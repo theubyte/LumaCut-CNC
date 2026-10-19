@@ -1,0 +1,47 @@
+# All dimensions and GPIO choices are UNVERIFIED placeholders.
+schema_version: 1
+machine:
+  model: LumaCut CNC
+  board: BTT SKR Mini MZ V1.0
+  microcontroller: STM32F103RC
+  work_area_mm: {x: null, y: null, z: null}
+homing:
+  z_dedicated_endstop: true
+  z_endstop_candidate: PC2
+  z_before_xy: true
+  homing_direction_verified: false
+probe:
+  type: mechanical_switch
+  input_candidate: PC14
+  normally_closed_preferred: true
+  x_offset_from_laser_mm: null
+  y_offset_from_laser_mm: null
+  trigger_tip_distance_from_optical_datum_mm: null
+  probe_feed_mm_min: null
+  max_probe_travel_mm: null
+focus:
+  target_distance_from_same_optical_datum_mm: null
+  profile_version: null
+mesh:
+  enabled: false
+  realtime_z_compensation: false
+  max_slope: null
+laser:
+  pwm_pin_candidate: PA1
+  pwm_electrically_verified: false
+  power_interlock_hardware_verified: false
+  startup_state: off
+safety:
+  independent_estop: required
+  enclosure_interlock: required
+  key_enable: required
+  extraction_feedback: recommended
+  fire_detection: planned
+screen:
+  board: Waveshare ESP32-S3-Touch-LCD-7 Rev1.2
+  candidate_transport: TTL_UART_after_level_verification
+  serial_arbitration: pending
+extensions:
+  movement_sensor: reserved
+  camera_alignment: planned
+  automatic_material_detection: research_only

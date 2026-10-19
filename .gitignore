@@ -1,0 +1,13 @@
+.env
+*.key
+*.pem
+**/__pycache__/
+.pio/
+*.bin
+*.elf
+*.map
+artifacts/
+**/data/
+**/secrets/
+**/gh/
+.DS_Store
