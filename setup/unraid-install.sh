@@ -10,7 +10,14 @@ if ! command -v docker >/dev/null || ! docker info >/dev/null 2>&1; then
 fi
 mkdir -p "$STATE/source" "$STATE/data/artifacts" "$STATE/data/jobs" "$STATE/secrets" "$STATE/gh"
 if [ "$ROOT" != "$STATE/source" ]; then cp -a "$ROOT"/. "$STATE/source"/; fi
-chmod 700 "$STATE/secrets" "$STATE/gh"
+chmod 700 "$STATE/gh"
+# Container runs as UID 10001; a root-owned 0700 directory was not traversable.
+# Make secrets readable/traversable only for that UID, with container mount read-only.
+printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$STATE/secrets/known_hosts"
+chown -R 10001:10001 "$STATE/secrets"
+chmod 500 "$STATE/secrets"
+chmod 644 "$STATE/secrets/known_hosts"
+if [ -f "$STATE/secrets/deploy_key" ]; then chmod 400 "$STATE/secrets/deploy_key"; fi
 chown -R 10001:10001 "$STATE/data"
 if [ ! -f "$STATE/.env" ]; then
   umask 077
