@@ -1,10 +1,16 @@
-# Projektstand – 2026-10-19
+# LumaCut CNC – Projektstatus 2026-10-19
 
-Repository: theubyte/LumaCut-CNC (privat), main.
-Konzept: SKR MZ steuert Atomstack/LaserTree via grblHAL, PC mit LightBurn direkt über USB, Waveshare ESP32-S3 7-Zoll-Touch als Bedienpanel. Kein Raspberry Pi.
-Erstellt: GitHub-Projektbasis, hardwarefreie Geometrie, Tests, Unraid-Docker-Buildserver mit Browser, GitHub-Checkout, Jobhistorie, Logs, Hashes, herunterladbare ZIPs, Installer und GitHub-Deploy-Key-Assistent.
-Nicht erstellt: freigegebene SKR-MZ-BIN, eigenes grblHAL-MZ-PlatformIO-Profil, vollständige HMI-Firmware, Hardwaretests, automatische Höhenkartenkompensation, sichere HMI-Arbitration.
-Technische Unbekannte: reale MZ-Pinbelegung/Bootloader, MZ-Schnittstellen-Ressourcen für HMI, PWM-Pegel, Taster und Z-Maße, Hardware-Interlocks.
-Nächster Schritt: Unraid-Installer starten und GitHub-Leseschlüssel anbinden; danach Geometrietests im Browser erfolgreich ausführen. Hardwaredaten aufnehmen, bevor die Firmwareentwicklung beginnt.
+Private Hauptquelle: https://github.com/theubyte/LumaCut-CNC, Branch main.
+Verbindliche Dokumente: README.md, HARDWARE.md, PROBE_AND_LEVELING.md, UNRAID.md und GitHub Issues.
 
-Jeder neue Chat kann das verbundene private GitHub-Repository lesen (sofern der GitHub-Zugriff für den Chat vorhanden ist) und auf Basis dieser Datei, des README und des konkreten Commits fortsetzen.
+Hardware: Atomstack A5 Pro, LaserTree LT-80W-AA-Pro, BTT SKR Mini MZ V1.0 (STM32F103RC / TMC2209), Waveshare ESP32-S3-Touch-LCD-7 Rev1.2. LightBurn soll via USB CDC direkt am SKR laufen, ohne Raspberry Pi; Unraid nur als GitHub-Compiler.
+
+Neu: Firmwarequellen im Repo.
+- SKR `firmware/skr/build.py` baut offiziellen, versionierten grblHAL-Code mit eigener MZ-Pinübersetzung und 28KiB-Bootloaderoffset.
+- HMI `firmware/hmi` hat eigene ESP32-S3-/LVGL-Touch-Firmware mit realem LCD-/Touch-Ansteuerungscode. Bedien-Events sind aus Sicherheitsgründen noch gesperrt.
+- CI erstellt Firmware und Tests; Unraid GUI kann dieselben Ziele per festem Kommando starten.
+- Höhengeometrie-Tests bleiben unabhängig von der Echtzeit-Firmware.
+
+Unbedingt unterscheiden: GitHub-Quellcode, erfolgreicher Compiler-Build, echte Hardware-Freigabe und fertige Bedienintegration sind verschiedene Entwicklungsstände. Nach jeder Änderung in CI prüfen. Bis zur ausdrücklichen Freigabe sind die .bin Dateien UNVERIFIED_DO_NOT_FLASH.
+
+Noch offen: zweite GRBL-UART-Schnittstelle mit konfliktfreiem LightBurn-Betrieb, Messwerte und sichere Servo-/PWM-/Interlock-Beschaltung, tatsächlich fahrender Z-Taster/Autofokus und Höhenkarte.

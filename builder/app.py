@@ -82,7 +82,10 @@ def perform(job_id,target):
                 project=src/"firmware"/key
                 if not (project/"platformio.ini").is_file():
                     raise RuntimeError("Firmware not implemented yet: firmware/"+key+"/platformio.ini missing")
-                run(["pio","run","-e",env],project,log,1500)
+                if key=="skr":
+                    run(["python","build.py"],project,log,2100)
+                else:
+                    run(["pio","run","-e",env],project,log,2100)
                 found=False
                 output=project/".pio"/"build"/env
                 for filename in ("firmware.bin","firmware.elf","bootloader.bin","partitions.bin"):
