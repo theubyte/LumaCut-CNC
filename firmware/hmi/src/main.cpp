@@ -60,7 +60,8 @@ static bool clear_touch() {
 }
 static void init_i2c() {
     Wire.begin(PIN_SDA,PIN_SCL,400000);
-    write_expander(CH_MODE,0);
+    if(!write_expander(CH_MODE,0x01))
+        Serial.println("WARNING: CH422G mode/output-enable failed");
     write_expander(CH_OUT,0);   // Display dark until fully initialized.
     // GT911 needs its IRQ line driven low while releasing reset.
     pinMode(4,OUTPUT);
