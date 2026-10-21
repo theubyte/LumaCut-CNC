@@ -46,7 +46,7 @@ document.querySelector('#key').value=key;
 function tab(name,button){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===name));document.querySelectorAll('nav button').forEach(x=>x.classList.remove('sel'));button.classList.add('sel')}
 function savekey(){key=document.querySelector('#key').value.trim();sessionStorage.setItem('lc-key',key);msg('Zugang lokal im Browser gespeichert');poll()}
 function msg(s){document.querySelector('#log').textContent=s}
-async function api(path,options){const sep=path.includes('?')?'&':'?';let response=await fetch(path+sep+'key='+encodeURIComponent(key),options);if(!response.ok)throw Error((await response.text()).slice(0,200));return response.json()}
+async function api(path,options){let opt=options||{};opt.headers=Object.assign({},opt.headers||{},{"X-LumaCut-Key":key});let response=await fetch(path,opt);if(!response.ok)throw Error((await response.text()).slice(0,200));return response.json()}
 async function poll(){if(!key){msg('Zugangscode unter Gerät eingeben');return}try{
  const s=await api('/api/status');document.querySelector('#state').textContent=s.state||'?';
  document.querySelector('#owner').textContent=s.owner;document.querySelector('#pos').textContent=s.position;
