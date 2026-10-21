@@ -40,7 +40,7 @@ jobs:
         if: matrix.target == 'skr'
         run: |
           for attempt in 1 2 3; do
-            if python firmware/skr/build.py; then exit 0; fi
+            if python firmware/skr/build.py && python firmware/skr/build.py --bridge; then exit 0; fi
             echo "Attempt $attempt failed, retrying after transient package/network issue."
             sleep 15
           done
@@ -49,7 +49,7 @@ jobs:
         if: matrix.target == 'hmi'
         run: |
           for attempt in 1 2 3; do
-            if pio run -d firmware/hmi -e lumacut_waveshare_s3 -e lumacut_waveshare_s3_keypad; then exit 0; fi
+            if pio run -d firmware/hmi -e lumacut_waveshare_s3 -e lumacut_waveshare_s3_keypad -e lumacut_waveshare_s3_pro; then exit 0; fi
             echo "Attempt $attempt failed, retrying after transient package/network issue."
             sleep 15
           done
@@ -65,7 +65,7 @@ jobs:
           from flash_bundle import build_flash_package
           core = Path.home() / ".platformio"
           templates = Path("builder")
-          for env in ("lumacut_waveshare_s3", "lumacut_waveshare_s3_keypad"):
+          for env in ("lumacut_waveshare_s3", "lumacut_waveshare_s3_keypad", "lumacut_waveshare_s3_pro"):
               output = Path("firmware/hmi/.pio/build") / env
               with TemporaryDirectory() as directory:
                   files = build_flash_package(output, Path(directory), "0" * 40, env, templates, core)
@@ -79,9 +79,13 @@ jobs:
           path: |
             firmware/skr/.pio/build/lumacut_skr_mz_usb/firmware.bin
             firmware/skr/.pio/build/lumacut_skr_mz_usb/firmware.elf
+            firmware/skr/.pio/build/lumacut_skr_mz_hmi_uart/firmware.bin
+            firmware/skr/.pio/build/lumacut_skr_mz_hmi_uart/firmware.elf
             firmware/hmi/.pio/build/lumacut_waveshare_s3/firmware.bin
             firmware/hmi/.pio/build/lumacut_waveshare_s3/firmware.elf
             firmware/hmi/.pio/build/lumacut_waveshare_s3_keypad/firmware.bin
             firmware/hmi/.pio/build/lumacut_waveshare_s3_keypad/firmware.elf
+            firmware/hmi/.pio/build/lumacut_waveshare_s3_pro/firmware.bin
+            firmware/hmi/.pio/build/lumacut_waveshare_s3_pro/firmware.elf
           if-no-files-found: error
           retention-days: 30
