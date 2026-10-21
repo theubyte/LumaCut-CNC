@@ -289,7 +289,7 @@ void bridgeService(){
     }
     if(tcp&&tcp.connected())externalForward(Owner::Tcp,tcp);
     if(Serial.available())externalForward(Owner::Usb,Serial);
-    if(owner==Owner::Usb&&!Serial.dtr()&&idle()){
+    if(owner==Owner::Usb&&idle()&&(uint32_t)(millis()-lastInputMs)>120000u){
         owner=Owner::None;hostLine="";
     }
     machineService();
