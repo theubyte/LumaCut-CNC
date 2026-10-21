@@ -208,6 +208,9 @@ pre{background:#0c1119;white-space:pre-wrap;word-break:break-word;padding:16px;m
 <p style="color:#ffcb81">Entwicklungsfirmware, nicht hardwareverifiziert! Zuerst Touch-Version ohne Motorsteuerung flashen. Laser physisch von Versorgung und TTL trennen.</p>
 <p>Unter HTTP: fertiges Windows-Flashpaket herunterladen, entpacken und <code>Flash-Waveshare-Windows.cmd</code> starten (Python 3 und Chrome/Edge). Unter HTTPS ist der direkte Flashknopf verfügbar.</p>
 <div id="message"></div></section><section><h2>Buildhistorie</h2><ul id="jobs"></ul></section></div>
+<section id="flasharea"><h2>Waveshare über PC-USB flashen (HTTPS)</h2>
+<p>Im LAN über HTTP bitte das Windows-Flashpaket herunterladen. Bei HTTPS einen abgeschlossenen HMI-Build in der Liste zum Flashen auswählen.</p>
+<div id="flashpanel">Noch kein HMI-Build zum Flashen gewählt.</div></section>
 <section><h2>Protokoll</h2><pre id="log">Kein Build gewählt.</pre></section>
 <p>Nur LAN / VPN · HTTP Basic Auth ohne TLS nicht ins Internet freigeben.</p>
 <script>
@@ -217,6 +220,16 @@ headers:{'Content-Type':'application/json','X-LumaCut-Action':'build'},body:JSON
 let d=await r.json();if(!r.ok)throw Error(d.error||r.status);current=d.id;refresh()}
 catch(e){document.querySelector('#message').textContent=String(e)}}
 function escapeHtml(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
+function chooseFlash(id){
+  if(!window.isSecureContext){
+    document.querySelector('#message').textContent='USB-Flash im Browser benötigt HTTPS. Bitte Windows-Flashpaket nutzen.';
+    return;
+  }
+  const installer=document.createElement('esp-web-install-button');
+  installer.setAttribute('manifest','/api/jobs/'+id+'/flash-manifest.json');
+  document.querySelector('#flashpanel').replaceChildren(installer);
+  document.querySelector('#flasharea').scrollIntoView({behavior:'smooth'});
+}
 async function show(id){current=id;let r=await fetch('/api/jobs/'+id+'/log');
 if(r.ok)document.querySelector('#log').textContent=await r.text()}
 async function refresh(){try{let r=await fetch('/api/jobs');let d=await r.json();
@@ -228,10 +241,11 @@ document.querySelector('#jobs').innerHTML=(d.jobs||[]).map(j=>'<li><b>'+escapeHt
   ? '<br><a href="/artifacts/'+j.id+'/Waveshare-HMI-Flash-Paket-Windows.zip">Windows-Flashpaket</a> · '+
     '<a href="/artifacts/'+j.id+'/LUMACUT_HMI_ESP32S3_MERGED.bin">ESP32-S3 Komplett-BIN</a>'+
     (window.isSecureContext
-       ? '<br><esp-web-install-button manifest="/api/jobs/'+j.id+'/flash-manifest.json"></esp-web-install-button>'
+       ? '<br><a href="#" data-flash="'+j.id+'">Jetzt per PC-USB flashen</a>'
        : '<br><small>Direkt im Browser flashen benötigt HTTPS. Über HTTP das Windows-Flashpaket verwenden.</small>')
   : '')+'</li>').join('');
 document.querySelectorAll('[data-id]').forEach(a=>a.onclick=e=>{e.preventDefault();show(a.dataset.id)});
+document.querySelectorAll('[data-flash]').forEach(a=>a.onclick=e=>{e.preventDefault();chooseFlash(a.dataset.flash)});
 if(current)show(current)}catch(e){document.querySelector('#message').textContent='Fehler: '+e}}
 refresh();setInterval(refresh,4000);
 </script></main></html>""",mimetype="text/html")
