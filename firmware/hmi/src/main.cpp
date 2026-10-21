@@ -1,5 +1,5 @@
 /*
-  LumaCut 7-inch HMI v0.3 – real RGB/GT911 LVGL dashboard.
+  LumaCut 7-inch HMI v0.4 – real RGB/GT911 LVGL dashboard.
   INTERLOCK: NO motion or laser commands are transmitted by this build.
   Future UART builds require signed-off board electrical + grblHAL protocol.
   This firmware provides a functional touch panel, editable calibration
@@ -18,7 +18,8 @@
 #include "esp_timer.h"
 
 static constexpr int W=800, H=480;
-static constexpr uint8_t GT=0x5D, CH_MODE=0x24, CH_OUT=0x38;
+static uint8_t gt_addr=0x5D; // GT911 may enumerate as either 0x5D or 0x14.
+static constexpr uint8_t CH_MODE=0x24, CH_OUT=0x38;
 // Waveshare manufacturer pin map: CH422G EXIO1=touch reset,
 // EXIO2=backlight, EXIO3=LCD reset, EXIO5=USB/CAN mux.
 // The USB/CAN mux MUST remain at 0 when USB flashing is used.
@@ -99,7 +100,7 @@ static bool write_expander(uint8_t addr,uint8_t data) {
     return Wire.endTransmission()==0;
 }
 static bool read_touch_reg(uint16_t reg,uint8_t* out,uint8_t count) {
-    Wire.beginTransmission(GT);
+    Wire.beginTransmission(gt_addr);
     Wire.write(static_cast<uint8_t>(reg >> 8));
     Wire.write(static_cast<uint8_t>(reg));
     if(Wire.endTransmission(false)!=0) return false;
@@ -108,7 +109,7 @@ static bool read_touch_reg(uint16_t reg,uint8_t* out,uint8_t count) {
     return true;
 }
 static bool clear_touch() {
-    Wire.beginTransmission(GT);
+    Wire.beginTransmission(gt_addr);
     Wire.write(0x81); Wire.write(0x4E); Wire.write(0x00);
     return Wire.endTransmission()==0;
 }
@@ -128,7 +129,11 @@ static void init_i2c() {
     pinMode(4,INPUT);
     uint8_t product[4]{};
     touch_ready=read_touch_reg(0x8140,product,4);
-    Serial.printf("GT911 detected: %d\n",touch_ready);
+    if(!touch_ready) {
+        gt_addr=0x14;
+        touch_ready=read_touch_reg(0x8140,product,4);
+    }
+    Serial.printf("GT911 detected: %d at 0x%02X\n",touch_ready,gt_addr);
 }
 static void flush_cb(lv_disp_drv_t* d,const lv_area_t* a,lv_color_t* px) {
     if(panel) {
@@ -246,7 +251,11 @@ static void init_ui() {
     lv_obj_set_style_bg_color(root,lv_color_hex(0x0E1622),0);
     lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
     label(root,"LumaCut CNC",22,15,20);
-    status_label=label(root,"OFFLINE / NO MOTION PERMITTED",540,20,16);
+#if HMI_UART_ENABLED
+    status_label=label(root,"UART KEYPAD / NO SKR ACK",540,20,16);
+#else
+    status_label=label(root,"OFFLINE / NO MOTION",540,20,16);
+#endif
     lv_obj_set_style_text_color(status_label,lv_color_hex(0xFFBD74),0);
     label(root,"Maschine",24,79,20);
     x_label=label(root,"X: ---.--- mm",25,125,20);
