@@ -846,8 +846,14 @@ void action(const char* id){
 }
 void internalInit(){
     prefs.begin("lumacut",false);
-    storageOk=LittleFS.begin(true);
-    if(storageOk&&!LittleFS.exists("/jobs"))LittleFS.mkdir("/jobs");
+    // Format only on first provisioning. Never silently erase saved jobs
+    // because of a later filesystem or power-loss mounting failure.
+    storageOk=LittleFS.begin(false);
+    if(!storageOk&&!prefs.getBool("fsinit",false))storageOk=LittleFS.begin(true);
+    if(storageOk){
+        prefs.putBool("fsinit",true);
+        if(!LittleFS.exists("/jobs"))LittleFS.mkdir("/jobs");
+    }
     loadParks();
     machine.begin(115200,SERIAL_8N1,44,43); // Physical UART2 switch; SKR PA9/PA10 crossed.
     Serial.begin(115200); // Native USB CDC for LightBurn; never print diagnostic messages here.
