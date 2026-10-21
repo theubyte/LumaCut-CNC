@@ -104,7 +104,7 @@ static bool read_touch_reg(uint16_t reg,uint8_t* out,uint8_t count) {
     Wire.write(static_cast<uint8_t>(reg >> 8));
     Wire.write(static_cast<uint8_t>(reg));
     if(Wire.endTransmission(false)!=0) return false;
-    if(Wire.requestFrom(GT,count)!=(int)count) return false;
+    if(Wire.requestFrom(gt_addr,count)!=(int)count) return false;
     for(uint8_t i=0;i<count;++i) out[i]=Wire.read();
     return true;
 }
