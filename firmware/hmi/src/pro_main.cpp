@@ -51,7 +51,7 @@ String wifiSsid,wifiPass,linkLine,hostLine;
 String script[12];int scriptCount=0,scriptIndex=0;
 bool commandPending=false,jobRunning=false,jobPaused=false,scriptActive=false;
 bool homePending=false,homingInProgress=false,hostBlocked=false;
-uint32_t lastStatusMs=0,lastQueryMs=0,localArmUntil=0,lastInputMs=0;
+uint32_t lastStatusMs=0,lastQueryMs=0,localArmUntil=0,lastInputMs=0,wifiHostUntil=0;
 enum class Owner { None, Usb, Tcp, Internal, Script };
 Owner owner=Owner::None;
 enum class MachineState { Unknown, Idle, Run, Hold, Alarm, Home };
@@ -154,6 +154,7 @@ const char* ownerText(){
 bool fresh(){return lastStatusMs && (uint32_t)(millis()-lastStatusMs)<3500u;}
 bool idle(){return fresh()&&machineState==MachineState::Idle;}
 bool armed(){return localArmUntil && int32_t(localArmUntil-millis())>0;}
+bool wifiHostAuthorized(){return wifiHostUntil && int32_t(wifiHostUntil-millis())>0;}
 bool canCommand(){return owner==Owner::None&&idle()&&machineHomed&&armed();}
 void setNotice(const String& s){notice=s;if(messageLabel)lv_label_set_text(messageLabel,notice.c_str());}
 void updateUi(){
@@ -273,7 +274,14 @@ void externalForward(Owner value,Stream& src){
     unsigned n=0;
     while(src.available()&&n++<512){
         int c=src.read();if(c<0)break;
-        if(!claim(value))continue;
+        if(!claim(value)){
+            // Never silently discard host commands when another owner is active.
+            if(c=='\n'||c=='\r'){
+                if(value==Owner::Usb)Serial.print("error:9\r\n");
+                else if(value==Owner::Tcp&&tcp&&tcp.connected())tcp.print("error:9\r\n");
+            }
+            continue;
+        }
         lastInputMs=millis();
         if(hostBlocked){
             if(c=='?')machine.write('?'); // only read-only status after abort
@@ -290,8 +298,10 @@ void externalForward(Owner value,Stream& src){
 void bridgeService(){
     if(tcpServer.hasClient()){
         WiFiClient incoming=tcpServer.available();
-        if(tcp&&tcp.connected()){incoming.stop();}
-        else tcp=incoming;
+        if((tcp&&tcp.connected())||!wifiHostAuthorized()||owner!=Owner::None){
+            incoming.print("error: WLAN-Host nicht lokal freigegeben oder Maschine belegt\r\n");
+            incoming.stop();
+        } else tcp=incoming;
     }
     if(owner==Owner::Tcp&&(!tcp||!tcp.connected())){
         if(machineState==MachineState::Run)feedHold();
@@ -415,7 +425,8 @@ bool selectJob(String name){
     if(!storageOk||!SPIFFS.exists("/jobs/"+name))return false;
     selectedJob=name;parseBounds();updateUi();return true;
 }
-bool auth(){return apiKey.length()&&http.hasArg("key")&&http.arg("key")==apiKey;}
+bool auth(){return apiKey.length()&&http.hasHeader("X-LumaCut-Key")&&
+        http.header("X-LumaCut-Key")==apiKey;}
 void fail(int code,String text){http.send(code,"text/plain; charset=utf-8",text);}
 String jsonStatus(){
     String val="{\"state\":\""+String(fresh()?stateText():"Offline")+
@@ -426,6 +437,8 @@ String jsonStatus(){
     return val;
 }
 void installRoutes(){
+    const char* headers[]={"X-LumaCut-Key"};
+    http.collectHeaders(headers,1);
     http.on("/",HTTP_GET,[]{http.send_P(200,"text/html; charset=utf-8",MOBILE_PORTAL);});
     http.on("/api/status",HTTP_GET,[]{if(!auth()){fail(401,"Code erforderlich");return;}http.send(200,"application/json",jsonStatus());});
     http.on("/api/jobs",HTTP_GET,[]{
@@ -593,7 +606,7 @@ void makeUi(){
     lbl(quick,"Schnellzugriff",19,20,20);
     btn(quick,"Rahmen trocken",19,68,258,49,"frame");
     btn(quick,"Parkposition",19,127,258,49,"park");
-    btn(quick,"USB / Wi-Fi freigeben",19,186,258,49,"release");
+    btn(quick,"LightBurn WLAN erlauben",19,186,258,49,"host");
     c=card(pages[1],0,0,772,266);
     lbl(c,"Jobs & Dateien",22,19,20);
     jobLabel=lbl(c,"Noch keine Datei ausgewählt",22,54,14,SUBTLE);
@@ -670,6 +683,15 @@ void action(const char* id){
         if(!idle()||owner!=Owner::None||!machineHomed){setNotice("Nur nach Referenzfahrt im Leerlauf freigeben.");return;}
         localArmUntil=millis()+ARM_DURATION;
         setNotice("30 Sekunden lokal freigegeben. Vor jeder Bewegung Fahrweg prüfen.");return;
+    }
+    if(op=="host"){
+        if(owner!=Owner::None||!fresh()||
+           (machineState!=MachineState::Idle&&machineState!=MachineState::Alarm)){
+            setNotice("WLAN LightBurn nur bei freier Maschine aktivieren.");return;
+        }
+        wifiHostUntil=millis()+300000u;
+        setNotice("LightBurn TCP-Port 23 für 5 Minuten zur Verbindung geöffnet.");
+        return;
     }
     if(op=="release"){
         if(owner!=Owner::Internal&&owner!=Owner::Script&&idle()){
