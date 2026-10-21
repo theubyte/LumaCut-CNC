@@ -66,7 +66,7 @@ lv_obj_t* pages[5]{};
 lv_obj_t* navButtons[5]{};
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
-*passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr;
+*passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr,*macroEntry=nullptr;
 int activePage=0,parkSlot=0;
 constexpr uint32_t INK=0x1C2738,SUBTLE=0x748195,BG=0xF5F7FA,WHITE=0xFFFFFF;
 constexpr uint32_t BLUE=0x007AFF,PALE_BLUE=0xE6F2FF,GRAY=0xF0F3F8,RED=0xCE3550;
@@ -619,6 +619,11 @@ void makeUi(){
     btn(c,"Position 2",270,92,231,45,"p1");
     btn(c,"Position 3",519,92,230,45,"p2");
     macroLabel=lbl(c,"Position 1",21,153,20);
+    macroEntry=lv_textarea_create(c);lv_obj_set_pos(macroEntry,209,143);
+    lv_obj_set_size(macroEntry,278,43);
+    lv_textarea_set_one_line(macroEntry,true);lv_textarea_set_max_length(macroEntry,24);
+    lv_textarea_set_text(macroEntry,parks[parkSlot].name.c_str());
+    btn(c,"Namen speichern",499,143,250,43,"rename",PALE_BLUE,BLUE);
     btn(c,"Aktuelle XY sichern",21,197,334,47,"capture",PALE_BLUE,BLUE);
     btn(c,"Anfahren",372,197,377,47,"park");
     c=card(pages[4],0,0,772,266);
@@ -655,6 +660,7 @@ void makeUi(){
     };
     lv_obj_add_event_cb(ssidEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
     lv_obj_add_event_cb(passwordEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
+    lv_obj_add_event_cb(macroEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
     switchTab(0);
 }
 int jogStep=1;
@@ -692,7 +698,19 @@ void action(const char* id){
     if(op=="frame"){if(!dryFrame())setNotice("Trockenrahmen gesperrt oder Dateigrenzen unbekannt.");return;}
     if(op=="park"){if(!runPark())setNotice("Parken erst nach Home, lokaler Freigabe und gespeichertem Makro.");return;}
     if(op=="capture"){savePark();return;}
-    if(op=="p0"||op=="p1"||op=="p2"){parkSlot=op[1]-'0';updateUi();return;}
+    if(op=="rename"){
+        String name=lv_textarea_get_text(macroEntry);name.trim();
+        if(name.length()<1||name.length()>24){setNotice("Makroname: 1 bis 24 Zeichen.");return;}
+        parks[parkSlot].name=name;
+        String prefKey="p"+String(parkSlot)+"n";
+        prefs.putString(prefKey.c_str(),name);
+        lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
+        updateUi();setNotice("Makro umbenannt: "+name);return;
+    }
+    if(op=="p0"||op=="p1"||op=="p2"){
+        parkSlot=op[1]-'0';lv_textarea_set_text(macroEntry,parks[parkSlot].name.c_str());
+        updateUi();return;
+    }
     if(op=="next"){
         if(!storageOk)return;
         File dir=SPIFFS.open("/jobs");File f=dir.openNextFile();
