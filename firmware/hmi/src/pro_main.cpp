@@ -180,7 +180,7 @@ bool claim(Owner value){
     owner=value;lastInputMs=millis();return true;
 }
 void releaseLocal(){
-    if((owner==Owner::Script||owner==Owner::Internal)&&!jobRunning&&!scriptActive&&!commandPending)owner=Owner::None;
+    if((owner==Owner::Script||owner==Owner::Internal)&&!jobRunning&&!scriptActive&&!commandPending&&idle())owner=Owner::None;
 }
 void writeCmd(const String& text){machine.print(text);machine.write('\n');}
 void feedHold(){machine.write('!');}
@@ -236,7 +236,7 @@ void parseMachineLine(const String& line){
             else{scriptActive=false;scriptCount=0;owner=Owner::None;setNotice("Makro gestoppt: "+line);}
         } else if(owner==Owner::Internal&&commandPending){
             commandPending=false;
-            if(!ok){jobRunning=false;if(jobFile)jobFile.close();owner=Owner::None;setNotice("G-Code-Fehler: "+line);}
+            if(!ok){jobRunning=false;if(jobFile)jobFile.close();feedHold();setNotice("G-Code-Fehler: "+line+". Maschine angehalten.");}
         }
     } else if(line.startsWith("ALARM:")){
         machineState=MachineState::Alarm;machineHomed=false;
@@ -290,6 +290,7 @@ void bridgeService(){
         owner=Owner::None;hostLine="";
     }
     machineService();
+    releaseLocal();
 }
 bool nextJobLine(String& line){
     line="";
@@ -305,8 +306,8 @@ bool nextJobLine(String& line){
 void internalJobService(){
     if(owner!=Owner::Internal||!jobRunning||jobPaused||commandPending)return;
     if(!jobFile.available()){
-        jobFile.close();jobRunning=false;owner=Owner::None;
-        setNotice("Alle Jobzeilen quittiert. Maschinenstillstand prüfen.");
+        jobFile.close();jobRunning=false;
+        setNotice("Alle G-Code-Zeilen quittiert. Maschine fährt bis Stillstand weiter.");
         return;
     }
     String line;
