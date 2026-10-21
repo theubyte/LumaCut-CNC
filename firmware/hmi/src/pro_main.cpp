@@ -297,6 +297,22 @@ void externalForward(Owner value,Stream& src){
     }
 }
 void bridgeService(){
+    // Losing live GRBL telemetry must suspend local G-code streaming.
+    // This is a software request only; the external laser interlock is mandatory.
+    static bool lostStatusReported=false;
+    if(lastStatusMs && (uint32_t)(millis()-lastStatusMs)>3500u){
+        if(!lostStatusReported && (owner==Owner::Internal||owner==Owner::Script||
+                                  owner==Owner::Tcp||owner==Owner::Usb)){
+            feedHold();
+            if(jobFile)jobFile.close();
+            jobRunning=false;jobPaused=true;
+            scriptActive=false;commandPending=false;scriptCount=scriptIndex=0;
+            machineHomed=false;haveMpos=false;
+            if(owner==Owner::Usb||owner==Owner::Tcp)hostBlocked=true;
+            setNotice("SKR-Status verloren. Feed Hold gesendet; Laser hardwareseitig sichern.");
+            lostStatusReported=true;
+        }
+    } else if(fresh())lostStatusReported=false;
     if(tcpServer.hasClient()){
         WiFiClient incoming=tcpServer.available();
         if((tcp&&tcp.connected())||!wifiHostAuthorized()||owner!=Owner::None){
@@ -329,7 +345,7 @@ bool nextJobLine(String& line){
     line.trim();return true;
 }
 void internalJobService(){
-    if(owner!=Owner::Internal||!jobRunning||jobPaused||commandPending)return;
+    if(owner!=Owner::Internal||!jobRunning||jobPaused||commandPending||!fresh())return;
     if(!jobFile.available()){
         jobFile.close();jobRunning=false;
         setNotice("Alle G-Code-Zeilen quittiert. Maschine fährt bis Stillstand weiter.");
@@ -523,7 +539,8 @@ void installRoutes(){
     },[]{
         HTTPUpload &up=http.upload();
         if(up.status==UPLOAD_FILE_START){
-            uploadAllowed=auth()&&storageOk&&owner==Owner::None;
+            uploadAllowed=auth()&&storageOk&&owner==Owner::None&&
+                (!fresh()||machineState==MachineState::Idle);
             uploadFinished=false;uploadBytes=0;
             uploadTemporary="";uploadDestination="";
             String name=up.filename;name.replace(" ","_");
