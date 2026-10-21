@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m unittest discover -s tests -v
-      - run: python -m py_compile builder/app.py tools/probe_math.py firmware/skr/build.py
+      - run: python -m py_compile builder/app.py builder/flash_bundle.py builder/flash_local.py tools/probe_math.py firmware/skr/build.py
   firmware:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -54,6 +54,23 @@ jobs:
             sleep 15
           done
           exit 1
+      - name: Check full Waveshare flash bundles (offline and UART)
+        if: matrix.target == 'hmi'
+        run: |
+          python -m pip install --disable-pip-version-check esptool==4.9.0
+          PYTHONPATH=builder python - <<'PY'
+          import os
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          from flash_bundle import build_flash_package
+          core = Path.home() / ".platformio"
+          templates = Path("builder")
+          for env in ("lumacut_waveshare_s3", "lumacut_waveshare_s3_keypad"):
+              output = Path("firmware/hmi/.pio/build") / env
+              with TemporaryDirectory() as directory:
+                  files = build_flash_package(output, Path(directory), "0" * 40, env, templates, core)
+                  print(env, files)
+          PY
       - name: Save experimental binaries
         if: success()
         uses: actions/upload-artifact@v4
