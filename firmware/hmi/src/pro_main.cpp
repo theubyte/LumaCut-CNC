@@ -458,6 +458,11 @@ void installRoutes(){
             uploadAllowed=auth()&&storageOk&&owner!=Owner::Internal;
             uploadBytes=0;
             String name=up.filename;name.replace(" ","_");
+            for(size_t k=0;k<name.length();k++){
+                char ch=name.charAt(k);
+                if(!((ch>='A'&&ch<='Z')||(ch>='a'&&ch<='z')||
+                     (ch>='0'&&ch<='9')||ch=='_'||ch=='-'||ch=='.'))uploadAllowed=false;
+            }
             if(name.length()>72||name.indexOf("..")>=0||name.indexOf('/')>=0||name.indexOf('\\')>=0 ||
                !(name.endsWith(".gcode")||name.endsWith(".nc")||name.endsWith(".tap")||name.endsWith(".txt")))
                 uploadAllowed=false;
