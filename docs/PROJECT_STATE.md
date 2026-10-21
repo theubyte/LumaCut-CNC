@@ -7,7 +7,7 @@
 Atomstack A5 Pro, LaserTree LT-80W-AA-Pro, BTT SKR Mini MZ v1.0 (STM32F103RC, TMC2209), Waveshare ESP32-S3-Touch-LCD-7 Rev1.2; keine Raspberry-Pi-Abhängigkeit. **LightBurn ⇄ USB CDC ⇄ SKR (grblHAL)** bleibt Haupt-G-Code-Stream. **HMI → 3,3-V-UART → SKR USART1** für einzelne grblHAL-Keypad-Zeichen; PC10/PC11 USART3 gehören TMC2209.
 
 ## Aktuelle Firmware und Tests
-- **SKR:** `firmware/skr/build.py`; gepinnte grblHAL-STM32F1xx-Quellen; angepasste MZ-Motor-/Limit-/FET-Pins; nativer USB-Anschluss; `KEYPAD_ENABLE=2` USART1. **GitHub-Actions-Build erfolgreich**, einschließlich Keypad-Änderung. Physischer SKR-Flash **nicht getestet**.
+- **SKR:** `firmware/skr/build.py`; gepinnte grblHAL-STM32F1xx-Quellen; angepasste MZ-Motor-/Limit-/FET-Pins; nativer USB-Anschluss; `KEYPAD_ENABLE=2` USART1; **Y_GANGED=1 für Atomstack-Doppel-Y (vierter E-Treiber PB3/PB4/PD2 als Y2)**. Y2-Drehrichtung, Treiberstrom und mechanische Synchronisation am realen Gerät prüfen. **GitHub-Actions-Build erfolgreich**, einschließlich Keypad-Änderung. Physischer SKR-Flash **nicht getestet**.
 - **HMI:** `firmware/hmi/src/main.cpp` v0.4, LVGL 8, RGB565 800×480, GT911 auf 0x5D/0x14, CH422G-Reset/Backlight-Korrektur. `lumacut_waveshare_s3` offline für sicheren Displaytest; `lumacut_waveshare_s3_keypad` optionales Gated-Jogging (30-s-Freigabe, Keyup 0x85). **Beide Buildziele wurden in Actions erfolgreich kompiliert**. Touch, tatsächlicher UART-Datenaustausch und Bewegungen **nicht an Hardware geprüft**.
 - **CI:** `.github/workflows/ci.yml`: Tests und beide Controller, Toolchain-Cache, Wiederholungen bei Paketserverstörung, Download-Artefakte `UNVERIFIED-skr-...`, `UNVERIFIED-hmi-...`.
 - **Inbetriebnahmeanleitung:** `docs/INBETRIEBNAHME.md`.
