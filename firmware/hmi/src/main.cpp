@@ -1,5 +1,5 @@
 /*
-  LumaCut 7-inch HMI v0.1 – real RGB/GT911 LVGL dashboard.
+  LumaCut 7-inch HMI v0.2 – real RGB/GT911 LVGL dashboard.
   INTERLOCK: NO motion or laser commands are transmitted by this build.
   Future UART builds require signed-off board electrical + grblHAL protocol.
   This firmware provides a functional touch panel, editable calibration
@@ -15,6 +15,10 @@
 
 static constexpr int W=800, H=480;
 static constexpr uint8_t GT=0x5D, CH_MODE=0x24, CH_OUT=0x38;
+// Waveshare manufacturer pin map: CH422G EXIO1=touch reset,
+// EXIO2=backlight, EXIO3=LCD reset, EXIO5=USB/CAN mux.
+// The USB/CAN mux MUST remain at 0 when USB flashing is used.
+static constexpr uint8_t LCD_RST=(1u<<3), TP_RST=(1u<<1), LCD_BL=(1u<<2);
 static constexpr int PIN_SDA=8, PIN_SCL=9;
 static constexpr uint16_t TOUCH_STATUS=0x814E, TOUCH_POINTS=0x814F;
 
@@ -57,11 +61,16 @@ static bool clear_touch() {
 static void init_i2c() {
     Wire.begin(PIN_SDA,PIN_SCL,400000);
     write_expander(CH_MODE,0);
-    write_expander(CH_OUT,0);
-    delay(30);
-    // CH422G outputs: LCD RESET bit0, GT911 RESET bit1, BL bit2.
-    write_expander(CH_OUT,0x07);
-    delay(120);
+    write_expander(CH_OUT,0);   // Display dark until fully initialized.
+    // GT911 needs its IRQ line driven low while releasing reset.
+    pinMode(4,OUTPUT);
+    digitalWrite(4,LOW);
+    delay(10);
+    write_expander(CH_OUT,LCD_RST);   // LCD reset release; TP still reset.
+    delay(100);
+    write_expander(CH_OUT,LCD_RST|TP_RST);
+    delay(200);
+    pinMode(4,INPUT);
     uint8_t product[4]{};
     touch_ready=read_touch_reg(0x8140,product,4);
     Serial.printf("GT911 detected: %d\n",touch_ready);
@@ -104,11 +113,11 @@ static bool lcd_begin() {
     cfg.timings.h_res=W;
     cfg.timings.v_res=H;
     cfg.timings.hsync_pulse_width=4;
-    cfg.timings.hsync_back_porch=43;
-    cfg.timings.hsync_front_porch=210;
+    cfg.timings.hsync_back_porch=8;
+    cfg.timings.hsync_front_porch=8;
     cfg.timings.vsync_pulse_width=4;
-    cfg.timings.vsync_back_porch=12;
-    cfg.timings.vsync_front_porch=22;
+    cfg.timings.vsync_back_porch=8;
+    cfg.timings.vsync_front_porch=8;
     cfg.timings.flags.pclk_active_neg=1;
     cfg.data_width=16;
     cfg.sram_trans_align=4;
@@ -215,9 +224,10 @@ void setup() {
         while(true)delay(1000);
     }
     init_ui();
-    write_expander(CH_OUT,0x07);
-    // Some revisions gate the backlight through CH422G open-drain bank.
-    write_expander(0x23,0xFF);
+    // Enable backlight only once the panel and UI are initialized.
+    // Do not modify the unrelated CH422G open-drain bank.
+    if(!write_expander(CH_OUT,LCD_RST|TP_RST|LCD_BL))
+        Serial.println("WARNING: CH422G backlight enable failed");
 }
 void loop(){
     lv_timer_handler();
