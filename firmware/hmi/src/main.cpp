@@ -1,3 +1,4 @@
+#if !defined(HMI_PRO_ENABLED) || !HMI_PRO_ENABLED
 /*
   LumaCut 7-inch HMI v0.4 – real RGB/GT911 LVGL dashboard.
   INTERLOCK: NO motion or laser commands are transmitted by this build.
@@ -322,3 +323,5 @@ void loop(){
     lv_timer_handler();
     delay(5);
 }
+
+#endif // legacy HMI profiles
