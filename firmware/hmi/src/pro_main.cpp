@@ -14,7 +14,7 @@
 #include <ESPmDNS.h>
 #include <BLEDevice.h>
 #include <Preferences.h>
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <lvgl.h>
 #include <esp_lcd_panel_rgb.h>
 #include <esp_lcd_panel_ops.h>
@@ -358,7 +358,7 @@ void internalJobService(){
 }
 bool jobStart(){
     if(!canCommand()||!selectedJob.length()||!storageOk)return false;
-    jobFile=SPIFFS.open("/jobs/"+selectedJob,FILE_READ);
+    jobFile=LittleFS.open("/jobs/"+selectedJob,FILE_READ);
     if(!jobFile)return false;
     owner=Owner::Internal;jobRunning=true;jobPaused=false;commandPending=false;
     setNotice("Job aktiv – keine zweite Steuerquelle erlaubt.");return true;
@@ -394,7 +394,7 @@ bool parseBounds(){
     // We do not try to guess absolute coordinates or resolve arc extrema.
     bounds=Bounds{};
     if(!storageOk||!selectedJob.length())return false;
-    File f=SPIFFS.open("/jobs/"+selectedJob,FILE_READ);
+    File f=LittleFS.open("/jobs/"+selectedJob,FILE_READ);
     if(!f)return false;
     bool modeAbsolute=false,modeMetric=false,firstPoint=false,good=true;
     int motion=-1;
@@ -476,7 +476,7 @@ bool dryFrame(){
 bool selectJob(String name){
     if(owner==Owner::Internal||owner==Owner::Script)return false;
     if(name.indexOf('/')>=0||name.indexOf('\\')>=0||name.indexOf("..")>=0)return false;
-    if(!storageOk||!SPIFFS.exists("/jobs/"+name))return false;
+    if(!storageOk||!LittleFS.exists("/jobs/"+name))return false;
     selectedJob=name;parseBounds();updateUi();return true;
 }
 bool auth(){return apiKey.length()&&http.hasHeader("X-LumaCut-Key")&&
@@ -502,7 +502,7 @@ void installRoutes(){
         if(!auth()){fail(401,"Code erforderlich");return;}
         String out="{\"files\":[";bool first=true;
         if(storageOk){
-            File root=SPIFFS.open("/jobs");
+            File root=LittleFS.open("/jobs");
             File f=root.openNextFile();
             while(f){if(!f.isDirectory()){
                 String name=String(f.name());int pos=name.lastIndexOf('/');
@@ -554,29 +554,29 @@ void installRoutes(){
                 uploadAllowed=false;
             uploadDestination="/jobs/"+name;
             uploadTemporary="/jobs/."+name+".part";
-            if(uploadAllowed&&SPIFFS.exists(uploadDestination))uploadAllowed=false;
+            if(uploadAllowed&&LittleFS.exists(uploadDestination))uploadAllowed=false;
             if(uploadAllowed){
-                SPIFFS.remove(uploadTemporary);
-                uploadFile=SPIFFS.open(uploadTemporary,FILE_WRITE);
+                LittleFS.remove(uploadTemporary);
+                uploadFile=LittleFS.open(uploadTemporary,FILE_WRITE);
                 if(!uploadFile)uploadAllowed=false;
             }
         } else if(up.status==UPLOAD_FILE_WRITE && uploadAllowed){
             uploadBytes+=up.currentSize;
             if(uploadBytes>MAX_JOB_BYTES||uploadFile.write(up.buf,up.currentSize)!=up.currentSize){
                 uploadAllowed=false;uploadFile.close();
-                if(uploadTemporary.length())SPIFFS.remove(uploadTemporary);
+                if(uploadTemporary.length())LittleFS.remove(uploadTemporary);
             }
         } else if(up.status==UPLOAD_FILE_END){
             if(uploadFile)uploadFile.close();
             if(uploadAllowed&&uploadBytes>0&&uploadTemporary.length()&&uploadDestination.length()&&
-               !SPIFFS.exists(uploadDestination)){
-                uploadFinished=SPIFFS.rename(uploadTemporary,uploadDestination);
+               !LittleFS.exists(uploadDestination)){
+                uploadFinished=LittleFS.rename(uploadTemporary,uploadDestination);
             }
-            if(!uploadFinished&&uploadTemporary.length())SPIFFS.remove(uploadTemporary);
+            if(!uploadFinished&&uploadTemporary.length())LittleFS.remove(uploadTemporary);
             uploadAllowed=uploadFinished;
         } else if(up.status==UPLOAD_FILE_ABORTED){
             if(uploadFile)uploadFile.close();
-            if(uploadTemporary.length())SPIFFS.remove(uploadTemporary);
+            if(uploadTemporary.length())LittleFS.remove(uploadTemporary);
             uploadAllowed=false;uploadFinished=false;
         }
     });
@@ -813,7 +813,7 @@ void action(const char* id){
     }
     if(op=="next"){
         if(!storageOk)return;
-        File dir=SPIFFS.open("/jobs");File f=dir.openNextFile();
+        File dir=LittleFS.open("/jobs");File f=dir.openNextFile();
         bool useNext=selectedJob.length()==0,chosen=false;
         String first;
         while(f){
@@ -846,8 +846,8 @@ void action(const char* id){
 }
 void internalInit(){
     prefs.begin("lumacut",false);
-    storageOk=SPIFFS.begin(true);
-    if(storageOk&&!SPIFFS.exists("/jobs"))SPIFFS.mkdir("/jobs");
+    storageOk=LittleFS.begin(true);
+    if(storageOk&&!LittleFS.exists("/jobs"))LittleFS.mkdir("/jobs");
     loadParks();
     machine.begin(115200,SERIAL_8N1,44,43); // Physical UART2 switch; SKR PA9/PA10 crossed.
     Serial.begin(115200); // Native USB CDC for LightBurn; never print diagnostic messages here.
