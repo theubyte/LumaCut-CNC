@@ -10,6 +10,8 @@ für GitHub-Lesezugriff verwendet; Passwort und Schlüssel bleiben im Unraid App
 - **SKR Mini MZ:** experimentelles STM32/grblHAL-Image. Kein Flash durch den Builder.
 - **Waveshare HMI – nur Touch:** Profil `lumacut_waveshare_s3`; zunächst dieses flashen.
 - **Waveshare HMI – UART-Jog:** Profil `lumacut_waveshare_s3_keypad`; nur nach erfolgreicher separater Motor-/Endschalterprüfung und bei stromlosem Laser.
+- **LumaCut Control OS:** Profil `lumacut_waveshare_s3_pro`, neue grafische Oberfläche, USB-C CDC, WLAN-GRBL/TCP, Handy-Jobportal, BLE-Status und gespeicherte Parkmakros. **Erfordert passende SKR-UART-Firmware!**
+- **SKR UART für Control OS:** Profil `lumacut_skr_mz_hmi_uart` aus `python firmware/skr/build.py --bridge`; USART1 als grblHAL-Hauptverbindung zum Waveshare, nicht das alte Keypad-Protokoll.
 
 Bei HMI-Erfolg erzeugt das Build Lab außer der normalen Entwicklungs-Firmware:
 1. `LUMACUT_HMI_ESP32S3_MERGED.bin`: vollständiges 16-MB-kompatibles ESP32-S3-Flashabbild aus Bootloader, Partitionstabelle, OTA-Bootstub und Anwendung (Startadresse 0), mit Prüfsumme.
@@ -20,7 +22,7 @@ Bei HMI-Erfolg erzeugt das Build Lab außer der normalen Entwicklungs-Firmware:
 
 **Ohne HTTPS**, also beim Standard-Zugriff `http://UNRAID-IP:18744`:
 
-1. Build `Waveshare HMI (nur Touch)` starten und auf Status `success` warten.
+1. Build **LumaCut Control OS (USB/WLAN/Jobs)** starten und auf Status `success` warten. Das ältere Nur-Touch-Profil bleibt als sicheres erstes Display-Diagnoseprofil verfügbar.
 2. Im selben Listeneintrag auf **Windows-Flashpaket** klicken.
 3. ZIP vollständig entpacken. Python 3 auf Windows installieren, sofern nicht vorhanden.
 4. Das Waveshare über den **USB TO UART**-Anschluss mit Datenkabel anschließen; Umschalter auf **UART1**. Andere serielle Programme schließen.
@@ -54,3 +56,11 @@ bash "$TMP_DIR/LumaCut-CNC-main/setup/unraid-install.sh"
 ```
 
 Nur wenn das Repository öffentlich abrufbar ist; andernfalls die aktualisierten Dateien mit bestehender GitHub-Berechtigung beziehen. Danach Build Lab wie gewohnt auf Port 18744 öffnen, Login bleibt `lumacut`. Unraid SSH-Verbindung nicht beenden; der Installer tauscht nur den Docker-Container aus.
+
+## Gekoppelte SKR-Firmware und LightBurn
+
+Das **neue** Control OS benötigt ebenfalls ein Board-Update: Im Build Lab **SKR UART für Control OS bauen** auswählen und dessen SKR-`firmware.bin` **nur nach Bootloader-, Anschluss-, Pin- und Sicherheitsprüfung** über microSD auf das SKR Mini MZ schreiben. Die normale SKR-USB-/Keypad-Firmware ist kein kompatibler Datenpartner.
+
+Im Normalbetrieb Waveshare auf **UART2**: Waveshare GPIO43 TX → SKR PA10 RX, Waveshare GPIO44 RX ← SKR PA9 TX, GND ↔ GND. Verbindung ist 3,3 V TTL. Der LightBurn-PC wird am **nativen USB-Type-C** des Waveshare angeschlossen, nicht am Schalter-geteilten USB TO UART. Oder LightBurn per WLAN/TCP zur HMI-IP, Port 23. Das Gerät baut außerdem einen WPA2-Hotspot und ein Handy-Webportal auf; Login-Daten werden am Display unter System gezeigt.
+
+Technische Details, Schutzmaßnahmen und bisher nicht freigegebene Laserfunktionen: [LumaCut Control OS](../docs/LUMACUT_CONTROL_OS.md).
