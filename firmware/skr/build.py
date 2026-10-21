@@ -77,6 +77,10 @@ def main():
             # UART0 (PA9 TX, PA10 RX) serves the grblHAL serial keypad.
             # USART3 (PC10/PC11) remains reserved for TMC2209.
             h.write("  -D KEYPAD_ENABLE=2\n")
+            # Atomstack A5 Pro: two synchronized Y motors. Use E driver
+            # (M3: PB3 STEP, PB4 DIR, PD2 ENABLE, TMC UART address 3) for Y2.
+            # Mechanical Y2 polarity and driver current need bench validation.
+            h.write("  -D Y_GANGED=1\n")
         run("pio","run","-e",ENV,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/ENV
         OUT.mkdir(parents=True,exist_ok=True)
