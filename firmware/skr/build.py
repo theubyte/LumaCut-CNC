@@ -91,7 +91,7 @@ def main():
             # Mechanical Y2 polarity and driver current need bench validation.
             h.write("  -D Y_GANGED=1\n")
         run("pio","run","-e",env,cwd=root,timeout=1500)
-        generated=root/".pio"/"build"/ENV
+        generated=root/".pio"/"build"/env
         out.mkdir(parents=True,exist_ok=True)
         for name in ("firmware.bin","firmware.elf"):
             source=generated/name
