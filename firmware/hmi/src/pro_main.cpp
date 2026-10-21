@@ -373,41 +373,78 @@ bool runPark(){
     return startScript(cmds,3);
 }
 bool parseBounds(){
+    // Deliberately conservative: unsafe/ambiguous G-code has NO framing preview.
+    // We do not try to guess absolute coordinates or resolve arc extrema.
     bounds=Bounds{};
     if(!storageOk||!selectedJob.length())return false;
-    File f=SPIFFS.open("/jobs/"+selectedJob,FILE_READ);if(!f)return false;
-    float x=0,y=0;
-    bool moved=false,abs=true,mm=true,known=false;
-    while(f.available()){
+    File f=SPIFFS.open("/jobs/"+selectedJob,FILE_READ);
+    if(!f)return false;
+    bool modeAbsolute=false,modeMetric=false,firstPoint=false,good=true;
+    int motion=-1;
+    float x=0.f,y=0.f;
+    while(f.available()&&good){
         String ln=f.readStringUntil('\n');ln.trim();ln.toUpperCase();
-        if(ln.length()>MAX_LINE){known=false;break;}
-        int semicolon=ln.indexOf(';');if(semicolon>=0)ln.remove(semicolon);
-        int parentheses=ln.indexOf('(');if(parentheses>=0)ln.remove(parentheses);
-        if(ln.indexOf("G91")>=0||ln.indexOf("G20")>=0||ln.indexOf("G2 ")>=0||ln.indexOf("G3 ")>=0||
-           ln.indexOf("G2X")>=0||ln.indexOf("G3X")>=0||ln.indexOf("G92")>=0||
-           ln.indexOf("G53")>=0||ln.indexOf("G68")>=0){known=false;break;}
-        if(ln.indexOf("G90")>=0)abs=true;
-        if(ln.indexOf("G21")>=0)mm=true;
-        if(!abs||!mm){known=false;break;}
-        bool coords=false;
-        for(int i=0;i<(int)ln.length();i++){
-            if(ln[i]!='X'&&ln[i]!='Y')continue;
-            char key=ln[i];
-            char* end=nullptr;float v=strtof(ln.c_str()+i+1,&end);
-            if(end==ln.c_str()+i+1||!isfinite(v))continue;
-            if(key=='X')x=v;else y=v;
-            coords=true;
+        if(ln.length()>MAX_LINE){good=false;break;}
+        int semicolon=ln.indexOf(';');
+        if(semicolon>=0)ln.remove(semicolon);
+        // Strip ordinary balanced parenthesized comments, refuse unmatched ones.
+        while(true){
+            int a=ln.indexOf('(');if(a<0)break;
+            int b=ln.indexOf(')',a+1);
+            if(b<0){good=false;break;}
+            ln.remove(a,b-a+1);
         }
-        if(coords){
-            if(!moved)bounds.x0=bounds.x1=x,bounds.y0=bounds.y1=y;
-            else{bounds.x0=min(bounds.x0,x);bounds.x1=max(bounds.x1,x);
-                 bounds.y0=min(bounds.y0,y);bounds.y1=max(bounds.y1,y);}
-            moved=true;known=true;
+        if(!good||ln.indexOf(')')>=0){good=false;break;}
+        bool hasX=false,hasY=false;
+        float nextX=x,nextY=y;
+        const char* text=ln.c_str();
+        size_t i=0,n=ln.length();
+        while(i<n&&good){
+            if(text[i]==' '||text[i]=='\t'){i++;continue;}
+            char letter=text[i++];
+            if(letter<'A'||letter>'Z'){good=false;break;}
+            char* end=nullptr;
+            float value=strtof(text+i,&end);
+            if(end==text+i||!isfinite(value)){good=false;break;}
+            i=size_t(end-text);
+            if(letter=='G'){
+                int code=int(value);
+                if(float(code)!=value){good=false;break;}
+                if(code==90)modeAbsolute=true;
+                else if(code==21)modeMetric=true;
+                else if(code==0||code==1)motion=code;
+                else if(code!=17&&code!=40&&code!=49&&code!=54&&
+                        code!=80&&code!=94){good=false;break;}
+            } else if(letter=='X'){nextX=value;hasX=true;}
+            else if(letter=='Y'){nextY=value;hasY=true;}
+            else if(letter=='M'){
+                int code=int(value);
+                if(float(code)!=value||
+                   (code!=2&&code!=3&&code!=4&&code!=5&&
+                    code!=7&&code!=8&&code!=9&&code!=30)){good=false;break;}
+            } else if(letter!='N'&&letter!='F'&&letter!='S'&&letter!='Z'){
+                good=false;break;
+            }
+        }
+        if(!good)break;
+        if(hasX||hasY){
+            if(!modeAbsolute||!modeMetric||motion<0){good=false;break;}
+            // First position must be completely specified, not inferred from origin.
+            if(!firstPoint&&!(hasX&&hasY)){good=false;break;}
+            x=nextX;y=nextY;
+            if(!firstPoint){
+                bounds.x0=bounds.x1=x;bounds.y0=bounds.y1=y;firstPoint=true;
+            } else {
+                bounds.x0=min(bounds.x0,x);bounds.x1=max(bounds.x1,x);
+                bounds.y0=min(bounds.y0,y);bounds.y1=max(bounds.y1,y);
+            }
         }
     }
-    f.close();bounds.valid=moved&&known;
+    f.close();
+    bounds.valid=good&&firstPoint;
     return bounds.valid;
 }
+
 bool dryFrame(){
     if(!bounds.valid)return false;
     String cmds[]={"M5","G21 G90",
