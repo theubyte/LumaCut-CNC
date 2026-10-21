@@ -50,7 +50,7 @@ String selectedJob,apName,apPass,apiKey,notice;
 String wifiSsid,wifiPass,linkLine,hostLine;
 String script[12];int scriptCount=0,scriptIndex=0;
 bool commandPending=false,jobRunning=false,jobPaused=false,scriptActive=false;
-bool homePending=false,homingInProgress=false;
+bool homePending=false,homingInProgress=false,hostBlocked=false;
 uint32_t lastStatusMs=0,lastQueryMs=0,localArmUntil=0,lastInputMs=0;
 enum class Owner { None, Usb, Tcp, Internal, Script };
 Owner owner=Owner::None;
@@ -187,6 +187,12 @@ void releaseLocal(){
 }
 void writeCmd(const String& text){machine.print(text);machine.write('\n');}
 void feedHold(){machine.write('!');}
+void abortHost(){
+    if(owner!=Owner::Tcp&&owner!=Owner::Usb)return;
+    machine.write((uint8_t)0x18);
+    machineHomed=false;hostBlocked=true;
+    setNotice("Externer Job abgebrochen. LightBurn stoppen; Quellenwechsel erst bei Idle.");
+}
 void abortJob(){
     // Soft reset also clears host parser state; machine must be re-homed.
     machine.write((uint8_t)0x18);
@@ -269,6 +275,10 @@ void externalForward(Owner value,Stream& src){
         int c=src.read();if(c<0)break;
         if(!claim(value))continue;
         lastInputMs=millis();
+        if(hostBlocked){
+            if(c=='?')machine.write('?'); // only read-only status after abort
+            continue;
+        }
         if(c=='\n'||c=='\r'){
             if(hostLine=="$H")homingInProgress=true;
             hostLine="";
@@ -285,12 +295,13 @@ void bridgeService(){
     }
     if(owner==Owner::Tcp&&(!tcp||!tcp.connected())){
         if(machineState==MachineState::Run)feedHold();
-        owner=Owner::None;setNotice("TCP-Verbindung verloren; Hold bei RUN angefordert.");
+        owner=Owner::None;hostBlocked=false;
+        setNotice("TCP-Verbindung verloren; Hold bei RUN angefordert.");
     }
     if(tcp&&tcp.connected())externalForward(Owner::Tcp,tcp);
     if(Serial.available())externalForward(Owner::Usb,Serial);
     if(owner==Owner::Usb&&idle()&&(uint32_t)(millis()-lastInputMs)>120000u){
-        owner=Owner::None;hostLine="";
+        owner=Owner::None;hostLine="";hostBlocked=false;
     }
     machineService();
     releaseLocal();
@@ -442,6 +453,7 @@ void installRoutes(){
         if(op=="pause"&&owner==Owner::Internal&&jobRunning){feedHold();jobPaused=true;ok=true;}
         else if(op=="resume"&&owner==Owner::Internal&&jobPaused){machine.write('~');jobPaused=false;ok=true;}
         else if(op=="abort"&&owner==Owner::Internal){abortJob();ok=true;}
+        else if(op=="abort"&&(owner==Owner::Tcp||owner==Owner::Usb)){abortHost();ok=true;}
         else if(op=="frame")ok=dryFrame();
         else if(op=="start")ok=jobStart();
         else if(op=="park")ok=runPark();
@@ -655,7 +667,7 @@ void action(const char* id){
     }
     if(op=="release"){
         if(owner!=Owner::Internal&&owner!=Owner::Script&&idle()){
-            owner=Owner::None;setNotice("Hostverbindung freigegeben.");
+            owner=Owner::None;hostBlocked=false;setNotice("Hostverbindung freigegeben.");
         } else setNotice("Quellenwechsel bei aktivem Job untersagt.");
         return;
     }
@@ -666,7 +678,7 @@ void action(const char* id){
     }
     if(op=="abort"){
         if(owner==Owner::Internal||owner==Owner::Script)abortJob();
-        else if(owner==Owner::Usb||owner==Owner::Tcp){feedHold();setNotice("Feed Hold gesendet. LightBurn hat die Jobkontrolle.");}
+        else if(owner==Owner::Usb||owner==Owner::Tcp){abortHost();}
         return;
     }
     if(op=="home"){
