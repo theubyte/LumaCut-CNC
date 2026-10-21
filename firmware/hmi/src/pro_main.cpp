@@ -12,6 +12,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include <BLEDevice.h>
 #include <Preferences.h>
 #include <SPIFFS.h>
 #include <lvgl.h>
@@ -33,6 +34,8 @@ WiFiServer tcpServer(WIFI_TCP_PORT);
 WiFiClient tcp;
 WebServer http(80);
 Preferences prefs;
+BLECharacteristic* bleStatus=nullptr;
+uint32_t lastBleMs=0;
 File uploadFile,jobFile;
 lv_disp_draw_buf_t draw;
 lv_disp_drv_t disp;
@@ -477,6 +480,23 @@ String randomToken(uint32_t value){
     char b[16];snprintf(b,sizeof(b),"%08lx",(unsigned long)value);
     return String(b);
 }
+void bleInit(){
+    BLEDevice::init("LumaCut Control");
+    BLEServer* s=BLEDevice::createServer();
+    BLEService* service=s->createService("a50d8324-5e0d-42db-92f8-c3f3b5b93051");
+    bleStatus=service->createCharacteristic("a50d8324-5e0d-42db-92f8-c3f3b5b93052",BLECharacteristic::PROPERTY_READ);
+    bleStatus->setValue("BOOT");
+    service->start();
+    BLEAdvertising* advertising=BLEDevice::getAdvertising();
+    advertising->addServiceUUID("a50d8324-5e0d-42db-92f8-c3f3b5b93051");
+    advertising->start();
+}
+void bleUpdate(){
+    if(!bleStatus||(uint32_t)(millis()-lastBleMs)<1300u)return;
+    lastBleMs=millis();
+    String state=String(stateText())+" X"+String(mx,2)+" Y"+String(my,2)+" Z"+String(mz,2);
+    bleStatus->setValue((uint8_t*)state.c_str(),state.length());
+}
 void networkInit(){
     wifiSsid=prefs.getString("ssid","");
     wifiPass=prefs.getString("wpw","");
@@ -491,6 +511,7 @@ void networkInit(){
     tcpServer.begin();
     MDNS.begin("lumacut");
     installRoutes();
+    bleInit();
 }
 lv_obj_t* lbl(lv_obj_t* parent,const String& text,int x,int y,int px,uint32_t color=INK){
     lv_obj_t* p=lv_label_create(parent);lv_label_set_text(p,text.c_str());
@@ -708,6 +729,7 @@ void loop(){
     http.handleClient();
     bridgeService();
     internalJobService();
+    bleUpdate();
     lv_timer_handler();
     static uint32_t lastUi=0;
     if(millis()-lastUi>600){lastUi=millis();updateUi();}
