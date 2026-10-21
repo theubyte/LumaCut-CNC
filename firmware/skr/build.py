@@ -6,7 +6,7 @@ hardware interlocks and bootloader. This script does not communicate with
 the controller or flash anything.
 """
 from __future__ import annotations
-import configparser, hashlib, pathlib, re, shutil, subprocess, tempfile
+import argparse, configparser, hashlib, pathlib, re, shutil, subprocess, tempfile
 
 HERE=pathlib.Path(__file__).resolve().parent
 CFG=configparser.ConfigParser(interpolation=None)
@@ -52,6 +52,11 @@ def patch(text):
     return text
 
 def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--bridge",action="store_true",help="Main grblHAL UART1 to Waveshare, no SKR USB")
+    args=parser.parse_args()
+    env=("lumacut_skr_mz_hmi_uart" if args.bridge else ENV)
+    out=HERE/".pio"/"build"/env
     if UPSTREAM!="https://github.com/grblHAL/STM32F1xx.git":
         raise RuntimeError("Unexpected upstream repository")
     if not re.fullmatch(r"[a-f0-9]{40}",SHA):
@@ -68,27 +73,31 @@ def main():
         # Use upstream's USB CDC environment and verified 28K bootloader
         # linker memory layout, not the unoffset FLASH linker script.
         with (root/"platformio.ini").open("a") as h:
-            h.write("\n[env:"+ENV+"]\n")
-            h.write("extends = env:BTT_SKR_MINI_E3_V20_USB\n")
+            h.write("\n[env:"+env+"]\n")
+            h.write("extends = env:"+("BTT_SKR_MINI_E3_V20" if args.bridge else "BTT_SKR_MINI_E3_V20_USB")+"\n")
             h.write("board_build.ldscript = STM32F103RCTX_BL28K_FLASH.ld\n")
-            h.write("build_flags = "+chr(36)+"{env:BTT_SKR_MINI_E3_V20_USB.build_flags}\n")
+            src_env="BTT_SKR_MINI_E3_V20" if args.bridge else "BTT_SKR_MINI_E3_V20_USB"
+            h.write("build_flags = "+chr(36)+"{env:"+src_env+".build_flags}\n")
+            if args.bridge:
+                h.write("  -D SERIAL_PORT=1\n")
             h.write("  -D COOLANT_ENABLE=1\n")
             h.write("  -D SPINDLE0_ENABLE=SPINDLE_PWM0_NODIR\n")
             # UART0 (PA9 TX, PA10 RX) serves the grblHAL serial keypad.
             # USART3 (PC10/PC11) remains reserved for TMC2209.
-            h.write("  -D KEYPAD_ENABLE=2\n")
+            if not args.bridge:
+                h.write("  -D KEYPAD_ENABLE=2\n")
             # Atomstack A5 Pro: two synchronized Y motors. Use E driver
             # (M3: PB3 STEP, PB4 DIR, PD2 ENABLE, TMC UART address 3) for Y2.
             # Mechanical Y2 polarity and driver current need bench validation.
             h.write("  -D Y_GANGED=1\n")
-        run("pio","run","-e",ENV,cwd=root,timeout=1500)
+        run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/ENV
-        OUT.mkdir(parents=True,exist_ok=True)
+        out.mkdir(parents=True,exist_ok=True)
         for name in ("firmware.bin","firmware.elf"):
             source=generated/name
             if not source.is_file():
                 raise RuntimeError("Missing compiled artifact: "+name)
-            dest=OUT/name
+            dest=out/name
             shutil.copyfile(source,dest)
             print(str(dest),"sha256",hashlib.sha256(dest.read_bytes()).hexdigest())
     print("BUILD COMPLETE - EXPERIMENTAL / NOT APPROVED FOR FLASHING")
