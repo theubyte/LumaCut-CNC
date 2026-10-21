@@ -111,13 +111,13 @@ if errorlevel 1 (
         z.write(templates / "flash_local.py", "flash_local.py")
         z.write(templates / "flash_ui.html", "flash_ui.html")
         z.writestr("BITTE-LESEN.txt",
-                   "LumaCut HMI Laborversion: Flashen per USB am Windows-PC.\\n"
-                   "1. ZIP entpacken, 2. USB TO UART verbinden, UART1 einstellen,\\n"
-                   "3. Flash-Waveshare-Windows.cmd starten, 4. Chrome/Edge nutzen.\\n"
-                   "Python 3 benoetigt; das Browser-Flashmodul benoetigt Internet.\\n"
-                   "Nur fuer Waveshare ESP32-S3-Touch-LCD-7 Rev1.2!\\n"
-                   "Dies ist eine ungepruefte Entwicklungsfirmware.\\n"
-                   "Laser waehrend der Inbetriebnahme physisch stromlos lassen.\\n")
+                   "LumaCut HMI Laborversion: Flashen per USB am Windows-PC.\n"
+                   "1. ZIP entpacken, 2. USB TO UART verbinden, UART1 einstellen,\n"
+                   "3. Flash-Waveshare-Windows.cmd starten, 4. Chrome/Edge nutzen.\n"
+                   "Python 3 benoetigt; das Browser-Flashmodul benoetigt Internet.\n"
+                   "Nur fuer Waveshare ESP32-S3-Touch-LCD-7 Rev1.2!\n"
+                   "Dies ist eine ungepruefte Entwicklungsfirmware.\n"
+                   "Laser waehrend der Inbetriebnahme physisch stromlos lassen.\n")
     return [
         file_meta(merged),
         file_meta(bundle),
@@ -125,5 +125,6 @@ if errorlevel 1 (
 
 
 def file_meta(path: Path) -> dict:
-    digest = hashlib.file_digest(path.open("rb"), "sha256").hexdigest()
+    with path.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
     return {"name": path.name, "bytes": path.stat().st_size, "sha256": digest}
