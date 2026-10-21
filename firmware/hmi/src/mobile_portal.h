@@ -27,7 +27,14 @@ code{font-size:13px;word-break:break-word}
 <main><header><div><div class="brand">LUMACUT · CONTROL OS</div><h1>Laser Studio</h1></div><span id="connection" class="pill">Verbinde …</span></header>
 <div class="tab active" id="home">
 <article><h2>Maschinenstatus</h2><div class="status"><strong id="state">Unbekannt</strong><span id="owner" class="hint">–</span></div><p class="hint" id="pos">X — · Y — · Z —</p><p class="hint" id="wifi"></p></article>
-<article><h2>Aufträge</h2><div id="jobinfo" class="hint">Kein Job gewählt</div><div class="space"></div>
+<article><h2>Aufträge</h2><div id="jobinfo" class="hint">Kein Job gewählt</div>
+<div style="background:#f2f6fc;border-radius:18px;padding:16px;margin:12px 0;text-align:center">
+<svg id="preview" viewBox="0 0 300 138" width="100%" style="max-height:155px">
+<rect x="8" y="8" width="284" height="122" rx="10" fill="#fff" stroke="#d9e0e8" stroke-width="2"/>
+<rect id="bbox" x="45" y="35" width="210" height="68" rx="2" fill="#e7f1ff" stroke="#007aff" stroke-width="2" stroke-dasharray="7 4" style="display:none"/>
+<text id="previewEmpty" x="150" y="75" text-anchor="middle" font-size="13" fill="#748195">Noch keine sichere Kontur</text>
+</svg><div id="bboxsize" class="hint" style="font-size:13px">Bounding Box nur für einfache G-Code-Pfade</div></div>
+<div class="space"></div>
 <div class="grid"><button onclick="act('frame')">Rahmen ohne Laser</button><button class="blue" onclick="act('start')">Start anfordern</button><button onclick="act('pause')">Pause</button><button onclick="act('resume')">Fortsetzen</button><button class="red" onclick="act('abort')">Abbrechen</button><button onclick="act('park')">Parkposition</button></div>
 <p class="hint">Start und Bewegung erfordern die lokale Freigabe am Bildschirm. Laservorschau mit 1 % ist nicht remote freigegeben.</p></article></div>
 <div class="tab" id="files"><article><h2>G-Code hochladen</h2>
@@ -52,6 +59,20 @@ async function poll(){if(!key){msg('Zugangscode unter Gerät eingeben');return}t
  document.querySelector('#owner').textContent=s.owner;document.querySelector('#pos').textContent=s.position;
  document.querySelector('#wifi').textContent=s.message||'';document.querySelector('#ip').textContent=location.host;
  document.querySelector('#jobinfo').textContent=s.job||'Kein Job gewählt';
+ const box=document.querySelector('#bbox'), empty=document.querySelector('#previewEmpty');
+ if(s.bounds&&Number.isFinite(s.bounds.x0)&&Number.isFinite(s.bounds.x1)&&
+    Number.isFinite(s.bounds.y0)&&Number.isFinite(s.bounds.y1)){
+    const width=Math.max(0,s.bounds.x1-s.bounds.x0),height=Math.max(0,s.bounds.y1-s.bounds.y0);
+    const scale=Math.min(220/Math.max(width,.01),85/Math.max(height,.01));
+    const pw=Math.max(2,width*scale),ph=Math.max(2,height*scale);
+    box.setAttribute('x',150-pw/2);box.setAttribute('y',69-ph/2);
+    box.setAttribute('width',pw);box.setAttribute('height',ph);
+    box.style.display='';empty.style.display='none';
+    document.querySelector('#bboxsize').textContent=width.toFixed(2)+' × '+height.toFixed(2)+' mm · Nur Begrenzung, keine Pfadvorschau';
+ } else {
+    box.style.display='none';empty.style.display='';
+    document.querySelector('#bboxsize').textContent='G-Code-Geometrie nicht sicher ermittelbar – Framing gesperrt';
+ }
  document.querySelector('#connection').textContent='Verbunden';
  const data=await api('/api/jobs');const target=document.querySelector('#jobs');target.replaceChildren();
  for(const f of data.files){let b=document.createElement('button');b.textContent=f.name+' · '+Math.round(f.bytes/1024)+' KB';
