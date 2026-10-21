@@ -14,7 +14,7 @@ WORK.mkdir(parents=True,exist_ok=True)
 REPO=os.environ.get("GIT_REPOSITORY","git@github.com:theubyte/LumaCut-CNC.git")
 BRANCH=os.environ.get("GIT_BRANCH","main")
 PASSWORD=os.environ.get("BUILDER_PASSWORD","")
-TARGETS={"tests","stm32_project_unverified","esp32_hmi_unverified","esp32_hmi_keypad_unverified"}
+TARGETS={"tests","stm32_project_unverified","stm32_hmi_bridge_unverified","esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified"}
 ID_RE=re.compile(r"^[a-f0-9]{16}$")
 app=Flask(__name__)
 lock=threading.Lock()
@@ -78,15 +78,17 @@ def perform(job_id,target):
                 run(["python","-m","unittest","discover","-s","tests","-v"],src,log,120)
                 run(["python","-m","py_compile","builder/app.py","tools/probe_math.py"],src,log,60)
             else:
-                key="skr" if target=="stm32_project_unverified" else "hmi"
-                env=("lumacut_skr_mz_usb" if key=="skr" else
-                     "lumacut_waveshare_s3_keypad" if target=="esp32_hmi_keypad_unverified"
+                key="skr" if target.startswith("stm32_") else "hmi"
+                env=("lumacut_skr_mz_hmi_uart" if target=="stm32_hmi_bridge_unverified"
+                     else "lumacut_skr_mz_usb" if key=="skr"
+                     else "lumacut_waveshare_s3_pro" if target=="esp32_hmi_pro_unverified"
+                     else "lumacut_waveshare_s3_keypad" if target=="esp32_hmi_keypad_unverified"
                      else "lumacut_waveshare_s3")
                 project=src/"firmware"/key
                 if not (project/"platformio.ini").is_file():
                     raise RuntimeError("Firmware not implemented yet: firmware/"+key+"/platformio.ini missing")
                 if key=="skr":
-                    run(["python","build.py"],project,log,2100)
+                    run(["python","build.py"]+(["--bridge"] if target=="stm32_hmi_bridge_unverified" else []),project,log,2100)
                 else:
                     run(["pio","run","-e",env],project,log,2100)
                 found=False
@@ -166,7 +168,7 @@ def get_flash_manifest(job_id):
     if not manifest.is_file(): abort(404)
     meta=json.loads(manifest.read_text(encoding="utf-8"))
     if meta.get("status")!="success" or not meta.get("flash_package"): abort(404)
-    if meta.get("target") not in ("esp32_hmi_unverified","esp32_hmi_keypad_unverified"): abort(404)
+    if meta.get("target") not in ("esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified"): abort(404)
     if not (ART/job_id/IMAGE_NAME).is_file(): abort(404)
     return jsonify(flash_manifest(
         "/artifacts/"+job_id+"/"+IMAGE_NAME,
@@ -202,9 +204,11 @@ a{color:#79e0d7}li{margin:14px 0;overflow-wrap:anywhere}
 pre{background:#0c1119;white-space:pre-wrap;word-break:break-word;padding:16px;max-height:380px;overflow:auto}</style>
 <main><h1>LumaCut Build Lab</h1><p>GitHub-Quellen · Buildarchiv und SHA256 · Waveshare ESP32-S3 per Browser oder Windows-Flashpaket installieren.</p>
 <div class="grid"><section><h2>Build starten</h2><p><button onclick="start('tests')">Projekt-Tests</button></p>
-<p><button onclick="start('stm32_project_unverified')">SKR MZ kompilieren</button></p>
+<p><button onclick="start('stm32_project_unverified')">SKR USB (alt) bauen</button></p>
+<p><button onclick="start('stm32_hmi_bridge_unverified')">SKR UART für Control OS bauen</button></p>
 <p><button onclick="start('esp32_hmi_unverified')">Waveshare HMI (nur Touch) bauen</button></p>
 <p><button onclick="start('esp32_hmi_keypad_unverified')">Waveshare HMI (UART-Jog, Labor) bauen</button></p>
+<p><button onclick="start('esp32_hmi_pro_unverified')">LumaCut Control OS (USB/WLAN/Jobs) bauen</button></p>
 <p style="color:#ffcb81">Entwicklungsfirmware, nicht hardwareverifiziert! Zuerst Touch-Version ohne Motorsteuerung flashen. Laser physisch von Versorgung und TTL trennen.</p>
 <p>Unter HTTP: fertiges Windows-Flashpaket herunterladen, entpacken und <code>Flash-Waveshare-Windows.cmd</code> starten (Python 3 und Chrome/Edge). Unter HTTPS ist der direkte Flashknopf verfügbar.</p>
 <div id="message"></div></section><section><h2>Buildhistorie</h2><ul id="jobs"></ul></section></div>
