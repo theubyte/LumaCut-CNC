@@ -1,25 +1,43 @@
 # LumaCut CNC
 
-Eigenständiges, privates Entwicklungsprojekt für Atomstack A5 Pro / LaserTree LT-80W-AA-Pro, BIGTREETECH SKR Mini MZ V1.0 (STM32F103RC, TMC2209) und Waveshare ESP32-S3-Touch-LCD-7 Rev1.2.
+Quellcode, dokumentierte Builds und Inbetriebnahmeunterlagen für Atomstack A5 Pro / LaserTree LT-80W-AA-Pro mit **BIGTREETECH SKR Mini MZ V1.0** (STM32F103RC, TMC2209) sowie **Waveshare ESP32-S3-Touch-LCD-7 Rev1.2**.
 
-**Stand 2026-10-19:** Infrastruktur und Geometrie-Tests; **KEINE** freigegebene flashfertige SKR-/ESP32-Firmware. Unraid ist ausschließlich ein GitHub-Buildserver; der Maschinenbetrieb soll ohne Raspberry Pi über LightBurn → USB → SKR (grblHAL) und die separate Touch-HMI laufen.
+**Stand 21.10.2026 – technisch kompiliert, Hardwarevalidierung fehlt.** Quellcode und GitHub-Action-Builds sind vorhanden. Diese Builds sind **nicht für produktiven Laserbetrieb freigegeben**. Sie sind Labor-/Inbetriebnahmeimages. Prüfe vor Benutzung unbedingt die elektrische Belegung und die externe Sicherheitskette.
 
-## Projektinhalte
-- `builder/`: Browser-Buildserver mit GitHub-Checkout, Buildlogs, Archiv/Prüfsummen, keinen Flashrechten.
-- `setup/`: Unraid-Docker-Installation und GitHub-Schlüssel-Einrichtung.
-- `config/laser.yaml`: offene Maschinengeometrie, Tasterversatz, Fokusparameter, Sicherheit.
-- `tools/probe_math.py` / `tests/`: reine, hardwarefreie XY-/Z-/Raster-Berechnung.
-- `docs/`: Hardware, Taster-/Z-Probe-Konzept, Bedienprotokoll, Freigabe und nächster Entwicklungsstand.
-- `firmware/skr`, `firmware/hmi`: reserviert für geprüfte Firmwarequellen.
+**[INBETRIEBNAHME: zuerst lesen](docs/INBETRIEBNAHME.md)**
 
-## Unraid-Installation
-Nach `git clone git@github.com:theubyte/LumaCut-CNC.git` aus dem Quellverzeichnis:
-```bash
-bash setup/unraid-install.sh
-bash setup/github-setup.sh
-```
-Builder: `http://<UNRAID-IP>:18744` (nur LAN/VPN); zufällig generiertes Basic-Auth-Passwort aus `/mnt/user/appdata/lumacut-builder/.env`. Quellen werden bei jedem Build von `main` abgerufen.
+## Firmware
 
-**Keine Firmware automatisch flashen.** Laserleistung muss unabhängig von MCU-/HMI-Abstürzen hardwareseitig sperrbar sein. Der Z-Referenzendschalter und der seitlich versetzte Werkstück-Taster sind getrennte Signale. Es sind keine realen PINs, Abmessungen oder Fokusabstände verifiziert. Das E3-V2-Profil ist nicht identisch mit der SKR-Mini-MZ-Belegung.
+| Projekt/Buildziel | Aufgabe | Status |
+|---|---|---|
+| `firmware/skr` → `lumacut_skr_mz_usb` | grblHAL X/Y/Z, USB CDC für LightBurn; USART1 UART-Keypad (`KEYPAD_ENABLE=2`) | Kompiliert; Port-Mapping und Sicherheitsfunktionen am echten SKR ungetestet |
+| `firmware/hmi` → `lumacut_waveshare_s3` | 7-Zoll-RGB/GT911, Touch-Dashboard, keine Bewegungsbefehle | Kompiliert; LCD und Touch am echten Gerät ungetestet |
+| `firmware/hmi` → `lumacut_waveshare_s3_keypad` | experimentelles UART-Keypad GPIO43/44 mit Jog-Freigabe, Stop bei Loslassen | Kompiliert; Verbindung mit SKR und Fahrverhalten ungetestet |
+| Z-Autofokus, XY-Tasterversatz, Höhenkarte, Live-DRO | Ziel-Funktionen | Noch nicht implementiert |
 
-Referenzen: https://github.com/grblHAL/STM32F1xx, https://docs.waveshare.com/ESP32-S3-Touch-LCD-7, https://docs.lightburnsoftware.com/, https://github.com/Klipper3d/klipper/blob/master/config/generic-bigtreetech-skr-mini-mz.cfg.
+Die HMI hat derzeit **keine grblHAL-Statusrückmeldung**, zeigt also keine live gemessenen X/Y/Z-Koordinaten. Die UART-Tasten sind **nicht** als Sicherheitseinrichtung nutzbar.
+
+**[GitHub Actions – Firmwarebuilds / Artefakte](https://github.com/theubyte/LumaCut-CNC/actions/workflows/ci.yml)**: einen mit grünem Haken abgeschlossenen Lauf auswählen, unten `UNVERIFIED-skr-...` und `UNVERIFIED-hmi-...` herunterladen. Im HMI-ZIP befinden sich beide Varianten unter den unterschiedlichen `.pio/build`-Verzeichnissen. Dateinamen sind nicht als Freigabe zu verstehen.
+
+## Architektur
+
+`LightBurn → USB CDC → SKR Mini MZ (grblHAL) → Motoren`
+
+`Waveshare Touch → UART2 (3,3-V-TTL) → SKR USART1 → grblHAL Keypad`
+
+Der Laser darf nur nach externer hardwarewirksamer Sicherheitsfreigabe zugeschaltet werden. USART3 PC10/PC11 bleibt für TMC2209 reserviert. Unraid ist ausschließlich GitHub-Buildserver, nicht Teil der Maschinensteuerung.
+
+## Quellen und Buildserver
+
+- `firmware/skr/build.py`: verwendet gepinnten offiziellen grblHAL-STM32F1xx-Code mit Mini-MZ-Pinanpassung und 28KiB-SD-Bootloader-Layout.
+- `firmware/hmi/src/main.cpp`: native ESP32-S3-RGB/GT911/CH422G-LVGL-Steuerung.
+- `setup/`, `builder/`: Unraid-Docker-Buildserver, LAN-UI auf Port 18744, ohne automatische Flash-Rechte.
+- `config/laser.yaml`: Planungsparameter, **keine** automatisch auf den SKR übertragenen Maschinenwerte.
+- `tools/probe_math.py`, `tests/`: Geometrieberechnung und hardwarefreie Unit-Tests.
+- `docs/INBETRIEBNAHME.md`: verpflichtende Checkliste, Pinbelegung und sichere Prüfschritte.
+
+Unraid: `bash setup/unraid-install.sh` und `bash setup/github-setup.sh` nur nach Prüfung der Scripts ausführen.
+
+## Freigabe
+
+Alle per CI erstellten Images heißen ausdrücklich `UNVERIFIED`. Nicht mit angeschlossenem aktiven Laser flashen oder testen. Not-Aus-/Schlüssel-/Gehäuse-Interlocks müssen hardwareseitig wirken, nicht nur durch Firmware.
