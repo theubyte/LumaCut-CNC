@@ -31,10 +31,12 @@ Der Laser darf nur nach externer hardwarewirksamer Sicherheitsfreigabe zugeschal
 
 - `firmware/skr/build.py`: verwendet gepinnten offiziellen grblHAL-STM32F1xx-Code mit Mini-MZ-Pinanpassung und 28KiB-SD-Bootloader-Layout.
 - `firmware/hmi/src/main.cpp`: native ESP32-S3-RGB/GT911/CH422G-LVGL-Steuerung.
-- `setup/`, `builder/`: Unraid-Docker-Buildserver, LAN-UI auf Port 18744, ohne automatische Flash-Rechte.
+- `setup/`, `builder/`: Unraid-Docker-Buildserver, LAN-UI auf Port 18744. HMI-Flashpaket für Windows oder bei HTTPS Browser-Web-Serial-Flash; kein USB-/Flash-Zugriff durch den Container.
 - `config/laser.yaml`: Planungsparameter, **keine** automatisch auf den SKR übertragenen Maschinenwerte.
 - `tools/probe_math.py`, `tests/`: Geometrieberechnung und hardwarefreie Unit-Tests.
 - `docs/INBETRIEBNAHME.md`: verpflichtende Checkliste, Pinbelegung und sichere Prüfschritte.
+
+**Waveshare HMI vom Build Lab flashen:** [Anleitung und Update des Unraid-Containers](builder/README.md). Der Builder erstellt ein vollständiges ESP32-S3-BIN und ein Windows-Paket mit lokalem Browser-Flashassistenten. Zuerst die HMI-Variante ohne UART-Jog testen.
 
 Unraid: `bash setup/unraid-install.sh` und `bash setup/github-setup.sh` nur nach Prüfung der Scripts ausführen.
 
