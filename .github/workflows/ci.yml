@@ -61,15 +61,15 @@ jobs:
           PYTHONPATH=builder python - <<'PY'
           import os
           from pathlib import Path
-          from tempfile import TemporaryDirectory
           from flash_bundle import build_flash_package
           core = Path.home() / ".platformio"
           templates = Path("builder")
           for env in ("lumacut_waveshare_s3", "lumacut_waveshare_s3_keypad", "lumacut_waveshare_s3_pro"):
               output = Path("firmware/hmi/.pio/build") / env
-              with TemporaryDirectory() as directory:
-                  files = build_flash_package(output, Path(directory), "0" * 40, env, templates, core)
-                  print(env, files)
+              directory = Path("ci_flash_images") / env
+              directory.mkdir(parents=True, exist_ok=True)
+              files = build_flash_package(output, directory, "0" * 40, env, templates, core)
+              print(env, files)
           PY
       - name: Save experimental binaries
         if: success()
@@ -87,5 +87,43 @@ jobs:
             firmware/hmi/.pio/build/lumacut_waveshare_s3_keypad/firmware.elf
             firmware/hmi/.pio/build/lumacut_waveshare_s3_pro/firmware.bin
             firmware/hmi/.pio/build/lumacut_waveshare_s3_pro/firmware.elf
+            ci_flash_images/lumacut_waveshare_s3_pro/LUMACUT_HMI_ESP32S3_MERGED.bin
+            ci_flash_images/lumacut_waveshare_s3_pro/Waveshare-HMI-Flash-Paket-Windows.zip
           if-no-files-found: error
+          retention-days: 30
+
+  paired_release:
+    name: Complete paired firmware ZIP
+    needs: firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: UNVERIFIED-*
+          path: downloaded
+      - name: Verify and package paired SKR and Waveshare
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, os, pathlib, zipfile
+          root=pathlib.Path("downloaded")
+          sha=os.environ["SOURCE_SHA"]
+          skr=root/("UNVERIFIED-skr-"+sha)/"firmware"/"skr"/".pio"/"build"/"lumacut_skr_mz_hmi_uart"/"firmware.bin"
+          image=root/("UNVERIFIED-hmi-"+sha)/"ci_flash_images"/"lumacut_waveshare_s3_pro"/"LUMACUT_HMI_ESP32S3_MERGED.bin"
+          win=root/("UNVERIFIED-hmi-"+sha)/"ci_flash_images"/"lumacut_waveshare_s3_pro"/"Waveshare-HMI-Flash-Paket-Windows.zip"
+          items={"SKR-Mini-MZ/firmware.bin":skr,"Waveshare/ESP32S3-Komplettimage.bin":image,"Waveshare/Waveshare-HMI-Flash-Paket-Windows.zip":win,"DOKUMENTATION/LUMACUT_CONTROL_OS.md":pathlib.Path("docs/LUMACUT_CONTROL_OS.md")}
+          for name,path in items.items():
+              if not path.is_file() or not path.stat().st_size: raise RuntimeError("Missing "+name+": "+str(path))
+          manifest={"source_sha":sha,"hardware_validated":False,"items":{name:{"bytes":p.stat().st_size,"sha256":hashlib.sha256(p.read_bytes()).hexdigest()} for name,p in items.items()}}
+          with zipfile.ZipFile("LumaCut-Control-OS-Komplettpaket.zip","w",zipfile.ZIP_DEFLATED) as bundle:
+              for name,p in items.items(): bundle.write(p,name)
+              bundle.writestr("PRUEFSUMMEN.json",json.dumps(manifest,indent=2))
+          print("Paired firmware package:",manifest)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LUMACUT-KOMPLETT-${{ github.sha }}
+          path: LumaCut-Control-OS-Komplettpaket.zip
           retention-days: 30
