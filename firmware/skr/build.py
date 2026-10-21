@@ -74,6 +74,9 @@ def main():
             h.write("build_flags = "+chr(36)+"{env:BTT_SKR_MINI_E3_V20_USB.build_flags}\n")
             h.write("  -D COOLANT_ENABLE=1\n")
             h.write("  -D SPINDLE0_ENABLE=SPINDLE_PWM0_NODIR\n")
+            # UART0 (PA9 TX, PA10 RX) serves the grblHAL serial keypad.
+            # USART3 (PC10/PC11) remains reserved for TMC2209.
+            h.write("  -D KEYPAD_ENABLE=2\n")
         run("pio","run","-e",ENV,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/ENV
         OUT.mkdir(parents=True,exist_ok=True)
