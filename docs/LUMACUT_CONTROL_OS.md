@@ -16,7 +16,7 @@ Die Waveshare-Buchse USB TO UART verwendet dieselben Pins GPIO43/44 und ist im U
 - Waveshare: `lumacut_waveshare_s3_pro` – grafische HMI, Wi-Fi, natives USB-CDC, BLE-Lesestatus, Job-Portal und Makros.
 - SKR: `lumacut_skr_mz_hmi_uart` – `python firmware/skr/build.py --bridge`; grblHAL USART1 PA9/PA10 als **Hauptstream**. SKR-USB braucht keinen PC-Anschluss.
 - Die bisherige SKR-USB-Firmware `lumacut_skr_mz_usb` und die alte HMI-Keypad-Firmware **nicht** mit dem Pro-HMI mischen: ihre Protokolle sind unterschiedlich.
-- Beide Ziele im Unraid Build Lab mit den neuen Tasten „SKR UART für Control OS“ und „LumaCut Control OS“ erstellen. Im Windows-Flashpaket das Waveshare per Browser am USB flashen. SKR nach gesonderter Bootloader-/Pinprüfung per FAT32-microSD aktualisieren.
+- **Ein-Klick-Komplettpaket:** Im Unraid Build Lab **„Komplettes LumaCut Control OS bauen (HMI + SKR)“** klicken. Ein Job erzeugt das Paket `LumaCut-Control-OS-Komplettpaket.zip` mit beiden auf denselben Git-Commit abgestimmten Firmwareversionen, Windows-Flashpaket, Anleitung und Prüfsummen. Alternativ unter GitHub Actions das Artifact `LUMACUT-KOMPLETT-<Commit-SHA>` herunterladen. Nach gesonderter Bootloader-/Pinprüfung wird das SKR per FAT32-microSD aktualisiert. Das Waveshare wird am PC über das Windows-Flashpaket installiert.
 
 ## Bedienoberfläche
 
@@ -28,11 +28,11 @@ Den nativen ESP32-S3-USB-Port mit dem PC verbinden (nicht USB TO UART). In Light
 
 ### LightBurn WLAN
 
-Im HMI unter System SSID/Passwort des 2,4-GHz-Heimnetzes eingeben. In LightBurn manuell GRBL-Gerät mit Verbindung „Ethernet or Wi-Fi/TCP“ und der HMI-IP einrichten. GRBL TCP auf Port **23**. Es darf immer nur ein externer Host oder ein lokaler HMI-Job/Makro die Steuerung besitzen; bei aktiven Jobs niemals Quellen umschalten.
+Im HMI unter System SSID/Passwort des 2,4-GHz-Heimnetzes eingeben. In LightBurn manuell GRBL-Gerät mit Verbindung „Ethernet or Wi-Fi/TCP“ und der HMI-IP einrichten. GRBL TCP auf Port **23**. **Vor einer neuen WLAN-LightBurn-Verbindung am HMI auf Home „LightBurn WLAN erlauben“ tippen**: Der Zugang öffnet für fünf Minuten zum Verbinden. Ein aktiver Host bleibt Eigentümer der Schnittstelle. Es darf immer nur ein externer Host oder ein lokaler HMI-Job/Makro die Steuerung besitzen; bei aktiven Jobs niemals Quellen umschalten.
 
 ### Handy
 
-Das Waveshare bietet einen WPA2-Hotspot `LumaCut-xxxx` und verbindet sich optional zum eigenen WLAN. Im HMI unter System stehen Hotspot-Passwort und Web-Zugangscode. Über `http://192.168.4.1` im Hotspot oder die angezeigte HMI-IP im Heimnetz sind G-Code-Upload (`.gcode`, `.nc`, `.tap`, `.txt`), Datei-Auswahl, Trockenrahmen, Start/Pause/Fortsetzen/Abbruch und Parkposition verfügbar.
+Das Waveshare bietet einen WPA2-Hotspot `LumaCut-xxxx` und verbindet sich optional zum eigenen WLAN. Im HMI unter System stehen Hotspot-Passwort und Web-Zugangscode. Über `http://192.168.4.1` im Hotspot oder die angezeigte HMI-IP im Heimnetz sind G-Code-Upload (`.gcode`, `.nc`, `.tap`, `.txt`), Datei-Auswahl, eine konservativ ermittelte Begrenzungsrahmen-Vorschau, Trockenrahmen, Start/Pause/Fortsetzen/Abbruch und Parkposition verfügbar. Der Upload ist auf 3 MiB pro Datei begrenzt, wird nur bei freier Steuerung angenommen und atomar im LittleFS gespeichert; fehlerhafte Uploads werden verworfen.
 
 LightBurn-Projektdateien `.lbrn2` können nicht nativ vom HMI interpretiert werden. LightBurn über USB/WLAN direkt verbinden oder G-Code exportieren. WLAN-HTTP und GRBL-TCP sind nicht TLS-geschützt; Gerät niemals über Router-Portweiterleitungen ins Internet stellen.
 
@@ -54,7 +54,11 @@ Für lokale G-Code-Jobs wartet das HMI auf grblHAL-Antworten pro Zeile. Hold mit
 
 - Kompiliert bedeutet nicht elektrisch oder funktional auf echter Hardware validiert.
 - Nach Reset und vor eigener Bewegung ist Homing `$H` nötig; beim Jog/Start außerdem `Idle`-Status und lokale 30-Sekunden-Freigabe.
-- Eine abreißende WLAN-Verbindung kann Hold anfordern, garantiert aber keine sichere Laser-Stromunterbrechung.
+- Eine abreißende WLAN-Verbindung oder ausbleibende SKR-Statusmeldung fordert Feed Hold an und blockiert weitere eigene Zeilen, garantiert aber keine sichere Laser-Stromunterbrechung.
 - Ein extern verdrahteter Not-Aus und eine hardwarewirksame Laser-Leistungsfreigabe sind unabdingbar.
-- Vollständige LightBurn-G-Code-Varianten wie relative Moves, Bögen/Arcs und spezielle Modalbefehle brauchen vor verlässlichem Framing einen ausgereiften Interpreter.
+- Der Frame-Interpreter lehnt relative Bewegungen, Bögen/Arcs, Koordinatenverschiebungen und andere nicht unterstützte Modalbefehle ab; er ist **keine vollständige LightBurn-Pfadvorschau**. Solche Dateien können weiterhin über LightBurn an den GRBL-Stream gesendet werden, aber nicht mit der HMI-Rahmenfunktion umrundet werden.
 - Maschine und Schalterbelegung, PWM, TMC-Treiber und die beiden Y-Motoren vor echtem Laserjob prüfen.
+
+## Technische Grenzen der Integrationsprüfung
+
+GitHub Actions erstellt die Sketches und ein abgestimmtes Firmwarepaar und kontrolliert Prüfdateien. Das ist ein erfolgreicher **Software-Build**, keine echte Hardwareprüfung. Der Touchscreen muss am realen Waveshare auf Darstellung, Berührungen, GATT-Status, Wi-Fi, USB-C-Grbl und GRBL-UART-Quittungen geprüft werden. Unraid erhält keine USB-Geräte; der PC flasht das HMI lokal. Das neue LittleFS-Layout ist nicht zu vorher experimentell gespeicherten SPIFFS-Jobs kompatibel; solche Dateien vorher extern sichern.
