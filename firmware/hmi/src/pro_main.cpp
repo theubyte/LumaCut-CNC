@@ -190,7 +190,7 @@ void feedHold(){machine.write('!');}
 void abortHost(){
     if(owner!=Owner::Tcp&&owner!=Owner::Usb)return;
     machine.write((uint8_t)0x18);
-    machineHomed=false;hostBlocked=true;
+    machineHomed=false;haveMpos=false;hostBlocked=true;
     setNotice("Externer Job abgebrochen. LightBurn stoppen; Quellenwechsel erst bei Idle.");
 }
 void abortJob(){
@@ -198,7 +198,7 @@ void abortJob(){
     machine.write((uint8_t)0x18);
     if(jobFile)jobFile.close();
     jobRunning=false;jobPaused=false;scriptActive=false;commandPending=false;
-    scriptCount=scriptIndex=0;owner=Owner::None;machineHomed=false;
+    scriptCount=scriptIndex=0;owner=Owner::None;machineHomed=false;haveMpos=false;
     setNotice("Abbruch gesendet. Referenzfahrt erneut erforderlich.");
 }
 void nextScript(){
@@ -688,7 +688,9 @@ void action(const char* id){
         return;
     }
     if(op=="home"){
-        if(owner!=Owner::None||!idle()){setNotice("Referenzfahrt nur ohne aktiven Host und im Idle.");return;}
+        if(owner!=Owner::None||!fresh()||(machineState!=MachineState::Idle&&machineState!=MachineState::Alarm)){
+            setNotice("Referenzfahrt nur ohne aktiven Host bei Idle/Alarm.");return;
+        }
         if(claim(Owner::Script)){
             String cmds[]={"$H"};script[0]=cmds[0];scriptCount=1;scriptIndex=0;scriptActive=true;
             homingInProgress=true;nextScript();setNotice("Referenzfahrt ausgelöst.");
