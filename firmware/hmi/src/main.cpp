@@ -1,11 +1,15 @@
 /*
-  LumaCut 7-inch HMI v0.2 – real RGB/GT911 LVGL dashboard.
+  LumaCut 7-inch HMI v0.3 – real RGB/GT911 LVGL dashboard.
   INTERLOCK: NO motion or laser commands are transmitted by this build.
   Future UART builds require signed-off board electrical + grblHAL protocol.
   This firmware provides a functional touch panel, editable calibration
   preview, no laser-control outputs, and startup-safe status indication.
 */
 #include <Arduino.h>
+#include <stdint.h>
+#ifndef HMI_UART_ENABLED
+#define HMI_UART_ENABLED 0
+#endif
 #include <Wire.h>
 #include <lvgl.h>
 #include "esp_lcd_panel_rgb.h"
@@ -38,6 +42,56 @@ static lv_obj_t* tool_label=nullptr;
 static int selected_step=1;
 static const float steps[]={0.1f,1.0f,10.0f};
 static bool touch_ready=false;
+#if HMI_UART_ENABLED
+// Waveshare UART2 connector (switch must select UART2): 3.3V TTL GPIO43 TX,
+// GPIO44 RX. No RS485 A/B voltage levels and no 5V UART.
+static HardwareSerial keypad_uart(1);
+static bool jog_armed=false;
+static uint32_t jog_arm_ms=0;
+static lv_obj_t* jog_arm_label=nullptr;
+static void keypad_send(uint8_t c) { keypad_uart.write(c); }
+static void disarm_jog() {
+    keypad_send(0x85); // grblHAL keypad: jog cancel; never rely on touch UI for E-stop
+    jog_armed=false;
+    if(jog_arm_label) lv_label_set_text(jog_arm_label,"JOG GESPERRT");
+}
+static void arm_jog(lv_event_t*) {
+    if(jog_armed) {
+        disarm_jog();
+        lv_label_set_text(message_label,"Jog gesperrt. Laser separat sichern.");
+    } else {
+        jog_armed=true;
+        jog_arm_ms=millis();
+        if(jog_arm_label) lv_label_set_text(jog_arm_label,"JOG FREI (30s)");
+        lv_label_set_text(message_label,"Nur bei LASER AUS und freiem Fahrweg tippen.");
+    }
+}
+static void jog_key(lv_event_t* e) {
+    const uint8_t key=(uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    const lv_event_code_t event=lv_event_get_code(e);
+    if(event==LV_EVENT_PRESSED) {
+        if(!jog_armed) {
+            lv_label_set_text(message_label,"Jog zuerst freigeben. SKR-Rueckmeldung fehlt.");
+            return;
+        }
+        // Only finite STEP jogging; grblHAL keypad blocks jog in non-idle states.
+        keypad_send('2'); // STEP jog, distance defined in SKR's $ settings
+        keypad_send(key);
+    } else if(event==LV_EVENT_RELEASED || event==LV_EVENT_PRESS_LOST) {
+        keypad_send(0x85);
+    }
+}
+static void add_jog(lv_obj_t* b, char key) {
+    lv_obj_add_event_cb(b,jog_key,LV_EVENT_PRESSED,(void*)(uintptr_t)(uint8_t)key);
+    lv_obj_add_event_cb(b,jog_key,LV_EVENT_RELEASED,(void*)(uintptr_t)(uint8_t)key);
+    lv_obj_add_event_cb(b,jog_key,LV_EVENT_PRESS_LOST,(void*)(uintptr_t)(uint8_t)key);
+}
+static void step_factor(lv_event_t*) {
+    if(!jog_armed) { lv_label_set_text(message_label,"Jog erst freigeben."); return; }
+    keypad_send('m'); // ask SKR to change configured jog factor
+    lv_label_set_text(message_label,"Schritt-Faktor am SKR umgeschaltet (ohne ACK).");
+}
+#endif
 
 static bool write_expander(uint8_t addr,uint8_t data) {
     Wire.beginTransmission(addr);
@@ -200,6 +254,18 @@ static void init_ui() {
     z_label=label(root,"Z: ---.--- mm",25,223,20);
     label(root,"Live-Position wird nach sicherer UART-Integration aktiviert.",25,279,16);
     label(root,"Touch-Steuerung",476,80,20);
+#if HMI_UART_ENABLED
+    add_jog(button(root,"X-",470,128,95,58,nullptr),'L');
+    add_jog(button(root,"X+",576,128,95,58,nullptr),'R');
+    add_jog(button(root,"Y-",470,195,95,58,nullptr),'B');
+    add_jog(button(root,"Y+",576,195,95,58,nullptr),'F');
+    add_jog(button(root,"Z-",470,262,95,58,nullptr),'D');
+    add_jog(button(root,"Z+",576,262,95,58,nullptr),'U');
+    step_label=label(root,"STEP: Werte im SKR",477,338,16);
+    button(root,"Faktor",655,325,120,47,step_factor);
+    button(root,"Jog freigeben",25,326,140,50,arm_jog);
+    jog_arm_label=label(root,"JOG GESPERRT",544,410,16);
+#else
     button(root,"X-",470,128,95,58,notify_disabled);
     button(root,"X+",576,128,95,58,notify_disabled);
     button(root,"Y-",470,195,95,58,notify_disabled);
@@ -209,16 +275,23 @@ static void init_ui() {
     step_label=label(root,"Schritt: 1.0 mm",477,338,16);
     button(root,"Schritt",655,325,120,47,cycle_step);
     button(root,"Homing",25,326,140,50,notify_disabled);
+#endif
     button(root,"Autofokus",175,326,140,50,notify_disabled);
     button(root,"Tasterprofil",325,326,140,50,show_profile);
     message_label=label(root,"Laser-Ausgang gesperrt | keine Verbindung zum SKR",25,413,16);
     lv_obj_set_style_text_color(message_label,lv_color_hex(0x76E0C5),0);
+#if HMI_UART_ENABLED
+    lv_label_set_text(message_label,"UART-Keypad (ohne ACK) | Laser separat stromlos");
+#endif
     (void)x_label; (void)y_label; (void)z_label; (void)profile_label; (void)tool_label;
 }
 void setup() {
     Serial.begin(115200);
+#if HMI_UART_ENABLED
+    keypad_uart.begin(115200,SERIAL_8N1,44,43);
+#endif
     delay(100);
-    Serial.println("LumaCut HMI experimental v0.1 - laser and movement disabled");
+    Serial.println("LumaCut HMI v0.3 - USB debug; UART keypad optional; laser never directly controlled");
     init_i2c();
     if(!lcd_begin()||!lvgl_begin()) {
         Serial.println("FATAL: RGB panel / LVGL init failed");
@@ -231,6 +304,12 @@ void setup() {
         Serial.println("WARNING: CH422G backlight enable failed");
 }
 void loop(){
+#if HMI_UART_ENABLED
+    if(jog_armed && (uint32_t)(millis()-jog_arm_ms)>30000u) {
+        disarm_jog();
+        lv_label_set_text(message_label,"Jog-Freigabe nach 30s automatisch erloschen.");
+    }
+#endif
     lv_timer_handler();
     delay(5);
 }
