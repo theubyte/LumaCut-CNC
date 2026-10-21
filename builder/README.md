@@ -12,11 +12,18 @@ für GitHub-Lesezugriff verwendet; Passwort und Schlüssel bleiben im Unraid App
 - **Waveshare HMI – UART-Jog:** Profil `lumacut_waveshare_s3_keypad`; nur nach erfolgreicher separater Motor-/Endschalterprüfung und bei stromlosem Laser.
 - **LumaCut Control OS:** Profil `lumacut_waveshare_s3_pro`, neue grafische Oberfläche, USB-C CDC, WLAN-GRBL/TCP, Handy-Jobportal, BLE-Status und gespeicherte Parkmakros. **Erfordert passende SKR-UART-Firmware!**
 - **SKR UART für Control OS:** Profil `lumacut_skr_mz_hmi_uart` aus `python firmware/skr/build.py --bridge`; USART1 als grblHAL-Hauptverbindung zum Waveshare, nicht das alte Keypad-Protokoll.
+- **Komplettes LumaCut Control OS (HMI + SKR)**: Ein-Klick-Build beider Profile mit gemeinsamer Quellcode-Version, vollständigem Flash-Paket und Prüfsummen.
 
 Bei HMI-Erfolg erzeugt das Build Lab außer der normalen Entwicklungs-Firmware:
 1. `LUMACUT_HMI_ESP32S3_MERGED.bin`: vollständiges 16-MB-kompatibles ESP32-S3-Flashabbild aus Bootloader, Partitionstabelle, OTA-Bootstub und Anwendung (Startadresse 0), mit Prüfsumme.
 2. `Waveshare-HMI-Flash-Paket-Windows.zip`: Firmware, Manifest und localhost-Flasher.
 3. Ein Web-Flash-Manifest, das zu genau diesem Build gehört.
+
+## Komplettpaket auf einmal erstellen
+
+Im Build Lab **„Komplettes LumaCut Control OS bauen (HMI + SKR)“** anklicken. Wenn der Status erfolgreich ist, erscheint **„Gesamtsystem-ZIP herunterladen“**. Das ZIP enthält `SKR-Mini-MZ/firmware.bin`, `Waveshare/Waveshare-HMI-Flash-Paket-Windows.zip`, das gesamte ESP32-S3-Image und die Dokumentation. Beide Images werden aus exakt demselben Git-Commit gebaut. Das SKR wird dabei **nicht** automatisch geflasht.
+
+Alternativ ist dasselbe Firmwarepaar nach erfolgreicher Pipeline unter GitHub Actions als Artifact `LUMACUT-KOMPLETT-<Git-SHA>` erhältlich.
 
 ## Flashen, wenn Waveshare am Windows-PC steckt
 
