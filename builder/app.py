@@ -14,7 +14,7 @@ WORK.mkdir(parents=True,exist_ok=True)
 REPO=os.environ.get("GIT_REPOSITORY","git@github.com:theubyte/LumaCut-CNC.git")
 BRANCH=os.environ.get("GIT_BRANCH","main")
 PASSWORD=os.environ.get("BUILDER_PASSWORD","")
-TARGETS={"tests","stm32_project_unverified","stm32_hmi_bridge_unverified","esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified"}
+TARGETS={"tests","stm32_project_unverified","stm32_hmi_bridge_unverified","esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified","lumacut_complete_suite_unverified"}
 ID_RE=re.compile(r"^[a-f0-9]{16}$")
 app=Flask(__name__)
 lock=threading.Lock()
@@ -77,6 +77,48 @@ def perform(job_id,target):
             if target=="tests":
                 run(["python","-m","unittest","discover","-s","tests","-v"],src,log,120)
                 run(["python","-m","py_compile","builder/app.py","tools/probe_math.py"],src,log,60)
+            elif target=="lumacut_complete_suite_unverified":
+                # Build one source commit into a paired, self-contained release.
+                skr=src/"firmware"/"skr"
+                hmi=src/"firmware"/"hmi"
+                run(["python","build.py","--bridge"],skr,log,2100)
+                skr_out=skr/".pio"/"build"/"lumacut_skr_mz_hmi_uart"
+                for fn in ("firmware.bin","firmware.elf"):
+                    src_file=skr_out/fn
+                    if not src_file.is_file(): raise RuntimeError("Missing SKR UART "+fn)
+                    dst=folder/("SKR_UART_UNVERIFIED_"+fn)
+                    shutil.copy2(src_file,dst)
+                    meta["files"].append({"name":dst.name,"bytes":dst.stat().st_size,
+                        "sha256":hashlib.sha256(dst.read_bytes()).hexdigest()})
+                run(["pio","run","-e","lumacut_waveshare_s3_pro"],hmi,log,2100)
+                hmi_out=hmi/".pio"/"build"/"lumacut_waveshare_s3_pro"
+                meta["files"].extend(build_flash_package(hmi_out,folder,sha,
+                    "lumacut_waveshare_s3_pro",Path(__file__).resolve().parent))
+                release=folder/"LumaCut-Control-OS-Komplettpaket.zip"
+                with zipfile.ZipFile(release,"w",zipfile.ZIP_DEFLATED) as z:
+                    z.write(folder/"SKR_UART_UNVERIFIED_firmware.bin",
+                            "SKR-Mini-MZ/firmware.bin")
+                    z.write(folder/"SKR_UART_UNVERIFIED_firmware.elf",
+                            "SKR-Mini-MZ/firmware.elf")
+                    z.write(folder/IMAGE_NAME,"Waveshare/"+IMAGE_NAME)
+                    z.write(folder/"Waveshare-HMI-Flash-Paket-Windows.zip",
+                            "Waveshare/Waveshare-HMI-Flash-Paket-Windows.zip")
+                    z.write(src/"docs"/"LUMACUT_CONTROL_OS.md",
+                            "DOKUMENTATION/ANLEITUNG.md")
+                    z.writestr("ZUERST_LESEN.txt",
+                        "LUMACUT CONTROL OS - ENTWICKLUNGSSTAND\n"
+                        "Beide Firmwaredateien aus genau demselben Git-Commit.\n"
+                        "Waveshare zuerst per Windows-Flashpaket installieren.\n"
+                        "SKR benötigt UART-Hauptstream (kein altes Keypad).\n"
+                        "Niemals flashen oder Maschinenbewegungen auslösen, bevor\n"
+                        "Pinbelegung, Bootloader, Endschalter, Schutzkette und\n"
+                        "hardwarewirksamer Laser-Not-Aus geprüft wurden.\n"
+                        "Laser während Erstinbetriebnahme stromlos und TTL getrennt.\n")
+                meta["files"].append({"name":release.name,"bytes":release.stat().st_size,
+                    "sha256":hashlib.sha256(release.read_bytes()).hexdigest()})
+                meta["flash_package"]=True
+                meta["paired_firmware"]=True
+                log.write("PAIRED LUMACUT CONTROL OS: SKR UART + Waveshare PRO, one source SHA.\n")
             else:
                 key="skr" if target.startswith("stm32_") else "hmi"
                 env=("lumacut_skr_mz_hmi_uart" if target=="stm32_hmi_bridge_unverified"
@@ -168,7 +210,7 @@ def get_flash_manifest(job_id):
     if not manifest.is_file(): abort(404)
     meta=json.loads(manifest.read_text(encoding="utf-8"))
     if meta.get("status")!="success" or not meta.get("flash_package"): abort(404)
-    if meta.get("target") not in ("esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified"): abort(404)
+    if meta.get("target") not in ("esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified","lumacut_complete_suite_unverified"): abort(404)
     if not (ART/job_id/IMAGE_NAME).is_file(): abort(404)
     return jsonify(flash_manifest(
         "/artifacts/"+job_id+"/"+IMAGE_NAME,
@@ -203,7 +245,9 @@ button{background:#68dac5;color:#072920;border:0;border-radius:10px;padding:12px
 a{color:#79e0d7}li{margin:14px 0;overflow-wrap:anywhere}
 pre{background:#0c1119;white-space:pre-wrap;word-break:break-word;padding:16px;max-height:380px;overflow:auto}</style>
 <main><h1>LumaCut Build Lab</h1><p>GitHub-Quellen · Buildarchiv und SHA256 · Waveshare ESP32-S3 per Browser oder Windows-Flashpaket installieren.</p>
-<div class="grid"><section><h2>Build starten</h2><p><button onclick="start('tests')">Projekt-Tests</button></p>
+<div class="grid"><section><h2>Build starten</h2>
+<p><button onclick="start('lumacut_complete_suite_unverified')">Komplettes LumaCut Control OS bauen (HMI + SKR)</button></p>
+<p><small>Ein Build, identischer Commit und ein vollständiges ZIP für beide Boards.</small></p><p><button onclick="start('tests')">Projekt-Tests</button></p>
 <p><button onclick="start('stm32_project_unverified')">SKR USB (alt) bauen</button></p>
 <p><button onclick="start('stm32_hmi_bridge_unverified')">SKR UART für Control OS bauen</button></p>
 <p><button onclick="start('esp32_hmi_unverified')">Waveshare HMI (nur Touch) bauen</button></p>
@@ -241,6 +285,7 @@ document.querySelector('#jobs').innerHTML=(d.jobs||[]).map(j=>'<li><b>'+escapeHt
 '<br><small>'+escapeHtml((j.source_sha||'').slice(0,12))+'</small><br>'+
 '<a href="#" data-id="'+j.id+'">Log</a> · <a href="/artifacts/'+j.id+'/build-package.zip">ZIP</a> · '+
 '<a href="/artifacts/'+j.id+'/manifest.json">Manifest</a>'+
+(j.status==='success' && j.paired_firmware ? '<br><a href="/artifacts/'+j.id+'/LumaCut-Control-OS-Komplettpaket.zip"><b>Gesamtsystem-ZIP herunterladen</b></a>':'')+
 (j.status==='success' && j.flash_package
   ? '<br><a href="/artifacts/'+j.id+'/Waveshare-HMI-Flash-Paket-Windows.zip">Windows-Flashpaket</a> · '+
     '<a href="/artifacts/'+j.id+'/LUMACUT_HMI_ESP32S3_MERGED.bin">ESP32-S3 Komplett-BIN</a>'+
