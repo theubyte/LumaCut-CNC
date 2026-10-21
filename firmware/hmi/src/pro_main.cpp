@@ -44,8 +44,9 @@ esp_lcd_panel_handle_t lcd=nullptr;
 lv_color_t* drawPixels=nullptr;
 uint8_t gtAddr=0x5d;
 bool touchOk=false,storageOk=false,machineHomed=false;
-bool uploadAllowed=false;
+bool uploadAllowed=false,uploadFinished=false;
 size_t uploadBytes=0;
+String uploadTemporary,uploadDestination;
 String selectedJob,apName,apPass,apiKey,notice;
 String wifiSsid,wifiPass,linkLine,hostLine;
 String script[12];int scriptCount=0,scriptIndex=0;
@@ -487,8 +488,10 @@ void installRoutes(){
             while(f){if(!f.isDirectory()){
                 String name=String(f.name());int pos=name.lastIndexOf('/');
                 if(pos>=0)name=name.substring(pos+1);
-                if(!first)out+=',';first=false;
-                out+="{\"name\":\""+name+"\",\"bytes\":"+String(f.size())+"}";
+                if(!name.endsWith(".part")){
+                    if(!first)out+=',';first=false;
+                    out+="{\"name\":\""+name+"\",\"bytes\":"+String(f.size())+"}";
+                }
             }f=root.openNextFile();}
         }out+="]}";http.send(200,"application/json",out);
     });
@@ -511,14 +514,15 @@ void installRoutes(){
         http.send(200,"application/json","{\"ok\":true}");
     });
     http.on("/api/upload",HTTP_POST,[]{
-        if(!auth()||!uploadAllowed){fail(403,"Upload nicht freigegeben");return;}
-        if(uploadFile)uploadFile.close();uploadAllowed=false;
+        if(!auth()||!uploadFinished){fail(403,"Upload fehlgeschlagen oder Datei existiert bereits");return;}
+        uploadFinished=false;uploadAllowed=false;
         http.send(200,"application/json","{\"ok\":true}");
     },[]{
         HTTPUpload &up=http.upload();
         if(up.status==UPLOAD_FILE_START){
-            uploadAllowed=auth()&&storageOk&&owner!=Owner::Internal;
-            uploadBytes=0;
+            uploadAllowed=auth()&&storageOk&&owner==Owner::None;
+            uploadFinished=false;uploadBytes=0;
+            uploadTemporary="";uploadDestination="";
             String name=up.filename;name.replace(" ","_");
             for(size_t k=0;k<name.length();k++){
                 char ch=name.charAt(k);
@@ -528,17 +532,32 @@ void installRoutes(){
             if(name.length()>72||name.indexOf("..")>=0||name.indexOf('/')>=0||name.indexOf('\\')>=0 ||
                !(name.endsWith(".gcode")||name.endsWith(".nc")||name.endsWith(".tap")||name.endsWith(".txt")))
                 uploadAllowed=false;
-            if(uploadAllowed)uploadFile=SPIFFS.open("/jobs/"+name,FILE_WRITE);
-            if(!uploadFile)uploadAllowed=false;
+            uploadDestination="/jobs/"+name;
+            uploadTemporary="/jobs/."+name+".part";
+            if(uploadAllowed&&SPIFFS.exists(uploadDestination))uploadAllowed=false;
+            if(uploadAllowed){
+                SPIFFS.remove(uploadTemporary);
+                uploadFile=SPIFFS.open(uploadTemporary,FILE_WRITE);
+                if(!uploadFile)uploadAllowed=false;
+            }
         } else if(up.status==UPLOAD_FILE_WRITE && uploadAllowed){
             uploadBytes+=up.currentSize;
             if(uploadBytes>MAX_JOB_BYTES||uploadFile.write(up.buf,up.currentSize)!=up.currentSize){
                 uploadAllowed=false;uploadFile.close();
+                if(uploadTemporary.length())SPIFFS.remove(uploadTemporary);
             }
         } else if(up.status==UPLOAD_FILE_END){
             if(uploadFile)uploadFile.close();
+            if(uploadAllowed&&uploadBytes>0&&uploadTemporary.length()&&uploadDestination.length()&&
+               !SPIFFS.exists(uploadDestination)){
+                uploadFinished=SPIFFS.rename(uploadTemporary,uploadDestination);
+            }
+            if(!uploadFinished&&uploadTemporary.length())SPIFFS.remove(uploadTemporary);
+            uploadAllowed=uploadFinished;
         } else if(up.status==UPLOAD_FILE_ABORTED){
-            if(uploadFile)uploadFile.close();uploadAllowed=false;
+            if(uploadFile)uploadFile.close();
+            if(uploadTemporary.length())SPIFFS.remove(uploadTemporary);
+            uploadAllowed=false;uploadFinished=false;
         }
     });
     http.begin();
