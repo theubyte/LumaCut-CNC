@@ -471,7 +471,10 @@ String jsonStatus(){
       "\",\"owner\":\""+String(ownerText())+
       "\",\"position\":\""+(haveMpos?("X "+String(mx,2)+" / Y "+String(my,2)+" / Z "+String(mz,2)):"Unbekannt")+
       "\",\"job\":\""+selectedJob+
-      "\",\"message\":\""+String(machineHomed?"Referenziert":"Referenzfahrt erforderlich")+"\"}";
+      "\",\"message\":\""+String(machineHomed?"Referenziert":"Referenzfahrt erforderlich")+
+      "\",\"bounds\":"+String(bounds.valid?
+        ("{\"x0\":"+String(bounds.x0,3)+",\"y0\":"+String(bounds.y0,3)+
+         ",\"x1\":"+String(bounds.x1,3)+",\"y1\":"+String(bounds.y1,3)+"}"):"null")+"}";
     return val;
 }
 void installRoutes(){
