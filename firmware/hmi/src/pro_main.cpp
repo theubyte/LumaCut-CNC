@@ -63,7 +63,7 @@ struct Bounds {float x0=0,y0=0,x1=0,y1=0;bool valid=false;};
 Bounds bounds;
 struct Park {String name;float x=0,y=0;bool stored=false;};
 Park parks[3];
-lv_obj_t* pages[9]{};
+lv_obj_t* pages[10]{};
 lv_obj_t* navButtons[7]{};
 lv_obj_t *areaField=nullptr,*areaDot=nullptr,*areaCaption=nullptr,*configCaption=nullptr;
 lv_obj_t *sizeXField=nullptr,*sizeYField=nullptr,*sizeZField=nullptr;
@@ -77,6 +77,7 @@ bool knownSetting[400]{};
 float focusLiftMm=7.f,focusGapMm=7.f,tipOffsetMm=0.f,
       probeTravelMm=15.f,probeFeedMm=60.f;
 bool autoLiftAfterHome=true,postHomePending=false,motorsReleased=false;
+bool contactSwitchAtHead=false;
 bool homeFromHmi=false,motorReleasePending=false;
 int catalogCategory=0;
 lv_disp_t* uiDisplay=nullptr;
@@ -863,9 +864,9 @@ lv_obj_t* configEntry(lv_obj_t* parent,int x,int y,int w,int h,const String& tex
 void switchTab(int idx){
     activePage=idx;
     const int navMap[7]={0,5,1,2,3,6,4};
-    for(int j=0;j<9;j++)lv_obj_add_flag(pages[j],LV_OBJ_FLAG_HIDDEN);
+    for(int j=0;j<10;j++)lv_obj_add_flag(pages[j],LV_OBJ_FLAG_HIDDEN);
     if(idx>=0&&idx<7)lv_obj_clear_flag(pages[navMap[idx]],LV_OBJ_FLAG_HIDDEN);
-    else if(idx>=7&&idx<9)lv_obj_clear_flag(pages[idx],LV_OBJ_FLAG_HIDDEN);
+    else if(idx>=7&&idx<10)lv_obj_clear_flag(pages[idx],LV_OBJ_FLAG_HIDDEN);
     for(int i=0;i<7;i++){
         lv_obj_set_style_bg_color(navButtons[i],lv_color_hex(i==idx?PALE_BLUE:WHITE),0);
         lv_obj_t* t=lv_obj_get_child(navButtons[i],0);
@@ -958,7 +959,7 @@ void makeUi(){
     sourceLabel=lbl(root,"Steuerung frei",583,84,14,SUBTLE);
 
     // Every page fits 800x480 without accidental scrolling.
-    for(int i=0;i<9;i++){
+    for(int i=0;i<10;i++){
         pages[i]=lv_obj_create(root);lv_obj_set_pos(pages[i],14,117);
         lv_obj_set_size(pages[i],772,272);
         lv_obj_set_style_bg_opa(pages[i],LV_OPA_TRANSP,0);
@@ -1168,6 +1169,26 @@ void makeUi(){
     }
     btn(c,"Setup",404,12,136,39,"setupgo",GRAY,INK);
 
+    // A single-axis Z homing cycle can use the existing PC2 switch
+    // as a MATERIAL SURFACE reference, if the head-mounted switch physically
+    // touches the workpiece. It is NOT G38 probing and changes Z machine home.
+    c=card(pages[9],0,0,380,268);
+    lbl(c,"Werkstueck-Z / PC2",18,12,20);
+    lbl(c,"Z-Schalter am Kopf auf Werkstueckkontakt?",18,49,14,SUBTLE);
+    btn(c,"Kopf-Taster Modus",18,76,343,48,"contactMode",PALE_BLUE,BLUE);
+    btn(c,"Schalterstatus lesen",18,138,343,47,"switchcheck",GRAY,INK);
+    lbl(c,"Z-only Homing: $HZ, benoetigt $22 Bit 1",18,198,14,SUBTLE);
+    lbl(c,"Nur bei korrekter Z-Suchrichtung ($23)!",18,225,14,RED);
+
+    c=card(pages[9],392,0,380,268);
+    lbl(c,"Werkstueck neu referenzieren",18,12,20);
+    lbl(c,"Die Z-Maschinenreferenz wird neu gesetzt.",18,50,14,SUBTLE);
+    lbl(c,"Homing-Tempo: $24 langsam, $25 schnell.",18,76,14,SUBTLE);
+    btn(c,"Z-Oberflaeche antasten",18,113,343,56,"zsurface",BLUE,BG);
+    btn(c,"Z auf Abstand",18,180,166,46,"zlift",PALE_BLUE,BLUE);
+    btn(c,"Zurueck",196,180,165,46,"focusgo",GRAY,INK);
+    lbl(c,"Kein G38-Probing / kein Hoehenraster",18,238,14,SUBTLE);
+
     // Bottom dock is always visible, and labels remain within touch targets.
     const char* tabs[]={"Home","Flaeche","Jobs","Jog","Makros","Setup","WLAN"};
     lv_obj_t* dock=card(root,14,406,772,59);
@@ -1278,9 +1299,34 @@ void action(const char* id){
         } else setNotice("Motorfreigabe fehlgeschlagen.");
         return;
     }
-    if(op=="probeSetup"){
-        setNotice("Einzelner PC2-Z-Taster: Probing braucht SKR-Modusumschaltung. "
-                  "Keine blinde G38-Fahrt ausloesen.");
+    if(op=="probeSetup"){switchTab(9);return;}
+    if(op=="contactMode"){
+        contactSwitchAtHead=!contactSwitchAtHead;
+        prefs.putBool("headsw",contactSwitchAtHead);
+        setNotice(contactSwitchAtHead?
+          "Kopf-Taster: Kontakt auf Werkstueckoberflaeche bestaetigt.":
+          "Werkstueck-Z-Modus ausgeschaltet.");
+        return;
+    }
+    if(op=="switchcheck"){
+        String cmds[]={"$LIM"};
+        if(startScript(cmds,1))setNotice("Lese mechanische X/Y/Z-Schalter.");
+        else setNotice("Schaltertest nur bei freier Steuerung.");
+        return;
+    }
+    if(op=="zsurface"){
+        if(!contactSwitchAtHead){
+            setNotice("Z-Taster muss am Kopf die Werkstueckoberflaeche beruehren.");return;
+        }
+        if(!canMotion()||!homingEnabled||!haveMpos){
+            setNotice("Vor dem Z-Werkstueckkontakt zuerst XYZ homen und Soft Limits setzen.");return;
+        }
+        // $22=3 enables single-axis homing on grblHAL; $HZ finds only Z's
+        // existing limit contact. This resets machine Z, NOT a G38 probe.
+        String cmds[]={"M5","$22=3","$HZ","$1=255"};
+        if(startScript(cmds,4))
+            setNotice("Werkstueckkontakt: Z-Referenzfahrt ($HZ) vorbereitet.");
+        else setNotice("Z-Werkstueckkontakt nur im Leerlauf.");
         return;
     }
     if(op=="editorcancel"){
@@ -1521,6 +1567,7 @@ void internalInit(){
     probeTravelMm=prefs.getFloat("ptravel",15.f);
     probeFeedMm=prefs.getFloat("pfeed",60.f);
     autoLiftAfterHome=prefs.getBool("autoZlift",true);
+    contactSwitchAtHead=prefs.getBool("headsw",false);
     // Format only on first provisioning. Never silently erase saved jobs
     // because of a later filesystem or power-loss mounting failure.
     storageOk=LittleFS.begin(false);
