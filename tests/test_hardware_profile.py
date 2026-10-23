@@ -48,5 +48,34 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('softLimitsEnabled&&workX>0',CONTROL)
         self.assertNotIn('String cmds[]={"$"}',CONTROL)
 
+    def test_coordinated_focus_and_keyboard(self):
+        self.assertIn('DEFAULT_STEPPER_IDLE_LOCK_TIME=255',BUILD)
+        self.assertIn('DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1',BUILD)
+        self.assertIn('DEFAULT_HOMING_ENABLE=1',BUILD)
+        self.assertIn('lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED',CONTROL)
+        self.assertIn('editOverlay=lv_obj_create(root)',CONTROL)
+        self.assertIn('lv_keyboard_set_textarea(keyboard,editInput)',CONTROL)
+        self.assertIn('prefs.putFloat("zlift"',CONTROL)
+        self.assertIn('prefs.putFloat("focgap"',CONTROL)
+        self.assertIn('focusGapMm-tipOffsetMm',CONTROL)
+        self.assertIn('postHomePending',CONTROL)
+        self.assertIn('script[1]="$1=255"',CONTROL)
+        self.assertIn('String cmds[]={"$1=0","$"}',CONTROL)
+
+    def test_single_z_switch_workpiece_reference(self):
+        self.assertIn('switch_must_contact_material: true',CONFIG)
+        self.assertIn('grbl_g38_probe_supported: false',CONFIG)
+        self.assertIn('physical_input: PC2',CONFIG)
+        self.assertIn('String cmds[]={"M5","$22=3","$HZ","$1=255"}',CONTROL)
+        self.assertIn('cmd=="$H"||cmd=="$HZ"',CONTROL)
+        self.assertIn('if(!contactSwitchAtHead)',CONTROL)
+
+    def test_touch_to_go_limits_and_laser_off(self):
+        self.assertIn('void areaTap(lv_event_t* e)',CONTROL)
+        self.assertIn('if(!machineHomed||!canMotion()||postHomePending)',CONTROL)
+        self.assertIn('lv_obj_add_event_cb(areaTouch,areaTap,LV_EVENT_CLICKED',CONTROL)
+        self.assertIn('String cmds[]={"M5","G53 G0 X"+String(x,3)',CONTROL)
+        self.assertIn('softLimitsEnabled&&workX>0',CONTROL)
+
 if __name__=="__main__":
     unittest.main()
