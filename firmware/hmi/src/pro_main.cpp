@@ -844,9 +844,10 @@ lv_obj_t* configEntry(lv_obj_t* parent,int x,int y,int w,int h,const String& tex
 void switchTab(int idx){
     activePage=idx;
     const int navMap[7]={0,5,1,2,3,6,4};
+    for(int j=0;j<9;j++)lv_obj_add_flag(pages[j],LV_OBJ_FLAG_HIDDEN);
+    if(idx>=0&&idx<7)lv_obj_clear_flag(pages[navMap[idx]],LV_OBJ_FLAG_HIDDEN);
+    else if(idx>=7&&idx<9)lv_obj_clear_flag(pages[idx],LV_OBJ_FLAG_HIDDEN);
     for(int i=0;i<7;i++){
-        if(i==idx)lv_obj_clear_flag(pages[navMap[i]],LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(pages[navMap[i]],LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_color(navButtons[i],lv_color_hex(i==idx?PALE_BLUE:WHITE),0);
         lv_obj_t* t=lv_obj_get_child(navButtons[i],0);
         if(t)lv_obj_set_style_text_color(t,lv_color_hex(i==idx?BLUE:SUBTLE),0);
@@ -870,7 +871,7 @@ void makeUi(){
     sourceLabel=lbl(root,"Steuerung frei",583,84,14,SUBTLE);
 
     // Every page fits 800x480 without accidental scrolling.
-    for(int i=0;i<7;i++){
+    for(int i=0;i<9;i++){
         pages[i]=lv_obj_create(root);lv_obj_set_pos(pages[i],14,117);
         lv_obj_set_size(pages[i],772,272);
         lv_obj_set_style_bg_opa(pages[i],LV_OPA_TRANSP,0);
@@ -1002,8 +1003,8 @@ void makeUi(){
     lbl(c,"Roter Punkt = aktuelle Maschinenposition (MPos)",20,88,14,SUBTLE);
     btn(c,"Referenzfahrt",20,129,200,49,"home",BLUE,BG);
     btn(c,"Koordinatennullpunkt",233,129,202,49,"origin",GRAY,INK);
-    btn(c,"Soft Limits aktivieren",20,197,200,48,"softon",PALE_BLUE,BLUE);
-    btn(c,"Setup oeffnen",233,197,202,48,"setupgo",GRAY,INK);
+    btn(c,"Fokus / Taster",20,197,200,48,"focusgo",PALE_BLUE,BLUE);
+    btn(c,"Parameter",233,197,202,48,"cataloggo",GRAY,INK);
 
     // MASCHINEN-SETUP: live GRBL $-parameters, motor polarity and bed dimensions.
     c=card(pages[6],0,0,380,268);
@@ -1031,7 +1032,47 @@ void makeUi(){
     btn(c,"Setzen",256,143,105,43,"setparam",PALE_BLUE,BLUE);
     btn(c,"$ Lesen",18,208,102,44,"readcfg",GRAY,INK);
     btn(c,"Limits EIN",128,208,112,44,"softon",PALE_BLUE,BLUE);
-    btn(c,"180 Grad",247,208,114,44,"rotate180",GRAY,INK);
+    btn(c,"Parameter",247,208,114,44,"cataloggo",GRAY,INK);
+
+    // Z focus and workpiece switch page. All numbers are stored in HMI
+    // preferences, and motor lock/release is written into SKR GRBL ($1).
+    c=card(pages[7],0,0,380,268);
+    lbl(c,"Z-Fokus & Werkstueck",18,12,20);
+    lbl(c,"Z-Rueckzug nach Homing [mm]",18,45,14,SUBTLE);
+    focusLiftField=configEntry(c,18,66,148,43,String(focusLiftMm,2));
+    btn(c,"Speichern",181,66,180,43,"focusSave",BLUE,BG);
+    lbl(c,"Optischer Fokusabstand [mm]",18,116,14,SUBTLE);
+    focusGapField=configEntry(c,18,136,149,41,String(focusGapMm,2));
+    btn(c,"Z + Rueckzug",181,136,180,41,"zlift",GRAY,INK);
+    lbl(c,"Schalter-Offset [mm]",18,190,14,SUBTLE);
+    tipOffsetField=configEntry(c,18,212,149,42,String(tipOffsetMm,2));
+    btn(c,"Auto-Z: EIN/AUS",181,212,180,42,"toggleAutoLift",PALE_BLUE,BLUE);
+
+    c=card(pages[7],392,0,380,268);
+    lbl(c,"Motoren / Taster",18,12,20);
+    motorInfo=lbl(c,"Schrittmotoren halten",18,45,14,SUBTLE);
+    lv_obj_set_width(motorInfo,340);
+    btn(c,"Motoren halten",18,74,160,45,"motorHold",PALE_BLUE,BLUE);
+    btn(c,"Handbewegung",194,74,168,45,"motorRelease",GRAY,INK);
+    lbl(c,"Werkstueck-Abtastung",18,134,14,SUBTLE);
+    probeInfo=lbl(c,"Probe: Z-Endschalter wird geteilt",18,156,14,SUBTLE);
+    lv_obj_set_width(probeInfo,343);
+    btn(c,"Probe konfigurieren",18,186,344,39,"probeSetup",GRAY,INK);
+    btn(c,"Zurueck zu Setup",18,230,344,34,"setupgo",GRAY,INK);
+
+    // Parameter catalog: grouped by actual GRBL $ IDs; tapping a row
+    // populates the editable raw setting on Setup, not an HMI-only dummy.
+    c=card(pages[8],0,0,772,268);
+    catalogTitle=lbl(c,"GRBL-Parameter",19,14,20);
+    btn(c,"Kategorie",551,12,200,39,"catalogNext",PALE_BLUE,BLUE);
+    for(int i=0;i<6;i++){
+        char* tag=nullptr;
+        String key="c"+String(i);
+        // Persistent C-string IDs for event handlers.
+        static const char* ids[]={"cat0","cat1","cat2","cat3","cat4","cat5"};
+        catalogRows[i]=btn(c,"Parameter",19+(i%2)*375,64+(i/2)*65,360,56,ids[i],GRAY,INK);
+    }
+    btn(c,"Zurueck zu Setup",19,250,733,14,"setupgo",GRAY,INK);
 
     // Bottom dock is always visible, and labels remain within touch targets.
     const char* tabs[]={"Home","Flaeche","Jobs","Jog","Makros","Setup","WLAN"};
@@ -1069,7 +1110,8 @@ void makeUi(){
     btn(editOverlay,"Zurueck",20,394,367,67,"editorcancel",GRAY,INK);
     lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
     for(lv_obj_t* field : {ssidEntry,passwordEntry,macroEntry,
-         sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField})
+         sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField,
+         focusLiftField,focusGapField,tipOffsetField})
         lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
     refreshSizeFields();
     switchTab(0);
