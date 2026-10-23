@@ -178,6 +178,20 @@ async function pollLog(force=false){
     if(force)addLocal("Log noch nicht verfügbar: "+e.message);
   }finally{model.logBusy=false;}
 }
+let releaseLastCheck=0;
+async function refreshApprovedRelease(){
+  const now=Date.now();
+  if(now-releaseLastCheck<15000)return;
+  releaseLastCheck=now;
+  try{
+    const r=await api("/api/updates/latest");
+    const m=await r.json();
+    $("stable-release").textContent=m.available&&m.source_sha?
+      "STABLE: "+m.source_sha.slice(0,12):"STABLE: Noch nicht veröffentlicht";
+  }catch(_){
+    $("stable-release").textContent="STABLE: Nicht erreichbar";
+  }
+}
 async function refresh(){
   if(model.refreshing)return;
   model.refreshing=true;
@@ -185,6 +199,7 @@ async function refresh(){
     const r=await api("/api/jobs");
     const data=await r.json();
     setConnection(true);
+    await refreshApprovedRelease();
     model.jobs=data.jobs||[];
     const prior=model.active;
     model.active=data.active||null;
