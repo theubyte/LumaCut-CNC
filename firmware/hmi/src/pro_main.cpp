@@ -578,22 +578,50 @@ bool selectJob(String name){
 bool auth(){return apiKey.length()&&http.hasHeader("X-LumaCut-Key")&&
         http.header("X-LumaCut-Key")==apiKey;}
 void fail(int code,String text){http.send(code,"text/plain; charset=utf-8",text);}
+String jsonMachine(){
+    String out="{\"machine\":\"LumaCut CNC\",";
+    out+="\"axes\":3,\"units\":\"mm\",\"homed\":";
+    out+=(machineHomed?"true":"false");
+    out+=",\"soft_limits_enabled\":";
+    out+=(softLimitsEnabled?"true":"false");
+    out+=",\"hard_limits_enabled\":";
+    out+=(hardLimitsEnabled?"true":"false");
+    out+=",\"homing_enabled\":";
+    out+=(homingEnabled?"true":"false");
+    out+=",\"direction_mask\":"+String(directionMask);
+    out+=",\"homing_direction_mask\":"+String(homingDirectionMask);
+    out+=",\"work_area\":{";
+    out+="\"x_mm\":"+String(workX,3)+",\"y_mm\":"+String(workY,3)+
+         ",\"z_mm\":"+String(workZ,3)+"}";
+    out+=",\"coordinates\":{\"zero_at_max\":";
+    out+=(machineZeroAtMax?"true":"false");
+    out+=",\"x_mm\":"+String(mx,3)+",\"y_mm\":"+String(my,3)+
+         ",\"z_mm\":"+String(mz,3)+",\"valid\":";
+    out+=((fresh()&&machineHomed&&haveMpos)?"true":"false");
+    out+="}}";
+    return out;
+}
 String jsonStatus(){
-    String val="{\"state\":\""+String(fresh()?stateText():"Offline")+
+    String out="{\"state\":\""+String(fresh()?stateText():"Offline")+
       "\",\"owner\":\""+String(ownerText())+
       "\",\"position\":\""+(haveMpos?("X "+String(mx,2)+" / Y "+String(my,2)+" / Z "+String(mz,2)):"Unbekannt")+
       "\",\"job\":\""+selectedJob+
       "\",\"message\":\""+String(machineHomed?"Referenziert":"Referenzfahrt erforderlich")+
       "\",\"bounds\":"+String(bounds.valid?
         ("{\"x0\":"+String(bounds.x0,3)+",\"y0\":"+String(bounds.y0,3)+
-         ",\"x1\":"+String(bounds.x1,3)+",\"y1\":"+String(bounds.y1,3)+"}"):"null")+"}";
-    return val;
+         ",\"x1\":"+String(bounds.x1,3)+",\"y1\":"+String(bounds.y1,3)+"}"):"null")+
+      ",\"machine\":"+jsonMachine()+"}";
+    return out;
 }
 void installRoutes(){
     const char* headers[]={"X-LumaCut-Key"};
     http.collectHeaders(headers,1);
     http.on("/",HTTP_GET,[]{http.send_P(200,"text/html; charset=utf-8",MOBILE_PORTAL);});
     http.on("/api/status",HTTP_GET,[]{if(!auth()){fail(401,"Code erforderlich");return;}http.send(200,"application/json",jsonStatus());});
+    http.on("/api/machine",HTTP_GET,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        http.send(200,"application/json",jsonMachine());
+    });
     http.on("/api/jobs",HTTP_GET,[]{
         if(!auth()){fail(401,"Code erforderlich");return;}
         String out="{\"files\":[";bool first=true;
