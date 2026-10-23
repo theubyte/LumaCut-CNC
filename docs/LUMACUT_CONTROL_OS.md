@@ -42,9 +42,13 @@ ESP32-S3 hat nur BLE und kein klassisches Bluetooth-SPP. Das HMI veröffentlicht
 
 ### Physische Achsen und gemeinsamer Taster (Korrektur 23.10.2026)
 
-Das reale Gerät hat **genau einen Motor pro Achse (X, Y, Z)**. Der E/M3-Treiber ist frei. Es gibt **nur einen mechanischen Taster am Laserkopf**, der zugleich für Z-Endposition und später Werkstückabtastung vorgesehen ist. X/Y besitzen derzeit **keine** Referenzschalter. Physischer Z-Taster wird auf **PC2/Z-STOP** vorgesehen; **PC14/PROBE bleibt unbenutzt**.
+Das reale Gerät hat **genau einen Motor und einen Endschalter pro Achse (X, Y, Z)**. Der E/M3-Treiber ist frei. Der Z-Endschalter am Laserkopf soll später zugleich für Werkstückabtastung dienen. Anschlüsse: **X-STOP PC0, Y-STOP PC1, Z-STOP PC2**. Ein separater **PC14/PROBE-Eingang ist unbenutzt**.
 
-Die aktuelle Firmware **deaktiviert Probe (G38.x)**, denn grblHAL verarbeitet Limit und Probe standardmäßig als verschiedene Funktionen. Das Gerät führt derzeit auch **kein automatisches XYZ-Homing** aus: dessen HMI-Button ist gesperrt, solange X/Y-Schalter fehlen. Vor einer späteren Doppelverwendung muss das sichere Umschalten zwischen Z-Limit- und Probe-Betrieb implementiert und hardwaregetestet werden. Taster nicht unkontrolliert parallel an PC2 und PC14 legen. Siehe [Hardwareprofil](HARDWARE.md).
+**XYZ-Homing ist verfügbar**: Unter Home erst **Homing aktivieren ($22=1)**, danach **Referenzfahrt ($H)**. Fehlermeldung `error:5` bedeutet, dass Homing bisher ausgeschaltet war. Die Schalterrichtung vorher mit `$23` passend zur realen Mechanik konfigurieren. Die aktuelle Firmware deaktiviert weiterhin **G38-Probing**, weil der Z-Endstop nicht ohne zusätzliche Logik zugleich als Probe-Eingang verwendet werden kann. Taster nicht unkontrolliert parallel auf PC2/PC14 legen. Siehe [Hardwareprofil](HARDWARE.md).
+
+### Design und Bedienfluss (Rev. 2)
+
+Die 800×480-Oberfläche hat eine einheitliche dunkle Studio-Gestaltung mit cyanblauen Primäraktionen, grossen Touchflächen, einer feststehenden Navigation und separaten Home-, Job-, Jog-, Makro- und Systemseiten. Fehlermeldungen wie `error:5` werden mit deutscher Ursache angezeigt. LVGLs eingebettete Montserrat-Standardschrift besitzt keine deutschen Umlaut-Glyphen; sichtbare HMI-Texte werden deshalb beim Rendern in darstellbares ASCII übertragen. Im Handyportal bleiben Umlaute erhalten.
 
 ### Makros / Parkpositionen
 
@@ -59,7 +63,7 @@ Für lokale G-Code-Jobs wartet das HMI auf grblHAL-Antworten pro Zeile. Hold mit
 ## Wichtige Grenzen
 
 - Kompiliert bedeutet nicht elektrisch oder funktional auf echter Hardware validiert.
-- Mit nur einem Z-Taster und ohne X/Y-Endschalter ist `$H` gesperrt; bis zu einer geprüften Referenzstrategie bleiben Bewegungen/Makros aus dem Touchpanel ebenfalls gesperrt. Externe GRBL-Hosts müssen Arbeitsbereich und Koordinaten eigenständig kontrollieren.
+- Mit drei XYZ-Endschaltern ist `$H` freigegeben. Das HMI bietet zusätzlich den Befehl `$22=1` an; die Steuerung muss passende `$23`-Suchrichtungen und Schalterpegel haben. Die künstliche zeitlich begrenzte HMI-Freigabe für Jog/Job entfällt; GRBL-Alarme und Verbindungszustand bleiben wirksam.
 - Eine abreißende WLAN-Verbindung oder ausbleibende SKR-Statusmeldung fordert Feed Hold an und blockiert weitere eigene Zeilen, garantiert aber keine sichere Laser-Stromunterbrechung.
 - Ein extern verdrahteter Not-Aus und eine hardwarewirksame Laser-Leistungsfreigabe sind unabdingbar.
 - Der Frame-Interpreter lehnt relative Bewegungen, Bögen/Arcs, Koordinatenverschiebungen und andere nicht unterstützte Modalbefehle ab; er ist **keine vollständige LightBurn-Pfadvorschau**. Solche Dateien können weiterhin über LightBurn an den GRBL-Stream gesendet werden, aber nicht mit der HMI-Rahmenfunktion umrundet werden.
