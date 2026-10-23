@@ -97,6 +97,11 @@ def main():
             # Default stepper holding after homing. Existing EEPROM/NVS values
             # retain precedence: HMI also sets $1=255 on successful home.
             h.write("  -D DEFAULT_STEPPER_IDLE_LOCK_TIME=255\n")
+            # Three real XYZ switches: enable default homing and optional
+            # single-Z homing for workpiece contact using the same head switch.
+            # These are factory defaults; SKR nonvolatile $22 takes precedence.
+            h.write("  -D DEFAULT_HOMING_ENABLE=1\n")
+            h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")
         run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/env
         out.mkdir(parents=True,exist_ok=True)
