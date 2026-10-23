@@ -1112,7 +1112,7 @@ void action(const char* id){
         if(end==vText.c_str()||*end!='\0'||!settingAllowed(idText.toInt(),value)){
             setNotice("Parameterwert ungueltig oder Sicherheitseinstellung blockiert.");return;
         }
-        String cmds[]={"$$"+idText+"="+vText,"$$"};
+        String cmds[]={"$"+idText+"="+vText,"$$"};
         if(startScript(cmds,2))setNotice("GRBL-Parameter gespeichert.");
         else setNotice("Parameter nur im Leerlauf aenderbar.");
         return;
