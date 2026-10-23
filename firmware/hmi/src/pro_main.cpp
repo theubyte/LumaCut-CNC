@@ -77,6 +77,7 @@ bool machineZeroAtMax=true;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
 *passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr,*macroEntry=nullptr;
+lv_obj_t *editOverlay=nullptr,*editInput=nullptr,*editTarget=nullptr;
 int activePage=0,parkSlot=0;
 constexpr uint32_t INK=0xF2F7FF,SUBTLE=0xA4B4C7,BG=0x091321,WHITE=0x172638;
 constexpr uint32_t BLUE=0x39C7F6,PALE_BLUE=0x153B54,GRAY=0x26384D,RED=0xFF6B75;
@@ -775,6 +776,26 @@ lv_obj_t* card(lv_obj_t* parent,int x,int y,int w,int h){
     return p;
 }
 void action(const char* id);
+void openKeyboard(lv_event_t* e){
+    // CLICKED is deliberate: focus is not consistently delivered by the
+    // GT911/LVGL pointer driver. A modal also keeps the typed text visible.
+    editTarget=lv_event_get_target(e);
+    if(!editTarget||!editOverlay||!keyboard||!editInput)return;
+    lv_textarea_set_text(editInput,lv_textarea_get_text(editTarget));
+    lv_textarea_set_password_mode(editInput,editTarget==passwordEntry);
+    const bool numeric=editTarget==sizeXField||editTarget==sizeYField||
+        editTarget==sizeZField||editTarget==paramKeyField||
+        editTarget==paramValueField;
+    lv_keyboard_set_mode(keyboard,numeric?LV_KEYBOARD_MODE_NUMBER:LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_keyboard_set_textarea(keyboard,editInput);
+    lv_obj_clear_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(editOverlay);
+}
+void keyboardEvent(lv_event_t* e){
+    lv_event_code_t code=lv_event_get_code(e);
+    if(code==LV_EVENT_READY)action("editorcommit");
+    else if(code==LV_EVENT_CANCEL)action("editorcancel");
+}
 void actionCb(lv_event_t* e){action((const char*)lv_event_get_user_data(e));}
 lv_obj_t* btn(lv_obj_t* parent,const char* text,int x,int y,int w,int h,const char* op,uint32_t bg=GRAY,uint32_t fg=INK){
     lv_obj_t* p=lv_btn_create(parent);lv_obj_set_pos(p,x,y);lv_obj_set_size(p,w,h);
@@ -1002,26 +1023,32 @@ void makeUi(){
     lv_obj_set_width(messageLabel,754);
     lv_label_set_long_mode(messageLabel,LV_LABEL_LONG_DOT);
 
-    keyboard=lv_keyboard_create(root);
-    lv_obj_set_size(keyboard,772,246);lv_obj_set_pos(keyboard,14,140);
-    lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
-    auto kb=(lv_event_cb_t)+[](lv_event_t* e){
-        lv_event_code_t code=lv_event_get_code(e);
-        if(code==LV_EVENT_READY||code==LV_EVENT_CANCEL)
-            lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
-    };
-    lv_obj_add_event_cb(keyboard,kb,LV_EVENT_READY,nullptr);
-    lv_obj_add_event_cb(keyboard,kb,LV_EVENT_CANCEL,nullptr);
-    auto showKeyboard=(lv_event_cb_t)+[](lv_event_t* e){
-        lv_keyboard_set_textarea(keyboard,lv_event_get_target(e));
-        lv_obj_clear_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(keyboard);
-    };
-    lv_obj_add_event_cb(ssidEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
-    lv_obj_add_event_cb(passwordEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
-    lv_obj_add_event_cb(macroEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
-    for(lv_obj_t* field : {sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField})
-        lv_obj_add_event_cb(field,showKeyboard,LV_EVENT_FOCUSED,nullptr);
+    // True full-screen editor: input ABOVE keyboard, so nothing is covered.
+    // Closing the modal explicitly commits back to the original field.
+    editOverlay=lv_obj_create(root);
+    lv_obj_set_pos(editOverlay,0,0);lv_obj_set_size(editOverlay,W,H);
+    lv_obj_set_style_radius(editOverlay,0,0);
+    lv_obj_set_style_pad_all(editOverlay,0,0);
+    lv_obj_set_style_bg_color(editOverlay,lv_color_hex(BG),0);
+    lv_obj_set_style_border_width(editOverlay,0,0);
+    lv_obj_clear_flag(editOverlay,LV_OBJ_FLAG_SCROLLABLE);
+    lbl(editOverlay,"EINGABE",24,11,20,BLUE);
+    editInput=lv_textarea_create(editOverlay);
+    lv_obj_set_pos(editInput,20,51);lv_obj_set_size(editInput,760,48);
+    lv_textarea_set_one_line(editInput,true);lv_textarea_set_max_length(editInput,96);
+    lv_obj_set_style_bg_color(editInput,lv_color_hex(GRAY),0);
+    lv_obj_set_style_text_color(editInput,lv_color_hex(INK),0);
+    keyboard=lv_keyboard_create(editOverlay);
+    lv_obj_set_pos(keyboard,12,108);lv_obj_set_size(keyboard,776,269);
+    lv_obj_set_style_bg_color(keyboard,lv_color_hex(WHITE),0);
+    lv_obj_add_event_cb(keyboard,keyboardEvent,LV_EVENT_READY,nullptr);
+    lv_obj_add_event_cb(keyboard,keyboardEvent,LV_EVENT_CANCEL,nullptr);
+    btn(editOverlay,"Speichern",404,394,376,67,"editorcommit",BLUE,BG);
+    btn(editOverlay,"Zurueck",20,394,367,67,"editorcancel",GRAY,INK);
+    lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
+    for(lv_obj_t* field : {ssidEntry,passwordEntry,macroEntry,
+         sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField})
+        lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
     refreshSizeFields();
     switchTab(0);
 }
@@ -1035,6 +1062,19 @@ bool settingAllowed(int id,float val){
 int jogStep=1;
 void action(const char* id){
     String op=id;
+    if(op=="editorcancel"){
+        lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
+        editTarget=nullptr;return;
+    }
+    if(op=="editorcommit"){
+        if(editTarget){
+            lv_textarea_set_text(editTarget,lv_textarea_get_text(editInput));
+            lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
+            editTarget=nullptr;
+            setNotice("Eingabe uebernommen.");updateUi();
+        }
+        return;
+    }
     if(op=="setupgo"){switchTab(5);return;}
     if(op=="rotate180"){
         if(!uiDisplay)return;
@@ -1186,7 +1226,7 @@ void action(const char* id){
         parks[parkSlot].name=name;
         String prefKey="p"+String(parkSlot)+"n";
         prefs.putString(prefKey.c_str(),name);
-        lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
+        if(editOverlay)lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
         updateUi();setNotice("Makro umbenannt: "+name);return;
     }
     if(op=="p0"||op=="p1"||op=="p2"){
@@ -1215,7 +1255,7 @@ void action(const char* id){
         wifiSsid=lv_textarea_get_text(ssidEntry);wifiPass=lv_textarea_get_text(passwordEntry);
         prefs.putString("ssid",wifiSsid);prefs.putString("wpw",wifiPass);
         WiFi.begin(wifiSsid.c_str(),wifiPass.c_str());
-        lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
+        if(editOverlay)lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
         setNotice("WLAN-Verbindung gestartet. Hotspot bleibt erreichbar.");return;
     }
     if(op=="x+"||op=="x-"||op=="y+"||op=="y-"||op=="z+"||op=="z-"){
