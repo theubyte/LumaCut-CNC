@@ -42,6 +42,7 @@ lv_disp_drv_t disp;
 lv_indev_drv_t input;
 esp_lcd_panel_handle_t lcd=nullptr;
 lv_color_t* drawPixels=nullptr;
+bool uiReady=false;
 uint8_t gtAddr=0x5d;
 bool touchOk=false,storageOk=false,machineHomed=false;
 bool uploadAllowed=false,uploadFinished=false;
@@ -156,11 +157,28 @@ bool displayInit(){
     cfg.bounce_buffer_size_px=W*10;
     const int pins[]={14,38,18,17,10,39,0,45,48,47,21,1,2,42,41,40};
     for(int i=0;i<16;i++)cfg.data_gpio_nums[i]=pins[i];
-    if(esp_lcd_new_rgb_panel(&cfg,&lcd)!=ESP_OK)return false;
-    if(esp_lcd_panel_reset(lcd)!=ESP_OK||esp_lcd_panel_init(lcd)!=ESP_OK)return false;
+    if(!psramFound()){
+        Serial.println("LUMACUT DISPLAY ERROR: external PSRAM not detected");
+        return false;
+    }
+    esp_err_t lcdError=esp_lcd_new_rgb_panel(&cfg,&lcd);
+    if(lcdError!=ESP_OK){
+        Serial.printf("LUMACUT DISPLAY ERROR: RGB panel 0x%X\n",(unsigned)lcdError);
+        return false;
+    }
+    lcdError=esp_lcd_panel_reset(lcd);
+    if(lcdError==ESP_OK)lcdError=esp_lcd_panel_init(lcd);
+    if(lcdError!=ESP_OK){
+        Serial.printf("LUMACUT DISPLAY ERROR: RGB init 0x%X\n",(unsigned)lcdError);
+        return false;
+    }
     lv_init();
     drawPixels=(lv_color_t*)heap_caps_malloc(W*16*sizeof(lv_color_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
-    if(!drawPixels)return false;
+    if(!drawPixels){
+        Serial.printf("LUMACUT DISPLAY ERROR: DMA draw buffer (%u bytes) allocation failed\n",
+                      (unsigned)(W*16*sizeof(lv_color_t)));
+        return false;
+    }
     lv_disp_draw_buf_init(&draw,drawPixels,nullptr,W*16);
     lv_disp_drv_init(&disp);disp.hor_res=W;disp.ver_res=H;disp.draw_buf=&draw;
     disp.sw_rotate=1;
@@ -1609,15 +1627,41 @@ void internalInit(){
     machine.begin(115200,SERIAL_8N1,44,43); // Physical UART2 switch; SKR PA9/PA10 crossed.
     Serial.begin(115200); // Native USB CDC for LightBurn; never print diagnostic messages here.
     touchInit();
-    if(!displayInit())return;
-    wifiSsid=prefs.getString("ssid","");
-    makeUi();networkInit();
-    expander(LCD_RESET|TP_RESET|BACKLIGHT); // EXIO5 stays LOW for native USB CDC.
-    setNotice("LumaCut Control OS. Nur Laborbetrieb bis Hardware und Interlocks geprüft.");
+    if(!displayInit()){
+        // Do not enter LVGL/network/GRBL service with an uninitialized LCD.
+        // Serial USB diagnostic is emitted only on startup failure.
+        uiReady=false;
+        return;
+    }
+    // Important: CH422G EXIO2 previously stayed OFF until all 10 UI pages
+    // and the network had initialized. Memory exhaustion therefore looked
+    // exactly like a permanently black screen. Show a minimal boot message
+    // and enable backlight *before* constructing the heavyweight interface.
+    lv_obj_t* boot=lv_label_create(lv_scr_act());
+    lv_label_set_text(boot,"LumaCut Studio\nDisplay gestartet - lade Oberflaeche...");
+    lv_obj_set_style_text_font(boot,&lv_font_montserrat_20,0);
+    lv_obj_set_style_text_color(boot,lv_color_hex(0x40D8C3),0);
+    lv_obj_center(boot);
+    lv_timer_handler();
+    if(!expander(LCD_RESET|TP_RESET|BACKLIGHT))
+        Serial.println("LUMACUT DISPLAY WARNING: CH422G EXIO2 backlight enable failed");
+    delay(100);
+    makeUi();
+    lv_obj_del(boot);
+    lv_timer_handler();
+    uiReady=true;
+    networkInit();
+    setNotice("LumaCut Control OS. Nur Laborbetrieb bis Hardware und Interlocks geprueft.");
 }
 }
 void setup(){internalInit();}
 void loop(){
+    if(!uiReady){
+        // A failed LCD/PSRAM init must not repeatedly dereference null LVGL
+        // objects. The USB bootloader can still be used to reflash the HMI.
+        delay(250);
+        return;
+    }
     http.handleClient();
     bridgeService();
     if(postHomePending&&owner==Owner::None&&idle()&&machineHomed){
