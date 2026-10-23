@@ -63,8 +63,16 @@ struct Bounds {float x0=0,y0=0,x1=0,y1=0;bool valid=false;};
 Bounds bounds;
 struct Park {String name;float x=0,y=0;bool stored=false;};
 Park parks[3];
-lv_obj_t* pages[5]{};
-lv_obj_t* navButtons[5]{};
+lv_obj_t* pages[7]{};
+lv_obj_t* navButtons[7]{};
+lv_obj_t *areaField=nullptr,*areaDot=nullptr,*areaCaption=nullptr,*configCaption=nullptr;
+lv_obj_t *sizeXField=nullptr,*sizeYField=nullptr,*sizeZField=nullptr;
+lv_obj_t *paramKeyField=nullptr,*paramValueField=nullptr;
+lv_disp_t* uiDisplay=nullptr;
+bool rotate180=false,settingsRequested=false;
+float workX=0,workY=0,workZ=0;
+int directionMask=-1,homingDirectionMask=-1;
+bool machineZeroAtMax=true;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
 *passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr,*macroEntry=nullptr;
@@ -102,7 +110,9 @@ void touchRead(lv_indev_drv_t*,lv_indev_data_t* result){
         if(readReg(0x814f,p,7)){
             int nx=p[1]|(p[2]<<8),ny=p[3]|(p[4]<<8);
             if(nx>=0&&nx<W&&ny>=0&&ny<H){
-                x=nx;y=ny;result->point.x=x;result->point.y=y;
+                x=rotate180?W-1-nx:nx;
+                y=rotate180?H-1-ny:ny;
+                result->point.x=x;result->point.y=y;
                 result->state=LV_INDEV_STATE_PR;
             }
         }
@@ -125,6 +135,10 @@ bool displayInit(){
     cfg.data_width=16;cfg.sram_trans_align=4;cfg.psram_trans_align=64;
     cfg.hsync_gpio_num=46;cfg.vsync_gpio_num=3;cfg.de_gpio_num=5;cfg.pclk_gpio_num=7;
     cfg.disp_gpio_num=GPIO_NUM_NC;cfg.flags.fb_in_psram=true;
+    // LCD EDMA competes with Wi-Fi and PSRAM for bandwidth: DRAM bounce
+    // buffers reduce scanline starvation (visual line drift). Not a substitute
+    // for proper 5V supply or vsync-validated full-frame swapping.
+    cfg.bounce_buffer_size_px=W*10;
     const int pins[]={14,38,18,17,10,39,0,45,48,47,21,1,2,42,41,40};
     for(int i=0;i<16;i++)cfg.data_gpio_nums[i]=pins[i];
     if(esp_lcd_new_rgb_panel(&cfg,&lcd)!=ESP_OK)return false;
@@ -134,7 +148,10 @@ bool displayInit(){
     if(!drawPixels)return false;
     lv_disp_draw_buf_init(&draw,drawPixels,nullptr,W*16);
     lv_disp_drv_init(&disp);disp.hor_res=W;disp.ver_res=H;disp.draw_buf=&draw;
-    disp.flush_cb=displayFlush;lv_disp_drv_register(&disp);
+    disp.sw_rotate=1;
+    disp.flush_cb=displayFlush;uiDisplay=lv_disp_drv_register(&disp);
+    rotate180=prefs.getBool("rotate180",false);
+    lv_disp_set_rotation(uiDisplay,rotate180?LV_DISP_ROT_180:LV_DISP_ROT_NONE);
     lv_indev_drv_init(&input);input.type=LV_INDEV_TYPE_POINTER;
     input.read_cb=touchRead;lv_indev_drv_register(&input);
     esp_timer_handle_t tm=nullptr;
@@ -657,9 +674,10 @@ lv_obj_t* btn(lv_obj_t* parent,const char* text,int x,int y,int w,int h,const ch
 }
 void switchTab(int idx){
     activePage=idx;
-    for(int i=0;i<5;i++){
-        if(i==idx)lv_obj_clear_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
+    const int navMap[7]={0,5,1,2,3,6,4};
+    for(int i=0;i<7;i++){
+        if(i==idx)lv_obj_clear_flag(pages[navMap[i]],LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(pages[navMap[i]],LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_color(navButtons[i],lv_color_hex(i==idx?PALE_BLUE:WHITE),0);
         lv_obj_t* t=lv_obj_get_child(navButtons[i],0);
         if(t)lv_obj_set_style_text_color(t,lv_color_hex(i==idx?BLUE:SUBTLE),0);
@@ -683,7 +701,7 @@ void makeUi(){
     sourceLabel=lbl(root,"Steuerung frei",583,84,14,SUBTLE);
 
     // Every page fits 800x480 without accidental scrolling.
-    for(int i=0;i<5;i++){
+    for(int i=0;i<7;i++){
         pages[i]=lv_obj_create(root);lv_obj_set_pos(pages[i],14,117);
         lv_obj_set_size(pages[i],772,272);
         lv_obj_set_style_bg_opa(pages[i],LV_OPA_TRANSP,0);
@@ -780,11 +798,11 @@ void makeUi(){
     btn(c,"Mit WLAN verbinden",415,189,333,54,"wifi",BLUE,BG);
 
     // Bottom dock is always visible, and labels remain within touch targets.
-    const char* tabs[]={"Home","Jobs","Steuerung","Makros","System"};
+    const char* tabs[]={"Home","Flaeche","Jobs","Jog","Makros","Setup","WLAN"};
     lv_obj_t* dock=card(root,14,406,772,59);
     lv_obj_set_style_radius(dock,19,0);
-    for(int i=0;i<5;i++){
-        navButtons[i]=btn(dock,tabs[i],8+i*153,7,144,45,nullptr,WHITE,SUBTLE);
+    for(int i=0;i<7;i++){
+        navButtons[i]=btn(dock,tabs[i],7+i*109,7,102,45,nullptr,WHITE,SUBTLE);
         lv_obj_add_event_cb(navButtons[i],navCb,LV_EVENT_CLICKED,(void*)(uintptr_t)i);
     }
     messageLabel=lbl(root,"Maschinenstatus wird geladen.",21,387,14,SUBTLE);
