@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git openssh-cli
 WORKDIR /srv/app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py flash_bundle.py flash_local.py flash_ui.html ./
+COPY app.py flash_bundle.py flash_local.py flash_ui.html dashboard.html dashboard.css dashboard.js ./
 RUN useradd --system --uid 10001 --create-home builder && mkdir -p /data /run/secrets && chown -R builder:builder /data /srv/app
 USER builder
 EXPOSE 8080
