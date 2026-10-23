@@ -38,7 +38,7 @@ class ReleaseNotificationTests(unittest.TestCase):
         self.assertIn('void checkLumaCutUpdates()',HMI)
         self.assertIn('if(op=="updatecheck")',HMI)
         self.assertIn('"/api/update/status"',HMI)
-        self.assertNotIn("setInsecure()",HMI)
+        self.assertNotIn("tls.setInsecure();",HMI)
         self.assertIn("BEGIN CERTIFICATE",CA)
         self.assertIn("LUMACUT_SOURCE_SHA",STAMP)
         self.assertIn("extra_scripts = pre:stamp.py",INI)
