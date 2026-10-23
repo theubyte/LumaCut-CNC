@@ -63,11 +63,21 @@ struct Bounds {float x0=0,y0=0,x1=0,y1=0;bool valid=false;};
 Bounds bounds;
 struct Park {String name;float x=0,y=0;bool stored=false;};
 Park parks[3];
-lv_obj_t* pages[7]{};
+lv_obj_t* pages[9]{};
 lv_obj_t* navButtons[7]{};
 lv_obj_t *areaField=nullptr,*areaDot=nullptr,*areaCaption=nullptr,*configCaption=nullptr;
 lv_obj_t *sizeXField=nullptr,*sizeYField=nullptr,*sizeZField=nullptr;
 lv_obj_t *paramKeyField=nullptr,*paramValueField=nullptr;
+lv_obj_t *focusLiftField=nullptr,*focusGapField=nullptr,*tipOffsetField=nullptr,
+    *probeTravelField=nullptr,*probeFeedField=nullptr,*probeInfo=nullptr,
+    *motorInfo=nullptr,*catalogTitle=nullptr;
+lv_obj_t* catalogRows[6]{};
+float savedSetting[400]{};
+bool knownSetting[400]{};
+float focusLiftMm=7.f,focusGapMm=7.f,tipOffsetMm=0.f,
+      probeTravelMm=15.f,probeFeedMm=60.f;
+bool autoLiftAfterHome=true,postHomePending=false,motorsReleased=false;
+int catalogCategory=0;
 lv_disp_t* uiDisplay=nullptr;
 bool rotate180=false,settingsRequested=false;
 float workX=0,workY=0,workZ=0;
@@ -251,6 +261,14 @@ void updateUi(){
         "\nZugangscode: "+apiKey;
         labelChanged(ipLabel,net);
     }
+    if(motorInfo){
+        labelChanged(motorInfo,motorsReleased?
+            "Motoren freigegeben: Position neu referenzieren.":
+            (machineHomed?"Motoren halten / $1=255":"Homing erforderlich"));
+    }
+    if(probeInfo){
+        labelChanged(probeInfo,"Z-Endschalter PC2 / separate Probe nicht angeschlossen");
+    }
     if(configCaption){
         labelChanged(configCaption,"Motor $3: "+(directionMask<0?String("?"):String(directionMask))+
             "  /  Homing $23: "+(homingDirectionMask<0?String("?"):String(homingDirectionMask))+
@@ -306,6 +324,10 @@ void parseMachineLine(const String& line){
             if(digits){
                 int id=key.toInt();
                 float number=line.substring(equal+1).toFloat();
+                if(id>=0&&id<400&&isfinite(number)){
+                    savedSetting[id]=number;knownSetting[id]=true;
+                }
+                if(id==1)motorsReleased=(number<255);
                 if(id==3&&number>=0&&number<=7)directionMask=int(number);
                 if(id==23&&number>=0&&number<=7)homingDirectionMask=int(number);
                 if(id==20)softLimitsEnabled=(number>=1);
@@ -1280,6 +1302,12 @@ void action(const char* id){
 void internalInit(){
     prefs.begin("lumacut",false);
     machineZeroAtMax=prefs.getBool("zeroMax",true);
+    focusLiftMm=prefs.getFloat("zlift",7.f);
+    focusGapMm=prefs.getFloat("focgap",7.f);
+    tipOffsetMm=prefs.getFloat("tipoffs",0.f);
+    probeTravelMm=prefs.getFloat("ptravel",15.f);
+    probeFeedMm=prefs.getFloat("pfeed",60.f);
+    autoLiftAfterHome=prefs.getBool("autoZlift",true);
     // Format only on first provisioning. Never silently erase saved jobs
     // because of a later filesystem or power-loss mounting failure.
     storageOk=LittleFS.begin(false);
