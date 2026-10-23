@@ -310,7 +310,12 @@ void nextScript(){
     if(scriptIndex>=scriptCount){
         scriptActive=false;commandPending=false;releaseLocal();return;
     }
-    writeCmd(script[scriptIndex++]);commandPending=true;
+    String cmd=script[scriptIndex++];
+    if(cmd=="$H"||cmd=="$HZ"){
+        homingInProgress=true;homeFromHmi=true;machineHomed=false;
+        haveMpos=false;postHomePending=false;
+    }
+    writeCmd(cmd);commandPending=true;
 }
 bool startScript(const String* commands,int count,bool motion=false){
     if(!canConfigure()||(motion&&!canMotion())||count<1||count>12)return false;
@@ -390,6 +395,8 @@ void parseMachineLine(const String& line){
             commandPending=false;
             if(!ok){jobRunning=false;if(jobFile)jobFile.close();feedHold();setNotice("G-Code-Fehler: "+line+". Maschine angehalten.");}
         }
+    } else if(line.startsWith("[LIM:")||line.startsWith("[HOMING:")){
+        setNotice("Schalterzustand: "+line);
     } else if(line.startsWith("ALARM:")){
         machineState=MachineState::Alarm;machineHomed=false;
         postHomePending=false;homeFromHmi=false;
@@ -431,7 +438,9 @@ void externalForward(Owner value,Stream& src){
             continue;
         }
         if(c=='\n'||c=='\r'){
-            if(hostLine=="$H"){homingInProgress=true;homeFromHmi=false;}
+            if(hostLine=="$H"||hostLine=="$HZ"){
+                homingInProgress=true;homeFromHmi=false;
+            }
             if(hostLine.startsWith("$")&&hostLine.indexOf('=')>1){
                 // LightBurn may modify $20 or travels without going through
                 // our machine setup. Re-query the real controller settings
