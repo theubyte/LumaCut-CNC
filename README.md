@@ -4,7 +4,7 @@ Quellcode, dokumentierte Builds und Inbetriebnahmeunterlagen für Atomstack A5 P
 
 **Stand 21.10.2026 – LumaCut Control OS (Waveshare als USB/WLAN-Gateway) und passende SKR-UART-Variante kompiliert, Hardwarevalidierung fehlt.** Quellcode und GitHub-Action-Builds sind vorhanden. Diese Builds sind **nicht für produktiven Laserbetrieb freigegeben**. Sie sind Labor-/Inbetriebnahmeimages. Prüfe vor Benutzung unbedingt die elektrische Belegung und die externe Sicherheitskette.
 
-**Reales Hardwareprofil (23.10.2026):** Genau drei Stepper (je einer für X, Y, Z), E-Treiber unbenutzt, ein einziger am Kopf montierter mechanischer Taster für Z-Endstop und künftig Werkstückabtastung, derzeit keine X/Y-Endschalter. Bis der geteilte Probe-Modus und eine XY-Referenzstrategie validiert sind, bleiben automatische Referenzfahrt und Probing gesperrt. [Hardwarebelegung](docs/HARDWARE.md).
+**Reales Hardwareprofil (23.10.2026):** Genau drei Stepper (je einer für X, Y, Z), E-Treiber unbenutzt, **je ein Endschalter an X/Y/Z**, Z-Taster soll später auch Werkstückabtastung übernehmen. **XYZ-Homing ist verfügbar**, G38-Werkstückabtastung benötigt erst eine geprüfte gemeinsame Endstop/Probe-Logik. [Hardwarebelegung](docs/HARDWARE.md).
 
 **[INBETRIEBNAHME: zuerst lesen](docs/INBETRIEBNAHME.md)**
 
