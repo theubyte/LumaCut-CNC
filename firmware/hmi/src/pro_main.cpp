@@ -486,7 +486,7 @@ void finishConfigWrite(bool success,const String& error){
     }else if(kind==ConfigWrite::MotorHold){
         motorHoldConfigured=knownSetting[1]&&fabsf(savedSetting[1]-255.f)<0.01f;
         setNotice(motorHoldConfigured?
-            "SKR bestaetigt $1=255. Physisches Haltemoment separat pruefen.":
+            "SKR bestaetigt $1=255. Falls Treiber aus waren: neu homen.":
             "Motor-Haltewert nicht bestaetigt. $ und TMC2209 pruefen.");
     }else if(kind==ConfigWrite::Limits){
         setNotice(softLimitsEnabled&&hardLimitsEnabled&&homingEnabled?
@@ -1535,7 +1535,7 @@ void action(const char* id){
         String cmds[]={"$1=255",String(char(36))+char(36)};
         if(startScript(cmds,2)){
             motorsReleased=false;configWrite=ConfigWrite::MotorHold;
-            setNotice("Sende $1=255; warte auf SKR-Rueckmeldung.");
+            setNotice("Sende $1=255. Wenn Motoren aus waren, danach XYZ homen.");
         } else setNotice("Motor-Einstellung nur im Leerlauf/Alarm.");
         return;
     }
@@ -1584,7 +1584,7 @@ void action(const char* id){
         }
         // $22=3 enables single-axis homing on grblHAL; $HZ finds only Z's
         // existing limit contact. This resets machine Z, NOT a G38 probe.
-        String cmds[]={"M5","$22=3","$HZ","$1=255"};
+        String cmds[]={"M5","$22=3","$1=255","$HZ"};
         if(startScript(cmds,4))
             setNotice("Werkstueckkontakt: Z-Referenzfahrt ($HZ) vorbereitet.");
         else setNotice("Z-Werkstueckkontakt nur im Leerlauf.");
@@ -1759,9 +1759,12 @@ void action(const char* id){
             setNotice("Referenzfahrt nur bei freier Maschine moeglich.");return;
         }
         if(claim(Owner::Script)){
-            script[0]="$H";script[1]="$1=255";
+            // Program idle holding BEFORE motors are woken by the homing
+            // cycle. Changing $1 after homing may leave an already-disabled
+            // enable pin OFF until another motor movement.
+            script[0]="$1=255";script[1]="$H";
             scriptCount=2;scriptIndex=0;scriptActive=true;
-            homingInProgress=true;homeFromHmi=true;machineHomed=false;
+            homingInProgress=false;homeFromHmi=false;machineHomed=false;
             haveMpos=false;postHomePending=false;
             nextScript();setNotice("Referenzfahrt gestartet.");
         }
