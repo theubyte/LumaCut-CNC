@@ -391,6 +391,17 @@ void externalForward(Owner value,Stream& src){
         }
         if(c=='\n'||c=='\r'){
             if(hostLine=="$H")homingInProgress=true;
+            if(hostLine.startsWith("$")&&hostLine.indexOf('=')>1){
+                // LightBurn may modify $20 or travels without going through
+                // our machine setup. Re-query the real controller settings
+                // before enabling any later local motion.
+                softLimitsEnabled=false;
+                settingsRequested=false;
+                if(hostLine.startsWith("$3=")||hostLine.startsWith("$23=")||
+                   hostLine.startsWith("$130=")||hostLine.startsWith("$131=")||
+                   hostLine.startsWith("$132=")||hostLine.startsWith("$22="))
+                    machineHomed=false;
+            }
             hostLine="";
         }else if(c>=32&&hostLine.length()<96)hostLine+=char(c);
         machine.write((uint8_t)c);
