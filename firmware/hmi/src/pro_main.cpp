@@ -68,7 +68,7 @@ lv_obj_t* navButtons[7]{};
 lv_obj_t *areaField=nullptr,*areaDot=nullptr,*areaCaption=nullptr,*configCaption=nullptr;
 lv_obj_t *sizeXField=nullptr,*sizeYField=nullptr,*sizeZField=nullptr;
 lv_obj_t *paramKeyField=nullptr,*paramValueField=nullptr;
-lv_obj_t *focusLiftField=nullptr,*focusGapField=nullptr,*tipOffsetField=nullptr,
+lv_obj_t *releaseButton=nullptr,*focusLiftField=nullptr,*focusGapField=nullptr,*tipOffsetField=nullptr,
     *probeTravelField=nullptr,*probeFeedField=nullptr,*probeInfo=nullptr,
     *motorInfo=nullptr,*catalogTitle=nullptr;
 lv_obj_t* catalogRows[6]{};
@@ -78,7 +78,7 @@ float focusLiftMm=7.f,focusGapMm=7.f,tipOffsetMm=0.f,
       probeTravelMm=15.f,probeFeedMm=60.f;
 bool autoLiftAfterHome=true,postHomePending=false,motorsReleased=false;
 bool contactSwitchAtHead=false,postContactLift=false;
-bool homeFromHmi=false,motorReleasePending=false;
+bool homeFromHmi=false;
 int catalogCategory=0;
 lv_disp_t* uiDisplay=nullptr;
 bool rotate180=false,settingsRequested=false;
@@ -263,6 +263,8 @@ void updateUi(){
         "\nZugangscode: "+apiKey;
         labelChanged(ipLabel,net);
     }
+    if(releaseButton)labelChanged(lv_obj_get_child(releaseButton,0),
+        motorsReleased?"Aufwecken":"Handbewegung");
     if(motorInfo){
         labelChanged(motorInfo,motorsReleased?
             "Motoren freigegeben: Position neu referenzieren.":
@@ -379,14 +381,6 @@ void parseMachineLine(const String& line){
             }
             else{machineHomed=false;setNotice(line=="error:5"?"Homing im SKR deaktiviert. Unter System $22=1 aktivieren.":"Referenzfahrt fehlgeschlagen: "+line);}
             homingInProgress=false;homeFromHmi=false;
-        }
-        if(motorReleasePending){
-            if(ok){
-                machineHomed=false;haveMpos=false;
-                motorsReleased=true;postHomePending=false;
-                setNotice("Motoren freigegeben. Danach erneut referenzieren.");
-            }
-            motorReleasePending=false;
         }
         if((owner==Owner::Script)&&commandPending){
             commandPending=false;
@@ -1166,7 +1160,7 @@ void makeUi(){
     motorInfo=lbl(c,"Schrittmotoren halten",18,45,14,SUBTLE);
     lv_obj_set_width(motorInfo,340);
     btn(c,"Motoren halten",18,74,160,45,"motorHold",PALE_BLUE,BLUE);
-    btn(c,"Handbewegung",194,74,168,45,"motorRelease",GRAY,INK);
+    releaseButton=btn(c,"Handbewegung",194,74,168,45,"motorRelease",GRAY,INK);
     lbl(c,"Werkstueck-Abtastung",18,134,14,SUBTLE);
     probeInfo=lbl(c,"Probe: Z-Endschalter wird geteilt",18,156,14,SUBTLE);
     lv_obj_set_width(probeInfo,343);
@@ -1307,12 +1301,24 @@ void action(const char* id){
         return;
     }
     if(op=="motorRelease"){
-        if(owner!=Owner::None||!idle()){setNotice("Motoren nur im Leerlauf freigeben.");return;}
-        String cmds[]={"$1=0","$"};
-        if(startScript(cmds,2)){
-            motorReleasePending=true;
-            setNotice("Motoren werden freigegeben, danach neu homen.");
-        } else setNotice("Motorfreigabe fehlgeschlagen.");
+        if(motorsReleased){
+            machine.write((uint8_t)0x18); // controller reset wakes from $SLP
+            machineHomed=false;haveMpos=false;motorsReleased=false;
+            homingInProgress=false;postHomePending=false;
+            owner=Owner::None;scriptActive=false;commandPending=false;
+            settingsRequested=false;lastStatusMs=0;
+            setNotice("Motoren aktiv. Vor weiteren Fahrten XYZ neu referenzieren.");
+            return;
+        }
+        if(owner!=Owner::None||!idle()){
+            setNotice("Motorfreigabe nur im Leerlauf moeglich.");return;
+        }
+        // grblHAL $SLP disables drivers reliably; $1=0 alone may not
+        // force an immediate enable-pin transition when already idle.
+        machine.print("M5\n$SLP\n");
+        machineHomed=false;haveMpos=false;
+        motorsReleased=true;postHomePending=false;
+        setNotice("Schlafmodus: Motoren frei. Erneut tippen zum Aufwecken.");
         return;
     }
     if(op=="probeSetup"){switchTab(9);return;}
