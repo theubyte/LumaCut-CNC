@@ -69,6 +69,10 @@ Für lokale G-Code-Jobs wartet das HMI auf grblHAL-Antworten pro Zeile. Hold mit
 - Der Frame-Interpreter lehnt relative Bewegungen, Bögen/Arcs, Koordinatenverschiebungen und andere nicht unterstützte Modalbefehle ab; er ist **keine vollständige LightBurn-Pfadvorschau**. Solche Dateien können weiterhin über LightBurn an den GRBL-Stream gesendet werden, aber nicht mit der HMI-Rahmenfunktion umrundet werden.
 - Maschine und Z-Taster, PWM, TMC-Treiber und die drei einzelnen XYZ-Motoren vor echtem Laserjob prüfen.
 
+## Neue Maschinen-Setup- und Live-Positionsfunktionen (23.10.2026)
+
+Das HMI enthält die Register **Flaeche** (Live-XY-Position als roter Punkt in einem Quadrat) und **Setup** (gespeicherte GRBL-Achs- und Homing-Richtungen, Verfahrwege, Parametereditor, Soft Limits und 180-Grad-Displaydrehung). Die Abmessungen werden mit `$$` aus `$130/$131/$132` gelesen, nach bestätigter Referenzfahrt mit `MPos` dargestellt und im authentifizierten `GET /api/machine` auch für eigene Software angeboten. Beim Umdrehen der Motoren wechselt das HMI gleichzeitig die gleiche `$23`-Achsenmaske für die physische Schalteranfahrt. GRBL bleibt maßgebend für die Verfahrgrenzen. Das SKR hat kein validiertes Sensorless-DIAG-Setup, daher werden keine Motor-Stall-Referenzfahrten oder automatische Anschlagfahrten für eine angebliche Vermessung gestartet. Die ESP32-Firmware testet DRAM-Bounce-Buffer gegen horizontale RGB-Streifen und unterdrückt unnötige Label-Redraws. [Vollständige Setup-Anleitung](MASCHINEN_SETUP.md).
+
 ## Technische Grenzen der Integrationsprüfung
 
 GitHub Actions erstellt die Sketches und ein abgestimmtes Firmwarepaar und kontrolliert Prüfdateien. Das ist ein erfolgreicher **Software-Build**, keine echte Hardwareprüfung. Der Touchscreen muss am realen Waveshare auf Darstellung, Berührungen, GATT-Status, Wi-Fi, USB-C-Grbl und GRBL-UART-Quittungen geprüft werden. Unraid erhält keine USB-Geräte; der PC flasht das HMI lokal. Das neue LittleFS-Layout ist nicht zu vorher experimentell gespeicherten SPIFFS-Jobs kompatibel; solche Dateien vorher extern sichern.
