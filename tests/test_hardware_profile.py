@@ -48,6 +48,14 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('softLimitsEnabled&&workX>0',CONTROL)
         self.assertNotIn('String cmds[]={"$"}',CONTROL)
 
+    def test_catalog_declared_before_first_call(self):
+        # Regression: Arduino/C++ standalone .cpp does not generate prototypes.
+        call=CONTROL.index("void updateUi(){")
+        decl=CONTROL.index("void refreshCatalog();")
+        definition=CONTROL.index("void refreshCatalog(){")
+        self.assertLess(decl,call)
+        self.assertLess(call,definition)
+
     def test_coordinated_focus_and_keyboard(self):
         self.assertIn('DEFAULT_STEPPER_IDLE_LOCK_TIME=255',BUILD)
         self.assertIn('DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1',BUILD)
