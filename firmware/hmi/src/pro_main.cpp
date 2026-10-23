@@ -666,7 +666,13 @@ String jsonMachine(){
     out+=",\"x_mm\":"+String(mx,3)+",\"y_mm\":"+String(my,3)+
          ",\"z_mm\":"+String(mz,3)+",\"valid\":";
     out+=((fresh()&&machineHomed&&haveMpos)?"true":"false");
-    out+="}}";
+    out+="},\"focus\":{\"target_gap_mm\":"+String(focusGapMm,3)+
+         ",\"homing_retract_mm\":"+String(focusLiftMm,3)+
+         ",\"switch_trigger_clearance_mm\":"+String(tipOffsetMm,3)+
+         ",\"auto_retract\":"+String(autoLiftAfterHome?"true":"false")+
+         ",\"head_contact_mode\":"+String(contactSwitchAtHead?"true":"false")+
+         ",\"g38_supported\":false,\"z_single_axis_home_supported\":true},\"steppers\":{\"holding\":"+
+         String(!motorsReleased?"true":"false")+"}}";
     return out;
 }
 String jsonStatus(){
