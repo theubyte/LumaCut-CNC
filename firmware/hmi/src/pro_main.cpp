@@ -975,9 +975,103 @@ void makeUi(){
     refreshSizeFields();
     switchTab(0);
 }
+bool settingAllowed(int id,float val){
+    // Keep hard/soft limits and homing active when modified through the HMI.
+    if((id==20||id==21||id==22)&&val<1)return false;
+    if(id==3||id==23)return(val>=0&&val<=7&&int(val)==val);
+    if(id==130||id==131||id==132)return val>0&&val<=3000;
+    return id>=0&&id<=999&&isfinite(val);
+}
 int jogStep=1;
 void action(const char* id){
     String op=id;
+    if(op=="setupgo"){switchTab(5);return;}
+    if(op=="rotate180"){
+        if(!uiDisplay)return;
+        rotate180=!rotate180;
+        prefs.putBool("rotate180",rotate180);
+        lv_disp_set_rotation(uiDisplay,rotate180?LV_DISP_ROT_180:LV_DISP_ROT_NONE);
+        setNotice(rotate180?"Display um 180 Grad gedreht.":"Normale Displayausrichtung.");
+        return;
+    }
+    if(op=="origin"){
+        machineZeroAtMax=!machineZeroAtMax;
+        prefs.putBool("zeroMax",machineZeroAtMax);
+        updateArea();
+        setNotice(machineZeroAtMax?"GRBL-Maschinenbereich: -Weg bis 0.":"GRBL-Maschinenbereich: 0 bis Weg.");
+        return;
+    }
+    if(op=="readcfg"){
+        String cmds[]={"$"};
+        if(!startScript(cmds,1))setNotice("Maschinenparameter nur im Leerlauf lesbar.");
+        else setNotice("Lese $3, $23 und Verfahrwege aus GRBL.");
+        return;
+    }
+    if(op=="flipall"||op=="flipx"||op=="flipy"||op=="flipz"){
+        if(directionMask<0){setNotice("Erst GRBL-Einstellungen mit $ Lesen laden.");return;}
+        int axis=op=="flipall"?7:op=="flipx"?1:op=="flipy"?2:4;
+        int newMask=directionMask^axis;
+        String cmds[]={"$3="+String(newMask),"$"};
+        if(startScript(cmds,2))
+            setNotice("Motor-Richtungsmaske wird auf "+String(newMask)+" gesetzt.");
+        else setNotice("Motor-Richtung nur im Leerlauf aenderbar.");
+        return;
+    }
+    if(op=="homex"||op=="homey"||op=="homez"){
+        if(homingDirectionMask<0){setNotice("Erst GRBL-Einstellungen mit $ Lesen laden.");return;}
+        int bit=op=="homex"?1:op=="homey"?2:4;
+        int newMask=homingDirectionMask^bit;
+        String cmds[]={"$23="+String(newMask),"$"};
+        if(startScript(cmds,2))
+            setNotice("Homing-Richtungsmaske wird auf "+String(newMask)+" gesetzt.");
+        else setNotice("Homing-Richtung nur im Leerlauf aenderbar.");
+        return;
+    }
+    if(op=="savearea"){
+        const char* sx=lv_textarea_get_text(sizeXField);
+        const char* sy=lv_textarea_get_text(sizeYField);
+        const char* sz=lv_textarea_get_text(sizeZField);
+        float x=atof(sx),y=atof(sy),z=atof(sz);
+        if(!isfinite(x)||!isfinite(y)||!isfinite(z)||
+            x<1||y<1||z<1||x>3000||y>3000||z>3000){
+            setNotice("Fahrwege: X, Y, Z in mm zwischen 1 und 3000 eingeben.");return;
+        }
+        // The controller alone validates travel; these must be measured,
+        // not estimated by repeatedly driving against endstops.
+        String cmds[]={"$130="+String(x,3),"$131="+String(y,3),
+                       "$132="+String(z,3),"$"};
+        if(startScript(cmds,4))
+            setNotice("Verfahrwege werden im SKR gespeichert.");
+        else setNotice("Fahrwege nur im Leerlauf aenderbar.");
+        return;
+    }
+    if(op=="softon"){
+        if(workX<=0||workY<=0||workZ<=0){
+            setNotice("Zuerst alle drei gemessenen Verfahrwege in GRBL speichern.");return;
+        }
+        String cmds[]={"$22=1","$20=1","$"};
+        if(startScript(cmds,3))setNotice("Homing und Soft Limits aktiviert.");
+        else setNotice("Soft Limits nur bei freier Maschine aktivierbar.");
+        return;
+    }
+    if(op=="setparam"){
+        String idText=lv_textarea_get_text(paramKeyField);
+        String vText=lv_textarea_get_text(paramValueField);
+        idText.trim();idText.replace("$","");
+        if(!idText.length()||!vText.length()){setNotice("Parameter-ID und Wert eingeben.");return;}
+        for(unsigned i=0;i<idText.length();i++)if(!isDigit(idText[i])){
+            setNotice("Parameter-ID muss numerisch sein.");return;
+        }
+        char* end=nullptr;
+        float value=strtof(vText.c_str(),&end);
+        if(end==vText.c_str()||*end!='\0'||!settingAllowed(idText.toInt(),value)){
+            setNotice("Parameterwert ungueltig oder Sicherheitseinstellung blockiert.");return;
+        }
+        String cmds[]={"$"+idText+"="+vText,"$"};
+        if(startScript(cmds,2))setNotice("GRBL-Parameter gespeichert.");
+        else setNotice("Parameter nur im Leerlauf aenderbar.");
+        return;
+    }
     if(op=="host"){
         if(owner!=Owner::None||!fresh()||
            (machineState!=MachineState::Idle&&machineState!=MachineState::Alarm)){
@@ -1078,6 +1172,7 @@ void action(const char* id){
 }
 void internalInit(){
     prefs.begin("lumacut",false);
+    machineZeroAtMax=prefs.getBool("zeroMax",true);
     // Format only on first provisioning. Never silently erase saved jobs
     // because of a later filesystem or power-loss mounting failure.
     storageOk=LittleFS.begin(false);
@@ -1104,8 +1199,14 @@ void loop(){
     internalJobService();
     bleUpdate();
     lv_timer_handler();
+    // Collect actual GRBL persistent limits and axis polarity once controller is
+    // available; do not fabricate travel distances from the nominal frame size.
+    if(!settingsRequested&&millis()>4500&&idle()&&owner==Owner::None){
+        settingsRequested=true;
+        String cmds[]={"$"};startScript(cmds,1);
+    }
     static uint32_t lastUi=0;
-    if(millis()-lastUi>600){lastUi=millis();updateUi();}
+    if(millis()-lastUi>160){lastUi=millis();updateUi();}
     delay(2);
 }
 #endif
