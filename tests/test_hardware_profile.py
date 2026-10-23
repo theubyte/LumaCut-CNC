@@ -62,6 +62,8 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn("MALLOC_CAP_SPIRAM",config)
         self.assertIn("heap_caps_realloc",config)
         self.assertIn('if(!psramFound())',CONTROL)
+        touch=CONTROL[CONTROL.index('void touchInit(){'):CONTROL.index('void touchRead(')]
+        self.assertIn('if(!expander(LCD_RESET|TP_RESET|BACKLIGHT))',touch)
         self.assertIn('void loop(){\n    if(!uiReady)',CONTROL)
         init=CONTROL[CONTROL.index("void internalInit(){"):CONTROL.index("void setup(){")]
         self.assertLess(init.index('expander(LCD_RESET|TP_RESET|BACKLIGHT)'),
