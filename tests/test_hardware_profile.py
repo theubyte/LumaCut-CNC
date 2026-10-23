@@ -143,7 +143,7 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('String(operatorPos(mx),2)',CONTROL)
         self.assertIn('String(operatorPos(my),2)',CONTROL)
         self.assertIn('String(operatorPos(mz),2)',CONTROL)
-        self.assertIn('float zLift(float targetOperatorMm)',CONTROL)
+        self.assertIn('bool zLift(float targetOperatorMm)',CONTROL)
         self.assertIn('const float machineTarget=machinePosFromOperator(targetOperatorMm)',CONTROL)
         self.assertIn('const float rawDelta=machineTarget-mz',CONTROL)
         self.assertIn('zJogRawDelta(rawDelta)',CONTROL)
