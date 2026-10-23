@@ -237,8 +237,11 @@ bool canConfigure(){return owner==Owner::None&&fresh()&&
     (machineState==MachineState::Idle||machineState==MachineState::Alarm);}
 bool canMotion(){return canCommand()&&machineHomed&&haveMpos&&
     !motorsReleased&&softLimitsEnabled&&workX>0&&workY>0&&workZ>0;}
+// A Z clearance move has its own locally checked travel envelope.
+ // $20 is recommended but its OFF state must not lock out a bounded
+ // retreat from a successfully homed endstop.
 bool canZMotion(){return canCommand()&&fresh()&&machineHomed&&haveMpos&&
-    !motorsReleased&&softLimitsEnabled&&workZ>0;}
+    !motorsReleased&&workZ>0;}
 String uiText(String s){
     s.replace("ä","ae");s.replace("ö","oe");s.replace("ü","ue");
     s.replace("Ä","Ae");s.replace("Ö","Oe");s.replace("Ü","Ue");
@@ -1466,7 +1469,6 @@ bool zDeltaAllowed(float delta){
     if(!fresh()){zLiftReason="SKR ist nicht erreichbar.";return false;}
     if(!machineHomed){zLiftReason="Maschine nicht referenziert.";return false;}
     if(!haveMpos){zLiftReason="Keine Maschinenposition MPos. GRBL Statusmaske $10 pruefen.";return false;}
-    if(!softLimitsEnabled){zLiftReason="Soft Limits $20 sind AUS. Erst Wegmessung/Setup pruefen.";return false;}
     if(workZ<=0){zLiftReason="Z-Verfahrweg $132 fehlt. Gemessenen Wert speichern.";return false;}
     if(!isfinite(delta)||fabsf(delta)<0.001f){zLiftReason="Z-Rueckzug muss ungleich 0 mm sein.";return false;}
     if(!canZMotion()){zLiftReason="SKR ist beschaeftigt oder Motoren sind freigegeben.";return false;}
@@ -1481,13 +1483,27 @@ bool zDeltaAllowed(float delta){
     }
     return true;
 }
-bool zLift(float delta){
+bool zJogRawDelta(float delta){
     if(!zDeltaAllowed(delta))return false;
-    // The sign of the correct *physical* retreat direction depends on where
-    // the switch is fitted. Never silently flip a requested +7 mm to -7 mm.
     String cmds[]={"M5","$J=G91 G21 Z"+String(delta,3)+
                         " F"+String(constrain(probeFeedMm,30.f,600.f),1)};
     return startScript(cmds,2,true,true);
+}
+// A target such as 7.00 mm is the displayed positive position AFTER homing,
+// not an additional +7 mm added to the homing switch pull-off.
+// Example MPos Z=-1 => logical Z=+1, target +7 => raw delta=-6.
+bool zLift(float targetOperatorMm){
+    if(!isfinite(targetOperatorMm)||targetOperatorMm<0.05f){
+        zLiftReason="Z-Zielabstand muss mindestens 0,05 mm betragen.";
+        return false;
+    }
+    const float machineTarget=machinePosFromOperator(targetOperatorMm);
+    const float rawDelta=machineTarget-mz;
+    if(fabsf(rawDelta)<0.005f){
+        zLiftReason="Z steht bereits bei "+String(targetOperatorMm,2)+" mm.";
+        return false;
+    }
+    return zJogRawDelta(rawDelta);
 }
 bool settingAllowed(int id,float val){
     // Keep hard/soft limits and homing active when modified through the HMI.
@@ -1506,8 +1522,8 @@ void action(const char* id){
         String offset=lv_textarea_get_text(tipOffsetField);
         float a=lift.toFloat(),b=gap.toFloat(),c=offset.toFloat();
         if(!isfinite(a)||!isfinite(b)||!isfinite(c)||
-           fabsf(a)>50.f||b<0.5f||b>100.f||fabsf(c)>100.f){
-            setNotice("Z-Lift +/-50 mm; Fokus 0.5-100 mm; Offset +/-100 mm.");return;
+           a<0.05f||a>50.f||b<0.5f||b>100.f||fabsf(c)>100.f){
+            setNotice("Z-Ziel 0.05-50 mm; Fokus 0.5-100 mm; Offset +/-100 mm.");return;
         }
         if(fabsf(a-focusLiftMm)>0.001f){
             zLiftDirectionVerified=false;
@@ -1527,9 +1543,10 @@ void action(const char* id){
         return;
     }
     if(op=="ztest"){
-        float delta=focusLiftMm<0?-0.5f:0.5f;
-        if(zLift(delta))
-            setNotice("Z-Test "+String(delta,1)+" mm gestartet. Physische Richtung pruefen.");
+        // +0.5 operator-space is a small retreat from the homed reference.
+        float delta=machinePosFromOperator(0.5f);
+        if(zJogRawDelta(delta))
+            setNotice("Z-Test +0,5 mm im positiven Anzeigeraum gestartet.");
         else setNotice("Z-Test abgelehnt: "+zLiftReason);
         return;
     }
@@ -1544,7 +1561,7 @@ void action(const char* id){
     }
     if(op=="zlift"){
         if(zLift(focusLiftMm))
-            setNotice("Z-Rueckzug "+String(focusLiftMm,2)+" mm bei Laser AUS gestartet.");
+            setNotice("Z-Ziel "+String(focusLiftMm,2)+" mm bei Laser AUS angefahren.");
         else setNotice("Z-Lift nicht moeglich: "+zLiftReason);
         return;
     }
@@ -1861,7 +1878,7 @@ void action(const char* id){
 void internalInit(){
     prefs.begin("lumacut",false);
     machineZeroAtMax=prefs.getBool("zeroMax",true);
-    focusLiftMm=prefs.getFloat("zlift",7.f);
+    focusLiftMm=fabsf(prefs.getFloat("zlift",7.f));
     zLiftDirectionVerified=prefs.getBool("zsignOK",false);
     focusGapMm=prefs.getFloat("focgap",7.f);
     tipOffsetMm=prefs.getFloat("tipoffs",0.f);
@@ -1939,17 +1956,15 @@ void loop(){
             const float requested=postContactLift?
                 (focusGapMm-tipOffsetMm):focusLiftMm;
             postContactLift=false;
-            if(!zDeltaAllowed(requested)){
-                // Report actual SKR precondition/soft-bound error first.
-                setNotice("Auto-Z nicht gefahren: "+zLiftReason);
-            }else if(!zLiftDirectionVerified){
-                zLiftReason="Z-Richtung noch nicht bestaetigt. Test Z 0,5 mm, dann Richtung OK.";
-                setNotice("Auto-Z aus: "+zLiftReason);
-            }else if(!zLift(requested)){
+            // Normal $H uses the verified convention expressed by user:
+            // raw MPos is negative and retreat grows the positive HMI
+            // distance. The stored target is absolute distance from zero.
+            // Workpiece contact $HZ remains separately calibrated.
+            if(!zLift(requested)){
                 setNotice("Auto-Z nicht gefahren: "+zLiftReason);
             }else{
                 zLiftReason="";
-                setNotice("Auto-Z "+String(requested,2)+" mm bei Laser AUS gestartet.");
+                setNotice("Auto-Z auf "+String(requested,2)+" mm bei Laser AUS gestartet.");
             }
         }
     }
