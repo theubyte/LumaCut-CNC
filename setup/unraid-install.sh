@@ -25,14 +25,14 @@ if [ ! -f "$STATE/.env" ]; then
   printf 'BUILDER_PASSWORD=%s\nGIT_REPOSITORY=git@github.com:theubyte/LumaCut-CNC.git\nGIT_BRANCH=main\n' "$SECRET" > "$STATE/.env"
 fi
 # Device update token is independent of the builder administrator password.
-# Store it only in Unraid appdata, never in GitHub, logs or public release JSON.
+# Store it only in Unraid appdata, never in GitHub or public release JSON.
 if ! grep -q '^UPDATE_DEVICE_KEY=' "$STATE/.env"; then
   umask 077
-  UPDATE_SECRET="$(od -An -N32 -tx1 /dev/urandom | tr -d ' \\n')"
-  printf 'UPDATE_DEVICE_KEY=%s\\n' "$UPDATE_SECRET" >> "$STATE/.env"
+  UPDATE_SECRET="$(od -An -N32 -tx1 /dev/urandom | tr -dc '0-9a-f')"
+  printf 'UPDATE_DEVICE_KEY=%s\n' "$UPDATE_SECRET" >> "$STATE/.env"
 fi
 if ! grep -q '^UPDATE_PUBLIC_ORIGIN=' "$STATE/.env"; then
-  printf 'UPDATE_PUBLIC_ORIGIN=https://luma.millione.de\\n' >> "$STATE/.env"
+  printf 'UPDATE_PUBLIC_ORIGIN=https://luma.millione.de\n' >> "$STATE/.env"
 fi
 chmod 600 "$STATE/.env"
 echo "Baue Docker-Image ..."
