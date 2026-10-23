@@ -195,7 +195,8 @@ async function refresh(){
     if(model.active&&model.active!==prior){
       model.watch.add(model.active);model.selected=model.active;
     }
-    if(model.selected&&!find(model.selected))model.selected=model.jobs[0]?.id||null;
+    if(model.selected&&!find(model.selected)&&model.selected!==model.active)
+      model.selected=model.jobs[0]?.id||null;
     for(const id of [...model.watch]){
       const job=find(id);
       if(job&&job.status!=="running"&&!model.notified.has(id)){
