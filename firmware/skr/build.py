@@ -94,6 +94,9 @@ def main():
             # Probe operations on the shared switch require a separate,
             # carefully validated control mode before they can be enabled.
             h.write("  -D PROBE_ENABLE=0\n")
+            # Default stepper holding after homing. Existing EEPROM/NVS values
+            # retain precedence: HMI also sets $1=255 on successful home.
+            h.write("  -D DEFAULT_STEPPER_IDLE_LOCK_TIME=255\n")
         run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/env
         out.mkdir(parents=True,exist_ok=True)
