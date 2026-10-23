@@ -5,14 +5,27 @@ machine:
   board: BTT SKR Mini MZ V1.0
   microcontroller: STM32F103RC
   work_area_mm: {x: null, y: null, z: null}
+motors:
+  x: {count: 1, connector: XM}
+  y: {count: 1, connector: YM}
+  z: {count: 1, connector: ZAM_or_ZBM}
+  extruder_driver_used: false
 homing:
-  z_dedicated_endstop: true
-  z_endstop_candidate: PC2
-  z_before_xy: true
+  automatic_xyz_enabled: false
+  x_switch_present: false
+  y_switch_present: false
+  z_switch_present: true
+  z_endstop_pin: PC2
+  z_shared_with_workpiece_probe: true
+  x_y_reference_method: not_yet_defined
   homing_direction_verified: false
 probe:
-  type: mechanical_switch
-  input_candidate: PC14
+  type: same_mechanical_switch_as_z_endstop
+  physical_switch_count: 1
+  physical_signal_pin: PC2
+  pc14_probe_input_wired: false
+  grblhal_shared_pin_mode_implemented: false
+  probing_enabled_in_firmware: false
   normally_closed_preferred: true
   x_offset_from_laser_mm: null
   y_offset_from_laser_mm: null
