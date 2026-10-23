@@ -1,4 +1,4 @@
-"""Regression guards for the user's actual single-switch / 3-stepper machine.
+"""Regression guards for the user's actual 3-endstop / 3-stepper machine.
 
 These assertions verify source configuration, not electrical function or safe
 physical behaviour. Real hardware commissioning remains mandatory.
@@ -24,13 +24,14 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn("physical_signal_pin: PC2", CONFIG)
         self.assertIn("pc14_probe_input_wired: false", CONFIG)
         self.assertIn("probing_enabled_in_firmware: false", CONFIG)
-        self.assertIn("x_switch_present: false", CONFIG)
-        self.assertIn("y_switch_present: false", CONFIG)
+        self.assertIn("x_switch_present: true", CONFIG)
+        self.assertIn("y_switch_present: true", CONFIG)
 
-    def test_no_automatic_full_xyz_homing_from_touch_panel(self):
+    def test_regular_xyz_homing_reenabled(self):
         self.assertIn('if(op=="home"){', CONTROL)
-        self.assertNotIn('script[0]=cmds[0];scriptCount=1;', CONTROL)
-        self.assertIn("Homing gesperrt: nur ein Z-Taster", CONTROL)
+        self.assertIn('script[0]="$H"', CONTROL)
+        self.assertIn('script[0]="$22=1"', CONTROL)
+        self.assertIn('bool canCommand(){return owner==Owner::None&&idle();}', CONTROL)
 
 if __name__=="__main__":
     unittest.main()
