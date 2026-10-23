@@ -52,7 +52,7 @@ Die 800×480-Oberfläche hat eine einheitliche dunkle Studio-Gestaltung mit cyan
 
 ### Makros / Parkpositionen
 
-Die Oberfläche erlaubt drei gespeicherte XY-Parkpositionen, die im HMI dauerhaft abgelegt werden. Nach verifizierter Achsreferenz und lokaler Zeitfreigabe aktuelle Maschinen-X/Y speichern und in Idle mit `M5`, `G21 G90`, `G53 G0 X... Y...` anfahren. Kein automatisches Z-Verfahren: Eine sichere Kollisionsfreihöhe kann ohne genaue Maschineinrichtung nicht angenommen werden. Diese Funktion erfordert einen von Hindernissen freien Fahrweg.
+Die Oberfläche erlaubt drei gespeicherte XY-Parkpositionen, die im HMI dauerhaft abgelegt werden. Bei freier Maschinensteuerung und verifizierten Maschinenkoordinaten aktuelle Maschinen-X/Y speichern und in Idle mit `M5`, `G21 G90`, `G53 G0 X... Y...` anfahren. Kein automatisches Z-Verfahren: Eine sichere Kollisionsfreihöhe kann ohne genaue Maschineinrichtung nicht angenommen werden. Diese Funktion erfordert einen von Hindernissen freien Fahrweg.
 
 ### Jobsteuerung / Framing
 
