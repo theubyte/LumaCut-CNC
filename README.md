@@ -4,6 +4,8 @@ Quellcode, dokumentierte Builds und Inbetriebnahmeunterlagen für Atomstack A5 P
 
 **Stand 21.10.2026 – LumaCut Control OS (Waveshare als USB/WLAN-Gateway) und passende SKR-UART-Variante kompiliert, Hardwarevalidierung fehlt.** Quellcode und GitHub-Action-Builds sind vorhanden. Diese Builds sind **nicht für produktiven Laserbetrieb freigegeben**. Sie sind Labor-/Inbetriebnahmeimages. Prüfe vor Benutzung unbedingt die elektrische Belegung und die externe Sicherheitskette.
 
+**Reales Hardwareprofil (23.10.2026):** Genau drei Stepper (je einer für X, Y, Z), E-Treiber unbenutzt, ein einziger am Kopf montierter mechanischer Taster für Z-Endstop und künftig Werkstückabtastung, derzeit keine X/Y-Endschalter. Bis der geteilte Probe-Modus und eine XY-Referenzstrategie validiert sind, bleiben automatische Referenzfahrt und Probing gesperrt. [Hardwarebelegung](docs/HARDWARE.md).
+
 **[INBETRIEBNAHME: zuerst lesen](docs/INBETRIEBNAHME.md)**
 
 ## Firmware
@@ -15,7 +17,7 @@ Quellcode, dokumentierte Builds und Inbetriebnahmeunterlagen für Atomstack A5 P
 | `firmware/hmi` → `lumacut_waveshare_s3` | 7-Zoll-RGB/GT911, Touch-Dashboard, keine Bewegungsbefehle | Kompiliert; LCD und Touch am echten Gerät ungetestet |
 | `firmware/hmi` → `lumacut_waveshare_s3_keypad` | Altes experimentelles UART-Keypad-Profil | Kompiliert; nicht mit Control OS kombinieren |
 | `firmware/hmi` → `lumacut_waveshare_s3_pro` | **Control OS:** 7″ Apple-inspiriertes UI, USB-C CDC und WLAN-GRBL für LightBurn, G-Code-Jobportal, BLE-Status, Parkmakros | Kompiliert; physische Tests ausstehend |
-| Z-Autofokus, XY-Tasterversatz, Höhenkarte, Live-DRO | Ziel-Funktionen | Noch nicht implementiert |
+| Z-Autofokus, XY-Tasterversatz, Höhenkarte | Ziel-Funktionen | Noch nicht implementiert; gemeinsamer Z-Taster benötigt validierte Probe-Umschaltung |
 
 Die alte Keypad-HMI hat keine grblHAL-Rückmeldung. Die neue **Control-OS-HMI** wertet dagegen Statusdaten und X/Y/Z-Maschinenkoordinaten über den SKR-UART-Hauptstream aus. Das ist bisher nur softwareseitig kompiliert, nicht an der realen Maschine verifiziert.
 
