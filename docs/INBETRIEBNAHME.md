@@ -18,7 +18,7 @@ Ein realer Funktions- und Sicherheitstest am BTT SKR Mini MZ V1.0 und am Wavesha
 - Ein FAT32-formatiertes microSD-Medium verwenden. `firmware.bin` ins Root der SD kopieren. Strom AUS, SD einstecken, Strom EIN und nach Boot überprüfen, ob `FIRMWARE.CUR` oder boardtypisches Umbenennungsmerkmal entstanden ist.
 - **Kein UART-/SWD-Flash-Kommando erforderlich:** Normaler SKR Mini MZ v1.0 verwendet einen 28KiB-SD-Bootloader. Falls dein Board einen anderen Bootloader hat oder das Update nicht übernimmt: stoppen, Firmware/Bootloader rückprüfen, nicht blind alternative Offsets flashen.
 - USB mit PC verbinden, LightBurn vorerst als GRBL-Testverbindung (nicht Laserjob) bei passenden seriellen Parametern einrichten; Konsole: `$I`, `$$`, `$pins`, `?`, `M5`. Erwartet wird eine grblHAL/GRBL-Antwort. **Keine Bewegungen**, solange Richtung, Endschalter und Weggrenzen nicht geprüft sind.
-- Hardware-Schaltplan gegen tatsächliches SKR-Mini-MZ-Pinmapping vergleichen. X PC0 und Y PC1 sind aktuell unbeschaltet, der **einzige mechanische Taster** ist für Z PC2 vorgesehen; PC14 ist unbeschaltet; PWM PA1; Laser-Enable PC7 **ist ein FET-Ausgang, kein garantierter 3,3-V-TTL-Pin**. PC8/PC9 sind Heiz-FETs und ausdrücklich keine frei schaltbaren Ausgänge. Ausgangsspannung bei Boot/Reset/Brownout messen. Nie 24 V an Laserkopf-TTL anschließen.
+- Hardware-Schaltplan gegen tatsächliches SKR-Mini-MZ-Pinmapping vergleichen. X PC0 und Y PC1 haben jeweils einen Schalter, der **einzige mechanische Taster** ist für Z PC2 vorgesehen; PC14 ist unbeschaltet; PWM PA1; Laser-Enable PC7 **ist ein FET-Ausgang, kein garantierter 3,3-V-TTL-Pin**. PC8/PC9 sind Heiz-FETs und ausdrücklich keine frei schaltbaren Ausgänge. Ausgangsspannung bei Boot/Reset/Brownout messen. Nie 24 V an Laserkopf-TTL anschließen.
 - Drehrichtung/Achs-Zuordnung/TMC-Adresse und Strom separat verifizieren, insbesondere deine Spindel-Z-Achse und Laserlast (~500 g). Genau ein X-, ein Y- und ein Z-Motor; E/M3 bleibt frei.
 
 ## 3. HMI Firmware / Display
@@ -43,7 +43,7 @@ Im SKR ist `KEYPAD_ENABLE=2` aktiviert: grblHAL nimmt einzelne Steuerzeichen üb
 
 ## Aktualisierte Hardware-Konfiguration
 
-**Korrektur 23.10.2026:** Die reale Maschine hat jeweils einen Motor für X, Y und Z und nur einen mechanischen Taster, der Z-Endstop und Werkstückmessung übernehmen soll. Keine X/Y-Schalter, kein separater Probe-Sensor. Die ältere Beispielverkabelung für PC14 als separaten Probe-Eingang ist **nicht** für dieses Gerät gültig. Der HMI-`$H`-Befehl wurde aus Sicherheitsgründen gesperrt; G38-Probing ist in der Firmware bis zum geprüften gemeinsamen Eingangsmodus deaktiviert. [Aktuelles Hardwareprofil](HARDWARE.md).
+**Korrektur 23.10.2026:** Die reale Maschine hat jeweils einen Motor für X, Y und Z und nur einen mechanischen Taster, der Z-Endstop und Werkstückmessung übernehmen soll. X/Y-Endschalter sind montiert; kein separater Probe-Sensor. Die ältere Beispielverkabelung für PC14 als separaten Probe-Eingang ist **nicht** für dieses Gerät gültig. HMI-Homing ist freigegeben: Bei `error:5` `$22=1` über **Homing aktivieren** setzen und nach Prüfung von `$23`/Schalterzustand **Referenzfahrt** starten. G38-Probing bleibt bis zum geprüften gemeinsamen Z-Schalter-Modus deaktiviert. [Aktuelles Hardwareprofil](HARDWARE.md).
 
 ## 5. Testreihenfolge
 1. HMI nur per USB versorgen, erst einmal **Offline-Image** flashen: Logo/UI/Touch, sämtliche Jog-Tasten ohne Bewegung.
@@ -53,7 +53,7 @@ Im SKR ist `KEYPAD_ENABLE=2` aktiviert: grblHAL nimmt einzelne Steuerzeichen üb
 5. Laserkopf, TTL/PWM, externe Laserfreigabe und Abstände ausschließlich nach Messprotokoll einrichten; erst bei bestandenem Test freigeben.
 
 ## Offene Punkte
-- **Mit der tatsächlichen Hardware deaktiviert:** automatisches XYZ-Homing (X/Y ohne Schalter) und separates G38-Probing (nur ein Z-Taster vorhanden). **Nicht vorhanden:** bestätigte grblHAL-TMC2209-Laufparameter, verifizierte Endschalter-/Probe-Pegel, echter Live-DRO/GRBL-Status am HMI, Autofokus, automatische XY/Taster-Kalibrierung und Höhenkarte.
+- **Mit der tatsächlichen Hardware deaktiviert:** G38-Probing über den für Z-STOP verwendeten Schalter; **XYZ-Homing ist verfügbar**. **Nicht vorhanden:** bestätigte grblHAL-TMC2209-Laufparameter, verifizierte Endschalter-/Probe-Pegel, echter Live-DRO/GRBL-Status am HMI, Autofokus, automatische XY/Taster-Kalibrierung und Höhenkarte.
 - **Nicht getestet:** STM32 Flash auf dieser spezifischen SKR-Platine, reales LCD/GT911-Verhalten auf Rev1.2, UART zwischen den beiden Boards, Start-/Stoppsicherheit und reales Laserverhalten.
 - **Nicht freigegeben:** Lasergravur oder Schneidbetrieb. Weitere Schritte hängen von der Elektro-/Hardwareverifikation ab.
 
