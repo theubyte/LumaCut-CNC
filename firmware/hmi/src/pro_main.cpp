@@ -80,7 +80,8 @@ uint32_t lastUpdateCheckMs=0;
 bool updateCheckRequested=false,updateAvailable=false;
 lv_obj_t *sizeXField=nullptr,*sizeYField=nullptr,*sizeZField=nullptr;
 lv_obj_t *paramKeyField=nullptr,*paramValueField=nullptr;
-lv_obj_t *releaseButton=nullptr,*focusLiftField=nullptr,*focusGapField=nullptr,*tipOffsetField=nullptr,
+lv_obj_t *releaseButton=nullptr,*focusTargetButton=nullptr,
+    *autoZButton=nullptr,*focusLiftField=nullptr,*focusGapField=nullptr,*tipOffsetField=nullptr,
     *probeTravelField=nullptr,*probeFeedField=nullptr,*probeInfo=nullptr,
     *motorInfo=nullptr,*catalogTitle=nullptr;
 lv_obj_t* catalogRows[6]{};
@@ -408,6 +409,10 @@ void updateUi(){
         " $132:"+(knownSetting[132]?String(savedSetting[132],1):"?");
         labelChanged(ipLabel,net);
     }
+    if(focusTargetButton)labelChanged(lv_obj_get_child(focusTargetButton,0),
+        "Z auf "+String(focusLiftMm,1)+" mm");
+    if(autoZButton)labelChanged(lv_obj_get_child(autoZButton,0),
+        autoLiftAfterHome?"Auto-Z: EIN":"Auto-Z: AUS");
     if(releaseButton)labelChanged(lv_obj_get_child(releaseButton,0),
         motorsReleased?"Aufwecken":"Handbewegung");
     if(updateLabel)labelChanged(updateLabel,updateCheckStatus);
@@ -1367,15 +1372,15 @@ void makeUi(){
     // preferences, and motor lock/release is written into SKR GRBL ($1).
     c=card(pages[7],0,0,380,268);
     lbl(c,"Z-Fokus & Werkstueck",18,12,20);
-    lbl(c,"Z-Rueckzug nach Homing [mm]",18,45,14,SUBTLE);
+    lbl(c,"Z-Zielabstand nach Homing [mm]",18,45,14,SUBTLE);
     focusLiftField=configEntry(c,18,66,148,43,String(focusLiftMm,2));
     btn(c,"Speichern",181,66,180,43,"focusSave",BLUE,BG);
     lbl(c,"Optischer Fokusabstand [mm]",18,116,14,SUBTLE);
     focusGapField=configEntry(c,18,136,149,41,String(focusGapMm,2));
-    btn(c,"Z + Rueckzug",181,136,180,41,"zlift",GRAY,INK);
+    focusTargetButton=btn(c,"Z auf 7,0 mm",181,136,180,41,"zlift",GRAY,INK);
     lbl(c,"Schalter-Offset [mm]",18,190,14,SUBTLE);
     tipOffsetField=configEntry(c,18,212,149,42,String(tipOffsetMm,2));
-    btn(c,"Auto-Z: EIN/AUS",181,212,180,42,"toggleAutoLift",PALE_BLUE,BLUE);
+    autoZButton=btn(c,"Auto-Z: EIN",181,212,180,42,"toggleAutoLift",PALE_BLUE,BLUE);
 
     c=card(pages[7],392,0,380,268);
     lbl(c,"Motoren / Taster",18,12,20);
@@ -1531,7 +1536,7 @@ void action(const char* id){
         }
         focusLiftMm=a;focusGapMm=b;tipOffsetMm=c;
         prefs.putFloat("zlift",a);prefs.putFloat("focgap",b);prefs.putFloat("tipoffs",c);
-        setNotice("Z-Rueckzug, Fokusabstand und Tasteroffset gespeichert.");
+        setNotice("Z-Zielabstand, Fokuswert und Tasteroffset gespeichert.");
         return;
     }
     if(op=="toggleAutoLift"){
