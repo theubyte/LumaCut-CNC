@@ -114,6 +114,12 @@ void touchInit(){
     uint8_t product[4]{};
     touchOk=readReg(0x8140,product,4);
     if(!touchOk){gtAddr=0x14;touchOk=readReg(0x8140,product,4);}
+    // Diagnostic failsafe: assert the Waveshare EXIO2 backlight immediately
+    // after I2C/CH422G initialization, BEFORE RGB, LVGL, filesystem and Wi-Fi.
+    // Even a later panel or UI initialization failure can no longer leave a
+    // completely dark backlight due solely to late startup ordering.
+    if(!expander(LCD_RESET|TP_RESET|BACKLIGHT))
+        Serial.println("LUMACUT WARNING: CH422G EXIO2 backlight I2C write failed");
 }
 void touchRead(lv_indev_drv_t*,lv_indev_data_t* result){
     static int16_t x=0,y=0;
