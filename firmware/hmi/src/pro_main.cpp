@@ -10,6 +10,13 @@
 #include <HardwareSerial.h>
 #include <Wire.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <time.h>
+#include "update_ca.h"
+#ifndef LUMACUT_SOURCE_SHA
+#define LUMACUT_SOURCE_SHA "unknown"
+#endif
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <BLEDevice.h>
@@ -67,6 +74,10 @@ Park parks[3];
 lv_obj_t* pages[10]{};
 lv_obj_t* navButtons[7]{};
 lv_obj_t *areaField=nullptr,*areaDot=nullptr,*areaCaption=nullptr,*configCaption=nullptr;
+lv_obj_t *updateLabel=nullptr;
+String offeredUpdateSha,updateCheckStatus="Noch nicht geprueft";
+uint32_t lastUpdateCheckMs=0;
+bool updateCheckRequested=false,updateAvailable=false;
 lv_obj_t *sizeXField=nullptr,*sizeYField=nullptr,*sizeZField=nullptr;
 lv_obj_t *paramKeyField=nullptr,*paramValueField=nullptr;
 lv_obj_t *releaseButton=nullptr,*focusLiftField=nullptr,*focusGapField=nullptr,*tipOffsetField=nullptr,
@@ -269,6 +280,80 @@ void updateArea(){
 }
 // LVGL updates need the parameter catalog declared before its definition.
 void refreshCatalog();
+// Version DISCOVERY only. Firmware installation is intentionally disabled
+// until HMI OTA rollback and SKR BOOT0/NRST flashing have been hardware tested.
+// HTTPS is validated against a public CA in update_ca.h: never setInsecure().
+String extractReleaseSha(const String& json){
+    int key=json.indexOf("\"source_sha\"");
+    if(key<0||json.length()>4096)return "";
+    int colon=json.indexOf(':',key+12);
+    if(colon<0)return "";
+    int first=json.indexOf('"',colon+1);
+    if(first<0)return "";
+    int last=json.indexOf('"',first+1);
+    if(last<0)return "";
+    String sha=json.substring(first+1,last);
+    if(sha.length()!=40)return "";
+    for(unsigned i=0;i<sha.length();i++){
+        char c=sha[i];
+        if(!((c>='0'&&c<='9')||(c>='a'&&c<='f')))return "";
+    }
+    return sha;
+}
+void checkLumaCutUpdates(){
+    if(WiFi.status()!=WL_CONNECTED){
+        updateCheckStatus="Updatecheck: WLAN nicht verbunden";return;
+    }
+    // TLS certificate validity cannot be assessed until SNTP synchronizes.
+    if(time(nullptr)<1700000000){
+        updateCheckStatus="Updatecheck: Uhr noch nicht synchron";return;
+    }
+    WiFiClientSecure tls;
+    tls.setCACert(LUMACUT_UPDATE_CA);
+    tls.setTimeout(4);
+    HTTPClient request;
+    request.setConnectTimeout(4000);
+    request.setTimeout(5000);
+    if(!request.begin(tls,"https://luma.millione.de/api/updates/latest")){
+        updateCheckStatus="Updatecheck: HTTPS-Verbindung fehlgeschlagen";return;
+    }
+    int code=request.GET();
+    if(code==200){
+        String body=request.getString();
+        if(body.indexOf("\"available\":true")>=0){
+            String sha=extractReleaseSha(body);
+            if(sha.length()==40){
+                offeredUpdateSha=sha;
+                updateAvailable=(sha!=String(LUMACUT_SOURCE_SHA));
+                updateCheckStatus=updateAvailable?
+                    ("NEUES UPDATE: "+sha.substring(0,12)):
+                    ("HMI-Stand aktuell: "+sha.substring(0,12));
+                if(updateAvailable)
+                    setNotice("LumaCut Update verfuegbar. Unter WLAN/System anzeigen.");
+            }else updateCheckStatus="Updatecheck: Manifest ungueltig";
+        }else if(body.indexOf("\"available\":false")>=0){
+            updateAvailable=false;
+            updateCheckStatus="Noch keine freigegebene Stable-Version";
+        }else updateCheckStatus="Updatecheck: Unerwartetes Manifest";
+    }else{
+        // A TLS mismatch is a failure, not permission to use plaintext HTTP.
+        updateCheckStatus="Updatecheck: Server/TLS Fehler "+String(code);
+    }
+    request.end();
+}
+void updateCheckService(){
+    const uint32_t now=millis();
+    bool periodic=(now>180000u)&&(lastUpdateCheckMs==0||
+              (uint32_t)(now-lastUpdateCheckMs)>21600000u);
+    if(!updateCheckRequested&&!periodic)return;
+    // No networking that can stall the machine command dispatcher mid-job.
+    if(owner!=Owner::None||jobRunning||scriptActive||homingInProgress||
+       (fresh()&&machineState!=MachineState::Idle))return;
+    lastUpdateCheckMs=now;
+    updateCheckRequested=false;
+    checkLumaCutUpdates();
+}
+
 void updateUi(){
     labelChanged(statusLabel,fresh()?stateText():"Keine Verbindung");
     labelChanged(positionLabel,(fresh()&&haveMpos)?
@@ -292,6 +377,7 @@ void updateUi(){
     }
     if(releaseButton)labelChanged(lv_obj_get_child(releaseButton,0),
         motorsReleased?"Aufwecken":"Handbewegung");
+    if(updateLabel)labelChanged(updateLabel,updateCheckStatus);
     if(motorInfo){
         labelChanged(motorInfo,motorsReleased?
             "Schlafmodus: Achsen duerfen bewegt werden.":
@@ -714,6 +800,14 @@ void installRoutes(){
     http.collectHeaders(headers,1);
     http.on("/",HTTP_GET,[]{http.send_P(200,"text/html; charset=utf-8",MOBILE_PORTAL);});
     http.on("/api/status",HTTP_GET,[]{if(!auth()){fail(401,"Code erforderlich");return;}http.send(200,"application/json",jsonStatus());});
+    http.on("/api/update/status",HTTP_GET,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        String payload="{\"local_sha\":\""+String(LUMACUT_SOURCE_SHA)+
+            "\",\"offered_sha\":\""+offeredUpdateSha+
+            "\",\"available\":"+(updateAvailable?String("true"):String("false"))+
+            ",\"hmi_ota_ready\":false,\"skr_ota_ready\":false}";
+        http.send(200,"application/json",payload);
+    });
     http.on("/api/machine",HTTP_GET,[]{
         if(!auth()){fail(401,"Code erforderlich");return;}
         http.send(200,"application/json",jsonMachine());
@@ -824,6 +918,7 @@ void bleUpdate(){
     bleStatus->setValue((uint8_t*)state.c_str(),state.length());
 }
 void networkInit(){
+    configTime(0,0,"pool.ntp.org","time.cloudflare.com");
     wifiSsid=prefs.getString("ssid","");
     wifiPass=prefs.getString("wpw","");
     apName="LumaCut-"+String((uint32_t)(ESP.getEfuseMac()&0xffff),HEX);
@@ -1092,6 +1187,9 @@ void makeUi(){
         lv_obj_set_style_border_width(field,0,0);
     }
     btn(c,"Mit WLAN verbinden",415,189,333,54,"wifi",BLUE,BG);
+    btn(c,"Updates pruefen",20,206,356,41,"updatecheck",PALE_BLUE,BLUE);
+    updateLabel=lbl(c,"Noch nicht geprueft",20,247,14,SUBTLE);
+    lv_obj_set_width(updateLabel,390);
 
     // ARBEITSFLAECHE: true XY machine position in an explicitly defined square.
     c=card(pages[5],0,0,304,268);
@@ -1390,6 +1488,11 @@ void action(const char* id){
             editTarget=nullptr;
             setNotice("Eingabe uebernommen.");updateUi();
         }
+        return;
+    }
+    if(op=="updatecheck"){
+        updateCheckRequested=true;
+        setNotice("LumaCut Stable-Updates werden per HTTPS geprueft.");
         return;
     }
     if(op=="setupgo"){switchTab(5);return;}
@@ -1693,6 +1796,7 @@ void loop(){
     }
     internalJobService();
     bleUpdate();
+    updateCheckService();
     lv_timer_handler();
     // Collect actual GRBL persistent limits and axis polarity once controller is
     // available; do not fabricate travel distances from the nominal frame size.
