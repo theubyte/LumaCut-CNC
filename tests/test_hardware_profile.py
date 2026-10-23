@@ -20,12 +20,15 @@ class HardwareProfileTests(unittest.TestCase):
             self.assertIn(f"{axis}: {{count: 1,", CONFIG)
 
     def test_one_physical_z_switch(self):
-        self.assertIn("physical_switch_count: 1", CONFIG)
+        self.assertIn("shared_z_switch_count: 1", CONFIG)
+        self.assertIn("total_axis_endstop_count: 3", CONFIG)
         self.assertIn("physical_signal_pin: PC2", CONFIG)
         self.assertIn("pc14_probe_input_wired: false", CONFIG)
         self.assertIn("probing_enabled_in_firmware: false", CONFIG)
         self.assertIn("x_switch_present: true", CONFIG)
+        self.assertIn("x_endstop_pin: PC0", CONFIG)
         self.assertIn("y_switch_present: true", CONFIG)
+        self.assertIn("y_endstop_pin: PC1", CONFIG)
 
     def test_regular_xyz_homing_reenabled(self):
         self.assertIn('if(op=="home"){', CONTROL)
