@@ -93,3 +93,16 @@ Unter **Fokus / Taster → Probe konfigurieren** ist dazu ein **Z-Test 0,5 mm** 
 **Testabfolge ohne Laserenergie:** Zuerst im HMI **Setup → $$ Lesen** die realen `$1`, `$20`, `$130`, `$131`, `$132` kontrollieren; gemessene Achswege erst danach über die Felder **Speichern**; sicherstellen, dass der SKR bestätigt; Soft Limits bei geprüften Endschaltern aktivieren; dann XYZ referenzieren; Z-Test mit wenigen Zehntelmillimetern in bekannter Richtung; **Z-Richtung OK**; anschließend Auto-Z unter **Fokus/Taster** freigeben und unter Aufsicht testen. Wenn das HMI den Wert bestätigt, Motoren aber nicht halten, ist weitere Hardware-/Treiberdiagnose nötig.
 
 Dies sind Quellcode- und Buildtests; eine reale Bewegungsprüfung auf der Maschine ist dadurch **nicht** ersetzt.
+
+## Revision 24.10.2026: Positive HMI-Koordinaten und Z-Zielposition 7 mm
+
+grblHAL verwendet standardmäßig einen **negativen Maschinenkoordinatenraum** von ungefähr `-Verfahrweg` bis `0`. Nach `$H` und einem `$27=1`-mm-Schalterrückzug kann die Rohposition deshalb beispielsweise `MPos Z=-1,00` sein, obwohl Homing und Bewegungsrichtung korrekt sind. **Das ist kein Vorzeichenfehler der Schrittmotoren.**
+
+Das HMI zeigt bei der Grundeinstellung **`zero_at_max=true`** die positive Entfernung vom Maschinenreferenzpunkt:
+`X_display=-MPos.X`, `Y_display=-MPos.Y`, `Z_display=-MPos.Z`. Beispiel: `MPos:-1,-1,-1` wird `X:+1,00 Y:+1,00 Z:+1,00`. Diese Umrechnung findet **nur** in der Bedienoberfläche und in den zusätzlich angebotenen `display_x_mm/display_y_mm/display_z_mm`-JSON-Feldern statt. Die nativen Werte `coordinates.x_mm/y_mm/z_mm`, Maschinenstatus und G-Code/LightBurn bleiben unverändert. Die bestehende XY-Arbeitsfeldkarte arbeitet weiterhin mit echten MPos-Werten.
+
+Der HMI-Wert **Z-Rückzug 7 mm** ist jetzt eine **absolute positive Zielposition gemessen vom Maschinenreferenzpunkt**, nicht ein additiver relativer Hub nach der bereits ausgeführten Schalterfreifahrt. Beispiel: Z direkt nach Homing zeigt `+1,00` (MPos `-1,00`); Ziel Z `+7,00` entspricht MPos `-7,00`, also nur noch einem **6-mm-Bewegungsbefehl**. Motorpolung `$3` und Homingrichtung `$23` bleiben dabei unverändert.
+
+Eine Z-Fahrt wird nur bei erfolgreichem Homing, gültiger Live-Maschinenposition, bekannter tatsächlicher Z-Verfahrlänge `$132`, freier GRBL-Steuerung und Ziel **innerhalb** des überprüften Maschinenraums ausgeführt. Für die aus dem HMI angeforderte, lokal begrenzte Z-Freifahrt ist `$20=1` nicht mehr zwingend, obwohl eingeschaltete Soft Limits im SKR ausdrücklich empfohlen bleiben. Wenn `$132` oder `MPos` fehlt, wird der spezifische fehlende Wert angezeigt statt einer endlosen Wartemeldung. Laser-Aus wird vor der Z-Bewegung gesendet.
+
+**Wichtig:** Die 7 mm sind zunächst der Bezug zu der über den Endschalter festgelegten Z-Maschinenreferenz. Ob sie genau **7 mm optischen Abstand zum Werkstück** ergeben, ist eine andere Frage und muss mit dem Taster-/Werkstück-Offset kalibriert werden. Die neue Umrechnung ändert keine Motorpins und ist nicht die Einführung eines neuen GRBL-Koordinatensystems für LightBurn.
