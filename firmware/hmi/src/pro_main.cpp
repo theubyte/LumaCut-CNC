@@ -171,7 +171,7 @@ void updateUi(){
         if(fresh()&&haveMpos)lv_label_set_text_fmt(positionLabel,"X %.2f   Y %.2f   Z %.2f",mx,my,mz);
         else lv_label_set_text(positionLabel,"X --.--   Y --.--   Z --.--");
     }
-    if(sourceLabel)lv_label_set_text(sourceLabel,ownerText());
+    if(sourceLabel)lv_label_set_text(sourceLabel,uiText(String(ownerText())).c_str());
     if(jobLabel){
         String t=selectedJob.length()?"Datei: "+selectedJob:"Noch keine Datei ausgewählt";
         if(bounds.valid)t+="  ·  "+String(bounds.x1-bounds.x0,1)+" × "+String(bounds.y1-bounds.y0,1)+" mm";
@@ -245,13 +245,13 @@ void parseMachineLine(const String& line){
         bool ok=line=="ok";
         if(homingInProgress){
             if(ok){machineHomed=true;setNotice("Referenzfahrt bestätigt.");}
-            else{machineHomed=false;setNotice("Referenzfahrt fehlgeschlagen: "+line);}
+            else{machineHomed=false;setNotice(line=="error:5"?"Homing im SKR deaktiviert. Unter System $22=1 aktivieren.":"Referenzfahrt fehlgeschlagen: "+line);}
             homingInProgress=false;
         }
         if((owner==Owner::Script)&&commandPending){
             commandPending=false;
             if(ok)nextScript();
-            else{scriptActive=false;scriptCount=0;owner=Owner::None;setNotice("Makro gestoppt: "+line);}
+            else{scriptActive=false;scriptCount=0;owner=Owner::None;setNotice(line=="error:5"?"Homing im SKR ausgeschaltet ($22=0).":"Befehl fehlgeschlagen: "+line);}
         } else if(owner==Owner::Internal&&commandPending){
             commandPending=false;
             if(!ok){jobRunning=false;if(jobFile)jobFile.close();feedHold();setNotice("G-Code-Fehler: "+line+". Maschine angehalten.");}
@@ -627,7 +627,7 @@ void networkInit(){
     bleInit();
 }
 lv_obj_t* lbl(lv_obj_t* parent,const String& text,int x,int y,int px,uint32_t color=INK){
-    lv_obj_t* p=lv_label_create(parent);lv_label_set_text(p,text.c_str());
+    lv_obj_t* p=lv_label_create(parent);lv_label_set_text(p,uiText(text).c_str());
     lv_obj_set_pos(p,x,y);lv_obj_set_style_text_color(p,lv_color_hex(color),0);
     if(px>=28)lv_obj_set_style_text_font(p,&lv_font_montserrat_28,0);
     else if(px>=20)lv_obj_set_style_text_font(p,&lv_font_montserrat_20,0);
@@ -648,7 +648,7 @@ lv_obj_t* btn(lv_obj_t* parent,const char* text,int x,int y,int w,int h,const ch
     lv_obj_set_style_radius(p,14,0);lv_obj_set_style_bg_color(p,lv_color_hex(bg),0);
     lv_obj_set_style_shadow_width(p,0,0);
     if(op)lv_obj_add_event_cb(p,actionCb,LV_EVENT_CLICKED,(void*)op);
-    lv_obj_t* t=lv_label_create(p);lv_label_set_text(t,text);lv_obj_center(t);
+    lv_obj_t* t=lv_label_create(p);lv_label_set_text(t,uiText(String(text)).c_str());lv_obj_center(t);
     lv_obj_set_style_text_color(t,lv_color_hex(fg),0);lv_obj_set_style_text_font(t,&lv_font_montserrat_14,0);
     return p;
 }
