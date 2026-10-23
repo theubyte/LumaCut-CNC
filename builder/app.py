@@ -2,8 +2,9 @@
 from __future__ import annotations
 from pathlib import Path
 from datetime import datetime, timezone
+from statistics import median
 import base64, hashlib, hmac, json, os, re, secrets, shutil, signal, subprocess, threading, zipfile
-from flask import Flask, Response, request, abort, jsonify, send_from_directory
+from flask import Flask, Response, request, abort, jsonify, send_from_directory, send_file
 from flash_bundle import build_flash_package, flash_manifest, IMAGE_NAME
 
 ROOT=Path("/data")
@@ -19,6 +20,35 @@ ID_RE=re.compile(r"^[a-f0-9]{16}$")
 app=Flask(__name__)
 lock=threading.Lock()
 running=None
+STAGES={
+    "lumacut_complete_suite_unverified":["GitHub-Quellen","SKR grblHAL kompilieren","Waveshare HMI kompilieren","Komplettpaket erstellen"],
+    "stm32_hmi_bridge_unverified":["GitHub-Quellen","SKR grblHAL kompilieren","Firmware vorbereiten"],
+    "stm32_project_unverified":["GitHub-Quellen","SKR grblHAL kompilieren","Firmware vorbereiten"],
+    "esp32_hmi_pro_unverified":["GitHub-Quellen","Waveshare HMI kompilieren","Flashpaket erstellen"],
+    "esp32_hmi_unverified":["GitHub-Quellen","Waveshare HMI kompilieren","Flashpaket erstellen"],
+    "esp32_hmi_keypad_unverified":["GitHub-Quellen","Waveshare HMI kompilieren","Flashpaket erstellen"],
+    "tests":["GitHub-Quellen","Projekt-Tests","Pruefbericht erstellen"]
+}
+WEIGHTS={
+    "lumacut_complete_suite_unverified":[0.08,0.38,0.44,0.10],
+    "stm32_hmi_bridge_unverified":[0.09,0.81,0.10],
+    "stm32_project_unverified":[0.09,0.81,0.10],
+    "esp32_hmi_pro_unverified":[0.07,0.83,0.10],
+    "esp32_hmi_unverified":[0.07,0.83,0.10],
+    "esp32_hmi_keypad_unverified":[0.07,0.83,0.10],
+    "tests":[0.12,0.80,0.08]
+}
+# Cold-start estimates until this machine has finished a job in each category.
+# Clearly marked as approximations in the UI, not fabricated completion times.
+BASELINE_SECONDS={
+    "lumacut_complete_suite_unverified":1200,
+    "stm32_hmi_bridge_unverified":330,
+    "stm32_project_unverified":330,
+    "esp32_hmi_pro_unverified":950,
+    "esp32_hmi_unverified":950,
+    "esp32_hmi_keypad_unverified":950,
+    "tests":100
+}
 
 @app.before_request
 def auth():
@@ -38,6 +68,76 @@ def save(folder,obj):
     temp=folder/"manifest.tmp"
     temp.write_text(json.dumps(obj,indent=2,ensure_ascii=False),encoding="utf-8")
     temp.replace(folder/"manifest.json")
+
+def mark_stage(folder,meta,index):
+    names=STAGES.get(meta["target"],["Build"])
+    meta["stage_index"]=index
+    meta["stage"]=names[min(index,len(names)-1)]
+    meta["stage_started_utc"]=datetime.now(timezone.utc).isoformat()
+    save(folder,meta)
+
+def elapsed_seconds(meta):
+    try:
+        started=datetime.fromisoformat(meta.get("created_utc",""))
+        stop=datetime.fromisoformat(meta.get("finished_utc","")) if meta.get("finished_utc") else datetime.now(timezone.utc)
+        return max(0,int((stop-started).total_seconds()))
+    except (ValueError,TypeError):
+        return 0
+
+def progress_info(meta):
+    state=meta.get("status","")
+    duration=elapsed_seconds(meta)
+    if state in ("success","failed"):
+        return {"progress_pct":100 if state=="success" else int(meta.get("progress_pct",0)),
+                "elapsed_seconds":duration,"eta_seconds":0,"stage":meta.get("stage","Fertig"),
+                "eta_source":"finished"}
+    target=meta.get("target","")
+    weight=WEIGHTS.get(target,[1.0])
+    index=min(max(int(meta.get("stage_index",0)),0),len(weight)-1)
+    base=sum(weight[:index])
+    within=.08
+    stage=meta.get("stage","Starte Build")
+    file=ART/meta.get("id","")/"build.log"
+    if file.is_file():
+        try:
+            with file.open("rb") as stream:
+                stream.seek(max(0,file.stat().st_size-280000))
+                text=stream.read().decode("utf-8",errors="replace")
+            if index==0:
+                within=.64 if "Cloning into" in text else .14
+            elif "kompilieren" in stage:
+                # Counts actual compiler output, never claims complete before
+                # PlatformIO reports success.
+                marker="lumacut_waveshare" if "HMI" in stage else "lumacut_skr"
+                count=sum(1 for line in text.splitlines() if "Compiling .pio/build/" in line and marker in line)
+                reference=410 if "HMI" in stage else 215
+                within=min(.89,max(.02,count/reference))
+                tail=text[-3500:]
+                if "Linking .pio/build/" in tail and marker in tail: within=max(within,.93)
+                if "Building .pio/build/" in tail and marker in tail: within=max(within,.96)
+            else:
+                within=.4
+        except OSError:
+            pass
+    pct=min(98,max(0,int(100*(base+weight[index]*within))))
+    prior=[]
+    for job in ART.iterdir():
+        if not job.is_dir() or job.name==meta.get("id"): continue
+        m=job/"manifest.json"
+        if not m.is_file(): continue
+        try:
+            v=json.loads(m.read_text(encoding="utf-8"))
+            if v.get("target")==target and v.get("status")=="success":
+                prior.append(elapsed_seconds(v))
+        except (OSError,ValueError):
+            pass
+        if len(prior)>=16: break
+    expected=int(median(prior)) if prior else BASELINE_SECONDS.get(target,600)
+    # Blend time history with observed build progress after early startup.
+    inferred=int(duration*(100-pct)/max(pct,1)) if duration>20 and pct>=10 else expected-duration
+    eta=max(0,int(.6*max(0,expected-duration)+.4*max(0,inferred)))
+    return {"progress_pct":pct,"elapsed_seconds":duration,"eta_seconds":eta,
+            "stage":stage,"eta_source":"history" if prior else "baseline"}
 
 def run(args,cwd,log,timeout):
     log.write("$ "+" ".join(args)+"\n")
@@ -63,7 +163,8 @@ def perform(job_id,target):
     work.mkdir()
     meta={"id":job_id,"target":target,"status":"running",
           "created_utc":datetime.now(timezone.utc).isoformat(),"repository":REPO,
-          "branch":BRANCH,"source_sha":None,"flash_ready":False,"files":[]}
+          "branch":BRANCH,"source_sha":None,"flash_ready":False,"files":[],
+          "stage_index":0,"stage":STAGES[target][0]}
     save(folder,meta)
     try:
         with (folder/"build.log").open("w",encoding="utf-8",buffering=1) as log:
@@ -75,12 +176,15 @@ def perform(job_id,target):
             save(folder,meta)
             log.write("SOURCE: "+sha+"\n")
             if target=="tests":
+                mark_stage(folder,meta,1)
                 run(["python","-m","unittest","discover","-s","tests","-v"],src,log,120)
                 run(["python","-m","py_compile","builder/app.py","tools/probe_math.py"],src,log,60)
+                mark_stage(folder,meta,2)
             elif target=="lumacut_complete_suite_unverified":
                 # Build one source commit into a paired, self-contained release.
                 skr=src/"firmware"/"skr"
                 hmi=src/"firmware"/"hmi"
+                mark_stage(folder,meta,1)
                 run(["python","build.py","--bridge"],skr,log,2100)
                 skr_out=skr/".pio"/"build"/"lumacut_skr_mz_hmi_uart"
                 for fn in ("firmware.bin","firmware.elf"):
@@ -90,10 +194,12 @@ def perform(job_id,target):
                     shutil.copy2(src_file,dst)
                     meta["files"].append({"name":dst.name,"bytes":dst.stat().st_size,
                         "sha256":hashlib.sha256(dst.read_bytes()).hexdigest()})
+                mark_stage(folder,meta,2)
                 run(["pio","run","-e","lumacut_waveshare_s3_pro"],hmi,log,2100)
                 hmi_out=hmi/".pio"/"build"/"lumacut_waveshare_s3_pro"
                 meta["files"].extend(build_flash_package(hmi_out,folder,sha,
                     "lumacut_waveshare_s3_pro",Path(__file__).resolve().parent))
+                mark_stage(folder,meta,3)
                 release=folder/"LumaCut-Control-OS-Komplettpaket.zip"
                 with zipfile.ZipFile(release,"w",zipfile.ZIP_DEFLATED) as z:
                     z.write(folder/"SKR_UART_UNVERIFIED_firmware.bin",
@@ -129,6 +235,7 @@ def perform(job_id,target):
                 project=src/"firmware"/key
                 if not (project/"platformio.ini").is_file():
                     raise RuntimeError("Firmware not implemented yet: firmware/"+key+"/platformio.ini missing")
+                mark_stage(folder,meta,1)
                 if key=="skr":
                     run(["python","build.py"]+(["--bridge"] if target=="stm32_hmi_bridge_unverified" else []),project,log,2100)
                 else:
@@ -145,6 +252,7 @@ def perform(job_id,target):
                         "sha256":hashlib.sha256(dest.read_bytes()).hexdigest()})
                     found=True
                 if not found: raise RuntimeError("Build produced no firmware artifact")
+                mark_stage(folder,meta,2)
                 if key=="hmi":
                     # Complete HMI image is flashable, but not hardware-validated.
                     flash_files=build_flash_package(
@@ -154,8 +262,12 @@ def perform(job_id,target):
                     meta["flash_package"]=True
                     log.write("ESP32-S3 image + Windows localhost flash package ready.\n")
             meta["status"]="success"
+            meta["stage"]="Abgeschlossen"
+            meta["progress_pct"]=100
     except Exception as exc:
+        meta["progress_pct"]=progress_info(meta)["progress_pct"]
         meta["status"]="failed"
+        meta["stage"]="Fehlgeschlagen"
         meta["error"]=str(exc)
         with (folder/"build.log").open("a",encoding="utf-8") as log: log.write("\nERROR: "+str(exc)+"\n")
     finally:
@@ -177,7 +289,10 @@ def jobs():
             try: result.append(json.loads((folder/"manifest.json").read_text()))
             except (ValueError,OSError): continue
     with lock: current=running
-    return jsonify({"active":current,"jobs":sorted(result,key=lambda m:m["created_utc"],reverse=True)[:50]})
+    result=sorted(result,key=lambda m:m.get("created_utc",""),reverse=True)[:50]
+    for item in result:
+        item.update(progress_info(item))
+    return jsonify({"active":current,"jobs":result,"server_utc":datetime.now(timezone.utc).isoformat()})
 
 @app.post("/api/build")
 def build():
