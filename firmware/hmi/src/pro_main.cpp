@@ -175,6 +175,8 @@ bool idle(){return fresh()&&machineState==MachineState::Idle;}
 bool armed(){return localArmUntil && int32_t(localArmUntil-millis())>0;}
 bool wifiHostAuthorized(){return wifiHostUntil && int32_t(wifiHostUntil-millis())>0;}
 bool canCommand(){return owner==Owner::None&&idle();}
+bool canConfigure(){return owner==Owner::None&&fresh()&&
+    (machineState==MachineState::Idle||machineState==MachineState::Alarm);}
 bool canMotion(){return canCommand()&&machineHomed&&haveMpos&&
     softLimitsEnabled&&workX>0&&workY>0&&workZ>0;}
 String uiText(String s){
@@ -287,7 +289,7 @@ void nextScript(){
     writeCmd(script[scriptIndex++]);commandPending=true;
 }
 bool startScript(const String* commands,int count,bool motion=false){
-    if(!canCommand()||(motion&&!canMotion())||count<1||count>12)return false;
+    if(!canConfigure()||(motion&&!canMotion())||count<1||count>12)return false;
     if(!claim(Owner::Script))return false;
     for(int i=0;i<count;i++)script[i]=commands[i];
     scriptCount=count;scriptIndex=0;scriptActive=true;
@@ -1255,7 +1257,7 @@ void loop(){
     lv_timer_handler();
     // Collect actual GRBL persistent limits and axis polarity once controller is
     // available; do not fabricate travel distances from the nominal frame size.
-    if(!settingsRequested&&millis()>4500&&idle()&&owner==Owner::None){
+    if(!settingsRequested&&millis()>4500&&canConfigure()){
         settingsRequested=true;
         String cmds[]={"$$"};startScript(cmds,1);
     }
