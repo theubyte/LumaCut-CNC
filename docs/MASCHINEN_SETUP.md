@@ -47,3 +47,33 @@ Die ESP32-S3-HMI nutzt nun einen DRAM-*Bounce-Buffer* für RGB-Panel-DMA (`W*10`
 - [grblHAL Motor-Plugin Sensorless](https://github.com/grblHAL/Plugins_motor)
 - [Mini MZ Klipper-Pins](https://github.com/Klipper3d/klipper/blob/master/config/generic-bigtreetech-skr-mini-mz.cfg)
 - [LumaCut Hardwareprofil](HARDWARE.md)
+
+## Touch-Tastatur und Eingabedialog (Revision 23.10.2026)
+
+Auf Touch einer beliebigen HMI-Eingabe (WLAN, Passwort, Makroname, GRBL-ID/Wert, XYZ-Verfahrweg, Z-Rückzug, Fokusabstand oder mechanischer Tasteroffset) erscheint jetzt **ein vollständig bildschirmfüllender Editor** mit sichtbarem Textfeld oberhalb der Tastatur und großen Schaltflächen **Speichern** und **Zurück**. Die Verbindung nutzt LVGL-Ereignis `LV_EVENT_CLICKED`, nicht das auf dem GT911 vorher unzuverlässige FOCUS-Ereignis. Zahlfelder aktivieren ein numerisches Keyboard. Ohne Hardwaretest ist die Touch-Tastatur nicht als vollständig verifiziert anzusehen.
+
+## Fokusprofil und Z-Rückzug nach Homing
+
+Das HMI speichert drei unabhängige Werte in den Preferences des Waveshare: **Z-Rückzug nach normalem XYZ-Homing**, **optischer Soll-Fokusabstand** (beide zunächst 7 mm) und **optischer Abstand des Laserkopf-Datums zur Werkstückoberfläche genau beim Tasterkontakt** (Tasteroffset, zunächst 0 mm als unkallibrierter Platzhalter). Negative Retractwerte erlauben abhängig von der tatsächlichen Achsorientierung Bewegungen in negativer Z-Richtung. Die Werte müssen anhand der Optik und des Tastpunkts gemessen werden.
+
+Nach erfolgreichem **vom HMI gestarteten** `$H` sendet die HMI-Sequenz `$1=255` an den SKR und fordert – **nur wenn die aktuelle MPos-Position und die gespeicherten Soft Limits den Weg zulassen** – einen absoluten kleinen Z-Rückzug per GRBL-Jogging mit ausgeschaltetem Laser (`M5`) an. Ist der gewünschte Weg außerhalb `$132`, wird **nicht gefahren**, sondern die Bedienoberfläche zeigt eine konkrete Meldung. Gerade beim Z-Homing in positiver Richtung kann `Z+7` nach der Referenzfahrt gegen das obere Limit zeigen. Deshalb ist das Vorzeichen der Rückzugsstrecke im HMI einstellbar und darf nicht geraten werden. Die optische tatsächliche Brennweite wird dadurch nicht selbstkalibriert.
+
+## Werkstückabtastung mit dem vorhandenen Z-Taster
+
+Da an **PC2** derselbe mechanische Schalter für Z-Endstop und Werkstückkontakt hängt und **PC14** nicht belegt ist, bleibt echtes `G38.2`-Probing deaktiviert. Eine gemeinsame GPIO-Verwendung als Limit-Interrupt und Probe ohne definierte Umschaltung könnte den Lauf abbrechen oder einen mechanischen Fehler verursachen.
+
+**Neu implementiert ist eine alternative Z-Werkstückreferenzierung über `$HZ`:** Nach vollständigem XYZ-Homing und gültigen Verfahrwegen kann im HMI unter **Fokus / Taster → Probe konfigurieren** der spezielle **Kopf-Taster-Modus** aktiviert werden. Dies ist nur sinnvoll, wenn der am Laserkopf montierte Z-Schalter tatsächlich die **Oberfläche des Werkstücks** tastet. Dann sendet das HMI in einer quittierten GRBL-Sequenz `M5`, `$22=3` (Homing plus achsspezifisches Homing), `$HZ` und `$1=255`. Danach wird bei gültigen Soft Limits ein konfigurierter optischer Rückzug von `Soll-Fokusabstand minus optischer Abstand beim Schalterkontakt` gefahren. Bei Standardwerten 7 mm - 0 mm sind das +7 mm. Ein Z-Homing verändert jedoch die Z-Maschinenreferenz und ist **kein metrisches G38-Probing mit separater Tastposition**. Die Z-Suchrichtung `$23`, `$24/$25`, der Schalterhub und reale Bewegungsgrenzen müssen vor dem ersten Versuch überprüft werden. Eine maximale Z-Taststrecke wird vom HMI aktuell **nicht separat auf z. B. 15 mm begrenzt**; `$HZ` nutzt die im SKR konfigurierten Homing-Grenzen. Es ist deshalb keine generell sichere automatische Vermessung beliebiger Werkstückhöhen.
+
+Das SKR-Build enthält jetzt die zugehörigen Factory-Defaults `DEFAULT_HOMING_ENABLE=1`, `DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1` und `DEFAULT_STEPPER_IDLE_LOCK_TIME=255`. Bereits in grblHAL gespeicherte NVS/EEPROM-Einstellungen gehen Factory-Defaults vor; die HMI-Sequenz schreibt beim Z-Einzelhoming ausdrücklich `$22=3`.
+
+## Haltemoment statt mechanischer Bremse
+
+Unter **Fokus / Taster → Motoren halten** wird `$1=255` geschrieben. Die Schrittmotoren bleiben nach dem Stillstand im Haltestrom, soweit Treiberstrom, Temperatur und Controllerzustand das erlauben. **Handbewegung** setzt `$1=0`, wartet auf die GRBL-Bestätigung und verwirft die Positionsreferenz im HMI; nach jeder Handverstellung muss die Maschine erneut referenziert werden. Das ist **keine physische Bremse**: Überwindet äußere Kraft das Haltemoment, verliert die offene Schrittkette Schritte, ohne dass das Board es feststellen kann. Für eine echte Haltebremse ist zusätzliche Hardware mit sicherer Ansteuerung und meist Positionsrückmeldung notwendig.
+
+## Touch auf das Live-Arbeitsfeld
+
+Die 210×210-Ansicht besitzt eine transparente aktive Touchfläche. Nach erfolgreichem Homing, bei verfügbarer `MPos`, aktivem `$20` und bekannten `$130/$131/$132` wird die angetippte XY-Position in Maschinenkoordinaten (`G53`) abgebildet und mit einer 1-mm-Randreserve innerhalb der gemessenen Grenzen gehalten. Das HMI sendet `M5` und danach ein `G53 G0 X… Y…`. Ein nicht referenzierter oder mit einem externen Host beschäftigter Controller wird nicht für lokales Verfahren übernommen. Die Route ist damit **keine Hinderniserkennung**: vor der XY-Fahrt muss ausreichend Z-Freiheit bestehen. Das antippbare Quadrat ist eine grafische normierte Ansicht; das Seitenverhältnis der realen Fläche wird rechnerisch berücksichtigt.
+
+## Parametervielfalt im HMI
+
+Der gruppierte HMI-Katalog liest die tatsächlich vom SKR mit `$$` gemeldeten Werte und enthält Schrittpuls (µs), Schrittpuls- und Motor-Inversion, Motor-Haltestrom, Endstop-/Probe-Polarität, X/Y/Z-Schritte pro Millimeter, X/Y/Z-Höchstgeschwindigkeit, X/Y/Z-Beschleunigung, Verfahrwege, Homing-Such- und Tastgeschwindigkeit, Homing-Entprellung/Freifahrt, Laser-Leistungs-Minimum/Maximum, `$32` Lasermodus, `$33` PWM-Frequenz, Statusmasken und weitere Firmwareoptionen. TMC-Strom/Mikroschritte werden **nur gezeigt, wenn das SKR die entsprechenden erweiterten Parameter tatsächlich meldet**; mit dem installierten Firmwareprofil darf die Existenz des Motor-Plugins nicht vorausgesetzt werden. Für weitere Nummern gibt es im Setup den GRBL-Parametereditor `$ID=Wert`, der den Controller quittieren lässt.
