@@ -71,6 +71,45 @@ class BuildLabFlaskTests(unittest.TestCase):
         self.assertEqual(result.data,b"REAL_TEST_FIRMWARE")
         self.assertIn("firmware.bin",result.headers.get("Content-Disposition",""))
 
+    def test_update_release_requires_approval_and_paired_images(self):
+        import hashlib
+        release_id="fedcba9876543210"
+        folder=self.module.ART/release_id
+        folder.mkdir()
+        items={}
+        files=[]
+        for role,name in (("hmi","HMI_OTA_APP_UNVERIFIED.bin"),
+                          ("skr","SKR_UART_UNVERIFIED_firmware.bin")):
+            binary=(role+" test compiled bytes").encode()
+            (folder/name).write_bytes(binary)
+            digest=hashlib.sha256(binary).hexdigest()
+            files.append({"name":name,"bytes":len(binary),"sha256":digest})
+        manifest={"id":release_id,"status":"success",
+                  "target":"lumacut_complete_suite_unverified",
+                  "paired_firmware":True,
+                  "source_sha":"a"*40,"files":files}
+        (folder/"manifest.json").write_text(json.dumps(manifest))
+        first=self.client.get("/api/updates/latest")
+        self.assertEqual(first.status_code,200)
+        self.assertFalse(first.get_json()["available"])
+        denied=self.client.post("/api/updates/approve",json={"job_id":release_id})
+        self.assertEqual(denied.status_code,401)
+        approved=self.client.post("/api/updates/approve",
+            json={"job_id":release_id},
+            headers={**self.auth,"X-LumaCut-Action":"build"})
+        self.assertEqual(approved.status_code,200)
+        info=self.client.get("/api/updates/latest")
+        self.assertTrue(info.get_json()["available"])
+        self.assertEqual(info.get_json()["source_sha"],"a"*40)
+        self.assertFalse(info.get_json()["automatic_skr_flash_enabled"])
+        self.assertFalse(info.get_json()["hmi_ota_enabled"])
+        self.assertEqual(
+            self.client.get("/api/updates/file/hmi").status_code,401)
+        # Even an approved release cannot be downloaded over the device API
+        # until the operator provisions a separate device credential.
+        self.assertEqual(self.client.get("/api/updates/file/hmi",
+            headers=self.auth).status_code,503)
+
     def test_restrict_assets_and_build_targets(self):
         self.assertEqual(self.client.get("/ui/app.py",headers=self.auth).status_code,404)
         response=self.client.post("/api/build",headers={**self.auth,
