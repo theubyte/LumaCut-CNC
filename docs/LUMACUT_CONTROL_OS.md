@@ -40,9 +40,15 @@ LightBurn-Projektdateien `.lbrn2` können nicht nativ vom HMI interpretiert werd
 
 ESP32-S3 hat nur BLE und kein klassisches Bluetooth-SPP. Das HMI veröffentlicht einen read-only BLE-Maschinenzustand, **kein direktes LightBurn-Bluetooth-Serial**. BLE Service `a50d8324-5e0d-42db-92f8-c3f3b5b93051`, Status-Characteristic `a50d8324-5e0d-42db-92f8-c3f3b5b93052`.
 
+### Physische Achsen und gemeinsamer Taster (Korrektur 23.10.2026)
+
+Das reale Gerät hat **genau einen Motor pro Achse (X, Y, Z)**. Der E/M3-Treiber ist frei. Es gibt **nur einen mechanischen Taster am Laserkopf**, der zugleich für Z-Endposition und später Werkstückabtastung vorgesehen ist. X/Y besitzen derzeit **keine** Referenzschalter. Physischer Z-Taster wird auf **PC2/Z-STOP** vorgesehen; **PC14/PROBE bleibt unbenutzt**.
+
+Die aktuelle Firmware **deaktiviert Probe (G38.x)**, denn grblHAL verarbeitet Limit und Probe standardmäßig als verschiedene Funktionen. Das Gerät führt derzeit auch **kein automatisches XYZ-Homing** aus: dessen HMI-Button ist gesperrt, solange X/Y-Schalter fehlen. Vor einer späteren Doppelverwendung muss das sichere Umschalten zwischen Z-Limit- und Probe-Betrieb implementiert und hardwaregetestet werden. Taster nicht unkontrolliert parallel an PC2 und PC14 legen. Siehe [Hardwareprofil](HARDWARE.md).
+
 ### Makros / Parkpositionen
 
-Die Oberfläche erlaubt drei gespeicherte XY-Parkpositionen, die im HMI dauerhaft abgelegt werden. Nach Homing und lokaler Zeitfreigabe aktuelle Maschinen-X/Y speichern und in Idle mit `M5`, `G21 G90`, `G53 G0 X... Y...` anfahren. Kein automatisches Z-Verfahren: Eine sichere Kollisionsfreihöhe kann ohne genaue Maschineinrichtung nicht angenommen werden. Diese Funktion erfordert einen von Hindernissen freien Fahrweg.
+Die Oberfläche erlaubt drei gespeicherte XY-Parkpositionen, die im HMI dauerhaft abgelegt werden. Nach verifizierter Achsreferenz und lokaler Zeitfreigabe aktuelle Maschinen-X/Y speichern und in Idle mit `M5`, `G21 G90`, `G53 G0 X... Y...` anfahren. Kein automatisches Z-Verfahren: Eine sichere Kollisionsfreihöhe kann ohne genaue Maschineinrichtung nicht angenommen werden. Diese Funktion erfordert einen von Hindernissen freien Fahrweg.
 
 ### Jobsteuerung / Framing
 
@@ -53,11 +59,11 @@ Für lokale G-Code-Jobs wartet das HMI auf grblHAL-Antworten pro Zeile. Hold mit
 ## Wichtige Grenzen
 
 - Kompiliert bedeutet nicht elektrisch oder funktional auf echter Hardware validiert.
-- Nach Reset und vor eigener Bewegung ist Homing `$H` nötig; beim Jog/Start außerdem `Idle`-Status und lokale 30-Sekunden-Freigabe.
+- Mit nur einem Z-Taster und ohne X/Y-Endschalter ist `$H` gesperrt; bis zu einer geprüften Referenzstrategie bleiben Bewegungen/Makros aus dem Touchpanel ebenfalls gesperrt. Externe GRBL-Hosts müssen Arbeitsbereich und Koordinaten eigenständig kontrollieren.
 - Eine abreißende WLAN-Verbindung oder ausbleibende SKR-Statusmeldung fordert Feed Hold an und blockiert weitere eigene Zeilen, garantiert aber keine sichere Laser-Stromunterbrechung.
 - Ein extern verdrahteter Not-Aus und eine hardwarewirksame Laser-Leistungsfreigabe sind unabdingbar.
 - Der Frame-Interpreter lehnt relative Bewegungen, Bögen/Arcs, Koordinatenverschiebungen und andere nicht unterstützte Modalbefehle ab; er ist **keine vollständige LightBurn-Pfadvorschau**. Solche Dateien können weiterhin über LightBurn an den GRBL-Stream gesendet werden, aber nicht mit der HMI-Rahmenfunktion umrundet werden.
-- Maschine und Schalterbelegung, PWM, TMC-Treiber und die beiden Y-Motoren vor echtem Laserjob prüfen.
+- Maschine und Z-Taster, PWM, TMC-Treiber und die drei einzelnen XYZ-Motoren vor echtem Laserjob prüfen.
 
 ## Technische Grenzen der Integrationsprüfung
 
