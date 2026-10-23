@@ -1446,9 +1446,12 @@ void action(const char* id){
         if(workX<=0||workY<=0||workZ<=0){
             setNotice("Zuerst alle drei gemessenen Verfahrwege in GRBL speichern.");return;
         }
-        String cmds[]={"$22=1","$20=1","$$"};
-        if(startScript(cmds,3))setNotice("Homing und Soft Limits aktiviert.");
-        else setNotice("Soft Limits nur bei freier Maschine aktivierbar.");
+        // Both limits are active: software checks the measured travel, while
+        // physical switches trigger SKR hard-limit alarms on endstop contact.
+        String cmds[]={"$22=1","$20=1","$21=1",String(char(36))+char(36)};
+        if(startScript(cmds,4))
+            setNotice("Homing, Soft Limits und Endschalterueberwachung eingeschaltet.");
+        else setNotice("Limits nur bei freier Maschine aktivierbar.");
         return;
     }
     if(op=="setparam"){
