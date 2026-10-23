@@ -86,10 +86,14 @@ def main():
             # USART3 (PC10/PC11) remains reserved for TMC2209.
             if not args.bridge:
                 h.write("  -D KEYPAD_ENABLE=2\n")
-            # Atomstack A5 Pro: two synchronized Y motors. Use E driver
-            # (M3: PB3 STEP, PB4 DIR, PD2 ENABLE, TMC UART address 3) for Y2.
-            # Mechanical Y2 polarity and driver current need bench validation.
-            h.write("  -D Y_GANGED=1\n")
+            # Actual LumaCut machine: exactly ONE stepper per XYZ axis.
+            # No Y_GANGED and no M3/E extruder motor in use.
+            # Only ONE mechanical Z switch is installed, wired as Z limit (PC2).
+            # It must NOT be assumed to be an independent PC14 probe, and
+            # normal XYZ homing cannot run without X and Y switches.
+            # Probe operations on the shared switch require a separate,
+            # carefully validated control mode before they can be enabled.
+            h.write("  -D PROBE_ENABLE=0\n")
         run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/env
         out.mkdir(parents=True,exist_ok=True)
