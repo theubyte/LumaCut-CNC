@@ -672,7 +672,7 @@ void makeUi(){
     lv_obj_t* c=card(pages[0],0,0,458,266);
     lbl(c,"Maschinenübersicht",21,20,20);
     lbl(c,"Intelligente Lasersteuerung",21,51,14,SUBTLE);
-    btn(c,"Referenzfahrt",20,95,192,48,"home");
+    btn(c,"Homing gesperrt",20,95,192,48,"home");
     btn(c,"Lokale Freigabe",226,95,209,48,"arm",PALE_BLUE,BLUE);
     btn(c,"Start",20,159,131,51,"start",BLUE,WHITE);
     btn(c,"Pause",163,159,130,51,"pause");
@@ -786,13 +786,10 @@ void action(const char* id){
         return;
     }
     if(op=="home"){
-        if(owner!=Owner::None||!fresh()||(machineState!=MachineState::Idle&&machineState!=MachineState::Alarm)){
-            setNotice("Referenzfahrt nur ohne aktiven Host bei Idle/Alarm.");return;
-        }
-        if(claim(Owner::Script)){
-            String cmds[]={"$H"};script[0]=cmds[0];scriptCount=1;scriptIndex=0;scriptActive=true;
-            homingInProgress=true;nextScript();setNotice("Referenzfahrt ausgelöst.");
-        }return;
+        // Real machine currently has ONLY one Z switch and NO X/Y switches.
+        // Never run $H: the uninstrumented axes could crash into hard stops.
+        setNotice("Homing gesperrt: nur ein Z-Taster, X/Y-Endschalter fehlen.");
+        return;
     }
     if(op=="start"){if(!jobStart())setNotice("Start gesperrt: Idle, Home, Freigabe und gewählter Job erforderlich.");return;}
     if(op=="frame"){if(!dryFrame())setNotice("Trockenrahmen gesperrt oder Dateigrenzen unbekannt.");return;}
