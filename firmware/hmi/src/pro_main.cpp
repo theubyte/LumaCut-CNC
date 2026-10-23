@@ -1922,7 +1922,10 @@ void loop(){
             const float requested=postContactLift?
                 (focusGapMm-tipOffsetMm):focusLiftMm;
             postContactLift=false;
-            if(!zLiftDirectionVerified){
+            if(!zDeltaAllowed(requested)){
+                // Report actual SKR precondition/soft-bound error first.
+                setNotice("Auto-Z nicht gefahren: "+zLiftReason);
+            }else if(!zLiftDirectionVerified){
                 zLiftReason="Z-Richtung noch nicht bestaetigt. Test Z 0,5 mm, dann Richtung OK.";
                 setNotice("Auto-Z aus: "+zLiftReason);
             }else if(!zLift(requested)){
