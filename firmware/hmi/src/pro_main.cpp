@@ -77,6 +77,7 @@ bool knownSetting[400]{};
 float focusLiftMm=7.f,focusGapMm=7.f,tipOffsetMm=0.f,
       probeTravelMm=15.f,probeFeedMm=60.f;
 bool autoLiftAfterHome=true,postHomePending=false,motorsReleased=false;
+bool motorHoldConfigured=false;
 bool contactSwitchAtHead=false,postContactLift=false;
 bool homeFromHmi=false;
 int catalogCategory=0;
@@ -267,8 +268,9 @@ void updateUi(){
         motorsReleased?"Aufwecken":"Handbewegung");
     if(motorInfo){
         labelChanged(motorInfo,motorsReleased?
-            "Motoren freigegeben: Position neu referenzieren.":
-            (machineHomed?"Motoren halten / $1=255":"Homing erforderlich"));
+            "Schlafmodus: Achsen duerfen bewegt werden.":
+            (!motorHoldConfigured?"Haltemoment aus: $1=255 aktivieren.":
+             (machineHomed?"Haltemoment EIN, Referenz gespeichert.":"Homing erforderlich")));
     }
     if(probeInfo){
         labelChanged(probeInfo,"Z-Endschalter PC2 / separate Probe nicht angeschlossen");
@@ -340,7 +342,7 @@ void parseMachineLine(const String& line){
                 if(id>=0&&id<400&&isfinite(number)){
                     savedSetting[id]=number;knownSetting[id]=true;
                 }
-                if(id==1)motorsReleased=(number<255);
+                if(id==1)motorHoldConfigured=(number>=255);
                 if(id==3&&number>=0&&number<=7)directionMask=int(number);
                 if(id==23&&number>=0&&number<=7)homingDirectionMask=int(number);
                 if(id==20)softLimitsEnabled=(number>=1);
@@ -1295,7 +1297,7 @@ void action(const char* id){
     if(op=="motorHold"){
         String cmds[]={"$1=255",String(char(36))+char(36)};
         if(startScript(cmds,2)){
-            motorsReleased=false;
+            motorsReleased=false;motorHoldConfigured=true;
             setNotice("Motor-Haltestrom dauerhaft aktiv ($1=255).");
         } else setNotice("Motor-Einstellung nur im Leerlauf/Alarm.");
         return;
