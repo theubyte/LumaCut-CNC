@@ -434,6 +434,7 @@ void abortJob(){
     machine.write((uint8_t)0x18);
     if(jobFile)jobFile.close();
     jobRunning=false;jobPaused=false;scriptActive=false;commandPending=false;
+    configWrite=ConfigWrite::None;
     scriptCount=scriptIndex=0;owner=Owner::None;machineHomed=false;haveMpos=false;
     setNotice("Abbruch gesendet. Referenzfahrt erneut erforderlich.");
 }
@@ -457,6 +458,49 @@ bool startScript(const String* commands,int count,bool motion=false,bool zOnly=f
     scriptCount=count;scriptIndex=0;scriptActive=true;
     nextScript();return true;
 }
+void finishConfigWrite(bool success,const String& error){
+    ConfigWrite kind=configWrite;
+    configWrite=ConfigWrite::None;
+    if(kind==ConfigWrite::None)return;
+    if(!success){
+        lastControllerError=error;
+        setNotice("SKR hat Einstellung ABGELEHNT: "+error);
+        return;
+    }
+    if(kind==ConfigWrite::Travel){
+        bool verified=true;
+        for(int i=0;i<3;i++){
+            int key=130+i;
+            if(!knownSetting[key]||
+               fabsf(savedSetting[key]-travelRequested[i])>0.01f)
+                verified=false;
+        }
+        if(verified){
+            travelInputsDirty=false;
+            refreshSizeFields();
+            setNotice("SKR bestaetigt alle drei Verfahrwege $130/$131/$132.");
+        }else setNotice("SKR Verfahrwege nicht bestaetigt. $ lesen und Werte vergleichen.");
+    }else if(kind==ConfigWrite::MotorHold){
+        motorHoldConfigured=knownSetting[1]&&fabsf(savedSetting[1]-255.f)<0.01f;
+        setNotice(motorHoldConfigured?
+            "SKR bestaetigt $1=255. Physisches Haltemoment separat pruefen.":
+            "Motor-Haltewert nicht bestaetigt. $ und TMC2209 pruefen.");
+    }else if(kind==ConfigWrite::Limits){
+        setNotice(softLimitsEnabled&&hardLimitsEnabled&&homingEnabled?
+            "SKR bestaetigt Homing/Soft/Hard Limits.":
+            "SKR Limits nicht alle bestaetigt. $20/$21/$22 pruefen.");
+    }else if(kind==ConfigWrite::Parameter){
+        bool matching=requestedSettingId>=0&&requestedSettingId<400&&
+            knownSetting[requestedSettingId]&&
+            fabsf(savedSetting[requestedSettingId]-requestedSettingValue)<0.01f;
+        setNotice(matching?
+            ("SKR bestaetigt $"+String(requestedSettingId)+"="+
+             String(savedSetting[requestedSettingId],3)):
+            ("SKR Parameter $"+String(requestedSettingId)+
+             " nicht bestaetigt. $ lesen."));
+    }
+}
+
 void parseMachineLine(const String& line){
     if(line.length()>2 && line[0]==char(36) && isDigit(line[1])){
         int equal=line.indexOf('=');
@@ -507,15 +551,26 @@ void parseMachineLine(const String& line){
             if(ok){
                 machineHomed=true;
                 postHomePending=(homeFromHmi&&autoLiftAfterHome);
-                setNotice("Homing erfolgreich. Z-Rueckzug vorbereitet.");
+                postHomeStartedMs=millis();
+                settingsRequested=false; // force fresh $ after completed homing
+                setNotice(postHomePending?
+                    "Homing OK; pruefe Z-Lift und Controllergrenzen.":
+                    "Homing OK; automatischer Z-Rueckzug ausgeschaltet.");
             }
             else{machineHomed=false;setNotice(line=="error:5"?"Homing im SKR deaktiviert. Unter System $22=1 aktivieren.":"Referenzfahrt fehlgeschlagen: "+line);}
             homingInProgress=false;homeFromHmi=false;
         }
         if((owner==Owner::Script)&&commandPending){
             commandPending=false;
-            if(ok)nextScript();
-            else{scriptActive=false;scriptCount=0;owner=Owner::None;setNotice(line=="error:5"?"Homing im SKR ausgeschaltet ($22=0).":"Befehl fehlgeschlagen: "+line);}
+            if(ok){
+                nextScript();
+                if(!scriptActive)finishConfigWrite(true,"");
+            }else{
+                scriptActive=false;scriptCount=0;owner=Owner::None;
+                finishConfigWrite(false,line);
+                if(configWrite==ConfigWrite::None)
+                    setNotice("SKR Befehl fehlgeschlagen: "+line);
+            }
         } else if(owner==Owner::Internal&&commandPending){
             commandPending=false;
             if(!ok){jobRunning=false;if(jobFile)jobFile.close();feedHold();setNotice("G-Code-Fehler: "+line+". Maschine angehalten.");}
@@ -525,6 +580,7 @@ void parseMachineLine(const String& line){
     } else if(line.startsWith("ALARM:")){
         machineState=MachineState::Alarm;machineHomed=false;
         postHomePending=false;homeFromHmi=false;
+        lastControllerError=line;
         setNotice(line);
     }
 }
@@ -1455,8 +1511,8 @@ void action(const char* id){
     if(op=="motorHold"){
         String cmds[]={"$1=255",String(char(36))+char(36)};
         if(startScript(cmds,2)){
-            motorsReleased=false;motorHoldConfigured=true;
-            setNotice("Motor-Haltestrom dauerhaft aktiv ($1=255).");
+            motorsReleased=false;configWrite=ConfigWrite::MotorHold;
+            setNotice("Sende $1=255; warte auf SKR-Rueckmeldung.");
         } else setNotice("Motor-Einstellung nur im Leerlauf/Alarm.");
         return;
     }
@@ -1604,8 +1660,11 @@ void action(const char* id){
         // not estimated by repeatedly driving against endstops.
         String cmds[]={"$130="+String(x,3),"$131="+String(y,3),
                        "$132="+String(z,3),"$$"};
-        if(startScript(cmds,4))
-            setNotice("Verfahrwege werden im SKR gespeichert.");
+        if(startScript(cmds,4)){
+            travelRequested[0]=x;travelRequested[1]=y;travelRequested[2]=z;
+            configWrite=ConfigWrite::Travel;
+            setNotice("Sende Verfahrwege; warte auf SKR-Bestaetigung.");
+        }
         else setNotice("Fahrwege nur im Leerlauf aenderbar.");
         return;
     }
@@ -1616,8 +1675,10 @@ void action(const char* id){
         // Both limits are active: software checks the measured travel, while
         // physical switches trigger SKR hard-limit alarms on endstop contact.
         String cmds[]={"$22=1","$20=1","$21=1",String(char(36))+char(36)};
-        if(startScript(cmds,4))
-            setNotice("Homing, Soft Limits und Endschalterueberwachung eingeschaltet.");
+        if(startScript(cmds,4)){
+            configWrite=ConfigWrite::Limits;
+            setNotice("Limits werden gesetzt; warte auf SKR-Bestaetigung.");
+        }
         else setNotice("Limits nur bei freier Maschine aktivierbar.");
         return;
     }
@@ -1635,7 +1696,11 @@ void action(const char* id){
             setNotice("Parameterwert ungueltig oder Sicherheitseinstellung blockiert.");return;
         }
         String cmds[]={"$"+idText+"="+vText,"$$"};
-        if(startScript(cmds,2))setNotice("GRBL-Parameter gespeichert.");
+        if(startScript(cmds,2)){
+            requestedSettingId=idText.toInt();requestedSettingValue=value;
+            configWrite=ConfigWrite::Parameter;
+            setNotice("Warte auf SKR-Bestaetigung fuer $"+idText+".");
+        }
         else setNotice("Parameter nur im Leerlauf aenderbar.");
         return;
     }
