@@ -43,7 +43,17 @@ code{font-size:13px;word-break:break-word}
 </style>
 <main><header><div><div class="brand">LUMACUT / STUDIO</div><h1>Laser Studio</h1></div><span id="connection" class="pill">Verbinde …</span></header>
 <div class="tab active" id="home">
-<article><h2>Maschinenstatus</h2><div class="status"><strong id="state">Unbekannt</strong><span id="owner" class="hint">–</span></div><p class="hint" id="pos">X — · Y — · Z —</p><p class="hint" id="wifi"></p></article>
+<article><h2>Maschinenstatus</h2><div class="status"><strong id="state">Unbekannt</strong><span id="owner" class="hint">–</span></div><p class="hint" id="pos">X — · Y — · Z —</p><p class="hint" id="wifi"></p>
+<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:18px">
+<svg viewBox="0 0 220 220" width="205" height="205" aria-label="Aktuelle Maschinenposition">
+<rect x="10" y="10" width="200" height="200" rx="5" fill="#101d2e" stroke="#46718f" stroke-width="2"/>
+<path d="M60 10V210 M110 10V210 M160 10V210 M10 60H210 M10 110H210 M10 160H210" stroke="#263a4d" stroke-width="1"/>
+<circle id="machineSpot" cx="110" cy="110" r="8" fill="#ff304d" stroke="#ffffff" stroke-width="2" style="display:none"/>
+</svg>
+<div><strong style="font-size:17px">Live-Arbeitsfeld</strong>
+<p id="machineSize" class="hint">Lese Verfahrweg...</p>
+<p class="hint">Roter Punkt: aktuelle Position nach Referenzfahrt</p>
+<p class="hint">Abmessungen werden aus GRBL $130/$131 gelesen.</p></div></div></article>
 <article><h2>Aufträge</h2><div id="jobinfo" class="hint">Kein Job gewählt</div>
 <div style="background:#101d2e;border:1px solid #35506b;border-radius:18px;padding:16px;margin:12px 0;text-align:center">
 <svg id="preview" viewBox="0 0 300 138" width="100%" style="max-height:155px">
@@ -75,6 +85,20 @@ async function poll(){if(!key){msg('Zugangscode unter Gerät eingeben');return}t
  const s=await api('/api/status');document.querySelector('#state').textContent=s.state||'?';
  document.querySelector('#owner').textContent=s.owner;document.querySelector('#pos').textContent=s.position;
  document.querySelector('#wifi').textContent=s.message||'';document.querySelector('#ip').textContent=location.host;
+ const m=s.machine,pt=document.querySelector('#machineSpot');
+ if(m&&m.work_area){
+   const w=m.work_area.x_mm,h=m.work_area.y_mm,p=m.coordinates;
+   document.querySelector('#machineSize').textContent=
+     (w>0&&h>0)?w.toFixed(1)+' × '+h.toFixed(1)+' mm':'Arbeitsbereich noch nicht konfiguriert';
+   if(p&&p.valid&&w>0&&h>0){
+     const fx=p.zero_at_max?(p.x_mm+w)/w:p.x_mm/w;
+     const fy=p.zero_at_max?(p.y_mm+h)/h:p.y_mm/h;
+     if(fx>=0&&fx<=1&&fy>=0&&fy<=1){
+       pt.setAttribute('cx',10+fx*200);pt.setAttribute('cy',10+(1-fy)*200);
+       pt.style.display='';
+     }else pt.style.display='none';
+   }else pt.style.display='none';
+ }else pt.style.display='none';
  document.querySelector('#jobinfo').textContent=s.job||'Kein Job gewählt';
  const box=document.querySelector('#bbox'), empty=document.querySelector('#previewEmpty');
  if(s.bounds&&Number.isFinite(s.bounds.x0)&&Number.isFinite(s.bounds.x1)&&
