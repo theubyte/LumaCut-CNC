@@ -77,6 +77,7 @@ bool knownSetting[400]{};
 float focusLiftMm=7.f,focusGapMm=7.f,tipOffsetMm=0.f,
       probeTravelMm=15.f,probeFeedMm=60.f;
 bool autoLiftAfterHome=true,postHomePending=false,motorsReleased=false;
+bool homeFromHmi=false,motorReleasePending=false;
 int catalogCategory=0;
 lv_disp_t* uiDisplay=nullptr;
 bool rotate180=false,settingsRequested=false;
@@ -289,12 +290,14 @@ void releaseLocal(){
 void writeCmd(const String& text){machine.print(text);machine.write('\n');}
 void feedHold(){machine.write('!');}
 void abortHost(){
+    postHomePending=false;homeFromHmi=false;
     if(owner!=Owner::Tcp&&owner!=Owner::Usb)return;
     machine.write((uint8_t)0x18);
     machineHomed=false;haveMpos=false;hostBlocked=true;
     setNotice("Externer Job abgebrochen. LightBurn stoppen; Quellenwechsel erst bei Idle.");
 }
 void abortJob(){
+    postHomePending=false;homeFromHmi=false;
     // Soft reset also clears host parser state; machine must be re-homed.
     machine.write((uint8_t)0x18);
     if(jobFile)jobFile.close();
@@ -362,9 +365,21 @@ void parseMachineLine(const String& line){
     } else if(line=="ok" || line.startsWith("error:")){
         bool ok=line=="ok";
         if(homingInProgress){
-            if(ok){machineHomed=true;setNotice("Referenzfahrt bestätigt.");}
+            if(ok){
+                machineHomed=true;
+                postHomePending=(homeFromHmi&&autoLiftAfterHome);
+                setNotice("Homing erfolgreich. Z-Rueckzug vorbereitet.");
+            }
             else{machineHomed=false;setNotice(line=="error:5"?"Homing im SKR deaktiviert. Unter System $22=1 aktivieren.":"Referenzfahrt fehlgeschlagen: "+line);}
-            homingInProgress=false;
+            homingInProgress=false;homeFromHmi=false;
+        }
+        if(motorReleasePending){
+            if(ok){
+                machineHomed=false;haveMpos=false;
+                motorsReleased=true;postHomePending=false;
+                setNotice("Motoren freigegeben. Danach erneut referenzieren.");
+            }
+            motorReleasePending=false;
         }
         if((owner==Owner::Script)&&commandPending){
             commandPending=false;
@@ -376,6 +391,7 @@ void parseMachineLine(const String& line){
         }
     } else if(line.startsWith("ALARM:")){
         machineState=MachineState::Alarm;machineHomed=false;
+        postHomePending=false;homeFromHmi=false;
         setNotice(line);
     }
 }
@@ -414,7 +430,7 @@ void externalForward(Owner value,Stream& src){
             continue;
         }
         if(c=='\n'||c=='\r'){
-            if(hostLine=="$H")homingInProgress=true;
+            if(hostLine=="$H"){homingInProgress=true;homeFromHmi=false;}
             if(hostLine.startsWith("$")&&hostLine.indexOf('=')>1){
                 // LightBurn may modify $20 or travels without going through
                 // our machine setup. Re-query the real controller settings
@@ -423,7 +439,8 @@ void externalForward(Owner value,Stream& src){
                 settingsRequested=false;
                 if(hostLine.startsWith("$3=")||hostLine.startsWith("$23=")||
                    hostLine.startsWith("$130=")||hostLine.startsWith("$131=")||
-                   hostLine.startsWith("$132=")||hostLine.startsWith("$22="))
+                   hostLine.startsWith("$132=")||hostLine.startsWith("$22=")||
+                   hostLine.startsWith("$1="))
                     machineHomed=false;
             }
             hostLine="";
@@ -1150,6 +1167,20 @@ void makeUi(){
     refreshSizeFields();
     switchTab(0);
 }
+bool zDeltaAllowed(float delta){
+    if(!canMotion()||fabsf(delta)<0.001f||!isfinite(delta))return false;
+    float minZ=machineZeroAtMax?-workZ:0.f;
+    float maxZ=machineZeroAtMax?0.f:workZ;
+    float target=mz+delta;
+    return target>minZ+0.002f&&target<maxZ-0.002f;
+}
+bool zLift(float delta){
+    if(!zDeltaAllowed(delta))return false;
+    String cmds[]={"M5","$J=G91 G21 Z"+String(delta,3)+
+                        " F"+String(constrain(probeFeedMm,30.f,600.f),1)};
+    // M5 always precedes Z movement; stop at configured soft travel boundary.
+    return startScript(cmds,2,true);
+}
 bool settingAllowed(int id,float val){
     // Keep hard/soft limits and homing active when modified through the HMI.
     if((id==20||id==21||id==22)&&val<1)return false;
@@ -1310,8 +1341,10 @@ void action(const char* id){
             setNotice("Referenzfahrt nur bei freier Maschine moeglich.");return;
         }
         if(claim(Owner::Script)){
-            script[0]="$H";scriptCount=1;scriptIndex=0;scriptActive=true;
-            homingInProgress=true;machineHomed=false;
+            script[0]="$H";script[1]="$1=255";
+            scriptCount=2;scriptIndex=0;scriptActive=true;
+            homingInProgress=true;homeFromHmi=true;machineHomed=false;
+            haveMpos=false;postHomePending=false;
             nextScript();setNotice("Referenzfahrt gestartet.");
         }
         return;
@@ -1419,6 +1452,21 @@ void setup(){internalInit();}
 void loop(){
     http.handleClient();
     bridgeService();
+    if(postHomePending&&owner==Owner::None&&idle()&&machineHomed){
+        // Wait for real post-home position and measured machine limits.
+        if(!softLimitsEnabled||workZ<=0||!haveMpos){
+            static uint32_t lastMsg=0;
+            if(millis()-lastMsg>3000){
+                lastMsg=millis();
+                setNotice("Z-Lift wartet auf MPos, Z-Weg und Soft Limits.");
+            }
+        } else {
+            postHomePending=false;
+            if(!zLift(focusLiftMm))
+                setNotice("Z-Rueckzug liegt ausserhalb des Verfahrwegs. Z-Setup pruefen.");
+            else setNotice("Z-Rueckzug "+String(focusLiftMm,2)+" mm gestartet.");
+        }
+    }
     internalJobService();
     bleUpdate();
     lv_timer_handler();
