@@ -43,7 +43,7 @@ Im SKR ist `KEYPAD_ENABLE=2` aktiviert: grblHAL nimmt einzelne Steuerzeichen üb
 
 ## Aktualisierte Hardware-Konfiguration
 
-**Korrektur 23.10.2026:** Die reale Maschine hat jeweils einen Motor für X, Y und Z und nur einen mechanischen Taster, der Z-Endstop und Werkstückmessung übernehmen soll. X/Y-Endschalter sind montiert; kein separater Probe-Sensor. Die ältere Beispielverkabelung für PC14 als separaten Probe-Eingang ist **nicht** für dieses Gerät gültig. HMI-Homing ist freigegeben: Bei `error:5` `$22=1` über **Homing aktivieren** setzen und nach Prüfung von `$23`/Schalterzustand **Referenzfahrt** starten. G38-Probing bleibt bis zum geprüften gemeinsamen Z-Schalter-Modus deaktiviert. [Aktuelles Hardwareprofil](HARDWARE.md).
+**Korrektur 23.10.2026:** Die reale Maschine hat jeweils einen Motor und einen Endschalter für X, Y und Z (insgesamt drei Endschalter). Der Z-Endschalter soll später zusätzlich die Werkstückmessung übernehmen; ein separater Probe-Sensor ist nicht montiert. Die ältere Beispielverkabelung für PC14 als separaten Probe-Eingang ist **nicht** für dieses Gerät gültig. HMI-Homing ist freigegeben: Bei `error:5` `$22=1` über **Homing aktivieren** setzen und nach Prüfung von `$23`/Schalterzustand **Referenzfahrt** starten. G38-Probing bleibt bis zum geprüften gemeinsamen Z-Schalter-Modus deaktiviert. [Aktuelles Hardwareprofil](HARDWARE.md).
 
 ## 5. Testreihenfolge
 1. HMI nur per USB versorgen, erst einmal **Offline-Image** flashen: Logo/UI/Touch, sämtliche Jog-Tasten ohne Bewegung.
