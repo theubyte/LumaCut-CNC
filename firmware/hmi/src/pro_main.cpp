@@ -27,7 +27,7 @@ constexpr int W=800,H=480;
 constexpr int SDA_PIN=8,SCL_PIN=9;
 constexpr uint8_t IO_MODE=0x24,IO_OUT=0x38;
 constexpr uint8_t LCD_RESET=(1<<3),TP_RESET=(1<<1),BACKLIGHT=(1<<2);
-constexpr uint32_t WIFI_TCP_PORT=23, STATUS_INTERVAL=250, ARM_DURATION=30000;
+constexpr uint32_t WIFI_TCP_PORT=23, STATUS_INTERVAL=250;
 constexpr size_t MAX_JOB_BYTES=3*1024*1024, MAX_LINE=220;
 HardwareSerial machine(1);
 WiFiServer tcpServer(WIFI_TCP_PORT);
@@ -296,7 +296,7 @@ bool startScript(const String* commands,int count,bool motion=false){
     nextScript();return true;
 }
 void parseMachineLine(const String& line){
-    if(line.startsWith("$$")){
+    if(line.startsWith("$") && !line.startsWith("$")){
         int equal=line.indexOf('=');
         if(equal>1){
             String key=line.substring(1,equal);
@@ -1113,7 +1113,7 @@ void action(const char* id){
     if(op=="setparam"){
         String idText=lv_textarea_get_text(paramKeyField);
         String vText=lv_textarea_get_text(paramValueField);
-        idText.trim();idText.replace("$$","");
+        idText.trim();idText.replace("$","");
         if(!idText.length()||!vText.length()){setNotice("Parameter-ID und Wert eingeben.");return;}
         for(unsigned i=0;i<idText.length();i++)if(!isDigit(idText[i])){
             setNotice("Parameter-ID muss numerisch sein.");return;
