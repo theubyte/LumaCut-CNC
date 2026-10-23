@@ -243,6 +243,8 @@ void updateArea(){
         lv_obj_set_pos(areaDot,px,py);
     lv_obj_clear_flag(areaDot,LV_OBJ_FLAG_HIDDEN);
 }
+// LVGL updates need the parameter catalog declared before its definition.
+void refreshCatalog();
 void updateUi(){
     labelChanged(statusLabel,fresh()?stateText():"Keine Verbindung");
     labelChanged(positionLabel,(fresh()&&haveMpos)?
