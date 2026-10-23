@@ -567,8 +567,9 @@ void parseMachineLine(const String& line){
                 if(!scriptActive)finishConfigWrite(true,"");
             }else{
                 scriptActive=false;scriptCount=0;owner=Owner::None;
+                ConfigWrite failedWrite=configWrite;
                 finishConfigWrite(false,line);
-                if(configWrite==ConfigWrite::None)
+                if(failedWrite==ConfigWrite::None)
                     setNotice("SKR Befehl fehlgeschlagen: "+line);
             }
         } else if(owner==Owner::Internal&&commandPending){
@@ -1363,7 +1364,8 @@ void makeUi(){
     probeInfo=lbl(c,"Probe: Z-Endschalter wird geteilt",18,156,14,SUBTLE);
     lv_obj_set_width(probeInfo,343);
     btn(c,"Probe konfigurieren",18,186,344,39,"probeSetup",GRAY,INK);
-    btn(c,"Zurueck zu Setup",18,230,344,34,"setupgo",GRAY,INK);
+    btn(c,"Z-Test 0,5 mm",18,230,166,34,"ztest",GRAY,INK);
+    btn(c,"Z-Richtung OK",196,230,166,34,"zverify",PALE_BLUE,BLUE);
 
     // Parameter catalog: grouped by actual GRBL $ IDs; tapping a row
     // populates the editable raw setting on Setup, not an HMI-only dummy.
@@ -1499,13 +1501,31 @@ void action(const char* id){
     if(op=="toggleAutoLift"){
         autoLiftAfterHome=!autoLiftAfterHome;
         prefs.putBool("autoZlift",autoLiftAfterHome);
-        setNotice(autoLiftAfterHome?"Auto-Z-Rueckzug nach Homing EIN":"Auto-Z-Rueckzug AUS");
+        setNotice(autoLiftAfterHome?
+            "Auto-Z EIN. Vor Auto-Fahrt Z-Test 0,5 mm und Richtung OK erforderlich.":
+            "Auto-Z nach Homing AUS");
+        return;
+    }
+    if(op=="ztest"){
+        float delta=focusLiftMm<0?-0.5f:0.5f;
+        if(zLift(delta))
+            setNotice("Z-Test "+String(delta,1)+" mm gestartet. Physische Richtung pruefen.");
+        else setNotice("Z-Test abgelehnt: "+zLiftReason);
+        return;
+    }
+    if(op=="zverify"){
+        if(!machineHomed||!fresh()||!haveMpos||workZ<=0||!softLimitsEnabled){
+            setNotice("Z-Richtung erst nach Homing, MPos und $20/$132 pruefen.");return;
+        }
+        zLiftDirectionVerified=true;
+        prefs.putBool("zsignOK",true);
+        setNotice("Z-Vorzeichen vom Bediener bestaetigt. Auto-Z nutzt diesen Wert.");
         return;
     }
     if(op=="zlift"){
         if(zLift(focusLiftMm))
-            setNotice("Z-Rueckzug "+String(focusLiftMm,2)+" mm gestartet.");
-        else setNotice("Z-Lift nicht moeglich: Position, Homing und Z-Grenzen pruefen.");
+            setNotice("Z-Rueckzug "+String(focusLiftMm,2)+" mm bei Laser AUS gestartet.");
+        else setNotice("Z-Lift nicht moeglich: "+zLiftReason);
         return;
     }
     if(op=="motorHold"){
@@ -1875,25 +1895,22 @@ void loop(){
     }
     http.handleClient();
     bridgeService();
-    if(postHomePending&&owner==Owner::None&&idle()&&machineHomed){
-        // Wait for real post-home position and measured machine limits.
-        if(!softLimitsEnabled||workZ<=0||!haveMpos){
-            static uint32_t lastMsg=0;
-            if(millis()-lastMsg>3000){
-                lastMsg=millis();
-                setNotice("Z-Lift wartet auf MPos, Z-Weg und Soft Limits.");
-            }
-        } else {
-            postHomePending=false;
-            // In workpiece-contact mode the switch trigger and optical focus
-            // have different datums. Positive tip offset is the current
-            // optical clearance at switch contact. Relative lift = target-
-            // minus-current clearance; never claim this is self-calibrated.
-            float delta=postContactLift?(focusGapMm-tipOffsetMm):focusLiftMm;
+    if(postHomePending&&machineHomed){
+        if(owner==Owner::None&&idle()&&
+           (haveMpos||(uint32_t)(millis()-postHomeStartedMs)>3500u)){
+            postHomePending=false; // Never show an endless waiting notice
+            const float requested=postContactLift?
+                (focusGapMm-tipOffsetMm):focusLiftMm;
             postContactLift=false;
-            if(!zLift(delta))
-                setNotice("Z-Abstand liegt ausserhalb des Verfahrwegs. Kalibrierung pruefen.");
-            else setNotice("Z nach Referenzierung um "+String(delta,2)+" mm bewegt.");
+            if(!zLiftDirectionVerified){
+                zLiftReason="Z-Richtung noch nicht bestaetigt. Test Z 0,5 mm, dann Richtung OK.";
+                setNotice("Auto-Z aus: "+zLiftReason);
+            }else if(!zLift(requested)){
+                setNotice("Auto-Z nicht gefahren: "+zLiftReason);
+            }else{
+                zLiftReason="";
+                setNotice("Auto-Z "+String(requested,2)+" mm bei Laser AUS gestartet.");
+            }
         }
     }
     internalJobService();
