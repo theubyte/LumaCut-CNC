@@ -36,5 +36,17 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('script[0]="$22=1"', CONTROL)
         self.assertIn('bool canCommand(){return owner==Owner::None&&idle();}', CONTROL)
 
+    def test_workspace_and_direction_controls(self):
+        self.assertIn('String cmds[]={"$3="+String(newMask),"$23="+String(newHomeMask),"$$"}',CONTROL)
+        self.assertIn('script[0]="$H"',CONTROL)
+        self.assertIn('cfg.bounce_buffer_size_px=W*10',CONTROL)
+        self.assertIn('LV_DISP_ROT_180',CONTROL)
+        self.assertIn('lv_obj_t *areaField=',CONTROL)
+        self.assertIn('String jsonMachine()',CONTROL)
+        self.assertIn('http.on("/api/machine"',CONTROL)
+        self.assertIn('"$130="+String(x,3)',CONTROL)
+        self.assertIn('softLimitsEnabled&&workX>0',CONTROL)
+        self.assertNotIn('String cmds[]={"$"}',CONTROL)
+
 if __name__=="__main__":
     unittest.main()
