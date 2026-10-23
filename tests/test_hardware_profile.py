@@ -32,13 +32,13 @@ class HardwareProfileTests(unittest.TestCase):
 
     def test_regular_xyz_homing_reenabled(self):
         self.assertIn('if(op=="home"){', CONTROL)
-        self.assertIn('script[0]="$H"', CONTROL)
+        self.assertIn('script[1]="$H"', CONTROL)
         self.assertIn('script[0]="$22=1"', CONTROL)
         self.assertIn('bool canCommand(){return owner==Owner::None&&idle();}', CONTROL)
 
     def test_workspace_and_direction_controls(self):
         self.assertIn('String cmds[]={"$3="+String(newMask),"$23="+String(newHomeMask),"$$"}',CONTROL)
-        self.assertIn('script[0]="$H"',CONTROL)
+        self.assertIn('script[1]="$H"',CONTROL)
         self.assertIn('cfg.bounce_buffer_size_px=W*10',CONTROL)
         self.assertIn('LV_DISP_ROT_180',CONTROL)
         self.assertIn('lv_obj_t *areaField=',CONTROL)
@@ -82,7 +82,7 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('prefs.putFloat("focgap"',CONTROL)
         self.assertIn('focusGapMm-tipOffsetMm',CONTROL)
         self.assertIn('postHomePending',CONTROL)
-        self.assertIn('script[1]="$1=255"',CONTROL)
+        self.assertIn('script[0]="$1=255"',CONTROL)
         self.assertIn("machine.print(", CONTROL)
         self.assertIn("$SLP", CONTROL)
         self.assertIn("String(char(36))+char(36)", CONTROL)
@@ -94,7 +94,7 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('switch_must_contact_material: true',CONFIG)
         self.assertIn('grbl_g38_probe_supported: false',CONFIG)
         self.assertIn('physical_input: PC2',CONFIG)
-        self.assertIn('String cmds[]={"M5","$22=3","$HZ","$1=255"}',CONTROL)
+        self.assertIn('String cmds[]={"M5","$22=3","$1=255","$HZ"}',CONTROL)
         self.assertIn('cmd=="$H"||cmd=="$HZ"',CONTROL)
         self.assertIn('if(!contactSwitchAtHead)',CONTROL)
 
