@@ -31,6 +31,8 @@ Das SKR benötigt dabei keine eigene USB-Verbindung zum PC. Der native USB-C des
 
 **[LumaCut Control OS: Bedienung, Verkabelung, Grenzen](docs/LUMACUT_CONTROL_OS.md)**
 
+**[Maschinen-Setup: Achsrichtung, Soft Limits, Live-Arbeitsfläche, Displayrotation und Sensorless-Fakten](docs/MASCHINEN_SETUP.md)**
+
 Der Laser darf nur nach externer hardwarewirksamer Sicherheitsfreigabe zugeschaltet werden. USART3 PC10/PC11 bleibt für TMC2209 reserviert. Unraid ist ausschließlich GitHub-Buildserver, nicht Teil der Maschinensteuerung.
 
 ## Quellen und Buildserver
