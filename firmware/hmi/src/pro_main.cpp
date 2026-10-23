@@ -69,8 +69,8 @@ lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
 *passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr,*macroEntry=nullptr;
 int activePage=0,parkSlot=0;
-constexpr uint32_t INK=0x1C2738,SUBTLE=0x748195,BG=0xF5F7FA,WHITE=0xFFFFFF;
-constexpr uint32_t BLUE=0x007AFF,PALE_BLUE=0xE6F2FF,GRAY=0xF0F3F8,RED=0xCE3550;
+constexpr uint32_t INK=0xF2F7FF,SUBTLE=0xA4B4C7,BG=0x091321,WHITE=0x172638;
+constexpr uint32_t BLUE=0x39C7F6,PALE_BLUE=0x153B54,GRAY=0x26384D,RED=0xFF6B75;
 
 bool expander(uint8_t b){Wire.beginTransmission(IO_OUT);Wire.write(b);return Wire.endTransmission()==0;}
 bool readReg(uint16_t reg,uint8_t* buf,uint8_t len){
@@ -636,8 +636,8 @@ lv_obj_t* lbl(lv_obj_t* parent,const String& text,int x,int y,int px,uint32_t co
 }
 lv_obj_t* card(lv_obj_t* parent,int x,int y,int w,int h){
     lv_obj_t* p=lv_obj_create(parent);lv_obj_set_pos(p,x,y);lv_obj_set_size(p,w,h);
-    lv_obj_set_style_radius(p,21,0);lv_obj_set_style_bg_color(p,lv_color_hex(WHITE),0);
-    lv_obj_set_style_border_width(p,1,0);lv_obj_set_style_border_color(p,lv_color_hex(0xE7ECF1),0);
+    lv_obj_set_style_radius(p,20,0);lv_obj_set_style_bg_color(p,lv_color_hex(WHITE),0);
+    lv_obj_set_style_border_width(p,1,0);lv_obj_set_style_border_color(p,lv_color_hex(0x284059),0);
     lv_obj_set_style_pad_all(p,0,0);lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);
     return p;
 }
@@ -645,8 +645,11 @@ void action(const char* id);
 void actionCb(lv_event_t* e){action((const char*)lv_event_get_user_data(e));}
 lv_obj_t* btn(lv_obj_t* parent,const char* text,int x,int y,int w,int h,const char* op,uint32_t bg=GRAY,uint32_t fg=INK){
     lv_obj_t* p=lv_btn_create(parent);lv_obj_set_pos(p,x,y);lv_obj_set_size(p,w,h);
-    lv_obj_set_style_radius(p,14,0);lv_obj_set_style_bg_color(p,lv_color_hex(bg),0);
+    lv_obj_set_style_radius(p,13,0);lv_obj_set_style_bg_color(p,lv_color_hex(bg),0);
+    lv_obj_set_style_border_color(p,lv_color_hex(bg==GRAY?0x35506B:bg),0);
+    lv_obj_set_style_border_width(p,1,0);
     lv_obj_set_style_shadow_width(p,0,0);
+    lv_obj_set_style_bg_color(p,lv_color_hex(PALE_BLUE),LV_STATE_PRESSED);
     if(op)lv_obj_add_event_cb(p,actionCb,LV_EVENT_CLICKED,(void*)op);
     lv_obj_t* t=lv_label_create(p);lv_label_set_text(t,uiText(String(text)).c_str());lv_obj_center(t);
     lv_obj_set_style_text_color(t,lv_color_hex(fg),0);lv_obj_set_style_text_font(t,&lv_font_montserrat_14,0);
@@ -658,6 +661,8 @@ void switchTab(int idx){
         if(i==idx)lv_obj_clear_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(pages[i],LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_color(navButtons[i],lv_color_hex(i==idx?PALE_BLUE:WHITE),0);
+        lv_obj_t* t=lv_obj_get_child(navButtons[i],0);
+        if(t)lv_obj_set_style_text_color(t,lv_color_hex(i==idx?BLUE:SUBTLE),0);
     }
     updateUi();
 }
