@@ -326,7 +326,7 @@ bool startScript(const String* commands,int count,bool motion=false){
     nextScript();return true;
 }
 void parseMachineLine(const String& line){
-    if(line.startsWith("$") && !line.startsWith("$")){
+    if(line.length()>2 && line[0]==char(36) && isDigit(line[1])){
         int equal=line.indexOf('=');
         if(equal>1){
             String key=line.substring(1,equal);
