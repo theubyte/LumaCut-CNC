@@ -76,7 +76,7 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1',BUILD)
         self.assertIn('DEFAULT_HOMING_ENABLE=1',BUILD)
         self.assertIn('lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED',CONTROL)
-        self.assertIn('editOverlay=lv_obj_create(root)',CONTROL)
+        self.assertIn('editOverlay=lv_obj_create(lv_layer_top())',CONTROL)
         self.assertIn('lv_keyboard_set_textarea(keyboard,editInput)',CONTROL)
         self.assertIn('prefs.putFloat("zlift"',CONTROL)
         self.assertIn('prefs.putFloat("focgap"',CONTROL)
@@ -86,6 +86,32 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn("machine.print(", CONTROL)
         self.assertIn("$SLP", CONTROL)
         self.assertIn("String(char(36))+char(36)", CONTROL)
+
+    def test_keyboard_fits_real_800x480_display(self):
+        # The editor is deliberately separated from LVGL's scrollable root.
+        self.assertIn("void layoutKeyboardDialog()",CONTROL)
+        self.assertIn("lv_disp_get_hor_res(disp)",CONTROL)
+        self.assertIn("lv_disp_get_ver_res(disp)",CONTROL)
+        self.assertIn("lv_obj_set_scrollbar_mode(editOverlay,LV_SCROLLBAR_MODE_OFF)",CONTROL)
+        self.assertIn("lv_keyboard_set_popovers(keyboard,false)",CONTROL)
+        self.assertIn("lv_obj_get_coords(keyboard,&bounds)",CONTROL)
+        self.assertIn("layoutKeyboardDialog();",CONTROL)
+        self.assertIn("editSaveButton=btn(editOverlay",CONTROL)
+        self.assertIn("editCancelButton=btn(editOverlay",CONTROL)
+        self.assertLess(CONTROL.index("lv_keyboard_set_mode(keyboard"),
+                        CONTROL.index("    layoutKeyboardDialog();",CONTROL.index("lv_keyboard_set_mode(keyboard")))
+        # Expected screen geometry uses >=80px free space underneath
+        # every control; the bottom row never approaches the bezel edge.
+        h=480
+        bottom_safe=max(65,h//6)
+        button_h=min(52,max(40,h//8))
+        buttons_y=h-bottom_safe-button_h
+        kb_y=97
+        kb_h=max(90,buttons_y-kb_y-14)
+        self.assertEqual(buttons_y,348)
+        self.assertEqual(kb_h,237)
+        self.assertLessEqual(kb_y+kb_h,buttons_y-14)
+        self.assertLess(buttons_y+button_h, h-60)
 
     def test_grbl_parameter_readback_active(self):
         self.assertIn("line[0]==char(36) && isDigit(line[1])",CONTROL)
