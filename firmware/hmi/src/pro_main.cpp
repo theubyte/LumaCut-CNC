@@ -269,6 +269,7 @@ void updateUi(){
     if(probeInfo){
         labelChanged(probeInfo,"Z-Endschalter PC2 / separate Probe nicht angeschlossen");
     }
+    refreshCatalog();
     if(configCaption){
         labelChanged(configCaption,"Motor $3: "+(directionMask<0?String("?"):String(directionMask))+
             "  /  Homing $23: "+(homingDirectionMask<0?String("?"):String(homingDirectionMask))+
@@ -807,7 +808,8 @@ void openKeyboard(lv_event_t* e){
     lv_textarea_set_password_mode(editInput,editTarget==passwordEntry);
     const bool numeric=editTarget==sizeXField||editTarget==sizeYField||
         editTarget==sizeZField||editTarget==paramKeyField||
-        editTarget==paramValueField;
+        editTarget==paramValueField||editTarget==focusLiftField||
+        editTarget==focusGapField||editTarget==tipOffsetField;
     lv_keyboard_set_mode(keyboard,numeric?LV_KEYBOARD_MODE_NUMBER:LV_KEYBOARD_MODE_TEXT_LOWER);
     lv_keyboard_set_textarea(keyboard,editInput);
     lv_obj_clear_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
@@ -855,6 +857,40 @@ void switchTab(int idx){
     updateUi();
 }
 void navCb(lv_event_t* e){switchTab((int)(uintptr_t)lv_event_get_user_data(e));}
+// Machine parameter catalog: metadata only. Available values must be read
+// back from SKR via GRBL $; unknown firmware extensions are marked "?".
+struct ParameterEntry {int id; const char* label;};
+const ParameterEntry parameterPages[7][6]={
+    {{0,"Schrittpuls us"},{1,"Motor Haltestrom"},{2,"Schritt invert."},{3,"Motor Richtung"},
+     {4,"Enable invert."},{5,"Endstop Polaritaet"}},
+    {{100,"X Schritte/mm"},{101,"Y Schritte/mm"},{102,"Z Schritte/mm"},
+     {110,"X max mm/min"},{111,"Y max mm/min"},{112,"Z max mm/min"}},
+    {{120,"X Beschleunig."},{121,"Y Beschleunig."},{122,"Z Beschleunig."},
+     {130,"X Fahrweg mm"},{131,"Y Fahrweg mm"},{132,"Z Fahrweg mm"}},
+    {{20,"Soft Limits"},{21,"Hard Limits"},{22,"XYZ Homing"},{23,"Homing-Richtung"},
+     {24,"Homing Fein"},{25,"Homing Schnell"}},
+    {{26,"Homing Entprell."},{27,"Homing Freifahrt"},{30,"Laser Leistung max"},
+     {31,"Laser Leistung min"},{32,"Laser-Modus"},{33,"Laser PWM Hz"}},
+    {{6,"Probe Polaritaet"},{10,"Statusmaske"},{11,"Kurvenabweichung"},
+     {12,"Kreisbogen-Tol."},{13,"Zoll-Ausgabe"},{34,"PWM/Spindel Extra"}},
+    {{140,"X Motorstrom"},{141,"Y Motorstrom"},{142,"Z Motorstrom"},
+     {150,"X Microsteps"},{151,"Y Microsteps"},{152,"Z Microsteps"}}
+};
+const char* catalogNames[7]={"Antrieb & Endschalter","Schrittaufl./Tempo",
+    "Beschleunigung & Wege","Homing & Limits","Laser & PWM",
+    "GRBL Spezial","TMC2209 Erweiterungen"};
+void refreshCatalog(){
+    if(!catalogTitle)return;
+    labelChanged(catalogTitle,String("GRBL / ")+catalogNames[catalogCategory]);
+    for(int i=0;i<6;i++){
+        int id=parameterPages[catalogCategory][i].id;
+        String value=knownSetting[id]?String(savedSetting[id],3):String("nicht gemeldet");
+        lv_obj_t* child=lv_obj_get_child(catalogRows[i],0);
+        labelChanged(child,String("$")+String(id)+" "+parameterPages[catalogCategory][i].label+
+                      " / "+value);
+    }
+}
+
 void makeUi(){
     lv_obj_t* root=lv_scr_act();
     lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
@@ -1066,13 +1102,11 @@ void makeUi(){
     catalogTitle=lbl(c,"GRBL-Parameter",19,14,20);
     btn(c,"Kategorie",551,12,200,39,"catalogNext",PALE_BLUE,BLUE);
     for(int i=0;i<6;i++){
-        char* tag=nullptr;
-        String key="c"+String(i);
         // Persistent C-string IDs for event handlers.
         static const char* ids[]={"cat0","cat1","cat2","cat3","cat4","cat5"};
         catalogRows[i]=btn(c,"Parameter",19+(i%2)*375,64+(i/2)*65,360,56,ids[i],GRAY,INK);
     }
-    btn(c,"Zurueck zu Setup",19,250,733,14,"setupgo",GRAY,INK);
+    btn(c,"Setup",404,12,136,39,"setupgo",GRAY,INK);
 
     // Bottom dock is always visible, and labels remain within touch targets.
     const char* tabs[]={"Home","Flaeche","Jobs","Jog","Makros","Setup","WLAN"};
@@ -1140,6 +1174,18 @@ void action(const char* id){
         return;
     }
     if(op=="setupgo"){switchTab(5);return;}
+    if(op=="focusgo"){switchTab(7);return;}
+    if(op=="cataloggo"){switchTab(8);return;}
+    if(op=="catalogNext"){catalogCategory=(catalogCategory+1)%7;refreshCatalog();return;}
+    if(op.startsWith("cat")&&op.length()==4&&op[3]>='0'&&op[3]<='5'){
+        int slot=op[3]-'0',id=parameterPages[catalogCategory][slot].id;
+        lv_textarea_set_text(paramKeyField,String(id).c_str());
+        lv_textarea_set_text(paramValueField,
+            knownSetting[id]?String(savedSetting[id],3).c_str():"");
+        switchTab(5);
+        setNotice("Parameter $"+String(id)+" bearbeiten und Setzen waehlen.");
+        return;
+    }
     if(op=="rotate180"){
         if(!uiDisplay)return;
         rotate180=!rotate180;
