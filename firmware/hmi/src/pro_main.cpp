@@ -112,7 +112,8 @@ bool zLiftDirectionVerified=false;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
 *passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr,*macroEntry=nullptr;
-lv_obj_t *editOverlay=nullptr,*editInput=nullptr,*editTarget=nullptr;
+lv_obj_t *editOverlay=nullptr,*editInput=nullptr,*editTarget=nullptr,
+    *editSaveButton=nullptr,*editCancelButton=nullptr,*editHeading=nullptr;
 int activePage=0,parkSlot=0;
 constexpr uint32_t INK=0xF2F7FF,SUBTLE=0xA4B4C7,BG=0x091321,WHITE=0x172638;
 constexpr uint32_t BLUE=0x39C7F6,PALE_BLUE=0x153B54,GRAY=0x26384D,RED=0xFF6B75;
@@ -1051,6 +1052,51 @@ lv_obj_t* card(lv_obj_t* parent,int x,int y,int w,int h){
     return p;
 }
 void action(const char* id);
+// The GT911 has a 800x480 landscape touch area. An editor attached to the
+// normal screen could be displaced by LVGL focus/scroll and earlier layouts
+// placed the bottom keyboard rows out of touch range. Use the always-on-top
+// LVGL layer, recompute positions from the *actual* display resolution, and
+// reserve generous empty space below the touch controls.
+void layoutKeyboardDialog(){
+    if(!editOverlay||!keyboard||!editInput||!editSaveButton||
+       !editCancelButton||!editHeading)return;
+    lv_disp_t* disp=lv_disp_get_default();
+    if(!disp)return;
+    const int w=lv_disp_get_hor_res(disp);
+    const int h=lv_disp_get_ver_res(disp);
+    if(w<320||h<240)return;
+    const int margin=12;
+    const int inputY=42;
+    const int inputH=43;
+    const int kbY=97;
+    const int bottomSafe=LV_MAX(65,h/6); // 80 pixels on 480px LCD
+    const int buttonH=LV_MIN(52,LV_MAX(40,h/8));
+    const int buttonsY=h-bottomSafe-buttonH;
+    const int keyboardH=LV_MAX(90,buttonsY-kbY-14);
+    const int width=w-2*margin;
+    lv_obj_set_pos(editOverlay,0,0);
+    lv_obj_set_size(editOverlay,w,h);
+    lv_obj_set_pos(editHeading,margin+4,9);
+    lv_obj_set_pos(editInput,margin,inputY);
+    lv_obj_set_size(editInput,width,inputH);
+    lv_obj_set_pos(keyboard,margin,kbY);
+    lv_obj_set_size(keyboard,width,keyboardH);
+    const int gutter=10;
+    const int half=(width-gutter)/2;
+    lv_obj_set_pos(editCancelButton,margin,buttonsY);
+    lv_obj_set_size(editCancelButton,half,buttonH);
+    lv_obj_set_pos(editSaveButton,margin+half+gutter,buttonsY);
+    lv_obj_set_size(editSaveButton,width-half-gutter,buttonH);
+    lv_obj_update_layout(editOverlay);
+    // Defensive: no key may be placed behind the footer or past display.
+    lv_area_t bounds{};
+    lv_obj_get_coords(keyboard,&bounds);
+    if(bounds.y2>=buttonsY-4){
+        const int corrected=LV_MAX(75,keyboardH-(bounds.y2-(buttonsY-5)));
+        lv_obj_set_size(keyboard,width,corrected);
+        lv_obj_update_layout(editOverlay);
+    }
+}
 void openKeyboard(lv_event_t* e){
     // CLICKED is deliberate: focus is not consistently delivered by the
     // GT911/LVGL pointer driver. A modal also keeps the typed text visible.
@@ -1065,6 +1111,9 @@ void openKeyboard(lv_event_t* e){
     lv_keyboard_set_mode(keyboard,numeric?LV_KEYBOARD_MODE_NUMBER:LV_KEYBOARD_MODE_TEXT_LOWER);
     lv_keyboard_set_textarea(keyboard,editInput);
     lv_obj_clear_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
+    // In particular LVGL may resize internal keyboard rows after mode switch.
+    // Place the keyboard again AFTER setting the requested keymap.
+    layoutKeyboardDialog();
     lv_obj_move_foreground(editOverlay);
 }
 void keyboardEvent(lv_event_t* e){
@@ -1441,26 +1490,36 @@ void makeUi(){
 
     // True full-screen editor: input ABOVE keyboard, so nothing is covered.
     // Closing the modal explicitly commits back to the original field.
-    editOverlay=lv_obj_create(root);
-    lv_obj_set_pos(editOverlay,0,0);lv_obj_set_size(editOverlay,W,H);
+    // The modal is a child of lv_layer_top(), not the scrolled/root
+    // application screen. It therefore cannot be shifted by the selected
+    // textarea's LVGL focus/scroll offset.
+    editOverlay=lv_obj_create(lv_layer_top());
     lv_obj_set_style_radius(editOverlay,0,0);
     lv_obj_set_style_pad_all(editOverlay,0,0);
     lv_obj_set_style_bg_color(editOverlay,lv_color_hex(BG),0);
+    lv_obj_set_style_bg_opa(editOverlay,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(editOverlay,0,0);
+    lv_obj_set_style_shadow_width(editOverlay,0,0);
     lv_obj_clear_flag(editOverlay,LV_OBJ_FLAG_SCROLLABLE);
-    lbl(editOverlay,"EINGABE",24,11,20,BLUE);
+    lv_obj_set_scrollbar_mode(editOverlay,LV_SCROLLBAR_MODE_OFF);
+    editHeading=lbl(editOverlay,"EINGABE",24,11,20,BLUE);
     editInput=lv_textarea_create(editOverlay);
-    lv_obj_set_pos(editInput,20,51);lv_obj_set_size(editInput,760,48);
-    lv_textarea_set_one_line(editInput,true);lv_textarea_set_max_length(editInput,96);
+    lv_textarea_set_one_line(editInput,true);
+    lv_textarea_set_max_length(editInput,96);
     lv_obj_set_style_bg_color(editInput,lv_color_hex(GRAY),0);
     lv_obj_set_style_text_color(editInput,lv_color_hex(INK),0);
     keyboard=lv_keyboard_create(editOverlay);
-    lv_obj_set_pos(keyboard,12,108);lv_obj_set_size(keyboard,776,269);
     lv_obj_set_style_bg_color(keyboard,lv_color_hex(WHITE),0);
+    lv_obj_set_style_pad_all(keyboard,2,0);
+    lv_obj_set_style_pad_row(keyboard,2,0);
+    lv_obj_set_style_pad_column(keyboard,2,0);
+    lv_keyboard_set_popovers(keyboard,false);
+    lv_obj_clear_flag(keyboard,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(keyboard,keyboardEvent,LV_EVENT_READY,nullptr);
     lv_obj_add_event_cb(keyboard,keyboardEvent,LV_EVENT_CANCEL,nullptr);
-    btn(editOverlay,"Speichern",404,394,376,67,"editorcommit",BLUE,BG);
-    btn(editOverlay,"Zurueck",20,394,367,67,"editorcancel",GRAY,INK);
+    editSaveButton=btn(editOverlay,"Speichern",0,0,10,10,"editorcommit",BLUE,BG);
+    editCancelButton=btn(editOverlay,"Abbrechen",0,0,10,10,"editorcancel",GRAY,INK);
+    layoutKeyboardDialog();
     lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
     for(lv_obj_t* field : {ssidEntry,passwordEntry,macroEntry,
          sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField,
