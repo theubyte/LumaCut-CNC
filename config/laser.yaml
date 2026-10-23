@@ -13,15 +13,18 @@ motors:
 homing:
   automatic_xyz_enabled: true
   x_switch_present: true
+  x_endstop_pin: PC0
   y_switch_present: true
+  y_endstop_pin: PC1
   z_switch_present: true
   z_endstop_pin: PC2
   z_shared_with_workpiece_probe: true
   x_y_reference_method: one_limit_switch_per_axis
-  homing_direction_verified: false # set $23 to actual switch locations
+  homing_direction_verified: false # adjust $23 to installed switch direction
 probe:
   type: same_mechanical_switch_as_z_endstop
-  physical_switch_count: 1
+  shared_z_switch_count: 1
+  total_axis_endstop_count: 3
   physical_signal_pin: PC2
   pc14_probe_input_wired: false
   grblhal_shared_pin_mode_implemented: false
