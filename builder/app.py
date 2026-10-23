@@ -7,7 +7,7 @@ import base64, hashlib, hmac, json, os, re, secrets, shutil, signal, subprocess,
 from flask import Flask, Response, request, abort, jsonify, send_from_directory, send_file
 from flash_bundle import build_flash_package, flash_manifest, IMAGE_NAME
 
-ROOT=Path("/data")
+ROOT=Path(os.environ.get("LUMACUT_DATA_ROOT","/data"))
 ART=ROOT/"artifacts"
 WORK=ROOT/"jobs"
 ART.mkdir(parents=True,exist_ok=True)
