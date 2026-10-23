@@ -1,5 +1,55 @@
 # LumaCut Build Lab V2 – Firmware bauen, archivieren und installieren
 
+## Update Center unter https://luma.millione.de/
+
+Die **Update-Infrastruktur für die Versionsanzeige** ist jetzt im Quellcode vorhanden.
+Sie besteht aus `GET /api/updates/latest` (öffentlich lesbare, nur explizit
+freigegebene Versionsinformationen), `POST /api/updates/approve` (nur mit
+administrativer Basic-Authentifizierung und dem bisherigen Schutzheader
+`X-LumaCut-Action: build`), und `GET /api/updates/file/hmi` bzw.
+`/api/updates/file/skr` (geschützte Firmware-Downloads).
+
+Im Dashboard nach einem **erfolgreichen Build komplett** im Archiv den Build
+auswählen und **Als Update für das HMI freigeben** anklicken. Die UI fordert
+eine explizite Bestätigung; ein normaler erfolgreicher Build wird **nicht
+automatisch veröffentlicht**. Beide Firmwaredateien müssen aus demselben Git
+Commit stammen, existieren und ihre SHA256-Prüfsumme erfüllen. Das HMI wird
+nicht aus dem **gesamten** 16-MB-Flashabbild aktualisiert, sondern ausschließlich
+aus dem separat generierten **OTA-Anwendungsimage** `HMI_OTA_APP_UNVERIFIED.bin`.
+Der SKR-Anteil bleibt `SKR_UART_UNVERIFIED_firmware.bin`.
+
+Ein Geräte-Schlüssel (`UPDATE_DEVICE_KEY`) muss vom Besitzer **außerhalb des
+GitHub-Repositories** in `/mnt/user/appdata/lumacut-builder/.env` hinterlegt
+werden, bevor die neuen Device-Downloadrouten die Binärdateien ausliefern.
+Dies ist bewusst getrennt vom Web-Dashboard-Passwort. Bereits beim ersten
+Update kann das **gepaarte** Image unabhängig davon als normales Build-ZIP
+heruntergeladen werden.
+
+Das Waveshare-HMI ruft über WLAN alle ungefähr 6 Stunden die feste Adresse
+`https://luma.millione.de/api/updates/latest` ab, sobald die Uhr synchronisiert
+und die Maschine nicht beschäftigt ist. Unter **System/WLAN → Updates prüfen**
+kann das manuell ausgelöst werden. **TLS wird mit ISRG Root X1 geprüft, nicht
+mit `setInsecure()`.** Verwendet die öffentliche Domain einen anderen
+Zertifikatsaussteller oder sind NTP/HTTPS/Reverse-Proxy nicht erreichbar,
+schlägt der Check geschlossen fehl. Das Domain-Routing und die tatsächliche
+Zertifikatskette konnten aus diesem Arbeitskontext nicht geprüft werden.
+
+**Wichtig: Die vorliegende Revision meldet nur verfügbare Updates.**
+Im Manifest steht ausdrücklich `hmi_ota_enabled: false` und
+`automatic_skr_flash_enabled: false`. OTA-Installieren wird erst nach einem
+funktionierenden ESP32-S3-Doppelslot-/Rollback-Test aktiviert. Für das SKR Mini
+MZ STM32F103RC muss der BOOT0-/NRST-Zugang zum Bootloader mit realer Hardware
+nachgewiesen werden. Ein erfolgreicher Compiler-Build oder eine Versionsanzeige
+ist kein Nachweis für sicheres Board-Flashen.
+
+Die Webseite wird durch Änderungen auf GitHub **nicht automatisch aktualisiert**:
+Mit dem unten beschriebenen Unraid/NextTerm-Update das neue Docker-Image
+installieren und sicherstellen, dass der Reverse-Proxy auf
+`https://luma.millione.de/` die beiden Release-Routen entsprechend weiterleitet.
+Beim öffentlichen Endpoint dürfen keine Basic-Auth-Gates vorgeschaltet sein,
+beim geschützten Firmware-Download dagegen weiterhin nur berechtigte Clients
+zugelassen werden. TLS muss gültig sein.
+
 ## Neue Bedienoberfläche (Dashboard V2)
 
 Die Benutzeroberfläche auf Port **18744** hat fünf Primäraktionen:
