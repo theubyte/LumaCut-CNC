@@ -1293,7 +1293,7 @@ void action(const char* id){
         return;
     }
     if(op=="motorHold"){
-        String cmds[]={"$1=255","$"};
+        String cmds[]={"$1=255",String(char(36))+char(36)};
         if(startScript(cmds,2)){
             motorsReleased=false;
             setNotice("Motor-Haltestrom dauerhaft aktiv ($1=255).");
