@@ -99,6 +99,15 @@ float workX=0,workY=0,workZ=0;
 int directionMask=-1,homingDirectionMask=-1;
 bool softLimitsEnabled=false,hardLimitsEnabled=false,homingEnabled=false;
 bool machineZeroAtMax=true;
+bool travelInputsDirty=false;
+enum class ConfigWrite {None,Travel,Parameter,MotorHold,Limits};
+ConfigWrite configWrite=ConfigWrite::None;
+float travelRequested[3]{};
+int requestedSettingId=-1;
+float requestedSettingValue=0.f;
+String lastControllerError, zLiftReason;
+uint32_t postHomeStartedMs=0;
+bool zLiftDirectionVerified=false;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
 *passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr,*macroEntry=nullptr;
@@ -227,7 +236,9 @@ bool canCommand(){return owner==Owner::None&&idle();}
 bool canConfigure(){return owner==Owner::None&&fresh()&&
     (machineState==MachineState::Idle||machineState==MachineState::Alarm);}
 bool canMotion(){return canCommand()&&machineHomed&&haveMpos&&
-    softLimitsEnabled&&workX>0&&workY>0&&workZ>0;}
+    !motorsReleased&&softLimitsEnabled&&workX>0&&workY>0&&workZ>0;}
+bool canZMotion(){return canCommand()&&fresh()&&machineHomed&&haveMpos&&
+    !motorsReleased&&softLimitsEnabled&&workZ>0;}
 String uiText(String s){
     s.replace("ä","ae");s.replace("ö","oe");s.replace("ü","ue");
     s.replace("Ä","Ae");s.replace("Ö","Oe");s.replace("Ü","Ue");
@@ -243,6 +254,10 @@ void labelChanged(lv_obj_t* o,const String& value){
         lv_label_set_text(o,display.c_str());
 }
 void refreshSizeFields(){
+    // The numeric editor copies text into a field and then hides the modal.
+    // It is no longer focused, so the old refresh used to overwrite pending
+    // user edits on the next $ response (even before 'Save' was clicked).
+    if(travelInputsDirty)return;
     if(sizeXField&&workX>0&&!lv_obj_has_state(sizeXField,LV_STATE_FOCUSED))
         lv_textarea_set_text(sizeXField,String(workX,1).c_str());
     if(sizeYField&&workY>0&&!lv_obj_has_state(sizeYField,LV_STATE_FOCUSED))
@@ -434,8 +449,9 @@ void nextScript(){
     }
     writeCmd(cmd);commandPending=true;
 }
-bool startScript(const String* commands,int count,bool motion=false){
-    if(!canConfigure()||(motion&&!canMotion())||count<1||count>12)return false;
+bool startScript(const String* commands,int count,bool motion=false,bool zOnly=false){
+    if(!canConfigure()||(motion&&!(zOnly?canZMotion():canMotion()))||
+       count<1||count>12)return false;
     if(!claim(Owner::Script))return false;
     for(int i=0;i<count;i++)script[i]=commands[i];
     scriptCount=count;scriptIndex=0;scriptActive=true;
@@ -1368,18 +1384,32 @@ void makeUi(){
     switchTab(0);
 }
 bool zDeltaAllowed(float delta){
-    if(!canMotion()||fabsf(delta)<0.001f||!isfinite(delta))return false;
+    zLiftReason="";
+    if(!fresh()){zLiftReason="SKR ist nicht erreichbar.";return false;}
+    if(!machineHomed){zLiftReason="Maschine nicht referenziert.";return false;}
+    if(!haveMpos){zLiftReason="Keine Maschinenposition MPos. GRBL Statusmaske $10 pruefen.";return false;}
+    if(!softLimitsEnabled){zLiftReason="Soft Limits $20 sind AUS. Erst Wegmessung/Setup pruefen.";return false;}
+    if(workZ<=0){zLiftReason="Z-Verfahrweg $132 fehlt. Gemessenen Wert speichern.";return false;}
+    if(!isfinite(delta)||fabsf(delta)<0.001f){zLiftReason="Z-Rueckzug muss ungleich 0 mm sein.";return false;}
+    if(!canZMotion()){zLiftReason="SKR ist beschaeftigt oder Motoren sind freigegeben.";return false;}
     float minZ=machineZeroAtMax?-workZ:0.f;
     float maxZ=machineZeroAtMax?0.f:workZ;
     float target=mz+delta;
-    return target>minZ+0.002f&&target<maxZ-0.002f;
+    if(target<=minZ+0.05f||target>=maxZ-0.05f){
+        zLiftReason="Z-Ziel "+String(target,2)+" ausserhalb "+
+            String(minZ,1)+".."+String(maxZ,1)+
+            " mm. Z-Lift-Vorzeichen und Referenzrichtung pruefen.";
+        return false;
+    }
+    return true;
 }
 bool zLift(float delta){
     if(!zDeltaAllowed(delta))return false;
+    // The sign of the correct *physical* retreat direction depends on where
+    // the switch is fitted. Never silently flip a requested +7 mm to -7 mm.
     String cmds[]={"M5","$J=G91 G21 Z"+String(delta,3)+
                         " F"+String(constrain(probeFeedMm,30.f,600.f),1)};
-    // M5 always precedes Z movement; stop at configured soft travel boundary.
-    return startScript(cmds,2,true);
+    return startScript(cmds,2,true,true);
 }
 bool settingAllowed(int id,float val){
     // Keep hard/soft limits and homing active when modified through the HMI.
@@ -1400,6 +1430,10 @@ void action(const char* id){
         if(!isfinite(a)||!isfinite(b)||!isfinite(c)||
            fabsf(a)>50.f||b<0.5f||b>100.f||fabsf(c)>100.f){
             setNotice("Z-Lift +/-50 mm; Fokus 0.5-100 mm; Offset +/-100 mm.");return;
+        }
+        if(fabsf(a-focusLiftMm)>0.001f){
+            zLiftDirectionVerified=false;
+            prefs.putBool("zsignOK",false);
         }
         focusLiftMm=a;focusGapMm=b;tipOffsetMm=c;
         prefs.putFloat("zlift",a);prefs.putFloat("focgap",b);prefs.putFloat("tipoffs",c);
@@ -1483,6 +1517,8 @@ void action(const char* id){
     }
     if(op=="editorcommit"){
         if(editTarget){
+            if(editTarget==sizeXField||editTarget==sizeYField||editTarget==sizeZField)
+                travelInputsDirty=true;
             lv_textarea_set_text(editTarget,lv_textarea_get_text(editInput));
             lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
             editTarget=nullptr;
@@ -1718,6 +1754,7 @@ void internalInit(){
     prefs.begin("lumacut",false);
     machineZeroAtMax=prefs.getBool("zeroMax",true);
     focusLiftMm=prefs.getFloat("zlift",7.f);
+    zLiftDirectionVerified=prefs.getBool("zsignOK",false);
     focusGapMm=prefs.getFloat("focgap",7.f);
     tipOffsetMm=prefs.getFloat("tipoffs",0.f);
     probeTravelMm=prefs.getFloat("ptravel",15.f);
