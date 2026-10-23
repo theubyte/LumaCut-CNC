@@ -98,6 +98,33 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('cmd=="$H"||cmd=="$HZ"',CONTROL)
         self.assertIn('if(!contactSwitchAtHead)',CONTROL)
 
+    def test_settings_editor_keeps_unsaved_values(self):
+        self.assertIn("bool travelInputsDirty=false",CONTROL)
+        self.assertIn("if(travelInputsDirty)return;",CONTROL)
+        self.assertIn("travelInputsDirty=true;",CONTROL)
+        self.assertIn("ConfigWrite::Travel",CONTROL)
+        self.assertIn("fabsf(savedSetting[key]-travelRequested[i])>0.01f",CONTROL)
+        self.assertIn('SKR bestaetigt alle drei Verfahrwege',CONTROL)
+        self.assertIn('SKR hat Einstellung ABGELEHNT',CONTROL)
+        self.assertIn('SKR bestaetigt $1=255',CONTROL)
+
+    def test_post_home_z_diagnostics_and_guard(self):
+        self.assertIn('bool canZMotion()',CONTROL)
+        self.assertIn('startScript(cmds,2,true,true)',CONTROL)
+        self.assertNotIn('Z-Lift wartet auf MPos, Z-Weg und Soft Limits.',CONTROL)
+        self.assertIn('postHomePending=false; // Never show an endless waiting notice',CONTROL)
+        self.assertIn('Z-Richtung noch nicht bestaetigt',CONTROL)
+        self.assertIn('zLiftDirectionVerified=prefs.getBool("zsignOK",false)',CONTROL)
+        self.assertIn('if(op=="ztest")',CONTROL)
+        self.assertIn('if(op=="zverify")',CONTROL)
+        self.assertIn('autoZlift',CONTROL)
+        self.assertIn('GRBL $1:',CONTROL)
+
+    def test_serial_timeout_unblocks_configuration(self):
+        self.assertIn('scriptCommandStartedMs=millis()',CONTROL)
+        self.assertIn('ConfigWrite timedOut=configWrite',CONTROL)
+        self.assertIn('!homingInProgress&&',CONTROL)
+
     def test_touch_to_go_limits_and_laser_off(self):
         self.assertIn('void areaTap(lv_event_t* e)',CONTROL)
         self.assertIn('if(!machineHomed||!canMotion()||postHomePending)',CONTROL)
