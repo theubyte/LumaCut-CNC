@@ -131,6 +131,7 @@ function renderDetails(){
   $("detail-duration").textContent=duration(j.elapsed_seconds);
   $("detail-state").textContent=statusText(j.status);
   $("detail-zip").href=artifact(j,"build-package.zip");
+  $("approve-update").hidden=!(j.status==="success"&&j.paired_firmware);
   const files=j.files||[];
   $("artifact-list").innerHTML=files.length?files.map(f=>{
     const sha=f.sha256||"";
@@ -280,6 +281,26 @@ function showFinish(j){
   modalButton("Log ansehen",()=>{closeModal();selectJob(j.id);
     $("terminal-section").scrollIntoView({behavior:"smooth"});},true);
 }
+async function approveRelease(){
+  const j=find(model.selected);
+  if(!j||j.status!=="success"||!j.paired_firmware)return;
+  if(!window.confirm(
+    "Dieses HMI-/SKR-Paket als STABLE-Update freigeben?\\n"+
+    "Nur nach Hardwareprüfung veröffentlichen. Es erfolgt kein automatischer Flashvorgang."))return;
+  try{
+    const response=await api("/api/updates/approve",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","X-LumaCut-Action":"build"},
+      body:JSON.stringify({job_id:j.id})});
+    const data=await response.json();
+    toast("Update-Kanal freigegeben: "+data.source_sha.slice(0,12));
+    openModal("Update veröffentlicht",
+      "Das freigegebene Versionsmanifest ist für die HMI-Updateprüfung bereit. "+
+      "Firmwareinstallation auf dem SKR bleibt bis zur Bootloader-Prüfung deaktiviert.",
+      {kicker:"STABLE RELEASE",icon:"✓",meta:data.source_sha.slice(0,12)});
+    modalLink("Update-Manifest prüfen", "/api/updates/latest");
+  }catch(e){toast("Freigabe fehlgeschlagen: "+e.message,true);}
+}
 function showFlash(job){
   const j=job||latest(isHmi);
   if(!j){
@@ -414,6 +435,7 @@ function init(){
     const j=find(model.active)||find(model.selected);if(!j)return;
     selectJob(j.id);$("terminal-section").scrollIntoView({behavior:"smooth"});
   });
+  $("approve-update").addEventListener("click",approveRelease);
   $("detail-log").addEventListener("click",()=>{
     $("terminal-section").scrollIntoView({behavior:"smooth"});pollLog(true);
   });
