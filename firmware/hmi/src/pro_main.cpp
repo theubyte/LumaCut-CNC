@@ -77,7 +77,7 @@ bool knownSetting[400]{};
 float focusLiftMm=7.f,focusGapMm=7.f,tipOffsetMm=0.f,
       probeTravelMm=15.f,probeFeedMm=60.f;
 bool autoLiftAfterHome=true,postHomePending=false,motorsReleased=false;
-bool contactSwitchAtHead=false;
+bool contactSwitchAtHead=false,postContactLift=false;
 bool homeFromHmi=false,motorReleasePending=false;
 int catalogCategory=0;
 lv_disp_t* uiDisplay=nullptr;
@@ -298,7 +298,7 @@ void abortHost(){
     setNotice("Externer Job abgebrochen. LightBurn stoppen; Quellenwechsel erst bei Idle.");
 }
 void abortJob(){
-    postHomePending=false;homeFromHmi=false;
+    postHomePending=false;postContactLift=false;homeFromHmi=false;
     // Soft reset also clears host parser state; machine must be re-homed.
     machine.write((uint8_t)0x18);
     if(jobFile)jobFile.close();
@@ -313,6 +313,7 @@ void nextScript(){
     String cmd=script[scriptIndex++];
     if(cmd=="$H"||cmd=="$HZ"){
         homingInProgress=true;homeFromHmi=true;machineHomed=false;
+        postContactLift=(cmd=="$HZ");
         haveMpos=false;postHomePending=false;
     }
     writeCmd(cmd);commandPending=true;
@@ -1610,9 +1611,15 @@ void loop(){
             }
         } else {
             postHomePending=false;
-            if(!zLift(focusLiftMm))
-                setNotice("Z-Rueckzug liegt ausserhalb des Verfahrwegs. Z-Setup pruefen.");
-            else setNotice("Z-Rueckzug "+String(focusLiftMm,2)+" mm gestartet.");
+            // In workpiece-contact mode the switch trigger and optical focus
+            // have different datums. Positive tip offset is the current
+            // optical clearance at switch contact. Relative lift = target-
+            // minus-current clearance; never claim this is self-calibrated.
+            float delta=postContactLift?(focusGapMm-tipOffsetMm):focusLiftMm;
+            postContactLift=false;
+            if(!zLift(delta))
+                setNotice("Z-Abstand liegt ausserhalb des Verfahrwegs. Kalibrierung pruefen.");
+            else setNotice("Z nach Referenzierung um "+String(delta,2)+" mm bewegt.");
         }
     }
     internalJobService();
