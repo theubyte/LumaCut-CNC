@@ -108,6 +108,29 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('SKR hat Einstellung ABGELEHNT',CONTROL)
         self.assertIn('SKR bestaetigt $1=255',CONTROL)
 
+    def test_positive_operator_coordinates_and_exact_seven_mm_target(self):
+        self.assertIn('float operatorPos(float machinePos)',CONTROL)
+        self.assertIn('machineZeroAtMax?-machinePos:machinePos',CONTROL)
+        self.assertIn('display_x_mm',CONTROL)
+        self.assertIn('display_y_mm',CONTROL)
+        self.assertIn('display_z_mm',CONTROL)
+        self.assertIn('String(operatorPos(mx),2)',CONTROL)
+        self.assertIn('String(operatorPos(my),2)',CONTROL)
+        self.assertIn('String(operatorPos(mz),2)',CONTROL)
+        self.assertIn('float zLift(float targetOperatorMm)',CONTROL)
+        self.assertIn('const float machineTarget=machinePosFromOperator(targetOperatorMm)',CONTROL)
+        self.assertIn('const float rawDelta=machineTarget-mz',CONTROL)
+        self.assertIn('zJogRawDelta(rawDelta)',CONTROL)
+        self.assertIn('Auto-Z auf ',CONTROL)
+        self.assertNotIn('if(!softLimitsEnabled){zLiftReason=',CONTROL)
+        # Example: after 1 mm homing pull-off, target +7 mm is -6 raw.
+        machine_pos=-1.0
+        display=lambda pos:-pos
+        machine_target=lambda val:-val
+        self.assertEqual(display(machine_pos),1.0)
+        self.assertEqual(machine_target(7.0)-machine_pos,-6.0)
+        self.assertEqual(display(machine_pos-6.0),7.0)
+
     def test_post_home_z_diagnostics_and_guard(self):
         self.assertIn('bool canZMotion()',CONTROL)
         self.assertIn('startScript(cmds,2,true,true)',CONTROL)
