@@ -738,6 +738,16 @@ lv_obj_t* btn(lv_obj_t* parent,const char* text,int x,int y,int w,int h,const ch
     lv_obj_set_style_text_color(t,lv_color_hex(fg),0);lv_obj_set_style_text_font(t,&lv_font_montserrat_14,0);
     return p;
 }
+lv_obj_t* configEntry(lv_obj_t* parent,int x,int y,int w,int h,const String& text){
+    lv_obj_t* item=lv_textarea_create(parent);
+    lv_obj_set_pos(item,x,y);lv_obj_set_size(item,w,h);
+    lv_textarea_set_one_line(item,true);lv_textarea_set_max_length(item,13);
+    lv_textarea_set_text(item,text.c_str());
+    lv_obj_set_style_bg_color(item,lv_color_hex(GRAY),0);
+    lv_obj_set_style_text_color(item,lv_color_hex(INK),0);
+    lv_obj_set_style_border_width(item,0,0);
+    return item;
+}
 void switchTab(int idx){
     activePage=idx;
     const int navMap[7]={0,5,1,2,3,6,4};
@@ -863,6 +873,73 @@ void makeUi(){
     }
     btn(c,"Mit WLAN verbinden",415,189,333,54,"wifi",BLUE,BG);
 
+    // ARBEITSFLAECHE: true XY machine position in an explicitly defined square.
+    c=card(pages[5],0,0,304,268);
+    lbl(c,"LIVE-ARBEITSFELD",18,10,14,BLUE);
+    areaField=lv_obj_create(c);
+    lv_obj_set_pos(areaField,47,31);lv_obj_set_size(areaField,210,210);
+    lv_obj_set_style_bg_color(areaField,lv_color_hex(0x101D2E),0);
+    lv_obj_set_style_border_color(areaField,lv_color_hex(0x46718F),0);
+    lv_obj_set_style_border_width(areaField,2,0);
+    lv_obj_set_style_radius(areaField,5,0);
+    lv_obj_set_style_pad_all(areaField,0,0);
+    lv_obj_clear_flag(areaField,LV_OBJ_FLAG_SCROLLABLE);
+    for(int i=1;i<4;i++){
+        lv_obj_t* v=lv_obj_create(areaField);
+        lv_obj_set_pos(v,i*52,0);lv_obj_set_size(v,1,206);
+        lv_obj_set_style_bg_color(v,lv_color_hex(0x263A4D),0);
+        lv_obj_set_style_border_width(v,0,0);lv_obj_set_style_radius(v,0,0);
+        lv_obj_t* h=lv_obj_create(areaField);
+        lv_obj_set_pos(h,0,i*52);lv_obj_set_size(h,206,1);
+        lv_obj_set_style_bg_color(h,lv_color_hex(0x263A4D),0);
+        lv_obj_set_style_border_width(h,0,0);lv_obj_set_style_radius(h,0,0);
+    }
+    areaDot=lv_obj_create(areaField);lv_obj_set_size(areaDot,14,14);
+    lv_obj_set_style_radius(areaDot,LV_RADIUS_CIRCLE,0);
+    lv_obj_set_style_bg_color(areaDot,lv_color_hex(0xFF304D),0);
+    lv_obj_set_style_border_color(areaDot,lv_color_hex(0xFFFFFF),0);
+    lv_obj_set_style_border_width(areaDot,2,0);
+    lv_obj_set_style_pad_all(areaDot,0,0);
+    lv_obj_add_flag(areaDot,LV_OBJ_FLAG_HIDDEN);
+    c=card(pages[5],316,0,456,268);
+    lbl(c,"Position & Verfahrweg",20,17,20,INK);
+    areaCaption=lbl(c,"GRBL-Arbeitsfeld wird geladen...",20,55,14,SUBTLE);
+    lv_obj_set_width(areaCaption,414);
+    lv_label_set_long_mode(areaCaption,LV_LABEL_LONG_DOT);
+    lbl(c,"Roter Punkt = aktuelle Maschinenposition (MPos)",20,88,14,SUBTLE);
+    btn(c,"Referenzfahrt",20,129,200,49,"home",BLUE,BG);
+    btn(c,"Koordinatennullpunkt",233,129,202,49,"origin",GRAY,INK);
+    btn(c,"Soft Limits aktivieren",20,197,200,48,"softon",PALE_BLUE,BLUE);
+    btn(c,"Setup oeffnen",233,197,202,48,"setupgo",GRAY,INK);
+
+    // MASCHINEN-SETUP: live GRBL $-parameters, motor polarity and bed dimensions.
+    c=card(pages[6],0,0,380,268);
+    lbl(c,"Arbeitsbereich & Richtung",18,12,20);
+    lbl(c,"Arbeitsweg X / Y / Z [mm]",18,45,14,SUBTLE);
+    sizeXField=configEntry(c,18,74,105,43,"");
+    sizeYField=configEntry(c,137,74,105,43,"");
+    sizeZField=configEntry(c,256,74,105,43,"");
+    btn(c,"Verfahrwege speichern",18,131,343,45,"savearea",BLUE,BG);
+    lbl(c,"Motor-Richtung invertieren ($3)",18,184,14,SUBTLE);
+    btn(c,"XYZ",18,209,87,42,"flipall",PALE_BLUE,BLUE);
+    btn(c,"X",111,209,78,42,"flipx",GRAY,INK);
+    btn(c,"Y",195,209,78,42,"flipy",GRAY,INK);
+    btn(c,"Z",279,209,82,42,"flipz",GRAY,INK);
+
+    c=card(pages[6],392,0,380,268);
+    lbl(c,"GRBL Maschinen-Setup",18,12,20);
+    lbl(c,"Homing-Richtung umschalten ($23)",18,45,14,SUBTLE);
+    btn(c,"X",18,69,105,44,"homex",GRAY,INK);
+    btn(c,"Y",137,69,105,44,"homey",GRAY,INK);
+    btn(c,"Z",256,69,105,44,"homez",GRAY,INK);
+    lbl(c,"Parameter-ID / Wert",18,119,14,SUBTLE);
+    paramKeyField=configEntry(c,18,143,99,43,"");
+    paramValueField=configEntry(c,130,143,113,43,"");
+    btn(c,"Setzen",256,143,105,43,"setparam",PALE_BLUE,BLUE);
+    btn(c,"$ Lesen",18,208,102,44,"readcfg",GRAY,INK);
+    btn(c,"Limits EIN",128,208,112,44,"softon",PALE_BLUE,BLUE);
+    btn(c,"180 Grad",247,208,114,44,"rotate180",GRAY,INK);
+
     // Bottom dock is always visible, and labels remain within touch targets.
     const char* tabs[]={"Home","Flaeche","Jobs","Jog","Makros","Setup","WLAN"};
     lv_obj_t* dock=card(root,14,406,772,59);
@@ -893,6 +970,9 @@ void makeUi(){
     lv_obj_add_event_cb(ssidEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
     lv_obj_add_event_cb(passwordEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
     lv_obj_add_event_cb(macroEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
+    for(lv_obj_t* field : {sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField})
+        lv_obj_add_event_cb(field,showKeyboard,LV_EVENT_FOCUSED,nullptr);
+    refreshSizeFields();
     switchTab(0);
 }
 int jogStep=1;
