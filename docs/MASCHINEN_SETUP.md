@@ -52,6 +52,22 @@ Die ESP32-S3-HMI nutzt nun einen DRAM-*Bounce-Buffer* für RGB-Panel-DMA (`W*10`
 
 Auf Touch einer beliebigen HMI-Eingabe (WLAN, Passwort, Makroname, GRBL-ID/Wert, XYZ-Verfahrweg, Z-Rückzug, Fokusabstand oder mechanischer Tasteroffset) erscheint jetzt **ein vollständig bildschirmfüllender Editor** mit sichtbarem Textfeld oberhalb der Tastatur und großen Schaltflächen **Speichern** und **Zurück**. Die Verbindung nutzt LVGL-Ereignis `LV_EVENT_CLICKED`, nicht das auf dem GT911 vorher unzuverlässige FOCUS-Ereignis. Zahlfelder aktivieren ein numerisches Keyboard. Ohne Hardwaretest ist die Touch-Tastatur nicht als vollständig verifiziert anzusehen.
 
+## Tastaturkorrektur (24.10.2026)
+
+**Ursache der außerhalb des 800×480-Displays liegenden Tasten:**
+`lv_keyboard_create()` setzt in LVGL 8 standardmäßig `LV_ALIGN_BOTTOM_MID`.
+`lv_obj_set_pos(keyboard, margin, kbY)` ändert den Anker nicht: positive Y-Werte verschieben
+somit die Tastatur **unter** den unteren Bildschirmrand. Auch eine nachträgliche
+Höhenreduzierung kann den Fehler verschlimmern. Das HMI erzwingt jetzt im
+vollbildigen Editor mit `lv_obj_align(keyboard, LV_ALIGN_TOP_LEFT, margin, kbY)`
+den oberen linken Ursprung, auch nach Tastaturmoduswechsel, und prüft die
+realen globalen Grenzen des Widgets. Speichern/Abbrechen bleiben oberhalb des
+Sicherheitsabstands zum Displayrand sichtbar.
+
+**Wichtig:** Der Fix wirkt erst nach dem Flashen des neuen HMI-Builds. GitHub-CI
+kann Kompilierung und Quelltext-Regression prüfen, nicht die reale GT911-Touchfläche;
+vor Maschinenbetrieb am stromlosen Laser prüfen.
+
 ## Fokusprofil und Z-Rückzug nach Homing
 
 Das HMI speichert drei unabhängige Werte in den Preferences des Waveshare: **Z-Rückzug nach normalem XYZ-Homing**, **optischer Soll-Fokusabstand** (beide zunächst 7 mm) und **optischer Abstand des Laserkopf-Datums zur Werkstückoberfläche genau beim Tasterkontakt** (Tasteroffset, zunächst 0 mm als unkallibrierter Platzhalter). Negative Retractwerte erlauben abhängig von der tatsächlichen Achsorientierung Bewegungen in negativer Z-Richtung. Die Werte müssen anhand der Optik und des Tastpunkts gemessen werden.
