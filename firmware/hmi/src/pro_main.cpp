@@ -72,6 +72,7 @@ lv_disp_t* uiDisplay=nullptr;
 bool rotate180=false,settingsRequested=false;
 float workX=0,workY=0,workZ=0;
 int directionMask=-1,homingDirectionMask=-1;
+bool softLimitsEnabled=false,hardLimitsEnabled=false,homingEnabled=false;
 bool machineZeroAtMax=true;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
@@ -174,6 +175,8 @@ bool idle(){return fresh()&&machineState==MachineState::Idle;}
 bool armed(){return localArmUntil && int32_t(localArmUntil-millis())>0;}
 bool wifiHostAuthorized(){return wifiHostUntil && int32_t(wifiHostUntil-millis())>0;}
 bool canCommand(){return owner==Owner::None&&idle();}
+bool canMotion(){return canCommand()&&machineHomed&&haveMpos&&
+    softLimitsEnabled&&workX>0&&workY>0&&workZ>0;}
 String uiText(String s){
     s.replace("ä","ae");s.replace("ö","oe");s.replace("ü","ue");
     s.replace("Ä","Ae");s.replace("Ö","Oe");s.replace("Ü","Ue");
@@ -198,7 +201,7 @@ void refreshSizeFields(){
 }
 void updateArea(){
     if(!areaField||!areaDot)return;
-    bool valid=fresh()&&haveMpos&&workX>0.f&&workY>0.f;
+    bool valid=fresh()&&machineHomed&&haveMpos&&workX>0.f&&workY>0.f;
     if(!valid){
         lv_obj_add_flag(areaDot,LV_OBJ_FLAG_HIDDEN);
         labelChanged(areaCaption,"Arbeitsfeld unbekannt: GRBL-Werte $130 / $131 lesen");
@@ -280,8 +283,8 @@ void nextScript(){
     }
     writeCmd(script[scriptIndex++]);commandPending=true;
 }
-bool startScript(const String* commands,int count){
-    if(!canCommand()||count<1||count>12)return false;
+bool startScript(const String* commands,int count,bool motion=false){
+    if(!canCommand()||(motion&&!canMotion())||count<1||count>12)return false;
     if(!claim(Owner::Script))return false;
     for(int i=0;i<count;i++)script[i]=commands[i];
     scriptCount=count;scriptIndex=0;scriptActive=true;
@@ -299,6 +302,9 @@ void parseMachineLine(const String& line){
                 float number=line.substring(equal+1).toFloat();
                 if(id==3&&number>=0&&number<=7)directionMask=int(number);
                 if(id==23&&number>=0&&number<=7)homingDirectionMask=int(number);
+                if(id==20)softLimitsEnabled=(number>=1);
+                if(id==21)hardLimitsEnabled=(number>=1);
+                if(id==22)homingEnabled=(number>=1);
                 bool changed=false;
                 if(id==130&&number>0){workX=number;changed=true;}
                 if(id==131&&number>0){workY=number;changed=true;}
@@ -447,7 +453,7 @@ void internalJobService(){
     writeCmd(line);commandPending=true;
 }
 bool jobStart(){
-    if(!canCommand()||!selectedJob.length()||!storageOk)return false;
+    if(!canMotion()||!selectedJob.length()||!storageOk)return false;
     jobFile=LittleFS.open("/jobs/"+selectedJob,FILE_READ);
     if(!jobFile)return false;
     owner=Owner::Internal;jobRunning=true;jobPaused=false;commandPending=false;
@@ -463,7 +469,7 @@ void loadParks(){
     }
 }
 void savePark(){
-    if(!canCommand()||!haveMpos){setNotice("Speichern nur im Leerlauf mit Positionsdaten moeglich.");return;}
+    if(!canMotion()){setNotice("Erst Referenzfahrt und Soft Limits einrichten.");return;}
     int i=parkSlot;String prefix="p"+String(i);
     parks[i].x=mx;parks[i].y=my;parks[i].stored=true;
     prefs.putBool((prefix+"v").c_str(),true);
@@ -477,7 +483,7 @@ bool runPark(){
     // Intentionally no automatic Z move: safe clearance cannot be inferred.
     String cmds[]={"M5","G21 G90",
         "G53 G0 X"+String(parks[parkSlot].x,3)+" Y"+String(parks[parkSlot].y,3)};
-    return startScript(cmds,3);
+    return startScript(cmds,3,true);
 }
 bool parseBounds(){
     // Deliberately conservative: unsafe/ambiguous G-code has NO framing preview.
@@ -561,7 +567,7 @@ bool dryFrame(){
         "G0 X"+String(bounds.x0,3)+" Y"+String(bounds.y1,3),
         "G0 X"+String(bounds.x0,3)+" Y"+String(bounds.y0,3),
         "M5"};
-    return startScript(cmds,8);
+    return startScript(cmds,8,true);
 }
 bool selectJob(String name){
     if(owner==Owner::Internal||owner==Owner::Script)return false;
@@ -1165,8 +1171,19 @@ void action(const char* id){
     if(op=="x+"||op=="x-"||op=="y+"||op=="y-"||op=="z+"||op=="z-"){
         const float dist=(jogStep==0?0.1f:jogStep==1?1.f:10.f)*(op[1]=='-'?-1:1);
         const char axis=(op[0]=='x'?'X':op[0]=='y'?'Y':'Z');
+        if(!canMotion()){
+            setNotice("Erst XYZ referenzieren und Soft Limits aktivieren.");return;
+        }
+        float current=axis=='X'?mx:axis=='Y'?my:mz;
+        float travel=axis=='X'?workX:axis=='Y'?workY:workZ;
+        float target=current+dist;
+        float minPos=machineZeroAtMax?-travel:0;
+        float maxPos=machineZeroAtMax?0:travel;
+        if(target<minPos+0.001f||target>maxPos-0.001f){
+            setNotice("Fahrbefehl endet ausserhalb des Arbeitsbereichs.");return;
+        }
         String cmds[]={"$J=G91 G21 "+String(axis)+String(dist,2)+" F600"};
-        if(!startScript(cmds,1))setNotice("Manuelles Verfahren nur im Leerlauf moeglich.");
+        if(!startScript(cmds,1,true))setNotice("Jog nur bei freier Maschine moeglich.");
         return;
     }
 }
