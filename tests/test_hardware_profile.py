@@ -60,7 +60,12 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('focusGapMm-tipOffsetMm',CONTROL)
         self.assertIn('postHomePending',CONTROL)
         self.assertIn('script[1]="$1=255"',CONTROL)
-        self.assertIn('String cmds[]={"$1=0","$"}',CONTROL)
+        self.assertIn("machine.print(", CONTROL)
+        self.assertIn("$SLP", CONTROL)
+        self.assertIn("String(char(36))+char(36)", CONTROL)
+
+    def test_grbl_parameter_readback_active(self):
+        self.assertIn("line[0]==char(36) && isDigit(line[1])",CONTROL)
 
     def test_single_z_switch_workpiece_reference(self):
         self.assertIn('switch_must_contact_material: true',CONFIG)
