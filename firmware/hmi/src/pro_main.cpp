@@ -1191,6 +1191,55 @@ bool settingAllowed(int id,float val){
 int jogStep=1;
 void action(const char* id){
     String op=id;
+    if(op=="focusSave"){
+        if(!focusLiftField||!focusGapField||!tipOffsetField)return;
+        String lift=lv_textarea_get_text(focusLiftField);
+        String gap=lv_textarea_get_text(focusGapField);
+        String offset=lv_textarea_get_text(tipOffsetField);
+        float a=lift.toFloat(),b=gap.toFloat(),c=offset.toFloat();
+        if(!isfinite(a)||!isfinite(b)||!isfinite(c)||
+           fabsf(a)>50.f||b<0.5f||b>100.f||fabsf(c)>100.f){
+            setNotice("Z-Lift +/-50 mm; Fokus 0.5-100 mm; Offset +/-100 mm.");return;
+        }
+        focusLiftMm=a;focusGapMm=b;tipOffsetMm=c;
+        prefs.putFloat("zlift",a);prefs.putFloat("focgap",b);prefs.putFloat("tipoffs",c);
+        setNotice("Z-Rueckzug, Fokusabstand und Tasteroffset gespeichert.");
+        return;
+    }
+    if(op=="toggleAutoLift"){
+        autoLiftAfterHome=!autoLiftAfterHome;
+        prefs.putBool("autoZlift",autoLiftAfterHome);
+        setNotice(autoLiftAfterHome?"Auto-Z-Rueckzug nach Homing EIN":"Auto-Z-Rueckzug AUS");
+        return;
+    }
+    if(op=="zlift"){
+        if(zLift(focusLiftMm))
+            setNotice("Z-Rueckzug "+String(focusLiftMm,2)+" mm gestartet.");
+        else setNotice("Z-Lift nicht moeglich: Position, Homing und Z-Grenzen pruefen.");
+        return;
+    }
+    if(op=="motorHold"){
+        String cmds[]={"$1=255","$"};
+        if(startScript(cmds,2)){
+            motorsReleased=false;
+            setNotice("Motor-Haltestrom dauerhaft aktiv ($1=255).");
+        } else setNotice("Motor-Einstellung nur im Leerlauf/Alarm.");
+        return;
+    }
+    if(op=="motorRelease"){
+        if(owner!=Owner::None||!idle()){setNotice("Motoren nur im Leerlauf freigeben.");return;}
+        String cmds[]={"$1=0","$"};
+        if(startScript(cmds,2)){
+            motorReleasePending=true;
+            setNotice("Motoren werden freigegeben, danach neu homen.");
+        } else setNotice("Motorfreigabe fehlgeschlagen.");
+        return;
+    }
+    if(op=="probeSetup"){
+        setNotice("Einzelner PC2-Z-Taster: Probing braucht SKR-Modusumschaltung. "
+                  "Keine blinde G38-Fahrt ausloesen.");
+        return;
+    }
     if(op=="editorcancel"){
         lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
         editTarget=nullptr;return;
