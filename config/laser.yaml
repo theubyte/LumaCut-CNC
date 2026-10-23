@@ -36,8 +36,31 @@ probe:
   probe_feed_mm_min: null
   max_probe_travel_mm: null
 focus:
-  target_distance_from_same_optical_datum_mm: null
-  profile_version: null
+  target_optical_clearance_mm: 7.0
+  homing_retract_mm: 7.0
+  switch_trigger_optical_clearance_mm: 0.0 # placeholder; MUST calibrate
+  auto_homing_retract_enabled: true
+  profile_version: 2
+  retract_travel_verified: false
+workpiece_contact:
+  implementation: grblhal_single_axis_z_homing
+  command: "$HZ"
+  grblhal_homing_mask_required: 3 # $22=3 enables single-axis homing
+  physical_input: PC2
+  switch_must_contact_material: true
+  hmi_opt_in_required: true
+  grbl_g38_probe_supported: false
+  machine_z_origin_changes: true
+  independent_probe_max_travel_limit: false
+steppers:
+  homing_holding_grbl_setting: "$1=255"
+  hand_release_grbl_setting: "$1=0"
+  release_invalidates_hmi_homed_reference: true
+  is_physical_brake: false
+hmi:
+  touch_keyboard: full_screen_modal_click
+  touch_to_move: laser_off_G53_XY_only_after_homing
+  parameter_catalog: grbl_readback_plus_raw_editor
 mesh:
   enabled: false
   realtime_z_compensation: false
