@@ -671,93 +671,140 @@ void makeUi(){
     lv_obj_t* root=lv_scr_act();
     lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(root,lv_color_hex(BG),0);
-    lbl(root,"LumaCut",22,11,28);lbl(root,"CONTROL OS",173,22,14,BLUE);
-    statusLabel=lbl(root,"Initialisiere…",450,17,14,BLUE);
-    positionLabel=lbl(root,"X --  Y --  Z --",24,62,20);
-    sourceLabel=lbl(root,"Verbindung frei",540,68,14,SUBTLE);
+    lv_obj_set_style_pad_all(root,0,0);
+
+    // Premium command-center header: product identity, live state and DRO.
+    lbl(root,"LumaCut",22,9,28);
+    lbl(root,"STUDIO  /  CNC",181,22,14,BLUE);
+    lbl(root,"LASER CONTROL SYSTEM",23,48,14,SUBTLE);
+    lv_obj_t* live=card(root,585,13,196,43);
+    statusLabel=lbl(live,"VERBINDUNG...",15,12,14,BLUE);
+    positionLabel=lbl(root,"X --.--     Y --.--     Z --.--",23,78,20,INK);
+    sourceLabel=lbl(root,"Steuerung frei",583,84,14,SUBTLE);
+
+    // Every page fits 800x480 without accidental scrolling.
     for(int i=0;i<5;i++){
-        pages[i]=lv_obj_create(root);lv_obj_set_pos(pages[i],14,104);
-        lv_obj_set_size(pages[i],772,286);lv_obj_set_style_bg_opa(pages[i],LV_OPA_TRANSP,0);
-        lv_obj_set_style_border_width(pages[i],0,0);lv_obj_set_style_pad_all(pages[i],0,0);
+        pages[i]=lv_obj_create(root);lv_obj_set_pos(pages[i],14,117);
+        lv_obj_set_size(pages[i],772,272);
+        lv_obj_set_style_bg_opa(pages[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(pages[i],0,0);
+        lv_obj_set_style_pad_all(pages[i],0,0);
         lv_obj_clear_flag(pages[i],LV_OBJ_FLAG_SCROLLABLE);
     }
-    lv_obj_t* c=card(pages[0],0,0,458,266);
-    lbl(c,"Maschinenübersicht",21,20,20);
-    lbl(c,"Intelligente Lasersteuerung",21,51,14,SUBTLE);
-    btn(c,"Homing gesperrt",20,95,192,48,"home");
-    btn(c,"Lokale Freigabe",226,95,209,48,"arm",PALE_BLUE,BLUE);
-    btn(c,"Start",20,159,131,51,"start",BLUE,WHITE);
-    btn(c,"Pause",163,159,130,51,"pause");
-    btn(c,"Abbruch",305,159,130,51,"abort",0xFFEDF0,RED);
-    lbl(c,"Verbindung & Bewegungen nur mit Statusfreigabe",21,238,14,SUBTLE);
-    lv_obj_t* quick=card(pages[0],474,0,297,266);
-    lbl(quick,"Schnellzugriff",19,20,20);
-    btn(quick,"Rahmen trocken",19,68,258,49,"frame");
-    btn(quick,"Parkposition",19,127,258,49,"park");
-    btn(quick,"LightBurn WLAN erlauben",19,186,258,49,"host");
-    c=card(pages[1],0,0,772,266);
-    lbl(c,"Jobs & Dateien",22,19,20);
-    jobLabel=lbl(c,"Noch keine Datei ausgewählt",22,54,14,SUBTLE);
-    btn(c,"Nächste Datei",21,106,180,52,"next");
-    btn(c,"Rahmen trocken",217,106,180,52,"frame");
-    btn(c,"Job starten",413,106,176,52,"start",BLUE,WHITE);
-    btn(c,"Pause / Weiter",605,106,145,52,"toggle");
-    lbl(c,"Upload: Handy im WLAN mit dem HMI-Webportal verbinden.",22,210,14,SUBTLE);
-    c=card(pages[2],0,0,772,266);
-    lbl(c,"Manuelle Steuerung",21,17,20);
-    lbl(c,"Nur referenziert und lokal freigegeben",21,50,14,SUBTLE);
-    btn(c,"Y+",315,62,126,52,"y+");
-    btn(c,"X-",176,126,126,52,"x-");
-    btn(c,"X+",454,126,126,52,"x+");
-    btn(c,"Y-",315,190,126,52,"y-");
-    btn(c,"Z+",604,62,125,52,"z+");
-    btn(c,"Z-",604,126,125,52,"z-");
-    btn(c,"0,1 / 1 / 10 mm",18,190,250,52,"step");
-    c=card(pages[3],0,0,772,266);
-    lbl(c,"Meine Parkpositionen",21,15,20);
-    lbl(c,"Eigene Makros per Position speichern",21,48,14,SUBTLE);
-    btn(c,"Position 1",21,92,231,45,"p0");
-    btn(c,"Position 2",270,92,231,45,"p1");
-    btn(c,"Position 3",519,92,230,45,"p2");
-    macroLabel=lbl(c,"Position 1",21,153,20);
-    macroEntry=lv_textarea_create(c);lv_obj_set_pos(macroEntry,209,143);
-    lv_obj_set_size(macroEntry,278,43);
+
+    // HOME: reference controls are prominent; no timed unlock.
+    lv_obj_t* c=card(pages[0],0,0,470,268);
+    lbl(c,"Maschinensteuerung",20,15,20);
+    lbl(c,"XYZ  /  Echtzeit  /  GRBL",20,47,14,SUBTLE);
+    btn(c,"Referenzfahrt",20,88,209,54,"home",BLUE,BG);
+    btn(c,"Homing aktivieren",244,88,206,54,"enablehome",PALE_BLUE,BLUE);
+    btn(c,"Job starten",20,157,132,53,"start",GRAY,INK);
+    btn(c,"Pause / Weiter",166,157,133,53,"toggle",GRAY,INK);
+    btn(c,"Abbrechen",313,157,137,53,"abort",0x55303A,0xFF8992);
+    lbl(c,"Status und Fehlermeldungen unten im Display",20,236,14,SUBTLE);
+
+    lv_obj_t* quick=card(pages[0],482,0,290,268);
+    lbl(quick,"Schnellzugriff",19,15,20);
+    lbl(quick,"Dein direkter Workflow",19,46,14,SUBTLE);
+    btn(quick,"Kontur abfahren",18,89,254,49,"frame",GRAY,INK);
+    btn(quick,"Parkposition",18,149,254,49,"park",GRAY,INK);
+    btn(quick,"LightBurn per WLAN",18,209,254,43,"host",PALE_BLUE,BLUE);
+
+    // JOBS: large clear actions and filename/status.
+    c=card(pages[1],0,0,772,268);
+    lbl(c,"Job Studio",22,15,20);
+    lbl(c,"Datei vom Handy oder aus LightBurn",22,47,14,SUBTLE);
+    jobLabel=lbl(c,"Keine Datei ausgewaehlt",22,80,20,INK);
+    lv_obj_set_width(jobLabel,722);
+    lv_label_set_long_mode(jobLabel,LV_LABEL_LONG_DOT);
+    btn(c,"Datei wechseln",21,137,177,55,"next",GRAY,INK);
+    btn(c,"Kontur testen",211,137,170,55,"frame",GRAY,INK);
+    btn(c,"Job starten",393,137,170,55,"start",BLUE,BG);
+    btn(c,"Pause / Weiter",575,137,174,55,"toggle",GRAY,INK);
+    lbl(c,"Dateien lokal im HMI speichern: WLAN-Portal in der Systemansicht",22,226,14,SUBTLE);
+
+    // JOG: spatial arrow arrangement with separate Z column.
+    c=card(pages[2],0,0,772,268);
+    lbl(c,"Manuelle Achsen",20,15,20);
+    lbl(c,"Jogging mit GRBL / Schrittweite waehlen",20,47,14,SUBTLE);
+    btn(c,"Y +",300,75,116,50,"y+",GRAY,INK);
+    btn(c,"X -",169,137,116,50,"x-",GRAY,INK);
+    btn(c,"X +",431,137,116,50,"x+",GRAY,INK);
+    btn(c,"Y -",300,201,116,49,"y-",GRAY,INK);
+    lbl(c,"Z-ACHSE",604,51,14,SUBTLE);
+    btn(c,"Z +",593,87,153,54,"z+",PALE_BLUE,BLUE);
+    btn(c,"Z -",593,151,153,54,"z-",PALE_BLUE,BLUE);
+    lbl(c,"SCHRITTWEITE",20,172,14,SUBTLE);
+    btn(c,"0.1 / 1 / 10 mm",20,201,234,48,"step",PALE_BLUE,BLUE);
+
+    // MACROS: three dedicated programmable machine XY positions.
+    c=card(pages[3],0,0,772,268);
+    lbl(c,"Parkpositionen",21,15,20);
+    lbl(c,"Drei eigene XY-Positionen mit Namen",21,46,14,SUBTLE);
+    btn(c,"Position 1",21,88,231,48,"p0",GRAY,INK);
+    btn(c,"Position 2",270,88,231,48,"p1",GRAY,INK);
+    btn(c,"Position 3",519,88,230,48,"p2",GRAY,INK);
+    macroLabel=lbl(c,"Position 1",21,153,20,INK);
+    lv_obj_set_width(macroLabel,180);
+    lv_label_set_long_mode(macroLabel,LV_LABEL_LONG_DOT);
+    macroEntry=lv_textarea_create(c);lv_obj_set_pos(macroEntry,208,149);
+    lv_obj_set_size(macroEntry,287,44);
     lv_textarea_set_one_line(macroEntry,true);lv_textarea_set_max_length(macroEntry,24);
     lv_textarea_set_text(macroEntry,parks[parkSlot].name.c_str());
-    btn(c,"Namen speichern",499,143,250,43,"rename",PALE_BLUE,BLUE);
-    btn(c,"Aktuelle XY sichern",21,197,334,47,"capture",PALE_BLUE,BLUE);
-    btn(c,"Anfahren",372,197,377,47,"park");
-    c=card(pages[4],0,0,772,266);
-    lbl(c,"Netzwerk & Geräte",21,14,20);
-    ipLabel=lbl(c,"Netzwerk startet...",21,53,14,SUBTLE);
-    lbl(c,"WLAN-Name",415,32,14,SUBTLE);
-    ssidEntry=lv_textarea_create(c);lv_obj_set_pos(ssidEntry,415,54);lv_obj_set_size(ssidEntry,328,41);
-    lv_textarea_set_one_line(ssidEntry,true);lv_textarea_set_text(ssidEntry,wifiSsid.c_str());
-    lbl(c,"WLAN-Passwort",415,100,14,SUBTLE);
-    passwordEntry=lv_textarea_create(c);lv_obj_set_pos(passwordEntry,415,124);lv_obj_set_size(passwordEntry,328,41);
-    lv_textarea_set_one_line(passwordEntry,true);lv_textarea_set_password_mode(passwordEntry,true);
-    btn(c,"WLAN verbinden",415,185,328,51,"wifi",PALE_BLUE,BLUE);
+    lv_obj_set_style_bg_color(macroEntry,lv_color_hex(GRAY),0);
+    lv_obj_set_style_text_color(macroEntry,lv_color_hex(INK),0);
+    lv_obj_set_style_border_width(macroEntry,0,0);
+    btn(c,"Name sichern",509,149,240,44,"rename",PALE_BLUE,BLUE);
+    btn(c,"Aktuelle Position speichern",21,209,355,43,"capture",GRAY,INK);
+    btn(c,"Position anfahren",393,209,356,43,"park",BLUE,BG);
+
+    // SYSTEM: Wi-Fi and local network configuration.
+    c=card(pages[4],0,0,772,268);
+    lbl(c,"System & Verbindung",21,15,20);
+    ipLabel=lbl(c,"Netzwerk wird gestartet...",22,63,14,SUBTLE);
+    lv_obj_set_width(ipLabel,372);
+    lbl(c,"WLAN-NAME (SSID)",418,36,14,SUBTLE);
+    ssidEntry=lv_textarea_create(c);lv_obj_set_pos(ssidEntry,415,58);
+    lv_obj_set_size(ssidEntry,333,41);lv_textarea_set_one_line(ssidEntry,true);
+    lv_textarea_set_text(ssidEntry,wifiSsid.c_str());
+    lbl(c,"WLAN-PASSWORT",418,104,14,SUBTLE);
+    passwordEntry=lv_textarea_create(c);lv_obj_set_pos(passwordEntry,415,126);
+    lv_obj_set_size(passwordEntry,333,41);
+    lv_textarea_set_one_line(passwordEntry,true);
+    lv_textarea_set_password_mode(passwordEntry,true);
+    for(lv_obj_t* field : {ssidEntry,passwordEntry}){
+        lv_obj_set_style_bg_color(field,lv_color_hex(GRAY),0);
+        lv_obj_set_style_text_color(field,lv_color_hex(INK),0);
+        lv_obj_set_style_border_width(field,0,0);
+    }
+    btn(c,"Mit WLAN verbinden",415,189,333,54,"wifi",BLUE,BG);
+
+    // Bottom dock is always visible, and labels remain within touch targets.
     const char* tabs[]={"Home","Jobs","Steuerung","Makros","System"};
-    lv_obj_t* dock=card(root,14,400,772,64);lv_obj_set_style_radius(dock,25,0);
+    lv_obj_t* dock=card(root,14,406,772,59);
+    lv_obj_set_style_radius(dock,19,0);
     for(int i=0;i<5;i++){
-        navButtons[i]=btn(dock,tabs[i],8+i*153,8,144,48,nullptr,WHITE,INK);
+        navButtons[i]=btn(dock,tabs[i],8+i*153,7,144,45,nullptr,WHITE,SUBTLE);
         lv_obj_add_event_cb(navButtons[i],navCb,LV_EVENT_CLICKED,(void*)(uintptr_t)i);
     }
-    messageLabel=lbl(root,"Laser muss hardwareseitig abgesichert sein.",19,378,14,SUBTLE);
+    messageLabel=lbl(root,"Maschinenstatus wird geladen.",21,387,14,SUBTLE);
+    lv_obj_set_width(messageLabel,754);
+    lv_label_set_long_mode(messageLabel,LV_LABEL_LONG_DOT);
+
     keyboard=lv_keyboard_create(root);
-    lv_obj_set_size(keyboard,772,246);lv_obj_set_pos(keyboard,14,134);
+    lv_obj_set_size(keyboard,772,246);lv_obj_set_pos(keyboard,14,140);
     lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
     auto kb=(lv_event_cb_t)+[](lv_event_t* e){
         lv_event_code_t code=lv_event_get_code(e);
-        if(code==LV_EVENT_READY||code==LV_EVENT_CANCEL){
+        if(code==LV_EVENT_READY||code==LV_EVENT_CANCEL)
             lv_obj_add_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
-        }
     };
     lv_obj_add_event_cb(keyboard,kb,LV_EVENT_READY,nullptr);
     lv_obj_add_event_cb(keyboard,kb,LV_EVENT_CANCEL,nullptr);
     auto showKeyboard=(lv_event_cb_t)+[](lv_event_t* e){
         lv_keyboard_set_textarea(keyboard,lv_event_get_target(e));
-        lv_obj_clear_flag(keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(keyboard);
+        lv_obj_clear_flag(keyboard,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(keyboard);
     };
     lv_obj_add_event_cb(ssidEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
     lv_obj_add_event_cb(passwordEntry,showKeyboard,LV_EVENT_FOCUSED,nullptr);
