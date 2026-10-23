@@ -1,4 +1,21 @@
-# LumaCut Build Lab – Firmware bauen und Waveshare HMI flashen
+# LumaCut Build Lab V2 – Firmware bauen, archivieren und installieren
+
+## Neue Bedienoberfläche (Dashboard V2)
+
+Die Benutzeroberfläche auf Port **18744** hat fünf Primäraktionen:
+1. **Build komplett**: GitHub-Commit einmal abrufen, SKR-grblHAL und Waveshare HMI daraus bauen, ein gepaartes ZIP mit Firmware/Prüfsummen ausgeben.
+2. **Build HMI**: Waveshare ESP32-S3 Control OS bauen, Komplett-BIN und Windows-Flashpaket erzeugen.
+3. **Build Laser grblHAL**: passendes SKR Mini MZ UART-Firmwareprofil bauen.
+4. **HMI flashen**: letzten erfolgreichen HMI-Build wählen; Flash per Web Serial unter HTTPS/localhost oder Windows-Flashpaket unter normalem LAN-HTTP.
+5. **grblHAL auf SD-Karte**: die SKR-Firmware eines abgeschlossenen Builds als **firmware.bin** herunterladen. Ein unterstützender HTTPS-Browser kann sie direkt in einen ausgewählten microSD-Ordner schreiben; bei HTTP greift der reguläre Browser-Download.
+
+Der Build-Fortschritt wird anhand tatsächlicher Stufen und PlatformIO-Compiler-Ausgaben abgeleitet; Prozente und Restzeit sind **Schätzwerte**, keine exakten Messungen. Historische erfolgreiche Laufzeiten der gleichen Buildvariante fließen in die ETA ein. Während des Builds aktualisiert sich die Webseite etwa alle 2,2 Sekunden. Abschluss oder Fehler öffnen einen Dialog mit explizitem **X** sowie ZIP-, Log-, Flash- und SD-Folgeaktionen.
+
+Im Archiv können Builds durchsucht und nach Status gefiltert werden. Für jeden Build gibt es Manifest, SHA256-Prüfsummen, Artefakte und gespeichertes Buildlog. Die **Terminalansicht** zeigt die echte Prozessausgabe; ihre Eingabe unterstützt bewusst nur Diagnosebefehle (`help`, `status`, `jobs`, `log`, `files`, `manifest`, `source`, `refresh`, `clear`). **Kein frei ausführbarer Shell-Zugang im Browser**: Host- und Container-Befehle laufen über NextTerm/SSH, damit das Build Lab keinen Remote-Code-Ausführungskanal bietet.
+
+**Sicherheits- und Hardwaregrenze:** Eine auf microSD gespeicherte `firmware.bin` aktualisiert das SKR erst, wenn ein mit dem Board kompatibler Bootloader den Dateiablauf tatsächlich unterstützt. Ein erfolgreicher Build beweist weder sichere Achsrichtungen noch Laserschutz. Flashen am Waveshare erfolgt vom PC aus, nicht vom Unraid-Docker-Container.
+
+
 
 Unraid Docker mit Flask, PlatformIO und esptool; Web-Port **18744** (Container 8080).
 Quellen werden für jeden Job aus GitHub geholt. Der Deploy-Key wird ausschließlich
@@ -50,19 +67,31 @@ Der Browser darf auf `localhost` den Web-Serial-Zugriff erfragen – auf beliebi
 - Verbindungs-/USB-Probleme: Datenkabel, UART1-Position, Chrome/Edge, COM-Port, andere Terminalprogramme und ggf. BOOT-Taste prüfen.
 - Authentifizierung: HTTP Basic. LAN/VPN verwenden, nicht ins Internet freigeben; für externen Zugriff HTTPS/TLS.
 
-## Update des bereits installierten Unraid-Containers
+## Build Lab aktualisieren – NextTerm auf Unraid (privates GitHub-Repo)
 
-Die GitHub-Quellen werden bei Build-Jobs aktualisiert, aber **nicht die laufende Weboberfläche im Docker-Image**. Daher für Änderungen am Build Lab das Docker-Image neu installieren. Der Installer erhält vorhandenes Passwort und Buildarchive:
+Da das GitHub-Repository privat ist, funktioniert der alte öffentliche tar.gz-Download nicht zuverlässig. Verwende stattdessen den vorhandenen, ausschließlich lesenden Deploy-Key auf Unraid:
 
 ```bash
-TMP_DIR="$(mktemp -d)"
-curl -fL --retry 3 -o "$TMP_DIR/lumacut-main.tar.gz" \
-  https://github.com/theubyte/LumaCut-CNC/archive/refs/heads/main.tar.gz &&
-tar -xzf "$TMP_DIR/lumacut-main.tar.gz" -C "$TMP_DIR" &&
-bash "$TMP_DIR/LumaCut-CNC-main/setup/unraid-install.sh"
+bash <<'LUMACUT_UPDATE'
+set -Eeuo pipefail
+STATE=/mnt/user/appdata/lumacut-builder
+test -f "$STATE/secrets/deploy_key" || { echo "GitHub Deploy-Key fehlt."; exit 1; }
+test -f "$STATE/secrets/known_hosts" || { echo "GitHub known_hosts fehlt."; exit 1; }
+TEMP="$(mktemp -d)"
+trap 'rm -rf "$TEMP"' EXIT
+export GIT_SSH_COMMAND="ssh -i $STATE/secrets/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$STATE/secrets/known_hosts"
+git clone --depth 1 --branch main git@github.com:theubyte/LumaCut-CNC.git "$TEMP/repo"
+python3 -m py_compile "$TEMP/repo/builder/app.py"
+if command -v node >/dev/null 2>&1; then
+  node --check "$TEMP/repo/builder/dashboard.js"
+fi
+bash "$TEMP/repo/setup/unraid-install.sh"
+docker ps --filter 'name=^/lumacut-builder$'
+echo "Build Lab: http://DEINE-UNRAID-IP:18744"
+LUMACUT_UPDATE
 ```
 
-Nur wenn das Repository öffentlich abrufbar ist; andernfalls die aktualisierten Dateien mit bestehender GitHub-Berechtigung beziehen. Danach Build Lab wie gewohnt auf Port 18744 öffnen, Login bleibt `lumacut`. Unraid SSH-Verbindung nicht beenden; der Installer tauscht nur den Docker-Container aus.
+Der Installer ersetzt das Docker-Image einschließlich HTML/CSS/JS, nicht nur die Firmwarequelle. Die Daten unter `/mnt/user/appdata/lumacut-builder/data`, bestehende Buildarchive, das Passwort und der Deploy-Key bleiben erhalten. **Nicht während eines aktiven Builds aktualisieren:** Ein laufender Build wird beim Containerersatz abgebrochen.
 
 ## Gekoppelte SKR-Firmware und LightBurn
 
