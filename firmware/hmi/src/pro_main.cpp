@@ -908,6 +908,40 @@ void refreshCatalog(){
     }
 }
 
+void areaTap(lv_event_t* e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    if(!machineHomed||!canMotion()||postHomePending){
+        setNotice("Erst Homing, Motor-Haltebetrieb und Verfahrgrenzen pruefen.");
+        return;
+    }
+    lv_indev_t* dev=lv_indev_get_act();
+    if(!dev||!areaField||workX<=0||workY<=0)return;
+    lv_point_t touch;
+    lv_indev_get_point(dev,&touch);
+    lv_area_t area;
+    lv_obj_get_coords(areaField,&area);
+    // Only the actual 188x188 inner travel projection is actionable.
+    float u=(float(touch.x-area.x1)-6.f)/188.f;
+    float v=(float(touch.y-area.y1)-6.f)/188.f;
+    if(u<0.f||u>1.f||v<0.f||v>1.f)return;
+    float x=machineZeroAtMax?(u-1.f)*workX:u*workX;
+    float y=machineZeroAtMax?(-v)*workY:(1.f-v)*workY;
+    // Clamp away from nominal limit values, respecting homing pull-off.
+    const float margin=1.0f;
+    float xmin=machineZeroAtMax?-workX+margin:margin;
+    float xmax=machineZeroAtMax?-margin:workX-margin;
+    float ymin=machineZeroAtMax?-workY+margin:margin;
+    float ymax=machineZeroAtMax?-margin:workY-margin;
+    if(xmin>=xmax||ymin>=ymax)return;
+    x=constrain(x,xmin,xmax);y=constrain(y,ymin,ymax);
+    // Never turn laser on for touch travel. Coordinates are MPos (G53).
+    String cmds[]={"M5","G53 G0 X"+String(x,3)+" Y"+String(y,3)};
+    if(startScript(cmds,2,true))
+        setNotice("Fahre mit Laser AUS nach X "+String(x,1)+
+                  " / Y "+String(y,1)+". Fahrweg beobachten.");
+    else setNotice("Maschine belegt, keine Touch-Bewegung moeglich.");
+}
+
 void makeUi(){
     lv_obj_t* root=lv_scr_act();
     lv_obj_clear_flag(root,LV_OBJ_FLAG_SCROLLABLE);
@@ -1048,6 +1082,15 @@ void makeUi(){
     lv_obj_set_style_border_width(areaDot,2,0);
     lv_obj_set_style_pad_all(areaDot,0,0);
     lv_obj_add_flag(areaDot,LV_OBJ_FLAG_HIDDEN);
+    // Invisible touch layer above grid and position dot.
+    lv_obj_t* areaTouch=lv_obj_create(areaField);
+    lv_obj_set_pos(areaTouch,0,0);lv_obj_set_size(areaTouch,207,207);
+    lv_obj_set_style_bg_opa(areaTouch,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(areaTouch,0,0);
+    lv_obj_set_style_pad_all(areaTouch,0,0);
+    lv_obj_set_style_shadow_width(areaTouch,0,0);
+    lv_obj_clear_flag(areaTouch,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(areaTouch,areaTap,LV_EVENT_CLICKED,nullptr);
     c=card(pages[5],316,0,456,268);
     lbl(c,"Position & Verfahrweg",20,17,20,INK);
     areaCaption=lbl(c,"GRBL-Arbeitsfeld wird geladen...",20,55,14,SUBTLE);
