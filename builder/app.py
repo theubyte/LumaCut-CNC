@@ -15,6 +15,9 @@ WORK.mkdir(parents=True,exist_ok=True)
 REPO=os.environ.get("GIT_REPOSITORY","git@github.com:theubyte/LumaCut-CNC.git")
 BRANCH=os.environ.get("GIT_BRANCH","main")
 PASSWORD=os.environ.get("BUILDER_PASSWORD","")
+UPDATE_DEVICE_KEY=os.environ.get("UPDATE_DEVICE_KEY","")
+UPDATE_PUBLIC_ORIGIN=os.environ.get("UPDATE_PUBLIC_ORIGIN","https://luma.millione.de").rstrip("/")
+RELEASE_FILE=ROOT/"approved-release.json"
 TARGETS={"tests","stm32_project_unverified","stm32_hmi_bridge_unverified","esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified","lumacut_complete_suite_unverified"}
 ID_RE=re.compile(r"^[a-f0-9]{16}$")
 app=Flask(__name__)
@@ -52,6 +55,13 @@ BASELINE_SECONDS={
 
 @app.before_request
 def auth():
+    # Public metadata enables checks; binaries require per-device token.
+    if request.method=="GET" and request.path=="/api/updates/latest":
+        return None
+    if request.method=="GET" and request.path.startswith("/api/updates/file/"):
+        supplied=request.headers.get("X-LumaCut-Device-Key","")
+        if UPDATE_DEVICE_KEY and hmac.compare_digest(supplied,UPDATE_DEVICE_KEY):
+            return None
     head=request.headers.get("Authorization","")
     try:
         payload=base64.b64decode(head[6:],validate=True).decode("utf-8") if head.startswith("Basic ") else ""
@@ -200,12 +210,21 @@ def perform(job_id,target):
                 meta["files"].extend(build_flash_package(hmi_out,folder,sha,
                     "lumacut_waveshare_s3_pro",Path(__file__).resolve().parent))
                 mark_stage(folder,meta,3)
+                # OTA requires the app-only image, never the merged 16 MB flash image.
+                ota_src=hmi_out/"firmware.bin"
+                if not ota_src.is_file(): raise RuntimeError("HMI OTA application is missing")
+                ota_dest=folder/"HMI_OTA_APP_UNVERIFIED.bin"
+                shutil.copy2(ota_src,ota_dest)
+                meta["files"].append({"name":ota_dest.name,"bytes":ota_dest.stat().st_size,
+                    "sha256":hashlib.sha256(ota_dest.read_bytes()).hexdigest()})
                 release=folder/"LumaCut-Control-OS-Komplettpaket.zip"
                 with zipfile.ZipFile(release,"w",zipfile.ZIP_DEFLATED) as z:
                     z.write(folder/"SKR_UART_UNVERIFIED_firmware.bin",
                             "SKR-Mini-MZ/firmware.bin")
                     z.write(folder/"SKR_UART_UNVERIFIED_firmware.elf",
                             "SKR-Mini-MZ/firmware.elf")
+                    z.write(folder/"HMI_OTA_APP_UNVERIFIED.bin",
+                            "Waveshare/HMI_OTA_APP_UNVERIFIED.bin")
                     z.write(folder/IMAGE_NAME,"Waveshare/"+IMAGE_NAME)
                     z.write(folder/"Waveshare-HMI-Flash-Paket-Windows.zip",
                             "Waveshare/Waveshare-HMI-Flash-Paket-Windows.zip")
@@ -343,6 +362,83 @@ def get_artifact(job_id,filename):
     allowed.update(x["name"] for x in json.loads(m.read_text()).get("files",[]))
     if filename not in allowed: abort(404)
     return send_from_directory(folder,filename,as_attachment=True)
+
+def validated_release(job_id):
+    if not ID_RE.fullmatch(job_id): raise ValueError("Invalid build id")
+    folder=ART/job_id
+    path=folder/"manifest.json"
+    if not path.is_file(): raise ValueError("Build manifest missing")
+    meta=json.loads(path.read_text(encoding="utf-8"))
+    if (meta.get("status")!="success" or
+        meta.get("target")!="lumacut_complete_suite_unverified" or
+        not meta.get("paired_firmware")):
+        raise ValueError("Approve only a successful paired HMI + grblHAL build")
+    names={"hmi":"HMI_OTA_APP_UNVERIFIED.bin","skr":"SKR_UART_UNVERIFIED_firmware.bin"}
+    records={f["name"]:f for f in meta.get("files",[])}
+    images={}
+    for role,name in names.items():
+        file=folder/name
+        if not file.is_file() or name not in records:
+            raise ValueError("Missing firmware image "+name)
+        digest=hashlib.sha256(file.read_bytes()).hexdigest()
+        if digest!=records[name]["sha256"]:
+            raise ValueError("Firmware checksum mismatch "+name)
+        images[role]={"bytes":file.stat().st_size,"sha256":digest,
+            "url":UPDATE_PUBLIC_ORIGIN+"/api/updates/file/"+role}
+    return {"schema":1,"channel":"stable","paired":True,"job_id":job_id,
+        "source_sha":meta["source_sha"],"hardware":{
+            "hmi":"Waveshare ESP32-S3-Touch-LCD-7 Rev1.2",
+            "skr":"BTT SKR Mini MZ V1.0 STM32F103RC"},
+        "automatic_skr_flash_enabled":False,
+        "hmi_ota_enabled":False,
+        "images":images}
+
+@app.post("/api/updates/approve")
+def approve_update():
+    # Only the authenticated administrator can publish. A new build alone
+    # never pushes potentially defective firmware to an attached laser.
+    body=request.get_json(silent=True)
+    if not isinstance(body,dict): abort(400)
+    try: manifest=validated_release(body.get("job_id",""))
+    except (ValueError,OSError,KeyError) as ex:
+        return jsonify({"error":str(ex)}),400
+    manifest["published_utc"]=datetime.now(timezone.utc).isoformat()
+    tmp=ROOT/"approved-release.tmp"
+    tmp.write_text(json.dumps(manifest,indent=2),encoding="utf-8")
+    tmp.replace(RELEASE_FILE)
+    return jsonify(manifest)
+
+@app.get("/api/updates/latest")
+def latest_update():
+    if not RELEASE_FILE.is_file():
+        response=jsonify({"available":False,"schema":1,"channel":"stable"})
+    else:
+        try:
+            manifest=json.loads(RELEASE_FILE.read_text(encoding="utf-8"))
+            response=jsonify({"available":True,**manifest})
+        except (OSError,ValueError):
+            response=jsonify({"available":False,"error":"Invalid release data"})
+            response.status_code=503
+    response.headers["Cache-Control"]="no-store"
+    response.headers["X-Content-Type-Options"]="nosniff"
+    return response
+
+@app.get("/api/updates/file/<role>")
+def update_image(role):
+    if role not in ("hmi","skr"): abort(404)
+    if not UPDATE_DEVICE_KEY:
+        return jsonify({"error":"Update device key is not configured"}),503
+    if not RELEASE_FILE.is_file(): abort(404)
+    manifest=json.loads(RELEASE_FILE.read_text(encoding="utf-8"))
+    job_id=manifest.get("job_id","")
+    try: checked=validated_release(job_id)
+    except (ValueError,OSError,KeyError): abort(503)
+    if checked["source_sha"]!=manifest.get("source_sha"): abort(503)
+    filename="HMI_OTA_APP_UNVERIFIED.bin" if role=="hmi" else "SKR_UART_UNVERIFIED_firmware.bin"
+    response=send_file(ART/job_id/filename,mimetype="application/octet-stream",
+        as_attachment=True,download_name=filename,max_age=0)
+    response.headers["Cache-Control"]="no-store"
+    return response
 
 @app.get("/api/jobs/<job_id>/sd-image")
 def sd_image(job_id):
