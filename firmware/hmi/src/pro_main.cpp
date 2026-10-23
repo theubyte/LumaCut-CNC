@@ -246,6 +246,17 @@ String uiText(String s){
     s.replace("…","...");s.replace("·","/");s.replace("×","x");
     return s;
 }
+// Operator-facing coordinates: grblHAL's default machine volume is
+// [-axis travel, 0]. A raw position of -1 mm is already 1 mm away from
+// the homing switch. LightBurn, status telemetry and GRBL keep the
+// unmodified native MPos values; only the LumaCut operator view changes.
+float operatorPos(float machinePos){
+    float pos=machineZeroAtMax?-machinePos:machinePos;
+    return fabsf(pos)<0.0005f?0.f:pos; // avoid negative zero
+}
+float machinePosFromOperator(float operatorPosition){
+    return machineZeroAtMax?-operatorPosition:operatorPosition;
+}
 void setNotice(const String& s){notice=s;if(messageLabel)lv_label_set_text(messageLabel,uiText(notice).c_str());}
 void labelChanged(lv_obj_t* o,const String& value){
     if(!o)return;
@@ -274,7 +285,7 @@ void updateArea(){
         return;
     }
     labelChanged(areaCaption,String(workX,1)+" x "+String(workY,1)+
-        " mm / MPos X "+String(mx,2)+"  Y "+String(my,2));
+        " mm / Position X "+String(operatorPos(mx),2)+"  Y "+String(operatorPos(my),2));
     // Standard GRBL machine coordinates occupy [-travel, 0] after homing.
     // Origin-at-zero mode is selectable for alternative controller settings.
     float rx=machineZeroAtMax?(mx+workX)/workX:mx/workX;
@@ -372,7 +383,8 @@ void updateCheckService(){
 void updateUi(){
     labelChanged(statusLabel,fresh()?stateText():"Keine Verbindung");
     labelChanged(positionLabel,(fresh()&&haveMpos)?
-        "X "+String(mx,2)+"    Y "+String(my,2)+"    Z "+String(mz,2):
+        "X "+String(operatorPos(mx),2)+"    Y "+String(operatorPos(my),2)+
+        "    Z "+String(operatorPos(mz),2):
         "X --.--     Y --.--     Z --.--");
     labelChanged(sourceLabel,activePage==5?
         ("Motor $3="+(directionMask<0?String("?"):String(directionMask))+
@@ -848,7 +860,11 @@ String jsonMachine(){
     out+=",\"coordinates\":{\"zero_at_max\":";
     out+=(machineZeroAtMax?"true":"false");
     out+=",\"x_mm\":"+String(mx,3)+",\"y_mm\":"+String(my,3)+
-         ",\"z_mm\":"+String(mz,3)+",\"valid\":";
+         ",\"z_mm\":"+String(mz,3)+
+         ",\"display_x_mm\":"+String(operatorPos(mx),3)+
+         ",\"display_y_mm\":"+String(operatorPos(my),3)+
+         ",\"display_z_mm\":"+String(operatorPos(mz),3)+
+         ",\"display_system\":\"positive_distance_from_reference\",\"valid\":";
     out+=((fresh()&&machineHomed&&haveMpos)?"true":"false");
     out+="},\"focus\":{\"target_gap_mm\":"+String(focusGapMm,3)+
          ",\"homing_retract_mm\":"+String(focusLiftMm,3)+
@@ -862,7 +878,8 @@ String jsonMachine(){
 String jsonStatus(){
     String out="{\"state\":\""+String(fresh()?stateText():"Offline")+
       "\",\"owner\":\""+String(ownerText())+
-      "\",\"position\":\""+(haveMpos?("X "+String(mx,2)+" / Y "+String(my,2)+" / Z "+String(mz,2)):"Unbekannt")+
+      "\",\"position\":\""+(haveMpos?("X "+String(operatorPos(mx),2)+
+      " / Y "+String(operatorPos(my),2)+" / Z "+String(operatorPos(mz),2)):"Unbekannt")+
       "\",\"job\":\""+selectedJob+
       "\",\"message\":\""+String(machineHomed?"Referenziert":"Referenzfahrt erforderlich")+
       "\",\"bounds\":"+String(bounds.valid?
@@ -1147,8 +1164,8 @@ void areaTap(lv_event_t* e){
     // Never turn laser on for touch travel. Coordinates are MPos (G53).
     String cmds[]={"M5","G53 G0 X"+String(x,3)+" Y"+String(y,3)};
     if(startScript(cmds,2,true))
-        setNotice("Fahre mit Laser AUS nach X "+String(x,1)+
-                  " / Y "+String(y,1)+". Fahrweg beobachten.");
+        setNotice("Fahre mit Laser AUS nach X "+String(operatorPos(x),1)+
+                  " / Y "+String(operatorPos(y),1)+". Fahrweg beobachten.");
     else setNotice("Maschine belegt, keine Touch-Bewegung moeglich.");
 }
 
