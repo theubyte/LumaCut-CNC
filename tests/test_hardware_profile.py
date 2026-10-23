@@ -56,6 +56,19 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertLess(decl,call)
         self.assertLess(call,definition)
 
+    def test_black_screen_startup_regression(self):
+        config=(ROOT/"firmware/hmi/src/lv_conf.h").read_text(encoding="utf-8")
+        self.assertIn("#define LV_MEM_CUSTOM 1",config)
+        self.assertIn("MALLOC_CAP_SPIRAM",config)
+        self.assertIn("heap_caps_realloc",config)
+        self.assertIn('if(!psramFound())',CONTROL)
+        self.assertIn('void loop(){\n    if(!uiReady)',CONTROL)
+        init=CONTROL[CONTROL.index("void internalInit(){"):CONTROL.index("void setup(){")]
+        self.assertLess(init.index('expander(LCD_RESET|TP_RESET|BACKLIGHT)'),
+                        init.index('makeUi();'))
+        self.assertLess(init.index('makeUi();'),init.index('networkInit();'))
+        self.assertIn('lv_label_set_text(boot,"LumaCut Studio',init)
+
     def test_coordinated_focus_and_keyboard(self):
         self.assertIn('DEFAULT_STEPPER_IDLE_LOCK_TIME=255',BUILD)
         self.assertIn('DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1',BUILD)
