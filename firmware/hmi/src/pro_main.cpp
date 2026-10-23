@@ -27,7 +27,7 @@ constexpr int W=800,H=480;
 constexpr int SDA_PIN=8,SCL_PIN=9;
 constexpr uint8_t IO_MODE=0x24,IO_OUT=0x38;
 constexpr uint8_t LCD_RESET=(1<<3),TP_RESET=(1<<1),BACKLIGHT=(1<<2);
-constexpr uint32_t WIFI_TCP_PORT=23, STATUS_INTERVAL=950, ARM_DURATION=30000;
+constexpr uint32_t WIFI_TCP_PORT=23, STATUS_INTERVAL=250, ARM_DURATION=30000;
 constexpr size_t MAX_JOB_BYTES=3*1024*1024, MAX_LINE=220;
 HardwareSerial machine(1);
 WiFiServer tcpServer(WIFI_TCP_PORT);
@@ -182,27 +182,74 @@ String uiText(String s){
     return s;
 }
 void setNotice(const String& s){notice=s;if(messageLabel)lv_label_set_text(messageLabel,uiText(notice).c_str());}
+void labelChanged(lv_obj_t* o,const String& value){
+    if(!o)return;
+    String display=uiText(value);
+    if(strcmp(lv_label_get_text(o),display.c_str())!=0)
+        lv_label_set_text(o,display.c_str());
+}
+void refreshSizeFields(){
+    if(sizeXField&&workX>0&&!lv_obj_has_state(sizeXField,LV_STATE_FOCUSED))
+        lv_textarea_set_text(sizeXField,String(workX,1).c_str());
+    if(sizeYField&&workY>0&&!lv_obj_has_state(sizeYField,LV_STATE_FOCUSED))
+        lv_textarea_set_text(sizeYField,String(workY,1).c_str());
+    if(sizeZField&&workZ>0&&!lv_obj_has_state(sizeZField,LV_STATE_FOCUSED))
+        lv_textarea_set_text(sizeZField,String(workZ,1).c_str());
+}
+void updateArea(){
+    if(!areaField||!areaDot)return;
+    bool valid=fresh()&&haveMpos&&workX>0.f&&workY>0.f;
+    if(!valid){
+        lv_obj_add_flag(areaDot,LV_OBJ_FLAG_HIDDEN);
+        labelChanged(areaCaption,"Arbeitsfeld unbekannt: GRBL-Werte $130 / $131 lesen");
+        return;
+    }
+    labelChanged(areaCaption,String(workX,1)+" x "+String(workY,1)+
+        " mm / MPos X "+String(mx,2)+"  Y "+String(my,2));
+    // Standard GRBL machine coordinates occupy [-travel, 0] after homing.
+    // Origin-at-zero mode is selectable for alternative controller settings.
+    float rx=machineZeroAtMax?(mx+workX)/workX:mx/workX;
+    float ry=machineZeroAtMax?(my+workY)/workY:my/workY;
+    // Do not falsely display clamped outside coordinates as inside the bed.
+    if(rx < -0.001f||rx > 1.001f||ry < -0.001f||ry > 1.001f){
+        lv_obj_add_flag(areaDot,LV_OBJ_FLAG_HIDDEN);
+        labelChanged(areaCaption,"Position ausserhalb des eingestellten Arbeitsfeldes");
+        return;
+    }
+    rx=constrain(rx,0.f,1.f);ry=constrain(ry,0.f,1.f);
+    int usable=188;
+    int px=6+int(rx*usable);
+    int py=6+int((1.f-ry)*usable);
+    if(lv_obj_get_x(areaDot)!=px||lv_obj_get_y(areaDot)!=py)
+        lv_obj_set_pos(areaDot,px,py);
+    lv_obj_clear_flag(areaDot,LV_OBJ_FLAG_HIDDEN);
+}
 void updateUi(){
-    if(statusLabel)lv_label_set_text(statusLabel,uiText(fresh()?stateText():"Keine Verbindung").c_str());
-    if(positionLabel) {
-        if(fresh()&&haveMpos)lv_label_set_text_fmt(positionLabel,"X %.2f   Y %.2f   Z %.2f",mx,my,mz);
-        else lv_label_set_text(positionLabel,"X --.--   Y --.--   Z --.--");
-    }
-    if(sourceLabel)lv_label_set_text(sourceLabel,uiText(String(ownerText())).c_str());
-    if(jobLabel){
-        String t=selectedJob.length()?"Datei: "+selectedJob:"Noch keine Datei ausgewählt";
-        if(bounds.valid)t+="  ·  "+String(bounds.x1-bounds.x0,1)+" × "+String(bounds.y1-bounds.y0,1)+" mm";
-        lv_label_set_text(jobLabel,uiText(t).c_str());
-    }
-    if(macroLabel)lv_label_set_text(macroLabel,uiText(parks[parkSlot].stored?parks[parkSlot].name:String("Freier Makroplatz")).c_str());
+    labelChanged(statusLabel,fresh()?stateText():"Keine Verbindung");
+    labelChanged(positionLabel,(fresh()&&haveMpos)?
+        "X "+String(mx,2)+"    Y "+String(my,2)+"    Z "+String(mz,2):
+        "X --.--     Y --.--     Z --.--");
+    labelChanged(sourceLabel,ownerText());
+    String job=selectedJob.length()?"Datei: "+selectedJob:"Noch keine Datei ausgewaehlt";
+    if(bounds.valid)job+="  /  "+String(bounds.x1-bounds.x0,1)+
+                                " x "+String(bounds.y1-bounds.y0,1)+" mm";
+    labelChanged(jobLabel,job);
+    labelChanged(macroLabel,parks[parkSlot].stored?parks[parkSlot].name:String("Freier Makroplatz"));
     if(ipLabel){
-        String s="WLAN: "+(WiFi.status()==WL_CONNECTED?WiFi.localIP().toString():String("nicht verbunden"))+
-        "\nHotspot: "+apName+"  /  "+apPass+
+        String net="WLAN: "+(WiFi.status()==WL_CONNECTED?WiFi.localIP().toString():String("nicht verbunden"))+
+        "\nHotspot: "+apName+" / "+apPass+
         "\nApp: http://"+WiFi.softAPIP().toString()+
         "\nZugangscode: "+apiKey;
-        lv_label_set_text(ipLabel,uiText(s).c_str());
+        labelChanged(ipLabel,net);
     }
+    if(configCaption){
+        labelChanged(configCaption,"Motor $3: "+(directionMask<0?String("?"):String(directionMask))+
+            "  /  Homing $23: "+(homingDirectionMask<0?String("?"):String(homingDirectionMask))+
+            "  /  X "+String(workX,0)+" Y "+String(workY,0)+" Z "+String(workZ,0));
+    }
+    updateArea();
 }
+
 bool claim(Owner value){
     if(owner==value)return true;
     if(owner!=Owner::None)return false;
@@ -241,6 +288,25 @@ bool startScript(const String* commands,int count){
     nextScript();return true;
 }
 void parseMachineLine(const String& line){
+    if(line.startsWith("$")){
+        int equal=line.indexOf('=');
+        if(equal>1){
+            String key=line.substring(1,equal);
+            bool digits=true;
+            for(unsigned i=0;i<key.length();i++)if(!isDigit(key[i]))digits=false;
+            if(digits){
+                int id=key.toInt();
+                float number=line.substring(equal+1).toFloat();
+                if(id==3&&number>=0&&number<=7)directionMask=int(number);
+                if(id==23&&number>=0&&number<=7)homingDirectionMask=int(number);
+                bool changed=false;
+                if(id==130&&number>0){workX=number;changed=true;}
+                if(id==131&&number>0){workY=number;changed=true;}
+                if(id==132&&number>0){workZ=number;changed=true;}
+                if(changed)refreshSizeFields();
+            }
+        }
+    }
     if(line.startsWith("<")){
         int end=line.indexOf('|');if(end<0)end=line.indexOf('>');
         String state=line.substring(1,end);
