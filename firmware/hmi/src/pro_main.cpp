@@ -156,10 +156,17 @@ bool fresh(){return lastStatusMs && (uint32_t)(millis()-lastStatusMs)<3500u;}
 bool idle(){return fresh()&&machineState==MachineState::Idle;}
 bool armed(){return localArmUntil && int32_t(localArmUntil-millis())>0;}
 bool wifiHostAuthorized(){return wifiHostUntil && int32_t(wifiHostUntil-millis())>0;}
-bool canCommand(){return owner==Owner::None&&idle()&&machineHomed&&armed();}
-void setNotice(const String& s){notice=s;if(messageLabel)lv_label_set_text(messageLabel,notice.c_str());}
+bool canCommand(){return owner==Owner::None&&idle();}
+String uiText(String s){
+    s.replace("ä","ae");s.replace("ö","oe");s.replace("ü","ue");
+    s.replace("Ä","Ae");s.replace("Ö","Oe");s.replace("Ü","Ue");
+    s.replace("ß","ss");s.replace("–","-");s.replace("—","-");
+    s.replace("…","...");s.replace("·","/");s.replace("×","x");
+    return s;
+}
+void setNotice(const String& s){notice=s;if(messageLabel)lv_label_set_text(messageLabel,uiText(notice).c_str());}
 void updateUi(){
-    if(statusLabel)lv_label_set_text_fmt(statusLabel,"%s  %s",fresh()?stateText():"Verbindung fehlt",armed()?"· Freigegeben":"");
+    if(statusLabel)lv_label_set_text(statusLabel,uiText(fresh()?stateText():"Keine Verbindung").c_str());
     if(positionLabel) {
         if(fresh()&&haveMpos)lv_label_set_text_fmt(positionLabel,"X %.2f   Y %.2f   Z %.2f",mx,my,mz);
         else lv_label_set_text(positionLabel,"X --.--   Y --.--   Z --.--");
@@ -168,15 +175,15 @@ void updateUi(){
     if(jobLabel){
         String t=selectedJob.length()?"Datei: "+selectedJob:"Noch keine Datei ausgewählt";
         if(bounds.valid)t+="  ·  "+String(bounds.x1-bounds.x0,1)+" × "+String(bounds.y1-bounds.y0,1)+" mm";
-        lv_label_set_text(jobLabel,t.c_str());
+        lv_label_set_text(jobLabel,uiText(t).c_str());
     }
-    if(macroLabel)lv_label_set_text(macroLabel,parks[parkSlot].stored?parks[parkSlot].name.c_str():"Freier Makroplatz");
+    if(macroLabel)lv_label_set_text(macroLabel,uiText(parks[parkSlot].stored?parks[parkSlot].name:String("Freier Makroplatz")).c_str());
     if(ipLabel){
         String s="WLAN: "+(WiFi.status()==WL_CONNECTED?WiFi.localIP().toString():String("nicht verbunden"))+
         "\nHotspot: "+apName+"  /  "+apPass+
         "\nApp: http://"+WiFi.softAPIP().toString()+
         "\nZugangscode: "+apiKey;
-        lv_label_set_text(ipLabel,s.c_str());
+        lv_label_set_text(ipLabel,uiText(s).c_str());
     }
 }
 bool claim(Owner value){
@@ -373,7 +380,7 @@ void loadParks(){
     }
 }
 void savePark(){
-    if(!canCommand()||!haveMpos){setNotice("Speichern nur mit Referenzfahrt und lokaler Freigabe.");return;}
+    if(!canCommand()||!haveMpos){setNotice("Speichern nur im Leerlauf mit Positionsdaten moeglich.");return;}
     int i=parkSlot;String prefix="p"+String(i);
     parks[i].x=mx;parks[i].y=my;parks[i].stored=true;
     prefs.putBool((prefix+"v").c_str(),true);
@@ -755,11 +762,6 @@ void makeUi(){
 int jogStep=1;
 void action(const char* id){
     String op=id;
-    if(op=="arm"){
-        if(!idle()||owner!=Owner::None||!machineHomed){setNotice("Nur nach Referenzfahrt im Leerlauf freigeben.");return;}
-        localArmUntil=millis()+ARM_DURATION;
-        setNotice("30 Sekunden lokal freigegeben. Vor jeder Bewegung Fahrweg prüfen.");return;
-    }
     if(op=="host"){
         if(owner!=Owner::None||!fresh()||
            (machineState!=MachineState::Idle&&machineState!=MachineState::Alarm)){
@@ -786,14 +788,31 @@ void action(const char* id){
         return;
     }
     if(op=="home"){
-        // Real machine currently has ONLY one Z switch and NO X/Y switches.
-        // Never run $H: the uninstrumented axes could crash into hard stops.
-        setNotice("Homing gesperrt: nur ein Z-Taster, X/Y-Endschalter fehlen.");
+        // Real machine: one installed endstop for each of X, Y and Z.
+        if(owner!=Owner::None||!fresh()||
+           (machineState!=MachineState::Idle&&machineState!=MachineState::Alarm)){
+            setNotice("Referenzfahrt nur bei freier Maschine moeglich.");return;
+        }
+        if(claim(Owner::Script)){
+            script[0]="$H";scriptCount=1;scriptIndex=0;scriptActive=true;
+            homingInProgress=true;machineHomed=false;
+            nextScript();setNotice("Referenzfahrt gestartet.");
+        }
         return;
     }
-    if(op=="start"){if(!jobStart())setNotice("Start gesperrt: Idle, Home, Freigabe und gewählter Job erforderlich.");return;}
+    if(op=="enablehome"){
+        if(owner!=Owner::None||!idle()){
+            setNotice("Homing nur im Leerlauf konfigurierbar.");return;
+        }
+        if(claim(Owner::Script)){
+            script[0]="$22=1";scriptCount=1;scriptIndex=0;scriptActive=true;
+            nextScript();setNotice("Homing aktivieren: $22=1 gesendet.");
+        }
+        return;
+    }
+    if(op=="start"){if(!jobStart())setNotice("Zum Start Datei waehlen und Leerlauf abwarten.");return;}
     if(op=="frame"){if(!dryFrame())setNotice("Trockenrahmen gesperrt oder Dateigrenzen unbekannt.");return;}
-    if(op=="park"){if(!runPark())setNotice("Parken erst nach Home, lokaler Freigabe und gespeichertem Makro.");return;}
+    if(op=="park"){if(!runPark())setNotice("Parkposition fehlt oder Maschine ist beschaeftigt.");return;}
     if(op=="capture"){savePark();return;}
     if(op=="rename"){
         String name=lv_textarea_get_text(macroEntry);name.trim();
@@ -837,7 +856,7 @@ void action(const char* id){
         const float dist=(jogStep==0?0.1f:jogStep==1?1.f:10.f)*(op[1]=='-'?-1:1);
         const char axis=(op[0]=='x'?'X':op[0]=='y'?'Y':'Z');
         String cmds[]={"$J=G91 G21 "+String(axis)+String(dist,2)+" F600"};
-        if(!startScript(cmds,1))setNotice("Jog gesperrt: Maschine muss Idle, referenziert und lokal freigegeben sein.");
+        if(!startScript(cmds,1))setNotice("Manuelles Verfahren nur im Leerlauf moeglich.");
         return;
     }
 }
