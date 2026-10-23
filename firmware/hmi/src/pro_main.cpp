@@ -106,7 +106,7 @@ float travelRequested[3]{};
 int requestedSettingId=-1;
 float requestedSettingValue=0.f;
 String lastControllerError, zLiftReason;
-uint32_t postHomeStartedMs=0;
+uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
 bool zLiftDirectionVerified=false;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
@@ -387,7 +387,10 @@ void updateUi(){
         String net="WLAN: "+(WiFi.status()==WL_CONNECTED?WiFi.localIP().toString():String("nicht verbunden"))+
         "\nHotspot: "+apName+" / "+apPass+
         "\nApp: http://"+WiFi.softAPIP().toString()+
-        "\nZugangscode: "+apiKey;
+        "\nZugangscode: "+apiKey+
+        "\nGRBL $1:"+(knownSetting[1]?String(savedSetting[1],0):"?")+
+        " $20:"+(knownSetting[20]?String(savedSetting[20],0):"?")+
+        " $132:"+(knownSetting[132]?String(savedSetting[132],1):"?");
         labelChanged(ipLabel,net);
     }
     if(releaseButton)labelChanged(lv_obj_get_child(releaseButton,0),
@@ -448,7 +451,7 @@ void nextScript(){
         postContactLift=(cmd=="$HZ");
         haveMpos=false;postHomePending=false;
     }
-    writeCmd(cmd);commandPending=true;
+    writeCmd(cmd);commandPending=true;scriptCommandStartedMs=millis();
 }
 bool startScript(const String* commands,int count,bool motion=false,bool zOnly=false){
     if(!canConfigure()||(motion&&!(zOnly?canZMotion():canMotion()))||
@@ -1895,6 +1898,20 @@ void loop(){
     }
     http.handleClient();
     bridgeService();
+    // A missing or rejected settings response must not monopolize the UART
+    // and prevent all later parameter edits indefinitely.
+    if(scriptActive&&commandPending&&owner==Owner::Script&&!homingInProgress&&
+       (uint32_t)(millis()-scriptCommandStartedMs)>12000u){
+        scriptActive=false;commandPending=false;scriptCount=scriptIndex=0;
+        owner=Owner::None;
+        ConfigWrite timedOut=configWrite;configWrite=ConfigWrite::None;
+        lastControllerError="Antwort-Timeout bei GRBL Einstellbefehl";
+        setNotice(timedOut==ConfigWrite::None?
+            "SKR antwortet nicht; UART/Wiring/GRBL pruefen.":
+            "SKR hat Einstellbefehl nicht bestaetigt; UART pruefen.");
+        machineHomed=false;haveMpos=false;
+        postHomePending=false;
+    }
     if(postHomePending&&machineHomed){
         if(owner==Owner::None&&idle()&&
            (haveMpos||(uint32_t)(millis()-postHomeStartedMs)>3500u)){
