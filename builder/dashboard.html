@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#09131f">
+  <title>LumaCut Studio · Build Lab</title>
+  <link rel="stylesheet" href="/ui/dashboard.css">
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+  <script src="/ui/dashboard.js" defer></script>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="LumaCut Build Lab">
+      <span class="brand-icon"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 2 5 20h10l-3 10 15-19H16l3-9Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg></span>
+      <span><strong>LUMACUT</strong><small>BUILD LAB <span class="version">V2</span></small></span>
+    </a>
+    <div class="sidebar-separator"></div>
+    <div class="sidebar-label">WORKSPACE</div>
+    <nav class="nav" aria-label="Navigation">
+      <a href="#overview" class="nav-link active"><span class="ni">◫</span> Dashboard</a>
+      <a href="#activity" class="nav-link"><span class="ni">▤</span> Build-Archiv <span id="nav-count" class="nav-count">0</span></a>
+      <a href="#terminal-section" class="nav-link"><span class="ni">›_</span> Terminal</a>
+    </nav>
+    <div class="sidebar-spacer"></div>
+    <div class="connection">
+      <span id="health-led" class="led"></span>
+      <div><strong id="connection-text">Verbindung wird geprüft</strong><small>GitHub / Lokaler Builder</small></div>
+    </div>
+    <div class="sidebar-foot">
+      <span>PRIVATE BUILD ENVIRONMENT</span>
+      <span>Unraid · Port 18744</span>
+    </div>
+  </aside>
+
+  <main class="content" id="overview">
+    <header class="topbar">
+      <div class="crumb"><span class="muted">Workspace</span><span class="slash">/</span><span>Build Dashboard</span></div>
+      <div class="top-right">
+        <span class="top-pill"><span id="top-led" class="led"></span><span id="top-state">Verbinde…</span></span>
+        <span class="clock" id="clock"></span>
+      </div>
+    </header>
+    <div class="main-inner">
+      <div class="eyebrow">FIRMWARE CONTROL CENTER <span class="line"></span> SKR MINI MZ + ESP32-S3</div>
+      <section class="hero">
+        <div>
+          <h1>Build. Flash.<br><em>Create.</em></h1>
+          <p>Deine komplette LumaCut-Firmware an einem Ort. Ein Klick zum Bauen, Live-Status für jeden Job und direkte Übergabe an deine Hardware.</p>
+          <div class="hero-metadata"><span><span class="mini-led"></span> GITHUB MAIN</span><span>GESCHÜTZTER LAN-ZUGRIFF</span></div>
+        </div>
+        <div class="hero-graphic" aria-hidden="true"><div class="hero-orbit orbit-a"></div><div class="hero-orbit orbit-b"></div><div class="hero-core"><svg viewBox="0 0 100 100" fill="none"><path d="m51 10-29 47h26l-8 33 39-51H52l8-29Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/></svg></div><span class="orb-dot dot1"></span><span class="orb-dot dot2"></span></div>
+      </section>
+
+      <div class="section-heading"><div><span class="section-overline">01 / OPERATIONS</span><h2>Was möchtest du machen?</h2></div><span class="tiny-note">Builds laufen nacheinander, damit sich keine Prozesse stören.</span></div>
+      <section class="actions" aria-label="Fünf Hauptaktionen">
+        <button class="action-card action-primary" data-action="complete">
+          <span class="action-top"><span class="action-symbol">▦</span><span class="action-number">01</span></span>
+          <strong>Build komplett</strong><span>HMI + grblHAL aus demselben Commit</span>
+          <span class="action-arrow">↗</span>
+        </button>
+        <button class="action-card" data-action="hmi">
+          <span class="action-top"><span class="action-symbol">▣</span><span class="action-number">02</span></span>
+          <strong>Build HMI</strong><span>Waveshare ESP32-S3 · Control OS</span>
+          <span class="action-arrow">↗</span>
+        </button>
+        <button class="action-card" data-action="skr">
+          <span class="action-top"><span class="action-symbol">⌘</span><span class="action-number">03</span></span>
+          <strong>Build Laser grblHAL</strong><span>SKR Mini MZ · UART-Firmware</span>
+          <span class="action-arrow">↗</span>
+        </button>
+        <button class="action-card" data-action="flash">
+          <span class="action-top"><span class="action-symbol">↯</span><span class="action-number">04</span></span>
+          <strong>HMI flashen</strong><span>Browser über HTTPS oder Windows-Paket</span>
+          <span class="action-arrow">↗</span>
+        </button>
+        <button class="action-card" data-action="sd">
+          <span class="action-top"><span class="action-symbol">▤</span><span class="action-number">05</span></span>
+          <strong>grblHAL auf SD-Karte</strong><span>firmware.bin für das SKR vorbereiten</span>
+          <span class="action-arrow">↗</span>
+        </button>
+      </section>
+
+      <section class="operation-panel" aria-label="Aktueller Build">
+        <div class="panel-heading">
+          <div><span class="section-overline">LIVE OPERATION</span><h3 id="active-title">Bereit für deinen nächsten Build</h3><p id="active-description">Wähle oben eine Aktion, um zu beginnen.</p></div>
+          <div class="state-chip" id="active-status">BEREIT</div>
+        </div>
+        <div class="progress-track"><div id="progress-fill" class="progress-fill" style="width:0%"></div></div>
+        <div class="progress-stats">
+          <div><strong id="progress-value">0%</strong><span>Fortschritt · Schätzung</span></div>
+          <div><strong id="progress-stage">–</strong><span>Aktueller Schritt</span></div>
+          <div><strong id="progress-time">–</strong><span>Verbleibend · Schätzung</span></div>
+          <div><strong id="progress-elapsed">–</strong><span>Vergangen</span></div>
+        </div>
+        <div class="progress-footer"><span id="commit-line">GitHub-Stand wird beim Build ermittelt.</span><button class="text-button" id="active-log-button" disabled>Protokoll öffnen ↗</button></div>
+      </section>
+
+      <div class="two-col" id="activity">
+        <section class="surface history-panel">
+          <div class="section-head-row"><div><span class="section-overline">02 / BUILD RECORDS</span><h3>Build-Archiv <span id="history-count" class="light-count">0</span></h3></div><button id="refresh-button" class="icon-button" title="Aktualisieren" aria-label="Aktualisieren">↻</button></div>
+          <div class="filter-line"><input id="history-search" type="search" placeholder="Build oder Commit suchen…" aria-label="Buildhistorie durchsuchen"><select id="history-filter" aria-label="Status filtern"><option value="all">Alle Status</option><option value="success">Erfolgreich</option><option value="running">Laufend</option><option value="failed">Fehler</option></select></div>
+          <div id="history-list" class="history-list"><div class="empty-state">Builds werden geladen…</div></div>
+          <div class="list-footer">Maximal 50 Einträge · Die gespeicherten Logs und Artefakte bleiben erhalten.</div>
+        </section>
+
+        <section class="surface details-panel">
+          <div class="section-head-row"><div><span class="section-overline">03 / SELECTED BUILD</span><h3>Build-Details</h3></div><span id="detail-chip" class="small-state">KEINE AUSWAHL</span></div>
+          <div id="details-empty" class="details-empty"><div class="detail-icon">◈</div><strong>Noch kein Build ausgewählt</strong><p>Wähle einen Eintrag im Archiv, um Artefakte, Commit und Prüfsummen zu sehen.</p></div>
+          <div id="details-content" hidden>
+            <div class="details-grid"><div><span>PROFIL</span><strong id="detail-target">–</strong></div><div><span>COMMIT</span><strong id="detail-sha">–</strong></div><div><span>DAUER</span><strong id="detail-duration">–</strong></div><div><span>STATUS</span><strong id="detail-state">–</strong></div></div>
+            <div class="artifact-heading">Dateien & Prüfsummen</div>
+            <div id="artifact-list" class="artifact-list"></div>
+            <div class="detail-actions"><button id="detail-log" class="secondary-button">Log ansehen</button><a id="detail-zip" class="secondary-button" href="#">Archiv-ZIP ↓</a></div>
+          </div>
+        </section>
+      </div>
+
+      <section class="surface terminal-panel" id="terminal-section">
+        <div class="section-head-row terminal-top">
+          <div><span class="section-overline">04 / LIVE OUTPUT</span><h3>Build-Terminal</h3></div>
+          <div class="terminal-actions"><span id="terminal-mode" class="terminal-badge">READ ONLY</span><label class="autoscroll"><input id="autoscroll" type="checkbox" checked> Auto-Scroll</label><button id="copy-terminal" class="mini-button">Kopieren</button><button id="clear-terminal" class="mini-button">Leeren</button><a id="download-log" class="mini-button" href="#" download="build.log">Log ↓</a></div>
+        </div>
+        <div class="terminal" id="terminal-output" role="log" aria-live="off" tabindex="0"><div class="terminal-placeholder">$ LumaCut Build Lab bereit.<br>Wähle einen Build oder tippe <b>help</b>.</div></div>
+        <form id="terminal-form" class="terminal-input"><span class="terminal-prompt">lumacut<span>@</span>builder:~$</span><input id="terminal-command" autocomplete="off" spellcheck="false" aria-label="Terminalbefehl" placeholder="help, jobs, status, log, files, clear…"><button type="submit" aria-label="Befehl ausführen">↵</button></form>
+        <div class="terminal-disclaimer">Lesende Diagnosekonsole für Builds. Keine beliebigen Shell-Befehle oder Container-Kommandos über das Web.</div>
+      </section>
+      <footer><span>© LumaCut Studio · Private Build Infrastructure</span><span>Entwicklungsfirmware · Laser vor Hardwaretests physisch deaktivieren</span></footer>
+    </div>
+  </main>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<div id="modal-root" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <button id="modal-close" class="modal-close" aria-label="Schließen">×</button>
+    <div id="modal-icon" class="modal-icon">✓</div>
+    <span id="modal-kicker" class="section-overline">BUILD COMPLETED</span>
+    <h2 id="modal-title">Build abgeschlossen</h2>
+    <p id="modal-description"></p>
+    <div id="modal-meta" class="modal-meta"></div>
+    <div id="modal-actions" class="modal-actions"></div>
+    <div id="modal-flash" class="modal-flash" hidden></div>
+    <button id="modal-dismiss" class="modal-dismiss">Schließen</button>
+  </div>
+</div>
+</body>
+</html>
