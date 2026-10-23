@@ -232,7 +232,10 @@ void updateUi(){
     labelChanged(positionLabel,(fresh()&&haveMpos)?
         "X "+String(mx,2)+"    Y "+String(my,2)+"    Z "+String(mz,2):
         "X --.--     Y --.--     Z --.--");
-    labelChanged(sourceLabel,ownerText());
+    labelChanged(sourceLabel,activePage==5?
+        ("Motor $3="+(directionMask<0?String("?"):String(directionMask))+
+         "  Homing $23="+(homingDirectionMask<0?String("?"):String(homingDirectionMask)))
+        :String(ownerText()));
     String job=selectedJob.length()?"Datei: "+selectedJob:"Noch keine Datei ausgewaehlt";
     if(bounds.valid)job+="  /  "+String(bounds.x1-bounds.x0,1)+
                                 " x "+String(bounds.y1-bounds.y0,1)+" mm";
@@ -291,7 +294,7 @@ bool startScript(const String* commands,int count,bool motion=false){
     nextScript();return true;
 }
 void parseMachineLine(const String& line){
-    if(line.startsWith("$")){
+    if(line.startsWith("$$")){
         int equal=line.indexOf('=');
         if(equal>1){
             String key=line.substring(1,equal);
@@ -1036,18 +1039,24 @@ void action(const char* id){
         return;
     }
     if(op=="readcfg"){
-        String cmds[]={"$"};
+        String cmds[]={"$$"};
         if(!startScript(cmds,1))setNotice("Maschinenparameter nur im Leerlauf lesbar.");
         else setNotice("Lese $3, $23 und Verfahrwege aus GRBL.");
         return;
     }
     if(op=="flipall"||op=="flipx"||op=="flipy"||op=="flipz"){
-        if(directionMask<0){setNotice("Erst GRBL-Einstellungen mit $ Lesen laden.");return;}
+        if(directionMask<0||homingDirectionMask<0){
+            setNotice("Erst Motor- und Homing-Masken mit $$ Lesen laden.");return;
+        }
         int axis=op=="flipall"?7:op=="flipx"?1:op=="flipy"?2:4;
         int newMask=directionMask^axis;
-        String cmds[]={"$3="+String(newMask),"$"};
-        if(startScript(cmds,2))
-            setNotice("Motor-Richtungsmaske wird auf "+String(newMask)+" gesetzt.");
+        int newHomeMask=homingDirectionMask^axis;
+        // When stepper polarity flips, invert homing search too to preserve
+        // physical direction toward the existing mechanical endstop.
+        String cmds[]={"$3="+String(newMask),"$23="+String(newHomeMask),"$$"};
+        if(startScript(cmds,3))
+            setNotice("Motor $3="+String(newMask)+", Homing $23="+
+                      String(newHomeMask)+". Fahrtrichtung erst pruefen.");
         else setNotice("Motor-Richtung nur im Leerlauf aenderbar.");
         return;
     }
@@ -1055,7 +1064,7 @@ void action(const char* id){
         if(homingDirectionMask<0){setNotice("Erst GRBL-Einstellungen mit $ Lesen laden.");return;}
         int bit=op=="homex"?1:op=="homey"?2:4;
         int newMask=homingDirectionMask^bit;
-        String cmds[]={"$23="+String(newMask),"$"};
+        String cmds[]={"$23="+String(newMask),"$$"};
         if(startScript(cmds,2))
             setNotice("Homing-Richtungsmaske wird auf "+String(newMask)+" gesetzt.");
         else setNotice("Homing-Richtung nur im Leerlauf aenderbar.");
@@ -1073,7 +1082,7 @@ void action(const char* id){
         // The controller alone validates travel; these must be measured,
         // not estimated by repeatedly driving against endstops.
         String cmds[]={"$130="+String(x,3),"$131="+String(y,3),
-                       "$132="+String(z,3),"$"};
+                       "$132="+String(z,3),"$$"};
         if(startScript(cmds,4))
             setNotice("Verfahrwege werden im SKR gespeichert.");
         else setNotice("Fahrwege nur im Leerlauf aenderbar.");
@@ -1083,7 +1092,7 @@ void action(const char* id){
         if(workX<=0||workY<=0||workZ<=0){
             setNotice("Zuerst alle drei gemessenen Verfahrwege in GRBL speichern.");return;
         }
-        String cmds[]={"$22=1","$20=1","$"};
+        String cmds[]={"$22=1","$20=1","$$"};
         if(startScript(cmds,3))setNotice("Homing und Soft Limits aktiviert.");
         else setNotice("Soft Limits nur bei freier Maschine aktivierbar.");
         return;
@@ -1091,7 +1100,7 @@ void action(const char* id){
     if(op=="setparam"){
         String idText=lv_textarea_get_text(paramKeyField);
         String vText=lv_textarea_get_text(paramValueField);
-        idText.trim();idText.replace("$","");
+        idText.trim();idText.replace("$$","");
         if(!idText.length()||!vText.length()){setNotice("Parameter-ID und Wert eingeben.");return;}
         for(unsigned i=0;i<idText.length();i++)if(!isDigit(idText[i])){
             setNotice("Parameter-ID muss numerisch sein.");return;
@@ -1101,7 +1110,7 @@ void action(const char* id){
         if(end==vText.c_str()||*end!='\0'||!settingAllowed(idText.toInt(),value)){
             setNotice("Parameterwert ungueltig oder Sicherheitseinstellung blockiert.");return;
         }
-        String cmds[]={"$"+idText+"="+vText,"$"};
+        String cmds[]={"$$"+idText+"="+vText,"$$"};
         if(startScript(cmds,2))setNotice("GRBL-Parameter gespeichert.");
         else setNotice("Parameter nur im Leerlauf aenderbar.");
         return;
@@ -1248,7 +1257,7 @@ void loop(){
     // available; do not fabricate travel distances from the nominal frame size.
     if(!settingsRequested&&millis()>4500&&idle()&&owner==Owner::None){
         settingsRequested=true;
-        String cmds[]={"$"};startScript(cmds,1);
+        String cmds[]={"$$"};startScript(cmds,1);
     }
     static uint32_t lastUi=0;
     if(millis()-lastUi>160){lastUi=millis();updateUi();}
