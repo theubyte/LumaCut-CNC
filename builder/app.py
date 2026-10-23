@@ -344,75 +344,36 @@ def get_artifact(job_id,filename):
     if filename not in allowed: abort(404)
     return send_from_directory(folder,filename,as_attachment=True)
 
+@app.get("/api/jobs/<job_id>/sd-image")
+def sd_image(job_id):
+    """Download board-specific SKR image with required SD filename firmware.bin."""
+    if not ID_RE.fullmatch(job_id): abort(404)
+    manifest=ART/job_id/"manifest.json"
+    if not manifest.is_file(): abort(404)
+    meta=json.loads(manifest.read_text(encoding="utf-8"))
+    if meta.get("status")!="success": abort(409)
+    if meta.get("target") not in (
+        "lumacut_complete_suite_unverified",
+        "stm32_project_unverified",
+        "stm32_hmi_bridge_unverified"
+    ): abort(404)
+    name=("SKR_UART_UNVERIFIED_firmware.bin"
+          if meta.get("paired_firmware") else "UNVERIFIED_DO_NOT_FLASH_firmware.bin")
+    file=ART/job_id/name
+    if not file.is_file(): abort(404)
+    return send_file(file,as_attachment=True,download_name="firmware.bin",
+                     mimetype="application/octet-stream",max_age=0)
+
+@app.get("/ui/<asset>")
+def frontend_asset(asset):
+    if asset not in {"dashboard.css","dashboard.js"}: abort(404)
+    return send_file(Path(__file__).resolve().parent/asset,max_age=0)
+
 @app.get("/")
 def home():
-    return Response("""<!doctype html><html lang="de"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>LumaCut Build Lab</title>
-<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
-<style>body{background:#101721;color:#edf5fa;font-family:system-ui;margin:0}
-main{max-width:1050px;margin:auto;padding:24px}h1{font-size:38px}
-esp-web-install-button{--esp-tools-button-color:#68dac5;--esp-tools-button-text-color:#072920}
-p,small{color:#aec1d0}section{background:#1b2939;border:1px solid #344357;
-border-radius:18px;padding:20px;margin:16px 0}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:720px){.grid{grid-template-columns:1fr}}
-button{background:#68dac5;color:#072920;border:0;border-radius:10px;padding:12px;font-weight:700;cursor:pointer}
-a{color:#79e0d7}li{margin:14px 0;overflow-wrap:anywhere}
-pre{background:#0c1119;white-space:pre-wrap;word-break:break-word;padding:16px;max-height:380px;overflow:auto}</style>
-<main><h1>LumaCut Build Lab</h1><p>GitHub-Quellen · Buildarchiv und SHA256 · Waveshare ESP32-S3 per Browser oder Windows-Flashpaket installieren.</p>
-<div class="grid"><section><h2>Build starten</h2>
-<p><button onclick="start('lumacut_complete_suite_unverified')">Komplettes LumaCut Control OS bauen (HMI + SKR)</button></p>
-<p><small>Ein Build, identischer Commit und ein vollständiges ZIP für beide Boards.</small></p><p><button onclick="start('tests')">Projekt-Tests</button></p>
-<p><button onclick="start('stm32_project_unverified')">SKR USB (alt) bauen</button></p>
-<p><button onclick="start('stm32_hmi_bridge_unverified')">SKR UART für Control OS bauen</button></p>
-<p><button onclick="start('esp32_hmi_unverified')">Waveshare HMI (nur Touch) bauen</button></p>
-<p><button onclick="start('esp32_hmi_keypad_unverified')">Waveshare HMI (UART-Jog, Labor) bauen</button></p>
-<p><button onclick="start('esp32_hmi_pro_unverified')">LumaCut Control OS (USB/WLAN/Jobs) bauen</button></p>
-<p style="color:#ffcb81">Entwicklungsfirmware, nicht hardwareverifiziert! Zuerst Touch-Version ohne Motorsteuerung flashen. Laser physisch von Versorgung und TTL trennen.</p>
-<p>Unter HTTP: fertiges Windows-Flashpaket herunterladen, entpacken und <code>Flash-Waveshare-Windows.cmd</code> starten (Python 3 und Chrome/Edge). Unter HTTPS ist der direkte Flashknopf verfügbar.</p>
-<div id="message"></div></section><section><h2>Buildhistorie</h2><ul id="jobs"></ul></section></div>
-<section id="flasharea"><h2>Waveshare über PC-USB flashen (HTTPS)</h2>
-<p>Im LAN über HTTP bitte das Windows-Flashpaket herunterladen. Bei HTTPS einen abgeschlossenen HMI-Build in der Liste zum Flashen auswählen.</p>
-<div id="flashpanel">Noch kein HMI-Build zum Flashen gewählt.</div></section>
-<section><h2>Protokoll</h2><pre id="log">Kein Build gewählt.</pre></section>
-<p>Nur LAN / VPN · HTTP Basic Auth ohne TLS nicht ins Internet freigeben.</p>
-<script>
-let current='';
-async function start(t){try{let r=await fetch('/api/build',{method:'POST',
-headers:{'Content-Type':'application/json','X-LumaCut-Action':'build'},body:JSON.stringify({target:t})});
-let d=await r.json();if(!r.ok)throw Error(d.error||r.status);current=d.id;refresh()}
-catch(e){document.querySelector('#message').textContent=String(e)}}
-function escapeHtml(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')}
-function chooseFlash(id){
-  if(!window.isSecureContext){
-    document.querySelector('#message').textContent='USB-Flash im Browser benötigt HTTPS. Bitte Windows-Flashpaket nutzen.';
-    return;
-  }
-  const installer=document.createElement('esp-web-install-button');
-  installer.setAttribute('manifest','/api/jobs/'+id+'/flash-manifest.json');
-  document.querySelector('#flashpanel').replaceChildren(installer);
-  document.querySelector('#flasharea').scrollIntoView({behavior:'smooth'});
-}
-async function show(id){current=id;let r=await fetch('/api/jobs/'+id+'/log');
-if(r.ok)document.querySelector('#log').textContent=await r.text()}
-async function refresh(){try{let r=await fetch('/api/jobs');let d=await r.json();
-document.querySelector('#jobs').innerHTML=(d.jobs||[]).map(j=>'<li><b>'+escapeHtml(j.target)+'</b> '+escapeHtml(j.status)+
-'<br><small>'+escapeHtml((j.source_sha||'').slice(0,12))+'</small><br>'+
-'<a href="#" data-id="'+j.id+'">Log</a> · <a href="/artifacts/'+j.id+'/build-package.zip">ZIP</a> · '+
-'<a href="/artifacts/'+j.id+'/manifest.json">Manifest</a>'+
-(j.status==='success' && j.paired_firmware ? '<br><a href="/artifacts/'+j.id+'/LumaCut-Control-OS-Komplettpaket.zip"><b>Gesamtsystem-ZIP herunterladen</b></a>':'')+
-(j.status==='success' && j.flash_package
-  ? '<br><a href="/artifacts/'+j.id+'/Waveshare-HMI-Flash-Paket-Windows.zip">Windows-Flashpaket</a> · '+
-    '<a href="/artifacts/'+j.id+'/LUMACUT_HMI_ESP32S3_MERGED.bin">ESP32-S3 Komplett-BIN</a>'+
-    (window.isSecureContext
-       ? '<br><a href="#" data-flash="'+j.id+'">Jetzt per PC-USB flashen</a>'
-       : '<br><small>Direkt im Browser flashen benötigt HTTPS. Über HTTP das Windows-Flashpaket verwenden.</small>')
-  : '')+'</li>').join('');
-document.querySelectorAll('[data-id]').forEach(a=>a.onclick=e=>{e.preventDefault();show(a.dataset.id)});
-document.querySelectorAll('[data-flash]').forEach(a=>a.onclick=e=>{e.preventDefault();chooseFlash(a.dataset.flash)});
-if(current)show(current)}catch(e){document.querySelector('#message').textContent='Fehler: '+e}}
-refresh();setInterval(refresh,4000);
-</script></main></html>""",mimetype="text/html")
+    return send_file(Path(__file__).resolve().parent/"dashboard.html",
+                     mimetype="text/html",max_age=0)
+
 
 if __name__=="__main__":
     app.run(host="0.0.0.0",port=8080,threaded=True)
