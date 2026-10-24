@@ -7,7 +7,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y python3 python3-flask python3-serial python3-pip \
-  git curl avahi-daemon network-manager ca-certificates
+  git curl avahi-daemon network-manager ca-certificates ffmpeg v4l-utils
 id lumacut >/dev/null 2>&1 || useradd --system --home /var/lib/lumacut \
   --shell /usr/sbin/nologin --user-group lumacut
 usermod -aG dialout,video,render lumacut
@@ -38,7 +38,7 @@ LUMACUT_SKR=$PORT
 LUMACUT_HTTP=8080
 LUMACUT_TCP=23
 LUMACUT_DATA=/var/lib/lumacut
-LUMACUT_CAMERA_CMD=/usr/bin/rpicam-still
+LUMACUT_CAMERA_DEVICE=/dev/video0
 EOF
   chmod 600 "$ENV"
   echo "=== Zugangscode nur hier angezeigt. Sicher aufbewahren ==="
