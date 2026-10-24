@@ -24,8 +24,8 @@ class ControlStudioTests(unittest.TestCase):
     def test_bed_profile_precharge_and_aftercool(self):
         profile=json.loads((ROOT/"lightburn/LumaCut-CNC-USB.lbdev").read_text(encoding="utf-8"))
         conf=profile["DeviceList"][0]["Settings"]
-        self.assertTrue(conf["StartGCode"].endswith("M3 S0\\nG4 P2"))
-        self.assertEqual(conf["EndGCode"],"M3 S0\\nG4 P30\\nM5\\nM9")
+        self.assertTrue(conf["StartGCode"].endswith("M3 S0\nG4 P2"))
+        self.assertEqual(conf["EndGCode"],"M3 S0\nG4 P30\nM5\nM9")
         self.assertIn('settings["StartGCode"]=',HMI)
         self.assertIn('settings["EndGCode"]=',HMI)
 
