@@ -123,7 +123,7 @@ bool zLiftDirectionVerified=false;
 lv_obj_t* updateKeyEntry=nullptr;
 String updateDeviceKey,updateImageSha256;
 size_t updateImageBytes=0;
-bool updateOtaApproved=false,otaInstallRequested=false;
+bool updateOtaApproved=false,otaInstallRequested=false,skrFirmwareReleased=false;
 uint32_t otaArmUntil=0;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
@@ -350,6 +350,7 @@ String extractReleaseSha(const String& json){
     return sha;
 }
 void checkLumaCutUpdates(){
+    skrFirmwareReleased=false;
     if(WiFi.status()!=WL_CONNECTED){
         updateCheckStatus="Updatecheck: WLAN nicht verbunden";return;
     }
@@ -383,7 +384,14 @@ void checkLumaCutUpdates(){
             const String channel=doc["channel"].as<String>();
             const String hardware=doc["hardware"]["hmi"].as<String>();
             const String url=doc["images"]["hmi"]["url"].as<String>();
-            if(!LumaOta::isHex(sha,40)||!LumaOta::isHex(checksum,64)||
+            const String skrSha=doc["images"]["skr"]["sha256"].as<String>();
+            const size_t skrBytes=doc["images"]["skr"]["bytes"].as<size_t>();
+            const String skrHardware=doc["hardware"]["skr"].as<String>();
+            if(!LumaOta::isHex(skrSha,64)||skrBytes==0||
+               skrHardware!="BTT SKR Mini MZ V1.0 STM32F103RC"||
+               !doc["skr_firmware_available"].as<bool>()||
+               doc["skr_install_method"].as<String>()!="microSD"||
+               !LumaOta::isHex(sha,40)||!LumaOta::isHex(checksum,64)||
                 bytes<65536||bytes>8u*1024u*1024u||channel!="stable"||
                 hardware!="Waveshare ESP32-S3-Touch-LCD-7 Rev1.2"||
                 url!=LumaOta::IMAGE_URL||!doc["paired"].as<bool>()){
@@ -394,10 +402,11 @@ void checkLumaCutUpdates(){
                 updateImageSha256=checksum;
                 updateImageBytes=bytes;
                 updateOtaApproved=doc["hmi_ota_enabled"].as<bool>();
+                skrFirmwareReleased=true;
                 updateAvailable=(sha!=String(LUMACUT_SOURCE_SHA));
                 updateCheckStatus=updateAvailable?
-                    ("UPDATE "+sha.substring(0,12)+(updateOtaApproved?" bereit":" (OTA gesperrt)")):
-                    ("HMI aktuell: "+sha.substring(0,12));
+                    ("UPDATE HMI + SKR: "+sha.substring(0,12)):
+                    ("HMI / SKR Release aktuell: "+sha.substring(0,12));
                 if(updateAvailable)setNotice("LumaCut Update verfuegbar. Unter WLAN/System anzeigen.");
             }
         }
@@ -994,7 +1003,8 @@ void installRoutes(){
             "\",\"offered_sha\":\""+offeredUpdateSha+
             "\",\"available\":"+(updateAvailable?String("true"):String("false"))+
             ",\"hmi_ota_ready\":"+String((LumaOta::available() && LumaOta::isHex(updateDeviceKey,64))?"true":"false")+
-            ",\"skr_ota_ready\":false}";
+            ",\"skr_firmware_available\":"+String(skrFirmwareReleased?"true":"false")+
+            ",\"skr_install_method\":\"microSD\"}";
         http.send(200,"application/json",payload);
     });
     http.on("/api/machine",HTTP_GET,[]{
