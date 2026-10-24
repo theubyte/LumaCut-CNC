@@ -35,6 +35,8 @@ class Controller:
         self.host_commands = deque(maxlen=32768)
         self.host_fragment = bytearray()
         self.host_overflow = False
+        self.bootstrap_ready = False
+        self.bootstrap_pending = 0
         self.lightburn_enabled = True
         self.owner = None  # host, job, local
         self.state = "Disconnected"
@@ -153,6 +155,14 @@ class Controller:
             self.last_error = line
         self.lines.append(line)
         if line == "ok" or line.startswith("error:"):
+            if self.bootstrap_pending > 0 and self.host is None:
+                if line != "ok":
+                    self.bootstrap_pending = 0
+                    self.bootstrap_ready = False
+                    self.last_error = "SKR-Initialisierung fehlgeschlagen: " + line
+                else:
+                    self.bootstrap_pending -= 1
+                    self.bootstrap_ready = self.bootstrap_pending == 0
             if self.host is not None and self.host_commands:
                 sent = self.host_commands.popleft()
                 if line == "ok":
@@ -181,7 +191,16 @@ class Controller:
                         self.state = "Unknown"
                         self.extra_outputs["PC7"] = None
                         self.replies.clear()
-                        LOG.info("SKR connected at %s", self.port)
+                        self.settings.clear()
+                        self.identity = {"version": "", "firmware": "", "board": "", "driver": ""}
+                        self.bootstrap_pending = 2
+                        self.bootstrap_ready = False
+                        # USB CDC is the only control channel. Identify real
+                        # grblHAL and read machine limits before allowing
+                        # LightBurn streams or Pi motion commands.
+                        time.sleep(0.3)
+                        self._send_locked(b"$I\n$\n")
+                        LOG.info("SKR connected and init queries sent at %s", self.port)
                     except Exception as exc:
                         self.state = "Disconnected"
                         self.last_error = str(exc)[:150]
@@ -231,6 +250,8 @@ class Controller:
                     self.serial = None
                     self.state = "Disconnected"
                     self.extra_outputs["PC7"] = None
+                    self.bootstrap_ready = False
+                    self.bootstrap_pending = 0
                     self.homed = False
                     buf.clear()
 
@@ -245,6 +266,7 @@ class Controller:
                 "owner": self.owner or "Frei",
                 "homed": self.homed,
                 "identity": dict(self.identity),
+                "bootstrap_ready": self.bootstrap_ready,
                 "extra_outputs": dict(self.extra_outputs),
                 "position": self.position,
                 "status_age": round(age, 2) if age is not None else None,
@@ -386,6 +408,7 @@ class Controller:
         client.settimeout(0.25)
         with self.cond:
             if (self.owner is not None or self.serial is None or
+                    not self.bootstrap_ready or
                     not self.lightburn_enabled or
                     self.state not in ("Idle", "Alarm", "Unknown") or
                     (self.maintenance_file and self.maintenance_file.exists())):
