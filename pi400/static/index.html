@@ -51,6 +51,50 @@ p{line-height:1.5;margin:8px 0}small,.muted{color:var(--muted)}
 .fileitem{border-bottom:1px solid #254254;padding:8px}
 #preview{width:100%;max-height:200px}
 @media(max-width:760px){main{padding:16px 12px 86px}.span4,.span5,.span6,.span7,.span8{grid-column:span 12}.panel{padding:17px}nav button{min-width:89px;font-size:12px;padding:9px}.logo{font-size:24px}}
+
+/* LumaCut Control OS – responsive machine interface */
+:root{color-scheme:dark;--bg:#080d15;--panel:#111c2b;--line:#26394e;--ink:#edf3fa;--muted:#91a9ba;--cyan:#5bcaf4;--green:#69dab2;--red:#fa818e}
+body{background:radial-gradient(ellipse 80% 44% at 93% -9%,#1e3a51 0%,transparent 75%),linear-gradient(170deg,#080d15,#0c1520 67%,#0b1420);min-height:100vh}
+main{max-width:1360px;padding:32px 32px 88px}
+.top{border-bottom:1px solid #233348;padding:0 2px 24px;margin-bottom:17px}
+.logo{font-size:32px;font-weight:850;letter-spacing:-1.35px}
+.top small{display:block;color:#819cb0;font-size:12px;margin-top:3px}
+.eyebrow{font-size:10px;letter-spacing:2.5px;color:#73cdec}
+.status{background:#152332;color:#a7becc;border-color:#33485c;display:inline-flex;align-items:center;gap:9px;box-shadow:0 4px 17px #0003}
+.status:before{content:"";display:block;width:9px;height:9px;background:#ffbb7f;border-radius:50%;box-shadow:0 0 0 4px #ecab6524}
+.status.online:before{background:#65d9ad;box-shadow:0 0 0 4px #65d9ad20}
+.status.offline:before{background:#fd8495;box-shadow:0 0 0 4px #fd849520}
+nav{position:sticky;top:0;z-index:10;border-radius:13px;padding:6px;background:#111d2cf2;border-color:#2c3d50;backdrop-filter:blur(18px);margin-bottom:20px;box-shadow:0 8px 28px #0005}
+nav button,nav a{font-size:12px;font-weight:700;transition:background .15s ease,color .15s ease;padding:12px 10px;min-width:max-content}
+nav button.active{background:#294761;color:#ecfaff;box-shadow:inset 0 0 0 1px #42677e}
+nav a{color:#9dd5ed}
+.panel{background:linear-gradient(150deg,#152536,#0e1927);border:1px solid #2a3d51;border-radius:19px;padding:24px;box-shadow:0 12px 35px #0002}
+.panel:hover{border-color:#38526b}.layout{gap:17px}
+h2{font-weight:750;font-size:18px;letter-spacing:-.45px;color:#f0f6fc}
+h3{font-size:13px;color:#b6cfe0;font-weight:750;margin-top:21px}
+.kpi{background:#0d1a28;border:1px solid #2a3f53;border-radius:13px;min-height:82px}
+.kpi small{font-size:11px;color:#94b0c2;margin-bottom:9px}
+.kpi .value{font-size:24px}
+.value{font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;letter-spacing:-.7px;color:#effaff}
+button{border:1px solid #38536a;background:#1b2c3e;border-radius:11px;padding:11px 15px;transition:background .15s,border-color .15s,transform .15s}
+button:hover{background:#2b4257;border-color:#6488a0}button:active{transform:translateY(1px)}
+button.primary{background:#5bcaf4;border-color:#5bcaf4;color:#06131f;box-shadow:0 4px 18px #5bcaf414}
+button.primary:hover{background:#87ddfd;border-color:#87ddfd}
+button.stop{background:#44222b;color:#ffc1c8;border-color:#a35867}
+button.stop:hover{background:#66303d}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #84dafb;outline-offset:3px}
+input,select{background:#0a1624;border:1px solid #3a5268;padding:11px 13px;border-radius:10px}
+.actiongrid button{min-height:64px;font-size:16px;font-weight:800}
+.actiongrid button[data-op^="z"]{border-color:#5d567e;background:#24263d}
+.param{background:#122438;border:1px solid #243d51;padding:9px}.param:nth-child(odd){background:#14283a}
+.caption{line-height:1.6;color:#8faab9}
+#position{margin:10px 0 7px;font-size:clamp(18px,2.3vw,29px);font-weight:800}
+#preview{height:auto;background:#081725;border:1px solid #223b50;border-radius:13px;margin-top:12px}
+#log{margin-top:19px;border-left:3px solid #5bcaf4;background:#102339;padding:12px 16px;border-radius:0 9px 9px 0;min-height:44px}
+#log.bad{border-left-color:#fa818e;background:#3b1d28}
+@media(max-width:920px){main{padding:18px 14px 70px}.span4,.span5,.span6,.span7,.span8{grid-column:span 12}.panel{padding:20px}nav button,nav a{font-size:12px;padding:11px 12px}}
+@media(max-width:480px){.logo{font-size:27px}.kpi{padding:10px}.kpi .value{font-size:17px}.value{font-size:20px}.actiongrid button{min-height:56px}.param{grid-template-columns:minmax(0,1fr) 83px 38px;gap:5px}}
+@media(prefers-reduced-motion:reduce){button{transition:none;transform:none!important}}
 </style></head><body><main>
 <div class="top"><div><div class="eyebrow">LUMACUT / CONTROL STUDIO</div><div class="logo">Luma<span>Cut</span> CNC</div><small>GRBL · Raspberry Pi 400 · SKR Mini MZ</small></div><div class="status" id="connection">Verbinde…</div></div>
 <nav id="navigation">
@@ -82,10 +126,10 @@ p{line-height:1.5;margin:8px 0}small,.muted{color:var(--muted)}
 <h3>24-V-Zubehör</h3>
 <div class="two"><button id="ledControl" data-op="lightToggle">LED-Beleuchtung</button>
 <button id="exhaustControl" data-op="exhaustToggle">Abluftlüfter</button></div>
-<p class="caption">HE0/PC8 schaltet die LEDs, FAN0/PC6 die Abluft. FAN1/PC7 gibt über einen externen High-Side-Schalter den Laser frei.</p>
+<p class="caption">HE0/PC8 schaltet die LEDs, FAN0/PC6 die Abluft. FAN1/PC7 ist ein im Service Studio konfigurierbarer MOSFET-Ausgang. Die Laserfreigabe benötigt unabhängige Interlocks.</p>
 <h3>Aktiver Auftrag</h3><p id="jobname" class="muted">Kein Job ausgewählt</p>
 <button class="primary" data-op="start">Lokalen Job starten</button>
-<p class="caption">Externe LightBurn-Streams und HMI-Jobs besitzen die Steuerung exklusiv. Der Laser-Not-Aus bleibt hardwareseitig.</p></div>
+<p class="caption">LightBurn und Pi-Jobs werden exklusiv verwaltet. „Abbrechen“ ist ein Softwarestopp, kein Ersatz für den hardwareseitigen Not-Aus.</p></div>
 </div></section>
 <section id="motion" class="tab"><div class="layout">
 <div class="panel span7"><h2>Jog & Achsen</h2>
@@ -104,7 +148,7 @@ p{line-height:1.5;margin:8px 0}small,.muted{color:var(--muted)}
 <div class="two" style="margin-top:9px"><button id="parkRename">Name speichern</button><button id="parkCapture">Aktuelle Position speichern</button><button id="parkGo">Position anfahren</button></div>
 </div></div></section>
 <section id="jobs" class="tab"><div class="layout">
-<div class="panel span5"><h2>G-Code übertragen</h2><p class="muted">LightBurn → „GCode speichern“ → Datei auf das HMI laden.</p>
+<div class="panel span5"><h2>G-Code übertragen</h2><p class="muted">LightBurn → „GCode speichern“ → Datei auf den Pi 400 laden.</p>
 <input id="file" type="file" accept=".gcode,.gc,.nc,.tap,.txt">
 <div style="margin:12px 0"><button class="primary" id="upload">G-Code hochladen</button></div>
 <div class="two"><button data-op="start" class="primary">Job starten</button><button data-op="frame">Rahmen prüfen</button><button data-op="toggle">Pause / Weiter</button><button data-op="abort" class="stop">Abbrechen</button></div></div>
@@ -213,6 +257,8 @@ async function refresh(){
  try{
   const s=await api("/api/status");
   el("connection").textContent="Pi 400 · "+(s.state||"SKR");
+  el("connection").classList.toggle("online",Boolean(s.connected));
+  el("connection").classList.toggle("offline",!s.connected);
   updateDiagnostics(s);
   el("state").textContent=s.state||"—";el("owner").textContent=s.owner||"Frei";
   el("position").textContent=s.position||"—";el("jobname").textContent=s.job||"Kein Job";
@@ -228,7 +274,7 @@ async function refresh(){
       spot.style.display="";
     }
   }
- }catch(e){el("connection").textContent="Nicht verbunden";notify(e.message,true)}
+ }catch(e){el("connection").textContent="Nicht verbunden";el("connection").classList.remove("online");el("connection").classList.add("offline");notify(e.message,true)}
 }
 async function readConfig(){
  if(!key)return;
