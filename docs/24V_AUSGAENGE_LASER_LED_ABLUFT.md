@@ -8,7 +8,7 @@ Waveshare ESP32-S3 und BTT SKR Mini MZ V1.0.
 | Physische Klemme | STM32-Port | Steuerung |
 | --- | --- | --- |
 | **BED** | **PC9** | **24-V-Lasermodul EIN/AUS durch M3/M4/M5** |
-| **Laser-PWM/Servo** | **PA1** | TTL/PWM-Leistung 0–1000 (laut $30) |
+| **PT-DET-Signal** | **PA1** | Laser-TTL/PWM 0–3,3 V; nicht der Servo-Header |
 | **HE0** | **PC8** | 24-V-LED-Beleuchtung M7 |
 | **FAN0** | **PC6** | 24-V-Gehäuseabluft M8 |
 | **FAN1** | **PC7** | Nicht belegt, Reserve |
@@ -32,6 +32,11 @@ Am **BED+** liegen durchgeschleifte 24 V vom SKR-Netzteil an,
  aus der geschalteten Laser-24-V-Seite (BED+ und BED-).
  Der isolierte Ausgang soll 0/5 V am gelben Draht erzeugen.
 ```
+
+Der PA1-Anschluss ist auf dem **SKR Mini MZ V1.0 am PT-DET-Header**
+herausgefuehrt. **Nicht** am normalen Servo-Header suchen; niemals
+das +5-V-Bein des PT-DET-Headers mit dem PWM-Signal verwechseln.
+Die grblHAL-Firmware nutzt PA1 als Hardware-PWM (STM32-Timer).
 
 **Daher ja: VCC + GND des Lasers gehen direkt an die zweipolige
 BED-Klemme des SKR.** Die gelbe PWM-Leitung braucht eine
@@ -131,3 +136,52 @@ bevor der Laserstrahl überhaupt zugeschaltet wird.
 
 Dieser Aufbau wird in der Software vorbereitet, nicht als
 hardwaregeprüfte Fertigmaschine behauptet.
+
+## Fehlersuche: LaserTree-Leistung bleibt konstant
+
+Der 24-V-BED-Ausgang ist nur die **Versorgung**. Er regelt nicht die
+Laserleistung. Die optische Leistung wird vom separaten PWM-Eingang
+des Moduls gesteuert. LaserTree spezifiziert 0–5 kHz PWM, je nach
+Version 3–12 V beziehungsweise 5–12 V High-Pegel. Das HMI/SKR erzeugt
+an PA1 maximal 3,3 V – je nach Eingang/Isolator zu wenig.
+
+**Laser-Modul vollständig vom SKR trennen, keine Laserstrahlung
+während der Messung.** Bei eingeschalteter SKR-Elektronik das
+PWM-Signal direkt am echten PT-DET/PA1-Pin **gegen SKR-GND** messen
+(nicht gegen den geschalteten BED-Minus). Sollwerte für DC-Mittelwert
+bei 3,3-V-PWM sind ungefähr 0, 0,83, 1,65, 2,48, 3,3 V
+bei S0/S250/S500/S750/S1000 und `$30=1000`.
+Ein Oszilloskop ist für sichere PWM-Frequenz-/Tastgradmessung besser
+geeignet als ein Multimeter.
+
+Über die **LightBurn-Konsole / SKR-Seriellschnittstelle** zunächst
+`$$` prüfen, insbesondere: `$9` PWM/Spindel-Optionen,
+`$16` PWM/Enable-Polarität, `$30=1000`, `$31=0`,
+`$32=1`, `$33=1000` (zum Test, maximal 5000),
+`$34=0`, `$35=0`, `$36=100`.
+Die jeweils gemeldeten Werte sind ausschlaggebend; bei bestehender
+Anlage die Parameter vor einer Änderung dokumentieren.
+
+Im stromlosen, abgesteckten Laserzustand können die folgenden
+Befehle den PWM-Ausgang messbar beeinflussen:
+```gcode
+M3 S0
+S250
+S500
+S750
+S1000
+M5
+```
+`M3` statt `M4` zur Diagnose verwenden, weil dynamische
+M4-Laserleistung vom Fahrzustand abhängt. Wenn PA1 keine
+veränderliche PWM liefert, liegt die Ursache im SKR-Pin,
+der grblHAL-Konfiguration oder der Firmware.
+Wenn PA1 variiert, der Laser bei korrekter, isolierter Ansteuerung
+aber unveränderlich arbeitet, sind Signalpegel,
+Laser-Massebezug, galvanische PWM-Isolation oder die
+Laser-Treiberelektronik zu prüfen.
+
+**PA1 darf bei BED-Low-Side-Schaltung nicht direkt mit Gelb PWM
+verbunden werden**: Die Masse des Lasers auf BED− schwebt im
+ausgeschalteten Zustand und könnte über PA1 gegen SKR-GND
+rückgespeist werden.
