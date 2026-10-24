@@ -75,8 +75,49 @@ mesh:
 laser:
   pwm_pin_candidate: PA1
   pwm_electrically_verified: false
+  module: LaserTree LT-80W-AA-PRO
+  module_power: 24V DC, approx 1.5-2A per manufacturer
+  module_pwm: 3-12V TTL/PWM, max 5kHz
+  grbl_spindle_enable_output: PC7  # FAN1 low-side MOSFET
+  power_switching_method: external_24v_high_side_switch_required
+  pwm_and_module_ground_must_remain_common: true
+  pc7_direct_laser_ground_switching_allowed: false
+  prepower_and_cooldown_circuit_hardware_verified: false
   power_interlock_hardware_verified: false
   startup_state: off
+cabinet_accessories:
+  dc_bus: 24V
+  led:
+    connector: HE0
+    power_output: PC8
+    grblhal_command: M7
+    grblhal_realtime_toggle_hex: "0xA1"
+    mosfet_type: low_side
+    max_current_verified: false
+  exhaust:
+    connector: FAN0
+    power_output: PC6
+    grblhal_command: M8
+    grblhal_realtime_toggle_hex: "0xA0"
+    mosfet_type: low_side
+    max_current_verified: false
+  laser_enable:
+    connector: FAN1
+    power_output: PC7
+    command: spindle_enable_M3_M4
+    external_high_side_switch_required: true
+    power_precharge_verified: false
+  bed_output:
+    connector: BED
+    mcu_pin: PC9
+    used: false
+    notes: reserved_high_current_mosfet_do_not_use_as_gpio
+  shared_commands:
+    M9: both_24v_led_and_exhaust_outputs_off
+    M7: led_on
+    M8: exhaust_on
+    realtime_independent_toggle: true
+  experimental_not_approved_for_laser_fire: true
 safety:
   independent_estop: required
   enclosure_interlock: required
