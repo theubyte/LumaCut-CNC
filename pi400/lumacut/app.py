@@ -758,19 +758,19 @@ def start_job():
         raise RuntimeError("Job läuft")
     job_cancel.clear()
     job_pause.clear()
-    with controller.lock:
-        controller._acquire_local("job")
     # Freeze the chosen G-code when the job is accepted. Later uploads or
     # selection changes must not silently change a running program.
     snapshot = (JOBS / selected_job).read_text(encoding="utf-8", errors="replace")
     # Never let an uploaded G-code job bypass Service Studio permissions.
     # Preflight the whole file before moving any motor or energizing the laser.
     for index, raw in enumerate(snapshot.splitlines(), 1):
-        line = re.sub(r"\\([^()]*\\)", "", raw.split(";", 1)[0]).strip()
+        line = re.sub(r"\([^()]*\)", "", raw.split(";", 1)[0]).strip()
         if not line or line.startswith("%"):
             continue
         if line.startswith("$") or not Controller.host_command_allowed(line):
             raise PermissionError("Zeile %d: Service/GPIO-Befehl in G-Code-Datei gesperrt" % index)
+    with controller.lock:
+        controller._acquire_local("job")
     job_thread = threading.Thread(target=_run_job, args=(selected_job, snapshot),
                                   name="gcode-job", daemon=True)
     try:
