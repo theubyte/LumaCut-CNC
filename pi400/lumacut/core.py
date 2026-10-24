@@ -32,6 +32,8 @@ class Controller:
         self.read_thread = None
         self.host = None
         self.host_pending = 0
+        self.host_commands = deque(maxlen=32768)
+        self.host_fragment = bytearray()
         self.lightburn_enabled = True
         self.owner = None  # host, job, local
         self.state = "Disconnected"
@@ -89,6 +91,8 @@ class Controller:
                 pass
         self.host = None
         self.host_pending = 0
+        self.host_commands.clear()
+        self.host_fragment.clear()
         if self.owner == "host":
             self.owner = None
 
@@ -136,6 +140,17 @@ class Controller:
             self.last_error = line
         self.lines.append(line)
         if line == "ok" or line.startswith("error:"):
+            if self.host is not None and self.host_commands:
+                sent = self.host_commands.popleft()
+                if line == "ok":
+                    if sent == "$H":
+                        self.homed = True
+                    if sent.startswith("$") and "=" in sent:
+                        m = SETTING.match(sent)
+                        if m:
+                            self.settings[int(m.group(1))] = float(m.group(2))
+                        if sent.startswith(("$3=", "$23=", "$130=", "$131=", "$132=")):
+                            self.homed = False
             self.replies.append(line)
             self.cond.notify_all()
         return self.host is not None
@@ -297,6 +312,8 @@ class Controller:
                 return
             self.host = client
             self.host_pending = 0
+            self.host_commands.clear()
+            self.host_fragment.clear()
             self.owner = "host"
             self.bytes_host = 0
         try:
@@ -314,6 +331,18 @@ class Controller:
                     self.host_pending = min(64, self.host_pending + data.count(b"?"))
                     if b"\x18" in data:
                         self.homed = False
+                        self.host_commands.clear()
+                        self.host_fragment.clear()
+                    for byte in data:
+                        if byte in (10, 13):
+                            if self.host_fragment:
+                                command = self.host_fragment.decode("ascii", "replace").strip()
+                                self.host_fragment.clear()
+                                if command:
+                                    self.host_commands.append(command)
+                        elif 32 <= byte <= 126:
+                            if len(self.host_fragment) < 240:
+                                self.host_fragment.append(byte)
                     self._send_locked(data)  # byte-exact G-code + realtime
         except (OSError, ConnectionError):
             pass
