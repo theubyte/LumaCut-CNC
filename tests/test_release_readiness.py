@@ -1,10 +1,14 @@
 """Regression tests for approval of legacy, incomplete firmware build archives."""
 import hashlib
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
 
+# The builder creates its artifacts folder at import. CI must never require /data.
+_TEST_DATA_ROOT=tempfile.TemporaryDirectory(prefix="lumacut-release-test-")
+os.environ["LUMACUT_DATA_ROOT"]=_TEST_DATA_ROOT.name
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"builder"))
 import app as builder
 
