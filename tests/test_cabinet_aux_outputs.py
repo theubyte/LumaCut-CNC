@@ -32,7 +32,9 @@ class AuxOutputContractTest(unittest.TestCase):
         self.assertIn('pwm_off(spindle);',BUILD)
         self.assertIn('M3 S0 powers BED/laser fan without firing the laser',BUILD)
         self.assertIn('PWM is off but BED remains energized until the explicit M5',BUILD)
-        self.assertNotIn('AUXOUTPUT2_PIN          7',BUILD)
+        # The original upstream line is a search token in build.py, not
+        # the emitted board map. Verify replacement output instead.
+        self.assertIn("'#define AUXOUTPUT2_PIN          9'",BUILD)
 
     def test_mist_flood_independent_realtime_override(self):
         self.assertIn('machine.write((uint8_t)(lights?0xA1:0xA0));',HMI)
