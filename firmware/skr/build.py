@@ -43,7 +43,13 @@ def patch(text):
         '#define AUXOUTPUT3_PORT         GPIOC // MZ FAN0, flood\n#define AUXOUTPUT3_PIN          6')
     text=change(text,
         '#define AUXOUTPUT4_PORT         GPIOC // Coolant mist\n#define AUXOUTPUT4_PIN          9',
-        '// PC9 HEATER MOSFET disabled. No AUXOUTPUT4 definition.')
+        '#define AUXOUTPUT4_PORT         GPIOC // LumaCut HE0 PC8 24V LEDs, grblHAL M7 mist\n'
+        '#define AUXOUTPUT4_PIN          8')
+    # PC9 remains disabled: high-current BED FET kept as an independent spare.
+    # PC7 FAN1 is spindle enable, PC6 FAN0 is M8 exhaust.
+    # IMPORTANT: both fan/heater MOSFET outputs are LOW-SIDE switches. PC7
+    # must drive a separately rated/high-side laser +24V power-enable circuit,
+    # never interrupt the laser module's PWM/common-ground return directly.
     for expected in ('#define AUXOUTPUT0_PIN          1',
                      '#define AUXOUTPUT2_PIN          7',
                      '#define AUXINPUT2_PIN           14',
@@ -149,7 +155,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
             h.write("build_flags = "+chr(36)+"{env:"+src_env+".build_flags}\n")
             if args.bridge:
                 h.write("  -D SERIAL_PORT=1\n")
-            h.write("  -D COOLANT_ENABLE=1\n")
+            h.write("  -D COOLANT_ENABLE=3\n") # M8 PC6 exhaust AND M7 PC8 LEDs
             h.write("  -D SPINDLE0_ENABLE=SPINDLE_PWM0_NODIR\n")
             # UART0 (PA9 TX, PA10 RX) serves the grblHAL serial keypad.
             # USART3 (PC10/PC11) remains reserved for TMC2209.
