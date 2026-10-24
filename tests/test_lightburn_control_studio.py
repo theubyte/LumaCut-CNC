@@ -40,8 +40,13 @@ class ControlStudioTests(unittest.TestCase):
         self.assertNotIn('if(op=="safez20")',HMI)
 
     def test_offline_hotspot_qr_and_network_web_onboarding(self):
-        qr=(ROOT/"firmware/hmi/src/qrcodegen.c").read_text(encoding="utf-8")
-        self.assertIn('MIT License',qr)
+        # LVGL v8 already compiles Nayuki's qrcodegen.c. Compiling a
+        # second local implementation caused duplicate-symbol linker failures.
+        # Only a local API declaration header is retained for the firmware.
+        qr_header=(ROOT/"firmware/hmi/src/qrcodegen.h").read_text(encoding="utf-8")
+        self.assertIn('MIT License',qr_header)
+        self.assertFalse((ROOT/"firmware/hmi/src/qrcodegen.c").exists())
+        self.assertIn('#include "qrcodegen.h"',HMI)
         self.assertIn('WIFI:T:WPA;S:',HMI)
         self.assertIn('qrcodegen_encodeText',HMI)
         self.assertIn('void showHotspotQr()',HMI)
