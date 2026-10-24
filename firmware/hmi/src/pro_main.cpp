@@ -401,8 +401,18 @@ void checkLumaCutUpdates(){
                 if(updateAvailable)setNotice("LumaCut Update verfuegbar. Unter WLAN/System anzeigen.");
             }
         }
+    }else if(code==401||code==403){
+        updateAvailable=false;updateOtaApproved=false;
+        updateCheckStatus="Updatecheck: Zugriff gesperrt (HTTP "+String(code)+")";
+        setNotice("Update-API verlangt Login: Unraid-Compiler oder Reverse-Proxy pruefen.");
+    }else if(code==404){
+        updateAvailable=false;updateOtaApproved=false;
+        updateCheckStatus="Update-API fehlt (404): Compiler aktualisieren";
     }else{
-        updateCheckStatus="Updatecheck: Server/TLS Fehler "+String(code);
+        updateAvailable=false;updateOtaApproved=false;
+        updateCheckStatus=code<0?
+            ("Updatecheck: Netzwerk/TLS Fehler "+String(code)):
+            ("Updatecheck: Server HTTP "+String(code));
     }
     request.end();
 }
