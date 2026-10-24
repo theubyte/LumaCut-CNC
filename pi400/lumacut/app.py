@@ -622,6 +622,11 @@ def do_action(op):
         if bounds is None:
             raise RuntimeError("Kontur aus diesem G-Code nicht sicher bestimmbar")
         x0, y0, x1, y1 = bounds
+        limits = controller.status()["settings"]
+        if limits.get(130, 0) <= 0 or limits.get(131, 0) <= 0:
+            raise RuntimeError("GRBL-Fahrwege müssen zuerst ausgelesen werden")
+        if x1-x0 > limits[130] or y1-y0 > limits[131]:
+            raise RuntimeError("G-Code-Kontur ist größer als der SKR-Verfahrweg")
         return run_commands(["M5", "G21 G90",
             "G0 X%.3f Y%.3f" % (x0,y0),
             "G0 X%.3f Y%.3f" % (x1,y0),
@@ -698,7 +703,11 @@ def start_job():
     job_pause.clear()
     with controller.lock:
         controller._acquire_local("job")
-    job_thread = threading.Thread(target=_run_job, name="gcode-job", daemon=True)
+    # Freeze the chosen G-code when the job is accepted. Later uploads or
+    # selection changes must not silently change a running program.
+    snapshot = (JOBS / selected_job).read_text(encoding="utf-8", errors="replace")
+    job_thread = threading.Thread(target=_run_job, args=(selected_job, snapshot),
+                                  name="gcode-job", daemon=True)
     try:
         job_thread.start()
     except Exception:
@@ -709,11 +718,10 @@ def start_job():
     return "Job gestartet: " + selected_job
 
 
-def _run_job():
-    job_progress.update(name=selected_job, line=0, state="running")
+def _run_job(job_name, snapshot):
+    job_progress.update(name=job_name, line=0, state="running")
     try:
-        path = JOBS / selected_job
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = snapshot.splitlines()
         job_progress["total"] = len(lines)
         for i, raw in enumerate(lines):
             if job_cancel.is_set():
@@ -732,6 +740,11 @@ def _run_job():
         if job_cancel.is_set():
             job_progress["state"] = "stopped"
         else:
+            # Always append an explicit laser OFF, even if LightBurn omitted
+            # M5 or used M3 S0 to keep the module cooling fan energized.
+            off_reply = controller.command("M5", owner="job", timeout=30)
+            if off_reply != "ok":
+                raise RuntimeError("Laser-Abschaltung nicht bestätigt: "+off_reply)
             # Wait for GRBL planner to become idle before releasing ownership.
             deadline = time.monotonic() + 120
             while controller.state not in ("Idle", "Alarm") and time.monotonic() < deadline:
