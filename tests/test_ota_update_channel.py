@@ -44,6 +44,16 @@ class ReleaseNotificationTests(unittest.TestCase):
         self.assertIn('machineState!=MachineState::Idle',HMI)
         self.assertIn('void installHmiUpdate()',HMI)
 
+    def test_optional_sd_mount_after_expander_and_littlefs_fallback(self):
+        self.assertIn('#include <SD.h>',HMI)
+        self.assertIn("SD.begin((uint8_t)-1,SPI,4000000)",HMI)
+        self.assertIn('jobStore().open("/jobs/"+selectedJob,FILE_READ)',HMI)
+        self.assertIn('storageOk=sdReady||internalStorageReady;',HMI)
+        self.assertIn('File dir=LittleFS.open("/jobs");',HMI)
+        self.assertIn('if(!SD.exists("/jobs"))sdReady=SD.mkdir("/jobs");',HMI)
+        self.assertLess(HMI.index('    touchInit();'),HMI.index('sdReady=SD.begin('))
+        self.assertNotIn('SD.format()',HMI)
+
     def test_application_only_hmi_image_not_merged(self):
         self.assertIn('ota_src=hmi_out/"firmware.bin"',SERVER)
         self.assertIn('ota_dest=folder/"HMI_OTA_APP_UNVERIFIED.bin"',SERVER)
