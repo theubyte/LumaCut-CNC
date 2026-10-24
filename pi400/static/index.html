@@ -315,7 +315,7 @@ function drawParams(){
  const known=new Map(categories.flat().map(([id,name])=>[id,name]));
  const all=el("category").value==="all";
  const source=all?
-   Object.keys(params).filter(v=>/^\\d+$/.test(v)).map(v=>[Number(v),known.get(Number(v))||"Firmware-Parameter"]):
+   Object.keys(params).filter(v=>/^\d+$/.test(v)).map(v=>[Number(v),known.get(Number(v))||"Firmware-Parameter"]):
    categories[Number(el("category").value)];
  const query=el("paramSearch").value.trim().toLowerCase();
  const selected=source.filter(([id,name])=>!query||("$"+id+" "+name).toLowerCase().includes(query));
