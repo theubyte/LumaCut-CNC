@@ -62,6 +62,24 @@ class Pi400TransportTests(unittest.TestCase):
         self.assertEqual(c.last_error,"error:20")
         self.assertEqual(c.suppressed_reports,1)
 
+    def test_lightburn_homing_and_settings_are_tracked_from_real_ack(self):
+        c=Controller("/dev/null")
+        c.host=FakeSocket()
+        c.owner="host"
+        c.host_commands.append("$H")
+        with c.cond:
+            c._read_response("ok")
+        self.assertTrue(c.homed)
+        c.host_commands.append("$130=450.5")
+        with c.cond:
+            c._read_response("ok")
+        self.assertEqual(c.settings[130],450.5)
+        self.assertFalse(c.homed)
+        c.host_commands.append("$H")
+        with c.cond:
+            c._read_response("error:9")
+        self.assertFalse(c.homed)
+
     def test_exclusive_host_ownership(self):
         c=Controller("/dev/null")
         c.serial=object()
