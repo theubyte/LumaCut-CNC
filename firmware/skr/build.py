@@ -96,6 +96,15 @@ def main():
             h.write("  -D PROBE_ENABLE=0\n")
             # Default stepper holding after homing. Existing EEPROM/NVS values
             # retain precedence: HMI also sets $1=255 on successful home.
+            # Original Atomstack A5 Pro belt mechanics use 80 steps/mm
+            # when the Trinamic driver microstepping matches the OEM setup.
+            # Factory defaults only: existing SKR EEPROM values take precedence.
+            h.write("  -D DEFAULT_X_STEPS_PER_MM=80.0f\\n")
+            h.write("  -D DEFAULT_Y_STEPS_PER_MM=80.0f\\n")
+            # Z is a different Anet A8 motor + lead screw. Its lead and the
+            # running microstep resolution are not yet established; guessing
+            # $102 could cause unsafe 20mm retreats or overtravel.
+            # Keep the upstream Z steps/mm default pending measured correction.
             h.write("  -D DEFAULT_STEPPER_IDLE_LOCK_TIME=255\n")
             # Three real XYZ switches: enable default homing and optional
             # single-Z homing for workpiece contact using the same head switch.
