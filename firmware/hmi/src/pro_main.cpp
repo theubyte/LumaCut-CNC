@@ -75,6 +75,13 @@ String script[12];int scriptCount=0,scriptIndex=0;
 bool commandPending=false,jobRunning=false,jobPaused=false,scriptActive=false;
 bool homePending=false,homingInProgress=false,hostBlocked=false;
 bool wifiLightburnEnabled=true;
+// Live grblHAL accessory states |A:... in realtime status.
+// M7/mist -> PC8 HE0 (cabinet LEDs); M8/flood -> PC6 FAN0 (exhaust).
+// We use one-byte 0xA1/0xA0 realtime toggles, which may be issued by
+// a pendant even while LightBurn owns the G-code stream.
+bool lightOn=false,exhaustOn=false,accessoryStatusFresh=false;
+uint32_t lastAccessoryRequestMs=0;
+lv_obj_t* lightControlButton=nullptr,*exhaustControlButton=nullptr;
 uint32_t lastStatusMs=0,lastQueryMs=0,localArmUntil=0,lastInputMs=0,wifiHostUntil=0;
 enum class Owner { None, Usb, Tcp, Internal, Script };
 Owner owner=Owner::None;
@@ -582,6 +589,10 @@ void updateUi(){
         autoLiftAfterHome?"Auto-Z: EIN":"Auto-Z: AUS");
     if(jogSpeedButton)labelChanged(lv_obj_get_child(jogSpeedButton,0),
         "Tempo "+String(jogSpeedPercent)+"% / SKR Max");
+    if(lightControlButton)labelChanged(lv_obj_get_child(lightControlButton,0),
+        lightOn?"LEDs AUSSCHALTEN":"LEDs EINSCHALTEN");
+    if(exhaustControlButton)labelChanged(lv_obj_get_child(exhaustControlButton,0),
+        exhaustOn?"Abluft AUSSCHALTEN":"Abluft EINSCHALTEN");
     if(releaseButton)labelChanged(lv_obj_get_child(releaseButton,0),
         motorsReleased?"Aufwecken":"Handbewegung");
     if(updateLabel)labelChanged(updateLabel,updateCheckStatus);
@@ -737,6 +748,22 @@ void parseMachineLine(const String& line){
         }
     }
     if(line.startsWith("<")){
+        // grblHAL status provides |A:SF/M when outputs are asserted, and
+        // omits the field when none is active. This is controller feedback,
+        // not an invented HMI state.
+        // Ignore a short stale status echo right after a realtime toggle.
+        if((uint32_t)(millis()-lastAccessoryRequestMs)>550u){
+            const int at=line.indexOf("|A:");
+            String a="";
+            if(at>=0){
+                int limit=line.indexOf('|',at+3);
+                if(limit<0)limit=line.indexOf('>',at+3);
+                a=line.substring(at+3,limit<0?line.length():limit);
+            }
+            lightOn=a.indexOf('M')>=0;
+            exhaustOn=a.indexOf('F')>=0;
+            accessoryStatusFresh=true;
+        }
         int end=line.indexOf('|');if(end<0)end=line.indexOf('>');
         String state=line.substring(1,end);
         if(state=="Idle")machineState=MachineState::Idle;
@@ -1166,6 +1193,7 @@ void installRoutes(){
             "updatecheck","toggleAutoLift","zlift","frame","start",
             "pause","toggle","abort","park","capture","p0","p1","p2",
             "next","step","jogsound","x+","x-","y+","y-","z+","z-",
+            "lightToggle","exhaustToggle","lightOn","lightOff","exhaustOn","exhaustOff",
             "probePlan","probeSave","updateinstall","skrinstall"
         };
         bool found=false;
@@ -1344,6 +1372,8 @@ void installRoutes(){
         d["router_ssid"]=wifiSsid;d["connected"]=WiFi.status()==WL_CONNECTED;
         d["router_ip"]=WiFi.status()==WL_CONNECTED?WiFi.localIP().toString():"";
         d["lightburn_tcp_enabled"]=wifiLightburnEnabled;
+        d["cabinet_leds_on"]=lightOn;
+        d["exhaust_on"]=exhaustOn;
         d["lightburn_port"]=WIFI_TCP_PORT;
         String json;serializeJson(d,json);http.send(200,"application/json",json);
     });
@@ -1754,7 +1784,10 @@ void makeUi(){
     btn(c,"Job starten",20,157,132,53,"start",GRAY,INK);
     btn(c,"Pause / Weiter",166,157,133,53,"toggle",GRAY,INK);
     btn(c,"Abbrechen",313,157,137,53,"abort",0x55303A,0xFF8992);
-    lbl(c,"Status und Fehlermeldungen unten im Display",20,236,14,SUBTLE);
+    lightControlButton=btn(c,"LEDs EINSCHALTEN",20,222,209,40,
+                           "lightToggle",PALE_BLUE,BLUE);
+    exhaustControlButton=btn(c,"Abluft EINSCHALTEN",244,222,206,40,
+                             "exhaustToggle",PALE_BLUE,BLUE);
 
     lv_obj_t* quick=card(pages[0],482,0,290,268);
     lbl(quick,"Schnellzugriff",19,15,20);
@@ -2508,6 +2541,38 @@ void action(const char* id){
             setNotice("Warte auf SKR-Bestaetigung fuer $"+idText+".");
         }
         else setNotice("Parameter nur im Leerlauf aenderbar.");
+        return;
+    }
+    if(op=="lightToggle"||op=="exhaustToggle"||
+       op=="lightOn"||op=="lightOff"||op=="exhaustOn"||op=="exhaustOff"){
+        if(!fresh()||!accessoryStatusFresh||
+           !(machineState==MachineState::Idle||
+             machineState==MachineState::Run||machineState==MachineState::Hold)){
+            setNotice("LED/Abluft: zuerst GRBL Status lesen und Verbindung pruefen.");return;
+        }
+        if((uint32_t)(millis()-lastAccessoryRequestMs)<600u){
+            setNotice("Warte auf GRBL-Zustand nach der letzten Schaltung.");return;
+        }
+        const bool lights=op.startsWith("light");
+        const bool current=lights?lightOn:exhaustOn;
+        bool desired=!current;
+        if(op.endsWith("On"))desired=true;
+        if(op.endsWith("Off"))desired=false;
+        if(current==desired){
+            setNotice(lights?"LEDs bereits im gewuenschten Zustand.":
+                              "Abluft bereits im gewuenschten Zustand.");
+            return;
+        }
+        // grblHAL supports the independent realtime overrides even while
+        // a GRBL serial or TCP host owns the machine. They toggle only one
+        // coolant accessory, avoiding M9 which would shut BOTH off.
+        machine.write((uint8_t)(lights?0xA1:0xA0));
+        lastAccessoryRequestMs=millis();
+        lightOn=lights?desired:lightOn;
+        exhaustOn=lights?exhaustOn:desired;
+        machine.write('?');
+        setNotice(lights?"LEDs: Schaltung an SKR gesendet.":
+                          "Abluft: Schaltung an SKR gesendet.");
         return;
     }
     if(op=="host"){
