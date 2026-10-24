@@ -1,133 +1,133 @@
-# LumaCut CNC · 24-V-Ausgänge und Laser-Ansteuerung
+# LumaCut CNC: 24-V-Laser direkt am SKR-BED-Ausgang (PC9)
 
-**Hardware:** BTT SKR Mini MZ V1.0 (STM32F103RC) mit grblHAL auf
-`main`, Waveshare ESP32-S3-Touch-LCD-7 Rev1.2 und LaserTree
-LT-80W-AA-PRO. Die Pinbelegung wurde mit dem
-`generic-bigtreetech-skr-mini-mz.cfg` von Klipper und dem
-originalen BigTreeTech-Marlin-Boardprofil geprüft.
+Stand: 24.10.2026, LumaCut `main`. Gewünschter Aufbau mit LaserTree LT-80W-AA-PRO,
+Waveshare ESP32-S3 und BTT SKR Mini MZ V1.0.
 
-**Wichtig:** PC6, PC7, PC8, PC9 sind MCU-GPIOs mit 3,3 V Logik.
-Die gleichnamigen Klemmen FAN0, FAN1, HE0, BED sind mit
-Low-Side-Leistungs-MOSFETs verbunden. Nie 24 V an einen freiliegenden
-STM32-Pin legen. Die positive Versorgung der 2-poligen
-Ausgänge kommt von der 24-V-Eingangsschiene.
+## SKR-Belegung – ein Kanal pro Funktion
 
-## Stromversorgung und Pins
+| Physische Klemme | STM32-Port | Steuerung |
+| --- | --- | --- |
+| **BED** | **PC9** | **24-V-Lasermodul EIN/AUS durch M3/M4/M5** |
+| **Laser-PWM/Servo** | **PA1** | TTL/PWM-Leistung 0–1000 (laut $30) |
+| **HE0** | **PC8** | 24-V-LED-Beleuchtung M7 |
+| **FAN0** | **PC6** | 24-V-Gehäuseabluft M8 |
+| **FAN1** | **PC7** | Nicht belegt, Reserve |
 
-| Klemme | MCU-Ausgang | LumaCut-Aufgabe | GRBL-Funktion |
-| --- | --- | --- | --- |
-| Servo/Z-PROBE-Signal | PA1 (3,3-V-Signal, nicht 24 V) | Laser-PWM (0..1000) | M3/M4, S |
-| FAN1 | PC7 (Low-Side) | Nur Steuereingang für externen High-Side-Laser-24V-Schalter | Spindle Enable |
-| FAN0 | PC6 (Low-Side) | 24-V-Abluftlüfter | M8 / Flood, Echtzeit-Toggle 0xA0 |
-| HE0 | PC8 (Low-Side) | 24-V-Kabinen-LEDs | M7 / Mist, Echtzeit-Toggle 0xA1 |
-| BED | PC9 (Low-Side) | Nicht verwendet; Reserve | keine |
+BED/HE0/FAN0 sind MOSFET-Ausgänge, die **Minus schalten**. Die
+STM32-Signalpins PC9/PC8/PC6 führen selber **keine 24 V**.
+Am **BED+** liegen durchgeschleifte 24 V vom SKR-Netzteil an,
+**BED−** wird beim Einschalten nach Netzteil-GND geschaltet.
 
-Die Board-Firmware schaltet beide Coolant-Funktionen mit
-`COOLANT_ENABLE=3` frei. Die LED-Ansteuerung übernimmt M7, die
-Abluft M8. M9 deaktiviert **beide** Kanäle gleichzeitig. Die
-HMI-/Webbuttons senden stattdessen **getrennte grblHAL
-Echtzeit-Toggles** und lesen den echten `|A:...`-Status aus:
-`A:M` LED, `A:F` Abluft. Damit wird LED ein/aus nicht durch einen
-blind gesendeten M9-Befehl mit dem Lüfter verwechselt. Der SKR ist
-alleinige Quelle für die Ausgangszustände.
-
-## Leistungsklemmen ohne Kurzschluss anschließen
+## BED für den Laser: drei Leiter eindeutig zuordnen
 
 ```text
-                          24-V-Netzteil
-                           +24 V  0 V
-                             |     |
-            +----------------+     +---------------------+
-            |                |                           |
-          Sicherung        Sicherung                    Masse
-            |                |                           |
-    24-V-LED-Streifen(+)  Abluftlüfter(+)          Laser-GND (ständig)
-    LED-Streifen(-)       Abluftlüfter(-)              |
-            |                |                         |
-         HE0 / PC8         FAN0 / PC6            LaserTree 3-polig
-             [MOSFET schaltet Minus]               VCC  GND  PWM
-                                                       ^        ^
-    24 V (+), eigener abgesicherter Zweig --------------|        |
-      über externen, DC-tauglichen HIGH-SIDE-Kontakt K1-+        |
-                                                                |
-               SKR PA1 (3,3-V-TTL) ------------------------------+
-               Nur nach Überprüfung des PWM-Signalpegels!
+ SKR MINI MZ                       LaserTree LT-80W-AA-PRO
+ BED + (24V, abgesichert)  ------>  ROT  VCC +24V
+ BED - (MOSFET PC9)       ------>  SCHWARZ  Laser-GND
+ PA1 (3,3-V-Logik) ---> [PWM-Optokoppler/Isolator] ---> GELB Laser-PWM
+ SKR-GND -----------> [Eingangs-GND des Isolators]
 
-    FAN1 / PC7 ---- 24-V-Schalt-/Relaissteuereingang K1
-                   (kein direkter Laser-GND-Rückleiter!)
+ BED-/Laser-GND -------> [Ausgangs-GND des Isolators]
+ 5-V-Ausgangsspannung fuer den isolierten PWM-Treiber
+ aus der geschalteten Laser-24-V-Seite (BED+ und BED-).
+ Der isolierte Ausgang soll 0/5 V am gelben Draht erzeugen.
 ```
 
-Bei Relais mit einer Spule: diese muss für 24 V geeignet sein, eine
-Freilaufdiode/Schutzbeschaltung besitzen, und der Eingangs-/
-Spulenstrom muss innerhalb der FAN1-Ausgangsleistung liegen.
-Kontaktseite K1 muss die **Gleichstromlast** des Lasermoduls
-inklusive Einschaltstrom zuverlässig schalten. Alternativ eignet
-sich ein dafür ausgelegter MOSFET-High-Side-Schalter.
+**Daher ja: VCC + GND des Lasers gehen direkt an die zweipolige
+BED-Klemme des SKR.** Die gelbe PWM-Leitung braucht eine
+galvanisch getrennte 5-V-Ansteuerung. Ursache: BED trennt Laser-GND
+vom Netzteil-GND; ein direkter PA1–PWM-Draht könnte den
+ausgeschalteten Lasertreiber über den GPIO rückspeisen.
+Der Isolator darf die beiden Masse-Seiten nicht durchverbinden;
+die Laserseite darf auch nicht über das Metallgehäuse oder andere
+Kabel einen gemeinsamen Masse-Rückweg erhalten. Im stromlosen
+Zustand mit Durchgangsprüfer zwischen Laser-GND, Metallgehäuse
+und SKR-GND kontrollieren.
 
-LaserTree LT-80W-AA-PRO laut Hersteller: 24 V bei etwa
-1,5–2 A, Lasersteuerung am gelben PWM-Draht, schwarzer GND,
-roter 24-V-VCC. Das 3,3-V-PWM-Signal der SKR-Logik liegt am
-unteren Rand der 3–12-V-Spezifikation. Vor Freigabe wird
-PWM-High/Low direkt am Eingang gemessen und überprüft, dass
-PWM=0 bzw. stromloser SKR **niemals** den Laser einschaltet.
+LaserTree-Daten: VCC 12/24 V, typische 24-V-Last etwa 1,5–2 A,
+PWM-Eingang 0/3–12 V bis 5 kHz. Vor Anschluss des Lasers
+BED-Ausgangspolarität, reale Schaltspannung, Optokoppler-Polung,
+PWM-Pegel und Stromaufnahme messen. Leiter, Sicherung und
+MOSFET-Wärme müssen für die tatsächliche Last ausgelegt sein.
 
-**Nicht so verdrahten:** Die rote und schwarze Laser-Versorgung
-einfach zwischen VIN+ und FAN1-/HE0- schalten, während PWM
-mit einer gemeinsamen Platinenmasse verbunden bleibt. Dadurch
-würde die Laser-Masse im Aus-Zustand schweben und möglicherweise
-über die PWM-Signalleitung unerwünscht rückgespeist.
+## Schaltlogik im angepassten grblHAL
 
-## Laser nur bei Job, aber mit Vorlauf und Nachkühlung
+Im LumaCut-SKR-Build ist
+`AUXOUTPUT2_PIN 9` = `SPINDLE_ENABLE_PIN PC9` statt PC7.
 
-Die vorhandene grblHAL-Firmware setzt mit `SPINDLE0_ENABLE=
-SPINDLE_PWM0_NODIR` den PC7-Spindle-Enable-Ausgang
-bei aktiver Spindel-/Laseransteuerung. Das ist **keine**
-fertige sichere Stromversorgungsschaltung für LaserTree:
+- **`M3 S0`**: BED an, PA1-PWM bleibt 0 %. Geeignet zum Vorversorgen.
+- **`G4 P2`**: Zwei Sekunden Vorlauf für Laser-Treiber und internen Lüfter.
+- **`M3 S500`**: BED bleibt an, PWM wird auf den gewählten S-Wert
+  gestellt (Beispiel bei `$30=1000`).
+- **`S0` bei weiterhin aktivem M3/M4**: Laserstrahl aus, **BED bleibt
+  an**, damit der Laserlüfter bei Leerfahrten nicht ständig aus-/angeht.
+- **`M5`**: PWM 0 und BED aus. Das ist ein expliziter
+  Stromabschaltbefehl; dafür ist keine softwareseitige Nachlaufzeit
+  garantiert.
+- **`M7` / `M8`**: LEDs beziehungsweise Abluft separat einschalten.
+  **`M9`** schaltet beide wieder aus.
 
-- Der LaserTree-Hersteller verlangt, dass die Betriebsspannung
-  vorhanden ist, bevor PWM-Leistung ausgegeben wird.
-- LightBurn kann M3/M4 und S0 an mehreren Stellen eines Jobs
-  ausgeben. Die Laser-Stromversorgung darf bei Leerfahrten
-  oder 0 % PWM nicht fortlaufend hart ein- und ausgeschaltet
-  werden. Ein externes Halte-/Verzögerungsmodul oder eine
-  weitere Freigabestufe muss die Versorgung vorab aufbauen,
-  die PWM-Freigabe erst **danach** erlauben und die
-  Nachkühlung des Lasermoduls gewährleisten.
-- Die Laserenergie benötigt darüber hinaus einen unabhängig
-  wirksamen Not-Aus, Schlüssel- und Gehäuse-Interlock;
-  eine HMI-Taste oder ein 24-V-MOSFET ist keine
-  sicherheitsgerichtete Abschaltung.
+Die Firmware hält die Stromversorgung innerhalb eines aktiven M3/M4
+bei **S0** eingeschaltet. So kann LightBurn den Laserstrahl abschalten,
+während der interne Kühllüfter weiterarbeitet.
 
-Die erzeugten LightBurn-USB-Profile senden `M8` bereits zu
-Jobbeginn und am Jobende `M5`, dann `G4 P30` (30 s
-Abluftnachlauf) und `M9`. Dies automatisiert die **Abluft**,
-nicht die sichere Schaltfolge des Lasermoduls. Beim manuellen
-HMI-/Webjob sollte der Bediener den Lüfter vor dem Start
-einschalten und nach dem Abzug der Rauchgase ausschalten.
-Die optionale 30-s-Nachlaufzeit gilt daher im Augenblick
-nur bei Verwendung des neuen LightBurn-Geräteprofils.
+### Passendes LightBurn-Profil
 
-## Vor Anschluss unbedingt prüfen
+`lightburn/LumaCut-CNC-USB.lbdev` und der Live-Profildownload
+vom HMI verwenden folgende Sequenzen:
 
-1. Netzteil 24 V; Gesamtbedarf = Laser (bis ca. 2 A) +
-   Schrittantriebe + 24-V-LED-Last + Abluftlüfter +
-   Elektronik + Einschaltspitzen. Die verfügbaren
-   Ströme der konkreten **FAN0/FAN1/HE0-Ausgangs-MOSFETs**
-   müssen anhand des Board-Schaltplans und der tatsächlichen
-   angeschlossenen Last überprüft werden.
-2. Jeden 24-V-Zweig separat passend absichern,
-   Leitungsquerschnitt und Polung prüfen, Schrankgehäuse erden.
-3. Erst ohne Lasermodul LED und Lüfter getrennt testen
-   (`M7/M8/M9` / HMI / Web), dabei Spannung und Polung
-   am Ausgang mit Multimeter prüfen.
-4. PC7-Freigabe und PA1-PWM zunächst ausschließlich mit
-   Messgerät oder geeigneter Prüflast testen; anschließend
-   externe Einschalt-/Abschaltsequenz und Interlocks nachweisen.
-5. Mit physisch getrenntem Laserstrom Homing, LightBurn
-   und automatische Lüftersteuerung prüfen; erst danach
-   einen kontrollierten Lasertest durchführen.
+**Start-G-Code:**
+```gcode
+G21
+G90
+M5
+M8
+M3 S0
+G4 P2
+```
 
-**Status:** Firmware-Zuordnung und HMI-/Webbedienung sind
-implementiert, aber **nicht elektrisch auf der realen Maschine
-verifiziert**. Die Laser-Versorgungsfreigabe ist als externe
-High-Side-Schaltung ausdrücklich noch nicht fertig aufgebaut.
+**End-G-Code:**
+```gcode
+M3 S0
+G4 P30
+M5
+M9
+```
+
+Beim regulären Ende bleibt BED während des 30-s-Nachlaufs versorgt,
+ohne Laser-PWM. Falls ein LightBurn-Job selbst vorher `M5` sendet,
+kann die Versorgung zwischenzeitlich abschalten; das Start- und
+End-G-Code-Profil garantiert **nicht** die lückenlose Versorgung
+bei beliebigem Fremd-G-Code und ersetzt keine thermische Überwachung.
+Spezielle Pausen, `ALARM`, Not-Aus oder Neustart können den
+Kühlungsnachlauf unterbrechen. Die Abfolge mit einer Prüflast testen,
+bevor der Laserstrahl überhaupt zugeschaltet wird.
+
+## Weitere 24-V-Ausgänge
+
+- **HE0 → 24-V-LED-Streifen:** positiver Anschluss an HE0+,
+  negativer an HE0−; M7 / LED-Taste am HMI und im Web.
+- **FAN0 → 24-V-Abluftlüfter:** positiver Anschluss an FAN0+,
+  negativer an FAN0−; M8 / Abluft-Taste am HMI und im Web.
+- **FAN1 → frei** (PC7 wird durch den LumaCut-Build nicht als
+  Laser-Stromfreigabe genutzt).
+
+## Erste Inbetriebnahme ohne Laserenergie
+
+1. SKR mit abgesichertem 24-V-Netzteil betreiben. LED- und Lüfterlasten
+   separat auf Ausgangsleistung/Polung prüfen.
+2. Vor Anschluss des Lasers zuerst mit einer geeigneten
+   **24-V-Prüflast** an BED kontrollieren:
+   nach `M5` 0 V Lastspannung; nach `M3 S0` 24 V;
+   nach `G4 P2` weiterhin 24 V; nach `M5` wieder aus.
+3. PWM-Isolator separat prüfen: **0 V bei S0 und M5**, 0–5-V-PWM
+   bei S>0, Signalfrequenz maximal gemäß LaserTree-Spezifikation.
+4. Sicherstellen, dass das Modulgehäuse, seine Luft-/Mechanikteile
+   und eventuelle Anschlussadapter BED− nicht mit dauerhaftem
+   Netzteil-GND verbinden.
+5. Erst nach bestätigter Polarität, sicherer Einschaltreihenfolge,
+   thermischer Versorgung/Nachkühlung und unabhängigen
+   Interlocks den Laser elektrisch verbinden.
+
+Dieser Aufbau wird in der Software vorbereitet, nicht als
+hardwaregeprüfte Fertigmaschine behauptet.
