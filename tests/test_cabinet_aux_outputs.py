@@ -1,10 +1,10 @@
 """Ensure laser, exhaust and cabinet LED pins stay separate on SKR Mini MZ.
 
 The grblHAL bridge must expose the three physical MOSFET channels:
- PC7 FAN1 = spindle-enable control for an external high-side laser supply
+ PC9 BED  = laser power switch controlled by spindle enable (low side)
  PC6 FAN0 = M8 flood/exhaust
  PC8 HE0  = M7 mist/cabinet 24 V LED
- PC9 BED = reserved (not a generic 24 V GPIO)
+ PC7 FAN1 = unused spare
 """
 from pathlib import Path
 import unittest
@@ -19,9 +19,9 @@ class AuxOutputContractTest(unittest.TestCase):
         self.assertIn('-D COOLANT_ENABLE=3',BUILD)
         self.assertIn('AUXOUTPUT3_PIN          6',BUILD)
         self.assertIn('AUXOUTPUT4_PIN          8',BUILD)
-        self.assertIn('AUXOUTPUT2_PIN          7',BUILD)
-        self.assertIn('PC9 remains disabled',BUILD)
-        self.assertIn('high-side laser +24V',BUILD)
+        self.assertIn('AUXOUTPUT2_PIN          9',BUILD)
+        self.assertIn('PC9 BED now directly switches',BUILD)
+        self.assertIn('galvanic isolation',BUILD)
         self.assertNotIn('-D COOLANT_ENABLE=1',BUILD)
 
     def test_mist_flood_independent_realtime_override(self):
