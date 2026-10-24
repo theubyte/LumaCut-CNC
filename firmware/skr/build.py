@@ -6,9 +6,11 @@ hardware interlocks and bootloader. This script does not communicate with
 the controller or flash anything.
 """
 from __future__ import annotations
-import argparse, configparser, hashlib, pathlib, re, shutil, subprocess, tempfile
+import argparse, configparser, hashlib, json, pathlib, re, shutil, subprocess, tempfile, sys
 
 HERE=pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1] / "pi400"))
+from lumacut.pins import DEFAULT_ROLES, manifest
 CFG=configparser.ConfigParser(interpolation=None)
 CFG.read(HERE/"platformio.ini")
 SHA=CFG["upstream"]["commit"]
@@ -276,6 +278,22 @@ extern status_code_t limits_lumacut_z_clearance (void);
             dest=out/name
             shutil.copyfile(source,dest)
             print(str(dest),"sha256",hashlib.sha256(dest.read_bytes()).hexdigest())
+    # Pair the binary with the exact host-visible capability contract. It is
+    # descriptive metadata, never a substitute for live SKR identification or
+    # the electrical acceptance test.
+    capabilities = manifest(DEFAULT_ROLES)
+    capabilities.update({
+        "firmware_mode": "UART legacy bridge" if args.bridge else "USB peripheral",
+        "firmware_filename": "firmware.bin",
+        "firmware_sha256": hashlib.sha256((out / "firmware.bin").read_bytes()).hexdigest(),
+        "grblhal_revision": SHA,
+        "hardware_verified": False,
+    })
+    (out / "capabilities.json").write_text(
+        json.dumps(capabilities, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print("BOARD CONTRACT", out / "capabilities.json")
     print("BUILD COMPLETE - EXPERIMENTAL / NOT APPROVED FOR FLASHING")
 
 if __name__=="__main__":

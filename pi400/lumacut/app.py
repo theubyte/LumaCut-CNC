@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import re
 import secrets
 import socket
 import subprocess
@@ -17,9 +18,11 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, request, send_file, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory, session
 
 from .core import Controller, serve_lightburn
+from .pins import DEFAULT_ROLES, accessories_for_roles, manifest, override_for_role, validate_roles
+from .service_auth import ServiceAuth
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.getenv("LUMACUT_DATA", "/var/lib/lumacut"))
@@ -34,6 +37,9 @@ HTTP_PORT = int(os.getenv("LUMACUT_HTTP", "8080"))
 TCP_PORT = int(os.getenv("LUMACUT_TCP", "23"))
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
+service_auth = ServiceAuth(DATA)
+app.secret_key = service_auth.signing_secret
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict")
 controller = Controller(SKR_PORT)
 controller.maintenance_file = DATA / "maintenance.lock"
 started = False
@@ -52,16 +58,18 @@ config = {
               {"name": "Park 3", "stored": False, "x": 0, "y": 0}],
     "jog_percent": 100,
     "lightburn_tcp_enabled": True,
+    "pin_roles": dict(DEFAULT_ROLES),
 }
 try:
     if CONFIG_PATH.exists():
         saved = json.loads(CONFIG_PATH.read_text())
         if isinstance(saved, dict):
-            for name in ("focus", "probe", "parks", "jog_percent", "lightburn_tcp_enabled"):
+            for name in ("focus", "probe", "parks", "jog_percent", "lightburn_tcp_enabled", "pin_roles"):
                 if name in saved:
                     config[name] = saved[name]
 except Exception:
     logging.exception("Configuration recovery; previous config retained")
+config["pin_roles"] = __import__("lumacut.pins", fromlist=["effective_roles"]).effective_roles(config["pin_roles"])
 controller.lightburn_enabled = bool(config["lightburn_tcp_enabled"])
 
 
@@ -75,7 +83,7 @@ def persist():
 
 @app.before_request
 def check_token():
-    if request.path == "/" or request.path.startswith("/static/"):
+    if request.path in ("/", "/service") or request.path.startswith("/static/"):
         return None
     supplied = request.headers.get("X-LumaCut-Key", "")
     if not secrets.compare_digest(supplied, TOKEN):
@@ -99,6 +107,8 @@ def handle_error(exc):
     if isinstance(exc, HTTPException):
         return exc
     logging.exception("Control Studio request failed")
+    if isinstance(exc, PermissionError):
+        return jsonify({"error": str(exc)}), 403
     if isinstance(exc, (ValueError, KeyError, RuntimeError)):
         return jsonify({"error": str(exc)}), 400
     if isinstance(exc, (TimeoutError, ConnectionError)):
@@ -109,6 +119,110 @@ def handle_error(exc):
 @app.get("/")
 def index():
     return send_from_directory(str(ROOT / "static"), "index.html")
+
+
+@app.get("/service")
+def service_page():
+    return send_from_directory(str(ROOT / "static"), "service.html")
+
+
+def require_service():
+    if session.get("service_until", 0) <= time.time():
+        raise PermissionError("Service-Anmeldung erforderlich")
+
+
+@app.get("/api/service/auth")
+def service_auth_status():
+    return jsonify(active=session.get("service_until", 0) > time.time())
+
+
+@app.post("/api/service/login")
+def service_login():
+    client = request.remote_addr or "unknown"
+    if not service_auth.authenticate(request.form.get("password", ""), client):
+        raise PermissionError("Servicepasswort falsch")
+    session.clear()
+    session["service_until"] = time.time() + 600
+    return jsonify(message="Service freigeschaltet (10 Minuten)", active=True)
+
+
+@app.post("/api/service/logout")
+def service_logout():
+    session.clear()
+    return jsonify(message="Service gesperrt", active=False)
+
+
+@app.post("/api/service/password")
+def service_password():
+    require_service()
+    service_auth.change_password(request.form.get("old", ""),
+                                 request.form.get("new", ""),
+                                 request.remote_addr or "unknown")
+    app.secret_key = service_auth.signing_secret
+    session.clear()
+    return jsonify(message="Servicepasswort geändert. Erneut anmelden.")
+
+
+@app.get("/api/service/pins")
+def service_pins():
+    require_service()
+    return jsonify(manifest(config["pin_roles"]))
+
+
+@app.post("/api/service/pins")
+def service_save_pins():
+    require_service()
+    require_free()
+    proposed = validate_roles({"lights": request.form.get("lights"),
+                               "exhaust": request.form.get("exhaust")})
+    if any(controller.status()["accessories"].values()):
+        raise RuntimeError("Zubehör vor einer Neuzuordnung ausschalten")
+    with config_lock:
+        config["pin_roles"] = proposed
+        persist()
+    return jsonify(message="Logische M7/M8-Zubehörbelegung gespeichert",
+                   roles=proposed)
+
+
+@app.get("/api/service/diagnostics")
+def service_diagnostics():
+    require_service()
+    info = controller.status()
+    return jsonify(connected=info["connected"], state=info["state"],
+                   firmware=info["identity"],
+                   homed=info["homed"], owner=info["owner"],
+                   serial_faults=info["diagnostics"]["serial_faults"],
+                   suppressed_status=info["diagnostics"]["suppressed_status"],
+                   settings=info["settings"], recent=info["recent"],
+                   limitations=manifest(config["pin_roles"])["limitations"])
+
+
+@app.post("/api/service/command")
+def service_command():
+    require_service()
+    require_free()
+    command = request.form.get("command", "").strip()
+    # Read-only GRBL queries and bounded numeric settings only.
+    if command not in ("$", "$I", "$G", "$#"):
+        match = re.fullmatch(r"\$([0-9]{1,3})=([-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))", command)
+        if not match:
+            raise ValueError("Nur GRBL-Abfragen oder numerische $ID=Wert Einstellungen")
+        ident, value = int(match.group(1)), float(match.group(2))
+        if not __import__("math").isfinite(value):
+            raise ValueError("Wert nicht endlich")
+        if ident in (20, 21, 22) and value < 1:
+            raise ValueError("Softlimits, Hardlimits und Homing dürfen nicht deaktiviert werden")
+        if ident in (130, 131, 132) and not 0 < value <= 3000:
+            raise ValueError("Ungültiger Achsfahrweg")
+    is_write = bool(re.fullmatch(r"\$[0-9]{1,3}=.*", command))
+    response = run_commands([command] + (["$"] if is_write else []), timeout=20)
+    if is_write:
+        actual = controller.status()["settings"].get(ident)
+        tolerance = max(0.0005, abs(value) * 0.0001)
+        if actual is None or abs(actual - value) > tolerance:
+            raise RuntimeError("SKR-Rücklesung weicht vom Sollwert ab")
+    return jsonify(message=response, command=command)
+
 
 
 @app.get("/api/status")
@@ -131,7 +245,7 @@ def status():
                                  "z_mm": p[2] if p else 0,
                                  "zero_at_max": bool(config.get("zero_at_max", True))}},
         diagnostics=stat["diagnostics"],
-        accessories=stat["accessories"],
+        accessories=accessories_for_roles(stat["accessories"], config["pin_roles"]),
         last_error=stat["last_error"],
         recent=stat["recent"],
     )
@@ -185,6 +299,7 @@ def run_commands(lines, timeout=15):
 
 @app.post("/api/ui/setting")
 def set_param():
+    require_service()
     require_free()
     identifier = int(request.form["id"])
     if identifier not in controller.status()["settings"]:
@@ -202,6 +317,7 @@ def set_param():
 def set_config():
     section = request.form["section"]
     if section == "travel":
+        require_service()
         require_free()
         vals = [numeric(i, 0.01, 3000) for i in ("x", "y", "z")]
         result = run_commands(["$%d=%0.4f" % (id, val)
@@ -282,6 +398,9 @@ def probe_download():
 
 
 def do_action(op):
+    if op in ("enablehome", "softon", "motorHold", "motorRelease",
+              "flipx", "flipy", "flipz", "origin"):
+        require_service()
     if op == "host":
         controller.lightburn_enabled = not controller.lightburn_enabled
         config["lightburn_tcp_enabled"] = controller.lightburn_enabled
@@ -291,7 +410,7 @@ def do_action(op):
         return "LightBurn TCP: " + ("EIN" if controller.lightburn_enabled else "AUS")
     if op == "readcfg":
         require_free()
-        return run_commands(["$$"], timeout=15)
+        return run_commands(["$I", "$"], timeout=15)
     if op in ("home", "enablehome"):
         require_free()
         return run_commands(["$H" if op == "home" else "$22=1"], timeout=150)
@@ -327,11 +446,12 @@ def do_action(op):
         if _time.monotonic() - controller.last_accessory_toggle < 0.65:
             raise RuntimeError("Schaltung wird noch bestätigt")
         lights = op.startswith("light")
-        current = state["accessories"]["lights" if lights else "exhaust"]
+        role = "lights" if lights else "exhaust"
+        current = accessories_for_roles(state["accessories"], config["pin_roles"])[role]
         desired = (not current if op.endswith("Toggle") else op.endswith("On"))
         if current == desired:
             return "LED/Abluft bereits im gewählten Zustand"
-        controller.realtime(b"\xa1" if lights else b"\xa0")
+        controller.realtime(override_for_role(role, config["pin_roles"]))
         controller.last_accessory_toggle = _time.monotonic()
         return "LED" if lights else "Abluft" + " umgeschaltet"
     if op == "toggle":
@@ -597,8 +717,8 @@ def network():
                    router_ip=ip,
                    lightburn_tcp_enabled=controller.lightburn_enabled,
                    lightburn_port=TCP_PORT,
-                   cabinet_leds_on=controller.status()["accessories"]["lights"],
-                   exhaust_on=controller.status()["accessories"]["exhaust"])
+                   cabinet_leds_on=accessories_for_roles(controller.status()["accessories"], config["pin_roles"])["lights"],
+                   exhaust_on=accessories_for_roles(controller.status()["accessories"], config["pin_roles"])["exhaust"])
 
 
 @app.get("/api/ui/network/scan")
@@ -617,6 +737,7 @@ def wifi_scan():
 
 @app.post("/api/ui/network/connect")
 def wifi_connect():
+    require_service()
     require_free()
     ssid = request.form["ssid"].strip()
     password = request.form.get("password", "")

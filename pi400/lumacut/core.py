@@ -41,6 +41,7 @@ class Controller:
         self.settings = {}
         self.last_status = 0.0
         self.homed = False
+        self.identity = {"version": "", "firmware": "", "board": "", "driver": ""}
         self.last_error = ""
         self.replies = deque(maxlen=1024)
         self.lines = deque(maxlen=100)
@@ -129,6 +130,11 @@ class Controller:
                     return True
                 self.suppressed_reports += 1
             return False
+        for prefix, field in (("[VER:", "version"), ("[FIRMWARE:", "firmware"),
+                              ("[BOARD:", "board"), ("[DRIVER:", "driver")):
+            if line.startswith(prefix) and line.endswith("]"):
+                self.identity[field] = line[len(prefix):-1]
+                break
         match = SETTING.match(line)
         if match:
             self.settings[int(match.group(1))] = float(match.group(2))
@@ -229,6 +235,7 @@ class Controller:
                 "state": self.state,
                 "owner": self.owner or "Frei",
                 "homed": self.homed,
+                "identity": dict(self.identity),
                 "position": self.position,
                 "status_age": round(age, 2) if age is not None else None,
                 "settings": dict(self.settings),

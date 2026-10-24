@@ -19,6 +19,21 @@ Das Waveshare-ESP32-S3-HMI wird **nicht mehr benötigt**. Seine
 Quellcode-Historie bleibt als Archiv unter `firmware/hmi` erhalten.
 Keine doppelte LightBurn-USB-/UART-Gateway-Verbindung mehr.
 
+## Control OS Service Studio
+
+In dieser Entwicklungsfassung kann der Raspberry Pi 400 über
+`http://lumacut.local:8080/service` als zentrale Bedien- und
+Konfigurationsinstanz betrieben werden. Separate Service-Anmeldung
+(Erstpasswort `lumaservice`, lokal gehasht, 10-minütige Sitzung),
+echte SKR-Diagnose, GRBL-Konfigurationskonsole und konfliktgeprüfte
+logische M7/M8-Zubehörbelegung sind implementiert.
+
+**Das ist noch keine vollständige, dynamische physische STM32-Pinbelegung.**
+Die Echtzeitsteuerung läuft weiterhin im grblHAL-Build des SKR.
+Hardwaretest, unabhängige Laser-Interlocks und automatisches SKR-Flashing
+sind nicht abgeschlossen. Status und offene Schritte:
+[Pi400 Control OS 2](docs/PI400_CONTROL_OS_2.md).
+
 ## Installation Raspberry Pi 400
 
 **[Komplette Pi400-Einrichtung, Netzwerk, LightBurn und Updates](docs/PI400_CONTROL_STUDIO.md)**.
