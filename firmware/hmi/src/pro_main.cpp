@@ -96,7 +96,10 @@ lv_obj_t *releaseButton=nullptr,*focusTargetButton=nullptr,
     *autoZButton=nullptr,*focusLiftField=nullptr,*focusGapField=nullptr,*tipOffsetField=nullptr,
     *probeTravelField=nullptr,*probeFeedField=nullptr,*probeInfo=nullptr,
     *motorInfo=nullptr,*catalogTitle=nullptr;
-lv_obj_t* catalogRows[6]{};
+lv_obj_t* catalogNamesLabel[6]{};
+lv_obj_t* catalogFields[6]{};
+bool catalogDirty[6]{};
+int catalogPendingSlot=-1;
 float savedSetting[400]{};
 bool knownSetting[400]{};
 float focusLiftMm=7.f,focusGapMm=7.f,tipOffsetMm=0.f,
@@ -643,6 +646,7 @@ void finishConfigWrite(bool success,const String& error){
             prefs.putBool("zScaleOK",false);
         }
         pendingCalibrationAxis=-1;
+        catalogPendingSlot=-1;
         lastControllerError=error;
         setNotice("SKR hat Einstellung ABGELEHNT: "+error);
         return;
@@ -678,6 +682,11 @@ void finishConfigWrite(bool success,const String& error){
             prefs.putBool("zScaleOK",matching);
         }
         pendingCalibrationAxis=-1;
+        if(catalogPendingSlot>=0&&catalogPendingSlot<6){
+            if(matching)catalogDirty[catalogPendingSlot]=false;
+            catalogPendingSlot=-1;
+            refreshCatalog();
+        }
         setNotice(matching?
             ("SKR bestaetigt $"+String(requestedSettingId)+"="+
              String(savedSetting[requestedSettingId],3)):
@@ -1272,7 +1281,9 @@ void openKeyboard(lv_event_t* e){
     if(!editTarget||!editOverlay||!keyboard||!editInput)return;
     lv_textarea_set_text(editInput,lv_textarea_get_text(editTarget));
     lv_textarea_set_password_mode(editInput,editTarget==passwordEntry);
-    const bool numeric=editTarget==sizeXField||editTarget==sizeYField||
+    bool isCatalog=false;
+    for(auto field : catalogFields)if(field==editTarget)isCatalog=true;
+    const bool numeric=isCatalog||editTarget==sizeXField||editTarget==sizeYField||
         editTarget==sizeZField||editTarget==paramKeyField||
         editTarget==paramValueField||editTarget==focusLiftField||
         editTarget==focusGapField||editTarget==tipOffsetField;
@@ -1353,10 +1364,16 @@ void refreshCatalog(){
     labelChanged(catalogTitle,String("GRBL / ")+catalogNames[catalogCategory]);
     for(int i=0;i<6;i++){
         int id=parameterPages[catalogCategory][i].id;
-        String value=knownSetting[id]?String(savedSetting[id],3):String("nicht gemeldet");
-        lv_obj_t* child=lv_obj_get_child(catalogRows[i],0);
-        labelChanged(child,String("$")+String(id)+" "+parameterPages[catalogCategory][i].label+
-                      " / "+value);
+        if(catalogNamesLabel[i]){
+            labelChanged(catalogNamesLabel[i],String("$")+String(id)+"  "+
+                         parameterPages[catalogCategory][i].label);
+        }
+        if(catalogFields[i]&&!catalogDirty[i]&&editTarget!=catalogFields[i]){
+            const String value=knownSetting[id]?
+                String(savedSetting[id],3):String("?");
+            if(value!=lv_textarea_get_text(catalogFields[i]))
+                lv_textarea_set_text(catalogFields[i],value.c_str());
+        }
     }
 }
 
@@ -1626,17 +1643,29 @@ void makeUi(){
     btn(c,"Z-Test 0,5 mm",18,230,166,34,"ztest",GRAY,INK);
     btn(c,"Z-Richtung OK",196,230,166,34,"zverify",PALE_BLUE,BLUE);
 
-    // Parameter catalog: grouped by actual GRBL $ IDs; tapping a row
-    // populates the editable raw setting on Setup, not an HMI-only dummy.
+    // Six compact parameter rows: left live GRBL name, editable value on
+    // the right, one explicitly acknowledged save control per setting.
     c=card(pages[8],0,0,772,268);
-    catalogTitle=lbl(c,"GRBL-Parameter",19,14,20);
-    btn(c,"Kategorie",551,12,200,39,"catalogNext",PALE_BLUE,BLUE);
+    catalogTitle=lbl(c,"GRBL-Parameter",17,13,20);
+    btn(c,"Kategorie >",544,10,208,40,"catalogNext",PALE_BLUE,BLUE);
     for(int i=0;i<6;i++){
-        // Persistent C-string IDs for event handlers.
-        static const char* ids[]={"cat0","cat1","cat2","cat3","cat4","cat5"};
-        catalogRows[i]=btn(c,"Parameter",19+(i%2)*375,64+(i/2)*65,360,56,ids[i],GRAY,INK);
+        static const char* saves[]={"catsave0","catsave1","catsave2",
+                                    "catsave3","catsave4","catsave5"};
+        const int y=55+i*34;
+        lv_obj_t* stripe=lv_obj_create(c);
+        lv_obj_set_pos(stripe,16,y);
+        lv_obj_set_size(stripe,738,32);
+        lv_obj_set_style_radius(stripe,8,0);
+        lv_obj_set_style_bg_color(stripe,lv_color_hex(i%2?0x1C2F44:0x20364B),0);
+        lv_obj_set_style_border_width(stripe,0,0);
+        lv_obj_set_style_pad_all(stripe,0,0);
+        lv_obj_clear_flag(stripe,LV_OBJ_FLAG_SCROLLABLE);
+        catalogNamesLabel[i]=lbl(stripe,"Parameter",15,8,14,INK);
+        lv_obj_set_width(catalogNamesLabel[i],468);
+        lv_label_set_long_mode(catalogNamesLabel[i],LV_LABEL_LONG_DOT);
+        catalogFields[i]=configEntry(stripe,500,1,165,30,"?");
+        btn(stripe,"✓",675,1,57,30,saves[i],PALE_BLUE,BLUE);
     }
-    btn(c,"Setup",404,12,136,39,"setupgo",GRAY,INK);
 
     // A single-axis Z homing cycle can use the existing PC2 switch
     // as a MATERIAL SURFACE reference, if the head-mounted switch physically
@@ -1727,6 +1756,8 @@ void makeUi(){
     for(lv_obj_t* field : {ssidEntry,passwordEntry,updateKeyEntry,calCommandedField,calActualField,macroEntry,
          sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField,
          focusLiftField,focusGapField,tipOffsetField})
+        lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
+    for(auto field : catalogFields)
         lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
     refreshSizeFields();
     switchTab(0);
@@ -1899,6 +1930,8 @@ void action(const char* id){
         if(editTarget){
             if(editTarget==sizeXField||editTarget==sizeYField||editTarget==sizeZField)
                 travelInputsDirty=true;
+            for(int i=0;i<6;i++)
+                if(editTarget==catalogFields[i])catalogDirty[i]=true;
             lv_textarea_set_text(editTarget,lv_textarea_get_text(editInput));
             lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
             editTarget=nullptr;
@@ -1951,7 +1984,35 @@ void action(const char* id){
     if(op=="setupgo"){switchTab(5);return;}
     if(op=="focusgo"){switchTab(7);return;}
     if(op=="cataloggo"){switchTab(8);return;}
-    if(op=="catalogNext"){catalogCategory=(catalogCategory+1)%7;refreshCatalog();return;}
+    if(op=="catalogNext"){
+        catalogCategory=(catalogCategory+1)%7;
+        for(bool &dirty : catalogDirty)dirty=false;
+        refreshCatalog();return;
+    }
+    if(op.startsWith("catsave")&&op.length()==8&&op[7]>='0'&&op[7]<='5'){
+        const int slot=op[7]-'0';
+        const int id=parameterPages[catalogCategory][slot].id;
+        if(!knownSetting[id]){
+            setNotice("SKR meldet $"+String(id)+" nicht. Keine Dummywerte schreiben.");return;
+        }
+        String input=lv_textarea_get_text(catalogFields[slot]);
+        input.trim();char* end=nullptr;
+        const float val=strtof(input.c_str(),&end);
+        if(input.isEmpty()||end==input.c_str()||*end||!settingAllowed(id,val)){
+            setNotice("Wert fuer $"+String(id)+" ungueltig.");return;
+        }
+        if(id==102&&knownSetting[27]&&fabsf(savedSetting[27]-2.5f)<0.001f){
+            setNotice("Z20 zuerst deaktivieren, dann $102 neu kalibrieren.");return;
+        }
+        String cmds[]={"$"+String(id)+"="+input,"$"};
+        if(startScript(cmds,2)){
+            requestedSettingId=id;requestedSettingValue=val;
+            catalogPendingSlot=slot;
+            configWrite=ConfigWrite::Parameter;
+            setNotice("Setze $"+String(id)+", warte auf SKR-Ruecklesung.");
+        }else setNotice("Einstellung nur bei stillstehendem SKR.");
+        return;
+    }
     if(op.startsWith("cat")&&op.length()==4&&op[3]>='0'&&op[3]<='5'){
         int slot=op[3]-'0',id=parameterPages[catalogCategory][slot].id;
         lv_textarea_set_text(paramKeyField,String(id).c_str());
