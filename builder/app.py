@@ -20,6 +20,8 @@ UPDATE_DEVICE_KEY=os.environ.get("UPDATE_DEVICE_KEY","")
 HMI_OTA_ENABLED=os.environ.get("HMI_OTA_ENABLED","false").lower() in ("true","1","yes")
 UPDATE_PUBLIC_ORIGIN=os.environ.get("UPDATE_PUBLIC_ORIGIN","https://luma.millione.de").rstrip("/")
 RELEASE_FILE=ROOT/"approved-release.json"
+OTA_IMAGE_NAME="HMI_OTA_APP_UNVERIFIED.bin"
+SKR_RELEASE_IMAGE_NAME="SKR_UART_UNVERIFIED_firmware.bin"
 TARGETS={"tests","stm32_project_unverified","stm32_hmi_bridge_unverified","esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified","lumacut_complete_suite_unverified"}
 ID_RE=re.compile(r"^[a-f0-9]{16}$")
 app=Flask(__name__)
@@ -307,8 +309,14 @@ def jobs():
     result=[]
     for folder in ART.iterdir():
         if folder.is_dir() and ID_RE.fullmatch(folder.name) and (folder/"manifest.json").is_file():
-            try: result.append(json.loads((folder/"manifest.json").read_text()))
-            except (ValueError,OSError): continue
+            try:
+                meta=json.loads((folder/"manifest.json").read_text())
+                if meta.get("paired_firmware") and meta.get("status")=="success":
+                    ready,reason=release_readiness(meta,folder)
+                    meta["release_ready"]=ready
+                    meta["release_blocker"]=reason
+                result.append(meta)
+            except (ValueError,OSError,TypeError,KeyError): continue
     with lock: current=running
     result=sorted(result,key=lambda m:m.get("created_utc",""),reverse=True)[:50]
     for item in result:
@@ -365,26 +373,60 @@ def get_artifact(job_id,filename):
     if filename not in allowed: abort(404)
     return send_from_directory(folder,filename,as_attachment=True)
 
+def release_readiness(meta,folder):
+    """Lightweight presence/manifest gate for the dashboard; no costly rehash.
+
+    Existing paired builds from older compiler versions can legitimately lack
+    the HMI OTA application file. They remain downloadable as normal archives,
+    but MUST NOT be advertised as installable OTA releases.
+    """
+    if (meta.get("status")!="success" or
+        meta.get("target")!="lumacut_complete_suite_unverified" or
+        not meta.get("paired_firmware")):
+        return False,"Nur erfolgreiches Komplettpaket (HMI + SKR) freigeben."
+    if not re.fullmatch(r"[a-f0-9]{40}",meta.get("source_sha") or ""):
+        return False,"Der Build hat keine gueltige Git-Quellversion."
+    records={f.get("name"):f for f in meta.get("files",[]) if isinstance(f,dict)}
+    for name in (OTA_IMAGE_NAME,SKR_RELEASE_IMAGE_NAME):
+        record=records.get(name)
+        image=folder/name
+        if (not record or not image.is_file() or
+            not isinstance(record.get("bytes"),int) or
+            not isinstance(record.get("sha256"),str) or
+            not re.fullmatch(r"[a-f0-9]{64}",record["sha256"]) or
+            record["bytes"]<=0 or record["bytes"]!=image.stat().st_size):
+            if name==OTA_IMAGE_NAME:
+                return False,(
+                    "Diesem aelteren Build fehlt das separat gepruefte HMI-OTA-Image. "
+                    "Bitte neues 'Komplett HMI + grblHAL'-Build aus main starten "
+                    "und danach den NEUEN Build freigeben."
+                )
+            return False,(
+                "Das SKR-Update-Image fehlt oder ist unvollstaendig. "
+                "Bitte ein neues Komplett-Build erstellen."
+            )
+    return True,""
+
 def validated_release(job_id):
     if not ID_RE.fullmatch(job_id): raise ValueError("Invalid build id")
     folder=ART/job_id
     path=folder/"manifest.json"
     if not path.is_file(): raise ValueError("Build manifest missing")
     meta=json.loads(path.read_text(encoding="utf-8"))
-    if (meta.get("status")!="success" or
-        meta.get("target")!="lumacut_complete_suite_unverified" or
-        not meta.get("paired_firmware")):
-        raise ValueError("Approve only a successful paired HMI + grblHAL build")
-    names={"hmi":"HMI_OTA_APP_UNVERIFIED.bin","skr":"SKR_UART_UNVERIFIED_firmware.bin"}
+    ready,reason=release_readiness(meta,folder)
+    if not ready: raise ValueError(reason)
+    names={"hmi":OTA_IMAGE_NAME,"skr":SKR_RELEASE_IMAGE_NAME}
     records={f["name"]:f for f in meta.get("files",[])}
     images={}
     for role,name in names.items():
         file=folder/name
         if not file.is_file() or name not in records:
             raise ValueError("Missing firmware image "+name)
-        digest=hashlib.sha256(file.read_bytes()).hexdigest()
+        with file.open("rb") as stream:
+            digest=hashlib.file_digest(stream,"sha256").hexdigest()
         if digest!=records[name]["sha256"]:
-            raise ValueError("Firmware checksum mismatch "+name)
+            raise ValueError("Firmware-Pruefsumme ungueltig: "+name+
+                             ". Bitte neues Komplett-Build erstellen.")
         images[role]={"bytes":file.stat().st_size,"sha256":digest,
             "url":UPDATE_PUBLIC_ORIGIN+"/api/updates/file/"+role}
     return {"schema":1,"channel":"stable","paired":True,"job_id":job_id,
@@ -436,7 +478,7 @@ def update_image(role):
     try: checked=validated_release(job_id)
     except (ValueError,OSError,KeyError): abort(503)
     if checked["source_sha"]!=manifest.get("source_sha"): abort(503)
-    filename="HMI_OTA_APP_UNVERIFIED.bin" if role=="hmi" else "SKR_UART_UNVERIFIED_firmware.bin"
+    filename=OTA_IMAGE_NAME if role=="hmi" else SKR_RELEASE_IMAGE_NAME
     response=send_file(ART/job_id/filename,mimetype="application/octet-stream",
         as_attachment=True,download_name=filename,max_age=0)
     response.headers["Cache-Control"]="no-store"
