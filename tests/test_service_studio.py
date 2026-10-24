@@ -29,6 +29,26 @@ class PinMapTests(unittest.TestCase):
             {"lights": False, "exhaust": True})
         self.assertEqual(override_for_role("lights", roles), bytes((0xA0,)))
 
+    def test_pc7_response_and_stale_default(self):
+        from lumacut.core import Controller
+        ctrl = Controller("/dev/null")
+        self.assertIsNone(ctrl.status()["extra_outputs"]["PC7"])
+        ctrl._read_response("[LCIO:PC7=1]")
+        self.assertEqual(ctrl.status()["extra_outputs"]["PC7"], 1)
+        ctrl._read_response("[LCIO:PC7=0]")
+        self.assertEqual(ctrl.status()["extra_outputs"]["PC7"], 0)
+
+    def test_custom_pc7_roles_validated(self):
+        from lumacut.pins import validate_spare_config
+        value = validate_spare_config(
+            {"pin": "PC7", "role": "air_assist", "name": "Air Assist"})
+        self.assertEqual(value["role"], "air_assist")
+        for bad in ({"pin": "PC9", "role": "custom", "name": "Laser"},
+                    {"pin": "PC7", "role": "stepper", "name": "Y"},
+                    {"pin": "PC7", "role": "custom", "name": "x; M3 S1000"}):
+            with self.assertRaises(ValueError):
+                validate_spare_config(bad)
+
     def test_identity_decode_is_from_real_grbl_lines(self):
         from lumacut.core import Controller
         c = Controller("/dev/null")
@@ -87,6 +107,15 @@ class ServiceApiTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.env_dir.cleanup()
+
+    def test_pc7_api_denies_unauthenticated_mutations(self):
+        client = self.app.test_client()
+        headers = {"X-LumaCut-Key": os.environ["LUMACUT_KEY"]}
+        self.assertEqual(client.post("/api/service/pc7/set", headers=headers,
+                                     data={"value": "1"}).status_code, 403)
+        self.assertEqual(client.post("/api/service/pc7/config", headers=headers,
+                                     data={"pin": "PC7", "role": "custom",
+                                           "name": "Pump"}).status_code, 403)
 
     def test_service_is_separately_password_gated(self):
         client = self.app.test_client()
