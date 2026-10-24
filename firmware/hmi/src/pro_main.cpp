@@ -14,6 +14,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "secure_ota.h"
+#include "skr_stm32_uart_ota.h"
 #include <time.h>
 #include "update_ca.h"
 #ifndef LUMACUT_SOURCE_SHA
@@ -121,10 +122,10 @@ String lastControllerError, zLiftReason;
 uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
 bool zLiftDirectionVerified=false;
 lv_obj_t* updateKeyEntry=nullptr;
-String updateDeviceKey,updateImageSha256;
-size_t updateImageBytes=0;
-bool updateOtaApproved=false,otaInstallRequested=false,skrFirmwareReleased=false;
-uint32_t otaArmUntil=0;
+String updateDeviceKey,updateImageSha256,updateSkrSha256;
+size_t updateImageBytes=0,updateSkrBytes=0;
+bool updateOtaApproved=false,otaInstallRequested=false,skrFirmwareReleased=false,skrInstallRequested=false;
+uint32_t otaArmUntil=0,skrArmUntil=0;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
 *passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr,*macroEntry=nullptr;
@@ -401,6 +402,8 @@ void checkLumaCutUpdates(){
                 offeredUpdateSha=sha;
                 updateImageSha256=checksum;
                 updateImageBytes=bytes;
+                updateSkrSha256=skrSha;
+                updateSkrBytes=skrBytes;
                 updateOtaApproved=doc["hmi_ota_enabled"].as<bool>();
                 skrFirmwareReleased=true;
                 updateAvailable=(sha!=String(LUMACUT_SOURCE_SHA));
@@ -480,6 +483,50 @@ void restoreHmiIfBootBroken(){
         prefs.putUInt("otaAttempts",0);
         ESP.restart();
     }
+}
+void skrUpdateProgress(const char* stage,uint32_t done,uint32_t total){
+    String message=String(stage);
+    if(total)message+=" "+String((done*100UL)/total)+"%";
+    setNotice(message);
+    lv_timer_handler();
+}
+void installSkrUpdate(){
+    if(!skrInstallRequested)return;
+    skrInstallRequested=false;
+    if(!skrFirmwareReleased||!LumaOta::isHex(updateSkrSha256,64)||
+       updateSkrBytes<1024||updateSkrBytes>SkrUpdate::MAX_IMAGE){
+        setNotice("Kein gueltiges gepaartes SKR-Release verfuegbar.");return;
+    }
+    if(!LumaOta::isHex(updateDeviceKey,64)){
+        setNotice("Update-Key unter System speichern.");return;
+    }
+    if(!fresh()||machineState!=MachineState::Idle||owner!=Owner::None||
+       jobRunning||scriptActive||homingInProgress||postHomePending||
+       commandPending){
+        setNotice("SKR-Update nur bei freiem, stillstehendem Controller.");return;
+    }
+    // The real laser power source must be disconnected separately.
+    // Stop spindle, then take exclusive ownership of grblHAL UART.
+    writeCmd("M5");machine.flush();
+    setNotice("SKR-Firmware herunterladen und SHA256 verifizieren...");
+    lv_timer_handler();
+    String failure;
+    fs::FS& fs=jobStore();
+    if(!SkrUpdate::fetchVerified(fs,updateDeviceKey,updateSkrSha256,
+        updateSkrBytes,LUMACUT_UPDATE_CA,failure,skrUpdateProgress)){
+        setNotice("SKR Download: "+failure);return;
+    }
+    // ROM flashing must NOT start when the boot/reset expander is absent.
+    if(!SkrUpdate::flashVerified(fs,machine,failure,skrUpdateProgress)){
+        machineHomed=false;haveMpos=false;
+        settingsRequested=false;lastStatusMs=0;
+        setNotice("SKR Flash: "+failure+". SKR-SD-Recovery moeglich.");
+        return;
+    }
+    machineHomed=false;haveMpos=false;
+    settingsRequested=false;lastStatusMs=0;
+    prefs.putString("skrLast",offeredUpdateSha);
+    setNotice("SKR erfolgreich geschrieben und rueckgelesen. Neustart abwarten.");
 }
 void updateUi(){
     labelChanged(statusLabel,fresh()?stateText():"Keine Verbindung");
@@ -1449,8 +1496,9 @@ void makeUi(){
     lv_obj_set_style_bg_color(updateKeyEntry,lv_color_hex(GRAY),0);
     lv_obj_set_style_text_color(updateKeyEntry,lv_color_hex(INK),0);
     btn(c,"Key sichern",235,161,141,38,"updatekeysave",GRAY,INK);
-    btn(c,"Pruefen",20,206,170,41,"updatecheck",PALE_BLUE,BLUE);
-    btn(c,"HMI installieren",200,206,176,41,"updateinstall",BLUE,BG);
+    btn(c,"Pruefen",20,206,105,41,"updatecheck",PALE_BLUE,BLUE);
+    btn(c,"HMI installieren",136,206,113,41,"updateinstall",BLUE,BG);
+    btn(c,"SKR installieren",260,206,116,41,"skrinstall",PALE_BLUE,BLUE);
     updateLabel=lbl(c,"Noch nicht geprueft",20,247,14,SUBTLE);
     lv_obj_set_width(updateLabel,390);
 
@@ -1825,6 +1873,20 @@ void action(const char* id){
         prefs.putString("upkey",updateDeviceKey);
         lv_textarea_set_text(updateKeyEntry,"");
         setNotice("Update-Key im ESP32-NVS gespeichert.");return;
+    }
+    if(op=="skrinstall"){
+        if(!skrFirmwareReleased||!LumaOta::isHex(updateSkrSha256,64)){
+            setNotice("SKR-Release fehlt: erst Updates pruefen.");return;
+        }
+        if(skrArmUntil && (int32_t)(skrArmUntil-millis())>0){
+            skrArmUntil=0;
+            skrInstallRequested=true;
+            setNotice("SKR-Update: Download, Flash und Ruecklesen starten.");
+        }else{
+            skrArmUntil=millis()+15000;
+            setNotice("LASER STROMLOS! Binnen 15s erneut SKR installieren.");
+        }
+        return;
     }
     if(op=="updateinstall"){
         if(!updateAvailable||!updateOtaApproved){
@@ -2245,6 +2307,7 @@ void loop(){
     internalJobService();
     bleUpdate();
     updateCheckService();
+    installSkrUpdate();
     installHmiUpdate();
     lv_timer_handler();
     // Collect actual GRBL persistent limits and axis polarity once controller is
