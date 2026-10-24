@@ -53,6 +53,16 @@ def patch(text):
         '#define AUXOUTPUT4_PORT         GPIOC // Coolant mist\n#define AUXOUTPUT4_PIN          9',
         '#define AUXOUTPUT4_PORT         GPIOC // LumaCut HE0 PC8 24V LEDs, grblHAL M7 mist\n'
         '#define AUXOUTPUT4_PIN          8')
+    # FAN1 PC7 is the one spare MOSFET output on this MZ revision.
+    # Expose it as a genuine grblHAL AUX GPIO so a Pi-side role can
+    # drive it with M64/M65 Pn; leave all motor/limit/laser pins fixed.
+    # The port index is announced by the firmware and must be checked
+    # on real hardware before it can be treated as an active output.
+    text=change(text,
+        '#define AUXOUTPUT4_PIN          9',
+        '#define AUXOUTPUT4_PIN          8\\n'
+        '#define AUXOUTPUT5_PORT         GPIOC // MZ FAN1 PC7 dedicated spare digital output\\n'
+        '#define AUXOUTPUT5_PIN          7')
     # PC9 BED now directly switches the laser module's 24V negative return.
     # PC7 FAN1 is currently UNUSED, PC6 FAN0 drives M8 exhaust.
     # A LOW-SIDE BED switch lifts LaserTree GND in OFF state. Therefore the
