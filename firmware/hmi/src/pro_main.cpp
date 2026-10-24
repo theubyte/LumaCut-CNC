@@ -2399,13 +2399,16 @@ void loop(){
            (haveMpos||(uint32_t)(millis()-postHomeStartedMs)>3500u)){
             postHomePending=false; // Never show an endless waiting notice
             const float requested=postContactLift?
-                (focusGapMm-tipOffsetMm):focusLiftMm;
+                (focusGapMm-tipOffsetMm):fmaxf(focusLiftMm,20.f);
             postContactLift=false;
             // Normal $H uses the verified convention expressed by user:
             // raw MPos is negative and retreat grows the positive HMI
             // distance. The stored target is absolute distance from zero.
             // Workpiece contact $HZ remains separately calibrated.
-            if(!zLift(requested)){
+            if(fabsf(machinePosFromOperator(requested)-mz)<0.005f){
+                setNotice("Z-Sicherheitsabstand bereits "+String(requested,2)+
+                          " mm; Referenzfahrt abgeschlossen.");
+            }else if(!zLift(requested)){
                 setNotice("Auto-Z nicht gefahren: "+zLiftReason);
             }else{
                 zLiftReason="";
