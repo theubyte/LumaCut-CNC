@@ -21,7 +21,8 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory, session
 
 from .core import Controller, serve_lightburn
-from .pins import DEFAULT_ROLES, accessories_for_roles, manifest, override_for_role, validate_roles
+from .pins import (DEFAULT_ROLES, DEFAULT_SPARE, SPARE_PC7_ROLES, accessories_for_roles,
+                   manifest, override_for_role, validate_roles, validate_spare_config)
 from .service_auth import ServiceAuth
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,17 +60,22 @@ config = {
     "jog_percent": 100,
     "lightburn_tcp_enabled": True,
     "pin_roles": dict(DEFAULT_ROLES),
+    "spare_pc7": dict(DEFAULT_SPARE),
 }
 try:
     if CONFIG_PATH.exists():
         saved = json.loads(CONFIG_PATH.read_text())
         if isinstance(saved, dict):
-            for name in ("focus", "probe", "parks", "jog_percent", "lightburn_tcp_enabled", "pin_roles"):
+            for name in ("focus", "probe", "parks", "jog_percent", "lightburn_tcp_enabled", "pin_roles", "spare_pc7"):
                 if name in saved:
                     config[name] = saved[name]
 except Exception:
     logging.exception("Configuration recovery; previous config retained")
 config["pin_roles"] = __import__("lumacut.pins", fromlist=["effective_roles"]).effective_roles(config["pin_roles"])
+try:
+    config["spare_pc7"] = validate_spare_config(config["spare_pc7"])
+except ValueError:
+    config["spare_pc7"] = dict(DEFAULT_SPARE)
 controller.lightburn_enabled = bool(config["lightburn_tcp_enabled"])
 
 
@@ -166,7 +172,10 @@ def service_password():
 @app.get("/api/service/pins")
 def service_pins():
     require_service()
-    return jsonify(manifest(config["pin_roles"]))
+    return jsonify({**manifest(config["pin_roles"]),
+                    "spare": dict(config["spare_pc7"]),
+                    "spare_roles": SPARE_PC7_ROLES,
+                    "pc7_state": controller.status()["extra_outputs"]["PC7"]})
 
 
 @app.post("/api/service/pins")
@@ -184,12 +193,67 @@ def service_save_pins():
                    roles=proposed)
 
 
+@app.post("/api/service/pc7/config")
+def service_pc7_config():
+    require_service()
+    require_free()
+    if controller.status()["extra_outputs"]["PC7"] == 1:
+        raise RuntimeError("FAN1 vor dem Umbelegen abschalten")
+    entry = validate_spare_config({"pin": request.form.get("pin"),
+                                   "role": request.form.get("role"),
+                                   "name": request.form.get("name")})
+    with config_lock:
+        config["spare_pc7"] = entry
+        persist()
+    return jsonify(message="PC7-Funktion gespeichert", spare=entry)
+
+
+def verified_lumacut_controller():
+    require_service()
+    require_free()
+    # Verify identity from the actual USB-connected STM32, not from the
+    # expected build filename or a user-configurable UI description.
+    run_commands(["$I"], timeout=12)
+    identity = controller.status()["identity"]
+    if identity.get("firmware") != "grblHAL" or "LumaCut SKR Mini MZ" not in identity.get("board", ""):
+        raise RuntimeError("Unbekannter SKR-Build. GPIO-Umschaltung gesperrt")
+
+
+@app.post("/api/service/pc7/read")
+def service_pc7_read():
+    verified_lumacut_controller()
+    run_commands(["$LCIO"], timeout=10)
+    state = controller.status()["extra_outputs"]["PC7"]
+    if state is None:
+        raise RuntimeError("SKR meldet kein unterstütztes $LCIO-Protokoll")
+    return jsonify(pin="PC7", value=state)
+
+
+@app.post("/api/service/pc7/set")
+def service_pc7_set():
+    verified_lumacut_controller()
+    desired = request.form.get("value")
+    if desired not in ("0", "1"):
+        raise ValueError("PC7-Ausgang erwartet 0 oder 1")
+    # First read proves that the dedicated command is implemented in the
+    # current physical SKR firmware; never assume an aux M64 port number.
+    run_commands(["$LCIO"], timeout=10)
+    if controller.status()["extra_outputs"]["PC7"] is None:
+        raise RuntimeError("PC7 nur mit passender SKR-Firmware steuerbar")
+    run_commands(["$LCIO=" + desired, "$LCIO"], timeout=10)
+    actual = controller.status()["extra_outputs"]["PC7"]
+    if actual != int(desired):
+        raise RuntimeError("SKR bestätigt den neuen PC7-Zustand nicht")
+    return jsonify(pin="PC7", value=actual, message="FAN1 PC7 Zustand bestätigt")
+
+
 @app.get("/api/service/diagnostics")
 def service_diagnostics():
     require_service()
     info = controller.status()
     return jsonify(connected=info["connected"], state=info["state"],
                    firmware=info["identity"],
+                   extra_outputs=info["extra_outputs"],
                    homed=info["homed"], owner=info["owner"],
                    serial_faults=info["diagnostics"]["serial_faults"],
                    suppressed_status=info["diagnostics"]["suppressed_status"],
