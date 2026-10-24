@@ -1,3 +1,102 @@
+# LumaCut CNC – Atomstack X/Y + Anet-Z: verifizierte Inbetriebnahme (24.10.2026)
+
+## Änderungen am aktuellen Softwarestand
+
+Die vorhandenen Atomstack-A5-Pro-Riemenachsen X/Y erhalten im SKR-Build
+**Werkseinstellungs-Defaults** `$100=80`, `$101=80` steps/mm. Dieser
+Wert gilt nur bei derselben Schrittmotor- und Mikroschrittauflösung wie
+an der Originalmechanik. **Vorhandene NVS-Werte überschreibt ein
+Firmwareflash nicht.** Zur Prüfung die realen `$100` und `$101` über
+`$ Lesen` ansehen.
+
+**Z:** Motor und Spindel stammen vom Anet A8, aber aus Motorfoto und
+Antriebsausführung lässt sich nicht erkennen, ob die Spindel
+2, 4 oder 8 mm pro Umdrehung führt und mit welcher TMC2209-
+Mikroschrittauflösung das Board arbeitet. `$102` wird daher **nicht**
+mit einem geratenen Wert überschrieben. Für alle Achsen gilt:
+
+`neue Schritte/mm = vorhandene Schritte/mm × befohlener Weg / gemessener Weg`.
+
+### Jog nach erfolgreichem Homing
+
+Nach einer erfolgreichen XYZ-Referenzfahrt, gültiger MPos, bekannten
+XYZ-Verfahrwegen und aktivierten Motoren darf das **Jog-Menü** einfache,
+berechnete `$J`-Schritte schicken. Der zusätzliche Workflow
+`Limits EIN` ist für Jog allein nicht mehr zwingend erforderlich.
+Der HMI-Code prüft die Endposition weiterhin selbst gegen
+`$130/$131/$132`; G0-Jobs und Flächenfahrt behalten den strengeren
+Soft-Limits-Check. Die Start-Schrittweite beträgt 0,1 mm. X+/Y+/Z+
+bezieht sich auf **positive angezeigte HMI-Koordinaten**, nicht die
+internen negativen GRBL-MPos. Jede Jogfahrt sendet zuerst `M5`.
+
+Die Taste **Leiser Jog / Normal** schaltet XY 240/Z 90 oder
+XY 700/Z 180 mm/min um. Das verringert möglicherweise Resonanzen
+während der Fahrt, verändert aber keine unbekannten TMC2209-Motorströme.
+Haltefrequenz-Geräusche können auch durch Choppermodus,
+Treiber-UART, Stromgrenze, mechanische Resonanzen oder lose Verdrahtung
+entstehen; ohne Treiberstatus/Strommessung ist eine dauerhafte
+Geräuschbeseitigung nicht nachgewiesen.
+
+### Einmalige echte Schrittkalibrierung
+
+1. Laser elektrisch stromlos lassen, Mechanik im freien Arbeitsraum
+   aufbauen und Homing aller drei Endschalter prüfen.
+2. Im **Jog** erst 0,1 mm in genügend Abstand von allen Anschlägen
+   testen. Dann eine gut messbare Sollfahrt ausführen (X/Y z. B. 10 mm,
+   Z zunächst 1 mm). Den **wirklichen** Weg mit Messschieber/Messuhr
+   messen, nicht aus der HMI-Anzeige abschätzen.
+3. **Jog → Wege kalibrieren**, befohlenen *Sollweg* und gemessenen
+   *Istweg* eintragen. Pro Achse **X/Y/Z korrigieren** wählen.
+   Das HMI berechnet die neuen Werte `$100/$101/$102`, schreibt sie in
+   die SKR-Konfiguration und liest sie zur Bestätigung zurück.
+4. Bewegung mit verschiedenen Strecken wiederholen, um mechanische
+   Fehler, falsche TMC-Mikroschritte und Umkehrspiel auszuschließen.
+   Besonders Z im gesamten vorgesehenen 20-mm-Abschnitt überprüfen.
+
+### Z zuerst, 20 mm Sicherheitsabstand, danach XY
+
+Die aktualisierte **SKR-Firmware** ergänzt eine Systembewegung direkt
+zwischen grblHALs üblicher Z-Homingphase und der anschließenden
+XY-Homingphase. Die SKR-Firmware prüft den konfigurierten Z-Fahrweg
+`$132` (mindestens 21 mm) und begrenzt die Zwischenfahrt auf maximal
+600 mm/min, zusätzlich zur kleineren tatsächlichen `$112`-Grenze.
+
+**Aus Sicherheitsgründen zuerst deaktiviert.** Den 20-mm-Zwischenschritt
+nur nach reproduzierbar gemessener Z-Kalibrierung und sichtbarem
+0,5-mm-Z-Richtungstest freischalten:
+
+1. Neue gepaarte HMI/SKR-Firmware installieren; vor Tests Laser physisch AUS.
+2. XYZ homen und **Jog → Wege kalibrieren → Z korrigieren** mit echtem
+   Soll/Ist-Weg durchführen, bis die HMI die bestätigte SKR-Rücklesung
+   meldet. In **Fokus/Taster** `Z-Test 0,5 mm` und anschließend
+   `Z-Richtung OK` nur nach Prüfung der tatsächlichen Bewegung drücken.
+3. Z-Fahrweg `$132` inklusive Sicherheitsreserve prüfen; erneut homen.
+   Danach **Jog → Wege kalibrieren → Z20 aktivieren** innerhalb von 15
+   Sekunden **zweimal** bestätigen. Das HMI setzt `$27=2.5` und liest
+   die SKR-Bestätigung. Dies ist der explizite Freigabewert der
+   LumaCut-SKR-Homing-Routine. `$27` ist zugleich der reguläre
+   grblHAL-Pull-off-Wert und gilt auch für X/Y (2,5 mm).
+4. Beim **nächsten** `$H` homt grblHAL erst Z, fährt um den
+   noch fehlenden Weg von Z-Pull-off auf 20 mm (relativ zur
+   Schalterreferenz) und homt **erst dann XY**. Der Schritt wird nicht
+   bei einem einzelnen `$HZ` (Werkstückkontakt) ausgeführt.
+   Bei zu kurzem Z-Fahrweg wird die Gesamt-Referenzfahrt mit Fehler
+   abgebrochen, ohne blind nach XY weiterzufahren.
+
+**Deaktivieren:** Wenn die Z-Kalibrierung verändert werden muss,
+wählt die HMI davor `$27=1.0` (vor dem neuen `$102`-Befehl).
+Ebenso kann `$27=1.0` nach Sicherung der Maschine über
+`Setup → Parameter-ID 27 → Setzen` eingetragen werden.
+Bei einem Firmware-Flash bleibt ein schon gesetzter `$27`-Wert
+im SKR-NVS normalerweise erhalten. Bei abweichender Firmware oder
+anderen Homing-Parametern ist die Vor-XY-Bewegung nicht hardwareverifiziert.
+
+Das alte HMI führt zur Sicherheit nach dem Gesamt-Homing weiterhin
+einen Z-Rückzug aus; in der neuen Firmware wird diese nachträgliche
+Bewegung nicht mehr nach **unten** auf einen gespeicherten
+7-mm-Fokusabstand zurückgeführt, sondern mindestens auf 20 mm begrenzt.
+
+---
 # LumaCut Studio – Maschinen-Setup und Live-Arbeitsfläche
 
 Stand 23.10.2026. **Entwicklungs-/Laborfirmware; keine Freigabe für Betrieb des bestromten Lasers.** Ein erfolgreiches CI-Build prüft Compiler und Tests, nicht die sichere reale Achsbewegung.
