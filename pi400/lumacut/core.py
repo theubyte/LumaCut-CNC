@@ -162,7 +162,16 @@ class Controller:
                     self.last_error = "SKR-Initialisierung fehlgeschlagen: " + line
                 else:
                     self.bootstrap_pending -= 1
-                    self.bootstrap_ready = self.bootstrap_pending == 0
+                    if self.bootstrap_pending == 0:
+                        identity_ok = (self.identity["firmware"] == "grblHAL" and
+                                       "LumaCut SKR Mini MZ" in self.identity["board"])
+                        settings_ok = {30, 32, 130, 131, 132}.issubset(self.settings)
+                        self.bootstrap_ready = bool(identity_ok and settings_ok)
+                        if not self.bootstrap_ready:
+                            self.last_error = (
+                                "USB Controller passt nicht zum LumaCut SKR "
+                                "oder erforderliche $-Parameter fehlen")
+
             if self.host is not None and self.host_commands:
                 sent = self.host_commands.popleft()
                 if line == "ok":
