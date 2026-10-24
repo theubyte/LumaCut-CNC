@@ -328,7 +328,7 @@ class Controller:
         c = command.strip().upper()
         if c.startswith("$LC") or c in ("$PGM", "$RST", "$SLP"):
             return False
-        if re.match(r"^\\$\\d+\\s*=", c) or re.match(r"^\\$N\\d+\\s*=", c):
+        if re.match(r"^\$\d+\s*=", c) or re.match(r"^\$N\d+\s*=", c):
             return False
         # Do not let unauthenticated LightBurn port 23 drive arbitrary I/O.
         if re.search(r"(?<![A-Z0-9])M6[2-8](?![0-9.])", c):
