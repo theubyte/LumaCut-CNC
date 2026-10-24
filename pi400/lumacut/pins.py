@@ -72,4 +72,4 @@ def accessories_for_roles(physical, roles):
 
 def override_for_role(role, roles):
     channel = effective_roles(roles)[role]
-    return b"\\xa1" if channel == "M7" else b"\\xa0"
+    return bytes((0xA1,)) if channel == "M7" else bytes((0xA0,))
