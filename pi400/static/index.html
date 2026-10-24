@@ -164,12 +164,13 @@ input,select{background:#0a1624;border:1px solid #3a5268;padding:11px 13px;borde
 <p class="caption">Die Datei wird erst nach Auswahl gestartet. LightBurn verbindet sich über TCP-Port 23 mit dem Pi. Das SKR hängt per USB am Pi.</p></div></div></section>
 <section id="settings" class="tab"><div class="layout">
 <div class="panel span8"><h2>GRBL-Parameter</h2><div class="row"><select id="category">
-<option value="0">Antrieb & Endschalter</option><option value="1">Schritte & Tempo</option>
+<option value="all">Alle vorhandenen SKR-Parameter</option><option value="0">Antrieb & Endschalter</option><option value="1">Schritte & Tempo</option>
 <option value="2">Beschleunigung & Verfahrwege</option><option value="3">Homing & Limits</option>
 <option value="4">Laser & PWM</option><option value="5">GRBL Spezial</option><option value="6">TMC2209</option></select>
 <button id="readcfg" class="primary">Werte lesen</button></div>
-<div id="params" style="margin-top:12px"></div>
-<p class="caption">Häkchen sendet $ID=Wert an grblHAL. Die Bestätigung wird vom SKR zurückgelesen; nicht vorhandene Erweiterungen bleiben gesperrt.</p></div>
+<label class="field" for="paramSearch">In Firmware-Einstellungen suchen</label><input id="paramSearch" type="search" placeholder="Parameter-ID oder Bezeichnung...">
+<p id="paramCount" class="caption">GRBL-Parameter vom SKR lesen</p><div id="params" style="margin-top:12px"></div>
+<p class="caption">Jeder vom SKR gemeldete numerische Parameter ist durchsuchbar. Änderungen benötigen eine aktive Service-Anmeldung und werden vom SKR zurückgelesen.</p></div>
 <div class="panel span4"><h2>Verfahrwege</h2>
 <label class="field">X [mm]</label><input id="travelX" type="number" step="any">
 <label class="field">Y [mm]</label><input id="travelY" type="number" step="any">
@@ -311,7 +312,16 @@ const categories=[
 ];
 function drawParams(){
  const parent=el("params");parent.replaceChildren();
- for(const [id,name] of categories[Number(el("category").value)]){
+ const known=new Map(categories.flat().map(([id,name])=>[id,name]));
+ const all=el("category").value==="all";
+ const source=all?
+   Object.keys(params).filter(v=>/^\\d+$/.test(v)).map(v=>[Number(v),known.get(Number(v))||"Firmware-Parameter"]):
+   categories[Number(el("category").value)];
+ const query=el("paramSearch").value.trim().toLowerCase();
+ const selected=source.filter(([id,name])=>!query||("$"+id+" "+name).toLowerCase().includes(query));
+ el("paramCount").textContent=selected.length+" Parameter angezeigt · "+
+   Object.keys(params).length+" vom SKR gemeldet";
+ for(const [id,name] of selected){
   const row=document.createElement("div");row.className="param";
   const label=document.createElement("label");label.textContent="$"+id+" · "+name;
   const val=document.createElement("input");val.type="number";val.step="any";
@@ -334,6 +344,7 @@ async function readParams(){
  catch(e){notify(e.message,true)}
 }
 el("category").onchange=drawParams;
+el("paramSearch").oninput=drawParams;
 el("readcfg").onclick=async()=>{await action("readcfg");setTimeout(readParams,850)};
 async function saveSection(section,fields){
  try{const out=await post("/api/ui/config",Object.assign({section},fields));
