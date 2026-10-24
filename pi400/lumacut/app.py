@@ -175,6 +175,8 @@ def service_save_pins():
     require_free()
     proposed = validate_roles({"lights": request.form.get("lights"),
                                "exhaust": request.form.get("exhaust")})
+    if any(controller.status()["accessories"].values()):
+        raise RuntimeError("Zubehör vor einer Neuzuordnung ausschalten")
     with config_lock:
         config["pin_roles"] = proposed
         persist()
@@ -187,6 +189,7 @@ def service_diagnostics():
     require_service()
     info = controller.status()
     return jsonify(connected=info["connected"], state=info["state"],
+                   firmware=info["identity"],
                    homed=info["homed"], owner=info["owner"],
                    serial_faults=info["diagnostics"]["serial_faults"],
                    suppressed_status=info["diagnostics"]["suppressed_status"],
@@ -211,7 +214,13 @@ def service_command():
             raise ValueError("Softlimits, Hardlimits und Homing dürfen nicht deaktiviert werden")
         if ident in (130, 131, 132) and not 0 < value <= 3000:
             raise ValueError("Ungültiger Achsfahrweg")
-    response = run_commands([command], timeout=20)
+    is_write = bool(re.fullmatch(r"\$[0-9]{1,3}=.*", command))
+    response = run_commands([command] + (["$"] if is_write else []), timeout=20)
+    if is_write:
+        actual = controller.status()["settings"].get(ident)
+        tolerance = max(0.0005, abs(value) * 0.0001)
+        if actual is None or abs(actual - value) > tolerance:
+            raise RuntimeError("SKR-Rücklesung weicht vom Sollwert ab")
     return jsonify(message=response, command=command)
 
 
@@ -401,7 +410,7 @@ def do_action(op):
         return "LightBurn TCP: " + ("EIN" if controller.lightburn_enabled else "AUS")
     if op == "readcfg":
         require_free()
-        return run_commands(["$$"], timeout=15)
+        return run_commands(["$I", "$"], timeout=15)
     if op in ("home", "enablehome"):
         require_free()
         return run_commands(["$H" if op == "home" else "$22=1"], timeout=150)
