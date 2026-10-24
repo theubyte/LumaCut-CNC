@@ -12,6 +12,8 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include "secure_ota.h"
 #include <time.h>
 #include "update_ca.h"
 #ifndef LUMACUT_SOURCE_SHA
@@ -22,6 +24,8 @@
 #include <BLEDevice.h>
 #include <Preferences.h>
 #include <LittleFS.h>
+#include <SPI.h>
+#include <SD.h>
 #include <lvgl.h>
 #include <esp_lcd_panel_rgb.h>
 #include <esp_lcd_panel_ops.h>
@@ -52,6 +56,13 @@ lv_color_t* drawPixels=nullptr;
 bool uiReady=false;
 uint8_t gtAddr=0x5d;
 bool touchOk=false,storageOk=false,machineHomed=false;
+bool sdReady=false,internalStorageReady=false;
+// In the Waveshare 7in display the TF CS pin is virtual (CH422G EXIO4).
+// Its output is held LOW by the existing expander backlight/reset mask;
+// the SD library uses no physical GPIO CS (Waveshare uses SD.begin(-1)).
+fs::FS& jobStore(){
+    return sdReady?static_cast<fs::FS&>(SD):static_cast<fs::FS&>(LittleFS);
+}
 bool uploadAllowed=false,uploadFinished=false;
 size_t uploadBytes=0;
 String uploadTemporary,uploadDestination;
@@ -109,6 +120,11 @@ float requestedSettingValue=0.f;
 String lastControllerError, zLiftReason;
 uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
 bool zLiftDirectionVerified=false;
+lv_obj_t* updateKeyEntry=nullptr;
+String updateDeviceKey,updateImageSha256;
+size_t updateImageBytes=0;
+bool updateOtaApproved=false,otaInstallRequested=false;
+uint32_t otaArmUntil=0;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
 *passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr,*macroEntry=nullptr;
@@ -311,6 +327,8 @@ void updateArea(){
 }
 // LVGL updates need the parameter catalog declared before its definition.
 void refreshCatalog();
+void writeCmd(const String&);
+void restoreHmiIfBootBroken();
 // Version DISCOVERY only. Firmware installation is intentionally disabled
 // until HMI OTA rollback and SKR BOOT0/NRST flashing have been hardware tested.
 // HTTPS is validated against a public CA in update_ca.h: never setInsecure().
@@ -348,26 +366,42 @@ void checkLumaCutUpdates(){
     if(!request.begin(tls,"https://luma.millione.de/api/updates/latest")){
         updateCheckStatus="Updatecheck: HTTPS-Verbindung fehlgeschlagen";return;
     }
-    int code=request.GET();
+    const int code=request.GET();
     if(code==200){
-        String body=request.getString();
-        if(body.indexOf("\"available\":true")>=0){
-            String sha=extractReleaseSha(body);
-            if(sha.length()==40){
+        const String body=request.getString();
+        DynamicJsonDocument doc(4096);
+        DeserializationError parse=deserializeJson(doc,body);
+        if(parse || !doc["available"].is<bool>()){
+            updateCheckStatus="Updatecheck: JSON-Manifest ungueltig";
+        }else if(!doc["available"].as<bool>()){
+            updateAvailable=false;updateOtaApproved=false;
+            updateCheckStatus="Noch keine freigegebene Stable-Version";
+        }else{
+            const String sha=doc["source_sha"].as<String>();
+            const String checksum=doc["images"]["hmi"]["sha256"].as<String>();
+            const size_t bytes=doc["images"]["hmi"]["bytes"].as<size_t>();
+            const String channel=doc["channel"].as<String>();
+            const String hardware=doc["hardware"]["hmi"].as<String>();
+            const String url=doc["images"]["hmi"]["url"].as<String>();
+            if(!LumaOta::isHex(sha,40)||!LumaOta::isHex(checksum,64)||
+                bytes<65536||bytes>8u*1024u*1024u||channel!="stable"||
+                hardware!="Waveshare ESP32-S3-Touch-LCD-7 Rev1.2"||
+                url!=LumaOta::IMAGE_URL||!doc["paired"].as<bool>()){
+                updateAvailable=false;updateOtaApproved=false;
+                updateCheckStatus="Updatecheck: Manifest/Hardware ungueltig";
+            }else{
                 offeredUpdateSha=sha;
+                updateImageSha256=checksum;
+                updateImageBytes=bytes;
+                updateOtaApproved=doc["hmi_ota_enabled"].as<bool>();
                 updateAvailable=(sha!=String(LUMACUT_SOURCE_SHA));
                 updateCheckStatus=updateAvailable?
-                    ("NEUES UPDATE: "+sha.substring(0,12)):
-                    ("HMI-Stand aktuell: "+sha.substring(0,12));
-                if(updateAvailable)
-                    setNotice("LumaCut Update verfuegbar. Unter WLAN/System anzeigen.");
-            }else updateCheckStatus="Updatecheck: Manifest ungueltig";
-        }else if(body.indexOf("\"available\":false")>=0){
-            updateAvailable=false;
-            updateCheckStatus="Noch keine freigegebene Stable-Version";
-        }else updateCheckStatus="Updatecheck: Unerwartetes Manifest";
+                    ("UPDATE "+sha.substring(0,12)+(updateOtaApproved?" bereit":" (OTA gesperrt)")):
+                    ("HMI aktuell: "+sha.substring(0,12));
+                if(updateAvailable)setNotice("LumaCut Update verfuegbar. Unter WLAN/System anzeigen.");
+            }
+        }
     }else{
-        // A TLS mismatch is a failure, not permission to use plaintext HTTP.
         updateCheckStatus="Updatecheck: Server/TLS Fehler "+String(code);
     }
     request.end();
@@ -385,6 +419,49 @@ void updateCheckService(){
     checkLumaCutUpdates();
 }
 
+// Requires the operator to tap twice, with the laser supply physically OFF.
+void installHmiUpdate(){
+    if(!otaInstallRequested)return;
+    otaInstallRequested=false;
+    if(!updateAvailable||!updateOtaApproved||
+       !LumaOta::isHex(updateImageSha256,64)||!LumaOta::available()){
+        setNotice("HMI-OTA nicht freigegeben/kein A-B-Slot.");return;
+    }
+    if(!LumaOta::isHex(updateDeviceKey,64)){
+        setNotice("64-stelligen Geraeteschluessel zuerst im HMI speichern.");return;
+    }
+    if(!fresh()||machineState!=MachineState::Idle||owner!=Owner::None||
+       jobRunning||scriptActive||homingInProgress||postHomePending||
+       commandPending){
+        setNotice("OTA nur bei verbundenem, stillstehendem SKR im Leerlauf.");return;
+    }
+    writeCmd("M5");
+    machine.flush();
+    const esp_partition_t* previous=esp_ota_get_running_partition();
+    if(!previous){setNotice("Aktuelle HMI-Partition unbekannt.");return;}
+    setNotice("HMI-Update: Download und SHA256-Pruefung...");
+    lv_timer_handler();
+    String error;
+    const bool success=LumaOta::install(updateImageSha256,updateImageBytes,
+                                         updateDeviceKey,LUMACUT_UPDATE_CA,error);
+    if(!success){
+        setNotice("HMI-Update fehlgeschlagen: "+error);return;
+    }
+    prefs.putString("otaPrevious",String(previous->label));
+    prefs.putUInt("otaAttempts",0);
+    prefs.putBool("otaPending",true);
+    setNotice("HMI-Update installiert; starte neu.");
+    lv_timer_handler();delay(400);ESP.restart();
+}
+void restoreHmiIfBootBroken(){
+    if(!prefs.getBool("otaPending",false))return;
+    const String old=prefs.getString("otaPrevious","");
+    if(LumaOta::restorePrior(old)){
+        prefs.putBool("otaPending",false);
+        prefs.putUInt("otaAttempts",0);
+        ESP.restart();
+    }
+}
 void updateUi(){
     labelChanged(statusLabel,fresh()?stateText():"Keine Verbindung");
     labelChanged(positionLabel,(fresh()&&haveMpos)?
@@ -394,20 +471,19 @@ void updateUi(){
     labelChanged(sourceLabel,activePage==5?
         ("Motor $3="+(directionMask<0?String("?"):String(directionMask))+
          "  Homing $23="+(homingDirectionMask<0?String("?"):String(homingDirectionMask)))
-        :String(ownerText()));
+        :String(ownerText())+" / GRBL $1:"+
+         (knownSetting[1]?String(savedSetting[1],0):"?"));
     String job=selectedJob.length()?"Datei: "+selectedJob:"Noch keine Datei ausgewaehlt";
     if(bounds.valid)job+="  /  "+String(bounds.x1-bounds.x0,1)+
                                 " x "+String(bounds.y1-bounds.y0,1)+" mm";
+    if(sdReady)job+=" / microSD";
     labelChanged(jobLabel,job);
     labelChanged(macroLabel,parks[parkSlot].stored?parks[parkSlot].name:String("Freier Makroplatz"));
     if(ipLabel){
         String net="WLAN: "+(WiFi.status()==WL_CONNECTED?WiFi.localIP().toString():String("nicht verbunden"))+
-        "\nHotspot: "+apName+" / "+apPass+
+        "\nAP: "+apName+" / "+apPass+
         "\nApp: http://"+WiFi.softAPIP().toString()+
-        "\nZugangscode: "+apiKey+
-        "\nGRBL $1:"+(knownSetting[1]?String(savedSetting[1],0):"?")+
-        " $20:"+(knownSetting[20]?String(savedSetting[20],0):"?")+
-        " $132:"+(knownSetting[132]?String(savedSetting[132],1):"?");
+        "\nCode: "+apiKey;
         labelChanged(ipLabel,net);
     }
     if(focusTargetButton)labelChanged(lv_obj_get_child(focusTargetButton,0),
@@ -727,7 +803,7 @@ void internalJobService(){
 }
 bool jobStart(){
     if(!canMotion()||!selectedJob.length()||!storageOk)return false;
-    jobFile=LittleFS.open("/jobs/"+selectedJob,FILE_READ);
+    jobFile=jobStore().open("/jobs/"+selectedJob,FILE_READ);
     if(!jobFile)return false;
     owner=Owner::Internal;jobRunning=true;jobPaused=false;commandPending=false;
     setNotice("Job aktiv – keine zweite Steuerquelle erlaubt.");return true;
@@ -763,7 +839,7 @@ bool parseBounds(){
     // We do not try to guess absolute coordinates or resolve arc extrema.
     bounds=Bounds{};
     if(!storageOk||!selectedJob.length())return false;
-    File f=LittleFS.open("/jobs/"+selectedJob,FILE_READ);
+    File f=jobStore().open("/jobs/"+selectedJob,FILE_READ);
     if(!f)return false;
     bool modeAbsolute=false,modeMetric=false,firstPoint=false,good=true;
     int motion=-1;
@@ -845,7 +921,7 @@ bool dryFrame(){
 bool selectJob(String name){
     if(owner==Owner::Internal||owner==Owner::Script)return false;
     if(name.indexOf('/')>=0||name.indexOf('\\')>=0||name.indexOf("..")>=0)return false;
-    if(!storageOk||!LittleFS.exists("/jobs/"+name))return false;
+    if(!storageOk||!jobStore().exists("/jobs/"+name))return false;
     selectedJob=name;parseBounds();updateUi();return true;
 }
 bool auth(){return apiKey.length()&&http.hasHeader("X-LumaCut-Key")&&
@@ -907,7 +983,8 @@ void installRoutes(){
         String payload="{\"local_sha\":\""+String(LUMACUT_SOURCE_SHA)+
             "\",\"offered_sha\":\""+offeredUpdateSha+
             "\",\"available\":"+(updateAvailable?String("true"):String("false"))+
-            ",\"hmi_ota_ready\":false,\"skr_ota_ready\":false}";
+            ",\"hmi_ota_ready\":"+String((LumaOta::available() && LumaOta::isHex(updateDeviceKey,64))?"true":"false")+
+            ",\"skr_ota_ready\":false}";
         http.send(200,"application/json",payload);
     });
     http.on("/api/machine",HTTP_GET,[]{
@@ -918,7 +995,7 @@ void installRoutes(){
         if(!auth()){fail(401,"Code erforderlich");return;}
         String out="{\"files\":[";bool first=true;
         if(storageOk){
-            File root=LittleFS.open("/jobs");
+            File root=jobStore().open("/jobs");
             File f=root.openNextFile();
             while(f){if(!f.isDirectory()){
                 String name=String(f.name());int pos=name.lastIndexOf('/');
@@ -970,29 +1047,29 @@ void installRoutes(){
                 uploadAllowed=false;
             uploadDestination="/jobs/"+name;
             uploadTemporary="/jobs/."+name+".part";
-            if(uploadAllowed&&LittleFS.exists(uploadDestination))uploadAllowed=false;
+            if(uploadAllowed&&jobStore().exists(uploadDestination))uploadAllowed=false;
             if(uploadAllowed){
-                LittleFS.remove(uploadTemporary);
-                uploadFile=LittleFS.open(uploadTemporary,FILE_WRITE);
+                jobStore().remove(uploadTemporary);
+                uploadFile=jobStore().open(uploadTemporary,FILE_WRITE);
                 if(!uploadFile)uploadAllowed=false;
             }
         } else if(up.status==UPLOAD_FILE_WRITE && uploadAllowed){
             uploadBytes+=up.currentSize;
             if(uploadBytes>MAX_JOB_BYTES||uploadFile.write(up.buf,up.currentSize)!=up.currentSize){
                 uploadAllowed=false;uploadFile.close();
-                if(uploadTemporary.length())LittleFS.remove(uploadTemporary);
+                if(uploadTemporary.length())jobStore().remove(uploadTemporary);
             }
         } else if(up.status==UPLOAD_FILE_END){
             if(uploadFile)uploadFile.close();
             if(uploadAllowed&&uploadBytes>0&&uploadTemporary.length()&&uploadDestination.length()&&
-               !LittleFS.exists(uploadDestination)){
-                uploadFinished=LittleFS.rename(uploadTemporary,uploadDestination);
+               !jobStore().exists(uploadDestination)){
+                uploadFinished=jobStore().rename(uploadTemporary,uploadDestination);
             }
-            if(!uploadFinished&&uploadTemporary.length())LittleFS.remove(uploadTemporary);
+            if(!uploadFinished&&uploadTemporary.length())jobStore().remove(uploadTemporary);
             uploadAllowed=uploadFinished;
         } else if(up.status==UPLOAD_FILE_ABORTED){
             if(uploadFile)uploadFile.close();
-            if(uploadTemporary.length())LittleFS.remove(uploadTemporary);
+            if(uploadTemporary.length())jobStore().remove(uploadTemporary);
             uploadAllowed=false;uploadFinished=false;
         }
     });
@@ -1342,7 +1419,18 @@ void makeUi(){
         lv_obj_set_style_border_width(field,0,0);
     }
     btn(c,"Mit WLAN verbinden",415,189,333,54,"wifi",BLUE,BG);
-    btn(c,"Updates pruefen",20,206,356,41,"updatecheck",PALE_BLUE,BLUE);
+    lbl(c,"UPDATE-KEY (aus Unraid .env)",20,140,14,SUBTLE);
+    updateKeyEntry=lv_textarea_create(c);
+    lv_obj_set_pos(updateKeyEntry,20,161);
+    lv_obj_set_size(updateKeyEntry,205,38);
+    lv_textarea_set_one_line(updateKeyEntry,true);
+    lv_textarea_set_max_length(updateKeyEntry,64);
+    lv_textarea_set_password_mode(updateKeyEntry,true);
+    lv_obj_set_style_bg_color(updateKeyEntry,lv_color_hex(GRAY),0);
+    lv_obj_set_style_text_color(updateKeyEntry,lv_color_hex(INK),0);
+    btn(c,"Key sichern",235,161,141,38,"updatekeysave",GRAY,INK);
+    btn(c,"Pruefen",20,206,170,41,"updatecheck",PALE_BLUE,BLUE);
+    btn(c,"HMI installieren",200,206,176,41,"updateinstall",BLUE,BG);
     updateLabel=lbl(c,"Noch nicht geprueft",20,247,14,SUBTLE);
     lv_obj_set_width(updateLabel,390);
 
@@ -1526,7 +1614,7 @@ void makeUi(){
     editCancelButton=btn(editOverlay,"Abbrechen",0,0,10,10,"editorcancel",GRAY,INK);
     layoutKeyboardDialog();
     lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
-    for(lv_obj_t* field : {ssidEntry,passwordEntry,macroEntry,
+    for(lv_obj_t* field : {ssidEntry,passwordEntry,updateKeyEntry,macroEntry,
          sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField,
          focusLiftField,focusGapField,tipOffsetField})
         lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
@@ -1705,6 +1793,29 @@ void action(const char* id){
             lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
             editTarget=nullptr;
             setNotice("Eingabe uebernommen.");updateUi();
+        }
+        return;
+    }
+    if(op=="updatekeysave"){
+        const String entry=lv_textarea_get_text(updateKeyEntry);
+        if(!LumaOta::isHex(entry,64)){
+            setNotice("Update-Key: 64 kleine Hex-Zeichen erforderlich.");return;
+        }
+        updateDeviceKey=entry;
+        prefs.putString("upkey",updateDeviceKey);
+        lv_textarea_set_text(updateKeyEntry,"");
+        setNotice("Update-Key im ESP32-NVS gespeichert.");return;
+    }
+    if(op=="updateinstall"){
+        if(!updateAvailable||!updateOtaApproved){
+            setNotice("Kein zur Installation freigegebenes HMI-Update.");return;
+        }
+        if(otaArmUntil && (int32_t)(otaArmUntil-millis())>0){
+            otaArmUntil=0;otaInstallRequested=true;
+            setNotice("Starte HMI-Update. Laser muss physisch AUS sein.");
+        }else{
+            otaArmUntil=millis()+15000;
+            setNotice("LASER STROMLOS! In 15 s erneut HMI installieren tippen.");
         }
         return;
     }
@@ -1902,7 +2013,7 @@ void action(const char* id){
     }
     if(op=="next"){
         if(!storageOk)return;
-        File dir=LittleFS.open("/jobs");File f=dir.openNextFile();
+        File dir=jobStore().open("/jobs");File f=dir.openNextFile();
         bool useNext=selectedJob.length()==0,chosen=false;
         String first;
         while(f){
@@ -1946,6 +2057,12 @@ void action(const char* id){
 }
 void internalInit(){
     prefs.begin("lumacut",false);
+    updateDeviceKey=prefs.getString("upkey","");
+    if(prefs.getBool("otaPending",false)){
+        const uint32_t attempts=prefs.getUInt("otaAttempts",0)+1;
+        prefs.putUInt("otaAttempts",attempts);
+        if(attempts>1)restoreHmiIfBootBroken();
+    }
     machineZeroAtMax=prefs.getBool("zeroMax",true);
     focusLiftMm=fabsf(prefs.getFloat("zlift",7.f));
     zLiftDirectionVerified=prefs.getBool("zsignOK",false);
@@ -1957,17 +2074,80 @@ void internalInit(){
     contactSwitchAtHead=prefs.getBool("headsw",false);
     // Format only on first provisioning. Never silently erase saved jobs
     // because of a later filesystem or power-loss mounting failure.
-    storageOk=LittleFS.begin(false);
-    if(!storageOk&&!prefs.getBool("fsinit",false))storageOk=LittleFS.begin(true);
-    if(storageOk){
+    internalStorageReady=LittleFS.begin(false);
+    if(!internalStorageReady&&!prefs.getBool("fsinit",false))
+        internalStorageReady=LittleFS.begin(true);
+    if(internalStorageReady){
         prefs.putBool("fsinit",true);
         if(!LittleFS.exists("/jobs"))LittleFS.mkdir("/jobs");
     }
+
     loadParks();
     machine.begin(115200,SERIAL_8N1,44,43); // Physical UART2 switch; SKR PA9/PA10 crossed.
     Serial.begin(115200); // Native USB CDC for LightBurn; never print diagnostic messages here.
     touchInit();
+    // Optional 4GB FAT32 microSD; one SPI client, no dedicated GPIO CS.
+    // Waveshare reference: MOSI 11, SCLK 12, MISO 13, CS CH422G EXIO4=LOW.
+    // touchInit() has already enabled that CS and preserved LCD/TP lines.
+    SPI.setHwCs(false);
+    SPI.begin(12,13,11,-1);
+    sdReady=SD.begin((uint8_t)-1,SPI,4000000);
+    if(sdReady){
+        if(!SD.exists("/jobs"))sdReady=SD.mkdir("/jobs");
+        if(!SD.exists("/updates"))SD.mkdir("/updates");
+        if(!SD.exists("/backups"))SD.mkdir("/backups");
+        if(!SD.exists("/logs"))SD.mkdir("/logs");
+    }
+    if(sdReady){
+        // Copy existing jobs, never overwriting an existing SD job.
+        if(internalStorageReady){
+            File dir=LittleFS.open("/jobs");
+            if(dir){
+                File source=dir.openNextFile();
+                uint8_t buffer[1024];
+                while(source){
+                    if(!source.isDirectory()){
+                        String name=source.name();
+                        int slash=name.lastIndexOf('/');
+                        if(slash>=0)name=name.substring(slash+1);
+                        String target="/jobs/"+name;
+                        if(name.length()&&name.indexOf("..")<0&&!SD.exists(target)){
+                            File dest=SD.open(target,FILE_WRITE);
+                            if(dest){
+                                size_t copied=0;
+                                while(source.available()){
+                                    size_t got=source.read(buffer,sizeof(buffer));
+                                    if(!got||dest.write(buffer,got)!=got)break;
+                                    copied+=got;
+                                }
+                                dest.close();
+                                if(copied!=source.size())SD.remove(target);
+                            }
+                        }
+                    }
+                    source.close();
+                    source=dir.openNextFile();
+                }
+                dir.close();
+            }
+        }
+        File log=SD.open("/logs/hmi_boot.log",FILE_APPEND);
+        if(log){
+            if(log.size()<524288){
+                log.print("Boot sha=");
+                log.print(LUMACUT_SOURCE_SHA);
+                log.print(" reset=");
+                log.println((unsigned)esp_reset_reason());
+            }
+            log.close();
+        }
+    }else{
+        SD.end();
+        SPI.end();
+    }
+    storageOk=sdReady||internalStorageReady;
     if(!displayInit()){
+        if(prefs.getBool("otaPending",false))restoreHmiIfBootBroken();
         // Do not enter LVGL/network/GRBL service with an uninitialized LCD.
         // Serial USB diagnostic is emitted only on startup failure.
         uiReady=false;
@@ -1990,6 +2170,11 @@ void internalInit(){
     lv_obj_del(boot);
     lv_timer_handler();
     uiReady=true;
+    if(prefs.getBool("otaPending",false)){
+        esp_ota_mark_app_valid_cancel_rollback();
+        prefs.putBool("otaPending",false);
+        prefs.putUInt("otaAttempts",0);
+    }
     networkInit();
     setNotice("LumaCut Control OS. Nur Laborbetrieb bis Hardware und Interlocks geprueft.");
 }
@@ -2040,6 +2225,7 @@ void loop(){
     internalJobService();
     bleUpdate();
     updateCheckService();
+    installHmiUpdate();
     lv_timer_handler();
     // Collect actual GRBL persistent limits and axis polarity once controller is
     // available; do not fabricate travel distances from the nominal frame size.
