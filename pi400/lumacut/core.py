@@ -32,6 +32,7 @@ class Controller:
         self.read_thread = None
         self.host = None
         self.host_pending = 0
+        self.lightburn_enabled = True
         self.owner = None  # host, job, local
         self.state = "Disconnected"
         self.position = None
@@ -288,6 +289,8 @@ class Controller:
         client.settimeout(0.25)
         with self.cond:
             if (self.owner is not None or self.serial is None or
+                    not self.lightburn_enabled or
+                    self.state not in ("Idle", "Alarm", "Unknown") or
                     (self.maintenance_file and self.maintenance_file.exists())):
                 client.sendall(b"error:9\r\n")
                 client.close()
