@@ -30,8 +30,15 @@ probe:
   grblhal_shared_pin_mode_implemented: false
   probing_enabled_in_firmware: false
   normally_closed_preferred: true
-  x_offset_from_laser_mm: null
-  y_offset_from_laser_mm: null
+  x_offset_from_laser_mm: null # enter on HMI; stored in ESP32 NVS prOX
+  y_offset_from_laser_mm: null # enter on HMI; stored in ESP32 NVS prOY
+  raster_plan_implemented: true
+  raster_plan_source: hmi_rectangle_and_xy_probe_offsets
+  raster_output: /logs/probe_plan.csv
+  raster_serpentine: true
+  raster_clips_to_probe_reachable_travel: true
+  actual_z_probe_measurement_ready: false
+  actual_probe_input_pc14_wired: false
   trigger_tip_distance_from_optical_datum_mm: null
   probe_feed_mm_min: null
   max_probe_travel_mm: null
