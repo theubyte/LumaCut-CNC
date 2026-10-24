@@ -1,0 +1,9 @@
+[Unit]
+Description=LumaCut Pi verified GitHub updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/lumacut/pi400/update.sh
+TimeoutStartSec=240
