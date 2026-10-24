@@ -153,6 +153,40 @@ class ServiceApiTests(unittest.TestCase):
             module.config["touch_jog_enabled"]=previous
             module.controller.homed=False
 
+    def test_gcode_preflight_rejects_service_bypass_before_job_acquisition(self):
+        from unittest.mock import patch
+        from lumacut import app as module
+        old_jobs, old_name, old_homed = (module.JOBS, module.selected_job,
+                                          module.controller.homed)
+        with tempfile.TemporaryDirectory() as jobs:
+            path=Path(jobs)/"unsafe.gcode"
+            path.write_text("G90 G21\nG1 X20\n$LCIO=1\nM3 S500\n")
+            module.JOBS=Path(jobs)
+            module.selected_job=path.name
+            module.controller.homed=True
+            try:
+                with patch.object(module, "require_free"):
+                    with self.assertRaisesRegex(PermissionError, "Service/GPIO"):
+                        module.start_job()
+                self.assertIsNone(module.controller.owner)
+            finally:
+                module.JOBS=old_jobs
+                module.selected_job=old_name
+                module.controller.homed=old_homed
+
+    def test_service_backup_has_no_credentials(self):
+        client=self.app.test_client()
+        headers={"X-LumaCut-Key":os.environ["LUMACUT_KEY"]}
+        self.assertEqual(client.get("/api/service/backup",headers=headers).status_code,403)
+        self.assertEqual(client.post("/api/service/login",headers=headers,
+                           data={"password":"lumaservice"}).status_code,200)
+        response=client.get("/api/service/backup",headers=headers)
+        self.assertEqual(response.status_code,200)
+        backup=response.get_json()
+        self.assertEqual(backup["schema"],"lumacut-machine-backup-v1")
+        self.assertNotIn(os.environ["LUMACUT_KEY"],response.get_data(as_text=True))
+        self.assertNotIn("lumaservice",response.get_data(as_text=True))
+
     def test_service_is_separately_password_gated(self):
         client = self.app.test_client()
         headers = {"X-LumaCut-Key": os.environ["LUMACUT_KEY"]}
