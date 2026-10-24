@@ -45,6 +45,8 @@ class Controller:
         self.bytes_host = 0
         self.suppressed_reports = 0
         self.faults = 0
+        self.accessories = {"lights": False, "exhaust": False}
+        self.last_accessory_toggle = 0.0
         self.last_poll = 0.0
         self.last_connect_attempt = 0.0
 
@@ -108,6 +110,11 @@ class Controller:
             pos = MACHINE_POS.search(line)
             if pos:
                 self.position = [float(pos.group(i)) for i in (1, 2, 3)]
+            accessory = ""
+            if "|A:" in line:
+                accessory = line.split("|A:", 1)[1].split("|", 1)[0].split(">", 1)[0]
+            self.accessories["lights"] = "M" in accessory
+            self.accessories["exhaust"] = "F" in accessory
             self.last_status = time.monotonic()
             # Host status requests are independently tracked. The unsolicited
             # dashboard polls remain internal, preventing console spam.
@@ -202,6 +209,7 @@ class Controller:
             return {
                 "connected": self.serial is not None and age is not None and age < 5,
                 "maintenance": bool(self.maintenance_file and self.maintenance_file.exists()),
+                "accessories": dict(self.accessories),
                 "state": self.state,
                 "owner": self.owner or "Frei",
                 "homed": self.homed,
@@ -269,7 +277,7 @@ class Controller:
                     self.owner = None
 
     def realtime(self, char):
-        if char not in (b"!", b"~", b"?", b"\x18"):
+        if char not in (b"!", b"~", b"?", b"\x18", b"\xa0", b"\xa1"):
             raise ValueError("Invalid realtime command")
         with self.lock:
             self._send_locked(char)
