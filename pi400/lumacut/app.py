@@ -24,6 +24,7 @@ from .core import Controller, serve_lightburn
 from .pins import (DEFAULT_ROLES, DEFAULT_SPARE, SPARE_PC7_ROLES, accessories_for_roles,
                    manifest, override_for_role, validate_roles, validate_spare_config)
 from .service_auth import ServiceAuth
+from .planner import analyze_file
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.getenv("LUMACUT_DATA", "/var/lib/lumacut"))
@@ -628,38 +629,17 @@ def ui_action():
 
 
 def job_bounds(path: Path):
-    # Parse GRBL absolute XY contours; unsupported modal transformations
-    # do not trigger a potentially incorrect unpowered frame.
-    import re
-    xs,ys = [],[]
-    absolute = True
-    metric = True
-    x = y = None
-    for line in path.read_text(encoding="utf-8",errors="replace").splitlines():
-        raw = line.split(";",1)[0]
-        raw = re.sub(r"\\([^()]*\\)","",raw).upper()
-        if not raw.strip():
-            continue
-        words = re.findall(r"([A-Z])\\s*([-+]?\\d*\\.?\\d+)",raw)
-        for letter,value in words:
-            if letter == "G":
-                code = int(float(value))
-                if code == 91: absolute = False
-                if code == 90: absolute = True
-                if code == 20: metric = False
-                if code == 21: metric = True
-                if code in (2,3,51,68,92): return None
-            if letter == "X": x=float(value)
-            if letter == "Y": y=float(value)
-        if not absolute or not metric:
-            return None
-        if x is not None and y is not None:
-            xs.append(x);ys.append(y)
-        if len(xs)>100000: return None
-    if not xs or not ys: return None
-    result=min(xs),min(ys),max(xs),max(ys)
-    if result[0]==result[2] or result[1]==result[3]: return None
-    return result
+    return analyze_file(path).bounds
+
+
+@app.get("/api/jobs/preview")
+def jobs_preview():
+    name = request.args.get("name", "") or selected_job
+    name = Path(name).name
+    if not name or not (JOBS / name).is_file():
+        raise ValueError("Auftragsdatei nicht gefunden")
+    return jsonify(analyze_file(JOBS / name).as_dict())
+
 
 
 @app.get("/api/jobs")
