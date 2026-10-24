@@ -249,6 +249,38 @@ def service_pc7_set():
     return jsonify(pin="PC7", value=actual, message="FAN1 PC7 Zustand bestätigt")
 
 
+@app.get("/api/service/backup")
+def service_backup():
+    require_service()
+    stat = controller.status()
+    # No machine API token, service password, Wi-Fi credentials or SSH keys.
+    # Export the controller's measured $-values plus user-set machine profile.
+    payload = {
+        "schema": "lumacut-machine-backup-v1",
+        "created_utc": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc).isoformat(),
+        "firmware": stat["identity"],
+        "serial_connected": stat["connected"],
+        "settings": stat["settings"],
+        "config": {
+            "focus": config["focus"],
+            "probe": config["probe"],
+            "parks": config["parks"],
+            "pin_roles": config["pin_roles"],
+            "spare_pc7": config["spare_pc7"],
+            "touch_jog_enabled": config["touch_jog_enabled"],
+            "jog_percent": config["jog_percent"],
+        },
+        "disclaimer": "Backup enthält nur vom SKR gemeldete Werte; "
+                      "Hardwarepegel, Motorstrom und Endschalter separat prüfen.",
+    }
+    response = Response(json.dumps(payload, indent=2, ensure_ascii=False),
+                        mimetype="application/json")
+    response.headers["Content-Disposition"] = (
+        'attachment; filename="LumaCut-CNC-machine-backup.json"')
+    return response
+
+
 @app.get("/api/service/diagnostics")
 def service_diagnostics():
     require_service()
