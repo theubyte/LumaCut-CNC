@@ -2,15 +2,16 @@
 "use strict";
 const $=id=>document.getElementById(id);
 const TARGETS={
-  complete:"lumacut_complete_suite_unverified",
+  complete:"pi400_skr_usb_unverified",
   hmi:"esp32_hmi_pro_unverified",
-  skr:"stm32_hmi_bridge_unverified"
+  skr:"stm32_project_unverified"
 };
 const NAMES={
-  lumacut_complete_suite_unverified:"Komplett · HMI + grblHAL",
+  lumacut_complete_suite_unverified:"Archiv · ESP32 + UART",
+  pi400_skr_usb_unverified:"Komplett · Raspberry Pi 400 + SKR USB",
   esp32_hmi_pro_unverified:"Waveshare HMI · Control OS",
   stm32_hmi_bridge_unverified:"Laser grblHAL · SKR UART",
-  stm32_project_unverified:"SKR USB · Legacy",
+  stm32_project_unverified:"SKR USB · Pi 400",
   esp32_hmi_unverified:"HMI Display · Diagnose",
   esp32_hmi_keypad_unverified:"HMI UART · Test",
   tests:"Projekt-Tests"
@@ -27,7 +28,7 @@ const label=j=>NAMES[j.target]||j.target||"Unbekannter Build";
 const isHmi=j=>!!j&&["esp32_hmi_pro_unverified","esp32_hmi_unverified",
   "esp32_hmi_keypad_unverified","lumacut_complete_suite_unverified"].includes(j.target);
 const isSkr=j=>!!j&&["stm32_project_unverified","stm32_hmi_bridge_unverified",
-  "lumacut_complete_suite_unverified"].includes(j.target);
+  "lumacut_complete_suite_unverified","pi400_skr_usb_unverified"].includes(j.target);
 const duration=n=>{
   if(n===undefined||n===null||!Number.isFinite(Number(n)))return "–";
   n=Math.max(0,Math.round(Number(n)));
