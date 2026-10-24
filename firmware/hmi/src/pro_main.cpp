@@ -462,7 +462,8 @@ void updateUi(){
     labelChanged(sourceLabel,activePage==5?
         ("Motor $3="+(directionMask<0?String("?"):String(directionMask))+
          "  Homing $23="+(homingDirectionMask<0?String("?"):String(homingDirectionMask)))
-        :String(ownerText()));
+        :String(ownerText())+" / GRBL $1:"+
+         (knownSetting[1]?String(savedSetting[1],0):"?"));
     String job=selectedJob.length()?"Datei: "+selectedJob:"Noch keine Datei ausgewaehlt";
     if(bounds.valid)job+="  /  "+String(bounds.x1-bounds.x0,1)+
                                 " x "+String(bounds.y1-bounds.y0,1)+" mm";
