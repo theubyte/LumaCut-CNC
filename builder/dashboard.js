@@ -314,7 +314,7 @@ async function approveRelease(){
   }
   if(!window.confirm(
     "Dieses HMI-/SKR-Paket als STABLE-Update freigeben?\\n"+
-    "Nur nach Hardwareprüfung veröffentlichen. Es erfolgt kein automatischer Flashvorgang."))return;
+    "Beide Firmwaredateien werden veroeffentlicht. Die Installation startet nicht von selbst."))return;
   try{
     const response=await api("/api/updates/approve",{
       method:"POST",
@@ -322,10 +322,14 @@ async function approveRelease(){
       body:JSON.stringify({job_id:j.id})});
     const data=await response.json();
     toast("Update-Kanal freigegeben: "+data.source_sha.slice(0,12));
-    openModal("Update veröffentlicht",
-      "Das freigegebene Versionsmanifest ist für die HMI-Updateprüfung bereit. "+
-      "Firmwareinstallation auf dem SKR bleibt bis zur Bootloader-Prüfung deaktiviert.",
+    openModal("HMI- und SKR-Update veröffentlicht",
+      "Beide Firmwaredateien sind als gemeinsamer Stand freigegeben. "+
+      "HMI: Update im Systemmenue pruefen und installieren. "+
+      "SKR: Passende firmware.bin hier herunterladen und ueber den "+
+      "vorhandenen microSD-Bootloader des Boards installieren.",
       {kicker:"STABLE RELEASE",icon:"✓",meta:data.source_sha.slice(0,12)});
+    modalLink("SKR-Update firmware.bin herunterladen",
+      "/api/updates/skr-firmware.bin",true);
     modalLink("Update-Manifest prüfen", "/api/updates/latest");
   }catch(e){toast("Freigabe fehlgeschlagen: "+e.message,true);}
 }
