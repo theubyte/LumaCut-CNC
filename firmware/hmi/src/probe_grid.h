@@ -25,8 +25,12 @@ inline bool clip(const Region& r,float travelX,float travelY,
     out.y1=fminf(r.y+r.height,fminf(travelY,travelY-margin+r.offsetY));
     if(!finite(out.x0)||!finite(out.x1)||!finite(out.y0)||!finite(out.y1)||
        out.x1<=out.x0||out.y1<=out.y0)return false;
-    out.nx=(uint32_t)ceilf((out.x1-out.x0)/r.pitch)+1;
-    out.ny=(uint32_t)ceilf((out.y1-out.y0)/r.pitch)+1;
+    // Check count BEFORE float-to-integer conversion (very small pitch).
+    const double cx=double(out.x1-out.x0)/double(r.pitch);
+    const double cy=double(out.y1-out.y0)/double(r.pitch);
+    if(!isfinite(cx)||!isfinite(cy)||cx>99998.0||cy>99998.0)return false;
+    out.nx=(uint32_t)ceil(cx)+1;
+    out.ny=(uint32_t)ceil(cy)+1;
     if(out.nx<2||out.ny<2||out.nx>100000||out.ny>100000)return false;
     out.clipped=(out.x0>r.x+0.0001f||out.x1<r.x+r.width-0.0001f||
                  out.y0>r.y+0.0001f||out.y1<r.y+r.height-0.0001f);
