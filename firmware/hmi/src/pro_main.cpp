@@ -1239,6 +1239,60 @@ void installRoutes(){
         DynamicJsonDocument d(512);d["message"]=notice;
         String json;serializeJson(d,json);http.send(200,"application/json",json);
     });
+    http.on("/api/ui/config",HTTP_GET,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        DynamicJsonDocument d(3072);
+        JsonObject t=d.createNestedObject("travel");
+        t["x"]=workX;t["y"]=workY;t["z"]=workZ;
+        JsonObject focus=d.createNestedObject("focus");
+        focus["lift"]=focusLiftMm;focus["gap"]=focusGapMm;
+        focus["tip"]=tipOffsetMm;focus["auto"]=autoLiftAfterHome;
+        JsonObject p=d.createNestedObject("probe");
+        p["x"]=probeRegion.x;p["y"]=probeRegion.y;
+        p["width"]=probeRegion.width;p["height"]=probeRegion.height;
+        p["offset_x"]=probeRegion.offsetX;p["offset_y"]=probeRegion.offsetY;
+        p["pitch"]=probeRegion.pitch;
+        d["homed"]=machineHomed;d["holding"]=motorHoldConfigured;
+        d["speed_pct"]=jogSpeedPercent;d["step"]=jogStep==0?.1f:jogStep==1?1.f:10.f;
+        JsonArray a=d.createNestedArray("parks");
+        for(auto &slot:parks){
+            JsonObject park=a.createNestedObject();
+            park["name"]=slot.name;park["stored"]=slot.stored;
+            park["x"]=slot.x;park["y"]=slot.y;
+        }
+        String json;serializeJson(d,json);http.send(200,"application/json",json);
+    });
+    http.on("/api/lightburn/profile",HTTP_GET,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        // DeviceList is the exact structure used in genuine .lbdev exports.
+        // No imaginary GRBL network transport schema: USB import is known.
+        DynamicJsonDocument d(3072);
+        JsonObject dev=d.createNestedArray("DeviceList").createNestedObject();
+        dev["DisplayName"]="LumaCut CNC - USB GRBL";
+        dev["Name"]="GRBL";dev["Type"]="Serial";
+        dev["Width"]=workX>0?workX:410.f;
+        dev["Height"]=workY>0?workY:400.f;
+        dev["HomeOnStartup"]=false;
+        dev["MirrorX"]=false;dev["MirrorY"]=false;
+        dev["EnableLaser2Offset"]=false;dev["EnableProcessOffset"]=false;
+        dev["Laser2OffsetX"]=0;dev["Laser2OffsetY"]=0;
+        dev["ProcessOffsetX"]=0;dev["ProcessOffsetY"]=0;
+        dev.createNestedArray("DefaultCutList");
+        dev.createNestedArray("DefaultToolCutList");
+        JsonObject settings=dev.createNestedObject("Settings");
+        settings["SValueMax"]=knownSetting[30]?savedSetting[30]:1000.f;
+        settings["EnableZ"]=true;
+        settings["EnableBoundsCheck"]=true;
+        settings["LaserFire_Enable"]=false;
+        settings["TransferMode"]=0;
+        settings["StartGCode"]="G21\\nG90\\nM5";
+        settings["EndGCode"]="M5";
+        settings["LastExportExt"]="gcode";
+        http.sendHeader("Content-Disposition",
+                        "attachment; filename=LumaCut-CNC-USB.lbdev");
+        String json;serializeJsonPretty(d,json);
+        http.send(200,"application/json",json);
+    });
     http.on("/api/ui/network",HTTP_GET,[]{
         if(!auth()){fail(401,"Code erforderlich");return;}
         DynamicJsonDocument d(1024);
