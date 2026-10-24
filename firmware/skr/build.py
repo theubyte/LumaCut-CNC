@@ -76,9 +76,6 @@ def main():
         # the existing GRBL pull-off $27 to the opt-in sentinel 2.5 mm.
         limits=root/"grbl"/"machine_limits.c"
         source=limits.read_text()
-        source=change(source,
-            'return grbl.home_machine(cycle, auto_square) ? Status_OK : Status_Unhandled;',
-            'return grbl.home_machine(cycle, auto_square) ? Status_OK : Status_Unhandled;')
         marker='// Homes the specified cycle axes, sets the machine position'
         if source.count(marker)!=1:
             raise RuntimeError("grblHAL homing function marker has changed")
@@ -184,7 +181,8 @@ extern status_code_t limits_lumacut_z_clearance (void);
             # single-Z homing for workpiece contact using the same head switch.
             # These are factory defaults; SKR nonvolatile $22 takes precedence.
             h.write("  -D DEFAULT_HOMING_ENABLE=1\n")
-            h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")            h.write("  -D LUMACUT_SAFE_Z20=1\n")
+            h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")
+            h.write("  -D LUMACUT_SAFE_Z20=1\n")
 
         run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/env
