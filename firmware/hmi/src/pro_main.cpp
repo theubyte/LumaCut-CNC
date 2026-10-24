@@ -12,6 +12,8 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include "secure_ota.h"
 #include <time.h>
 #include "update_ca.h"
 #ifndef LUMACUT_SOURCE_SHA
@@ -109,6 +111,11 @@ float requestedSettingValue=0.f;
 String lastControllerError, zLiftReason;
 uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
 bool zLiftDirectionVerified=false;
+lv_obj_t* updateKeyEntry=nullptr;
+String updateDeviceKey,updateImageSha256;
+size_t updateImageBytes=0;
+bool updateOtaApproved=false,otaInstallRequested=false;
+uint32_t otaArmUntil=0;
 lv_obj_t *statusLabel=nullptr,*positionLabel=nullptr,*messageLabel=nullptr,
 *sourceLabel=nullptr,*jobLabel=nullptr,*ipLabel=nullptr,*ssidEntry=nullptr,
 *passwordEntry=nullptr,*keyboard=nullptr,*macroLabel=nullptr,*macroEntry=nullptr;
@@ -311,6 +318,8 @@ void updateArea(){
 }
 // LVGL updates need the parameter catalog declared before its definition.
 void refreshCatalog();
+void writeCmd(const String&);
+void restoreHmiIfBootBroken();
 // Version DISCOVERY only. Firmware installation is intentionally disabled
 // until HMI OTA rollback and SKR BOOT0/NRST flashing have been hardware tested.
 // HTTPS is validated against a public CA in update_ca.h: never setInsecure().
@@ -348,26 +357,42 @@ void checkLumaCutUpdates(){
     if(!request.begin(tls,"https://luma.millione.de/api/updates/latest")){
         updateCheckStatus="Updatecheck: HTTPS-Verbindung fehlgeschlagen";return;
     }
-    int code=request.GET();
+    const int code=request.GET();
     if(code==200){
-        String body=request.getString();
-        if(body.indexOf("\"available\":true")>=0){
-            String sha=extractReleaseSha(body);
-            if(sha.length()==40){
+        const String body=request.getString();
+        DynamicJsonDocument doc(4096);
+        DeserializationError parse=deserializeJson(doc,body);
+        if(parse || !doc["available"].is<bool>()){
+            updateCheckStatus="Updatecheck: JSON-Manifest ungueltig";
+        }else if(!doc["available"].as<bool>()){
+            updateAvailable=false;updateOtaApproved=false;
+            updateCheckStatus="Noch keine freigegebene Stable-Version";
+        }else{
+            const String sha=doc["source_sha"].as<String>();
+            const String checksum=doc["images"]["hmi"]["sha256"].as<String>();
+            const size_t bytes=doc["images"]["hmi"]["bytes"].as<size_t>();
+            const String channel=doc["channel"].as<String>();
+            const String hardware=doc["hardware"]["hmi"].as<String>();
+            const String url=doc["images"]["hmi"]["url"].as<String>();
+            if(!LumaOta::isHex(sha,40)||!LumaOta::isHex(checksum,64)||
+                bytes<65536||bytes>8u*1024u*1024u||channel!="stable"||
+                hardware!="Waveshare ESP32-S3-Touch-LCD-7 Rev1.2"||
+                url!=LumaOta::IMAGE_URL||!doc["paired"].as<bool>()){
+                updateAvailable=false;updateOtaApproved=false;
+                updateCheckStatus="Updatecheck: Manifest/Hardware ungueltig";
+            }else{
                 offeredUpdateSha=sha;
+                updateImageSha256=checksum;
+                updateImageBytes=bytes;
+                updateOtaApproved=doc["hmi_ota_enabled"].as<bool>();
                 updateAvailable=(sha!=String(LUMACUT_SOURCE_SHA));
                 updateCheckStatus=updateAvailable?
-                    ("NEUES UPDATE: "+sha.substring(0,12)):
-                    ("HMI-Stand aktuell: "+sha.substring(0,12));
-                if(updateAvailable)
-                    setNotice("LumaCut Update verfuegbar. Unter WLAN/System anzeigen.");
-            }else updateCheckStatus="Updatecheck: Manifest ungueltig";
-        }else if(body.indexOf("\"available\":false")>=0){
-            updateAvailable=false;
-            updateCheckStatus="Noch keine freigegebene Stable-Version";
-        }else updateCheckStatus="Updatecheck: Unerwartetes Manifest";
+                    ("UPDATE "+sha.substring(0,12)+(updateOtaApproved?" bereit":" (OTA gesperrt)")):
+                    ("HMI aktuell: "+sha.substring(0,12));
+                if(updateAvailable)setNotice("LumaCut Update verfuegbar. Unter WLAN/System anzeigen.");
+            }
+        }
     }else{
-        // A TLS mismatch is a failure, not permission to use plaintext HTTP.
         updateCheckStatus="Updatecheck: Server/TLS Fehler "+String(code);
     }
     request.end();
@@ -385,6 +410,49 @@ void updateCheckService(){
     checkLumaCutUpdates();
 }
 
+// Requires the operator to tap twice, with the laser supply physically OFF.
+void installHmiUpdate(){
+    if(!otaInstallRequested)return;
+    otaInstallRequested=false;
+    if(!updateAvailable||!updateOtaApproved||
+       !LumaOta::isHex(updateImageSha256,64)||!LumaOta::available()){
+        setNotice("HMI-OTA nicht freigegeben/kein A-B-Slot.");return;
+    }
+    if(!LumaOta::isHex(updateDeviceKey,64)){
+        setNotice("64-stelligen Geraeteschluessel zuerst im HMI speichern.");return;
+    }
+    if(!fresh()||machineState!=MachineState::Idle||owner!=Owner::None||
+       jobRunning||scriptActive||homingInProgress||postHomePending||
+       commandPending){
+        setNotice("OTA nur bei verbundenem, stillstehendem SKR im Leerlauf.");return;
+    }
+    writeCmd("M5");
+    machine.flush();
+    const esp_partition_t* previous=esp_ota_get_running_partition();
+    if(!previous){setNotice("Aktuelle HMI-Partition unbekannt.");return;}
+    setNotice("HMI-Update: Download und SHA256-Pruefung...");
+    lv_timer_handler();
+    String error;
+    const bool success=LumaOta::install(updateImageSha256,updateImageBytes,
+                                         updateDeviceKey,LUMACUT_UPDATE_CA,error);
+    if(!success){
+        setNotice("HMI-Update fehlgeschlagen: "+error);return;
+    }
+    prefs.putString("otaPrevious",String(previous->label));
+    prefs.putUInt("otaAttempts",0);
+    prefs.putBool("otaPending",true);
+    setNotice("HMI-Update installiert; starte neu.");
+    lv_timer_handler();delay(400);ESP.restart();
+}
+void restoreHmiIfBootBroken(){
+    if(!prefs.getBool("otaPending",false))return;
+    const String old=prefs.getString("otaPrevious","");
+    if(LumaOta::restorePrior(old)){
+        prefs.putBool("otaPending",false);
+        prefs.putUInt("otaAttempts",0);
+        ESP.restart();
+    }
+}
 void updateUi(){
     labelChanged(statusLabel,fresh()?stateText():"Keine Verbindung");
     labelChanged(positionLabel,(fresh()&&haveMpos)?
@@ -1342,7 +1410,18 @@ void makeUi(){
         lv_obj_set_style_border_width(field,0,0);
     }
     btn(c,"Mit WLAN verbinden",415,189,333,54,"wifi",BLUE,BG);
-    btn(c,"Updates pruefen",20,206,356,41,"updatecheck",PALE_BLUE,BLUE);
+    lbl(c,"UPDATE-KEY (aus Unraid .env)",20,140,14,SUBTLE);
+    updateKeyEntry=lv_textarea_create(c);
+    lv_obj_set_pos(updateKeyEntry,20,161);
+    lv_obj_set_size(updateKeyEntry,205,38);
+    lv_textarea_set_one_line(updateKeyEntry,true);
+    lv_textarea_set_max_length(updateKeyEntry,64);
+    lv_textarea_set_password_mode(updateKeyEntry,true);
+    lv_obj_set_style_bg_color(updateKeyEntry,lv_color_hex(GRAY),0);
+    lv_obj_set_style_text_color(updateKeyEntry,lv_color_hex(INK),0);
+    btn(c,"Key sichern",235,161,141,38,"updatekeysave",GRAY,INK);
+    btn(c,"Pruefen",20,206,170,41,"updatecheck",PALE_BLUE,BLUE);
+    btn(c,"HMI installieren",200,206,176,41,"updateinstall",BLUE,BG);
     updateLabel=lbl(c,"Noch nicht geprueft",20,247,14,SUBTLE);
     lv_obj_set_width(updateLabel,390);
 
@@ -1526,7 +1605,7 @@ void makeUi(){
     editCancelButton=btn(editOverlay,"Abbrechen",0,0,10,10,"editorcancel",GRAY,INK);
     layoutKeyboardDialog();
     lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
-    for(lv_obj_t* field : {ssidEntry,passwordEntry,macroEntry,
+    for(lv_obj_t* field : {ssidEntry,passwordEntry,updateKeyEntry,macroEntry,
          sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField,
          focusLiftField,focusGapField,tipOffsetField})
         lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
@@ -1705,6 +1784,29 @@ void action(const char* id){
             lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
             editTarget=nullptr;
             setNotice("Eingabe uebernommen.");updateUi();
+        }
+        return;
+    }
+    if(op=="updatekeysave"){
+        const String entry=lv_textarea_get_text(updateKeyEntry);
+        if(!LumaOta::isHex(entry,64)){
+            setNotice("Update-Key: 64 kleine Hex-Zeichen erforderlich.");return;
+        }
+        updateDeviceKey=entry;
+        prefs.putString("upkey",updateDeviceKey);
+        lv_textarea_set_text(updateKeyEntry,"");
+        setNotice("Update-Key im ESP32-NVS gespeichert.");return;
+    }
+    if(op=="updateinstall"){
+        if(!updateAvailable||!updateOtaApproved){
+            setNotice("Kein zur Installation freigegebenes HMI-Update.");return;
+        }
+        if(otaArmUntil && (int32_t)(otaArmUntil-millis())>0){
+            otaArmUntil=0;otaInstallRequested=true;
+            setNotice("Starte HMI-Update. Laser muss physisch AUS sein.");
+        }else{
+            otaArmUntil=millis()+15000;
+            setNotice("LASER STROMLOS! In 15 s erneut HMI installieren tippen.");
         }
         return;
     }
@@ -1946,6 +2048,12 @@ void action(const char* id){
 }
 void internalInit(){
     prefs.begin("lumacut",false);
+    updateDeviceKey=prefs.getString("upkey","");
+    if(prefs.getBool("otaPending",false)){
+        const uint32_t attempts=prefs.getUInt("otaAttempts",0)+1;
+        prefs.putUInt("otaAttempts",attempts);
+        if(attempts>1)restoreHmiIfBootBroken();
+    }
     machineZeroAtMax=prefs.getBool("zeroMax",true);
     focusLiftMm=fabsf(prefs.getFloat("zlift",7.f));
     zLiftDirectionVerified=prefs.getBool("zsignOK",false);
@@ -1968,6 +2076,7 @@ void internalInit(){
     Serial.begin(115200); // Native USB CDC for LightBurn; never print diagnostic messages here.
     touchInit();
     if(!displayInit()){
+        if(prefs.getBool("otaPending",false))restoreHmiIfBootBroken();
         // Do not enter LVGL/network/GRBL service with an uninitialized LCD.
         // Serial USB diagnostic is emitted only on startup failure.
         uiReady=false;
@@ -1990,6 +2099,11 @@ void internalInit(){
     lv_obj_del(boot);
     lv_timer_handler();
     uiReady=true;
+    if(prefs.getBool("otaPending",false)){
+        esp_ota_mark_app_valid_cancel_rollback();
+        prefs.putBool("otaPending",false);
+        prefs.putUInt("otaAttempts",0);
+    }
     networkInit();
     setNotice("LumaCut Control OS. Nur Laborbetrieb bis Hardware und Interlocks geprueft.");
 }
@@ -2040,6 +2154,7 @@ void loop(){
     internalJobService();
     bleUpdate();
     updateCheckService();
+    installHmiUpdate();
     lv_timer_handler();
     // Collect actual GRBL persistent limits and axis polarity once controller is
     // available; do not fabricate travel distances from the nominal frame size.
