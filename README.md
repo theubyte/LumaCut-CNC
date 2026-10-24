@@ -1,53 +1,81 @@
-# LumaCut CNC
+# LumaCut CNC · Raspberry Pi 400 Control Studio
 
-Quellcode, dokumentierte Builds und Inbetriebnahmeunterlagen für Atomstack A5 Pro / LaserTree LT-80W-AA-Pro mit **BIGTREETECH SKR Mini MZ V1.0** (STM32F103RC, TMC2209) sowie **Waveshare ESP32-S3-Touch-LCD-7 Rev1.2**.
+**Aktive Architektur (Oktober 2026): Raspberry Pi 400 ohne Display
+als zentraler Webserver und LightBurn-GRBL-Gateway.**
 
-**Stand 21.10.2026 – LumaCut Control OS (Waveshare als USB/WLAN-Gateway) und passende SKR-UART-Variante kompiliert, Hardwarevalidierung fehlt.** Quellcode und GitHub-Action-Builds sind vorhanden. Diese Builds sind **nicht für produktiven Laserbetrieb freigegeben**. Sie sind Labor-/Inbetriebnahmeimages. Prüfe vor Benutzung unbedingt die elektrische Belegung und die externe Sicherheitskette.
+```text
+Handy / PC  ───────┐
+                   ├── Pi 400 Control Studio (HTTP 8080)
+LightBurn (GRBL) ──┘   TCP 23 → USB serial → grblHAL SKR Mini MZ V1.0
+                                           ├─ XYZ + Z20 pre-XY homing
+                                           ├─ PA1 Laser-PWM
+                                           ├─ BED PC9 Laser-24V-Schalter
+                                           ├─ HE0 PC8 24V-LEDs (M7)
+                                           └─ FAN0 PC6 24V-Abluft (M8)
+Pi 400 Camera ────> Control Studio (JPEG snapshot)
+```
 
-**Reales Hardwareprofil (23.10.2026):** Genau drei Stepper (je einer für X, Y, Z), E-Treiber unbenutzt, **je ein Endschalter an X/Y/Z**, Z-Taster soll später auch Werkstückabtastung übernehmen. **XYZ-Homing ist verfügbar**, G38-Werkstückabtastung benötigt erst eine geprüfte gemeinsame Endstop/Probe-Logik. [Hardwarebelegung](docs/HARDWARE.md).
+Das Waveshare-ESP32-S3-HMI wird **nicht mehr benötigt**. Seine
+Quellcode-Historie bleibt als Archiv unter `firmware/hmi` erhalten.
+Keine doppelte LightBurn-USB-/UART-Gateway-Verbindung mehr.
 
-**[INBETRIEBNAHME: zuerst lesen](docs/INBETRIEBNAHME.md)**
+## Installation Raspberry Pi 400
 
-## Firmware
+**[Komplette Pi400-Einrichtung, Netzwerk, LightBurn und Updates](docs/PI400_CONTROL_STUDIO.md)**.
 
-| Projekt/Buildziel | Aufgabe | Status |
-|---|---|---|
-| `firmware/skr` → `lumacut_skr_mz_usb` | Altes grblHAL USB-/Keypad-Testprofil | Kompiliert; nicht mit Control OS kombinieren |
-| `firmware/skr` → `lumacut_skr_mz_hmi_uart` | **Control OS SKR-Profil:** grblHAL USART1 PA9/10 Hauptstream zum Waveshare | Kompiliert; Hardware ungetestet |
-| `firmware/hmi` → `lumacut_waveshare_s3` | 7-Zoll-RGB/GT911, Touch-Dashboard, keine Bewegungsbefehle | Kompiliert; LCD und Touch am echten Gerät ungetestet |
-| `firmware/hmi` → `lumacut_waveshare_s3_keypad` | Altes experimentelles UART-Keypad-Profil | Kompiliert; nicht mit Control OS kombinieren |
-| `firmware/hmi` → `lumacut_waveshare_s3_pro` | **Control OS:** 7″ Apple-inspiriertes UI, USB-C CDC und WLAN-GRBL für LightBurn, G-Code-Jobportal, BLE-Status, Parkmakros | Kompiliert; physische Tests ausstehend |
-| Z-Autofokus, XY-Tasterversatz, Höhenkarte | Ziel-Funktionen | Noch nicht implementiert; gemeinsamer Z-Taster benötigt validierte Probe-Umschaltung |
+Mit Raspberry Pi OS Lite 64-Bit und Repository-Zugriff:
 
-Die alte Keypad-HMI hat keine grblHAL-Rückmeldung. Die neue **Control-OS-HMI** wertet dagegen Statusdaten und X/Y/Z-Maschinenkoordinaten über den SKR-UART-Hauptstream aus. Das ist bisher nur softwareseitig kompiliert, nicht an der realen Maschine verifiziert.
+```bash
+git clone --branch main git@github.com:theubyte/LumaCut-CNC.git
+cd LumaCut-CNC
+sudo bash pi400/install.sh
+```
 
-**[GitHub Actions – Firmwarebuilds / Artefakte](https://github.com/theubyte/LumaCut-CNC/actions/workflows/ci.yml)**: einen mit grünem Haken abgeschlossenen Lauf auswählen, unten `UNVERIFIED-skr-...` und `UNVERIFIED-hmi-...` herunterladen. Im HMI-ZIP befinden sich beide Varianten unter den unterschiedlichen `.pio/build`-Verzeichnissen. Dateinamen sind nicht als Freigabe zu verstehen.
+Danach im LAN `http://lumacut.local:8080` (HMI-Code vom
+Installationsskript eingeben). In LightBurn manuell **GRBL → Network**
+mit Pi-IP/`lumacut.local`, **Port 23**, einrichten. LightBurn Bridge
+im offiziellen Sinne ist ausschließlich für Ruida und deshalb hier
+kein Teil der Installation.
 
-## Architektur
+**Achtung:** Der SKR muss die native USB-grblHAL-Firmware
+`lumacut_skr_mz_usb` erhalten, nicht die frühere
+`lumacut_skr_mz_hmi_uart`-Version. Falls der STM32 nur UART-GrblHAL
+hat, findet der Pi noch keinen GRBL-USB-Port.
 
-**Control OS:** `LightBurn (USB oder Wi-Fi/TCP) / Handy (WLAN) → Waveshare ESP32-S3 → UART2 3,3-V-TTL → SKR Mini MZ (USART1 grblHAL) → Motoren/Laser`.
+**Automatische Pi-Softwareupdates:** `pi400/update.sh` mit
+`lumacut-update.timer`. Read-only Deploy-Key einrichten:
+`sudo bash /opt/lumacut/pi400/setup-update-key.sh`.
 
-Das SKR benötigt dabei keine eigene USB-Verbindung zum PC. Der native USB-C des Waveshare ist der LightBurn-Port; der USB-TO-UART-Port teilt sich seine UART2-Pins und kann dafür nicht parallel verwendet werden. BLE unterstützt Status, aber kein LightBurn-Bluetooth-Serial.
+**Automatisches SKR-Firmwareflashen ist USB-only noch nicht
+hardwareverifiziert**. Neue Firmware-Binaries werden vom Buildserver
+als Paket geliefert; Installation via vorhandenem SD-/SWD-Bootloader,
+bis ein geeigneter Programmierweg nachgewiesen ist.
 
-**[LumaCut Control OS: Bedienung, Verkabelung, Grenzen](docs/LUMACUT_CONTROL_OS.md)**
+## Builds und Tests
 
-**[Maschinen-Setup: Achsrichtung, Soft Limits, Live-Arbeitsfläche, Displayrotation und Sensorless-Fakten](docs/MASCHINEN_SETUP.md)**
+- GitHub CI: [Pi 400 + SKR USB](https://github.com/theubyte/LumaCut-CNC/actions/workflows/ci.yml)
+- Unraid-Compiler: `https://luma.millione.de/`, Hauptoption
+  **Pi 400 + SKR USB**, erstellt LumaCut-Pi400-SKR-USB.zip.
+- SKR-Build: `python firmware/skr/build.py`.
+- Webserver: `python -m lumacut.app` mit
+  `PYTHONPATH=pi400` und `LUMACUT_KEY` Umgebungsvariablen.
+- Tests: `python -m unittest discover -s tests -v`.
 
-Der Laser darf nur nach externer hardwarewirksamer Sicherheitsfreigabe zugeschaltet werden. USART3 PC10/PC11 bleibt für TMC2209 reserviert. Unraid ist ausschließlich GitHub-Buildserver, nicht Teil der Maschinensteuerung.
+## Bedienumfang
 
-## Quellen und Buildserver
+Responsive Webinterface mit Maschinenstatus, GRBL-Einstellungen,
+X/Y/Z-Jog, Homing, G-Code-Dateien, Parkplätzen, Fokus, offset-korrektem
+Werkstückraster (noch keine gemessene Höhenkarte), LEDs/Abluft,
+Router-WLAN-Auswahl, Kamera-Schnappschuss, LightBurn-Verbindung und
+Verbindungs-/Spamdiagnose. GRBL-Echtzeit-Status für die Webanzeige
+bleibt vom LightBurn-TCP-Stream getrennt. Der Pi leitet LightBurn
+`ok`, `error`, `ALARM`, `$$`, `$I` und hosteigene
+`?`-Antworten transparent an den echten SKR weiter.
 
-- `firmware/skr/build.py`: verwendet gepinnten offiziellen grblHAL-STM32F1xx-Code mit Mini-MZ-Pinanpassung und 28KiB-SD-Bootloader-Layout.
-- `firmware/hmi/src/main.cpp`: native ESP32-S3-RGB/GT911/CH422G-LVGL-Steuerung.
-- `setup/`, `builder/`: Unraid-Docker-Buildserver, LAN-UI auf Port 18744; neue Firmwareziele **LumaCut Control OS** und **SKR UART für Control OS**. HMI-Flashpaket für Windows oder bei HTTPS Browser-Web-Serial-Flash; kein USB-/Flash-Zugriff durch den Container.
-- `config/laser.yaml`: Planungsparameter, **keine** automatisch auf den SKR übertragenen Maschinenwerte.
-- `tools/probe_math.py`, `tests/`: Geometrieberechnung und hardwarefreie Unit-Tests.
-- `docs/INBETRIEBNAHME.md`: verpflichtende Checkliste, Pinbelegung und sichere Prüfschritte.
+**Hardware-Status:** Software-Builds ersetzen keine Inbetriebnahme
+am realen Pi/SKR. Laserleistung für Ersttests physisch abschalten.
+Die externe Not-Aus-/Gehäuse-Schutzkette darf nicht durch die
+Websteuerung ersetzt werden.
 
-**Waveshare HMI vom Build Lab flashen:** [Anleitung und Update des Unraid-Containers](builder/README.md). Der Builder erstellt ein vollständiges ESP32-S3-BIN und ein Windows-Paket mit lokalem Browser-Flashassistenten. Zuerst die HMI-Variante ohne UART-Jog testen.
-
-Unraid: `bash setup/unraid-install.sh` und `bash setup/github-setup.sh` nur nach Prüfung der Scripts ausführen.
-
-## Freigabe
-
-Alle per CI erstellten Images heißen ausdrücklich `UNVERIFIED`. Nicht mit angeschlossenem aktiven Laser flashen oder testen. Not-Aus-/Schlüssel-/Gehäuse-Interlocks müssen hardwareseitig wirken, nicht nur durch Firmware.
+Alte Waveshare-Dokumentation: `docs/LUMACUT_CONTROL_OS.md`.
+24V-Laser/BED-Verdrahtung: `docs/24V_AUSGAENGE_LASER_LED_ABLUFT.md`.
