@@ -70,6 +70,80 @@ def main():
         if actual!=SHA: raise RuntimeError("Incorrect source revision")
         header=root/"boards/btt_skr_mini_e3_2.0_map.h"
         header.write_text(patch(header.read_text()))
+        # LumaCut-specific Z-clearance occurs INSIDE grblHAL's system homing
+        # state, between Z and XY cycles, not afterward in the HMI.
+        # Armed only after the operator has calibrated Z and explicitly sets
+        # the existing GRBL pull-off $27 to the opt-in sentinel 2.5 mm.
+        limits=root/"grbl"/"machine_limits.c"
+        source=limits.read_text()
+        source=change(source,
+            'return grbl.home_machine(cycle, auto_square) ? Status_OK : Status_Unhandled;',
+            'return grbl.home_machine(cycle, auto_square) ? Status_OK : Status_Unhandled;')
+        marker='// Homes the specified cycle axes, sets the machine position'
+        if source.count(marker)!=1:
+            raise RuntimeError("grblHAL homing function marker has changed")
+        routine="""#ifdef LUMACUT_SAFE_Z20
+// Runs as a bounded system motion *after* Z homing and BEFORE XY homing.
+// Runtime opt-in uses documented GRBL $27 pull-off value 2.5mm; never
+// automatically retreat 20mm with uncalibrated steps/mm.
+FLASHMEM status_code_t limits_lumacut_z_clearance (void)
+{
+    const float target = 20.0f;
+    const float current_pulloff = homing_pulloff.values[Z_AXIS];
+    if(fabsf(settings.homing.pulloff - 2.5f) > 0.001f)
+        return Status_OK; // Not yet commissioned for this machine.
+    if(!(sys.homed.mask & bit(Z_AXIS)) ||
+       settings.axis[Z_AXIS].max_travel > -21.0f ||
+       current_pulloff >= target ||
+       current_pulloff < 0.5f ||
+       settings.axis[Z_AXIS].steps_per_mm <= 0.0f)
+        return Status_TravelExceeded; // Refuse XY homing if Z travel unknown.
+    coord_data_t distance = {0};
+    distance.values[Z_AXIS] = target - current_pulloff;
+    return limits_pull_off((axes_signals_t){.z = On}, &distance, 1.0f)
+        ? Status_OK : Status_Unhandled;
+}
+#endif
+
+"""
+        source=source.replace(marker,routine+marker)
+        # The original generic pull-off feed is based on X rate.
+        # For the special Z retreat, constrain it to the real Z max rate.
+        rate='plan_data.feed_rate = settings.axis[0].homing_seek_rate * sqrtf(n_axis);'
+        if source.count(rate)!=1:
+            raise RuntimeError("grblHAL pull-off feed layout has changed")
+        source=source.replace(rate,rate+"""
+#ifdef LUMACUT_SAFE_Z20
+    if(axis.mask == bit(Z_AXIS))
+        plan_data.feed_rate = fminf(600.0f, settings.axis[Z_AXIS].max_rate);
+#endif
+""")
+        limits.write_text(source)
+        motion=root/"grbl"/"motion_control.c"
+        body=motion.read_text()
+        location='if((homed_status = limits_go_home(cycle)) != Status_OK)\\n                        break;'
+        if body.count(location)!=1:
+            raise RuntimeError("grblHAL complete homing loop changed")
+        body=body.replace(location,location+"""
+#ifdef LUMACUT_SAFE_Z20
+                    // Standard grblHAL: cycle[0]=Z, cycle[1]=XY.
+                    // Perform extra Z clearance before any XY movement,
+                    // but not for standalone $HZ material probing.
+                    if(idx == 0 && cycle.mask == bit(Z_AXIS)) {
+                        if((homed_status = limits_lumacut_z_clearance()) != Status_OK)
+                            break;
+                    }
+#endif
+""")
+        prototype='#include "machine_limits.h"'
+        if prototype not in body:
+            raise RuntimeError("machine_limits include absent")
+        body=body.replace(prototype,prototype+"""
+#ifdef LUMACUT_SAFE_Z20
+extern status_code_t limits_lumacut_z_clearance (void);
+#endif
+""",1)
+        motion.write_text(body)
         # Use upstream's USB CDC environment and verified 28K bootloader
         # linker memory layout, not the unoffset FLASH linker script.
         with (root/"platformio.ini").open("a") as h:
@@ -110,7 +184,8 @@ def main():
             # single-Z homing for workpiece contact using the same head switch.
             # These are factory defaults; SKR nonvolatile $22 takes precedence.
             h.write("  -D DEFAULT_HOMING_ENABLE=1\n")
-            h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")
+            h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")            h.write("  -D LUMACUT_SAFE_Z20=1\\n")
+
         run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/env
         out.mkdir(parents=True,exist_ok=True)
