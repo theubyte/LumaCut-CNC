@@ -14,6 +14,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "secure_ota.h"
+#include "probe_grid.h"
 #include "skr_stm32_uart_ota.h"
 #include <time.h>
 #include "update_ca.h"
@@ -96,6 +97,9 @@ lv_obj_t *releaseButton=nullptr,*focusTargetButton=nullptr,
     *autoZButton=nullptr,*focusLiftField=nullptr,*focusGapField=nullptr,*tipOffsetField=nullptr,
     *probeTravelField=nullptr,*probeFeedField=nullptr,*probeInfo=nullptr,
     *motorInfo=nullptr,*catalogTitle=nullptr;
+lv_obj_t* probeFields[7]{}; // originXY, sizeXY, switch offsetXY, raster pitch
+lv_obj_t* probePlanLabel=nullptr;
+LumaProbe::Region probeRegion{10.f,10.f,100.f,100.f,10.f,0.f,0.f};
 lv_obj_t* catalogNamesLabel[6]{};
 lv_obj_t* catalogFields[6]{};
 bool catalogDirty[6]{};
@@ -123,7 +127,7 @@ int requestedSettingId=-1;
 float requestedSettingValue=0.f;
 String lastControllerError, zLiftReason;
 uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
-bool zLiftDirectionVerified=false;
+
 lv_obj_t* updateKeyEntry=nullptr,*calCommandedField=nullptr,*calActualField=nullptr;
 int jogSpeedPercent=100;
 bool zScaleMeasured=false;
@@ -1283,6 +1287,7 @@ void openKeyboard(lv_event_t* e){
     lv_textarea_set_password_mode(editInput,editTarget==passwordEntry);
     bool isCatalog=false;
     for(auto field : catalogFields)if(field==editTarget)isCatalog=true;
+    for(auto field : probeFields)if(field==editTarget)isCatalog=true;
     const bool numeric=isCatalog||editTarget==sizeXField||editTarget==sizeYField||
         editTarget==sizeZField||editTarget==paramKeyField||
         editTarget==paramValueField||editTarget==focusLiftField||
@@ -1640,8 +1645,7 @@ void makeUi(){
     probeInfo=lbl(c,"Probe: Z-Endschalter wird geteilt",18,156,14,SUBTLE);
     lv_obj_set_width(probeInfo,343);
     btn(c,"Probe konfigurieren",18,186,344,39,"probeSetup",GRAY,INK);
-    btn(c,"Z-Test 0,5 mm",18,230,166,34,"ztest",GRAY,INK);
-    btn(c,"Z-Richtung OK",196,230,166,34,"zverify",PALE_BLUE,BLUE);
+    btn(c,"Abtastfeld / XY-Offset",18,230,344,34,"probeSetup",PALE_BLUE,BLUE);
 
     // Six compact parameter rows: left live GRBL name, editable value on
     // the right, one explicitly acknowledged save control per setting.
@@ -1667,25 +1671,35 @@ void makeUi(){
         btn(stripe,"✓",675,1,57,30,saves[i],PALE_BLUE,BLUE);
     }
 
-    // A single-axis Z homing cycle can use the existing PC2 switch
-    // as a MATERIAL SURFACE reference, if the head-mounted switch physically
-    // touches the workpiece. It is NOT G38 probing and changes Z machine home.
+    // Independent X/Y switch-tip offsets and complete rectangle raster.
+    // Planning does not fire the laser or move the carriage. A hardware-
+    // verified independent G38 probe input is required for actual Z scanning.
     c=card(pages[9],0,0,380,268);
-    lbl(c,"Werkstueck-Z / PC2",18,12,20);
-    lbl(c,"Z-Schalter am Kopf auf Werkstueckkontakt?",18,49,14,SUBTLE);
-    btn(c,"Kopf-Taster Modus",18,76,343,48,"contactMode",PALE_BLUE,BLUE);
-    btn(c,"Schalterstatus lesen",18,138,343,47,"switchcheck",GRAY,INK);
-    lbl(c,"Z-only Homing: $HZ, benoetigt $22 Bit 1",18,198,14,SUBTLE);
-    lbl(c,"Nur bei korrekter Z-Suchrichtung ($23)!",18,225,14,RED);
+    lbl(c,"Werkstueck / Abtastfeld",18,10,20);
+    lbl(c,"Start X",18,43,14,SUBTLE);
+    lbl(c,"Start Y",196,43,14,SUBTLE);
+    probeFields[0]=configEntry(c,18,65,163,40,String(probeRegion.x,2));
+    probeFields[1]=configEntry(c,196,65,165,40,String(probeRegion.y,2));
+    lbl(c,"Breite",18,115,14,SUBTLE);
+    lbl(c,"Hoehe",196,115,14,SUBTLE);
+    probeFields[2]=configEntry(c,18,138,163,40,String(probeRegion.width,2));
+    probeFields[3]=configEntry(c,196,138,165,40,String(probeRegion.height,2));
+    probePlanLabel=lbl(c,"Raster noch nicht erstellt",18,190,14,SUBTLE);
+    lv_obj_set_width(probePlanLabel,345);
+    lv_label_set_long_mode(probePlanLabel,LV_LABEL_LONG_DOT);
+    lbl(c,"Positionen im positiven Arbeitsrahmen [mm]",18,226,14,SUBTLE);
 
     c=card(pages[9],392,0,380,268);
-    lbl(c,"Werkstueck neu referenzieren",18,12,20);
-    lbl(c,"Die Z-Maschinenreferenz wird neu gesetzt.",18,50,14,SUBTLE);
-    lbl(c,"Homing-Tempo: $24 langsam, $25 schnell.",18,76,14,SUBTLE);
-    btn(c,"Z-Oberflaeche antasten",18,113,343,56,"zsurface",BLUE,BG);
-    btn(c,"Z auf Abstand",18,180,166,46,"zlift",PALE_BLUE,BLUE);
-    btn(c,"Zurueck",196,180,165,46,"focusgo",GRAY,INK);
-    lbl(c,"Kein G38-Probing / kein Hoehenraster",18,238,14,SUBTLE);
+    lbl(c,"Taster-Offset",18,10,20);
+    lbl(c,"X relativ zum Laser",18,43,14,SUBTLE);
+    lbl(c,"Y relativ zum Laser",196,43,14,SUBTLE);
+    probeFields[4]=configEntry(c,18,65,163,40,String(probeRegion.offsetX,2));
+    probeFields[5]=configEntry(c,196,65,165,40,String(probeRegion.offsetY,2));
+    lbl(c,"Rasterabstand [mm]",18,115,14,SUBTLE);
+    probeFields[6]=configEntry(c,18,138,163,40,String(probeRegion.pitch,2));
+    btn(c,"Werte sichern",196,138,165,40,"probeSave",GRAY,INK);
+    btn(c,"Raster berechnen",18,188,343,42,"probePlan",BLUE,BG);
+    lbl(c,"Planung; kein G38-Taster an PC14 verbunden",18,236,14,RED);
 
     // Guided X/Y/Z steps/mm correction, accessible from Jog.
     // No blind screw pitch assumption: the operator measures the real travel.
@@ -1757,6 +1771,8 @@ void makeUi(){
          sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField,
          focusLiftField,focusGapField,tipOffsetField})
         lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
+    for(auto field : probeFields)
+        lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
     for(auto field : catalogFields)
         lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
     refreshSizeFields();
@@ -1823,10 +1839,6 @@ void action(const char* id){
            a<0.05f||a>50.f||b<0.5f||b>100.f||fabsf(c)>100.f){
             setNotice("Z-Ziel 0.05-50 mm; Fokus 0.5-100 mm; Offset +/-100 mm.");return;
         }
-        if(fabsf(a-focusLiftMm)>0.001f){
-            zLiftDirectionVerified=false;
-            prefs.putBool("zsignOK",false);
-        }
         focusLiftMm=a;focusGapMm=b;tipOffsetMm=c;
         prefs.putFloat("zlift",a);prefs.putFloat("focgap",b);prefs.putFloat("tipoffs",c);
         setNotice("Z-Zielabstand, Fokuswert und Tasteroffset gespeichert.");
@@ -1836,25 +1848,8 @@ void action(const char* id){
         autoLiftAfterHome=!autoLiftAfterHome;
         prefs.putBool("autoZlift",autoLiftAfterHome);
         setNotice(autoLiftAfterHome?
-            "Auto-Z EIN. Vor Auto-Fahrt Z-Test 0,5 mm und Richtung OK erforderlich.":
+            "Auto-Z EIN. Z-Kalibrierung und Verfahrwege pruefen.":
             "Auto-Z nach Homing AUS");
-        return;
-    }
-    if(op=="ztest"){
-        // +0.5 operator-space is a small retreat from the homed reference.
-        float delta=machinePosFromOperator(0.5f);
-        if(zJogRawDelta(delta))
-            setNotice("Z-Test +0,5 mm im positiven Anzeigeraum gestartet.");
-        else setNotice("Z-Test abgelehnt: "+zLiftReason);
-        return;
-    }
-    if(op=="zverify"){
-        if(!machineHomed||!fresh()||!haveMpos||workZ<=0||!canJog()){
-            setNotice("Z-Richtung erst nach erfolgreichem Homing und Z-Test bestaetigen.");return;
-        }
-        zLiftDirectionVerified=true;
-        prefs.putBool("zsignOK",true);
-        setNotice("Z-Vorzeichen vom Bediener bestaetigt. Auto-Z nutzt diesen Wert.");
         return;
     }
     if(op=="zlift"){
@@ -1893,6 +1888,72 @@ void action(const char* id){
         return;
     }
     if(op=="probeSetup"){switchTab(9);return;}
+    if(op=="probeSave"||op=="probePlan"){
+        float values[7]{};
+        for(int i=0;i<7;i++){
+            String raw=lv_textarea_get_text(probeFields[i]);
+            char* end=nullptr;
+            values[i]=strtof(raw.c_str(),&end);
+            if(raw.isEmpty()||end==raw.c_str()||*end||!isfinite(values[i])){
+                setNotice("Abtastfeld: Alle sieben Werte numerisch eingeben.");return;
+            }
+        }
+        LumaProbe::Region candidate{values[0],values[1],values[2],values[3],
+                                     values[6],values[4],values[5]};
+        if(candidate.width<=0.f||candidate.height<=0.f||
+           candidate.pitch<=0.f||fabsf(candidate.offsetX)>3000.f||
+           fabsf(candidate.offsetY)>3000.f){
+            setNotice("Abtastfeld: Breite, Hoehe, Raster oder Offset ungueltig.");return;
+        }
+        probeRegion=candidate;
+        prefs.putFloat("prX",probeRegion.x);prefs.putFloat("prY",probeRegion.y);
+        prefs.putFloat("prW",probeRegion.width);prefs.putFloat("prH",probeRegion.height);
+        prefs.putFloat("prPitch",probeRegion.pitch);
+        prefs.putFloat("prOX",probeRegion.offsetX);prefs.putFloat("prOY",probeRegion.offsetY);
+        if(op=="probeSave"){
+            setNotice("Abtastfeld und XY-Tasterversatz persistent gespeichert.");return;
+        }
+        if(workX<=0||workY<=0){
+            setNotice("Zuerst Rahmenmasse $130/$131 mit $ Lesen laden.");return;
+        }
+        LumaProbe::Plan plan{};
+        if(!LumaProbe::clip(probeRegion,workX,workY,0.5f,plan)){
+            setNotice("Taster kann mit diesem Offset keine Stelle im Feld erreichen.");return;
+        }
+        const uint64_t samples=(uint64_t)plan.nx*plan.ny;
+        if(samples>(sdReady?150000u:4000u)){
+            setNotice("Raster zu fein fuer Speicher: Abstand vergroessern.");return;
+        }
+        if(!storageOk){setNotice("SD/LittleFS nicht verfuegbar.");return;}
+        if(!jobStore().exists("/logs"))jobStore().mkdir("/logs");
+        File file=jobStore().open("/logs/probe_plan.csv","w");
+        if(!file){setNotice("Abtastplan konnte nicht gespeichert werden.");return;}
+        file.println("switch_x_mm,switch_y_mm,laser_x_mm,laser_y_mm,mpos_x_mm,mpos_y_mm");
+        bool valid=true;
+        for(uint32_t n=0;n<(uint32_t)samples;n++){
+            float sx,sy,lx,ly;
+            if(!LumaProbe::point(probeRegion,plan,n,sx,sy,lx,ly)||
+               lx<0.5f-0.0001f||ly<0.5f-0.0001f||
+               lx>workX-0.5f+0.0001f||ly>workY-0.5f+0.0001f){
+                valid=false;break;
+            }
+            file.print(sx,3);file.print(',');
+            file.print(sy,3);file.print(',');
+            file.print(lx,3);file.print(',');
+            file.print(ly,3);file.print(',');
+            file.print(machinePosFromOperator(lx),3);file.print(',');
+            file.println(machinePosFromOperator(ly),3);
+            if(n%64==0)delay(0);
+        }
+        file.close();
+        if(!valid){jobStore().remove("/logs/probe_plan.csv");
+            setNotice("Abtastplan verworfen: Achsgrenze verletzt.");return;}
+        const String msg=String(samples)+" Rasterpunkte "+(plan.clipped?
+            "(auf Taster-Reichweite begrenzt)":"(Feld vollstaendig)");
+        labelChanged(probePlanLabel,msg);
+        setNotice(msg+"; nur Planung, PC14-G38-Abtastung nicht vorhanden.");
+        return;
+    }
     if(op=="contactMode"){
         contactSwitchAtHead=!contactSwitchAtHead;
         prefs.putBool("headsw",contactSwitchAtHead);
@@ -2228,9 +2289,9 @@ void action(const char* id){
         return;
     }
     if(op=="safez20"){
-        if(!zScaleMeasured||!zLiftDirectionVerified||workZ<21.f||
+        if(!zScaleMeasured||workZ<21.f||
            !canJog()||!knownSetting[27]){
-            setNotice("Z20: Z Soll/Ist kalibrieren, Z-Test bestaetigen, XYZ homen und $ lesen.");
+            setNotice("Z20: Z-Weg kalibrieren, Arbeitsweg pruefen, XYZ homen und $ lesen.");
             return;
         }
         if(zSafetyArmUntil && (int32_t)(zSafetyArmUntil-millis())>0){
@@ -2343,13 +2404,19 @@ void internalInit(){
     }
     machineZeroAtMax=prefs.getBool("zeroMax",true);
     focusLiftMm=fmaxf(20.f,fabsf(prefs.getFloat("zlift",20.f)));
-    zLiftDirectionVerified=prefs.getBool("zsignOK",false);
     focusGapMm=prefs.getFloat("focgap",7.f);
     tipOffsetMm=prefs.getFloat("tipoffs",0.f);
     probeTravelMm=prefs.getFloat("ptravel",15.f);
     probeFeedMm=prefs.getFloat("pfeed",60.f);
     autoLiftAfterHome=prefs.getBool("autoZlift",true);
     contactSwitchAtHead=prefs.getBool("headsw",false);
+    probeRegion.x=prefs.getFloat("prX",10.f);
+    probeRegion.y=prefs.getFloat("prY",10.f);
+    probeRegion.width=prefs.getFloat("prW",100.f);
+    probeRegion.height=prefs.getFloat("prH",100.f);
+    probeRegion.pitch=prefs.getFloat("prPitch",10.f);
+    probeRegion.offsetX=prefs.getFloat("prOX",0.f);
+    probeRegion.offsetY=prefs.getFloat("prOY",0.f);
     // Format only on first provisioning. Never silently erase saved jobs
     // because of a later filesystem or power-loss mounting failure.
     internalStorageReady=LittleFS.begin(false);
