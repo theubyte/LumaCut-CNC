@@ -480,7 +480,18 @@ def do_action(op):
         return run_commands(["$I", "$"], timeout=15)
     if op in ("home", "enablehome"):
         require_free()
-        return run_commands(["$H" if op == "home" else "$22=1"], timeout=150)
+        result = run_commands(["$H" if op == "home" else "$22=1"], timeout=150)
+        if op == "home" and config["focus"].get("auto") and controller.homed:
+            # SKR has already retracted Z before XY; Pi performs only the
+            # additional operator-configurable final clearance.
+            result += " · " + do_action("zlift")
+        return result
+    if op == "toggleAutoLift":
+        with config_lock:
+            config["focus"]["auto"] = not bool(config["focus"].get("auto"))
+            persist()
+        return "Automatischer Z-Sicherheitsabstand nach Homing: " + (
+            "EIN" if config["focus"]["auto"] else "AUS")
     if op == "jogsound":
         config["jog_percent"] = {100: 50, 50: 25, 25: 100}.get(config["jog_percent"], 100)
         persist()
@@ -557,7 +568,7 @@ def do_action(op):
     if op == "start":
         return start_job()
     if op == "updatecheck":
-        return "Updates werden über die Pi-400-Verwaltung geprüft."
+        return update_description()
     if op in ("updateinstall", "skrinstall"):
         return "Firmwareupdates nur über abgesicherten Pi-Updatepfad."
     if op == "softon":
@@ -829,11 +840,43 @@ def camera():
     return Response(result.stdout, mimetype="image/jpeg")
 
 
+def git_revision(*args):
+    # Read only. Never call shell and never interpolate untrusted content.
+    try:
+        value = subprocess.run(["git", "-C", str(ROOT.parent), *args],
+                               capture_output=True, text=True, timeout=10)
+        if value.returncode != 0:
+            return None
+        return value.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def pi_update_info():
+    local = git_revision("rev-parse", "HEAD")
+    remote = git_revision("ls-remote", "origin", "refs/heads/main")
+    remote_sha = remote.split()[0] if remote and len(remote.split()) == 2 else None
+    return {"local_sha": local, "remote_sha": remote_sha,
+            "available": bool(local and remote_sha and local != remote_sha),
+            "remote_reachable": remote_sha is not None,
+            "automatic": True}
+
+
+def update_description():
+    info = pi_update_info()
+    if not info["remote_reachable"]:
+        return "GitHub momentan nicht erreichbar. Automatische Updates bleiben aktiviert."
+    if info["available"]:
+        return "Neuer Pi400-Code in main gefunden. Der automatische Updater installiert nur bei sicherem Leerlauf."
+    return "Pi400 Control OS ist auf dem neuesten GitHub-Stand."
+
+
 @app.get("/api/update/status")
 def update_status():
     # The installer/updater is a distinct privileged systemd task, not
     # callable by arbitrary web requests.
     return jsonify(pi_auto_update=True,
+                   pi=pi_update_info(),
                    maintenance=controller.maintenance_file.exists(),
                    skr_auto_flash=False,
                    skr_requires="verified SWD/ST-Link or supported bootloader flashing",
