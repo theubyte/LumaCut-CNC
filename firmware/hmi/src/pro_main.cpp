@@ -2081,6 +2081,11 @@ void internalInit(){
         prefs.putBool("fsinit",true);
         if(!LittleFS.exists("/jobs"))LittleFS.mkdir("/jobs");
     }
+
+    loadParks();
+    machine.begin(115200,SERIAL_8N1,44,43); // Physical UART2 switch; SKR PA9/PA10 crossed.
+    Serial.begin(115200); // Native USB CDC for LightBurn; never print diagnostic messages here.
+    touchInit();
     // Optional 4GB FAT32 microSD; one SPI client, no dedicated GPIO CS.
     // Waveshare reference: MOSI 11, SCLK 12, MISO 13, CS CH422G EXIO4=LOW.
     // touchInit() has already enabled that CS and preserved LCD/TP lines.
@@ -2141,10 +2146,6 @@ void internalInit(){
         SPI.end();
     }
     storageOk=sdReady||internalStorageReady;
-    loadParks();
-    machine.begin(115200,SERIAL_8N1,44,43); // Physical UART2 switch; SKR PA9/PA10 crossed.
-    Serial.begin(115200); // Native USB CDC for LightBurn; never print diagnostic messages here.
-    touchInit();
     if(!displayInit()){
         if(prefs.getBool("otaPending",false))restoreHmiIfBootBroken();
         // Do not enter LVGL/network/GRBL service with an uninitialized LCD.
