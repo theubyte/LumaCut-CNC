@@ -285,7 +285,7 @@ def service_backup():
 def service_diagnostics():
     require_service()
     info = controller.status()
-    return jsonify(connected=info["connected"], state=info["state"],
+    return jsonify(connected=info["connected"], ready=info["bootstrap_ready"], state=info["state"],
                    firmware=info["identity"],
                    extra_outputs=info["extra_outputs"],
                    homed=info["homed"], owner=info["owner"],
@@ -330,6 +330,7 @@ def status():
     p = stat["position"]
     return jsonify(
         connected=stat["connected"],
+        ready=stat["bootstrap_ready"],
         state=stat["state"],
         owner=stat["owner"],
         position="X %.2f Y %.2f Z %.2f" % tuple(p) if p else "X — Y — Z —",
