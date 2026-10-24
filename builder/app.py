@@ -20,12 +20,13 @@ UPDATE_PUBLIC_ORIGIN=os.environ.get("UPDATE_PUBLIC_ORIGIN","https://luma.million
 RELEASE_FILE=ROOT/"approved-release.json"
 OTA_IMAGE_NAME="HMI_OTA_APP_UNVERIFIED.bin"
 SKR_RELEASE_IMAGE_NAME="SKR_UART_UNVERIFIED_firmware.bin"
-TARGETS={"tests","stm32_project_unverified","stm32_hmi_bridge_unverified","esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified","lumacut_complete_suite_unverified"}
+TARGETS={"tests","stm32_project_unverified","stm32_hmi_bridge_unverified","esp32_hmi_unverified","esp32_hmi_keypad_unverified","esp32_hmi_pro_unverified","lumacut_complete_suite_unverified","pi400_skr_usb_unverified"}
 ID_RE=re.compile(r"^[a-f0-9]{16}$")
 app=Flask(__name__)
 lock=threading.Lock()
 running=None
 STAGES={
+    "pi400_skr_usb_unverified":["GitHub-Quellen","SKR USB grblHAL kompilieren","Pi 400 + USB-Paket erstellen"],
     "lumacut_complete_suite_unverified":["GitHub-Quellen","SKR grblHAL kompilieren","Waveshare HMI kompilieren","Komplettpaket erstellen"],
     "stm32_hmi_bridge_unverified":["GitHub-Quellen","SKR grblHAL kompilieren","Firmware vorbereiten"],
     "stm32_project_unverified":["GitHub-Quellen","SKR grblHAL kompilieren","Firmware vorbereiten"],
@@ -35,6 +36,7 @@ STAGES={
     "tests":["GitHub-Quellen","Projekt-Tests","Pruefbericht erstellen"]
 }
 WEIGHTS={
+    "pi400_skr_usb_unverified":[0.10,0.80,0.10],
     "lumacut_complete_suite_unverified":[0.08,0.38,0.44,0.10],
     "stm32_hmi_bridge_unverified":[0.09,0.81,0.10],
     "stm32_project_unverified":[0.09,0.81,0.10],
@@ -46,6 +48,7 @@ WEIGHTS={
 # Cold-start estimates until this machine has finished a job in each category.
 # Clearly marked as approximations in the UI, not fabricated completion times.
 BASELINE_SECONDS={
+    "pi400_skr_usb_unverified":400,
     "lumacut_complete_suite_unverified":1200,
     "stm32_hmi_bridge_unverified":330,
     "stm32_project_unverified":330,
@@ -192,6 +195,42 @@ def perform(job_id,target):
                 run(["python","-m","unittest","discover","-s","tests","-v"],src,log,120)
                 run(["python","-m","py_compile","builder/app.py","tools/probe_math.py"],src,log,60)
                 mark_stage(folder,meta,2)
+            elif target=="pi400_skr_usb_unverified":
+                # Current architecture: Raspberry Pi 400 hosts LightBurn TCP/web,
+                # SKR Mini MZ runs native USB grblHAL, no Waveshare firmware.
+                project=src/"firmware"/"skr"
+                mark_stage(folder,meta,1)
+                run(["python","build.py"],project,log,2100)
+                output=project/".pio"/"build"/"lumacut_skr_mz_usb"
+                bins={}
+                for fn in ("firmware.bin","firmware.elf"):
+                    item=output/fn
+                    if not item.is_file() or not item.stat().st_size:
+                        raise RuntimeError("SKR USB fehlt: "+fn)
+                    dest=folder/("SKR_USB_"+fn)
+                    shutil.copy2(item,dest)
+                    bins[fn]=dest
+                    meta["files"].append({"name":dest.name,"bytes":dest.stat().st_size,
+                        "sha256":hashlib.sha256(dest.read_bytes()).hexdigest()})
+                mark_stage(folder,meta,2)
+                archive=folder/"LumaCut-Pi400-SKR-USB.zip"
+                with zipfile.ZipFile(archive,"w",zipfile.ZIP_DEFLATED) as z:
+                    for name,file in bins.items():
+                        z.write(file,"SKR-USB/"+name)
+                    for file in (src/"pi400").rglob("*"):
+                        if file.is_file() and "__pycache__" not in file.parts:
+                            z.write(file,file.relative_to(src))
+                    z.write(src/"lightburn"/"LumaCut-CNC-USB.lbdev",
+                            "lightburn/LumaCut-CNC-USB.lbdev")
+                    z.writestr("README-PI400.txt",
+                        "LumaCut Pi400 + SKR USB. Pi: Raspberry Pi OS Lite. "
+                        "SKR: USB-firmware.bin statt altem UART-Build. "
+                        "Start: sudo bash pi400/install.sh. "
+                        "Hardwarefreigabe und Laser-Interlock erforderlich.\n")
+                meta["files"].append({"name":archive.name,
+                    "bytes":archive.stat().st_size,
+                    "sha256":hashlib.sha256(archive.read_bytes()).hexdigest()})
+                log.write("LUMACUT PI400: USB SKR + headless Control Studio.\n")
             elif target=="lumacut_complete_suite_unverified":
                 # Build one source commit into a paired, self-contained release.
                 skr=src/"firmware"/"skr"
