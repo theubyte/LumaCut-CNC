@@ -81,6 +81,10 @@ p{line-height:1.5;margin:8px 0}small,.muted{color:var(--muted)}
 <div class="two"><button class="primary" data-op="home">Referenzfahrt</button><button data-op="readcfg">GRBL lesen</button>
 <button data-op="frame">Kontur testen</button><button data-op="park">Parken</button>
 <button data-op="toggle">Pause / Weiter</button><button class="stop" data-op="abort">Abbrechen</button></div>
+<h3>24-V-Zubehör</h3>
+<div class="two"><button id="ledControl" data-op="lightToggle">LED-Beleuchtung</button>
+<button id="exhaustControl" data-op="exhaustToggle">Abluftlüfter</button></div>
+<p class="caption">HE0/PC8 schaltet die LEDs, FAN0/PC6 die Abluft. FAN1/PC7 gibt über einen externen High-Side-Schalter den Laser frei.</p>
 <h3>Aktiver Auftrag</h3><p id="jobname" class="muted">Kein Job ausgewählt</p>
 <button class="primary" data-op="start">Lokalen Job starten</button>
 <p class="caption">Externe LightBurn-Streams und HMI-Jobs besitzen die Steuerung exklusiv. Der Laser-Not-Aus bleibt hardwareseitig.</p></div>
@@ -190,7 +194,9 @@ function tab(id){
 }
 document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 async function action(op,extra={}){
- try{const d=await post("/api/ui/action",Object.assign({op},extra));notify(d.message||"Aktion gesendet");return d}
+ try{const d=await post("/api/ui/action",Object.assign({op},extra));notify(d.message||"Aktion gesendet");
+  if(op==="lightToggle"||op==="exhaustToggle")setTimeout(getNetwork,900);
+  return d}
  catch(e){notify("Aktion fehlgeschlagen: "+e.message,true)}
 }
 document.querySelectorAll("button[data-op]").forEach(b=>b.onclick=()=>action(b.dataset.op,
@@ -317,6 +323,10 @@ async function getNetwork(){
   el("routerSsid").value=net.router_ssid||"";
   el("routerStatus").textContent=net.connected?
    "Verbunden: "+net.router_ssid+" · IP "+net.router_ip:"Noch keine Router-Verbindung";
+  el("ledControl").textContent=net.cabinet_leds_on?
+   "LEDs ausschalten":"LEDs einschalten";
+  el("exhaustControl").textContent=net.exhaust_on?
+   "Abluft ausschalten":"Abluft einschalten";
   el("tcpHint").textContent="LightBurn TCP "+(net.lightburn_tcp_enabled?"EIN":"AUS")+
    " · IP "+(net.router_ip||net.hotspot_ip)+" · Port "+net.lightburn_port;
  }catch(e){notify("Netzwerk: "+e.message,true)}
