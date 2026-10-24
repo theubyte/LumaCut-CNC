@@ -344,7 +344,10 @@ def do_action(op):
     if op == "abort":
         job_cancel.set()
         controller.realtime(b"!")
-        return "Halt angefordert"
+        controller.realtime(b"\x18")  # hard GRBL soft reset, kills queued motion
+        controller.disconnect_host()
+        controller.homed = False
+        return "SKR G-Code-Puffer abgebrochen. Vor dem nächsten Job neu homen."
     if op == "capture":
         idx = int(request.form.get("slot", "0"))
         if not 0 <= idx <= 2:
