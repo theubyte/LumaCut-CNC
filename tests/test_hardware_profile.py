@@ -230,6 +230,10 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('prefs.putFloat("prOX"',CONTROL)
         self.assertIn('prefs.putFloat("prOY"',CONTROL)
         self.assertIn('"/logs/probe_plan.csv"',CONTROL)
+        self.assertIn('http.on("/api/probe-plan",HTTP_GET',CONTROL)
+        portal=(ROOT/"firmware"/"hmi"/"src"/"mobile_portal.h").read_text(encoding="utf-8")
+        self.assertIn("downloadProbePlan()",portal)
+        self.assertIn("X-LumaCut-Key",portal)
         self.assertIn('PC14-G38-Abtastung nicht vorhanden.',CONTROL)
         self.assertIn('LumaProbe::Region candidate{',CONTROL)
 
