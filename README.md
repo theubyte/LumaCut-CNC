@@ -11,7 +11,8 @@ LightBurn (GRBL) ──┘   TCP 23 → USB serial → grblHAL SKR Mini MZ V1.0
                                            ├─ PA1 Laser-PWM
                                            ├─ BED PC9 Laser-24V-Schalter
                                            ├─ HE0 PC8 24V-LEDs (M7)
-                                           └─ FAN0 PC6 24V-Abluft (M8)
+                                           ├─ FAN0 PC6 24V-Abluft (M8)
+                                           └─ FAN1 PC7 konfigurierbarer Ausgang ($LCIO)
 Pi 400 Camera ────> Control Studio (JPEG snapshot)
 ```
 
@@ -26,7 +27,7 @@ In dieser Entwicklungsfassung kann der Raspberry Pi 400 über
 Konfigurationsinstanz betrieben werden. Separate Service-Anmeldung
 (Erstpasswort `lumaservice`, lokal gehasht, 10-minütige Sitzung),
 echte SKR-Diagnose, GRBL-Konfigurationskonsole und konfliktgeprüfte
-logische M7/M8-Zubehörbelegung sind implementiert.
+logische M7/M8-Zubehörbelegung sowie der dedizierte PC7/FAN1-Ausgang mit $LCIO-Zustandsrückmeldung sind implementiert.
 
 **Das ist noch keine vollständige, dynamische physische STM32-Pinbelegung.**
 Die Echtzeitsteuerung läuft weiterhin im grblHAL-Build des SKR.
@@ -41,7 +42,7 @@ sind nicht abgeschlossen. Status und offene Schritte:
 Mit Raspberry Pi OS Lite 64-Bit und Repository-Zugriff:
 
 ```bash
-git clone --branch main git@github.com:theubyte/LumaCut-CNC.git
+git clone --branch main https://github.com/theubyte/LumaCut-CNC.git
 cd LumaCut-CNC
 sudo bash pi400/install.sh
 ```
@@ -58,8 +59,8 @@ kein Teil der Installation.
 hat, findet der Pi noch keinen GRBL-USB-Port.
 
 **Automatische Pi-Softwareupdates:** `pi400/update.sh` mit
-`lumacut-update.timer`. Read-only Deploy-Key einrichten:
-`sudo bash /opt/lumacut/pi400/setup-update-key.sh`.
+`lumacut-update.timer`. Das öffentliche Repository kann per HTTPS
+aktualisiert werden. Read-only SSH-Deploy-Keys sind nur bei privaten Repositories erforderlich.
 
 **Automatisches SKR-Firmwareflashen ist USB-only noch nicht
 hardwareverifiziert**. Neue Firmware-Binaries werden vom Buildserver
@@ -84,8 +85,12 @@ Werkstückraster (noch keine gemessene Höhenkarte), LEDs/Abluft,
 Router-WLAN-Auswahl, Kamera-Schnappschuss, LightBurn-Verbindung und
 Verbindungs-/Spamdiagnose. GRBL-Echtzeit-Status für die Webanzeige
 bleibt vom LightBurn-TCP-Stream getrennt. Der Pi leitet LightBurn
-`ok`, `error`, `ALARM`, `$$`, `$I` und hosteigene
-`?`-Antworten transparent an den echten SKR weiter.
+`ok`, `error`, `ALARM`, `$`, `$I` und hosteigene
+`?`-Antworten zuverlässig weiter. Kritische Einstellungen sowie
+`$LCIO`/freie digitale I/O-Befehle sind über den ungeschützten
+LightBurn-TCP-Kanal gesperrt und nur über die Service-Schnittstelle zulässig.
+Die Pi-Oberfläche enthält außerdem einen G-Code-Geometrieanalysator
+mit Kreisbogen- und Auftragsvorschau.
 
 **Hardware-Status:** Software-Builds ersetzen keine Inbetriebnahme
 am realen Pi/SKR. Laserleistung für Ersttests physisch abschalten.
