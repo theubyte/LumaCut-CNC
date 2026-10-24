@@ -321,6 +321,70 @@ public:
         return true;
     }
 };
+static constexpr const char* BACKUP="/backups/skr-app-previous.bin";
+static constexpr const char* BACKUP_PART="/backups/skr-app-previous.part";
+
+// Back up precisely the pages the upcoming update will erase. This preserves
+// the previous grblHAL application if any serial write/readback fails.
+inline bool backupPages(Rom& rom,fs::FS& fs,uint16_t count,String& err,
+                        Progress cb=nullptr){
+    if(!fs.exists("/backups")&&!fs.mkdir("/backups")){
+        err="Backup-Ordner kann nicht angelegt werden";return false;
+    }
+    fs.remove(BACKUP_PART);
+    File out=fs.open(BACKUP_PART,FILE_WRITE);
+    if(!out){err="Kein Platz fuer SKR-Backup";return false;}
+    const size_t total=(size_t)count*PAGE_BYTES;
+    uint8_t buf[256];
+    progress(cb,"Vorherige SKR-Firmware sichern",0,total);
+    bool ok=true;
+    for(size_t offset=0;offset<total;offset+=sizeof(buf)){
+        if(!rom.read(APP_BASE+offset,buf,sizeof(buf))||
+           out.write(buf,sizeof(buf))!=sizeof(buf)){
+            err="SKR-Backup Lesen/Schreiben fehlgeschlagen";
+            ok=false;break;
+        }
+        progress(cb,"Vorherige SKR-Firmware sichern",offset+sizeof(buf),total);
+    }
+    out.flush();out.close();
+    if(!ok){fs.remove(BACKUP_PART);return false;}
+    fs.remove(BACKUP);
+    if(!fs.rename(BACKUP_PART,BACKUP)){
+        err="SKR-Backup konnte nicht finalisiert werden";return false;
+    }
+    return true;
+}
+inline bool restoreBackup(Rom& rom,fs::FS& fs,uint16_t count,bool extended,
+                          String& err,Progress cb=nullptr){
+    File old=fs.open(BACKUP,FILE_READ);
+    const size_t total=(size_t)count*PAGE_BYTES;
+    if(!old||old.size()!=total){
+        if(old)old.close();
+        err="Vorherige SKR-Version nicht verfuegbar";return false;
+    }
+    progress(cb,"SKR Ruecksetzung: alte Seiten loeschen",0,count);
+    if(!rom.erasePages(FIRST_PAGE,count,extended)){
+        old.close();err="Ruecksetzung: Flashseiten loeschen fehlgeschlagen";
+        return false;
+    }
+    uint8_t buf[256],readback[256];
+    progress(cb,"SKR Ruecksetzung: Backup wiederherstellen",0,total);
+    for(size_t offset=0;offset<total;offset+=sizeof(buf)){
+        const uint32_t at=APP_BASE+offset;
+        if(old.read(buf,sizeof(buf))!=(int)sizeof(buf)||
+           !rom.write(at,buf,sizeof(buf))||
+           !rom.read(at,readback,sizeof(buf))||
+           memcmp(buf,readback,sizeof(buf))!=0){
+            old.close();err="Ruecksetzung/Readback fehlgeschlagen bei "+String(at,HEX);
+            return false;
+        }
+        progress(cb,"SKR Ruecksetzung: Backup wiederherstellen",
+                 offset+sizeof(buf),total);
+    }
+    old.close();
+    return true;
+}
+
 inline bool flashVerified(fs::FS& fs,HardwareSerial& uart,const String& expectedSha,
                           String& err,Progress cb=nullptr){
     File image=fs.open(STAGING,FILE_READ);
@@ -374,7 +438,9 @@ inline bool flashVerified(fs::FS& fs,HardwareSerial& uart,const String& expected
         image.close();return false;
     }
     Rom rom(uart);
-    bool ok=false;
+    bool ok=false,backupDone=false,eraseStarted=false;
+    uint16_t backupPagesCount=0;
+    bool extendedErase=false;
     do{
         if(!rom.begin()){err="STM32 ROM USART1 antwortet nicht (BOOT0/NRST/UART)";break;}
         uint16_t chip=0;
@@ -390,9 +456,14 @@ inline bool flashVerified(fs::FS& fs,HardwareSerial& uart,const String& expected
         if(FIRST_PAGE+pages>128){
             err="Anwendungsimage wuerde ueber Flashgrenze reichen";break;
         }
+        // Before erase, save all pages that this release can modify.
+        // If a programmed block later fails verification, restore the old app.
+        if(!backupPages(rom,fs,pages,err,cb))break;
+        backupDone=true;backupPagesCount=pages;extendedErase=extended;
         progress(cb,"SKR-App-Seiten loeschen",0,pages);
         // Keep the initial 14 bootloader pages (0..13) entirely unchanged.
         // Bounded pages; no mass erase, even if ROM supports that operation.
+        eraseStarted=true;
         if(!rom.erasePages(FIRST_PAGE,pages,extended)){
             err="STM32 konnte die Anwendungsseiten nicht loeschen";break;
         }
@@ -420,6 +491,16 @@ inline bool flashVerified(fs::FS& fs,HardwareSerial& uart,const String& expected
         ok=true;
         progress(cb,"SKR-Image vollstaendig verifiziert",size,size);
     }while(false);
+    if(!ok&&eraseStarted&&backupDone){
+        const String originalFailure=err;
+        String rollbackError;
+        if(restoreBackup(rom,fs,backupPagesCount,extendedErase,rollbackError,cb)){
+            err=originalFailure+"; vorherige SKR-Version wiederhergestellt";
+        }else{
+            err=originalFailure+"; automatische Ruecksetzung fehlgeschlagen: "+
+                rollbackError+" (SKR microSD/ROM-Recovery nutzen)";
+        }
+    }
     // BOOT0 low; hardware reset into the existing 28-KiB SD bootloader,
     // which will then start the app at 0x08007000.
     reset.runApplication();
