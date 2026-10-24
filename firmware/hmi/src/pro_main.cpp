@@ -1239,6 +1239,46 @@ void installRoutes(){
         DynamicJsonDocument d(512);d["message"]=notice;
         String json;serializeJson(d,json);http.send(200,"application/json",json);
     });
+    http.on("/api/ui/hotspot-qr",HTTP_GET,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        uint8_t temp[qrcodegen_BUFFER_LEN_MAX],qr[qrcodegen_BUFFER_LEN_MAX];
+        auto esc=[](const String& value){
+            String out;
+            for(size_t i=0;i<value.length();i++){
+                const char ch=value[i];
+                if(ch=='\\'||ch==';'||ch==','||ch==':'||ch=='"')out+='\\';
+                out+=ch;
+            }
+            return out;
+        };
+        const String data="WIFI:T:WPA;S:"+esc(apName)+";P:"+esc(apPass)+";;";
+        if(!qrcodegen_encodeText(data.c_str(),temp,qr,
+                                 qrcodegen_Ecc_MEDIUM,1,20,qrcodegen_Mask_AUTO,true)){
+            fail(500,"QR-Kodierung fehlgeschlagen");return;
+        }
+        const int size=qrcodegen_getSize(qr);
+        // Stream short SVG paths without allocating a large monolithic string.
+        http.setContentLength(CONTENT_LENGTH_UNKNOWN);
+        http.send(200,"image/svg+xml",
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 "+
+            String(size+8)+" "+String(size+8)+
+            "' shape-rendering='crispEdges'><rect x='-4' y='-4' width='"+
+            String(size+8)+"' height='"+String(size+8)+"' fill='white'/>");
+        for(int y=0;y<size;y++){
+            String path="<path fill='black' d='";
+            for(int x=0;x<size;){
+                if(!qrcodegen_getModule(qr,x,y)){x++;continue;}
+                const int begin=x;
+                while(x<size&&qrcodegen_getModule(qr,x,y))x++;
+                path+="M"+String(begin)+" "+String(y)+"h"+
+                      String(x-begin)+"v1h-"+String(x-begin)+"z";
+            }
+            path+="'/>";
+            http.sendContent(path);
+        }
+        http.sendContent("</svg>");
+        http.sendContent("");
+    });
     http.on("/api/ui/config",HTTP_GET,[]{
         if(!auth()){fail(401,"Code erforderlich");return;}
         DynamicJsonDocument d(3072);
