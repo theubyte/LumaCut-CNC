@@ -1,4 +1,4 @@
-name: LumaCut source and firmware CI
+name: LumaCut Pi 400 + SKR USB CI
 on:
   push:
     branches: [main]
@@ -18,120 +18,84 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install Build Lab test dependency
-        run: python -m pip install --disable-pip-version-check Flask==3.1.1
-      - run: python -m unittest discover -s tests -v
-      - run: python -m py_compile builder/app.py builder/flash_bundle.py builder/flash_local.py tools/probe_math.py firmware/skr/build.py
-      - name: Validate Build Lab browser JavaScript
-        run: node --check builder/dashboard.js
+      - name: Install Python dependencies
+        run: python -m pip install --disable-pip-version-check Flask==3.1.1 pyserial==3.5
+      - name: Run LumaCut source, Pi/GRBL transport and geometry tests
+        run: python -m unittest discover -s tests -v
+      - name: Compile Pi 400 server, installer and configuration
+        run: |
+          python -m compileall -q pi400
+          python -m py_compile builder/app.py tools/probe_math.py firmware/skr/build.py
+          bash -n pi400/install.sh pi400/update.sh
+      - name: Validate Pi Control Studio browser JavaScript
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          source=Path("pi400/static/index.html").read_text()
+          scripts=re.findall(r'<script[^>]*>([\s\S]*?)</script>', source)
+          if not scripts: raise SystemExit("No browser script found")
+          Path("/tmp/lumacut_pi_ui.js").write_text("\n".join(scripts))
+          PY
+          node --check /tmp/lumacut_pi_ui.js
+          node --check builder/dashboard.js
   firmware:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [skr, hmi]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Cache PlatformIO toolchains and packages
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: ~/.platformio
-          key: ${{ runner.os }}-pio-${{ matrix.target }}-v2-${{ hashFiles('firmware/skr/platformio.ini', 'firmware/hmi/platformio.ini') }}
+          key: ${{ runner.os }}-pio-skrusb-${{ hashFiles('firmware/skr/platformio.ini') }}
       - name: Install PlatformIO
         run: python -m pip install --disable-pip-version-check platformio==6.2.0
-      - name: grblHAL SKR Mini MZ
-        if: matrix.target == 'skr'
-        run: |
-          for attempt in 1 2 3; do
-            if python firmware/skr/build.py && python firmware/skr/build.py --bridge; then exit 0; fi
-            echo "Attempt $attempt failed, retrying after transient package/network issue."
-            sleep 15
-          done
-          exit 1
-      - name: Waveshare ESP32-S3 HMI (safe/offline and opt-in UART keypad)
-        if: matrix.target == 'hmi'
-        run: |
-          for attempt in 1 2 3; do
-            if pio run -d firmware/hmi -e lumacut_waveshare_s3 -e lumacut_waveshare_s3_keypad -e lumacut_waveshare_s3_pro; then exit 0; fi
-            echo "Attempt $attempt failed, retrying after transient package/network issue."
-            sleep 15
-          done
-          exit 1
-      - name: Check full Waveshare flash bundles (offline and UART)
-        if: matrix.target == 'hmi'
-        run: |
-          python -m pip install --disable-pip-version-check esptool==4.9.0
-          PYTHONPATH=builder python - <<'PY'
-          import os
-          from pathlib import Path
-          from flash_bundle import build_flash_package
-          core = Path.home() / ".platformio"
-          templates = Path("builder")
-          for env in ("lumacut_waveshare_s3", "lumacut_waveshare_s3_keypad", "lumacut_waveshare_s3_pro"):
-              output = Path("firmware/hmi/.pio/build") / env
-              directory = Path("ci_flash_images") / env
-              directory.mkdir(parents=True, exist_ok=True)
-              files = build_flash_package(output, directory, "0" * 40, env, templates, core)
-              print(env, files)
-          PY
-      - name: Save experimental binaries
-        if: success()
+      - name: Build grblHAL STM32F103RC native USB device
+        run: python firmware/skr/build.py
+      - name: Upload USB firmware binary
         uses: actions/upload-artifact@v4
         with:
-          name: UNVERIFIED-${{ matrix.target }}-${{ github.sha }}
+          name: LUMACUT-SKR-USB-${{ github.sha }}
           path: |
             firmware/skr/.pio/build/lumacut_skr_mz_usb/firmware.bin
             firmware/skr/.pio/build/lumacut_skr_mz_usb/firmware.elf
-            firmware/skr/.pio/build/lumacut_skr_mz_hmi_uart/firmware.bin
-            firmware/skr/.pio/build/lumacut_skr_mz_hmi_uart/firmware.elf
-            firmware/hmi/.pio/build/lumacut_waveshare_s3/firmware.bin
-            firmware/hmi/.pio/build/lumacut_waveshare_s3/firmware.elf
-            firmware/hmi/.pio/build/lumacut_waveshare_s3_keypad/firmware.bin
-            firmware/hmi/.pio/build/lumacut_waveshare_s3_keypad/firmware.elf
-            firmware/hmi/.pio/build/lumacut_waveshare_s3_pro/firmware.bin
-            firmware/hmi/.pio/build/lumacut_waveshare_s3_pro/firmware.elf
-            ci_flash_images/lumacut_waveshare_s3_pro/LUMACUT_HMI_ESP32S3_MERGED.bin
-            ci_flash_images/lumacut_waveshare_s3_pro/Waveshare-HMI-Flash-Paket-Windows.zip
           if-no-files-found: error
-          include-hidden-files: true
           retention-days: 30
-
-  paired_release:
-    name: Complete paired firmware ZIP
-    needs: firmware
+  package:
     runs-on: ubuntu-latest
+    needs: [tests, firmware]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: UNVERIFIED-*
-          path: downloaded
-      - name: Verify and package paired SKR and Waveshare
-        env:
-          SOURCE_SHA: ${{ github.sha }}
+          pattern: LUMACUT-SKR-USB-*
+          path: artifacts
+      - name: Verify Pi+USB release
         run: |
           python - <<'PY'
-          import hashlib, json, os, pathlib, zipfile
-          root=pathlib.Path("downloaded")
-          sha=os.environ["SOURCE_SHA"]
-          skr=root/("UNVERIFIED-skr-"+sha)/"firmware"/"skr"/".pio"/"build"/"lumacut_skr_mz_hmi_uart"/"firmware.bin"
-          image=root/("UNVERIFIED-hmi-"+sha)/"ci_flash_images"/"lumacut_waveshare_s3_pro"/"LUMACUT_HMI_ESP32S3_MERGED.bin"
-          win=root/("UNVERIFIED-hmi-"+sha)/"ci_flash_images"/"lumacut_waveshare_s3_pro"/"Waveshare-HMI-Flash-Paket-Windows.zip"
-          items={"SKR-Mini-MZ/firmware.bin":skr,"Waveshare/ESP32S3-Komplettimage.bin":image,"Waveshare/Waveshare-HMI-Flash-Paket-Windows.zip":win,"DOKUMENTATION/LUMACUT_CONTROL_OS.md":pathlib.Path("docs/LUMACUT_CONTROL_OS.md")}
-          for name,path in items.items():
-              if not path.is_file() or not path.stat().st_size: raise RuntimeError("Missing "+name+": "+str(path))
-          manifest={"source_sha":sha,"hardware_validated":False,"items":{name:{"bytes":p.stat().st_size,"sha256":hashlib.sha256(p.read_bytes()).hexdigest()} for name,p in items.items()}}
-          with zipfile.ZipFile("LumaCut-Control-OS-Komplettpaket.zip","w",zipfile.ZIP_DEFLATED) as bundle:
-              for name,p in items.items(): bundle.write(p,name)
-              bundle.writestr("PRUEFSUMMEN.json",json.dumps(manifest,indent=2))
-          print("Paired firmware package:",manifest)
+          from pathlib import Path
+          import hashlib,json,os,zipfile
+          bins=list(Path("artifacts").rglob("firmware.bin"))
+          if len(bins)!=1: raise RuntimeError("Expected one SKR USB binary: "+str(bins))
+          binary=bins[0]
+          manifest={"source_sha":"${{ github.sha }}",
+                    "skr_firmware":"SKR-USB/firmware.bin",
+                    "sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),
+                    "validated_on_hardware":False,
+                    "controller":"SKR Mini MZ V1.0 grblHAL USB",
+                    "gateway":"Raspberry Pi 400"}
+          with zipfile.ZipFile("LumaCut-Pi400-SKR-USB.zip","w",zipfile.ZIP_DEFLATED) as z:
+              z.write(binary,manifest["skr_firmware"])
+              for p in list(Path("pi400").rglob("*")):
+                  if p.is_file(): z.write(p,str(p))
+              z.write("lightburn/LumaCut-CNC-USB.lbdev")
+              z.writestr("manifest.json",json.dumps(manifest,indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: LUMACUT-KOMPLETT-${{ github.sha }}
-          path: LumaCut-Control-OS-Komplettpaket.zip
+          name: LUMACUT-PI400-${{ github.sha }}
+          path: LumaCut-Pi400-SKR-USB.zip
           retention-days: 30
