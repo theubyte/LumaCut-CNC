@@ -186,7 +186,7 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn("!motorsReleased&&workX>0&&workY>0&&workZ>0;",CONTROL)
         self.assertIn("if(!canJog()){",CONTROL)
         self.assertIn("const float dist=machinePosFromOperator(operatorDistance);",CONTROL)
-        self.assertIn("int jogStep=0;",CONTROL)
+        self.assertIn("int jogStep=1;",CONTROL)
         self.assertIn('if(op=="jogsound")',CONTROL)
         self.assertIn("const float speed=savedSetting[speedId]*float(jogSpeedPercent)/100.f;",CONTROL)
         self.assertIn('jogSpeedPercent=prefs.getInt("jogPct",100)',CONTROL)
