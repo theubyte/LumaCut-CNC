@@ -59,6 +59,7 @@ config = {
               {"name": "Park 2", "stored": False, "x": 0, "y": 0},
               {"name": "Park 3", "stored": False, "x": 0, "y": 0}],
     "jog_percent": 100,
+    "touch_jog_enabled": False,
     "lightburn_tcp_enabled": True,
     "pin_roles": dict(DEFAULT_ROLES),
     "spare_pc7": dict(DEFAULT_SPARE),
@@ -67,7 +68,7 @@ try:
     if CONFIG_PATH.exists():
         saved = json.loads(CONFIG_PATH.read_text())
         if isinstance(saved, dict):
-            for name in ("focus", "probe", "parks", "jog_percent", "lightburn_tcp_enabled", "pin_roles", "spare_pc7"):
+            for name in ("focus", "probe", "parks", "jog_percent", "lightburn_tcp_enabled", "pin_roles", "spare_pc7", "touch_jog_enabled"):
                 if name in saved:
                     config[name] = saved[name]
 except Exception:
@@ -332,6 +333,7 @@ def get_config():
                         for name, n in (("x", 130), ("y", 131), ("z", 132))}
     output["speed_pct"] = config["jog_percent"]
     output["step"] = 1
+    output["touch_jog_enabled"] = bool(config["touch_jog_enabled"])
     return jsonify(output)
 
 
@@ -637,6 +639,61 @@ def do_action(op):
         return "GCode-Jobs über die Dateiliste auswählen"
 
     raise ValueError("Unbekannter Befehl " + op)
+
+
+@app.post("/api/ui/workarea/jog")
+def workarea_jog():
+    # Pi-level virtual worktable: do not trust client coordinate limits.
+    # This uses machine coordinates (G53) exclusively, never an unverified
+    # LightBurn work coordinate offset. Automatic Z clearance is explicit.
+    require_free()
+    if not controller.homed:
+        raise RuntimeError("Referenzfahrt erforderlich")
+    status = controller.status()
+    settings = status["settings"]
+    x_travel, y_travel, z_travel = [settings.get(i, 0) for i in (130, 131, 132)]
+    if min(x_travel, y_travel, z_travel) <= 0:
+        raise RuntimeError("SKR-Verfahrwege nicht konfiguriert")
+    if not config.get("touch_jog_enabled", False):
+        raise PermissionError("Arbeitsfeld-Touch ist im Service-Menü noch nicht freigegeben")
+    px = numeric("x_ratio", 0, 1)
+    py = numeric("y_ratio", 0, 1)
+    # Keep an inside margin so no absolute edge or homing switch is touched.
+    safe_margin = 1.5
+    if not safe_margin / x_travel <= px <= 1 - safe_margin / x_travel:
+        raise ValueError("X-Koordinate zu nahe an Maschinenkante")
+    if not safe_margin / y_travel <= py <= 1 - safe_margin / y_travel:
+        raise ValueError("Y-Koordinate zu nahe an Maschinenkante")
+    zero_at_max = config.get("zero_at_max", True)
+    x = x_travel * (px - 1 if zero_at_max else px)
+    y = y_travel * (py - 1 if zero_at_max else py)
+    lift = float(config["focus"]["lift"])
+    if not 0 < lift < z_travel - .5:
+        raise RuntimeError("Z-Sicherheitsabstand ist nicht kalibriert")
+    z = -lift if zero_at_max else lift
+    if settings.get(112, 0) <= 0:
+        raise RuntimeError("Z-Maximalgeschwindigkeit fehlt")
+    # Machine-level G53 avoids G54/G92/WCO assumptions. SKR must still
+    # enforce its own hardware/soft limits and E-Stop.
+    return jsonify(message=run_commands([
+        "M5", "G53 G0 Z%.3f" % z,
+        "G53 G0 X%.3f Y%.3f" % (x, y)
+    ], timeout=60), target={"x": x, "y": y, "z": z})
+
+
+@app.post("/api/service/workarea")
+def service_workarea():
+    require_service()
+    require_free()
+    enabled = request.form.get("enabled")
+    if enabled not in ("0", "1"):
+        raise ValueError("Arbeitsfeldbewegung erwartet enabled=0 oder 1")
+    with config_lock:
+        config["touch_jog_enabled"] = enabled == "1"
+        persist()
+    return jsonify(message="Arbeitsfeld-Touch " +
+                   ("freigegeben" if config["touch_jog_enabled"] else "gesperrt"),
+                   enabled=config["touch_jog_enabled"])
 
 
 @app.post("/api/ui/action")
