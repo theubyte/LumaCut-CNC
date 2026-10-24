@@ -52,7 +52,10 @@ Linux auf dem Pi darf keine zeitkritischen Step-Pulse über normales USB takten.
   den Ausgang Funktionsname und Anwendungsprofil verwalten. Die Funktion
   verlangt echten SKR-Identitätsabgleich und einen unbelegten Controller.
 - Der Pi analysiert G-Code-Geometrie für eine SVG-Vorschau mit relativen
-  Bewegungen, Maßeinheiten und Kreisinterpolation; komplexe, unbekannte
+  Bewegungen, Maßeinheiten und Kreisinterpolation;
+- XY-Positionierung durch Tippen auf die virtuelle Arbeitsfläche (mit Servicefreigabe),
+  nur nach XYZ-Homing und aktivierter Z-Freifahrt. Der Pi prüft die Grenzen,
+  schaltet den Laser per M5 ab und fährt zunächst Z, dann XY in G53-Maschinenkoordinaten. komplexe, unbekannte
   Transformationen verweigern eine irreführende Vorschau.
 - Der LightBurn-TCP-Server blockiert unerlaubte Service- und GPIO-Befehle,
   während reguläre G-Code-Aufträge übertragen werden können.
