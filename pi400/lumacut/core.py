@@ -42,6 +42,7 @@ class Controller:
         self.last_status = 0.0
         self.homed = False
         self.identity = {"version": "", "firmware": "", "board": "", "driver": ""}
+        self.extra_outputs = {"PC7": None}
         self.last_error = ""
         self.replies = deque(maxlen=1024)
         self.lines = deque(maxlen=100)
@@ -135,6 +136,10 @@ class Controller:
             if line.startswith(prefix) and line.endswith("]"):
                 self.identity[field] = line[len(prefix):-1]
                 break
+        if line.startswith("[LCIO:PC7=") and line.endswith("]"):
+            pin_state = line[len("[LCIO:PC7="):-1]
+            if pin_state in ("0", "1"):
+                self.extra_outputs["PC7"] = int(pin_state)
         match = SETTING.match(line)
         if match:
             self.settings[int(match.group(1))] = float(match.group(2))
@@ -172,6 +177,7 @@ class Controller:
                     try:
                         self.serial = self._open()
                         self.state = "Unknown"
+                        self.extra_outputs["PC7"] = None
                         self.replies.clear()
                         LOG.info("SKR connected at %s", self.port)
                     except Exception as exc:
@@ -222,6 +228,7 @@ class Controller:
                         pass
                     self.serial = None
                     self.state = "Disconnected"
+                    self.extra_outputs["PC7"] = None
                     self.homed = False
                     buf.clear()
 
@@ -236,6 +243,7 @@ class Controller:
                 "owner": self.owner or "Frei",
                 "homed": self.homed,
                 "identity": dict(self.identity),
+                "extra_outputs": dict(self.extra_outputs),
                 "position": self.position,
                 "status_age": round(age, 2) if age is not None else None,
                 "settings": dict(self.settings),
