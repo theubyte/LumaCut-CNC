@@ -24,6 +24,8 @@
 #include <BLEDevice.h>
 #include <Preferences.h>
 #include <LittleFS.h>
+#include <SPI.h>
+#include <SD.h>
 #include <lvgl.h>
 #include <esp_lcd_panel_rgb.h>
 #include <esp_lcd_panel_ops.h>
@@ -54,6 +56,13 @@ lv_color_t* drawPixels=nullptr;
 bool uiReady=false;
 uint8_t gtAddr=0x5d;
 bool touchOk=false,storageOk=false,machineHomed=false;
+bool sdReady=false,internalStorageReady=false;
+// In the Waveshare 7in display the TF CS pin is virtual (CH422G EXIO4).
+// Its output is held LOW by the existing expander backlight/reset mask;
+// the SD library uses no physical GPIO CS (Waveshare uses SD.begin(-1)).
+fs::FS& jobStore(){
+    return sdReady?static_cast<fs::FS&>(SD):static_cast<fs::FS&>(LittleFS);
+}
 bool uploadAllowed=false,uploadFinished=false;
 size_t uploadBytes=0;
 String uploadTemporary,uploadDestination;
@@ -467,6 +476,7 @@ void updateUi(){
     String job=selectedJob.length()?"Datei: "+selectedJob:"Noch keine Datei ausgewaehlt";
     if(bounds.valid)job+="  /  "+String(bounds.x1-bounds.x0,1)+
                                 " x "+String(bounds.y1-bounds.y0,1)+" mm";
+    if(sdReady)job+=" / microSD";
     labelChanged(jobLabel,job);
     labelChanged(macroLabel,parks[parkSlot].stored?parks[parkSlot].name:String("Freier Makroplatz"));
     if(ipLabel){
@@ -793,7 +803,7 @@ void internalJobService(){
 }
 bool jobStart(){
     if(!canMotion()||!selectedJob.length()||!storageOk)return false;
-    jobFile=LittleFS.open("/jobs/"+selectedJob,FILE_READ);
+    jobFile=jobStore().open("/jobs/"+selectedJob,FILE_READ);
     if(!jobFile)return false;
     owner=Owner::Internal;jobRunning=true;jobPaused=false;commandPending=false;
     setNotice("Job aktiv – keine zweite Steuerquelle erlaubt.");return true;
@@ -829,7 +839,7 @@ bool parseBounds(){
     // We do not try to guess absolute coordinates or resolve arc extrema.
     bounds=Bounds{};
     if(!storageOk||!selectedJob.length())return false;
-    File f=LittleFS.open("/jobs/"+selectedJob,FILE_READ);
+    File f=jobStore().open("/jobs/"+selectedJob,FILE_READ);
     if(!f)return false;
     bool modeAbsolute=false,modeMetric=false,firstPoint=false,good=true;
     int motion=-1;
@@ -911,7 +921,7 @@ bool dryFrame(){
 bool selectJob(String name){
     if(owner==Owner::Internal||owner==Owner::Script)return false;
     if(name.indexOf('/')>=0||name.indexOf('\\')>=0||name.indexOf("..")>=0)return false;
-    if(!storageOk||!LittleFS.exists("/jobs/"+name))return false;
+    if(!storageOk||!jobStore().exists("/jobs/"+name))return false;
     selectedJob=name;parseBounds();updateUi();return true;
 }
 bool auth(){return apiKey.length()&&http.hasHeader("X-LumaCut-Key")&&
@@ -985,7 +995,7 @@ void installRoutes(){
         if(!auth()){fail(401,"Code erforderlich");return;}
         String out="{\"files\":[";bool first=true;
         if(storageOk){
-            File root=LittleFS.open("/jobs");
+            File root=jobStore().open("/jobs");
             File f=root.openNextFile();
             while(f){if(!f.isDirectory()){
                 String name=String(f.name());int pos=name.lastIndexOf('/');
@@ -1037,29 +1047,29 @@ void installRoutes(){
                 uploadAllowed=false;
             uploadDestination="/jobs/"+name;
             uploadTemporary="/jobs/."+name+".part";
-            if(uploadAllowed&&LittleFS.exists(uploadDestination))uploadAllowed=false;
+            if(uploadAllowed&&jobStore().exists(uploadDestination))uploadAllowed=false;
             if(uploadAllowed){
-                LittleFS.remove(uploadTemporary);
-                uploadFile=LittleFS.open(uploadTemporary,FILE_WRITE);
+                jobStore().remove(uploadTemporary);
+                uploadFile=jobStore().open(uploadTemporary,FILE_WRITE);
                 if(!uploadFile)uploadAllowed=false;
             }
         } else if(up.status==UPLOAD_FILE_WRITE && uploadAllowed){
             uploadBytes+=up.currentSize;
             if(uploadBytes>MAX_JOB_BYTES||uploadFile.write(up.buf,up.currentSize)!=up.currentSize){
                 uploadAllowed=false;uploadFile.close();
-                if(uploadTemporary.length())LittleFS.remove(uploadTemporary);
+                if(uploadTemporary.length())jobStore().remove(uploadTemporary);
             }
         } else if(up.status==UPLOAD_FILE_END){
             if(uploadFile)uploadFile.close();
             if(uploadAllowed&&uploadBytes>0&&uploadTemporary.length()&&uploadDestination.length()&&
-               !LittleFS.exists(uploadDestination)){
-                uploadFinished=LittleFS.rename(uploadTemporary,uploadDestination);
+               !jobStore().exists(uploadDestination)){
+                uploadFinished=jobStore().rename(uploadTemporary,uploadDestination);
             }
-            if(!uploadFinished&&uploadTemporary.length())LittleFS.remove(uploadTemporary);
+            if(!uploadFinished&&uploadTemporary.length())jobStore().remove(uploadTemporary);
             uploadAllowed=uploadFinished;
         } else if(up.status==UPLOAD_FILE_ABORTED){
             if(uploadFile)uploadFile.close();
-            if(uploadTemporary.length())LittleFS.remove(uploadTemporary);
+            if(uploadTemporary.length())jobStore().remove(uploadTemporary);
             uploadAllowed=false;uploadFinished=false;
         }
     });
@@ -2003,7 +2013,7 @@ void action(const char* id){
     }
     if(op=="next"){
         if(!storageOk)return;
-        File dir=LittleFS.open("/jobs");File f=dir.openNextFile();
+        File dir=jobStore().open("/jobs");File f=dir.openNextFile();
         bool useNext=selectedJob.length()==0,chosen=false;
         String first;
         while(f){
@@ -2064,12 +2074,73 @@ void internalInit(){
     contactSwitchAtHead=prefs.getBool("headsw",false);
     // Format only on first provisioning. Never silently erase saved jobs
     // because of a later filesystem or power-loss mounting failure.
-    storageOk=LittleFS.begin(false);
-    if(!storageOk&&!prefs.getBool("fsinit",false))storageOk=LittleFS.begin(true);
-    if(storageOk){
+    internalStorageReady=LittleFS.begin(false);
+    if(!internalStorageReady&&!prefs.getBool("fsinit",false))
+        internalStorageReady=LittleFS.begin(true);
+    if(internalStorageReady){
         prefs.putBool("fsinit",true);
         if(!LittleFS.exists("/jobs"))LittleFS.mkdir("/jobs");
     }
+    // Optional 4GB FAT32 microSD; one SPI client, no dedicated GPIO CS.
+    // Waveshare reference: MOSI 11, SCLK 12, MISO 13, CS CH422G EXIO4=LOW.
+    // touchInit() has already enabled that CS and preserved LCD/TP lines.
+    SPI.setHwCs(false);
+    SPI.begin(12,13,11,-1);
+    sdReady=SD.begin((uint8_t)-1,SPI,4000000);
+    if(sdReady){
+        if(!SD.exists("/jobs"))sdReady=SD.mkdir("/jobs");
+        if(!SD.exists("/updates"))SD.mkdir("/updates");
+        if(!SD.exists("/backups"))SD.mkdir("/backups");
+        if(!SD.exists("/logs"))SD.mkdir("/logs");
+    }
+    if(sdReady){
+        // Copy existing jobs, never overwriting an existing SD job.
+        if(internalStorageReady){
+            File dir=LittleFS.open("/jobs");
+            if(dir){
+                File source=dir.openNextFile();
+                uint8_t buffer[1024];
+                while(source){
+                    if(!source.isDirectory()){
+                        String name=source.name();
+                        int slash=name.lastIndexOf('/');
+                        if(slash>=0)name=name.substring(slash+1);
+                        String target="/jobs/"+name;
+                        if(name.length()&&name.indexOf("..")<0&&!SD.exists(target)){
+                            File dest=SD.open(target,FILE_WRITE);
+                            if(dest){
+                                size_t copied=0;
+                                while(source.available()){
+                                    size_t got=source.read(buffer,sizeof(buffer));
+                                    if(!got||dest.write(buffer,got)!=got)break;
+                                    copied+=got;
+                                }
+                                dest.close();
+                                if(copied!=source.size())SD.remove(target);
+                            }
+                        }
+                    }
+                    source.close();
+                    source=dir.openNextFile();
+                }
+                dir.close();
+            }
+        }
+        File log=SD.open("/logs/hmi_boot.log",FILE_APPEND);
+        if(log){
+            if(log.size()<524288){
+                log.print("Boot sha=");
+                log.print(LUMACUT_SOURCE_SHA);
+                log.print(" reset=");
+                log.println((unsigned)esp_reset_reason());
+            }
+            log.close();
+        }
+    }else{
+        SD.end();
+        SPI.end();
+    }
+    storageOk=sdReady||internalStorageReady;
     loadParks();
     machine.begin(115200,SERIAL_8N1,44,43); // Physical UART2 switch; SKR PA9/PA10 crossed.
     Serial.begin(115200); // Native USB CDC for LightBurn; never print diagnostic messages here.
