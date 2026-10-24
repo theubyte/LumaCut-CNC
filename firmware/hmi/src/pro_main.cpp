@@ -637,6 +637,11 @@ void finishConfigWrite(bool success,const String& error){
     configWrite=ConfigWrite::None;
     if(kind==ConfigWrite::None)return;
     if(!success){
+        if(pendingCalibrationAxis==2){
+            zScaleMeasured=false;
+            prefs.putBool("zScaleOK",false);
+        }
+        pendingCalibrationAxis=-1;
         lastControllerError=error;
         setNotice("SKR hat Einstellung ABGELEHNT: "+error);
         return;
@@ -2050,7 +2055,12 @@ void action(const char* id){
         if(end==vText.c_str()||*end!='\0'||!settingAllowed(idText.toInt(),value)){
             setNotice("Parameterwert ungueltig oder Sicherheitseinstellung blockiert.");return;
         }
-        String cmds[]={"$"+idText+"="+vText,"$$"};
+        if(idText=="102"&&knownSetting[27]&&
+           fabsf(savedSetting[27]-2.5f)<0.001f){
+            setNotice("Z20 ist aktiv: $102 nur ueber die Z-Kalibrierung aendern.");
+            return;
+        }
+        String cmds[]={"$"+idText+"="+vText,"$"};
         if(startScript(cmds,2)){
             requestedSettingId=idText.toInt();requestedSettingValue=value;
             configWrite=ConfigWrite::Parameter;
@@ -2200,9 +2210,14 @@ void action(const char* id){
             setNotice("Extremer Korrekturfaktor: Antrieb/Mikroschritte pruefen.");
             return;
         }
-        String cmds[]={"$"+String(id)+"="+String(corrected,4),
+        // If Z20 was armed, disarm the SKR BEFORE editing $102:
+        // a new motor scale invalidates the physically proven 20mm clearance.
+        const bool zArmed=(axis==2&&knownSetting[27]&&
+                           fabsf(savedSetting[27]-2.5f)<0.001f);
+        String cmds[]={"$27=1.0",
+                       "$"+String(id)+"="+String(corrected,4),
                        String(char(36))+char(36)};
-        if(startScript(cmds,2)){
+        if(startScript(zArmed?cmds:(cmds+1),zArmed?3:2)){
             pendingCalibrationAxis=axis;
             if(axis==2){zScaleMeasured=false;prefs.putBool("zScaleOK",false);}
             requestedSettingId=id;
