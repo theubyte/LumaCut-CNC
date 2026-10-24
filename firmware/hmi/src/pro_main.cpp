@@ -1093,6 +1093,17 @@ void installRoutes(){
         if(!auth()){fail(401,"Code erforderlich");return;}
         http.send(200,"application/json",jsonMachine());
     });
+    http.on("/api/probe-plan",HTTP_GET,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        if(!storageOk||!jobStore().exists("/logs/probe_plan.csv")){
+            fail(404,"Noch kein berechneter Rasterplan vorhanden");return;
+        }
+        File plan=jobStore().open("/logs/probe_plan.csv",FILE_READ);
+        if(!plan){fail(500,"Rasterplan nicht lesbar");return;}
+        http.sendHeader("Content-Disposition","attachment; filename=probe_plan.csv");
+        http.streamFile(plan,"text/csv");
+        plan.close();
+    });
     http.on("/api/jobs",HTTP_GET,[]{
         if(!auth()){fail(401,"Code erforderlich");return;}
         String out="{\"files\":[";bool first=true;
