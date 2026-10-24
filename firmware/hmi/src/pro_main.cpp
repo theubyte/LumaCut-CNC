@@ -136,6 +136,7 @@ uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
 lv_obj_t* updateKeyEntry=nullptr,*calCommandedField=nullptr,*calActualField=nullptr;
 lv_obj_t* jogSpeedButton=nullptr;
 int jogSpeedPercent=100;
+int jogStep=1;
 bool zScaleMeasured=false;
 uint32_t zSafetyArmUntil=0;
 int pendingCalibrationAxis=-1;
@@ -1151,6 +1152,137 @@ void installRoutes(){
         if(!ok){fail(409,"Maschine nicht bereit / HMI-Freigabe erforderlich / Aktion gesperrt");return;}
         http.send(200,"application/json","{\"ok\":true}");
     });
+    // Browser controls mirror the same validated HMI actions, not a second
+    // independent motor-control path. Real-time GRBL host remains exclusive.
+    http.on("/api/ui/action",HTTP_POST,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        const String op=http.arg("op");
+        static const char* allowed[]={
+            "home","enablehome","readcfg","motorHold","motorRelease",
+            "softon","flipx","flipy","flipz","origin","host",
+            "updatecheck","toggleAutoLift","zlift","frame","start",
+            "pause","toggle","abort","park","capture","p0","p1","p2",
+            "next","step","jogsound","x+","x-","y+","y-","z+","z-",
+            "probePlan","probeSave","updateinstall","skrinstall"
+        };
+        bool found=false;
+        for(auto item:allowed)if(op==item)found=true;
+        if(!found){fail(400,"Unbekannter HMI-Befehl");return;}
+        if(op=="x+"||op=="x-"||op=="y+"||op=="y-"||
+           op=="z+"||op=="z-"){
+            const String step=http.arg("step");
+            if(step=="0.1")jogStep=0;
+            else if(step=="1")jogStep=1;
+            else if(step=="10")jogStep=2;
+            else if(step.length()){fail(400,"Jog-Schritt 0.1, 1 oder 10");return;}
+        }
+        action(op.c_str());
+        DynamicJsonDocument d(768);
+        d["message"]=notice;
+        d["owner"]=ownerText();
+        d["state"]=stateText();
+        String json;serializeJson(d,json);
+        http.send(200,"application/json",json);
+    });
+    http.on("/api/ui/setting",HTTP_POST,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        const String id=http.arg("id"), value=http.arg("value");
+        if(!id.length()||!value.length()){fail(400,"Parameter fehlt");return;}
+        lv_textarea_set_text(paramKeyField,id.c_str());
+        lv_textarea_set_text(paramValueField,value.c_str());
+        action("setparam");
+        DynamicJsonDocument d(384);d["message"]=notice;
+        String json;serializeJson(d,json);http.send(200,"application/json",json);
+    });
+    http.on("/api/ui/params",HTTP_GET,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        DynamicJsonDocument d(8192);
+        JsonObject o=d.createNestedObject("settings");
+        for(int i=0;i<400;i++)if(knownSetting[i])
+            o[String(i)]=savedSetting[i];
+        String json;serializeJson(d,json);
+        http.send(200,"application/json",json);
+    });
+    http.on("/api/ui/config",HTTP_POST,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        const String section=http.arg("section");
+        if(section=="travel"){
+            for(int i=0;i<3;i++){
+                const String text=http.arg(i==0?"x":i==1?"y":"z");
+                if(text.isEmpty()){fail(400,"XYZ-Werte erforderlich");return;}
+                lv_textarea_set_text(i==0?sizeXField:i==1?sizeYField:sizeZField,
+                                     text.c_str());
+            }
+            travelInputsDirty=true;action("savearea");
+        }else if(section=="focus"){
+            if(!http.hasArg("lift")||!http.hasArg("gap")||!http.hasArg("tip")){
+                fail(400,"Fokuswerte erforderlich");return;
+            }
+            lv_textarea_set_text(focusLiftField,http.arg("lift").c_str());
+            lv_textarea_set_text(focusGapField,http.arg("gap").c_str());
+            lv_textarea_set_text(tipOffsetField,http.arg("tip").c_str());
+            action("focusSave");
+        }else if(section=="probe"){
+            static const char* fields[]={"x","y","width","height","offset_x","offset_y","pitch"};
+            for(int i=0;i<7;i++){
+                if(!http.hasArg(fields[i])){fail(400,"Alle sieben Abtastwerte erforderlich");return;}
+                lv_textarea_set_text(probeFields[i],http.arg(fields[i]).c_str());
+            }
+            action(http.arg("plan")=="1"?"probePlan":"probeSave");
+        }else if(section=="macro"){
+            if(!http.hasArg("slot")||!http.hasArg("name")){fail(400,"Makro fehlt");return;}
+            const int i=http.arg("slot").toInt();
+            if(i<0||i>2){fail(400,"Slot 0..2");return;}
+            parkSlot=i;lv_textarea_set_text(macroEntry,http.arg("name").c_str());
+            action("rename");
+        }else{fail(400,"Unbekannte HMI-Konfiguration");return;}
+        DynamicJsonDocument d(512);d["message"]=notice;
+        String json;serializeJson(d,json);http.send(200,"application/json",json);
+    });
+    http.on("/api/ui/network",HTTP_GET,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        DynamicJsonDocument d(1024);
+        d["hotspot_ssid"]=apName;d["hotspot_password"]=apPass;
+        d["hotspot_ip"]=WiFi.softAPIP().toString();
+        d["router_ssid"]=wifiSsid;d["connected"]=WiFi.status()==WL_CONNECTED;
+        d["router_ip"]=WiFi.status()==WL_CONNECTED?WiFi.localIP().toString():"";
+        d["lightburn_tcp_enabled"]=wifiLightburnEnabled;
+        d["lightburn_port"]=WIFI_TCP_PORT;
+        String json;serializeJson(d,json);http.send(200,"application/json",json);
+    });
+    http.on("/api/ui/network/scan",HTTP_GET,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        int n=WiFi.scanComplete();
+        if(n==WIFI_SCAN_FAILED){WiFi.scanNetworks(true);n=WIFI_SCAN_RUNNING;}
+        DynamicJsonDocument d(2048);
+        d["scanning"]=n==WIFI_SCAN_RUNNING;
+        JsonArray networks=d.createNestedArray("networks");
+        if(n>0){
+            for(int i=0;i<n&&i<20;i++){
+                JsonObject item=networks.createNestedObject();
+                item["ssid"]=WiFi.SSID(i);item["rssi"]=WiFi.RSSI(i);
+                item["secured"]=WiFi.encryptionType(i)!=WIFI_AUTH_OPEN;
+            }
+            WiFi.scanDelete();
+        }
+        String json;serializeJson(d,json);http.send(200,"application/json",json);
+    });
+    http.on("/api/ui/network/connect",HTTP_POST,[]{
+        if(!auth()){fail(401,"Code erforderlich");return;}
+        const String ssid=http.arg("ssid"), password=http.arg("password");
+        if(ssid.isEmpty()||ssid.length()>32||password.length()>63||
+           (password.length()>0&&password.length()<8)){
+            fail(400,"WLAN Name/Passwort ungueltig");return;
+        }
+        if(owner!=Owner::None||!(idle()||!fresh())){
+            fail(409,"Netzwechsel erst bei freier Maschine");return;
+        }
+        wifiSsid=ssid;wifiPass=password;
+        prefs.putString("ssid",ssid);
+        prefs.putString("wpw",password);
+        WiFi.begin(ssid.c_str(),password.c_str());
+        http.send(200,"application/json","{\"accepted\":true}");
+    });
     http.on("/api/upload",HTTP_POST,[]{
         if(!auth()||!uploadFinished){fail(403,"Upload fehlgeschlagen oder Datei existiert bereits");return;}
         uploadFinished=false;uploadAllowed=false;
@@ -1914,7 +2046,6 @@ bool settingAllowed(int id,float val){
     if(id==130||id==131||id==132)return val>0&&val<=3000;
     return id>=0&&id<=999&&isfinite(val);
 }
-int jogStep=1;
 void action(const char* id){
     String op=id;
     if(op=="focusSave"){
