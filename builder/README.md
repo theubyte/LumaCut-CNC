@@ -40,6 +40,32 @@ geheimnispreisgebenden** GET-Statusvergleich für lokalen und öffentlichen
 Update-Endpunkt. Ein HMI-Flash behebt einen serverseitigen HTTP-401-Fehler
 nicht. Der HMI-Diagnosetext unterscheidet ab jetzt HTTP 401, 404 und TLS.
 
+## Fehlerbehebung: "Missing firmware image HMI_OTA_APP_UNVERIFIED.bin"
+
+Dieses Archiv ist ein **älteres Komplett-Build**, das ohne separat
+gespeichertes HMI-OTA-Anwendungsimage erstellt wurde, oder dessen Image
+nachträglich im Archiv fehlt. Ein erfolgreiches HMI-/SKR-Flashpaket ist
+deshalb nicht automatisch ein sicher verteilbares OTA-Paket.
+
+Im aktualisierten Build Lab zeigt **Build-Details** den genauen Grund.
+Statt eine fehlerhafte Freigabe anzubieten, heißt der Knopf bei solchen
+Builds **Neues OTA-fähiges Komplett-Build starten**. Sobald der neue
+**Komplett · HMI + grblHAL**-Build erfolgreich ist, **diesen neuen
+Eintrag** auswählen und **Als Update für das HMI freigeben** drücken.
+
+Der Freigabe-Server akzeptiert nur:
+- `HMI_OTA_APP_UNVERIFIED.bin` (reines ESP32-S3-App-Image, kein 16-MB-Komplettimage),
+- `SKR_UART_UNVERIFIED_firmware.bin` vom **selben Git-Commit**,
+- die jeweils im Build-Manifest eingetragenen und auf Festplatte vorhandenen
+  Dateien mit korrekter Länge und übereinstimmender SHA-256-Summe.
+
+Ein fehlendes OTA-Image wird **niemals** durch das komplette Flashimage
+oder einen beliebigen ZIP-Inhalt ersetzt. Bestehende ältere Builds
+bleiben als reguläre ZIP-Downloads erhalten. Neue Backend-Regeln und
+Frontend-Oberfläche werden erst nach erneuter Installation des
+Unraid-Compiler-Docker-Containers wirksam; ein GitHub-Commit allein
+aktualisiert den laufenden Server nicht.
+
 ## Update Center unter https://luma.millione.de/
 
 Die **Update-Infrastruktur für die Versionsanzeige** ist jetzt im Quellcode vorhanden.
