@@ -208,7 +208,7 @@ class Controller:
                         # grblHAL and read machine limits before allowing
                         # LightBurn streams or Pi motion commands.
                         time.sleep(0.3)
-                        self._send_locked(b"$I\n$\n")
+                        self._send_locked(b"$I\n" + bytes((36, 36, 10)))
                         LOG.info("SKR connected and init queries sent at %s", self.port)
                     except Exception as exc:
                         self.state = "Disconnected"
