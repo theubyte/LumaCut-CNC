@@ -128,12 +128,34 @@ class Pi400TransportTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,"belegt"):
             c.command("$I",timeout=0.01)
         c.owner=None
+        c.bootstrap_ready=True
         with self.assertRaises(TimeoutError):
             # A fake write-only SKR never ACKs.
             class Device:
                 def write(self,data): return len(data)
             c.serial=Device()
             c.command("$I",timeout=0.02)
+
+    def test_usb_bootstrap_requires_two_real_acks(self):
+        c=Controller("/dev/null")
+        c.bootstrap_pending=2
+        self.assertFalse(c.bootstrap_ready)
+        c._read_response("[FIRMWARE:grblHAL]")
+        c._read_response("$130=450")
+        self.assertFalse(c.bootstrap_ready)
+        c._read_response("ok")
+        self.assertFalse(c.bootstrap_ready)
+        c._read_response("ok")
+        self.assertTrue(c.bootstrap_ready)
+        self.assertEqual(c.settings[130], 450)
+
+    def test_usb_bootstrap_fails_closed_on_firmware_error(self):
+        c=Controller("/dev/null")
+        c.bootstrap_pending=2
+        c._read_response("error:20")
+        self.assertFalse(c.bootstrap_ready)
+        self.assertEqual(c.bootstrap_pending, 0)
+        self.assertIn("Initialisierung", c.last_error)
 
     def test_accessory_feedback(self):
         c=Controller("/dev/null")
