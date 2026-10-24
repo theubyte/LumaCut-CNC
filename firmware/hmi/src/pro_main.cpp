@@ -470,12 +470,9 @@ void updateUi(){
     labelChanged(macroLabel,parks[parkSlot].stored?parks[parkSlot].name:String("Freier Makroplatz"));
     if(ipLabel){
         String net="WLAN: "+(WiFi.status()==WL_CONNECTED?WiFi.localIP().toString():String("nicht verbunden"))+
-        "\nHotspot: "+apName+" / "+apPass+
+        "\nAP: "+apName+" / "+apPass+
         "\nApp: http://"+WiFi.softAPIP().toString()+
-        "\nZugangscode: "+apiKey+
-        "\nGRBL $1:"+(knownSetting[1]?String(savedSetting[1],0):"?")+
-        " $20:"+(knownSetting[20]?String(savedSetting[20],0):"?")+
-        " $132:"+(knownSetting[132]?String(savedSetting[132],1):"?");
+        "\nCode: "+apiKey;
         labelChanged(ipLabel,net);
     }
     if(focusTargetButton)labelChanged(lv_obj_get_child(focusTargetButton,0),
@@ -975,7 +972,8 @@ void installRoutes(){
         String payload="{\"local_sha\":\""+String(LUMACUT_SOURCE_SHA)+
             "\",\"offered_sha\":\""+offeredUpdateSha+
             "\",\"available\":"+(updateAvailable?String("true"):String("false"))+
-            ",\"hmi_ota_ready\":false,\"skr_ota_ready\":false}";
+            ",\\"hmi_ota_ready\\":"+String((LumaOta::available() && LumaOta::isHex(updateDeviceKey,64))?"true":"false")+
+            ",\\"skr_ota_ready\\":false}";
         http.send(200,"application/json",payload);
     });
     http.on("/api/machine",HTTP_GET,[]{
