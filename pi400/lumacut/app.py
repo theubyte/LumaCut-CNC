@@ -268,7 +268,7 @@ def service_command():
     require_free()
     command = request.form.get("command", "").strip()
     # Read-only GRBL queries and bounded numeric settings only.
-    if command not in ("$", "$I", "$G", "$#"):
+    if command not in ("$$", "$I", "$G", "$#"):
         match = re.fullmatch(r"\$([0-9]{1,3})=([-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))", command)
         if not match:
             raise ValueError("Nur GRBL-Abfragen oder numerische $ID=Wert Einstellungen")
@@ -280,7 +280,7 @@ def service_command():
         if ident in (130, 131, 132) and not 0 < value <= 3000:
             raise ValueError("Ungültiger Achsfahrweg")
     is_write = bool(re.fullmatch(r"\$[0-9]{1,3}=.*", command))
-    response = run_commands([command] + (["$"] if is_write else []), timeout=20)
+    response = run_commands([command] + (["$$"] if is_write else []), timeout=20)
     if is_write:
         actual = controller.status()["settings"].get(ident)
         tolerance = max(0.0005, abs(value) * 0.0001)
@@ -477,7 +477,7 @@ def do_action(op):
         return "LightBurn TCP: " + ("EIN" if controller.lightburn_enabled else "AUS")
     if op == "readcfg":
         require_free()
-        return run_commands(["$I", "$"], timeout=15)
+        return run_commands(["$I", "$$"], timeout=15)
     if op in ("home", "enablehome"):
         require_free()
         result = run_commands(["$H" if op == "home" else "$22=1"], timeout=150)
@@ -573,10 +573,10 @@ def do_action(op):
         return "Firmwareupdates nur über abgesicherten Pi-Updatepfad."
     if op == "softon":
         require_free()
-        return run_commands(["$20=1", "$21=1", "$"])
+        return run_commands(["$20=1", "$21=1", "$$"])
     if op == "motorHold":
         require_free()
-        return run_commands(["$1=255", "$"])
+        return run_commands(["$1=255", "$$"])
     if op == "motorRelease":
         require_free()
         if controller.state == "Alarm":
@@ -591,7 +591,7 @@ def do_action(op):
             raise RuntimeError("SKR-Richtung $3 erst mit $ einlesen")
         bit = {"flipx": 1, "flipy": 2, "flipz": 4}[op]
         controller.homed = False
-        return run_commands(["$3=%d" % (int(setting) ^ bit), "$"])
+        return run_commands(["$3=%d" % (int(setting) ^ bit), "$$"])
     if op == "origin":
         with config_lock:
             config["zero_at_max"] = not config.get("zero_at_max", True)
