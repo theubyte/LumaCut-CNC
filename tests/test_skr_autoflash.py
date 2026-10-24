@@ -51,7 +51,7 @@ class AutomaticSkrUpdateTests(unittest.TestCase):
                        'if(!reset.begin())','if(!reset.enter())'):
             self.assertIn(phrase,UPD)
         for phrase in ('PCA9685','BOOT0','NRST','NPN','3,3 V','GND',
-                       'microSD','Ruecklesen'):
+                       'microSD','gelesen und Byte fuer Byte'):
             self.assertIn(phrase,DOC)
 
     def test_end_to_end_hmi_button_and_serial_ownership(self):
