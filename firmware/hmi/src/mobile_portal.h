@@ -70,7 +70,10 @@ code{font-size:13px;word-break:break-word}
 <article><h2>Gespeicherte Dateien</h2><div id="jobs"></div></article></div>
 <div class="tab" id="device"><article><h2>Verbindung und Zugang</h2>
 <p>Gerät: <strong id="ip">–</strong></p><label>HMI-Zugangscode</label><input id="key" type="password" placeholder="Code vom HMI-Display">
-<div class="space"></div><button onclick="savekey()">Zugang speichern</button><p class="hint">Nur im lokalen WLAN nutzen. API-Zugangscode niemals veröffentlichen.</p></article></div>
+<div class="space"></div><button onclick="savekey()">Zugang speichern</button><p class="hint">Nur im lokalen WLAN nutzen. API-Zugangscode niemals veröffentlichen.</p>
+<div class="space"></div><h2>Werkstueckraster</h2>
+<button onclick="downloadProbePlan()">Abtast-Raster (CSV) herunterladen</button>
+<p class="hint">X/Y-Tasteroffset und Tasterreichweite bereits beruecksichtigt. Noch keine gemessene Z-Hoehenkarte.</p></article></div>
 <div id="log"></div>
 </main>
 <nav><button class="sel" onclick="tab('home',this)">Übersicht</button><button onclick="tab('files',this)">Dateien</button><button onclick="tab('device',this)">Gerät</button></nav>
@@ -80,6 +83,18 @@ document.querySelector('#key').value=key;
 function tab(name,button){document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.id===name));document.querySelectorAll('nav button').forEach(x=>x.classList.remove('sel'));button.classList.add('sel')}
 function savekey(){key=document.querySelector('#key').value.trim();sessionStorage.setItem('lc-key',key);msg('Zugang lokal im Browser gespeichert');poll()}
 function msg(s){document.querySelector('#log').textContent=s}
+async function downloadProbePlan(){
+  if(!key){msg('Zuerst HMI-Zugangscode eingeben');return}
+  try{
+    const r=await fetch('/api/probe-plan',{headers:{'X-LumaCut-Key':key}});
+    if(!r.ok)throw Error((await r.text()).slice(0,200));
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download='probe_plan.csv';
+    document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+    msg('Geometrischen Rasterplan heruntergeladen.');
+  }catch(e){msg('Rasterdownload fehlgeschlagen: '+e.message)}
+}
 async function api(path,options){let opt=options||{};opt.headers=Object.assign({},opt.headers||{},{"X-LumaCut-Key":key});let response=await fetch(path,opt);if(!response.ok)throw Error((await response.text()).slice(0,200));return response.json()}
 async function poll(){if(!key){msg('Zugangscode unter Gerät eingeben');return}try{
  const s=await api('/api/status');document.querySelector('#state').textContent=s.state||'?';
