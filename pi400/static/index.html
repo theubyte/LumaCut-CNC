@@ -361,18 +361,7 @@ el("joinWifi").onclick=async()=>{
   setTimeout(getNetwork,5000);
  }catch(e){notify(e.message,true)}
 };
-let qrUrl="";
-async function getQr(){return;
-/*
- if(!key)return;
- try{
-  const r=await fetch("/api/ui/hotspot-qr",{headers:{"X-LumaCut-Key":key}});
-  if(!r.ok)throw Error(await r.text());
-  const u=URL.createObjectURL(await r.blob());el("qr").src=u;
-  if(qrUrl)URL.revokeObjectURL(qrUrl);qrUrl=u;
- }catch(e){notify("QR: "+e.message,true)}
-}
-*/
+async function getQr(){return}
 async function download(url,name){
  try{
   const r=await fetch(url,{headers:{"X-LumaCut-Key":key}});
