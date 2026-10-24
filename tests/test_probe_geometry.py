@@ -26,7 +26,6 @@ int main(){
     assert(p.x0>=15.5f && p.x1<=100.0f);
     assert(p.y0>=0.0f && p.y1<=50.0f);
     float sx,sy,lx,ly;
-    float lastY=-1.f;
     for(uint32_t i=0;i<(uint32_t)((uint64_t)p.nx*p.ny);i++){
         assert(point(r,p,i,sx,sy,lx,ly));
         assert(lx>=.5f-1e-3 && lx<=99.5f+1e-3);
@@ -48,9 +47,10 @@ int main(){
             source=Path(td)/"grid.cpp"
             exe=Path(td)/"grid"
             source.write_text(cpp,encoding="utf-8")
-            subprocess.run(["g++","-std=c++11","-Wall","-Wextra","-Werror",
-                            "-I",str(HEADER.parent),str(source),"-o",str(exe)],
-                           check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            build=subprocess.run(["g++","-std=c++11","-Wall","-Wextra","-Werror",
+                                  "-I",str(HEADER.parent),str(source),"-o",str(exe)],
+                                 capture_output=True,text=True)
+            self.assertEqual(build.returncode,0,build.stderr)
             subprocess.run([str(exe)],check=True)
 
 
