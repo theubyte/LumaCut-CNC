@@ -57,8 +57,8 @@ def patch(text):
     # Advertise this distinct MOSFET through grblHAL's Aux Output GPIO API.
     text=change(text,
         '#define AUXOUTPUT4_PIN          8',
-        '#define AUXOUTPUT4_PIN          8\\n'
-        '#define AUXOUTPUT5_PORT         GPIOC // FAN1 PC7 spare MOSFET\\n'
+        '#define AUXOUTPUT4_PIN          8\n'
+        '#define AUXOUTPUT5_PORT         GPIOC // FAN1 PC7 spare MOSFET\n'
         '#define AUXOUTPUT5_PIN          7')
     # PC9 BED now directly switches the laser module's 24V negative return.
     # PC7 FAN1 is an auxiliary output; PC6 FAN0 drives M8 exhaust.
