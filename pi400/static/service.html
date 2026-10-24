@@ -47,6 +47,13 @@ code{color:#9bd8f9;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}pr
 <button id="savePins" class="primary">Belegung übernehmen</button>
 </section>
 <section class="card">
+<div class="caps">Manuelle Arbeitsfeldsteuerung</div><h2>Touch-Jog Freigabe</h2>
+<p class="sub">Auf dem Dashboard tippen, um eine genaue XY-Position anzufahren. Der Pi schickt M5, hebt zuerst Z auf den eingestellten Sicherheitsabstand und bewegt dann XY in Maschinenkoordinaten.</p>
+<p class="notice">Erst nach echtem Motor-/Z-Abstandstest und Homing freigeben. Die Weboberfläche ersetzt weder Z-Endschalter noch Hardwarelimits.</p>
+<div class="buttonbar"><button id="touchOn" class="primary">Arbeitsfeld-Touch aktivieren</button><button id="touchOff">Arbeitsfeld-Touch deaktivieren</button></div>
+<p id="touchStatus" class="help">Derzeit gesperrt.</p>
+</section>
+<section class="card">
 <div class="caps">Parameter-Konsole</div><h2>GRBL-Servicekonsole</h2><p class="sub">Echte SKR-Antworten, keine simulierten Maschinenwerte.</p>
 <label for="command">Kommando</label><input id="command" spellcheck="false" value="$$" placeholder="$$ oder $110=6000">
 <p class="help">Zulässig: $$, $I, $G, $# und numerische Einstellungen. Bewegungen und Laseraktivierung sind in dieser Servicekonsole gesperrt.</p>
@@ -118,9 +125,28 @@ $("login").onclick=async()=>{
  }catch(e){authenticated(false);message(e.message,true)}
 };
 $("logout").onclick=async()=>{try{await call("/api/service/logout","POST",{});authenticated(false);message("Service gesperrt");}catch(e){message(e.message,true)}};
+async function loadTouch(){
+ try{
+  const out=await call("/api/ui/config");
+  $("touchStatus").textContent=out.touch_jog_enabled?"Touch-Jog: Aktiv":"Touch-Jog: Gesperrt";
+  $("touchOn").disabled=Boolean(out.touch_jog_enabled);
+  $("touchOff").disabled=!out.touch_jog_enabled;
+ }catch(e){message(e.message,true)}
+}
+$("touchOn").onclick=async()=>{
+ try{const out=await call("/api/service/workarea","POST",{enabled:"1"});
+  message(out.message);await loadTouch();
+ }catch(e){message(e.message,true)}
+};
+$("touchOff").onclick=async()=>{
+ try{const out=await call("/api/service/workarea","POST",{enabled:"0"});
+  message(out.message);await loadTouch();
+ }catch(e){message(e.message,true)}
+};
 async function load(){
  try{
  const [d,p]=await Promise.all([call("/api/service/diagnostics"),call("/api/service/pins")]);
+ await loadTouch();
  $("connected").textContent=d.connected?"Online":"Offline";
  $("machineState").textContent=d.state;
  $("serialFaults").textContent=String(d.serial_faults);
