@@ -351,6 +351,7 @@ void updateArea(){
 }
 // LVGL updates need the parameter catalog declared before its definition.
 void refreshCatalog();
+void action(const char* id); // needed by authenticated WebServer lambdas
 void writeCmd(const String&);
 void restoreHmiIfBootBroken();
 // Version DISCOVERY only. Firmware installation is intentionally disabled
