@@ -1668,7 +1668,7 @@ void makeUi(){
         lv_obj_set_width(catalogNamesLabel[i],468);
         lv_label_set_long_mode(catalogNamesLabel[i],LV_LABEL_LONG_DOT);
         catalogFields[i]=configEntry(stripe,500,1,165,30,"?");
-        btn(stripe,"✓",675,1,57,30,saves[i],PALE_BLUE,BLUE);
+        btn(stripe,LV_SYMBOL_OK,675,1,57,30,saves[i],PALE_BLUE,BLUE);
     }
 
     // Independent X/Y switch-tip offsets and complete rectangle raster.
