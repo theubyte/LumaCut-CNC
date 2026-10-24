@@ -37,7 +37,7 @@ code{color:#9bd8f9;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}pr
 <section class="card full">
 <div class="row" style="justify-content:space-between"><div><div class="caps">System Live</div><h2>Controller und Sicherheitszustand</h2></div><button id="refresh">Diagnose aktualisieren</button><button id="logout">Service sperren</button></div>
 <div class="metrics"><div class="metricbox"><div class="small muted">SKR-Verbindung</div><div id="connected" class="metric">—</div></div><div class="metricbox"><div class="small muted">Maschinenzustand</div><div id="machineState" class="metric">—</div></div><div class="metricbox"><div class="small muted">USB-Fehler</div><div id="serialFaults" class="metric">—</div></div></div>
-<p class="help" style="margin:15px 0 0">Der Pi verwaltet Aufträge und Konfiguration. Der STM32 führt harte Echtzeitbewegungen und Endschalterreaktionen aus.</p>
+<p class="help" style="margin:15px 0 0">Der Pi verwaltet Aufträge und Konfiguration. Der STM32 führt harte Echtzeitbewegungen und Endschalterreaktionen aus.</p><div id="firmwareIdentity" class="help" style="margin-top:10px">Firmwarekennung noch nicht abgefragt.</div>
 </section>
 <section class="card">
 <div class="caps">I/O-Matrix</div><h2>Zubehörkanäle zuweisen</h2><p class="sub">Aktiv: logische Zuordnung der bereits vom SKR unterstützten M7/M8-Ausgänge.</p>
@@ -109,6 +109,8 @@ async function load(){
  $("connected").textContent=d.connected?"Online":"Offline";
  $("machineState").textContent=d.state;
  $("serialFaults").textContent=String(d.serial_faults);
+ const firmware=d.firmware||{};
+ $("firmwareIdentity").textContent="SKR-Firmware: "+(firmware.version||"Noch nicht abgefragt")+(firmware.board?" · "+firmware.board:"")+(firmware.driver?" · "+firmware.driver:"");
  $("diagnostics").textContent=(d.recent||[]).slice(-25).join("\n")||"Keine GRBL-Nachrichten.";
  $("pinLights").value=p.roles.lights;
  $("pinExhaust").value=p.roles.exhaust;
