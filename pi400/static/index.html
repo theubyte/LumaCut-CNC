@@ -292,8 +292,8 @@ el("saveProbe").onclick=()=>saveSection("probe",probeData(false));
 el("planProbe").onclick=()=>saveSection("probe",probeData(true));
 el("parkSlot").onchange=()=>{el("parkName").value=cfg.parks?.[Number(el("parkSlot").value)]?.name||""};
 el("parkRename").onclick=()=>saveSection("macro",{slot:el("parkSlot").value,name:el("parkName").value});
-el("parkCapture").onclick=async()=>{await action("p"+el("parkSlot").value);await action("capture")};
-el("parkGo").onclick=async()=>{await action("p"+el("parkSlot").value);await action("park")};
+el("parkCapture").onclick=()=>action("capture",{slot:el("parkSlot").value});
+el("parkGo").onclick=()=>action("park",{slot:el("parkSlot").value});
 async function readFiles(){
  if(!key)return;
  try{
