@@ -361,15 +361,107 @@ def do_action(op):
         return "Updates werden über die Pi-400-Verwaltung geprüft."
     if op in ("updateinstall", "skrinstall"):
         return "Firmwareupdates nur über abgesicherten Pi-Updatepfad."
-    if op in ("motorHold", "motorRelease", "softon", "flipx", "flipy", "flipz",
-              "origin", "zlift", "frame", "pause", "next"):
-        raise RuntimeError("Diese Aktion wird auf dem Pi erst nach kompatiblem SKR-Protokoll freigeschaltet")
+    if op == "softon":
+        require_free()
+        return run_commands(["$20=1", "$21=1", "$"])
+    if op == "motorHold":
+        require_free()
+        return run_commands(["$1=255", "$"])
+    if op == "motorRelease":
+        require_free()
+        if controller.state == "Alarm":
+            raise RuntimeError("Achsen bereits Alarm; erst Referenzfahrt prüfen")
+        result = run_commands(["$SLP"])
+        controller.homed = False
+        return "Achsen im Schlafmodus; Neustart und Homing zum Aufwecken. " + result
+    if op in ("flipx", "flipy", "flipz"):
+        require_free()
+        setting = controller.settings.get(3)
+        if setting is None:
+            raise RuntimeError("SKR-Richtung $3 erst mit $ einlesen")
+        bit = {"flipx": 1, "flipy": 2, "flipz": 4}[op]
+        controller.homed = False
+        return run_commands(["$3=%d" % (int(setting) ^ bit), "$"])
+    if op == "origin":
+        with config_lock:
+            config["zero_at_max"] = not config.get("zero_at_max", True)
+        persist()
+        return "Koordinatenansicht gewechselt"
+    if op == "zlift":
+        require_free()
+        stat = controller.status()
+        if not stat["homed"] or not stat["position"]:
+            raise RuntimeError("Erst XYZ referenzieren")
+        lift = float(config["focus"]["lift"])
+        zmax = stat["settings"].get(132, 0)
+        if not 0 < lift < zmax:
+            raise RuntimeError("Z-Sicherheitsabstand außerhalb $132")
+        target = -lift if config.get("zero_at_max", True) else lift
+        if abs(target - stat["position"][2]) < 0.005:
+            return "Z bereits auf Sicherheitsabstand"
+        if 112 not in stat["settings"]:
+            raise RuntimeError("Z Maximaltempo $112 fehlt")
+        return run_commands(["M5", "G53 G0 Z%.3f" % target], timeout=30)
+    if op == "pause":
+        return do_action("toggle")
+    if op == "frame":
+        require_free()
+        if not controller.homed or not selected_job:
+            raise RuntimeError("Erst homen und G-Code auswählen")
+        bounds = job_bounds(JOBS / selected_job)
+        if bounds is None:
+            raise RuntimeError("Kontur aus diesem G-Code nicht sicher bestimmbar")
+        x0, y0, x1, y1 = bounds
+        return run_commands(["M5", "G21 G90",
+            "G0 X%.3f Y%.3f" % (x0,y0),
+            "G0 X%.3f Y%.3f" % (x1,y0),
+            "G0 X%.3f Y%.3f" % (x1,y1),
+            "G0 X%.3f Y%.3f" % (x0,y1),
+            "G0 X%.3f Y%.3f" % (x0,y0)],timeout=35)
+    if op == "next":
+        return "GCode-Jobs über die Dateiliste auswählen"
+
     raise ValueError("Unbekannter Befehl " + op)
 
 
 @app.post("/api/ui/action")
 def ui_action():
     return jsonify(message=do_action(request.form.get("op", "")))
+
+
+def job_bounds(path: Path):
+    # Parse GRBL absolute XY contours; unsupported modal transformations
+    # do not trigger a potentially incorrect unpowered frame.
+    import re
+    xs,ys = [],[]
+    absolute = True
+    metric = True
+    x = y = None
+    for line in path.read_text(encoding="utf-8",errors="replace").splitlines():
+        raw = line.split(";",1)[0]
+        raw = re.sub(r"\\([^()]*\\)","",raw).upper()
+        if not raw.strip():
+            continue
+        words = re.findall(r"([A-Z])\\s*([-+]?\\d*\\.?\\d+)",raw)
+        for letter,value in words:
+            if letter == "G":
+                code = int(float(value))
+                if code == 91: absolute = False
+                if code == 90: absolute = True
+                if code == 20: metric = False
+                if code == 21: metric = True
+                if code in (2,3,51,68,92): return None
+            if letter == "X": x=float(value)
+            if letter == "Y": y=float(value)
+        if not absolute or not metric:
+            return None
+        if x is not None and y is not None:
+            xs.append(x);ys.append(y)
+        if len(xs)>100000: return None
+    if not xs or not ys: return None
+    result=min(xs),min(ys),max(xs),max(ys)
+    if result[0]==result[2] or result[1]==result[3]: return None
+    return result
 
 
 @app.get("/api/jobs")
