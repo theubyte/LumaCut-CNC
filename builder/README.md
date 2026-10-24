@@ -48,8 +48,9 @@ ist die Wiederherstellung mit hardwaremäßig abgeschaltetem Laser zu prüfen.
 Das SKR Mini MZ hat noch keinen vom HMI aus überprüften BOOT0/NRST-Zugang
 und keinen geprüften UART-ROM-Flashpfad. Das Feld
 `automatic_skr_flash_enabled` bleibt deshalb ausdrücklich **false**.
-Die optionale 4-GB-microSD im Waveshare ist künftig für G-Code, Updates
-und Backups geeignet, ersetzt aber den SKR-Bootloaderzugang nicht.
+Die optionale 4-GB-microSD im Waveshare wird nun für G-Code, Bootlogs und
+vorbereitete Update-/Backup-Verzeichnisse eingebunden, mit LittleFS-Fallback.
+Das ist noch nicht hardwaregetestet und ersetzt den SKR-Bootloaderzugang nicht.
 Der genaue Stand und die Wiederherstellung stehen unter
 `docs/SECURE_UPDATES.md`.
 
