@@ -1,0 +1,25 @@
+[Unit]
+Description=LumaCut CNC Raspberry Pi 400 Control Studio and GRBL bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lumacut
+Group=lumacut
+SupplementaryGroups=dialout video render
+WorkingDirectory=/opt/lumacut
+EnvironmentFile=/etc/lumacut/lumacut.env
+Environment=PYTHONPATH=/opt/lumacut/pi400
+ExecStart=/usr/bin/python3 -m lumacut.app
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/lumacut
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
