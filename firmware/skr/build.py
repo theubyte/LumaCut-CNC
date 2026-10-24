@@ -72,8 +72,8 @@ def main():
         header.write_text(patch(header.read_text()))
         # LumaCut-specific Z-clearance occurs INSIDE grblHAL's system homing
         # state, between Z and XY cycles, not afterward in the HMI.
-        # Armed only after the operator has calibrated Z and explicitly sets
-        # the existing GRBL pull-off $27 to the opt-in sentinel 2.5 mm.
+        # Always retract to 20 mm after the Z homing cycle, before any XY
+        # homing movement. Travel and steps/mm must already be configured.
         limits=root/"grbl"/"machine_limits.c"
         source=limits.read_text()
         marker='// Homes the specified cycle axes, sets the machine position'
@@ -81,14 +81,12 @@ def main():
             raise RuntimeError("grblHAL homing function marker has changed")
         routine="""#ifdef LUMACUT_SAFE_Z20
 // Runs as a bounded system motion *after* Z homing and BEFORE XY homing.
-// Runtime opt-in uses documented GRBL $27 pull-off value 2.5mm; never
-// automatically retreat 20mm with uncalibrated steps/mm.
+// No HMI post-home move: the clearance is a real intermediate system move.
+// Insufficient Z travel aborts the homing sequence before X/Y starts.
 FLASHMEM status_code_t limits_lumacut_z_clearance (void)
 {
     const float target = 20.0f;
     const float current_pulloff = homing_pulloff.values[Z_AXIS];
-    if(fabsf(settings.homing.pulloff - 2.5f) > 0.001f)
-        return Status_OK; // Not yet commissioned for this machine.
     if(!(sys.homed.mask & bit(Z_AXIS)) ||
        settings.axis[Z_AXIS].max_travel > -21.0f ||
        current_pulloff >= target ||
