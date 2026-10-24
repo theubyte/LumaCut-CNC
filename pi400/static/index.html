@@ -184,7 +184,7 @@ input,select{background:#0a1624;border:1px solid #3a5268;padding:11px 13px;borde
 <label class="field">Optischer Fokus [mm]</label><input id="focusGap" type="number" step="any">
 <label class="field">Z-Tasterhöhe [mm]</label><input id="focusTip" type="number" step="any">
 <div class="two" style="margin-top:12px"><button id="saveFocus" class="primary">Speichern ✓</button><button data-op="zlift">Z auf Abstand</button>
-<button data-op="toggleAutoLift">Auto-Z EIN/AUS</button></div>
+<button id="autoZ" data-op="toggleAutoLift">Auto-Z EIN/AUS</button></div>
 <p class="caption">Z20 beim vollständigen Homing wird vom SKR vor X/Y ausgeführt, nicht nach dem Homing durch das HMI.</p></div>
 <div class="panel span7"><h2>Werkstückraster & Taster-Offset</h2>
 <div class="two">
@@ -255,6 +255,7 @@ document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>tab(b.dataset.t
 async function action(op,extra={}){
  try{const d=await post("/api/ui/action",Object.assign({op},extra));notify(d.message||"Aktion gesendet");
   if(op==="lightToggle"||op==="exhaustToggle")setTimeout(getNetwork,900);
+  if(op==="toggleAutoLift")setTimeout(readConfig,250);
   return d}
  catch(e){notify("Aktion fehlgeschlagen: "+e.message,true)}
 }
@@ -295,6 +296,7 @@ async function readConfig(){
    ["pOX",p.offset_x],["pOY",p.offset_y],["pPitch",p.pitch]]
    .forEach(item=>{const input=el(item[0]);if(document.activeElement!==input)input.value=item[1]??""});
   el("speed").textContent="Tempo "+(cfg.speed_pct||100)+"% / SKR";
+  el("autoZ").textContent=f.auto?"Auto-Z nach Homing EIN":"Auto-Z nach Homing AUS";
   if(cfg.parks&&cfg.parks.length){el("parkName").value=cfg.parks[Number(el("parkSlot").value)]?.name||""}
  }catch(e){notify(e.message,true)}
 }
