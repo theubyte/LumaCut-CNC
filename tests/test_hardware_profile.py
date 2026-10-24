@@ -95,6 +95,15 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn("lv_obj_set_scrollbar_mode(editOverlay,LV_SCROLLBAR_MODE_OFF)",CONTROL)
         self.assertIn("lv_keyboard_set_popovers(keyboard,false)",CONTROL)
         self.assertIn("lv_obj_get_coords(keyboard,&bounds)",CONTROL)
+        # LVGL v8 constructs keyboards at BOTTOM_MID. set_pos alone leaves
+        # the anchor at the bottom and shifts the widget off-screen.
+        layout=CONTROL[CONTROL.index("void layoutKeyboardDialog()"):CONTROL.index("void openKeyboard(")]
+        self.assertIn("lv_obj_align(editOverlay,LV_ALIGN_TOP_LEFT,0,0)",layout)
+        self.assertIn("lv_obj_align(keyboard,LV_ALIGN_TOP_LEFT,margin,kbY)",layout)
+        self.assertNotIn("lv_obj_set_pos(keyboard,margin,kbY)",layout)
+        self.assertLess(layout.index("lv_obj_align(keyboard,LV_ALIGN_TOP_LEFT,margin,kbY)"),
+                        layout.index("lv_obj_set_size(keyboard,width,keyboardH)"))
+        self.assertIn("bounds.y2>=buttonsY-4",layout)
         self.assertIn("layoutKeyboardDialog();",CONTROL)
         self.assertIn("editSaveButton=btn(editOverlay",CONTROL)
         self.assertIn("editCancelButton=btn(editOverlay",CONTROL)

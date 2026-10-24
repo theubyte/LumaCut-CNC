@@ -1074,12 +1074,16 @@ void layoutKeyboardDialog(){
     const int buttonsY=h-bottomSafe-buttonH;
     const int keyboardH=LV_MAX(90,buttonsY-kbY-14);
     const int width=w-2*margin;
-    lv_obj_set_pos(editOverlay,0,0);
+    // The modal is anchored to the display origin, not any scroll or old alignment.
+    lv_obj_align(editOverlay,LV_ALIGN_TOP_LEFT,0,0);
     lv_obj_set_size(editOverlay,w,h);
     lv_obj_set_pos(editHeading,margin+4,9);
     lv_obj_set_pos(editInput,margin,inputY);
     lv_obj_set_size(editInput,width,inputH);
-    lv_obj_set_pos(keyboard,margin,kbY);
+    // LVGL 8's keyboard constructor aligns to BOTTOM_MID by default.
+    // set_pos() would be an offset from the BOTTOM; y=97 then falls OFF-screen.
+    // align() changes the origin as well as the position (800x480-safe).
+    lv_obj_align(keyboard,LV_ALIGN_TOP_LEFT,margin,kbY);
     lv_obj_set_size(keyboard,width,keyboardH);
     const int gutter=10;
     const int half=(width-gutter)/2;
@@ -1088,12 +1092,13 @@ void layoutKeyboardDialog(){
     lv_obj_set_pos(editSaveButton,margin+half+gutter,buttonsY);
     lv_obj_set_size(editSaveButton,width-half-gutter,buttonH);
     lv_obj_update_layout(editOverlay);
-    // Defensive: no key may be placed behind the footer or past display.
+    // Bound the ACTUAL global keyboard rectangle, not just the requested size.
+    // Never shrink a bottom-aligned keyboard: that moves it even further down.
     lv_area_t bounds{};
     lv_obj_get_coords(keyboard,&bounds);
-    if(bounds.y2>=buttonsY-4){
-        const int corrected=LV_MAX(75,keyboardH-(bounds.y2-(buttonsY-5)));
-        lv_obj_set_size(keyboard,width,corrected);
+    if(bounds.x1<0||bounds.x2>=w||bounds.y1<0||bounds.y2>=buttonsY-4){
+        lv_obj_set_size(keyboard,width,LV_MAX(90,LV_MIN(keyboardH,buttonsY-kbY-14)));
+        lv_obj_align(keyboard,LV_ALIGN_TOP_LEFT,margin,kbY);
         lv_obj_update_layout(editOverlay);
     }
 }
