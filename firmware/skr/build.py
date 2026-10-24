@@ -200,6 +200,23 @@ extern status_code_t limits_lumacut_z_clearance (void);
         if original.count(zero_rpm_block)!=1:
             raise RuntimeError("Upstream spindleSetStateVariable() logic changed")
         original=original.replace(zero_rpm_block,standby_block)
+        # Drop laser PWM to zero before lifting BED-/laser return.
+        off_block="""    if(!(spindle->context.pwm->flags.cloned ? state.ccw : state.on)) {
+        spindle_off(spindle);
+        pwm_off(spindle);
+    } else {"""
+        safer_off="""    if(!(spindle->context.pwm->flags.cloned ? state.ccw : state.on)) {
+#ifdef LUMACUT_BED_SPINDLE_POWER
+        pwm_off(spindle);
+        spindle_off(spindle);
+#else
+        spindle_off(spindle);
+        pwm_off(spindle);
+#endif
+    } else {"""
+        if original.count(off_block)!=1:
+            raise RuntimeError("Upstream spindleSetStateVariable M5 ordering changed")
+        original=original.replace(off_block,safer_off)
         driver.write_text(original)
         # Use upstream's USB CDC environment and verified 28K bootloader
         # linker memory layout, not the unoffset FLASH linker script.
