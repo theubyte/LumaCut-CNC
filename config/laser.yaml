@@ -78,10 +78,20 @@ laser:
   module: LaserTree LT-80W-AA-PRO
   module_power: 24V DC, approx 1.5-2A per manufacturer
   module_pwm: 3-12V TTL/PWM, max 5kHz
-  grbl_spindle_enable_output: PC7  # FAN1 low-side MOSFET
-  power_switching_method: external_24v_high_side_switch_required
-  pwm_and_module_ground_must_remain_common: true
-  pc7_direct_laser_ground_switching_allowed: false
+  grbl_spindle_enable_output: PC9  # BED low-side power MOSFET
+  power_switching_method: direct_BED_24V_low_side_output
+  bed_positive_to_laser_vcc: true
+  bed_negative_to_laser_gnd: true
+  pwm_interface: optically_isolated_pwm_driver_required
+  pwm_input_from_skr: PA1
+  pwm_output_reference: laser_ground_on_BED_negative
+  pwm_direct_PA1_to_floating_laser_forbidden_by_circuit: true
+  shared_chassis_ground_bypass_must_be_checked: true
+  power_on_via_M3_S0: true
+  power_off_via_M5: true
+  pre_power_dwell_in_profile_s: 2
+  post_job_module_fan_cooldown_in_profile_s: 30
+  hardware_PWM_polarity_verified: false
   prepower_and_cooldown_circuit_hardware_verified: false
   power_interlock_hardware_verified: false
   startup_state: off
@@ -102,16 +112,24 @@ cabinet_accessories:
     mosfet_type: low_side
     max_current_verified: false
   laser_enable:
-    connector: FAN1
-    power_output: PC7
+    connector: BED
+    power_output: PC9
     command: spindle_enable_M3_M4
-    external_high_side_switch_required: true
-    power_precharge_verified: false
+    power_on_with_M3_S0: true
+    power_off_with_M5: true
+    mosfet_type: low_side
+    cooling_delay_requires_matched_gcode_profile: true
+    rated_output_current_verified: false
+  fan1:
+    connector: FAN1
+    mcu_pin: PC7
+    used: false
+    notes: currently_unassigned_spare
   bed_output:
     connector: BED
     mcu_pin: PC9
-    used: false
-    notes: reserved_high_current_mosfet_do_not_use_as_gpio
+    used: true
+    notes: low_side_laser_supply_mosfet
   shared_commands:
     M9: both_24v_led_and_exhaust_outputs_off
     M7: led_on
