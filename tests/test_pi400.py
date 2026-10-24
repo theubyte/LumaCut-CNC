@@ -127,7 +127,7 @@ class Pi400WebTests(unittest.TestCase):
 
     def test_camera_missing_is_informative(self):
         headers={"X-LumaCut-Key":"unit-test-long-private-key"}
-        os.environ["LUMACUT_CAMERA_CMD"]="/dev/nonexistent-camera"
+        os.environ["LUMACUT_CAMERA_DEVICE"]="/dev/nonexistent-camera"
         response=self.client.get("/api/camera/snapshot",headers=headers)
         self.assertEqual(response.status_code,503)
 
