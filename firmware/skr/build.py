@@ -156,6 +156,51 @@ extern status_code_t limits_lumacut_z_clearance (void);
 #endif
 """,1)
         motion.write_text(body)
+        # Laser power is the BED low-side FET (PC9) mapped to the spindle
+        # enable GPIO. Keep the 24V supply energized through S0/no-burn
+        # traverses while M3/M4 remains active. M5 always switches BED off.
+        # M3 S0 therefore permits a warm-up dwell BEFORE PWM > 0.
+        driver=root/"Src"/"driver.c"
+        original=driver.read_text()
+        speed_block="""        if(spindle->context.pwm->flags.rpm_controlled) {
+            spindle_off(spindle);
+            if(spindle->context.pwm->flags.laser_off_overdrive)
+                SPINDLE_PWM_TIMER_CCR = spindle->context.pwm->pwm_overdrive;
+        } else
+            pwm_off(spindle);"""
+        retain_block="""#ifdef LUMACUT_BED_SPINDLE_POWER
+        // Never power-cycle the module's internal fan for each S0 traverse.
+        // PWM is off but BED remains energized until the explicit M5.
+        pwm_off(spindle);
+#else
+"""+speed_block+"""
+#endif"""
+        if original.count(speed_block)!=1:
+            raise RuntimeError("Upstream spindleSetSpeed() PWM-off logic changed")
+        original=original.replace(speed_block,retain_block)
+        zero_rpm_block="""        if(rpm == 0.0f && spindle->context.pwm->flags.rpm_controlled)
+            spindle_off(spindle);
+        else {
+            spindle_on(spindle);
+            spindleSetSpeed(spindle, spindle->context.pwm->compute_value(spindle->context.pwm, rpm, false));
+        }"""
+        standby_block="""#ifdef LUMACUT_BED_SPINDLE_POWER
+        if(rpm == 0.0f && spindle->context.pwm->flags.rpm_controlled) {
+            // M3 S0 powers BED/laser fan without firing the laser.
+            // The matched LightBurn profile waits before nonzero PWM.
+            spindle_on(spindle);
+            pwm_off(spindle);
+        } else {
+            spindle_on(spindle);
+            spindleSetSpeed(spindle, spindle->context.pwm->compute_value(spindle->context.pwm, rpm, false));
+        }
+#else
+"""+zero_rpm_block+"""
+#endif"""
+        if original.count(zero_rpm_block)!=1:
+            raise RuntimeError("Upstream spindleSetStateVariable() logic changed")
+        original=original.replace(zero_rpm_block,standby_block)
+        driver.write_text(original)
         # Use upstream's USB CDC environment and verified 28K bootloader
         # linker memory layout, not the unoffset FLASH linker script.
         with (root/"platformio.ini").open("a") as h:
@@ -202,6 +247,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
             h.write("  -D DEFAULT_HOMING_ENABLE=1\n")
             h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")
             h.write("  -D LUMACUT_SAFE_Z20=1\n")
+            h.write("  -D LUMACUT_BED_SPINDLE_POWER=1\n")
 
         run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/env
