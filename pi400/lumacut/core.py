@@ -286,10 +286,10 @@ class Controller:
             raise RuntimeError("Pi-Softwareupdate: Maschinensteuerung gesperrt")
         if self.serial is None:
             raise ConnectionError("SKR USB nicht erreichbar")
-        if not self.bootstrap_ready:
-            raise ConnectionError("SKR-Initialisierung ($I/$) noch nicht abgeschlossen")
         if self.owner not in (None, owner):
             raise RuntimeError("Steuerung belegt: " + self.owner)
+        if not self.bootstrap_ready:
+            raise ConnectionError("SKR-Initialisierung noch nicht abgeschlossen")
         self.owner = owner
 
     def command(self, cmd, timeout=10.0, owner="local"):
