@@ -1,0 +1,10 @@
+[Unit]
+Description=Check LumaCut Pi software updates daily
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
