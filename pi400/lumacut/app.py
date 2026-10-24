@@ -310,6 +310,8 @@ def status():
                                  "zero_at_max": bool(config.get("zero_at_max", True))}},
         diagnostics=stat["diagnostics"],
         accessories=accessories_for_roles(stat["accessories"], config["pin_roles"]),
+        firmware=stat["identity"],
+        extra_outputs=stat["extra_outputs"],
         last_error=stat["last_error"],
         recent=stat["recent"],
     )
