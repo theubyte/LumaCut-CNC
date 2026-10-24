@@ -1,0 +1,94 @@
+# LumaCut Secure Updates – Stand 24.10.2026
+
+## Architektur
+
+Quelle ist weiterhin GitHub `main`. Der Unraid-Compiler klont bei jedem
+Build `GIT_BRANCH=main`, erstellt das HMI-Profil
+`lumacut_waveshare_s3_pro` und die dazugehörige UART-SKR-Firmware, archiviert
+beide Dateien und deren SHA256-Prüfsummen. Ein Build allein ist keine
+Freigabe. Über den Login geschützten Knopf `Als Update freigeben` kann ein
+validiertes **gepaartes** Build veröffentlicht werden.
+
+`GET /api/updates/latest` veröffentlicht ein kleines JSON-Manifest
+mit Version, Boardtypen, Dateigrößen und SHA256; der Binärdownload
+`GET /api/updates/file/hmi` ist nur über `X-LumaCut-Device-Key`
+zugänglich. HMI-TLS pinnt den CA-Root aus `update_ca.h`; der
+Firmwaredownload akzeptiert keine URL aus dem Manifest und keine Redirects.
+
+## HMI OTA (Code vorhanden, echter Hardwaretest ausstehend)
+
+- HMI mit dem aktualisierten Build **einmal per USB flashen**. Erst diese
+  Version kennt den neuen OTA-Installer.
+- In Unraid `/mnt/user/appdata/lumacut-builder/.env` den bestehenden
+  geheimen `UPDATE_DEVICE_KEY` ermitteln. **Nie nach GitHub committen.**
+- Auf dem HMI unter **WLAN/System** den Schlüssel über das maskierte
+  Eingabefeld eintragen und **Key sichern** tippen. Er muss 64
+  kleine Hex-Zeichen besitzen und verbleibt im ESP32-NVS (ohne garantierte
+  Flashverschlüsselung).
+- Nur nach bestätigter Hardware-/Recoveryprüfung den Serverprozess mit
+  `HMI_OTA_ENABLED=true` konfigurieren und neu starten. Standard ist
+  absichtlich **false**.
+- Danach einen **neuen vollständigen gepaarten Build** im Compiler
+  erstellen und explizit **Als Update freigeben**.
+- HMI im Idle prüfen: **Pruefen** lädt den HTTPS-Status. Die Installation
+  verlangt zwei separate Berührungen binnen 15 Sekunden. Der Laser muss
+  **physisch stromlos** sein; Software-M5 ersetzt keinen Interlock.
+- Die Anwendung lädt *nur* `HMI_OTA_APP_UNVERIFIED.bin` herunter,
+  schreibt nur den inaktiven OTA-Slot, kontrolliert Bytezahl und vollständige
+  SHA256-Summe **vor** `Update.end()`, und startet erst bei Erfolg neu.
+- Ein erneuter Bootfehler oder eine LCD-Initialisierungsstörung versucht
+  die vorherige OTA-Partition zu reaktivieren. Dies ist **kein** Ersatz
+  für den physischen USB-Recoveryweg, besonders wenn die Anwendung gar nicht
+  bis `prefs.begin()` startet. Bootloader-Rollback muss zusätzlich
+  nachweislich aktiv sein, ehe ein unbeaufsichtigtes Update erlaubt wird.
+
+**Keine automatische Installation** beim periodischen Updatecheck.
+Bis Touch, Stromausfallverhalten, echte OTA-Partitionierung, A/B-Wechsel,
+Recovery und elektrisch getrennter Laser am Waveshare Rev1.2 geprüft sind,
+bleibt Serverfreigabe `HMI_OTA_ENABLED=false`.
+
+## SKR-Firmware – physische Grenze
+
+Das SKR Mini MZ V1.0 nutzt STM32F103RC. Der SKR-UART ist über
+PA9/PA10 mit dem Waveshare verbunden. Für eine *sichere* autonome
+Erstinstallation oder ein Recovery der grblHAL-Firmware muss zuvor
+der tatsächliche Bootloaderpfad nachgewiesen werden (z.B. ROM USART1 mit
+BOOT0/NRST schaltbar oder ein kontrollierter eigener Bootloader).
+
+Die vorhandene PA9/PA10-Verbindung allein versetzt das SKR **nicht** in den
+ROM-Bootloader. Die grblHAL-Anwendung besitzt hier noch keinen
+authentifizierten Self-Flash-Endpunkt. Deshalb meldet das HMI
+`skr_ota_ready:false` und der Server
+`automatic_skr_flash_enabled:false`. SKR wird **nicht** durch eine
+Schein-OTA-Routine überschrieben. Eine geeignete Hardware-Recovery über
+SWD/BOOT0/NRST ist vor dem ersten realen Board-Flash nachzuweisen.
+
+Für den HMI-Einbau ist die optionale 4-GB-microSD eine Möglichkeit
+(FAT32): SPI GPIO11/12/13, CS über CH422G EXIO4. Sie kann künftig als
+Staging für SKR-Images, G-Code, Backup und Logs dienen. Die SD-Karte
+ersetzt aber **weder BOOT0/NRST noch einen Bootloader**. Der derzeitige
+HMI-OTA-Schreibpfad benötigt die Karte nicht und nutzt die zwei
+ESP32-internen OTA-Anwendungspartitionen.
+
+## Zugangsdaten des Compilers
+
+Loginname ist im Python-Server fest `lumacut` und Passwort kommt nur
+aus `BUILDER_PASSWORD` in `.env`. Die Unraid-Installerdatei erstellt
+ein Passwort nur, wenn `.env` noch fehlt; die existierende Datei
+wird bei jedem Upgrade wieder verwendet. **Das Wunschpasswort gehört
+ausschließlich auf den Unraid-Host; niemals in den öffentlichen GitHub-Code,
+ein Dockerfile, HTML oder Buildartefakt.** Passwortänderungen werden erst
+nach dem Neuaufsetzen des Containers mit aktualisiertem `--env-file`
+wirksam.
+
+## Akzeptanznachweise
+
+- [x] GitHub-Quellen, CI, gepaartes Build und Prüfsummen
+- [x] HMI-OTA-Datenpfad (Source), HTTPS und Boot-Slot-Beschränkung
+- [x] HMI-Key-Eingabe und doppelte Installationsbestätigung
+- [ ] HMI A/B, Recovery und Stromausfalltest **auf echter Hardware**
+- [ ] Reverse Proxy/TLS und Downloadrouten vom echten Gerät
+- [ ] SKR-ROM-Bootloader, BOOT0-/Reset-Leitungen und SWD-Rettungsweg
+- [ ] Sicherer Board-Flasher mit verifiziertem Readback und Rollback
+- [ ] Optionaler microSD-Treiber und Schutz vor Kartenverlust
+- [ ] Automatische gekoppelte Gesamtinstallation nach Freigabe
