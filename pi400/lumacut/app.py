@@ -75,11 +75,11 @@ def persist():
 def check_token():
     if request.path == "/" or request.path.startswith("/static/"):
         return None
-    if controller.maintenance_file.exists() and request.method in ("POST", "PUT", "DELETE"):
-        return Response("LumaCut Pi-Update: Steuerung gesperrt", 423)
     supplied = request.headers.get("X-LumaCut-Key", "")
     if not secrets.compare_digest(supplied, TOKEN):
         return Response("LumaCut Zugangscode erforderlich", 401)
+    if controller.maintenance_file.exists() and request.method in ("POST", "PUT", "DELETE"):
+        return Response("LumaCut Pi-Update: Steuerung gesperrt", 423)
     return None
 
 
@@ -129,6 +129,7 @@ def status():
                                  "z_mm": p[2] if p else 0,
                                  "zero_at_max": True}},
         diagnostics=stat["diagnostics"],
+        accessories=stat["accessories"],
         last_error=stat["last_error"],
         recent=stat["recent"],
     )
@@ -308,15 +309,22 @@ def do_action(op):
                             timeout=30)
     if op in ("lightToggle", "exhaustToggle", "lightOn", "lightOff",
               "exhaustOn", "exhaustOff"):
-        # M7/M8/M9 require controller ownership. No commands injected into
-        # an active LightBurn G-code stream. grblHAL override byte support
-        # is hardware-version dependent; use M commands only while idle.
-        require_free()
-        if op.startswith("light"):
-            value = "M7" if op in ("lightOn", "lightToggle") else "M9"
-        else:
-            value = "M8" if op in ("exhaustOn", "exhaustToggle") else "M9"
-        return run_commands([value])
+        # Independent grblHAL real-time coolant overrides: 0xA1 M7/LED,
+        # 0xA0 M8/exhaust. A plain M9 would turn BOTH off, so avoid it.
+        state = controller.status()
+        if not state["connected"]:
+            raise ConnectionError("SKR USB nicht verbunden")
+        import time as _time
+        if _time.monotonic() - controller.last_accessory_toggle < 0.65:
+            raise RuntimeError("Schaltung wird noch bestätigt")
+        lights = op.startswith("light")
+        current = state["accessories"]["lights" if lights else "exhaust"]
+        desired = (not current if op.endswith("Toggle") else op.endswith("On"))
+        if current == desired:
+            return "LED/Abluft bereits im gewählten Zustand"
+        controller.realtime(b"\xa1" if lights else b"\xa0")
+        controller.last_accessory_toggle = _time.monotonic()
+        return "LED" if lights else "Abluft" + " umgeschaltet"
     if op == "toggle":
         controller.realtime(b"~" if job_pause.is_set() else b"!")
         if job_pause.is_set():
@@ -460,7 +468,9 @@ def network():
     host = socket.gethostname()
     return jsonify(hotspot_ssid="", hotspot_password="", hotspot_ip="",
                    router_ssid="", connected=True, router_ip=host + ".local",
-                   lightburn_tcp_enabled=True, lightburn_port=TCP_PORT)
+                   lightburn_tcp_enabled=True, lightburn_port=TCP_PORT,
+                   cabinet_leds_on=controller.status()["accessories"]["lights"],
+                   exhaust_on=controller.status()["accessories"]["exhaust"])
 
 
 @app.get("/api/ui/network/scan")
