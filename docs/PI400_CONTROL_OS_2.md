@@ -59,6 +59,15 @@ Linux auf dem Pi darf keine zeitkritischen Step-Pulse über normales USB takten.
   Transformationen verweigern eine irreführende Vorschau.
 - Der LightBurn-TCP-Server blockiert unerlaubte Service- und GPIO-Befehle,
   während reguläre G-Code-Aufträge übertragen werden können.
+- Das Service Studio exportiert die realen SKR-Parameter und das gespeicherte
+  Maschinenprofil über `/api/service/backup` als JSON ohne Zugangscodes,
+  Schlüssel oder Servicepasswort. Ein Hardware-Reset wird dadurch nicht
+  ausgeführt.
+- Der Pi verlangt beim USB-Verbindungsaufbau eine echte `$I`-/`$`-
+  Identifikation mit passender LumaCut-SKR-Boardkennung und gültigen
+  Maschinenparametern, bevor lokale Befehle oder LightBurn freigegeben werden.
+- G-Code-Dateien werden **vor** dem Streaming auf unerlaubte Service- und
+  I/O-Kommandos geprüft, damit eine Datei keine Servicefreigabe umgeht.
 - Der SKR-Build erzeugt `capabilities.json` mit einer SHA-256-Prüfsumme
   der dazugehörigen `firmware.bin`. GitHub CI prüft die Übereinstimmung
   und packt beide Dateien gemeinsam in das Pi400/SKR-USB-Archiv.
