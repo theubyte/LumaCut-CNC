@@ -1,0 +1,47 @@
+{
+  "DeviceList": [
+    {
+      "DisplayName": "LumaCut CNC – GRBL (USB)",
+      "Name": "GRBL",
+      "Type": "Serial",
+      "Width": 410,
+      "Height": 400,
+      "HomeOnStartup": false,
+      "MirrorX": false,
+      "MirrorY": false,
+      "EnableLaser2Offset": false,
+      "EnableProcessOffset": false,
+      "Laser2OffsetX": 0,
+      "Laser2OffsetY": 0,
+      "ProcessOffsetX": 0,
+      "ProcessOffsetY": 0,
+      "ReverseIntervalCompensation": false,
+      "LastCamera": "",
+      "Info": "LumaCut-CNC Waveshare ESP32-S3 USB CDC -> SKR Mini MZ grblHAL; calibrate actual width/height.",
+      "DefaultCutList": [],
+      "DefaultToolCutList": [],
+      "Settings": {
+        "EnableBoundsCheck": true,
+        "EnableZ": true,
+        "StartGCode": "G21\nG90\nM5",
+        "EndGCode": "M5",
+        "SValueMax": 1000,
+        "TransferMode": 0,
+        "LastExportExt": "gcode",
+        "FastPausing": true,
+        "LaserFire_Enable": false,
+        "NegativeZ": false,
+        "OptimizeZ": false,
+        "RelativeZOnly": false,
+        "Sim_MaxSpeedX": 100,
+        "Sim_MaxSpeedY": 100,
+        "Sim_MaxAccelX": 1000,
+        "Sim_MaxAccelY": 1000,
+        "Sim_RapidSpeed": 100,
+        "Sim_GlobalFactor": 1,
+        "Sim_SpeedFactor": 1,
+        "UseG0ForOverscan": false
+      }
+    }
+  ]
+}
