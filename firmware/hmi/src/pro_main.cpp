@@ -972,8 +972,8 @@ void installRoutes(){
         String payload="{\"local_sha\":\""+String(LUMACUT_SOURCE_SHA)+
             "\",\"offered_sha\":\""+offeredUpdateSha+
             "\",\"available\":"+(updateAvailable?String("true"):String("false"))+
-            ",\\"hmi_ota_ready\\":"+String((LumaOta::available() && LumaOta::isHex(updateDeviceKey,64))?"true":"false")+
-            ",\\"skr_ota_ready\\":false}";
+            ",\"hmi_ota_ready\":"+String((LumaOta::available() && LumaOta::isHex(updateDeviceKey,64))?"true":"false")+
+            ",\"skr_ota_ready\":false}";
         http.send(200,"application/json",payload);
     });
     http.on("/api/machine",HTTP_GET,[]{
