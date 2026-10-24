@@ -51,16 +51,18 @@ config = {
               {"name": "Park 2", "stored": False, "x": 0, "y": 0},
               {"name": "Park 3", "stored": False, "x": 0, "y": 0}],
     "jog_percent": 100,
+    "lightburn_tcp_enabled": True,
 }
 try:
     if CONFIG_PATH.exists():
         saved = json.loads(CONFIG_PATH.read_text())
         if isinstance(saved, dict):
-            for name in ("focus", "probe", "parks", "jog_percent"):
+            for name in ("focus", "probe", "parks", "jog_percent", "lightburn_tcp_enabled"):
                 if name in saved:
                     config[name] = saved[name]
 except Exception:
     logging.exception("Configuration recovery; previous config retained")
+controller.lightburn_enabled = bool(config["lightburn_tcp_enabled"])
 
 
 def persist():
@@ -127,7 +129,7 @@ def status():
                                  "x_mm": p[0] if p else 0,
                                  "y_mm": p[1] if p else 0,
                                  "z_mm": p[2] if p else 0,
-                                 "zero_at_max": True}},
+                                 "zero_at_max": bool(config.get("zero_at_max", True))}},
         diagnostics=stat["diagnostics"],
         accessories=stat["accessories"],
         last_error=stat["last_error"],
@@ -280,6 +282,13 @@ def probe_download():
 
 
 def do_action(op):
+    if op == "host":
+        controller.lightburn_enabled = not controller.lightburn_enabled
+        config["lightburn_tcp_enabled"] = controller.lightburn_enabled
+        if not controller.lightburn_enabled:
+            controller.disconnect_host()
+        persist()
+        return "LightBurn TCP: " + ("EIN" if controller.lightburn_enabled else "AUS")
     if op == "readcfg":
         require_free()
         return run_commands(["$$"], timeout=15)
@@ -507,14 +516,20 @@ def start_job():
         raise RuntimeError("Job läuft")
     job_cancel.clear()
     job_pause.clear()
+    with controller.lock:
+        controller._acquire_local("job")
     job_thread = threading.Thread(target=_run_job, name="gcode-job", daemon=True)
-    job_thread.start()
+    try:
+        job_thread.start()
+    except Exception:
+        with controller.lock:
+            if controller.owner == "job":
+                controller.owner = None
+        raise
     return "Job gestartet: " + selected_job
 
 
 def _run_job():
-    with controller.lock:
-        controller._acquire_local("job")
     job_progress.update(name=selected_job, line=0, state="running")
     try:
         path = JOBS / selected_job
@@ -577,7 +592,8 @@ def network():
     return jsonify(hotspot_ssid=host + ".local", hotspot_password="",
                    hotspot_ip=ip, router_ssid=ssid, connected=bool(ssid),
                    router_ip=ip,
-                   lightburn_tcp_enabled=True, lightburn_port=TCP_PORT,
+                   lightburn_tcp_enabled=controller.lightburn_enabled,
+                   lightburn_port=TCP_PORT,
                    cabinet_leds_on=controller.status()["accessories"]["lights"],
                    exhaust_on=controller.status()["accessories"]["exhaust"])
 
