@@ -1,5 +1,45 @@
 # LumaCut Build Lab V2 – Firmware bauen, archivieren und installieren
 
+## Diagnose: HMI meldet Updatecheck HTTP 401
+
+**Ursache:** Das HMI kann HTTPS erreichen, aber der Server oder ein
+Reverse-Proxy verlangt Login. Die Flask-Version aus GitHub `main` hat
+`GET /api/updates/latest` **ausdrücklich von Basic Auth ausgenommen**.
+Wird trotzdem HTTP 401 gemeldet, läuft meist noch ein altes Docker-Image
+(Änderungen an GitHub aktualisieren laufende Container nicht), oder eine
+Access-List/Cloudflare-Authentifizierung des Proxys schützt auch diesen Pfad.
+
+**Prüfen auf Unraid/NextTerm:**
+```bash
+curl -i --max-time 8 http://127.0.0.1:18744/api/updates/latest
+curl -i --max-time 8 https://luma.millione.de/api/updates/latest
+```
+Erwartet: in beiden Fällen **HTTP 200** mit JSON wie
+`{"available":false,"channel":"stable","schema":1}` (noch kein Release) oder
+`{"available":true,...}` (freigegebener Release). HTTP 200 ist auch ohne
+freigegebenes Update korrekt.
+
+- **Lokal 401, extern 401:** Den Compiler-Docker-Container aus aktuellem
+  `main` neu installieren; der Flask-Server ist noch veraltet oder anders
+  konfiguriert. Das normale Compiler-Passwort bleibt in `.env`.
+- **Lokal 200, extern 401/403:** Im Reverse-Proxy ist ein zusätzlicher
+  Login aktiv. Falls Nginx Proxy Manager eine Access List für den gesamten
+  Host verwendet: Access List **Publicly Accessible** wählen und die
+  eigentliche Compiler-Anmeldung weiterhin der Flask-App überlassen.
+  Alternativ ausschließlich **GET /api/updates/latest** im vorgelagerten
+  Auth-Dienst ausnehmen. Die Firmwaredatei-Routen und alle Dashboard-Aktionen
+  dürfen **nicht** öffentlich freigegeben werden.
+- **Lokal 200, extern 404:** Falscher Host, Weiterleitungsregel oder Proxyziel
+  (der öffentliche Domainpfad muss zur selben App auf Port 18744 führen).
+- **Extern 000 / Netzwerkfehler:** DNS, HTTPS-Zertifikat, Reverse Proxy und
+  Netzwerk prüfen. Bei fehlendem Hairpin-NAT eventuell von einem anderen
+  Netz aus testen.
+
+Der Unraid-Installer enthält jetzt auch einen automatischen, **nicht
+geheimnispreisgebenden** GET-Statusvergleich für lokalen und öffentlichen
+Update-Endpunkt. Ein HMI-Flash behebt einen serverseitigen HTTP-401-Fehler
+nicht. Der HMI-Diagnosetext unterscheidet ab jetzt HTTP 401, 404 und TLS.
+
 ## Update Center unter https://luma.millione.de/
 
 Die **Update-Infrastruktur für die Versionsanzeige** ist jetzt im Quellcode vorhanden.
