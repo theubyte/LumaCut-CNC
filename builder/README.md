@@ -105,18 +105,22 @@ ohne Hardwarefreigabe standardmäßig abgeschaltet.** Sie lädt mit festem
 HTTPS-Ursprung und Geräte-Schlüssel die vollständige OTA-Anwendung, prüft
 Dateilänge und SHA-256 und wählt danach die inaktive ESP32-A/B-Partition.
 Beim HMI sind im WLAN/System-Menü der Update-Key und eine bewusste
-Doppelbestätigung zu bedienen. Die Server-Freigabe wird nur mit dem
-expliziten, außerhalb GitHub gesetzten `HMI_OTA_ENABLED=true` aktiv;
-standardmäßig bleibt `hmi_ota_enabled: false`. Ein neuer **kompletter Build**
-muss danach explizit im Compiler freigegeben werden. Vor echtem Flashen
-ist die Wiederherstellung mit hardwaremäßig abgeschaltetem Laser zu prüfen.
+Doppelbestätigung zu bedienen. Eine erfolgreiche explizite Freigabe setzt `hmi_ota_enabled: true`.
+Der Installer prüft selbst den Geräteschlüssel und zwei nutzbare
+ESP32-OTA-Partitionen. Ein neuer **kompletter Build** muss zuerst im
+Compiler erstellt und freigegeben werden. Vor echtem Flashen ist die
+Wiederherstellung mit hardwaremäßig abgeschaltetem Laser zu prüfen.
 
-Das SKR Mini MZ hat noch keinen vom HMI aus überprüften BOOT0/NRST-Zugang
-und keinen geprüften UART-ROM-Flashpfad. Das Feld
-`automatic_skr_flash_enabled` bleibt deshalb ausdrücklich **false**.
-Die optionale 4-GB-microSD im Waveshare wird nun für G-Code, Bootlogs und
+Nach Freigabe sind **beide** Images veröffentlicht. Der Compiler bietet
+die SKR-Firmware direkt im Bestätigungsdialog als `firmware.bin` zum
+Installieren über den SKR-eigenen microSD-Bootloader an. Die künstliche
+`automatic_skr_flash_enabled:false`-Freigabekennzeichnung entfällt;
+stattdessen beschreibt das Manifest den wirklich verfügbaren
+`skr_install_method: "microSD"`. Eine automatische Übertragung vom HMI zum
+SKR ist dagegen technisch noch nicht implementiert und wird nicht behauptet.
+Die optionale 4-GB-microSD im Waveshare wird für G-Code, Bootlogs und
 vorbereitete Update-/Backup-Verzeichnisse eingebunden, mit LittleFS-Fallback.
-Das ist noch nicht hardwaregetestet und ersetzt den SKR-Bootloaderzugang nicht.
+Das ersetzt den SKR-Bootloaderzugang nicht.
 Der genaue Stand und die Wiederherstellung stehen unter
 `docs/SECURE_UPDATES.md`.
 
