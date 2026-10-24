@@ -34,6 +34,7 @@ class Controller:
         self.host_pending = 0
         self.host_commands = deque(maxlen=32768)
         self.host_fragment = bytearray()
+        self.host_overflow = False
         self.lightburn_enabled = True
         self.owner = None  # host, job, local
         self.state = "Disconnected"
@@ -95,6 +96,7 @@ class Controller:
         self.host_pending = 0
         self.host_commands.clear()
         self.host_fragment.clear()
+        self.host_overflow = False
         if self.owner == "host":
             self.owner = None
 
@@ -315,6 +317,71 @@ class Controller:
             if char == b"\x18":
                 self.homed = False
 
+    @staticmethod
+    def host_command_allowed(command: str) -> bool:
+        """LightBurn may stream laser jobs but may not bypass service PIN control.
+
+        The system-level $-settings and GPIO commands are the Pi Service
+        Studio's responsibility. Ordinary $I, $$, $G, $H, $X, $J,
+        G0/G1/G2/G3, M3/M4/M5 and standard job control stay available.
+        """
+        c = command.strip().upper()
+        if c.startswith("$LC") or c in ("$PGM", "$RST", "$SLP"):
+            return False
+        if re.match(r"^\\$\\d+\\s*=", c) or re.match(r"^\\$N\\d+\\s*=", c):
+            return False
+        # Do not let unauthenticated LightBurn port 23 drive arbitrary I/O.
+        if re.search(r"(?<![A-Z0-9])M6[2-8](?![0-9.])", c):
+            return False
+        return True
+
+    def _forward_host_bytes_locked(self, data: bytes):
+        """Parse newline-bounded G-code to enforce authorization safely.
+
+        All GRBL realtime bytes bypass buffering. Only complete allowed
+        ASCII lines reach the STM32. A rejected line produces exactly one
+        error response and never enters the host->ACK correlation queue.
+        """
+        realtime = frozenset((ord("?"), ord("!"), ord("~"), 0x18,
+                              0x85, 0x90, 0x91, 0x92,
+                              0x93, 0x94, 0x95, 0x96,
+                              0xA0, 0xA1))
+        for byte in data:
+            if byte in realtime:
+                if byte == ord("?"):
+                    self.host_pending = min(64, self.host_pending + 1)
+                if byte == 0x18:
+                    self.homed = False
+                    self.host_commands.clear()
+                    self.host_fragment.clear()
+                    self.host_overflow = False
+                self._send_locked(bytes((byte,)))
+            elif byte in (10, 13):
+                if not self.host_fragment and not self.host_overflow:
+                    continue  # Ignore empty LF after CR; avoid extra 'ok'.
+                if self.host_overflow:
+                    allowed = False
+                    command = ""
+                else:
+                    command = self.host_fragment.decode("ascii", "replace").strip()
+                    allowed = self.host_command_allowed(command)
+                self.host_fragment.clear()
+                self.host_overflow = False
+                if allowed and command:
+                    self.host_commands.append(command)
+                    self._send_locked((command + "\n").encode("ascii"))
+                elif not allowed and self.host is not None:
+                    self.host.sendall(b"error:9\r\n")
+            elif 32 <= byte <= 126:
+                if len(self.host_fragment) < 240 and not self.host_overflow:
+                    self.host_fragment.append(byte)
+                else:
+                    self.host_overflow = True
+            else:
+                # Invalid byte: reject the whole text line. Never truncate
+                # dangerous, malformed or overlong commands into safe syntax.
+                self.host_overflow = True
+
     def serve_host(self, client: socket.socket):
         client.settimeout(0.25)
         with self.cond:
@@ -329,6 +396,7 @@ class Controller:
             self.host_pending = 0
             self.host_commands.clear()
             self.host_fragment.clear()
+            self.host_overflow = False
             self.owner = "host"
             self.bytes_host = 0
         try:
@@ -343,22 +411,7 @@ class Controller:
                     if self.host is not client:
                         break
                     self.bytes_host += len(data)
-                    self.host_pending = min(64, self.host_pending + data.count(b"?"))
-                    if b"\x18" in data:
-                        self.homed = False
-                        self.host_commands.clear()
-                        self.host_fragment.clear()
-                    for byte in data:
-                        if byte in (10, 13):
-                            if self.host_fragment:
-                                command = self.host_fragment.decode("ascii", "replace").strip()
-                                self.host_fragment.clear()
-                                if command:
-                                    self.host_commands.append(command)
-                        elif 32 <= byte <= 126:
-                            if len(self.host_fragment) < 240:
-                                self.host_fragment.append(byte)
-                    self._send_locked(data)  # byte-exact G-code + realtime
+                    self._forward_host_bytes_locked(data)
         except (OSError, ConnectionError):
             pass
         finally:
