@@ -46,6 +46,13 @@ class DashboardV2Tests(unittest.TestCase):
         self.assertIn('esp-web-install-button',JS)
         self.assertIn('Waveshare-HMI-Flash-Paket-Windows.zip',JS)
 
+    def test_approved_skr_firmware_download_instead_of_disabled_banner(self):
+        self.assertIn('"/api/updates/skr-firmware.bin"',APP)
+        self.assertIn('"/api/updates/skr-firmware.bin",true',JS)
+        self.assertIn('SKR-Update firmware.bin herunterladen',JS)
+        self.assertNotIn('Firmwareinstallation auf dem SKR bleibt bis zur Bootloader-Prüfung deaktiviert.',JS)
+        self.assertNotIn('"automatic_skr_flash_enabled":False',APP)
+
     def test_readonly_diagnostic_terminal(self):
         self.assertIn('terminalCommand(cmd)',JS)
         self.assertIn('Nur lesende Build-',JS)
