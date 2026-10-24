@@ -321,8 +321,8 @@ public:
         return true;
     }
 };
-inline bool flashVerified(fs::FS& fs,HardwareSerial& uart,String& err,
-                          Progress cb=nullptr){
+inline bool flashVerified(fs::FS& fs,HardwareSerial& uart,const String& expectedSha,
+                          String& err,Progress cb=nullptr){
     File image=fs.open(STAGING,FILE_READ);
     if(!image){err="Verifizierte SKR-Datei fehlt";return false;}
     const size_t size=image.size();
@@ -332,6 +332,32 @@ inline bool flashVerified(fs::FS& fs,HardwareSerial& uart,String& err,
     uint8_t head[8]{};
     if(image.read(head,8)!=8||!validVector(head,size)){
         image.close();err="SKR-Image falsche Startvektoren";return false;
+    }
+    // Check staged bytes a second time before touching STM32 flash.
+    // Power loss or card corruption between download and installation cannot
+    // silently turn a previously authenticated image into arbitrary code.
+    if(!hex64(expectedSha)){
+        image.close();err="SHA256-Metadaten fehlen";return false;
+    }
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    if(!sha256Start(ctx)){
+        mbedtls_sha256_free(&ctx);image.close();
+        err="Staging SHA256 Start fehlgeschlagen";return false;
+    }
+    uint8_t hashBuffer[1024];
+    bool checksumOk=true;
+    while(image.available()){
+        size_t n=image.read(hashBuffer,sizeof(hashBuffer));
+        if(!n||!sha256Update(ctx,hashBuffer,n)){checksumOk=false;break;}
+        delay(0);
+    }
+    unsigned char staged[32]{};
+    checksumOk=checksumOk&&sha256Finish(ctx,staged)&&
+               hexDigest(staged)==expectedSha;
+    mbedtls_sha256_free(&ctx);
+    if(!checksumOk){
+        image.close();err="Staging-Karte/Datei SHA256 fehlerhaft";return false;
     }
     image.seek(0);
     ResetControl reset;
