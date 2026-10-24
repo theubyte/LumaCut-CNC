@@ -218,7 +218,7 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('lv_obj_t* catalogFields[6]',CONTROL)
         self.assertIn('catalogNamesLabel[i]=lbl(stripe',CONTROL)
         self.assertIn('catalogFields[i]=configEntry(stripe',CONTROL)
-        self.assertIn('btn(stripe,"✓"',CONTROL)
+        self.assertIn('btn(stripe,LV_SYMBOL_OK',CONTROL)
         self.assertIn('if(op.startsWith("catsave")',CONTROL)
         self.assertIn('if(catalogPendingSlot>=0&&catalogPendingSlot<6)',CONTROL)
         self.assertIn('if(editTarget==catalogFields[i])catalogDirty[i]=true;',CONTROL)
