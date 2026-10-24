@@ -51,6 +51,11 @@ class ControlStudioTests(unittest.TestCase):
         self.assertIn('http.on("/api/ui/network/connect",HTTP_POST',HMI)
         self.assertIn('prefs.putString("ssid",ssid)',HMI)
 
+    def test_lightburn_gcode_files_use_sd_when_available(self):
+        self.assertIn('name.endsWith(".gc")',HMI)
+        self.assertIn('sdReady?64u*1024u*1024u:MAX_JOB_BYTES',HMI)
+        self.assertIn('jobStore().rename(uploadTemporary,uploadDestination)',HMI)
+
     def test_web_tabs_and_backend_share_actions(self):
         for tab in ("home","motion","jobs","settings","probe","network","system"):
             self.assertIn('id="'+tab+'" class="tab',WEB)
