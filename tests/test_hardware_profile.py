@@ -203,11 +203,12 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertNotIn('DEFAULT_Z_STEPS_PER_MM=',BUILD)
         self.assertIn('LUMACUT_SAFE_Z20=1',BUILD)
         self.assertIn('limits_lumacut_z_clearance',BUILD)
-        self.assertIn('settings.homing.pulloff - 2.5f',BUILD)
+        self.assertNotIn('settings.homing.pulloff - 2.5f',BUILD)
         self.assertIn('if(idx == 0 && cycle.mask == bit(Z_AXIS))',BUILD)
-        self.assertIn('if(op=="safez20")',CONTROL)
-        self.assertIn('if(!zScaleMeasured||workZ<21.f',CONTROL)
-        self.assertIn('String cmds[]={"$27=2.5",String(char(36))+char(36)};',CONTROL)
+        self.assertIn('settings.axis[Z_AXIS].max_travel > -21.0f',BUILD)
+        self.assertNotIn('if(op=="safez20")',CONTROL)
+        self.assertIn('postHomePending=false;',CONTROL)
+        self.assertIn('Homing OK: SKR hat Z vor XY auf 20 mm freigefahren.',CONTROL)
         self.assertIn("const float corrected=savedSetting[id]*commanded/actual;",CONTROL)
         self.assertIn("pendingCalibrationAxis=axis;",CONTROL)
         self.assertIn('prefs.putBool("zScaleOK",matching)',CONTROL)
@@ -232,10 +233,31 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('"/logs/probe_plan.csv"',CONTROL)
         self.assertIn('http.on("/api/probe-plan",HTTP_GET',CONTROL)
         portal=(ROOT/"firmware"/"hmi"/"src"/"mobile_portal.h").read_text(encoding="utf-8")
-        self.assertIn("downloadProbePlan()",portal)
+        self.assertIn('download("/api/probe-plan"',portal)
         self.assertIn("X-LumaCut-Key",portal)
         self.assertIn('PC14-G38-Abtastung nicht vorhanden.',CONTROL)
         self.assertIn('LumaProbe::Region candidate{',CONTROL)
+
+    def test_lightburn_web_parity_and_qr_are_not_dummy_buttons(self):
+        portal=(ROOT/"firmware/hmi/src/mobile_portal.h").read_text(encoding="utf-8")
+        self.assertIn('owner=Owner::Tcp;lastInputMs=millis()',CONTROL)
+        self.assertIn('wifiLightburnEnabled=prefs.getBool("lbTcp",true)',CONTROL)
+        self.assertIn('tcp.setNoDelay(true)',CONTROL)
+        self.assertIn('http.on("/api/ui/network/connect",HTTP_POST',CONTROL)
+        self.assertIn('http.on("/api/ui/network/scan",HTTP_GET',CONTROL)
+        self.assertIn('http.on("/api/ui/setting",HTTP_POST',CONTROL)
+        self.assertIn('http.on("/api/ui/config",HTTP_POST',CONTROL)
+        self.assertIn('http.on("/api/ui/action",HTTP_POST',CONTROL)
+        self.assertIn('http.on("/api/lightburn/profile",HTTP_GET',CONTROL)
+        self.assertIn('http.on("/api/ui/hotspot-qr",HTTP_GET',CONTROL)
+        self.assertIn('showHotspotQr();',CONTROL)
+        self.assertIn('qrcodegen_encodeText(',CONTROL)
+        for term in ('/api/ui/action','/api/ui/config','/api/ui/network/connect',
+                     '/api/ui/network/scan','/api/ui/params','/api/lightburn/profile',
+                     '/api/ui/hotspot-qr','/api/probe-plan'):
+            self.assertIn(term,portal)
+        self.assertIn('LumaCut CNC – GRBL (USB)',
+                      (ROOT/"lightburn/LumaCut-CNC-USB.lbdev").read_text())
 
     def test_serial_timeout_unblocks_configuration(self):
         self.assertIn('scriptCommandStartedMs=millis()',CONTROL)
