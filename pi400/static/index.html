@@ -266,9 +266,9 @@ async function refresh(){
  if(!key)return;
  try{
   const s=await api("/api/status");
-  el("connection").textContent="Pi 400 · "+(s.state||"SKR");
-  el("connection").classList.toggle("online",Boolean(s.connected));
-  el("connection").classList.toggle("offline",!s.connected);
+  el("connection").textContent="Pi 400 · "+(!s.connected?"SKR USB getrennt":!s.ready?"SKR-Prüfung offen":(s.state||"SKR"));
+  el("connection").classList.toggle("online",Boolean(s.ready));
+  el("connection").classList.toggle("offline",!s.ready);
   updateDiagnostics(s);
   el("state").textContent=s.state||"—";el("owner").textContent=s.owner||"Frei";
   el("position").textContent=s.position||"—";el("jobname").textContent=s.job||"Kein Job";
