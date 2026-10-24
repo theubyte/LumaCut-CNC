@@ -138,38 +138,41 @@ class Pi400TransportTests(unittest.TestCase):
 
     def test_usb_bootstrap_requires_two_real_acks(self):
         c=Controller("/dev/null")
-        c.bootstrap_pending=2
-        self.assertFalse(c.bootstrap_ready)
-        c._read_response("[FIRMWARE:grblHAL]")
-        c._read_response("[BOARD:LumaCut SKR Mini MZ v1.0 EXPERIMENTAL]")
-        for setting in ("$30=1000","$32=1","$130=450","$131=450","$132=80"):
-            c._read_response(setting)
-        self.assertFalse(c.bootstrap_ready)
-        c._read_response("ok")
-        self.assertFalse(c.bootstrap_ready)
-        c._read_response("ok")
-        self.assertTrue(c.bootstrap_ready)
-        self.assertEqual(c.settings[130], 450)
+        with c.cond:
+            c.bootstrap_pending=2
+            self.assertFalse(c.bootstrap_ready)
+            c._read_response("[FIRMWARE:grblHAL]")
+            c._read_response("[BOARD:LumaCut SKR Mini MZ v1.0 EXPERIMENTAL]")
+            for setting in ("$30=1000","$32=1","$130=450","$131=450","$132=80"):
+                c._read_response(setting)
+            self.assertFalse(c.bootstrap_ready)
+            c._read_response("ok")
+            self.assertFalse(c.bootstrap_ready)
+            c._read_response("ok")
+            self.assertTrue(c.bootstrap_ready)
+            self.assertEqual(c.settings[130], 450)
 
     def test_usb_bootstrap_rejects_other_grbl_boards(self):
         c=Controller("/dev/null")
-        c.bootstrap_pending=2
-        c._read_response("[FIRMWARE:grblHAL]")
-        c._read_response("[BOARD:Other Router]")
-        for setting in ("$30=1000","$32=1","$130=450","$131=450","$132=80"):
-            c._read_response(setting)
-        c._read_response("ok")
-        c._read_response("ok")
-        self.assertFalse(c.bootstrap_ready)
-        self.assertIn("passt nicht", c.last_error)
+        with c.cond:
+            c.bootstrap_pending=2
+            c._read_response("[FIRMWARE:grblHAL]")
+            c._read_response("[BOARD:Other Router]")
+            for setting in ("$30=1000","$32=1","$130=450","$131=450","$132=80"):
+                c._read_response(setting)
+            c._read_response("ok")
+            c._read_response("ok")
+            self.assertFalse(c.bootstrap_ready)
+            self.assertIn("passt nicht", c.last_error)
 
     def test_usb_bootstrap_fails_closed_on_firmware_error(self):
         c=Controller("/dev/null")
-        c.bootstrap_pending=2
-        c._read_response("error:20")
-        self.assertFalse(c.bootstrap_ready)
-        self.assertEqual(c.bootstrap_pending, 0)
-        self.assertIn("Initialisierung", c.last_error)
+        with c.cond:
+            c.bootstrap_pending=2
+            c._read_response("error:20")
+            self.assertFalse(c.bootstrap_ready)
+            self.assertEqual(c.bootstrap_pending, 0)
+            self.assertIn("Initialisierung", c.last_error)
 
     def test_accessory_feedback(self):
         c=Controller("/dev/null")
