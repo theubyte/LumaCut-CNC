@@ -180,6 +180,35 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn('autoZlift',CONTROL)
         self.assertIn('GRBL $1:',CONTROL)
 
+    def test_homed_bounded_jog_without_soft_limits_extra_workflow(self):
+        self.assertIn("bool canJog(){return canCommand()&&machineHomed&&haveMpos&&",CONTROL)
+        self.assertIn("!motorsReleased&&workX>0&&workY>0&&workZ>0;",CONTROL)
+        self.assertIn("if(!canJog()){",CONTROL)
+        self.assertIn("const float dist=machinePosFromOperator(operatorDistance);",CONTROL)
+        self.assertIn("int jogStep=0;",CONTROL)
+        self.assertIn('if(op=="jogsound")',CONTROL)
+        self.assertIn("const float speed=quietJog?",CONTROL)
+        # G0/laser work stays gated by controller soft limits.
+        self.assertIn("bool canMotion(){return canCommand()&&machineHomed&&haveMpos&&",CONTROL)
+        self.assertIn("!motorsReleased&&softLimitsEnabled&&workX>0",CONTROL)
+
+    def test_steps_per_mm_calibration_and_20mm_pre_xy_homing(self):
+        self.assertIn('DEFAULT_X_STEPS_PER_MM=80.0f',BUILD)
+        self.assertIn('DEFAULT_Y_STEPS_PER_MM=80.0f',BUILD)
+        self.assertNotIn('DEFAULT_Z_STEPS_PER_MM=',BUILD)
+        self.assertIn('LUMACUT_SAFE_Z20=1',BUILD)
+        self.assertIn('limits_lumacut_z_clearance',BUILD)
+        self.assertIn('settings.homing.pulloff - 2.5f',BUILD)
+        self.assertIn('if(idx == 0 && cycle.mask == bit(Z_AXIS))',BUILD)
+        self.assertIn('if(op=="safez20")',CONTROL)
+        self.assertIn('if(!zScaleMeasured||!zLiftDirectionVerified||workZ<21.f',CONTROL)
+        self.assertIn('String cmds[]={"$27=2.5",String(char(36))+char(36)};',CONTROL)
+        self.assertIn("const float corrected=savedSetting[id]*commanded/actual;",CONTROL)
+        self.assertIn("pendingCalibrationAxis=axis;",CONTROL)
+        self.assertIn('prefs.putBool("zScaleOK",matching)',CONTROL)
+        self.assertIn('btn(c,"Wege kalibrieren"',CONTROL)
+        self.assertIn('btn(c,"Z20 aktivieren"',CONTROL)
+
     def test_serial_timeout_unblocks_configuration(self):
         self.assertIn('scriptCommandStartedMs=millis()',CONTROL)
         self.assertIn('ConfigWrite timedOut=configWrite',CONTROL)
