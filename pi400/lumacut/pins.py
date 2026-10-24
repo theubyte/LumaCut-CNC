@@ -18,7 +18,7 @@ PINS = (
     ("PC9", "BED laser supply", "laser_supply", "reserved"),
     ("PC8", "HE0 / M7", "accessory", "assignable"),
     ("PC6", "FAN0 / M8", "accessory", "assignable"),
-    ("PC7", "FAN1 spare", "spare", "firmware support required"),
+    ("PC7", "FAN1 / $LCIO", "digital_output", "assignable"),
     ("PC2", "Z limit", "hard_limit", "reserved"),
     ("X-STOP", "X limit connector", "hard_limit", "reserved"),
     ("Y-STOP", "Y limit connector", "hard_limit", "reserved"),
@@ -55,11 +55,12 @@ def manifest(roles):
                   "availability": availability}
                  for pin, function, group, availability in PINS],
         "limitations": [
-            "M7 und M8 sind die einzigen zur Laufzeit logisch zuweisbaren Zubehörkanäle.",
+            "M7/M8 unterstützen logische Rollentausch-Konfiguration.",
+            "PC7/FAN1 unterstützt über die neue STM32-Firmware $LCIO=0/1 und $LCIO-Abfrage.",
             "Die physische STM32-Pinbelegung ist weiterhin im grblHAL-Build festgelegt.",
             "FAN0, HE0 und BED sind MOSFET-Leistungsausgänge, keine Logik-GPIOs.",
             "Laserfreigabe und Not-Aus müssen hardwareseitig unabhängig wirken.",
-            "PC7 ist derzeit nicht als dynamischer Ausgang im SKR-Protokoll implementiert.",
+            "Nicht vorhandene und sicherheitsrelevante GPIOs lassen sich nicht als frei verfügbaren Pin zuweisen.",
         ],
     }
 
@@ -73,3 +74,25 @@ def accessories_for_roles(physical, roles):
 def override_for_role(role, roles):
     channel = effective_roles(roles)[role]
     return bytes((0xA1,)) if channel == "M7" else bytes((0xA0,))
+
+
+SPARE_PC7_ROLES = ("custom", "air_assist", "worklight", "signal", "exhaust2")
+
+
+def validate_spare_config(data):
+    """Only the one board-verified spare output may receive a custom role."""
+    if not isinstance(data, dict):
+        raise ValueError("Ungültiges GPIO-Profil")
+    if set(data) != {"pin", "role", "name"}:
+        raise ValueError("Unbekannte GPIO-Konfigurationsfelder")
+    if data["pin"] != "PC7" or data["role"] not in SPARE_PC7_ROLES:
+        raise ValueError("Nur freier Ausgang PC7 mit gültigem Funktionsprofil")
+    name = data["name"]
+    if not isinstance(name, str) or not 1 <= len(name) <= 24:
+        raise ValueError("Name des Ausgangs: 1–24 Zeichen")
+    if not all(ch.isalnum() or ch in " -_" for ch in name):
+        raise ValueError("Im Namen nur Buchstaben, Zahlen, Leerzeichen, - und _")
+    return {"pin": "PC7", "role": data["role"], "name": name.strip()}
+
+
+DEFAULT_SPARE = {"pin": "PC7", "role": "custom", "name": "FAN1 Zusatzgerät"}
