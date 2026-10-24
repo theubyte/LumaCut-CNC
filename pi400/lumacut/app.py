@@ -35,6 +35,7 @@ TCP_PORT = int(os.getenv("LUMACUT_TCP", "23"))
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
 controller = Controller(SKR_PORT)
+controller.maintenance_file = DATA / "maintenance.lock"
 started = False
 selected_job = ""
 job_thread = None
@@ -74,6 +75,8 @@ def persist():
 def check_token():
     if request.path == "/" or request.path.startswith("/static/"):
         return None
+    if controller.maintenance_file.exists() and request.method in ("POST", "PUT", "DELETE"):
+        return Response("LumaCut Pi-Update: Steuerung gesperrt", 423)
     supplied = request.headers.get("X-LumaCut-Key", "")
     if not secrets.compare_digest(supplied, TOKEN):
         return Response("LumaCut Zugangscode erforderlich", 401)
@@ -523,6 +526,7 @@ def update_status():
     # The installer/updater is a distinct privileged systemd task, not
     # callable by arbitrary web requests.
     return jsonify(pi_auto_update=True,
+                   maintenance=controller.maintenance_file.exists(),
                    skr_auto_flash=False,
                    skr_requires="verified SWD/ST-Link or supported bootloader flashing",
                    warning="Kein Firmwareflash während Laserbetrieb")
