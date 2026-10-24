@@ -63,9 +63,15 @@ authentifizierten Self-Flash-Endpunkt. Deshalb meldet das HMI
 Schein-OTA-Routine überschrieben. Eine geeignete Hardware-Recovery über
 SWD/BOOT0/NRST ist vor dem ersten realen Board-Flash nachzuweisen.
 
-Für den HMI-Einbau ist die optionale 4-GB-microSD eine Möglichkeit
-(FAT32): SPI GPIO11/12/13, CS über CH422G EXIO4. Sie kann künftig als
-Staging für SKR-Images, G-Code, Backup und Logs dienen. Die SD-Karte
+Eine **optionale 4-GB-microSD** (FAT32) ist nun in der HMI-Quelle integriert:
+SPI GPIO11/12/13 mit SD_CS über CH422G EXIO4 (nach touchInit). Wenn die
+Karte eingebunden wird, verwendet der HMI-Job-Manager sie für alle
+`/jobs`-Dateien und kopiert vorhandene LittleFS-Jobs beim ersten Start
+unter Beibehaltung der Originale, ohne SD-Dateien zu überschreiben.
+`/updates`, `/backups` und `/logs` werden angelegt; die Datei
+`/logs/hmi_boot.log` protokolliert Firmware-Version und Resetgrund.
+Ohne Karte bzw. bei Einbindefehler bleibt LittleFS aktiv. Die SD-Treiber-
+und Kopierfunktion muss noch am echten Waveshare überprüft werden. Die SD-Karte
 ersetzt aber **weder BOOT0/NRST noch einen Bootloader**. Der derzeitige
 HMI-OTA-Schreibpfad benötigt die Karte nicht und nutzt die zwei
 ESP32-internen OTA-Anwendungspartitionen.
@@ -90,5 +96,6 @@ wirksam.
 - [ ] Reverse Proxy/TLS und Downloadrouten vom echten Gerät
 - [ ] SKR-ROM-Bootloader, BOOT0-/Reset-Leitungen und SWD-Rettungsweg
 - [ ] Sicherer Board-Flasher mit verifiziertem Readback und Rollback
-- [ ] Optionaler microSD-Treiber und Schutz vor Kartenverlust
+- [x] Optionaler FAT32-microSD-Treiber, Ordner und LittleFS-Fallback (Quellcode)
+- [ ] microSD-Lese-/Schreibtest und Verhalten bei Kartenverlust am Waveshare
 - [ ] Automatische gekoppelte Gesamtinstallation nach Freigabe
