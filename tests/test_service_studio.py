@@ -29,6 +29,17 @@ class PinMapTests(unittest.TestCase):
             {"lights": False, "exhaust": True})
         self.assertEqual(override_for_role("lights", roles), bytes((0xA0,)))
 
+    def test_identity_decode_is_from_real_grbl_lines(self):
+        from lumacut.core import Controller
+        c = Controller("/dev/null")
+        for line in ("[VER:1.1f.20261015:]",
+                     "[FIRMWARE:grblHAL]",
+                     "[BOARD:LumaCut SKR Mini MZ v1.0 EXPERIMENTAL]",
+                     "[DRIVER:STM32F103RC@72MHz]"):
+            c._read_response(line)
+        self.assertEqual(c.status()["identity"]["firmware"], "grblHAL")
+        self.assertIn("SKR Mini MZ", c.status()["identity"]["board"])
+
     def test_pin_conflicts_and_reserved_outputs_refused(self):
         for value in ({"lights": "M7", "exhaust": "M7"},
                       {"lights": "PC9", "exhaust": "M8"},
