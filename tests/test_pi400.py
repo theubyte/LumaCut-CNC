@@ -80,6 +80,47 @@ class Pi400TransportTests(unittest.TestCase):
             c._read_response("error:9")
         self.assertFalse(c.homed)
 
+    def test_lightburn_cannot_bypass_service_parameter_or_gpio_access(self):
+        c = Controller("/dev/null")
+        sock = FakeSocket()
+        class FakeSerial:
+            def __init__(self): self.written = bytearray()
+            def write(self, data):
+                self.written.extend(data)
+                return len(data)
+        c.serial = FakeSerial()
+        c.host = sock
+        c.owner = "host"
+        c._forward_host_bytes_locked(b"$LCIO=1\n$110=6000\n$I\nM64 P0\nG1 X10 F1000\n?")
+        self.assertEqual(bytes(c.serial.written), b"$I\nG1 X10 F1000\n?")
+        self.assertEqual(bytes(sock.lines), b"error:9\r\n"*3)
+        self.assertEqual(c.host_pending, 1)
+        self.assertEqual(list(c.host_commands), ["$I", "G1 X10 F1000"])
+        self.assertTrue(c.host_command_allowed("$H"))
+        self.assertTrue(c.host_command_allowed("$G"))
+        self.assertTrue(c.host_command_allowed("M3 S100"))
+        self.assertFalse(c.host_command_allowed("$27=4"))
+        self.assertFalse(c.host_command_allowed("G1 X10 M65 P0"))
+
+    def test_lightburn_chunked_and_oversized_commands_fail_closed(self):
+        c = Controller("/dev/null")
+        sock = FakeSocket()
+        class FakeSerial:
+            def __init__(self): self.written = bytearray()
+            def write(self, data):
+                self.written.extend(data)
+                return len(data)
+        c.serial = FakeSerial()
+        c.host = sock
+        c.owner = "host"
+        c._forward_host_bytes_locked(b"$110")
+        c._forward_host_bytes_locked(b"=100\r\nG0 X2\r\n")
+        self.assertEqual(bytes(c.serial.written), b"G0 X2\n")
+        self.assertEqual(bytes(sock.lines), b"error:9\r\n")
+        c._forward_host_bytes_locked(b"G0 X" + b"0"*400 + b"\n")
+        self.assertEqual(bytes(sock.lines), b"error:9\r\n"*2)
+        self.assertEqual(bytes(c.serial.written), b"G0 X2\n")
+
     def test_exclusive_host_ownership(self):
         c=Controller("/dev/null")
         c.serial=object()
