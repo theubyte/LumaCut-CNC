@@ -291,10 +291,10 @@ static status_code_t lumacut_pc7_io (sys_state_t state, char *args)
                 h.write("  -D SERIAL_PORT=1\n")
             h.write("  -D COOLANT_ENABLE=3\n") # M8 PC6 exhaust AND M7 PC8 LEDs
             h.write("  -D SPINDLE0_ENABLE=SPINDLE_PWM0_NODIR\n")
-            # UART0 (PA9 TX, PA10 RX) serves the grblHAL serial keypad.
-            # USART3 (PC10/PC11) remains reserved for TMC2209.
-            if not args.bridge:
-                h.write("  -D KEYPAD_ENABLE=2\n")
+            # Pi-400 USB builds do NOT enable the obsolete Waveshare keypad.
+            # PA9/PA10 (USART1) remain free for a separately validated STM32
+            # ROM bootloader service path; PC10/PC11 remain TMC2209 UART.
+            # The --bridge compatibility build intentionally retains UART1.
             # Actual LumaCut machine: exactly ONE stepper per XYZ axis.
             # No Y_GANGED and no M3/E extruder motor in use.
             # Only ONE mechanical Z switch is installed, wired as Z limit (PC2).
