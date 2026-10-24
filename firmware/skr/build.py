@@ -112,7 +112,7 @@ FLASHMEM status_code_t limits_lumacut_z_clearance (void)
         source=source.replace(rate,rate+"""
 #ifdef LUMACUT_SAFE_Z20
     if(axis.mask == bit(Z_AXIS))
-        plan_data.feed_rate = fminf(600.0f, settings.axis[Z_AXIS].max_rate);
+        plan_data.feed_rate = settings.axis[Z_AXIS].max_rate;
 #endif
 """)
         limits.write_text(source)
@@ -172,6 +172,10 @@ extern status_code_t limits_lumacut_z_clearance (void);
             # Factory defaults only: existing SKR EEPROM values take precedence.
             h.write("  -D DEFAULT_X_STEPS_PER_MM=80.0f\n")
             h.write("  -D DEFAULT_Y_STEPS_PER_MM=80.0f\n")
+            # Factory-only OEM XY maximum; real NVS speeds/acceleration
+            # remain operator-tunable based on mechanical validation.
+            h.write("  -D DEFAULT_X_MAX_RATE=6000.0f\n")
+            h.write("  -D DEFAULT_Y_MAX_RATE=6000.0f\n")
             # Z is a different Anet A8 motor + lead screw. Its lead and the
             # running microstep resolution are not yet established; guessing
             # $102 could cause unsafe 20mm retreats or overtravel.
