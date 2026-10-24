@@ -35,7 +35,7 @@ inline bool clip(const Region& r,float travelX,float travelY,
 inline bool point(const Region& r,const Plan& p,uint32_t n,
                   float& switchX,float& switchY,
                   float& laserX,float& laserY) {
-    if(n>=p.nx*p.ny)return false;
+    if((uint64_t)n>=(uint64_t)p.nx*p.ny)return false;
     const uint32_t row=n/p.nx;
     const uint32_t column=n%p.nx;
     const uint32_t idx=row&1?(p.nx-1-column):column; // serpentine
