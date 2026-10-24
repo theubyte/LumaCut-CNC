@@ -122,7 +122,8 @@ String lastControllerError, zLiftReason;
 uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
 bool zLiftDirectionVerified=false;
 lv_obj_t* updateKeyEntry=nullptr,*calCommandedField=nullptr,*calActualField=nullptr;
-bool quietJog=true,zScaleMeasured=false;
+int jogSpeedPercent=100;
+bool zScaleMeasured=false;
 uint32_t zSafetyArmUntil=0;
 int pendingCalibrationAxis=-1;
 String updateDeviceKey,updateImageSha256,updateSkrSha256;
@@ -1462,7 +1463,7 @@ void makeUi(){
     btn(c,"Z -",593,151,153,54,"z-",PALE_BLUE,BLUE);
     lbl(c,"SCHRITTWEITE",20,192,14,SUBTLE);
     btn(c,"0.1 / 1 / 10 mm",20,211,234,44,"step",PALE_BLUE,BLUE);
-    btn(c,"Leiser Jog / Normal",20,98,234,43,"jogsound",PALE_BLUE,BLUE);
+    btn(c,"Tempo 100%",20,98,234,43,"jogsound",PALE_BLUE,BLUE);
     btn(c,"Wege kalibrieren",20,143,234,43,"calgo",GRAY,INK);
 
     // MACROS: three dedicated programmable machine XY positions.
@@ -1778,7 +1779,7 @@ bool settingAllowed(int id,float val){
     if(id==130||id==131||id==132)return val>0&&val<=3000;
     return id>=0&&id<=999&&isfinite(val);
 }
-int jogStep=0;
+int jogStep=1;
 void action(const char* id){
     String op=id;
     if(op=="focusSave"){
@@ -2159,10 +2160,10 @@ void action(const char* id){
     if(op=="calgo"){switchTab(10);return;}
     if(op=="calback"){switchTab(3);return;}
     if(op=="jogsound"){
-        quietJog=!quietJog;
-        prefs.putBool("quietJog",quietJog);
-        setNotice(quietJog?"Leiser Jog: XY 240, Z 90 mm/min.":
-                          "Normal Jog: XY 700, Z 180 mm/min.");
+        jogSpeedPercent=jogSpeedPercent==100?50:jogSpeedPercent==50?25:100;
+        prefs.putInt("jogPct",jogSpeedPercent);
+        setNotice("Jog-Faktor "+String(jogSpeedPercent)+
+                  "% von $110/$111/$112, kein fester HMI-Low-Speed.");
         return;
     }
     if(op=="safez20"){
@@ -2252,7 +2253,13 @@ void action(const char* id){
         if(target<minPos+0.001f||target>maxPos-0.001f){
             setNotice("Fahrbefehl endet ausserhalb des Arbeitsbereichs.");return;
         }
-        const float speed=quietJog?(axis=='Z'?90.f:240.f):(axis=='Z'?180.f:700.f);
+        const int speedId=axis=='X'?110:axis=='Y'?111:112;
+        if(!knownSetting[speedId]||savedSetting[speedId]<=0){
+            setNotice("Erst $ Lesen: Achsmaximum $"+String(speedId)+" fehlt.");return;
+        }
+        // 100 % is the SKR axis maximum, not an arbitrary low HMI cap.
+        // GRBL still applies its configured acceleration and planner bounds.
+        const float speed=savedSetting[speedId]*float(jogSpeedPercent)/100.f;
         String cmds[]={"M5","$J=G91 G21 "+String(axis)+String(dist,3)+
                        " F"+String(speed,1)};
         // canJog() above has already checked homing, MPos and local bounds.
@@ -2264,7 +2271,8 @@ void action(const char* id){
 }
 void internalInit(){
     prefs.begin("lumacut",false);
-    quietJog=prefs.getBool("quietJog",true);
+    jogSpeedPercent=prefs.getInt("jogPct",100);
+    if(jogSpeedPercent!=25&&jogSpeedPercent!=50&&jogSpeedPercent!=100)jogSpeedPercent=100;
     zScaleMeasured=prefs.getBool("zScaleOK",false);
     updateDeviceKey=prefs.getString("upkey","");
     if(prefs.getBool("otaPending",false)){
