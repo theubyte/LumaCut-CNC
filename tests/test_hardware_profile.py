@@ -213,7 +213,8 @@ class HardwareProfileTests(unittest.TestCase):
         self.assertIn("pendingCalibrationAxis=axis;",CONTROL)
         self.assertIn('prefs.putBool("zScaleOK",matching)',CONTROL)
         self.assertIn('btn(c,"Wege kalibrieren"',CONTROL)
-        self.assertIn('btn(c,"Z20 aktivieren"',CONTROL)
+        self.assertIn('Z20 ist Teil der SKR-Referenzfahrt',CONTROL)
+        self.assertNotIn('btn(c,"Z20 aktivieren"',CONTROL)
 
     def test_inline_settings_have_value_and_per_row_confirmation(self):
         self.assertIn('lv_obj_t* catalogFields[6]',CONTROL)
