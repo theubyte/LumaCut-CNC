@@ -21,9 +21,12 @@ class ReleaseNotificationTests(unittest.TestCase):
         self.assertIn('RELEASE_FILE=ROOT/"approved-release.json"',SERVER)
         self.assertIn('@app.post("/api/updates/approve")',SERVER)
         self.assertIn('@app.get("/api/updates/latest")',SERVER)
-        self.assertIn('"hmi_ota_enabled":HMI_OTA_ENABLED',SERVER)
-        self.assertIn('HMI_OTA_ENABLED=os.environ.get(',SERVER)
-        self.assertIn('"automatic_skr_flash_enabled":False',SERVER)
+        self.assertIn('"hmi_ota_enabled":True',SERVER)
+        self.assertIn('"skr_firmware_available":True',SERVER)
+        self.assertIn('"skr_install_method":"microSD"',SERVER)
+        self.assertIn('"/api/updates/skr-firmware.bin"',SERVER)
+        self.assertNotIn('HMI_OTA_ENABLED=os.environ.get(',SERVER)
+        self.assertNotIn('"automatic_skr_flash_enabled":False',SERVER)
 
     def test_hmi_ota_writer_is_part_of_pro_firmware(self):
         ota=(ROOT/"firmware/hmi/src/secure_ota.h").read_text(encoding="utf-8")
