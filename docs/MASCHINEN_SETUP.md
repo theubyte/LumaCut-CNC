@@ -106,13 +106,11 @@ berechnete `$J`-Schritte schicken. Der zusätzliche Workflow
 `Limits EIN` ist für Jog allein nicht mehr zwingend erforderlich.
 Der HMI-Code prüft die Endposition weiterhin selbst gegen
 `$130/$131/$132`; G0-Jobs und Flächenfahrt behalten den strengeren
-Soft-Limits-Check. Die Start-Schrittweite beträgt 0,1 mm. X+/Y+/Z+
+Soft-Limits-Check. Die Start-Schrittweite beträgt 1 mm (umschaltbar 0,1/1/10 mm). X+/Y+/Z+
 bezieht sich auf **positive angezeigte HMI-Koordinaten**, nicht die
 internen negativen GRBL-MPos. Jede Jogfahrt sendet zuerst `M5`.
 
-Die Taste **Leiser Jog / Normal** schaltet XY 240/Z 90 oder
-XY 700/Z 180 mm/min um. Das verringert möglicherweise Resonanzen
-während der Fahrt, verändert aber keine unbekannten TMC2209-Motorströme.
+Die Taste **Tempo** schaltet zwischen 100 %, 50 % und 25 % der tatsächlich vom SKR zurückgelesenen Achsmaximalgeschwindigkeiten `$110/$111/$112` um. Standard sind 100 %. Das verändert keine unbekannten TMC2209-Motorströme.
 Haltefrequenz-Geräusche können auch durch Choppermodus,
 Treiber-UART, Stromgrenze, mechanische Resonanzen oder lose Verdrahtung
 entstehen; ohne Treiberstatus/Strommessung ist eine dauerhafte
@@ -139,18 +137,15 @@ Geräuschbeseitigung nicht nachgewiesen.
 Die aktualisierte **SKR-Firmware** ergänzt eine Systembewegung direkt
 zwischen grblHALs üblicher Z-Homingphase und der anschließenden
 XY-Homingphase. Die SKR-Firmware prüft den konfigurierten Z-Fahrweg
-`$132` (mindestens 21 mm) und begrenzt die Zwischenfahrt auf maximal
-600 mm/min, zusätzlich zur kleineren tatsächlichen `$112`-Grenze.
+`$132` (mindestens 21 mm) und führt die Zwischenfahrt mit der tatsächlich eingestellten maximalen Z-Geschwindigkeit `$112` aus.
 
 **Aus Sicherheitsgründen zuerst deaktiviert.** Den 20-mm-Zwischenschritt
-nur nach reproduzierbar gemessener Z-Kalibrierung und sichtbarem
-0,5-mm-Z-Richtungstest freischalten:
+nur nach reproduzierbar gemessener Z-Kalibrierung freischalten:
 
 1. Neue gepaarte HMI/SKR-Firmware installieren; vor Tests Laser physisch AUS.
 2. XYZ homen und **Jog → Wege kalibrieren → Z korrigieren** mit echtem
    Soll/Ist-Weg durchführen, bis die HMI die bestätigte SKR-Rücklesung
-   meldet. In **Fokus/Taster** `Z-Test 0,5 mm` und anschließend
-   `Z-Richtung OK` nur nach Prüfung der tatsächlichen Bewegung drücken.
+   meldet. Die korrekte tatsächliche Z-Fahrtrichtung bereits bei der normalen Referenzierung und Wegkalibrierung kontrollieren.
 3. Z-Fahrweg `$132` inklusive Sicherheitsreserve prüfen; erneut homen.
    Danach **Jog → Wege kalibrieren → Z20 aktivieren** innerhalb von 15
    Sekunden **zweimal** bestätigen. Das HMI setzt `$27=2.5` und liest
@@ -282,11 +277,11 @@ Die HMI-Firmware verwaltet die Eingaben jetzt als **ungespeicherte Änderungen**
 
 **Z-Rückzug nach erfolgreichem Homing:** Die HMI prüft separat `MPos`, Z-Verfahrweg `$132`, Soft-Limit `$20` und die angeforderte Zielposition innerhalb der tatsächlichen Z-Grenzen. X/Y-Werte sind für eine reine Z-Fahrt nicht zusätzlich Voraussetzung. Bei unbekannten Werten wird **einmalig** die konkrete fehlende Voraussetzung angezeigt; die Schleife wird beendet. Ein Z-Rückzug wird **nicht** blind ohne Homing und gemessene Grenzen durchgeführt. Wird der positive 7-mm-Rückzug bei einer aktuellen Position nahe dem oberen Z-Endstop (`Z=-1` in einem `-Weg…0`-Koordinatensystem) verlangt, kann `+7` außerhalb der Verfahrgrenze liegen. Das bedeutet **nicht**, dass wir automatisch `-7` fahren dürfen: Vorzeichen nur nach Prüfung der physischen Endstop-Anordnung einstellen.
 
-Unter **Fokus / Taster → Probe konfigurieren** ist dazu ein **Z-Test 0,5 mm** implementiert, mit dem bei *physisch stromlosem Laser*, korrekt referenzierter Maschine und aktivierten Soft Limits zunächst die Bewegungsrichtung beobachtet werden kann. Mit **Z-Richtung OK** bestätigt der Bediener die überprüfte Richtung ausdrücklich. Eine Änderung am Z-Rückzugswert hebt diese Bestätigung wieder auf. Der automatische Z-Rückzug wartet fortan nicht unendlich und wird ohne diese Bestätigung nicht ausgeführt. Damit ist die Testbestätigung ein **Bediener-Check**, keine automatische Drehrichtungserkennung.
+**Aktuelle Fassung:** Die zusätzlichen UI-Aktionen `Z-Test 0,5 mm` und `Z-Richtung OK` wurden entfernt. Die physische Z-Richtung wird durch normalen Homingbetrieb und die Wegkalibrierung festgestellt; ein besonderer Testknopf ist nicht mehr Voraussetzung. Der 20-mm-Zwischenschritt bleibt bis zum bestätigten Soll/Ist-Abgleich für `$102` gesperrt.
 
 **Motor-Halten:** Der Button setzt weiterhin `$1=255`, wertet nun aber den per `$` gelesenen Motor-Haltewert aus und meldet das Ergebnis. **Beim neuen HMI-Homing wird `$1=255` vor `$H` gesetzt**, damit die Achstreiber nach dem Bewegungsende nicht bereits von einer alten Idle-Zeit abgeschaltet sind. Ein reines `$1=255` nach bereits abgeschaltetem Treiber kann die Enable-Ausgänge erst nach dem nächsten Bewegungsvorgang beeinflussen. Dieser Controllerwert garantiert **kein** physisches Haltemoment. Prüfe im stromlosen Laser-Test die Versorgung der TMC2209-Treiber, ENABLE-Polarität und den tatsächlichen Motor-/Haltestrom. Ein Schrittmotor mit zu geringem Haltestrom ist durch äußere Kraft weiterhin verstellbar. Nicht versuchen, eine Achse gewaltsam am Haltemoment zu testen. Die HMI zeigt unter WLAN/System zusätzlich die GRBL-Werte `$1`, `$20` und `$132` an.
 
-**Testabfolge ohne Laserenergie:** Zuerst im HMI **Setup → $$ Lesen** die realen `$1`, `$20`, `$130`, `$131`, `$132` kontrollieren; gemessene Achswege erst danach über die Felder **Speichern**; sicherstellen, dass der SKR bestätigt; Soft Limits bei geprüften Endschaltern aktivieren; dann XYZ referenzieren; Z-Test mit wenigen Zehntelmillimetern in bekannter Richtung; **Z-Richtung OK**; anschließend Auto-Z unter **Fokus/Taster** freigeben und unter Aufsicht testen. Wenn das HMI den Wert bestätigt, Motoren aber nicht halten, ist weitere Hardware-/Treiberdiagnose nötig.
+**Testabfolge ohne Laserenergie:** Zuerst im HMI **Setup → $$ Lesen** die realen `$1`, `$20`, `$130`, `$131`, `$132` kontrollieren; gemessene Achswege erst danach über die Felder **Speichern**; sicherstellen, dass der SKR bestätigt; Soft Limits bei geprüften Endschaltern aktivieren; dann XYZ referenzieren; tatsächlich gefahrene Z-Strecke mit Messschieber prüfen; anschließend Z20 nach bestätigter Z-Kalibrierung freigeben und unter Aufsicht testen. Wenn das HMI den Wert bestätigt, Motoren aber nicht halten, ist weitere Hardware-/Treiberdiagnose nötig.
 
 Dies sind Quellcode- und Buildtests; eine reale Bewegungsprüfung auf der Maschine ist dadurch **nicht** ersetzt.
 
