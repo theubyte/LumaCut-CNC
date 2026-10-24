@@ -517,7 +517,7 @@ void installSkrUpdate(){
         setNotice("SKR Download: "+failure);return;
     }
     // ROM flashing must NOT start when the boot/reset expander is absent.
-    if(!SkrUpdate::flashVerified(fs,machine,failure,skrUpdateProgress)){
+    if(!SkrUpdate::flashVerified(fs,machine,updateSkrSha256,failure,skrUpdateProgress)){
         machineHomed=false;haveMpos=false;
         settingsRequested=false;lastStatusMs=0;
         setNotice("SKR Flash: "+failure+". SKR-SD-Recovery moeglich.");
