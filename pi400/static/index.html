@@ -153,6 +153,14 @@ input,select{background:#0a1624;border:1px solid #3a5268;padding:11px 13px;borde
 <div style="margin:12px 0"><button class="primary" id="upload">G-Code hochladen</button></div>
 <div class="two"><button data-op="start" class="primary">Job starten</button><button data-op="frame">Rahmen prüfen</button><button data-op="toggle">Pause / Weiter</button><button data-op="abort" class="stop">Abbrechen</button></div></div>
 <div class="panel span7"><h2>Gespeicherte Jobs</h2><div id="files">Aktualisiere Dateiliste…</div><button id="refreshfiles">Dateien neu laden</button>
+<div style="margin-top:18px;border-top:1px solid #2a4055;padding-top:16px">
+<h3>Auftragsvorschau · Pi Motion Analyzer</h3>
+<p id="jobPreviewInfo" class="caption">Wähle einen G-Code-Auftrag, um dessen tatsächliche Geometrie zu prüfen.</p>
+<svg id="jobPreview" viewBox="0 0 550 350" role="img" aria-label="Geometrische Laserauftrag-Vorschau" style="width:100%;display:block;aspect-ratio:11/7;border-radius:12px;background:#091725;border:1px solid #2c4057">
+<rect x="16" y="16" width="518" height="318" fill="#102238" stroke="#3b5469" rx="9"/>
+<g id="jobPreviewPaths"></g></svg>
+<p class="caption">Cyan: Fahr-/Schnittbewegungen, gestrichelt: Leerfahrten. Die Vorschau ersetzt keine Live-Prüfung von Nullpunkt, Fokus oder Endschaltern.</p>
+</div>
 <p class="caption">Die Datei wird erst nach Auswahl gestartet. LightBurn verbindet sich über TCP-Port 23 mit dem Pi. Das SKR hängt per USB am Pi.</p></div></div></section>
 <section id="settings" class="tab"><div class="layout">
 <div class="panel span8"><h2>GRBL-Parameter</h2><div class="row"><select id="category">
@@ -341,6 +349,42 @@ el("parkSlot").onchange=()=>{el("parkName").value=cfg.parks?.[Number(el("parkSlo
 el("parkRename").onclick=()=>saveSection("macro",{slot:el("parkSlot").value,name:el("parkName").value});
 el("parkCapture").onclick=()=>action("capture",{slot:el("parkSlot").value});
 el("parkGo").onclick=()=>action("park",{slot:el("parkSlot").value});
+async function loadPreview(name){
+ if(!key || !name)return;
+ const label=el("jobPreviewInfo"),group=el("jobPreviewPaths");
+ try{
+  const out=await api("/api/jobs/preview?name="+encodeURIComponent(name));
+  group.replaceChildren();
+  if(!out.bounds || !out.segments?.length){
+   label.textContent="Keine sichere Vorschau möglich: "+((out.errors||[]).join(" ")||"Keine XY-Kontur");
+   return;
+  }
+  const [x0,y0,x1,y1]=out.bounds, width=Math.max(x1-x0,.001),height=Math.max(y1-y0,.001);
+  const scale=Math.min(502/width,302/height), ox=275-(x0+x1)*scale/2,
+        oy=175+(y0+y1)*scale/2;
+  const fmt=n=>Number(n).toFixed(2);
+  const paths=[[],[]];
+  for(const [ax,ay,bx,by,rapid] of out.segments){
+    paths[rapid?0:1].push("M"+fmt(ox+ax*scale)+" "+fmt(oy-ay*scale)+
+                         "L"+fmt(ox+bx*scale)+" "+fmt(oy-by*scale));
+  }
+  const ns="http://www.w3.org/2000/svg";
+  for(let kind=0;kind<2;kind++){
+    if(!paths[kind].length)continue;
+    const path=document.createElementNS(ns,"path");
+    path.setAttribute("d",paths[kind].join(" "));
+    path.setAttribute("fill","none");
+    path.setAttribute("stroke",kind?"#5bd4f4":"#638198");
+    path.setAttribute("stroke-width",kind?"2":"1.1");
+    path.setAttribute("stroke-linecap","round");
+    if(!kind)path.setAttribute("stroke-dasharray","4 4");
+    group.appendChild(path);
+  }
+  label.textContent="X "+fmt(x0)+"…"+fmt(x1)+" · Y "+fmt(y0)+"…"+fmt(y1)+
+     " mm · "+out.estimated_segments+" Bewegungen"+
+     (out.truncated?" · Vorschau gekürzt":"");
+ }catch(e){label.textContent="Vorschau konnte nicht geladen werden: "+e.message}
+}
 async function readFiles(){
  if(!key)return;
  try{
@@ -352,7 +396,7 @@ async function readFiles(){
    let b=document.createElement("button");
    b.textContent=file.name+" · "+Math.round(file.bytes/1024)+" KiB";
    b.onclick=async()=>{
-    try{await post("/api/select",{name:file.name});notify("Datei ausgewählt: "+file.name);refresh()}
+    try{await post("/api/select",{name:file.name});notify("Datei ausgewählt: "+file.name);refresh();loadPreview(file.name)}
     catch(e){notify("Dateiauswahl: "+e.message,true)}
    };
    item.appendChild(b);list.appendChild(item);
