@@ -52,6 +52,38 @@ docker run -d --name "$NAME" --restart unless-stopped \
   --volume "$STATE/data:/data:rw" \
   --volume "$STATE/secrets:/run/secrets:ro" \
   lumacut-builder:0.3 >/dev/null
+
+# Check the same public JSON endpoint the Waveshare polls.
+# The Flask app intentionally exempts it from Basic auth.
+# A 401 on localhost means the container is stale or misconfigured.
+# A 200 on localhost but 401 through HTTPS means the reverse proxy
+# (Nginx Proxy Manager access list, Cloudflare Access, etc.) is blocking it.
+if command -v curl >/dev/null 2>&1; then
+  UPDATE_PATH="/api/updates/latest"
+  LOCAL_CODE="000"
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    LOCAL_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:${PORT}${UPDATE_PATH}" || true)"
+    if [ "$LOCAL_CODE" != "000" ]; then break; fi
+    sleep 1
+  done
+  REMOTE_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "https://luma.millione.de${UPDATE_PATH}" || true)"
+  echo "LumaCut Update-API: lokal HTTP $LOCAL_CODE / HTTPS-Domain HTTP $REMOTE_CODE"
+  if [ "$LOCAL_CODE" != "200" ]; then
+    echo "ACHTUNG: Die Update-API antwortet lokal nicht mit 200. Container/Route pruefen."
+  elif [ "$REMOTE_CODE" = "401" ] || [ "$REMOTE_CODE" = "403" ]; then
+    echo "FEHLER: Externe Update-API wird durch vorgeschaltete Auth gesperrt."
+    echo "Reverse Proxy: /api/updates/latest ohne zusaetzliche Login-Schranke freigeben."
+    echo "Der restliche Compiler bleibt durch Flask Basic-Auth geschuetzt."
+  elif [ "$REMOTE_CODE" = "200" ]; then
+    echo "OK: HMI kann die oeffentlichen Stable-Update-Metadaten abrufen (HTTP 200)."
+  elif [ "$REMOTE_CODE" = "000" ]; then
+    echo "HINWEIS: HTTPS-Domain vom Unraid-Host nicht erreichbar (DNS/TLS/Netzwerk)."
+  else
+    echo "HINWEIS: Externer Updatepfad HTTP $REMOTE_CODE. Proxy-Weiterleitung pruefen."
+  fi
+else
+  echo "HINWEIS: curl fehlt, oeffentliche Update-API nicht geprueft."
+fi
 echo "Weboberfläche: http://DEINE-UNRAID-IP:18744"
 echo "Login: lumacut"
 echo "Passwort unter: $STATE/.env"
