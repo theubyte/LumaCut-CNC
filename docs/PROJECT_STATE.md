@@ -1,24 +1,46 @@
-# LumaCut CNC – Projektstatus 2026-10-21
+# LumaCut CNC – Projektstatus 24.10.2026 (Pi400)
 
-**GitHub:** https://github.com/theubyte/LumaCut-CNC (main). **Wichtiger Hinweis: Repository ist derzeit PUBLIC**, nicht privat. Kein API-Token, SSH-Schlüssel oder personenbezogene Daten committen.
-**Erststart:** [INBETRIEBNAHME.md](INBETRIEBNAHME.md). Die Datei ist der verbindliche Hardware-Testplan.
+**Aktiver Branch:** `main` auf https://github.com/theubyte/LumaCut-CNC (öffentlich).
+**Keine separaten Entwicklungsbranches erforderlich.**
 
-## Hardware und Ziel
-Atomstack A5 Pro, LaserTree LT-80W-AA-Pro, BTT SKR Mini MZ v1.0 (STM32F103RC, TMC2209), Waveshare ESP32-S3-Touch-LCD-7 Rev1.2; keine Raspberry-Pi-Abhängigkeit. **LightBurn ⇄ USB CDC ⇄ SKR (grblHAL)** bleibt Haupt-G-Code-Stream. **HMI → 3,3-V-UART → SKR USART1** für einzelne grblHAL-Keypad-Zeichen; PC10/PC11 USART3 gehören TMC2209.
+## Zielarchitektur
+Raspberry Pi 400 ist die zentrale Maschine: Web-UI, Service-Zugang, Aufträge,
+Konfiguration, GRBL/LightBurn-TCP23, G-Code-Geometrieanalyse, USB-Verwaltung
+und Updates. Das SKR Mini MZ V1.0 führt die zeitkritischen Stepper-, PWM-,
+Endschalter- und MOSFET-Signale mit grblHAL über eine eigene USB-CDC-Verbindung aus.
+Die frühere Waveshare-ESP32-S3-HMI-Software ist nur Archiv.
 
-## Aktuelle Firmware und Tests
-- **SKR:** `firmware/skr/build.py`; gepinnte grblHAL-STM32F1xx-Quellen; angepasste MZ-Motor-/Limit-/FET-Pins; nativer USB-Anschluss; `KEYPAD_ENABLE=2` USART1; **Y_GANGED=1 für Atomstack-Doppel-Y (vierter E-Treiber PB3/PB4/PD2 als Y2)**. Y2-Drehrichtung, Treiberstrom und mechanische Synchronisation am realen Gerät prüfen. **GitHub-Actions-Build erfolgreich**, einschließlich Keypad-Änderung. Physischer SKR-Flash **nicht getestet**.
-- **HMI:** `firmware/hmi/src/main.cpp` v0.4, LVGL 8, RGB565 800×480, GT911 auf 0x5D/0x14, CH422G-Reset/Backlight-Korrektur. `lumacut_waveshare_s3` offline für sicheren Displaytest; `lumacut_waveshare_s3_keypad` optionales Gated-Jogging (30-s-Freigabe, Keyup 0x85). **Beide Buildziele wurden in Actions erfolgreich kompiliert**. Touch, tatsächlicher UART-Datenaustausch und Bewegungen **nicht an Hardware geprüft**.
-- **CI:** `.github/workflows/ci.yml`: Tests und beide Controller, Toolchain-Cache, Wiederholungen bei Paketserverstörung, Download-Artefakte `UNVERIFIED-skr-...`, `UNVERIFIED-hmi-...`.
-- **Inbetriebnahmeanleitung:** `docs/INBETRIEBNAHME.md`.
+## Implementierte Software
+- `pi400/lumacut/app.py`, `core.py`: Webserver, GRBL-Host-TCP-Brücke,
+  exklusiver USB-Besitz, gefilterte Statusabfragen, geblockte kritische
+  Host-Einstellungen, manuelle XYZ-Fahrt, Z-Homing, fokusspezifische
+  Nach-Homing-Freifahrt und native Dateien/Jobs.
+- `pi400/static/index.html`: responsive Maschinenoberfläche, SVG-G-Code-Vorschau,
+  WLAN, USB-Kamera, Status, Homing, Park-/Fokusfunktionen, Dateien und Parameter.
+- `pi400/static/service.html`: geschützte Serviceoberfläche mit Passwort
+  `lumaservice` (gehasht), 10-minütiger Anmeldung, Firmwarediagnose,
+  GRBL-Parameterkonsole und I/O-Pinbelegung.
+- `firmware/skr/build.py`: USB-grblHAL STM32F103RC mit X/Y/Z, TMC2209,
+  Z20-Homing, PA1 Laser-PWM, PC9 BED, PC8/M7 LEDs, PC6/M8 Abluft,
+  zusätzlichem PC7/FAN1 über `$LCIO` samt Readback.
+  Das ESP32-Keypad-Plugin wird nicht mehr in den USB-Build eingeschaltet.
+- CI erzeugt Firmware-Binärdaten mit SHA-256-Fähigkeitsdatei und
+  `LumaCut-Pi400-SKR-USB.zip` (GitHub Actions).
+- Täglicher Pi-Updater mit Maintenance-Sperre und Rollback bei Dienstfehlern.
 
-## Einschränkungen / Sicherheit
-Kein fertiger Laserbetrieb: Prüfen von Motor- und Anschlagsrichtungen, Z-Spindelwegen, elektrischen Pegeln, Laser-PWM PA1, Laser-Enable, TMC-UART-Adresse/Strom, 28KiB-Bootloader und GND/5V vor Motor-/Laseranschluss. Insbesondere PC6/PC7 sind MOSFET-Fanausgänge und keine sicheren TTL-Pins. Laser bei Flash und Bewegungstests **stromlos und TTL abgeklemmt** lassen. E-Stop/Laserschlüssel/Interlocks unabhängig von der MCU hardwareseitig realisieren.
+## Nicht hardwareverifiziert / noch offen
+- Der SKR arbeitet derzeit weiter auf grblHAL als hartem Echtzeitkern;
+  eine frei umkonfigurierbare universelle GPIO-Firmware ist **nicht** fertig.
+- Automatisches SKR-Flashing allein via USB ist **nicht** implementiert.
+- Ein separater G38-Werkstücktaster, gemessene Höhenkarte und vollautomatische
+  Werkstückabtastung sind **nicht** realisiert.
+- Die elektrische Isolation des PC9-BED-Low-Side-Schalters zum LaserTree-PWM,
+  alle Z/Motorbewegungen, Signalpegel und externe Schutzkette sind nicht am
+  realen Aufbau geprüft. Kein Freigabevermerk für realen Laserbetrieb.
 
-## Noch nicht entwickelt
-- Live-DRO/GRBL-Status auf HMI (UART-Keypad besitzt aktuell **keine Quittierung/Rückmeldung**).
-- Sichere Zustands-/Job-Arbitration über HMI über das Keypad-Plugin hinaus.
-- Referenzfahrt des mechanischen Werkstücktasters, Fokus-/XY-Versatz automatisch anwenden, Z-Autofokus, Höhenkarte, Materialerkennung/Kamera, Kalibrierroutine.
-- Vollständiger Hardware-Abnahmetest.
+## Inbetriebnahme
+Siehe [PI400_CONTROL_STUDIO.md](PI400_CONTROL_STUDIO.md) und
+[PI400_CONTROL_OS_2.md](PI400_CONTROL_OS_2.md).
 
-**Erfolg bei CI ≠ funktionierende, geprüfte Gesamtmaschine.** Das nächste Arbeitspaket ist die elektrische und mechanische Inbetriebnahme anhand dokumentierter Messwerte; funktionierende Flash-Images und Quellcode stehen in Actions bereit.
+**CI grün bedeutet Quellcode/Firmwarekompilierung, nicht hardwaregeprüfte
+Laserfunktion.**
