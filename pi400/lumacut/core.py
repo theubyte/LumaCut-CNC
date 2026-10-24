@@ -23,6 +23,7 @@ MACHINE_POS = re.compile(r"(?:^|\|)MPos:([-+\d.]+),([-+\d.]+),([-+\d.]+)")
 class Controller:
     def __init__(self, port: str, baud: int = 115200, serial_factory=None):
         self.port, self.baud = port, baud
+        self.maintenance_file = None
         self.serial_factory = serial_factory
         self.serial = None
         self.lock = threading.RLock()
@@ -200,6 +201,7 @@ class Controller:
             age = (time.monotonic() - self.last_status) if self.last_status else None
             return {
                 "connected": self.serial is not None and age is not None and age < 5,
+                "maintenance": bool(self.maintenance_file and self.maintenance_file.exists()),
                 "state": self.state,
                 "owner": self.owner or "Frei",
                 "homed": self.homed,
@@ -217,6 +219,8 @@ class Controller:
             }
 
     def _acquire_local(self, owner="local"):
+        if self.maintenance_file and self.maintenance_file.exists():
+            raise RuntimeError("Pi-Softwareupdate: Maschinensteuerung gesperrt")
         if self.serial is None:
             raise ConnectionError("SKR USB nicht erreichbar")
         if self.owner not in (None, owner):
@@ -275,7 +279,8 @@ class Controller:
     def serve_host(self, client: socket.socket):
         client.settimeout(0.25)
         with self.cond:
-            if self.owner is not None or self.serial is None:
+            if (self.owner is not None or self.serial is None or
+                    (self.maintenance_file and self.maintenance_file.exists())):
                 client.sendall(b"error:9\r\n")
                 client.close()
                 return
