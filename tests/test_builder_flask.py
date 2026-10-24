@@ -101,8 +101,17 @@ class BuildLabFlaskTests(unittest.TestCase):
         info=self.client.get("/api/updates/latest")
         self.assertTrue(info.get_json()["available"])
         self.assertEqual(info.get_json()["source_sha"],"a"*40)
-        self.assertFalse(info.get_json()["automatic_skr_flash_enabled"])
-        self.assertFalse(info.get_json()["hmi_ota_enabled"])
+        self.assertTrue(info.get_json()["skr_firmware_available"])
+        self.assertEqual(info.get_json()["skr_install_method"],"microSD")
+        self.assertEqual(info.get_json()["skr_install_filename"],"firmware.bin")
+        self.assertTrue(info.get_json()["hmi_ota_enabled"])
+        sd_release=self.client.get("/api/updates/skr-firmware.bin",
+            headers=self.auth)
+        self.assertEqual(sd_release.status_code,200)
+        self.assertEqual(sd_release.data,b"skr test compiled bytes")
+        self.assertIn("firmware.bin",
+                      sd_release.headers.get("Content-Disposition",""))
+        self.assertEqual(self.client.get("/api/updates/skr-firmware.bin").status_code,401)
         self.assertEqual(
             self.client.get("/api/updates/file/hmi").status_code,401)
         # Even an approved release cannot be downloaded over the device API
