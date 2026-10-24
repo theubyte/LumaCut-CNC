@@ -648,11 +648,14 @@ def lbprofile():
 
 @app.get("/api/camera/snapshot")
 def camera():
-    cmd = os.getenv("LUMACUT_CAMERA_CMD", "/usr/bin/rpicam-still")
-    if not Path(cmd).is_file():
-        return jsonify(error="Kamera nicht installiert"), 503
-    result = subprocess.run([cmd, "-n", "-t", "100",
-                             "--width", "1280", "--height", "720", "-o", "-"],
+    # Raspberry Pi 400 has NO CSI connector: use a UVC USB webcam.
+    device = os.getenv("LUMACUT_CAMERA_DEVICE", "/dev/video0")
+    if not Path(device).is_char_device():
+        return jsonify(error="USB-Kamera an /dev/video0 nicht erkannt"), 503
+    result = subprocess.run(["/usr/bin/ffmpeg", "-nostdin", "-hide_banner",
+                             "-loglevel", "error", "-f", "v4l2",
+                             "-i", device, "-frames:v", "1",
+                             "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
                             capture_output=True, timeout=12)
     if result.returncode or not result.stdout.startswith(b"\xff\xd8"):
         return jsonify(error="Kamera liefert kein JPEG"), 503
