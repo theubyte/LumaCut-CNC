@@ -62,6 +62,10 @@ class ReleaseNotificationTests(unittest.TestCase):
 
     def test_hmi_https_and_hardware_safety(self):
         self.assertIn("setCACert(LUMACUT_UPDATE_CA)",HMI)
+        self.assertIn('else if(code==401||code==403)',HMI)
+        self.assertIn('Update-API verlangt Login: Unraid-Compiler oder Reverse-Proxy pruefen.',HMI)
+        self.assertIn('Update-API fehlt (404): Compiler aktualisieren',HMI)
+        self.assertIn('updateAvailable=false;updateOtaApproved=false;',HMI)
         self.assertIn('"https://luma.millione.de/api/updates/latest"',HMI)
         self.assertIn("void updateCheckService()",HMI)
         self.assertIn('owner!=Owner::None||jobRunning||scriptActive',HMI)
