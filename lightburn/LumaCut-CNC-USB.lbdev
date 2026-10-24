@@ -23,8 +23,8 @@
       "Settings": {
         "EnableBoundsCheck": true,
         "EnableZ": true,
-        "StartGCode": "G21\nG90\nM5",
-        "EndGCode": "M5",
+        "StartGCode": "G21\nG90\nM5\nM8",
+        "EndGCode": "M5\nG4 P30\nM9",
         "SValueMax": 1000,
         "TransferMode": 0,
         "LastExportExt": "gcode",
