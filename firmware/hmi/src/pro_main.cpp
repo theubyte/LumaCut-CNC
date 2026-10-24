@@ -83,7 +83,7 @@ struct Bounds {float x0=0,y0=0,x1=0,y1=0;bool valid=false;};
 Bounds bounds;
 struct Park {String name;float x=0,y=0;bool stored=false;};
 Park parks[3];
-lv_obj_t* pages[10]{};
+lv_obj_t* pages[11]{};
 lv_obj_t* navButtons[7]{};
 lv_obj_t *areaField=nullptr,*areaDot=nullptr,*areaCaption=nullptr,*configCaption=nullptr;
 lv_obj_t *updateLabel=nullptr;
@@ -121,7 +121,8 @@ float requestedSettingValue=0.f;
 String lastControllerError, zLiftReason;
 uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
 bool zLiftDirectionVerified=false;
-lv_obj_t* updateKeyEntry=nullptr;
+lv_obj_t* updateKeyEntry=nullptr,*calCommandedField=nullptr,*calActualField=nullptr;
+bool quietJog=true;
 String updateDeviceKey,updateImageSha256,updateSkrSha256;
 size_t updateImageBytes=0,updateSkrBytes=0;
 bool updateOtaApproved=false,otaInstallRequested=false,skrFirmwareReleased=false,skrInstallRequested=false;
@@ -256,6 +257,11 @@ bool canConfigure(){return owner==Owner::None&&fresh()&&
     (machineState==MachineState::Idle||machineState==MachineState::Alarm);}
 bool canMotion(){return canCommand()&&machineHomed&&haveMpos&&
     !motorsReleased&&softLimitsEnabled&&workX>0&&workY>0&&workZ>0;}
+// Local $J movements use the HMI's own bounds checks. Unlike G0 jobs,
+// they can be enabled by a successful XYZ homing cycle alone, even if the
+// separate soft-limits switch has not yet been enabled on the SKR.
+bool canJog(){return canCommand()&&machineHomed&&haveMpos&&
+    !motorsReleased&&workX>0&&workY>0&&workZ>0;}
 // A Z clearance move has its own locally checked travel envelope.
  // $20 is recommended but its OFF state must not lock out a bounded
  // retreat from a successfully homed endstop.
@@ -1296,9 +1302,9 @@ lv_obj_t* configEntry(lv_obj_t* parent,int x,int y,int w,int h,const String& tex
 void switchTab(int idx){
     activePage=idx;
     const int navMap[7]={0,5,1,2,3,6,4};
-    for(int j=0;j<10;j++)lv_obj_add_flag(pages[j],LV_OBJ_FLAG_HIDDEN);
+    for(int j=0;j<11;j++)lv_obj_add_flag(pages[j],LV_OBJ_FLAG_HIDDEN);
     if(idx>=0&&idx<7)lv_obj_clear_flag(pages[navMap[idx]],LV_OBJ_FLAG_HIDDEN);
-    else if(idx>=7&&idx<10)lv_obj_clear_flag(pages[idx],LV_OBJ_FLAG_HIDDEN);
+    else if(idx>=7&&idx<11)lv_obj_clear_flag(pages[idx],LV_OBJ_FLAG_HIDDEN);
     for(int i=0;i<7;i++){
         lv_obj_set_style_bg_color(navButtons[i],lv_color_hex(i==idx?PALE_BLUE:WHITE),0);
         lv_obj_t* t=lv_obj_get_child(navButtons[i],0);
@@ -1391,7 +1397,7 @@ void makeUi(){
     sourceLabel=lbl(root,"Steuerung frei",583,84,14,SUBTLE);
 
     // Every page fits 800x480 without accidental scrolling.
-    for(int i=0;i<10;i++){
+    for(int i=0;i<11;i++){
         pages[i]=lv_obj_create(root);lv_obj_set_pos(pages[i],14,117);
         lv_obj_set_size(pages[i],772,272);
         lv_obj_set_style_bg_opa(pages[i],LV_OPA_TRANSP,0);
@@ -1444,6 +1450,8 @@ void makeUi(){
     btn(c,"Z -",593,151,153,54,"z-",PALE_BLUE,BLUE);
     lbl(c,"SCHRITTWEITE",20,172,14,SUBTLE);
     btn(c,"0.1 / 1 / 10 mm",20,201,234,48,"step",PALE_BLUE,BLUE);
+    btn(c,"Leiser Jog / Normal",20,98,234,43,"jogsound",PALE_BLUE,BLUE);
+    btn(c,"Wege kalibrieren",20,147,234,43,"calgo",GRAY,INK);
 
     // MACROS: three dedicated programmable machine XY positions.
     c=card(pages[3],0,0,772,268);
@@ -1637,6 +1645,26 @@ void makeUi(){
     btn(c,"Zurueck",196,180,165,46,"focusgo",GRAY,INK);
     lbl(c,"Kein G38-Probing / kein Hoehenraster",18,238,14,SUBTLE);
 
+    // Guided X/Y/Z steps/mm correction, accessible from Jog.
+    // No blind screw pitch assumption: the operator measures the real travel.
+    c=card(pages[10],0,0,380,268);
+    lbl(c,"Wegkalibrierung",18,12,20);
+    lbl(c,"1. Kleine Jogfahrt ausfuehren",18,48,14,SUBTLE);
+    lbl(c,"2. Soll- und Ist-Weg messen",18,77,14,SUBTLE);
+    lbl(c,"Soll (mm)",18,110,14,SUBTLE);
+    lbl(c,"Ist (mm)",196,110,14,SUBTLE);
+    calCommandedField=configEntry(c,18,135,165,46,"1.0");
+    calActualField=configEntry(c,196,135,165,46,"");
+    lbl(c,"Neuer Wert = Alter x Soll / Ist",18,207,14,SUBTLE);
+    lbl(c,"Laser vor Messfahrt stromlos!",18,235,14,RED);
+    c=card(pages[10],392,0,380,268);
+    lbl(c,"SKR Schritte/mm korrigieren",18,12,20);
+    lbl(c,"Aktuelle Werte werden mit $ gelesen.",18,47,14,SUBTLE);
+    btn(c,"X korrigieren ($100)",18,78,343,44,"calx",PALE_BLUE,BLUE);
+    btn(c,"Y korrigieren ($101)",18,130,343,44,"caly",PALE_BLUE,BLUE);
+    btn(c,"Z korrigieren ($102)",18,182,343,44,"calz",PALE_BLUE,BLUE);
+    btn(c,"Zurueck zu Jog",194,231,166,32,"calback",GRAY,INK);
+
     // Bottom dock is always visible, and labels remain within touch targets.
     const char* tabs[]={"Home","Flaeche","Jobs","Jog","Makros","Setup","WLAN"};
     lv_obj_t* dock=card(root,14,406,772,59);
@@ -1682,7 +1710,7 @@ void makeUi(){
     editCancelButton=btn(editOverlay,"Abbrechen",0,0,10,10,"editorcancel",GRAY,INK);
     layoutKeyboardDialog();
     lv_obj_add_flag(editOverlay,LV_OBJ_FLAG_HIDDEN);
-    for(lv_obj_t* field : {ssidEntry,passwordEntry,updateKeyEntry,macroEntry,
+    for(lv_obj_t* field : {ssidEntry,passwordEntry,updateKeyEntry,calCommandedField,calActualField,macroEntry,
          sizeXField,sizeYField,sizeZField,paramKeyField,paramValueField,
          focusLiftField,focusGapField,tipOffsetField})
         lv_obj_add_event_cb(field,openKeyboard,LV_EVENT_CLICKED,nullptr);
@@ -1737,7 +1765,7 @@ bool settingAllowed(int id,float val){
     if(id==130||id==131||id==132)return val>0&&val<=3000;
     return id>=0&&id<=999&&isfinite(val);
 }
-int jogStep=1;
+int jogStep=0;
 void action(const char* id){
     String op=id;
     if(op=="focusSave"){
@@ -2110,6 +2138,51 @@ void action(const char* id){
         if(!first.length())setNotice("Noch keine Jobs. Über Handy hochladen.");
         return;
     }
+    if(op=="calgo"){switchTab(10);return;}
+    if(op=="calback"){switchTab(3);return;}
+    if(op=="jogsound"){
+        quietJog=!quietJog;
+        prefs.putBool("quietJog",quietJog);
+        setNotice(quietJog?"Leiser Jog: XY 240, Z 90 mm/min.":
+                          "Normal Jog: XY 700, Z 180 mm/min.");
+        return;
+    }
+    if(op=="calx"||op=="caly"||op=="calz"){
+        if(!canConfigure()||jobRunning||homingInProgress){
+            setNotice("Kalibrierung nur bei stillstehendem SKR.");return;
+        }
+        const int axis=op=="calx"?0:op=="caly"?1:2;
+        const int id=100+axis;
+        if(!knownSetting[id]||savedSetting[id]<=0){
+            setNotice("Erst $ Lesen: aktuelle Schritte/mm fehlen.");return;
+        }
+        const String req=lv_textarea_get_text(calCommandedField);
+        const String obs=lv_textarea_get_text(calActualField);
+        char* ea=nullptr;char* eb=nullptr;
+        const float commanded=strtof(req.c_str(),&ea),actual=strtof(obs.c_str(),&eb);
+        if(ea==req.c_str()||eb==obs.c_str()||*ea||*eb||
+           !isfinite(commanded)||!isfinite(actual)||
+           commanded<0.1f||commanded>50.f||
+           actual<0.05f||actual>100.f){
+            setNotice("Soll/Ist in mm eingeben (Soll 0,1 bis 50).");return;
+        }
+        const float corrected=savedSetting[id]*commanded/actual;
+        if(!isfinite(corrected)||corrected<5.f||corrected>10000.f||
+           corrected<savedSetting[id]*0.1f||corrected>savedSetting[id]*10.f){
+            setNotice("Extremer Korrekturfaktor: Antrieb/Mikroschritte pruefen.");
+            return;
+        }
+        String cmds[]={"$"+String(id)+"="+String(corrected,4),"$"};
+        if(startScript(cmds,2)){
+            requestedSettingId=id;
+            requestedSettingValue=corrected;
+            configWrite=ConfigWrite::Parameter;
+            setNotice("Kalibrierung $"+String(id)+": "+
+                      String(savedSetting[id],2)+" -> "+String(corrected,2)+
+                      " steps/mm, warte auf SKR-Ruecklesung.");
+        }else setNotice("SKR beschaeftigt: Kalibrierung abgelehnt.");
+        return;
+    }
     if(op=="step"){jogStep=(jogStep+1)%3;setNotice("Schrittweite: "+String(jogStep==0?0.1f:jogStep==1?1.f:10.f)+" mm");return;}
     if(op=="wifi"){
         wifiSsid=lv_textarea_get_text(ssidEntry);wifiPass=lv_textarea_get_text(passwordEntry);
@@ -2119,10 +2192,11 @@ void action(const char* id){
         setNotice("WLAN-Verbindung gestartet. Hotspot bleibt erreichbar.");return;
     }
     if(op=="x+"||op=="x-"||op=="y+"||op=="y-"||op=="z+"||op=="z-"){
-        const float dist=(jogStep==0?0.1f:jogStep==1?1.f:10.f)*(op[1]=='-'?-1:1);
+        const float operatorDistance=(jogStep==0?0.1f:jogStep==1?1.f:10.f)*(op[1]=='-'?-1:1);
+        const float dist=machinePosFromOperator(operatorDistance);
         const char axis=(op[0]=='x'?'X':op[0]=='y'?'Y':'Z');
-        if(!canMotion()){
-            setNotice("Erst XYZ referenzieren und Soft Limits aktivieren.");return;
+        if(!canJog()){
+            setNotice("XYZ homen, SKR Idle und Motoren aktiv halten.");return;
         }
         float current=axis=='X'?mx:axis=='Y'?my:mz;
         float travel=axis=='X'?workX:axis=='Y'?workY:workZ;
@@ -2132,13 +2206,16 @@ void action(const char* id){
         if(target<minPos+0.001f||target>maxPos-0.001f){
             setNotice("Fahrbefehl endet ausserhalb des Arbeitsbereichs.");return;
         }
-        String cmds[]={"$J=G91 G21 "+String(axis)+String(dist,2)+" F600"};
+        const float speed=quietJog?(axis=='Z'?90.f:240.f):(axis=='Z'?180.f:700.f);
+        String cmds[]={"$J=G91 G21 "+String(axis)+String(dist,3)+
+                       " F"+String(speed,1)};
         if(!startScript(cmds,1,true))setNotice("Jog nur bei freier Maschine moeglich.");
         return;
     }
 }
 void internalInit(){
     prefs.begin("lumacut",false);
+    quietJog=prefs.getBool("quietJog",true);
     updateDeviceKey=prefs.getString("upkey","");
     if(prefs.getBool("otaPending",false)){
         const uint32_t attempts=prefs.getUInt("otaAttempts",0)+1;
@@ -2146,7 +2223,7 @@ void internalInit(){
         if(attempts>1)restoreHmiIfBootBroken();
     }
     machineZeroAtMax=prefs.getBool("zeroMax",true);
-    focusLiftMm=fabsf(prefs.getFloat("zlift",7.f));
+    focusLiftMm=fmaxf(20.f,fabsf(prefs.getFloat("zlift",20.f)));
     zLiftDirectionVerified=prefs.getBool("zsignOK",false);
     focusGapMm=prefs.getFloat("focgap",7.f);
     tipOffsetMm=prefs.getFloat("tipoffs",0.f);
