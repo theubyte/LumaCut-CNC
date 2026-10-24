@@ -121,7 +121,7 @@ FLASHMEM status_code_t limits_lumacut_z_clearance (void)
         limits.write_text(source)
         motion=root/"grbl"/"motion_control.c"
         body=motion.read_text()
-        location='if((homed_status = limits_go_home(cycle)) != Status_OK)\\n                        break;'
+        location='if((homed_status = limits_go_home(cycle)) != Status_OK)\n                        break;'
         if body.count(location)!=1:
             raise RuntimeError("grblHAL complete homing loop changed")
         body=body.replace(location,location+"""
@@ -173,8 +173,8 @@ extern status_code_t limits_lumacut_z_clearance (void);
             # Original Atomstack A5 Pro belt mechanics use 80 steps/mm
             # when the Trinamic driver microstepping matches the OEM setup.
             # Factory defaults only: existing SKR EEPROM values take precedence.
-            h.write("  -D DEFAULT_X_STEPS_PER_MM=80.0f\\n")
-            h.write("  -D DEFAULT_Y_STEPS_PER_MM=80.0f\\n")
+            h.write("  -D DEFAULT_X_STEPS_PER_MM=80.0f\n")
+            h.write("  -D DEFAULT_Y_STEPS_PER_MM=80.0f\n")
             # Z is a different Anet A8 motor + lead screw. Its lead and the
             # running microstep resolution are not yet established; guessing
             # $102 could cause unsafe 20mm retreats or overtravel.
@@ -184,7 +184,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
             # single-Z homing for workpiece contact using the same head switch.
             # These are factory defaults; SKR nonvolatile $22 takes precedence.
             h.write("  -D DEFAULT_HOMING_ENABLE=1\n")
-            h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")            h.write("  -D LUMACUT_SAFE_Z20=1\\n")
+            h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")            h.write("  -D LUMACUT_SAFE_Z20=1\n")
 
         run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/env
