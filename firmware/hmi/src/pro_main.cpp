@@ -1356,8 +1356,8 @@ void installRoutes(){
         settings["EnableBoundsCheck"]=true;
         settings["LaserFire_Enable"]=false;
         settings["TransferMode"]=0;
-        settings["StartGCode"]="G21\\nG90\\nM5";
-        settings["EndGCode"]="M5";
+        settings["StartGCode"]="G21\\nG90\\nM5\\nM8";
+        settings["EndGCode"]="M5\\nG4 P30\\nM9";
         settings["LastExportExt"]="gcode";
         http.sendHeader("Content-Disposition",
                         "attachment; filename=LumaCut-CNC-USB.lbdev");
