@@ -34,13 +34,24 @@ Zertifikatsaussteller oder sind NTP/HTTPS/Reverse-Proxy nicht erreichbar,
 schlägt der Check geschlossen fehl. Das Domain-Routing und die tatsächliche
 Zertifikatskette konnten aus diesem Arbeitskontext nicht geprüft werden.
 
-**Wichtig: Die vorliegende Revision meldet nur verfügbare Updates.**
-Im Manifest steht ausdrücklich `hmi_ota_enabled: false` und
-`automatic_skr_flash_enabled: false`. OTA-Installieren wird erst nach einem
-funktionierenden ESP32-S3-Doppelslot-/Rollback-Test aktiviert. Für das SKR Mini
-MZ STM32F103RC muss der BOOT0-/NRST-Zugang zum Bootloader mit realer Hardware
-nachgewiesen werden. Ein erfolgreicher Compiler-Build oder eine Versionsanzeige
-ist kein Nachweis für sicheres Board-Flashen.
+**Wichtig: Die HMI-OTA-Installationsroutine ist jetzt implementiert, aber
+ohne Hardwarefreigabe standardmäßig abgeschaltet.** Sie lädt mit festem
+HTTPS-Ursprung und Geräte-Schlüssel die vollständige OTA-Anwendung, prüft
+Dateilänge und SHA-256 und wählt danach die inaktive ESP32-A/B-Partition.
+Beim HMI sind im WLAN/System-Menü der Update-Key und eine bewusste
+Doppelbestätigung zu bedienen. Die Server-Freigabe wird nur mit dem
+expliziten, außerhalb GitHub gesetzten `HMI_OTA_ENABLED=true` aktiv;
+standardmäßig bleibt `hmi_ota_enabled: false`. Ein neuer **kompletter Build**
+muss danach explizit im Compiler freigegeben werden. Vor echtem Flashen
+ist die Wiederherstellung mit hardwaremäßig abgeschaltetem Laser zu prüfen.
+
+Das SKR Mini MZ hat noch keinen vom HMI aus überprüften BOOT0/NRST-Zugang
+und keinen geprüften UART-ROM-Flashpfad. Das Feld
+`automatic_skr_flash_enabled` bleibt deshalb ausdrücklich **false**.
+Die optionale 4-GB-microSD im Waveshare ist künftig für G-Code, Updates
+und Backups geeignet, ersetzt aber den SKR-Bootloaderzugang nicht.
+Der genaue Stand und die Wiederherstellung stehen unter
+`docs/SECURE_UPDATES.md`.
 
 Die Webseite wird durch Änderungen auf GitHub **nicht automatisch aktualisiert**:
 Mit dem unten beschriebenen Unraid/NextTerm-Update das neue Docker-Image
@@ -116,6 +127,17 @@ Der Browser darf auf `localhost` den Web-Serial-Zugriff erfragen – auf beliebi
 - Flash nur für Waveshare **ESP32-S3-Touch-LCD-7 Rev1.2**, niemals das SKR-MZ-Board mit dem ESP-Image beschreiben.
 - Verbindungs-/USB-Probleme: Datenkabel, UART1-Position, Chrome/Edge, COM-Port, andere Terminalprogramme und ggf. BOOT-Taste prüfen.
 - Authentifizierung: HTTP Basic. LAN/VPN verwenden, nicht ins Internet freigeben; für externen Zugriff HTTPS/TLS.
+
+## Compilerpasswort dauerhaft setzen
+
+Der Benutzername `lumacut` ist im Server fest codiert. Das Passwort liegt
+ausschließlich in der privaten Unraid-Datei
+`/mnt/user/appdata/lumacut-builder/.env`, **nicht auf GitHub**.
+Nach Installation des aktuellen Repositories kann es einmalig über
+`bash /mnt/user/appdata/lumacut-builder/source/setup/set-compiler-login.sh`
+auf dem Unraid-Host geändert werden. Das Skript fragt das Passwort verdeckt
+ab, speichert es mit Modus 0600 und startet den Container über den
+vorhandenen Installer neu. Das Passwort bleibt bei normalen Upgrades bestehen.
 
 ## Build Lab aktualisieren – NextTerm auf Unraid (privates GitHub-Repo)
 
