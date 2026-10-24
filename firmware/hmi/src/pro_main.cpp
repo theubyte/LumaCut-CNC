@@ -2238,9 +2238,12 @@ void action(const char* id){
             setNotice("Fahrbefehl endet ausserhalb des Arbeitsbereichs.");return;
         }
         const float speed=quietJog?(axis=='Z'?90.f:240.f):(axis=='Z'?180.f:700.f);
-        String cmds[]={"$J=G91 G21 "+String(axis)+String(dist,3)+
+        String cmds[]={"M5","$J=G91 G21 "+String(axis)+String(dist,3)+
                        " F"+String(speed,1)};
-        if(!startScript(cmds,1,true))setNotice("Jog nur bei freier Maschine moeglich.");
+        // canJog() above has already checked homing, MPos and local bounds.
+        // Passing motion=true to startScript would silently enforce the
+        // job-only canMotion()/soft-limit gate again.
+        if(!startScript(cmds,2))setNotice("Jog nur bei freier Maschine moeglich.");
         return;
     }
 }
