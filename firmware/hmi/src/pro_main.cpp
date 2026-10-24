@@ -73,6 +73,7 @@ String wifiSsid,wifiPass,linkLine,hostLine;
 String script[12];int scriptCount=0,scriptIndex=0;
 bool commandPending=false,jobRunning=false,jobPaused=false,scriptActive=false;
 bool homePending=false,homingInProgress=false,hostBlocked=false;
+bool wifiLightburnEnabled=true;
 uint32_t lastStatusMs=0,lastQueryMs=0,localArmUntil=0,lastInputMs=0,wifiHostUntil=0;
 enum class Owner { None, Usb, Tcp, Internal, Script };
 Owner owner=Owner::None;
@@ -862,19 +863,26 @@ void bridgeService(){
     } else if(fresh())lostStatusReported=false;
     if(tcpServer.hasClient()){
         WiFiClient incoming=tcpServer.available();
-        if((tcp&&tcp.connected())||!wifiHostAuthorized()||owner!=Owner::None){
-            incoming.print("error: WLAN-Host nicht lokal freigegeben oder Maschine belegt\r\n");
+        if((tcp&&tcp.connected())||!wifiLightburnEnabled||owner!=Owner::None){
+            incoming.print("error:9\r\n");
             incoming.stop();
-        } else tcp=incoming;
+        }else{
+            tcp=incoming;
+            tcp.setNoDelay(true); // GRBL commands/acknowledgements must not stall.
+            hostLine="";hostBlocked=false;
+            owner=Owner::Tcp;lastInputMs=millis();
+            setNotice("LightBurn verbunden (TCP 23). USB/Web-Jog ist pausiert.");
+        }
     }
     if(owner==Owner::Tcp&&(!tcp||!tcp.connected())){
         if(machineState==MachineState::Run)feedHold();
         owner=Owner::None;hostBlocked=false;
-        setNotice("TCP-Verbindung verloren; Hold bei RUN angefordert.");
+        hostLine="";
+        setNotice("LightBurn getrennt. Bei laufender Fahrt Feed Hold gesetzt.");
     }
     if(tcp&&tcp.connected())externalForward(Owner::Tcp,tcp);
     if(Serial.available())externalForward(Owner::Usb,Serial);
-    if(owner==Owner::Usb&&idle()&&(uint32_t)(millis()-lastInputMs)>120000u){
+    if(owner==Owner::Usb&&idle()&&(uint32_t)(millis()-lastInputMs)>15000u){
         owner=Owner::None;hostLine="";hostBlocked=false;
     }
     machineService();
@@ -1214,6 +1222,7 @@ void networkInit(){
     configTime(0,0,"pool.ntp.org","time.cloudflare.com");
     wifiSsid=prefs.getString("ssid","");
     wifiPass=prefs.getString("wpw","");
+    wifiLightburnEnabled=prefs.getBool("lbTcp",true);
     apName="LumaCut-"+String((uint32_t)(ESP.getEfuseMac()&0xffff),HEX);
     apPass=prefs.getString("ap","");
     apiKey=prefs.getString("key","");
@@ -1472,7 +1481,7 @@ void makeUi(){
     lbl(quick,"Dein direkter Workflow",19,46,14,SUBTLE);
     btn(quick,"Kontur abfahren",18,89,254,49,"frame",GRAY,INK);
     btn(quick,"Parkposition",18,149,254,49,"park",GRAY,INK);
-    btn(quick,"LightBurn per WLAN",18,209,254,43,"host",PALE_BLUE,BLUE);
+    btn(quick,"LightBurn TCP EIN/AUS",18,209,254,43,"host",PALE_BLUE,BLUE);
 
     // JOBS: large clear actions and filename/status.
     c=card(pages[1],0,0,772,268);
@@ -2204,12 +2213,16 @@ void action(const char* id){
         return;
     }
     if(op=="host"){
-        if(owner!=Owner::None||!fresh()||
-           (machineState!=MachineState::Idle&&machineState!=MachineState::Alarm)){
-            setNotice("WLAN LightBurn nur bei freier Maschine aktivieren.");return;
+        wifiLightburnEnabled=!wifiLightburnEnabled;
+        prefs.putBool("lbTcp",wifiLightburnEnabled);
+        if(!wifiLightburnEnabled&&tcp&&tcp.connected()){
+            if(machineState==MachineState::Run)feedHold();
+            tcp.stop();
+            owner=Owner::None;hostBlocked=false;
         }
-        wifiHostUntil=millis()+300000u;
-        setNotice("LightBurn TCP-Port 23 für 5 Minuten zur Verbindung geöffnet.");
+        setNotice(wifiLightburnEnabled?
+            "LightBurn TCP 23 dauerhaft EIN. WLAN-IP in LightBurn eintragen.":
+            "LightBurn TCP 23 AUS. USB bleibt verfuegbar.");
         return;
     }
     if(op=="release"){
