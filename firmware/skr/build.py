@@ -28,7 +28,9 @@ def change(text,old,new):
 def patch(text):
     # The E3 V2 shares SKR MZ X/Y/Z STEP/DIR/ENABLE, limits,
     # PC10/PC11 Trinamic UART and USB PA14 pull-up gate.
-    # MZ PC8/PC9 are HEATER FETs: must NOT be mapped as generic outputs.
+    # MZ PC8/PC9 are heater MOSFETs: PC8 drives M7 cabinet LEDs;
+    # PC9 drives the BED low-side LaserTree 24V supply under spindle enable.
+    # Neither PC8 nor PC9 is a 24V-capable *logic* GPIO.
     text=change(text,
         '#define BOARD_NAME "BTT SKR MINI E3 V2.0"',
         '#define BOARD_NAME "LumaCut SKR Mini MZ v1.0 EXPERIMENTAL"')
@@ -39,19 +41,28 @@ def patch(text):
         '#define AUXOUTPUT1_PORT         GPIOC // Spindle direction\n#define AUXOUTPUT1_PIN          6',
         '// MZ: do not assign PC6 twice (used as fan/coolant)')
     text=change(text,
+        '#define AUXOUTPUT2_PORT         GPIOC // Spindle enable\n#define AUXOUTPUT2_PIN          7',
+        '#define AUXOUTPUT2_PORT         GPIOC // MZ BED MOSFET: laser supply enable (LOW-SIDE)\n'
+        '#define AUXOUTPUT2_PIN          9')
+    text=change(text,
         '#define AUXOUTPUT3_PORT         GPIOC // Coolant flood\n#define AUXOUTPUT3_PIN          8',
         '#define AUXOUTPUT3_PORT         GPIOC // MZ FAN0, flood\n#define AUXOUTPUT3_PIN          6')
     text=change(text,
         '#define AUXOUTPUT4_PORT         GPIOC // Coolant mist\n#define AUXOUTPUT4_PIN          9',
         '#define AUXOUTPUT4_PORT         GPIOC // LumaCut HE0 PC8 24V LEDs, grblHAL M7 mist\n'
         '#define AUXOUTPUT4_PIN          8')
-    # PC9 remains disabled: high-current BED FET kept as an independent spare.
-    # PC7 FAN1 is spindle enable, PC6 FAN0 is M8 exhaust.
-    # IMPORTANT: both fan/heater MOSFET outputs are LOW-SIDE switches. PC7
-    # must drive a separately rated/high-side laser +24V power-enable circuit,
-    # never interrupt the laser module's PWM/common-ground return directly.
+    # PC9 BED now directly switches the laser module's 24V negative return.
+    # PC7 FAN1 is currently UNUSED, PC6 FAN0 drives M8 exhaust.
+    # A LOW-SIDE BED switch lifts LaserTree GND in OFF state. Therefore the
+    # laser PWM driver must have galvanic isolation and its secondary must
+    # reference laser-side GND (BED-), not the SKR/system GND.
+    # If the laser casing is bonded to system ground, the MOSFET could be
+    # bypassed; check with power disconnected before use. Never wire PA1
+    # straight to the floating laser PWM pin.
     for expected in ('#define AUXOUTPUT0_PIN          1',
-                     '#define AUXOUTPUT2_PIN          7',
+                     '#define AUXOUTPUT2_PIN          9',
+                     '#define AUXOUTPUT3_PIN          6',
+                     '#define AUXOUTPUT4_PIN          8',
                      '#define AUXINPUT2_PIN           14',
                      '#define Z_LIMIT_PIN             2'):
         if expected not in text: raise RuntimeError("Required pin not found: "+expected)
