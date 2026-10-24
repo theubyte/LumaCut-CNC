@@ -758,13 +758,15 @@ void parseMachineLine(const String& line){
         if(homingInProgress){
             if(ok){
                 machineHomed=true;
-                // Paired grblHAL now executes 20 mm Z clearance *inside* $H:
-                // Z switch -> Z20 -> X/Y switches. A second HMI post-home
-                // move would happen too late and might hit the tool/probe.
-                postHomePending=false;
+                // $H: Z->Z20->X/Y clearance is entirely within SKR homing.
+                // $HZ: separate workpiece Z reference may still need its
+                // calibrated focus retreat; no X/Y homing follows $HZ.
+                postHomePending=postContactLift&&autoLiftAfterHome;
                 postHomeStartedMs=millis();
                 settingsRequested=false;
-                setNotice("Homing OK: SKR hat Z vor XY auf 20 mm freigefahren.");
+                setNotice(postHomePending?
+                    "Werkstueck-Z OK: berechne Fokusabstand.":
+                    "Homing OK: SKR hat Z vor XY auf 20 mm freigefahren.");
             }
             else{machineHomed=false;setNotice(line=="error:5"?"Homing im SKR deaktiviert. Unter System $22=1 aktivieren.":"Referenzfahrt fehlgeschlagen: "+line);}
             homingInProgress=false;homeFromHmi=false;
