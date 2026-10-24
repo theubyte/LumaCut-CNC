@@ -117,6 +117,42 @@ class ServiceApiTests(unittest.TestCase):
                                      data={"pin": "PC7", "role": "custom",
                                            "name": "Pump"}).status_code, 403)
 
+    def test_touch_jog_is_disabled_until_service_enables_it(self):
+        from unittest.mock import patch
+        from lumacut import app as module
+        client = self.app.test_client()
+        headers = {"X-LumaCut-Key": os.environ["LUMACUT_KEY"]}
+        fake = {"owner": "Frei", "state": "Idle", "connected": True,
+                "settings": {130: 500, 131: 500, 132: 90, 112: 250},
+                "position": [-100, -100, -20]}
+        previous = module.config.get("touch_jog_enabled", False)
+        module.config["touch_jog_enabled"] = False
+        try:
+            with patch.object(module, "require_free"), \
+                 patch.object(module.controller, "status", return_value=fake), \
+                 patch.object(module, "run_commands", return_value="ok") as run:
+                module.controller.homed = True
+                unauth = client.post("/api/ui/workarea/jog", headers=headers,
+                                     data={"x_ratio":"0.5","y_ratio":"0.5"})
+                self.assertEqual(unauth.status_code,403)
+                auth = client.post("/api/service/login", headers=headers,
+                                   data={"password":"lumaservice"})
+                self.assertEqual(auth.status_code,200)
+                toggle = client.post("/api/service/workarea", headers=headers,
+                                     data={"enabled":"1"})
+                self.assertEqual(toggle.status_code,200)
+                reply = client.post("/api/ui/workarea/jog", headers=headers,
+                                    data={"x_ratio":"0.5","y_ratio":"0.5"})
+                self.assertEqual(reply.status_code,200)
+                self.assertEqual(run.call_args.args[0],
+                                 ["M5","G53 G0 Z-20.000","G53 G0 X-250.000 Y-250.000"])
+                outside=client.post("/api/ui/workarea/jog",headers=headers,
+                                    data={"x_ratio":"1.0","y_ratio":"0.5"})
+                self.assertEqual(outside.status_code,400)
+        finally:
+            module.config["touch_jog_enabled"]=previous
+            module.controller.homed=False
+
     def test_service_is_separately_password_gated(self):
         client = self.app.test_client()
         headers = {"X-LumaCut-Key": os.environ["LUMACUT_KEY"]}
