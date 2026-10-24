@@ -1448,10 +1448,10 @@ void makeUi(){
     lbl(c,"Z-ACHSE",604,51,14,SUBTLE);
     btn(c,"Z +",593,87,153,54,"z+",PALE_BLUE,BLUE);
     btn(c,"Z -",593,151,153,54,"z-",PALE_BLUE,BLUE);
-    lbl(c,"SCHRITTWEITE",20,172,14,SUBTLE);
-    btn(c,"0.1 / 1 / 10 mm",20,201,234,48,"step",PALE_BLUE,BLUE);
+    lbl(c,"SCHRITTWEITE",20,192,14,SUBTLE);
+    btn(c,"0.1 / 1 / 10 mm",20,211,234,44,"step",PALE_BLUE,BLUE);
     btn(c,"Leiser Jog / Normal",20,98,234,43,"jogsound",PALE_BLUE,BLUE);
-    btn(c,"Wege kalibrieren",20,147,234,43,"calgo",GRAY,INK);
+    btn(c,"Wege kalibrieren",20,143,234,43,"calgo",GRAY,INK);
 
     // MACROS: three dedicated programmable machine XY positions.
     c=card(pages[3],0,0,772,268);
