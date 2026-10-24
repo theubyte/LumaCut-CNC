@@ -35,7 +35,7 @@ class ControlStudioTests(unittest.TestCase):
         self.assertIn('limits_lumacut_z_clearance()',SKR)
         self.assertIn('settings.axis[Z_AXIS].max_travel > -21.0f',SKR)
         self.assertNotIn('settings.homing.pulloff - 2.5f',SKR)
-        self.assertIn('postHomePending=false;',HMI)
+        self.assertIn('postHomePending=postContactLift&&autoLiftAfterHome;',HMI)
         self.assertIn('Homing OK: SKR hat Z vor XY auf 20 mm freigefahren.',HMI)
         self.assertNotIn('if(op=="safez20")',HMI)
 
@@ -66,7 +66,6 @@ class ControlStudioTests(unittest.TestCase):
         self.assertIn('action("focusSave")',HMI)
         self.assertIn('action(http.arg("plan")=="1"?"probePlan":"probeSave")',HMI)
         self.assertIn('if(!auth()){fail(401',HMI)
-        self.assertIn('window',WEB) if False else None
 
 
 if __name__=="__main__":
