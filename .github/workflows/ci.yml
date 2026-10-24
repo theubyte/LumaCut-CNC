@@ -62,6 +62,7 @@ jobs:
           path: |
             firmware/skr/.pio/build/lumacut_skr_mz_usb/firmware.bin
             firmware/skr/.pio/build/lumacut_skr_mz_usb/firmware.elf
+            firmware/skr/.pio/build/lumacut_skr_mz_usb/capabilities.json
           if-no-files-found: error
           retention-days: 30
   package:
@@ -81,6 +82,9 @@ jobs:
           bins=list(Path("artifacts").rglob("firmware.bin"))
           if len(bins)!=1: raise RuntimeError("Expected one SKR USB binary: "+str(bins))
           binary=bins[0]
+          contract=json.loads((binary.parent/"capabilities.json").read_text())
+          if contract["firmware_sha256"]!=hashlib.sha256(binary.read_bytes()).hexdigest():
+              raise RuntimeError("SKR capability contract hash mismatch")
           manifest={"source_sha":"${{ github.sha }}",
                     "skr_firmware":"SKR-USB/firmware.bin",
                     "sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),
@@ -89,6 +93,7 @@ jobs:
                     "gateway":"Raspberry Pi 400"}
           with zipfile.ZipFile("LumaCut-Pi400-SKR-USB.zip","w",zipfile.ZIP_DEFLATED) as z:
               z.write(binary,manifest["skr_firmware"])
+              z.write(binary.parent/"capabilities.json","SKR-USB/capabilities.json")
               for p in list(Path("pi400").rglob("*")):
                   if p.is_file(): z.write(p,str(p))
               z.write("lightburn/LumaCut-CNC-USB.lbdev")
