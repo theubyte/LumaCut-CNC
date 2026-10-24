@@ -558,8 +558,25 @@ def _run_job():
 @app.get("/api/ui/network")
 def network():
     host = socket.gethostname()
-    return jsonify(hotspot_ssid="", hotspot_password="", hotspot_ip="",
-                   router_ssid="", connected=True, router_ip=host + ".local",
+    try:
+        ip = subprocess.run(["hostname", "-I"], capture_output=True,
+                            text=True, timeout=2).stdout.split()[0]
+    except (IndexError, OSError, subprocess.TimeoutExpired):
+        ip = host + ".local"
+    ssid = ""
+    try:
+        result = subprocess.run(["nmcli", "-t", "-f", "IN-USE,SSID",
+                                 "device", "wifi", "list"],
+                                capture_output=True, text=True, timeout=4)
+        for line in result.stdout.splitlines():
+            if line.startswith("*:"):
+                ssid = line.split(":", 1)[1].replace("\\:", ":")
+                break
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return jsonify(hotspot_ssid=host + ".local", hotspot_password="",
+                   hotspot_ip=ip, router_ssid=ssid, connected=bool(ssid),
+                   router_ip=ip,
                    lightburn_tcp_enabled=True, lightburn_port=TCP_PORT,
                    cabinet_leds_on=controller.status()["accessories"]["lights"],
                    exhaust_on=controller.status()["accessories"]["exhaust"])
