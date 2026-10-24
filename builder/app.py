@@ -16,8 +16,6 @@ REPO=os.environ.get("GIT_REPOSITORY","git@github.com:theubyte/LumaCut-CNC.git")
 BRANCH=os.environ.get("GIT_BRANCH","main")
 PASSWORD=os.environ.get("BUILDER_PASSWORD","")
 UPDATE_DEVICE_KEY=os.environ.get("UPDATE_DEVICE_KEY","")
-# OTA installation is an explicit bench-tested opt-in, NEVER implicit from a build.
-HMI_OTA_ENABLED=os.environ.get("HMI_OTA_ENABLED","false").lower() in ("true","1","yes")
 UPDATE_PUBLIC_ORIGIN=os.environ.get("UPDATE_PUBLIC_ORIGIN","https://luma.millione.de").rstrip("/")
 RELEASE_FILE=ROOT/"approved-release.json"
 OTA_IMAGE_NAME="HMI_OTA_APP_UNVERIFIED.bin"
@@ -433,8 +431,10 @@ def validated_release(job_id):
         "source_sha":meta["source_sha"],"hardware":{
             "hmi":"Waveshare ESP32-S3-Touch-LCD-7 Rev1.2",
             "skr":"BTT SKR Mini MZ V1.0 STM32F103RC"},
-        "automatic_skr_flash_enabled":False,
-        "hmi_ota_enabled":HMI_OTA_ENABLED,
+        "hmi_ota_enabled":True,
+        "skr_firmware_available":True,
+        "skr_install_method":"microSD",
+        "skr_install_filename":"firmware.bin",
         "images":images}
 
 @app.post("/api/updates/approve")
@@ -463,6 +463,26 @@ def latest_update():
         except (OSError,ValueError):
             response=jsonify({"available":False,"error":"Invalid release data"})
             response.status_code=503
+    response.headers["Cache-Control"]="no-store"
+    response.headers["X-Content-Type-Options"]="nosniff"
+    return response
+
+@app.get("/api/updates/skr-firmware.bin")
+def download_approved_skr_sd():
+    """Same approved SKR image as the release, named for the board's SD bootloader.
+
+    This route remains behind the normal dashboard login. It never claims that
+    merely downloading the image automatically writes the board flash.
+    """
+    if not RELEASE_FILE.is_file(): abort(404)
+    manifest=json.loads(RELEASE_FILE.read_text(encoding="utf-8"))
+    try:
+        checked=validated_release(manifest.get("job_id",""))
+    except (ValueError,OSError,KeyError): abort(503)
+    if checked["source_sha"]!=manifest.get("source_sha"): abort(503)
+    image=ART/manifest["job_id"]/SKR_RELEASE_IMAGE_NAME
+    response=send_file(image,as_attachment=True,download_name="firmware.bin",
+                       mimetype="application/octet-stream",max_age=0)
     response.headers["Cache-Control"]="no-store"
     response.headers["X-Content-Type-Options"]="nosniff"
     return response
