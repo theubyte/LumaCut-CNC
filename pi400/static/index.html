@@ -115,10 +115,10 @@ input,select{background:#0a1624;border:1px solid #3a5268;padding:11px 13px;borde
 <div class="kpi"><small>Referenziert</small><div id="homed">—</div></div></div>
 <h3>Liveposition</h3><div class="value" id="position">X — Y — Z —</div>
 <p class="caption" id="machineSize">Lese Achsverfahrwege…</p>
-<svg id="preview" viewBox="0 0 360 160" role="img" aria-label="Arbeitsfeld">
+<svg id="preview" viewBox="0 0 360 160" role="button" tabindex="0" aria-label="Arbeitsfeld – Tippen für manuelles Anfahren" style="cursor:crosshair;touch-action:manipulation">
 <rect x="10" y="10" width="340" height="140" fill="#0d2131" stroke="#47748e" rx="8"/>
 <path d="M95 10v140 M180 10v140 M265 10v140 M10 45h340 M10 80h340 M10 115h340" stroke="#254358"/>
-<circle id="spot" cx="180" cy="80" r="7" fill="#ff7883" stroke="#fff" style="display:none"/></svg></div>
+<circle id="spot" cx="180" cy="80" r="7" fill="#ff7883" stroke="#fff" style="display:none"/></svg><p id="touchHint" class="caption">Arbeitsfeld-Touch: erst nach XYZ-Homing und Freigabe im Service Studio.</p></div>
 <div class="panel span5"><h2>Schnellzugriff</h2>
 <div class="two"><button class="primary" data-op="home">Referenzfahrt</button><button data-op="readcfg">GRBL lesen</button>
 <button data-op="frame">Kontur testen</button><button data-op="park">Parken</button>
@@ -275,6 +275,9 @@ async function refresh(){
   const m=s.machine||{},w=m.work_area||{},p=m.coordinates||{};
   el("homed").textContent=m.homed?"JA":"—";
   el("machineSize").textContent=(w.x_mm||0)+" × "+(w.y_mm||0)+" mm";
+  el("touchHint").textContent=(!m.homed?"Erst XYZ referenzieren":
+    !cfg.touch_jog_enabled?"Touchbewegung im Service-Menü freischalten":
+    "Auf eine Position im Arbeitsfeld tippen → Z-Sicherheitsabstand, danach XY.");
   const spot=el("spot");spot.style.display="none";
   if(p.valid&&w.x_mm>0&&w.y_mm>0){
     let x=p.zero_at_max?(p.x_mm+w.x_mm)/w.x_mm:p.x_mm/w.x_mm;
@@ -301,6 +304,23 @@ async function readConfig(){
   if(cfg.parks&&cfg.parks.length){el("parkName").value=cfg.parks[Number(el("parkSlot").value)]?.name||""}
  }catch(e){notify(e.message,true)}
 }
+const touchArea=el("preview");
+touchArea.addEventListener("click",async e=>{
+ if(!key){notify("Bitte zuerst Maschinenzugangscode eingeben",true);return}
+ if(!cfg.touch_jog_enabled){notify("Arbeitsfeld-Touch zuerst im Service Studio freigeben",true);return}
+ const rect=touchArea.getBoundingClientRect();
+ const x=(e.clientX-rect.left)*360/rect.width,
+       y=(e.clientY-rect.top)*160/rect.height;
+ if(x<10||x>350||y<10||y>150){notify("Bitte auf die Arbeitsfläche tippen",true);return}
+ const rx=(x-10)/340, ry=(150-y)/140;
+ try{
+  const result=await post("/api/ui/workarea/jog",{x_ratio:rx.toFixed(5),y_ratio:ry.toFixed(5)});
+  notify("Laser AUS · Z gesichert · XY-Ziel "+result.target.x.toFixed(2)+" / "+result.target.y.toFixed(2));
+ }catch(error){notify(error.message,true)}
+});
+touchArea.addEventListener("keydown",e=>{
+ if(e.key==="Enter"||e.key===" "){e.preventDefault();notify("XY-Ziel durch Tippen/Klicken wählen")}
+});
 const categories=[
  [[0,"Schrittpuls"],[1,"Motor-Haltestrom"],[2,"Schritt invertieren"],[3,"Motor-Richtung"],[4,"Enable invertieren"],[5,"Endstop-Polarität"]],
  [[100,"X Schritte/mm"],[101,"Y Schritte/mm"],[102,"Z Schritte/mm"],[110,"X max mm/min"],[111,"Y max mm/min"],[112,"Z max mm/min"]],
