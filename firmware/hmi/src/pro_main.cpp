@@ -1398,7 +1398,8 @@ void installRoutes(){
                      (ch>='0'&&ch<='9')||ch=='_'||ch=='-'||ch=='.'))uploadAllowed=false;
             }
             if(name.length()>72||name.indexOf("..")>=0||name.indexOf('/')>=0||name.indexOf('\\')>=0 ||
-               !(name.endsWith(".gcode")||name.endsWith(".nc")||name.endsWith(".tap")||name.endsWith(".txt")))
+               !(name.endsWith(".gcode")||name.endsWith(".gc")||name.endsWith(".nc")||
+                  name.endsWith(".tap")||name.endsWith(".txt")))
                 uploadAllowed=false;
             uploadDestination="/jobs/"+name;
             uploadTemporary="/jobs/."+name+".part";
@@ -1410,7 +1411,10 @@ void installRoutes(){
             }
         } else if(up.status==UPLOAD_FILE_WRITE && uploadAllowed){
             uploadBytes+=up.currentSize;
-            if(uploadBytes>MAX_JOB_BYTES||uploadFile.write(up.buf,up.currentSize)!=up.currentSize){
+            // High-detail LightBurn G-code can exceed the small LittleFS limit.
+            // Use the permanently installed 4 GB SD for substantially larger jobs.
+            const size_t maxJob=sdReady?64u*1024u*1024u:MAX_JOB_BYTES;
+            if(uploadBytes>maxJob||uploadFile.write(up.buf,up.currentSize)!=up.currentSize){
                 uploadAllowed=false;uploadFile.close();
                 if(uploadTemporary.length())jobStore().remove(uploadTemporary);
             }
