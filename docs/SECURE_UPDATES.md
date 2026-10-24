@@ -25,9 +25,10 @@ Firmwaredownload akzeptiert keine URL aus dem Manifest und keine Redirects.
   Eingabefeld eintragen und **Key sichern** tippen. Er muss 64
   kleine Hex-Zeichen besitzen und verbleibt im ESP32-NVS (ohne garantierte
   Flashverschlüsselung).
-- Nur nach bestätigter Hardware-/Recoveryprüfung den Serverprozess mit
-  `HMI_OTA_ENABLED=true` konfigurieren und neu starten. Standard ist
-  absichtlich **false**.
+- Für explizit freigegebene vollständige Builds ist der HMI-OTA-Installer
+  ohne zusätzliche serverseitige Freigabevariable verfügbar. Das HMI schreibt
+  nur nach bewusster Bestätigung und erfüllten lokalen Voraussetzungen in
+  eine zweite OTA-Partition.
 - Danach einen **neuen vollständigen gepaarten Build** im Compiler
   erstellen und explizit **Als Update freigeben**.
 - HMI im Idle prüfen: **Pruefen** lädt den HTTPS-Status. Die Installation
@@ -42,10 +43,11 @@ Firmwaredownload akzeptiert keine URL aus dem Manifest und keine Redirects.
   bis `prefs.begin()` startet. Bootloader-Rollback muss zusätzlich
   nachweislich aktiv sein, ehe ein unbeaufsichtigtes Update erlaubt wird.
 
-**Keine automatische Installation** beim periodischen Updatecheck.
-Bis Touch, Stromausfallverhalten, echte OTA-Partitionierung, A/B-Wechsel,
-Recovery und elektrisch getrennter Laser am Waveshare Rev1.2 geprüft sind,
-bleibt Serverfreigabe `HMI_OTA_ENABLED=false`.
+**Keine unbeaufsichtigte Installation** beim periodischen Updatecheck:
+Der Operator löst HMI-OTA im Systemmenü ausdrücklich aus. Zwei installierbare
+ESP32-Partitionen, gültiger Geräteschlüssel und Leerlauf werden technisch
+überprüft. Der physische USB-Recoveryweg bleibt unabhängig davon notwendig.
+Stromausfall- und Wiederherstellungsverhalten müssen noch real getestet werden.
 
 ## SKR-Firmware – physische Grenze
 
@@ -55,13 +57,20 @@ Erstinstallation oder ein Recovery der grblHAL-Firmware muss zuvor
 der tatsächliche Bootloaderpfad nachgewiesen werden (z.B. ROM USART1 mit
 BOOT0/NRST schaltbar oder ein kontrollierter eigener Bootloader).
 
-Die vorhandene PA9/PA10-Verbindung allein versetzt das SKR **nicht** in den
-ROM-Bootloader. Die grblHAL-Anwendung besitzt hier noch keinen
-authentifizierten Self-Flash-Endpunkt. Deshalb meldet das HMI
-`skr_ota_ready:false` und der Server
-`automatic_skr_flash_enabled:false`. SKR wird **nicht** durch eine
-Schein-OTA-Routine überschrieben. Eine geeignete Hardware-Recovery über
-SWD/BOOT0/NRST ist vor dem ersten realen Board-Flash nachzuweisen.
+Die SKR-Firmware wird mit jedem freigegebenen gepaarten Release als
+`firmware.bin` im Compiler bereitgestellt. Der Benutzer kann sie aus dem
+Freigabedialog herunterladen und auf eine microSD für **den SKR-eigenen**
+Bootloader übertragen. Der SKR Mini MZ V1.0 unterstützt den microSD-
+Bootloaderweg mit 28-KiB-Firmware-Offset; der tatsächliche installierte
+Bootloader und das Updateverhalten müssen am konkreten Board geprüft werden.
+
+Das HMI meldet `skr_firmware_available` anhand der geprüften
+Release-Metadaten statt eines fest codierten `skr_ota_ready:false`.
+Das ist **keine automatische Übertragung auf den STM32**: Die vorhandene
+PA9/PA10-Verbindung versetzt das SKR nicht selbsttätig in den ROM-Bootloader;
+die grblHAL-Anwendung enthält derzeit keinen Netzwerk-/UART-Self-Flasher.
+Für eine automatische Installation durch das HMI muss ein wirksamer
+SKR-Bootloaderübergang inklusive Recovery umgesetzt werden.
 
 Eine **optionale 4-GB-microSD** (FAT32) ist nun in der HMI-Quelle integriert:
 SPI GPIO11/12/13 mit SD_CS über CH422G EXIO4 (nach touchInit). Wenn die
