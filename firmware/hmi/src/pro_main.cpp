@@ -122,7 +122,9 @@ String lastControllerError, zLiftReason;
 uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
 bool zLiftDirectionVerified=false;
 lv_obj_t* updateKeyEntry=nullptr,*calCommandedField=nullptr,*calActualField=nullptr;
-bool quietJog=true;
+bool quietJog=true,zScaleMeasured=false;
+uint32_t zSafetyArmUntil=0;
+int pendingCalibrationAxis=-1;
 String updateDeviceKey,updateImageSha256,updateSkrSha256;
 size_t updateImageBytes=0,updateSkrBytes=0;
 bool updateOtaApproved=false,otaInstallRequested=false,skrFirmwareReleased=false,skrInstallRequested=false;
@@ -665,6 +667,11 @@ void finishConfigWrite(bool success,const String& error){
         bool matching=requestedSettingId>=0&&requestedSettingId<400&&
             knownSetting[requestedSettingId]&&
             fabsf(savedSetting[requestedSettingId]-requestedSettingValue)<0.01f;
+        if(pendingCalibrationAxis==2){
+            zScaleMeasured=matching;
+            prefs.putBool("zScaleOK",matching);
+        }
+        pendingCalibrationAxis=-1;
         setNotice(matching?
             ("SKR bestaetigt $"+String(requestedSettingId)+"="+
              String(savedSetting[requestedSettingId],3)):
@@ -1663,6 +1670,7 @@ void makeUi(){
     btn(c,"X korrigieren ($100)",18,78,343,44,"calx",PALE_BLUE,BLUE);
     btn(c,"Y korrigieren ($101)",18,130,343,44,"caly",PALE_BLUE,BLUE);
     btn(c,"Z korrigieren ($102)",18,182,343,44,"calz",PALE_BLUE,BLUE);
+    btn(c,"Z20 aktivieren",18,231,168,32,"safez20",PALE_BLUE,BLUE);
     btn(c,"Zurueck zu Jog",194,231,166,32,"calback",GRAY,INK);
 
     // Bottom dock is always visible, and labels remain within touch targets.
@@ -1804,8 +1812,8 @@ void action(const char* id){
         return;
     }
     if(op=="zverify"){
-        if(!machineHomed||!fresh()||!haveMpos||workZ<=0||!softLimitsEnabled){
-            setNotice("Z-Richtung erst nach Homing, MPos und $20/$132 pruefen.");return;
+        if(!machineHomed||!fresh()||!haveMpos||workZ<=0||!canJog()){
+            setNotice("Z-Richtung erst nach erfolgreichem Homing und Z-Test bestaetigen.");return;
         }
         zLiftDirectionVerified=true;
         prefs.putBool("zsignOK",true);
@@ -2147,6 +2155,26 @@ void action(const char* id){
                           "Normal Jog: XY 700, Z 180 mm/min.");
         return;
     }
+    if(op=="safez20"){
+        if(!zScaleMeasured||!zLiftDirectionVerified||workZ<21.f||
+           !canJog()||!knownSetting[27]){
+            setNotice("Z20: Z Soll/Ist kalibrieren, Z-Test bestaetigen, XYZ homen und $ lesen.");
+            return;
+        }
+        if(zSafetyArmUntil && (int32_t)(zSafetyArmUntil-millis())>0){
+            zSafetyArmUntil=0;
+            String cmds[]={"$27=2.5",String(char(36))+char(36)};
+            if(startScript(cmds,2)){
+                requestedSettingId=27;requestedSettingValue=2.5f;
+                configWrite=ConfigWrite::Parameter;
+                setNotice("Z20 vor XY-Homing freigegeben, SKR-Antwort abwarten.");
+            }else setNotice("SKR nicht frei: Z20 nicht aktiviert.");
+        }else{
+            zSafetyArmUntil=millis()+15000u;
+            setNotice("Z20 nur bei Laser AUS und freiem Z-Weg! Nochmals tippen.");
+        }
+        return;
+    }
     if(op=="calx"||op=="caly"||op=="calz"){
         if(!canConfigure()||jobRunning||homingInProgress){
             setNotice("Kalibrierung nur bei stillstehendem SKR.");return;
@@ -2172,8 +2200,11 @@ void action(const char* id){
             setNotice("Extremer Korrekturfaktor: Antrieb/Mikroschritte pruefen.");
             return;
         }
-        String cmds[]={"$"+String(id)+"="+String(corrected,4),"$"};
+        String cmds[]={"$"+String(id)+"="+String(corrected,4),
+                       String(char(36))+char(36)};
         if(startScript(cmds,2)){
+            pendingCalibrationAxis=axis;
+            if(axis==2){zScaleMeasured=false;prefs.putBool("zScaleOK",false);}
             requestedSettingId=id;
             requestedSettingValue=corrected;
             configWrite=ConfigWrite::Parameter;
@@ -2216,6 +2247,7 @@ void action(const char* id){
 void internalInit(){
     prefs.begin("lumacut",false);
     quietJog=prefs.getBool("quietJog",true);
+    zScaleMeasured=prefs.getBool("zScaleOK",false);
     updateDeviceKey=prefs.getString("upkey","");
     if(prefs.getBool("otaPending",false)){
         const uint32_t attempts=prefs.getUInt("otaAttempts",0)+1;
