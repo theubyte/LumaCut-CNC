@@ -751,12 +751,13 @@ void parseMachineLine(const String& line){
         if(homingInProgress){
             if(ok){
                 machineHomed=true;
-                postHomePending=(homeFromHmi&&autoLiftAfterHome);
+                // Paired grblHAL now executes 20 mm Z clearance *inside* $H:
+                // Z switch -> Z20 -> X/Y switches. A second HMI post-home
+                // move would happen too late and might hit the tool/probe.
+                postHomePending=false;
                 postHomeStartedMs=millis();
-                settingsRequested=false; // force fresh $ after completed homing
-                setNotice(postHomePending?
-                    "Homing OK; pruefe Z-Lift und Controllergrenzen.":
-                    "Homing OK; automatischer Z-Rueckzug ausgeschaltet.");
+                settingsRequested=false;
+                setNotice("Homing OK: SKR hat Z vor XY auf 20 mm freigefahren.");
             }
             else{machineHomed=false;setNotice(line=="error:5"?"Homing im SKR deaktiviert. Unter System $22=1 aktivieren.":"Referenzfahrt fehlgeschlagen: "+line);}
             homingInProgress=false;homeFromHmi=false;
@@ -1733,7 +1734,7 @@ void makeUi(){
     btn(c,"X korrigieren ($100)",18,78,343,44,"calx",PALE_BLUE,BLUE);
     btn(c,"Y korrigieren ($101)",18,130,343,44,"caly",PALE_BLUE,BLUE);
     btn(c,"Z korrigieren ($102)",18,182,343,44,"calz",PALE_BLUE,BLUE);
-    btn(c,"Z20 aktivieren",18,231,168,32,"safez20",PALE_BLUE,BLUE);
+    lbl(c,"Z20 ist Teil der SKR-Referenzfahrt",18,237,14,BLUE);
     btn(c,"Zurueck zu Jog",194,231,166,32,"calback",GRAY,INK);
 
     // Bottom dock is always visible, and labels remain within touch targets.
@@ -2080,9 +2081,6 @@ void action(const char* id){
         if(input.isEmpty()||end==input.c_str()||*end||!settingAllowed(id,val)){
             setNotice("Wert fuer $"+String(id)+" ungueltig.");return;
         }
-        if(id==102&&knownSetting[27]&&fabsf(savedSetting[27]-2.5f)<0.001f){
-            setNotice("Z20 zuerst deaktivieren, dann $102 neu kalibrieren.");return;
-        }
         String cmds[]={"$"+String(id)+"="+input,"$"};
         if(startScript(cmds,2)){
             requestedSettingId=id;requestedSettingValue=val;
@@ -2196,11 +2194,6 @@ void action(const char* id){
         if(end==vText.c_str()||*end!='\0'||!settingAllowed(idText.toInt(),value)){
             setNotice("Parameterwert ungueltig oder Sicherheitseinstellung blockiert.");return;
         }
-        if(idText=="102"&&knownSetting[27]&&
-           fabsf(savedSetting[27]-2.5f)<0.001f){
-            setNotice("Z20 ist aktiv: $102 nur ueber die Z-Kalibrierung aendern.");
-            return;
-        }
         String cmds[]={"$"+idText+"="+vText,"$"};
         if(startScript(cmds,2)){
             requestedSettingId=idText.toInt();requestedSettingValue=value;
@@ -2306,26 +2299,6 @@ void action(const char* id){
                   "% von $110/$111/$112, kein fester HMI-Low-Speed.");
         return;
     }
-    if(op=="safez20"){
-        if(!zScaleMeasured||workZ<21.f||
-           !canJog()||!knownSetting[27]){
-            setNotice("Z20: Z-Weg kalibrieren, Arbeitsweg pruefen, XYZ homen und $ lesen.");
-            return;
-        }
-        if(zSafetyArmUntil && (int32_t)(zSafetyArmUntil-millis())>0){
-            zSafetyArmUntil=0;
-            String cmds[]={"$27=2.5",String(char(36))+char(36)};
-            if(startScript(cmds,2)){
-                requestedSettingId=27;requestedSettingValue=2.5f;
-                configWrite=ConfigWrite::Parameter;
-                setNotice("Z20 vor XY-Homing freigegeben, SKR-Antwort abwarten.");
-            }else setNotice("SKR nicht frei: Z20 nicht aktiviert.");
-        }else{
-            zSafetyArmUntil=millis()+15000u;
-            setNotice("Z20 nur bei Laser AUS und freiem Z-Weg! Nochmals tippen.");
-        }
-        return;
-    }
     if(op=="calx"||op=="caly"||op=="calz"){
         if(!canConfigure()||jobRunning||homingInProgress){
             setNotice("Kalibrierung nur bei stillstehendem SKR.");return;
@@ -2351,14 +2324,9 @@ void action(const char* id){
             setNotice("Extremer Korrekturfaktor: Antrieb/Mikroschritte pruefen.");
             return;
         }
-        // If Z20 was armed, disarm the SKR BEFORE editing $102:
-        // a new motor scale invalidates the physically proven 20mm clearance.
-        const bool zArmed=(axis==2&&knownSetting[27]&&
-                           fabsf(savedSetting[27]-2.5f)<0.001f);
-        String cmds[]={"$27=1.0",
-                       "$"+String(id)+"="+String(corrected,4),
+        String cmds[]={"$"+String(id)+"="+String(corrected,4),
                        String(char(36))+char(36)};
-        if(startScript(zArmed?cmds:(cmds+1),zArmed?3:2)){
+        if(startScript(cmds,2)){
             pendingCalibrationAxis=axis;
             if(axis==2){zScaleMeasured=false;prefs.putBool("zScaleOK",false);}
             requestedSettingId=id;
