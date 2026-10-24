@@ -80,6 +80,12 @@ code{color:#9bd8f9;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}pr
 <div class="notice">PC7 kann mit einer passenden grblHAL-SKR-Firmware über $LCIO gesteuert werden. Andere physische Pins bleiben reserviert, bis die zugehörige STM32-Firmware ihre elektrische Funktion unterstützt.</div>
 </section>
 <section class="card">
+<div class="caps">Konfiguration und Wartung</div><h2>Maschinenbackup</h2>
+<p class="sub">Alle tatsächlich aus dem SKR eingelesenen numerischen GRBL-Parameter und dein gespeichertes LumaCut-Maschinenprofil als JSON exportieren. Ohne Zugangscodes oder andere Geheimnisse.</p>
+<button id="exportMachine" class="primary">Maschinenprofil sichern</button>
+<p class="help">Der Export verändert nichts an der Maschine. Nach Firmwarewechsel keine Parameter blind wiederherstellen, bevor Hardware und Achsrichtung geprüft sind.</p>
+</section>
+<section class="card">
 <div class="caps">Sicherheit & Zugang</div><h2>Servicepasswort ändern</h2><p class="sub">Passworthash und Sitzungsschlüssel liegen nur auf dem Pi.</p>
 <label for="oldPassword">Bisheriges Passwort</label><input id="oldPassword" type="password" autocomplete="current-password">
 <label for="newPassword">Neues Passwort (mindestens 12 Zeichen)</label><input id="newPassword" type="password" autocomplete="new-password">
@@ -198,6 +204,19 @@ $("runCommand").onclick=async()=>{
  try{const command=$("command").value.trim();const out=await call("/api/service/command","POST",{command});
  $("consoleOutput").textContent=out.command+" → "+out.message+"\nAntwortzeilen in Systemprotokoll.";
  message("SKR hat den Befehl quittiert");await load();}catch(e){message(e.message,true)}
+};
+$("exportMachine").onclick=async()=>{
+ try{
+  const response=await fetch("/api/service/backup",{credentials:"same-origin",
+      headers:{"X-LumaCut-Key":key},cache:"no-store"});
+  if(!response.ok)throw new Error(await response.text());
+  const objectUrl=URL.createObjectURL(await response.blob());
+  const link=document.createElement("a");
+  link.href=objectUrl;link.download="LumaCut-CNC-machine-backup.json";
+  document.body.append(link);link.click();link.remove();
+  URL.revokeObjectURL(objectUrl);
+  message("Maschinenprofil erfolgreich exportiert");
+ }catch(e){message(e.message,true)}
 };
 $("changePassword").onclick=async()=>{
  try{const out=await call("/api/service/password","POST",{old:$("oldPassword").value,new:$("newPassword").value});
