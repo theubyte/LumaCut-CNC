@@ -1,3 +1,84 @@
+# LumaCut CNC – schneller Fahrbetrieb und Offset-Raster (24.10.2026)
+
+## Geschwindigkeit: Maschine bestimmt das Maximum, nicht das HMI
+
+Das Jog-Tempo basiert jetzt auf dem **tatsaechlichen, per GRBL `$$`
+gelesenen** Achsmaximum: `$110` X, `$111` Y, `$112` Z.
+Am HMI wird mit **100 % / 50 % / 25 %** lediglich ein frei waehlbarer
+Prozentfaktor angewendet; Startwert ist 100 %. Es existiert kein
+zusaetzlicher 240/700-mm/min-Speed-Cap fuer Jog oder ein
+600-mm/min-Cap fuer den Z-Sicherheitsrueckzug mehr. Die SKR-Firmware
+hat X/Y-Werkseinstellungen 6000 mm/min (aus dem urspruenglichen
+Atomstack-A5-Pro-Profil); bereits gespeicherte SKR-`$110/$111`-Werte
+haben Vorrang. `$112` wird wegen der anderen Anet-Spindel nicht
+blind angehoben.
+
+**Maximum der Motoren** ist nicht gleich Leerlauf-Maximum des
+Treibers: bei montierter Last/Spindel/Leitung gelten Drehmomentkurve,
+Beschleunigung, Eingangsspannung, Riemenspannung, TMC2209-Strom und
+thermische Grenzen. Die volle Maschinengeschwindigkeit ist daher ein
+messbarer Betriebsparameter und wird nicht als fester theoretischer
+Wert behauptet. Schrittverluste, haeufige Stall-Alarme und Hitze
+sind Zeichen zu hoher Werte. Mechanische Limits, M5, Homing und
+Kollisionserkennung bleiben bestehen.
+
+## Parameteroberflaeche
+
+**Setup / Parameter** enthaelt sieben Kategorien mit je sechs Zeilen.
+Links erscheinen `$ID` und Name, rechts ein Eingabefeld und ein
+Haken zum expliziten Setzen. Werte stammen aus der tatsaechlichen
+SKR-`$$`-Rueckmeldung (unbekannte Parameter bleiben mit `?`).
+Nach Haken bestaetigt erst der SKR-Readback den Erfolg. Editierte
+Werte bleiben bei UI-Refresh erhalten. Die Bildschirmtastatur passt
+in 800 × 480 Pixel.
+
+Die frueheren Buttons `Z-Test 0,5 mm` und `Z-Richtung OK` sind aus
+dem regulaeren Bedienablauf entfernt. Fuer die automatische 20-mm-
+Vor-XY-Homingbewegung bleibt aus physikalischen Gruenden eine
+Z-Schritte/mm-Kalibrierung erforderlich, weil falsche `$102`-Werte
+sonst zu unkontrolliert langen Fahrten fuehren koennen.
+
+## Offset-korrekter Ganzflaechen-Rasterplan
+
+In **Fokus/Taster → Abtastfeld/XY-Offset** koennen folgende Werte
+dauerhaft im ESP32 gespeichert werden:
+- Start X / Start Y des Werkstueckbereichs im positiven HMI-Koordinatensystem
+- Werkstueckbreite und -hoehe in mm
+- Tasterversatz X / Y gegenueber der Laserspitze (positiv, falls der
+  Taster in dieser Achsenrichtung *weiter rechts/oben* liegt)
+- Punktabstand des Rasters in mm
+
+Fuer jeden gewuenschten Schaltpunkt gilt:
+`Laserposition = Tasterpunkt – Tasteroffset`.
+Die Scanplanung bildet die Schnittmenge von gewuenschtem Rechteck,
+Maschinenvolumen und dem um X/Y-Offset verschobenen erreichbaren
+Tasterbereich. Dadurch wird keine Position ausserhalb
+`$130/$131` eingeplant, auch wenn der Taster nicht genau auf der
+Laserspitze sitzt. Eine 0,5-mm-Innenreserve bleibt wegen der
+Schalter-/Homing-Freifahrt. Zeilen werden serpentin angeordnet,
+also abwechselnd links→rechts und rechts→links, damit keine
+langen leeren Rueckfahrten zwischen Reihen noetig sind.
+
+**Raster berechnen** schreibt die geplanten Punkte als CSV nach
+`/logs/probe_plan.csv` (microSD, falls installiert, sonst LittleFS).
+Dateiinhalt: Tasterpunkt X/Y, Laserspitze X/Y und rohe GRBL-MPos X/Y.
+Das ist ein **geometrisch gueltiger Mess- und Bewegungsplan, keine
+gemessene Hoehenkarte**. Nur ausserhalb der erreichbaren Grenzen liegende
+Teile des gewuenschten Werkstuecks werden automatisch abgeschnitten;
+der Status sagt explizit, ob das Rechteck beschnitten wurde.
+
+**Echte Hoehenabtastung ist noch nicht vorhanden:** Das derzeitige
+SKR-Profil hat nur den mit dem Z-Homing geteilten Taster an PC2
+(`PROBE_ENABLE=0`); ein separater PC14-G38-Eingang ist nicht
+verdrahtet. `$HZ` setzt die Maschinen-Z-Referenz neu und darf
+nicht als Ersatz fuer eine echte flaechenhafte G38-Messung
+missbraucht werden. Eine physisch verdrahtete, gepruefte und getrennt
+auswertbare Probe, GRBL Probe-Signalerfassung, Resultat-Speicherung
+und eine sichere Mess-Z-Rueckzugsmethode sind fuer reale
+mehrpunktige Hoehenkarten noch umzusetzen. Die neue Oberflaeche
+loest deshalb **keine unbeaufsichtigten Abtastfahrten** aus.
+
+---
 # LumaCut CNC – Atomstack X/Y + Anet-Z: verifizierte Inbetriebnahme (24.10.2026)
 
 ## Änderungen am aktuellen Softwarestand
