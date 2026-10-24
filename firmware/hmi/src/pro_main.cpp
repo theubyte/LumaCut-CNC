@@ -1244,7 +1244,7 @@ void installRoutes(){
     });
     http.on("/api/ui/hotspot-qr",HTTP_GET,[]{
         if(!auth()){fail(401,"Code erforderlich");return;}
-        uint8_t temp[qrcodegen_BUFFER_LEN_MAX],qr[qrcodegen_BUFFER_LEN_MAX];
+        uint8_t temp[qrcodegen_BUFFER_LEN_FOR_VERSION(20)],qr[qrcodegen_BUFFER_LEN_FOR_VERSION(20)];
         auto esc=[](const String& value){
             String out;
             for(size_t i=0;i<value.length();i++){
@@ -1498,8 +1498,8 @@ void showHotspotQr(){
             MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     }
     if(!hotspotQrBuffer){setNotice("QR: nicht genug PSRAM.");return;}
-    uint8_t temp[qrcodegen_BUFFER_LEN_MAX];
-    uint8_t qr[qrcodegen_BUFFER_LEN_MAX];
+    uint8_t temp[qrcodegen_BUFFER_LEN_FOR_VERSION(20)];
+    uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(20)];
     auto escapeWifi=[](const String& input){
         String output;
         for(size_t i=0;i<input.length();i++){
