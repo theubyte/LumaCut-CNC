@@ -157,11 +157,11 @@ p{line-height:1.5;margin:8px 0}small,.muted{color:var(--muted)}
 <h3>LightBurn Netzwerk</h3><div class="two"><button data-op="host" id="tcpToggle">TCP aktivieren/deaktivieren</button><button id="lightburnProfile">USB-Geräteprofil herunterladen</button></div>
 <p class="muted" id="tcpHint">LightBurn → GRBL Netzwerk → Pi-IP (lumacut.local) → Port 23.</p></div>
 </div></section>
-<section id="camera" class="tab"><div class="layout"><div class="panel span8"><h2>Pi-Kamera · Live-Werkstückansicht</h2>
+<section id="camera" class="tab"><div class="layout"><div class="panel span8"><h2>USB-Kamera · Werkstückansicht</h2>
 <p class="muted">Kamera-Schnappschüsse direkt vom Raspberry Pi. Die Vorschau ist keine automatische geometrische Kalibrierung.</p>
 <img id="cameraFrame" alt="Kamerabild des Werkstücks" style="display:block;width:100%;background:#06101a;border-radius:15px;min-height:100px">
 <div class="two" style="margin-top:12px"><button id="cameraSnap" class="primary">Neues Kamerabild</button><button id="cameraAuto">Auto-Vorschau EIN/AUS</button></div>
-<p class="caption">Raspberry-Pi-Kameramodul mit rpicam-still; eine kompatible USB-Kamera benötigt einen eigenen Aufnahmetreiber.</p></div>
+<p class="caption">Raspberry Pi 400 besitzt keinen CSI-Anschluss: USB-Webcam (UVC), erkannt als /dev/video0.</p></div>
 <div class="panel span4"><h2>Systemdiagnose</h2><div class="kpi"><small>SKR-Verbindung</small><strong id="usbDiag">—</strong></div>
 <div class="kpi" style="margin-top:10px"><small>Interne Statusberichte gefiltert</small><strong id="spamDiag">—</strong></div>
 <div class="kpi" style="margin-top:10px"><small>Serielle Störungen</small><strong id="faultDiag">—</strong></div>
