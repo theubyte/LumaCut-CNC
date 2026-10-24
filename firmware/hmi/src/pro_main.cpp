@@ -15,6 +15,7 @@
 #include <ArduinoJson.h>
 #include "secure_ota.h"
 #include "probe_grid.h"
+#include "qrcodegen.h"
 #include "skr_stm32_uart_ota.h"
 #include <time.h>
 #include "update_ca.h"
@@ -85,9 +86,12 @@ struct Bounds {float x0=0,y0=0,x1=0,y1=0;bool valid=false;};
 Bounds bounds;
 struct Park {String name;float x=0,y=0;bool stored=false;};
 Park parks[3];
-lv_obj_t* pages[11]{};
+lv_obj_t* pages[12]{};
 lv_obj_t* navButtons[7]{};
 lv_obj_t *areaField=nullptr,*areaDot=nullptr,*areaCaption=nullptr,*configCaption=nullptr;
+lv_obj_t* hotspotQrCanvas=nullptr;
+lv_color_t* hotspotQrBuffer=nullptr;
+constexpr int QR_CANVAS_SIZE=208;
 lv_obj_t *updateLabel=nullptr;
 String offeredUpdateSha,updateCheckStatus="Noch nicht geprueft";
 uint32_t lastUpdateCheckMs=0;
@@ -1251,6 +1255,49 @@ lv_obj_t* card(lv_obj_t* parent,int x,int y,int w,int h){
     lv_obj_set_style_pad_all(p,0,0);lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);
     return p;
 }
+void showHotspotQr(){
+    if(!hotspotQrCanvas||apName.length()==0||apPass.length()<8){
+        setNotice("Hotspot noch nicht gestartet.");return;
+    }
+    if(!hotspotQrBuffer){
+        hotspotQrBuffer=(lv_color_t*)heap_caps_malloc(
+            QR_CANVAS_SIZE*QR_CANVAS_SIZE*sizeof(lv_color_t),
+            MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    }
+    if(!hotspotQrBuffer){setNotice("QR: nicht genug PSRAM.");return;}
+    uint8_t temp[qrcodegen_BUFFER_LEN_MAX];
+    uint8_t qr[qrcodegen_BUFFER_LEN_MAX];
+    auto escapeWifi=[](const String& input){
+        String output;
+        for(size_t i=0;i<input.length();i++){
+            char ch=input[i];
+            if(ch=='\\'||ch==';'||ch==','||ch==':'||ch=='"')output+='\\';
+            output+=ch;
+        }
+        return output;
+    };
+    const String payload="WIFI:T:WPA;S:"+escapeWifi(apName)+
+                         ";P:"+escapeWifi(apPass)+";;";
+    if(!qrcodegen_encodeText(payload.c_str(),temp,qr,
+                             qrcodegen_Ecc_MEDIUM,1,20,qrcodegen_Mask_AUTO,true)){
+        setNotice("Hotspot-Zugang zu lang fuer QR.");return;
+    }
+    lv_canvas_set_buffer(hotspotQrCanvas,hotspotQrBuffer,QR_CANVAS_SIZE,
+                         QR_CANVAS_SIZE,LV_IMG_CF_TRUE_COLOR);
+    lv_canvas_fill_bg(hotspotQrCanvas,lv_color_white(),LV_OPA_COVER);
+    const int modules=qrcodegen_getSize(qr);
+    const int pitch=QR_CANVAS_SIZE/(modules+8);
+    const int border=(QR_CANVAS_SIZE-pitch*modules)/2;
+    for(int y=0;y<modules;y++)for(int x=0;x<modules;x++){
+        if(!qrcodegen_getModule(qr,x,y))continue;
+        const lv_color_t black=lv_color_black();
+        for(int py=0;py<pitch;py++)for(int px=0;px<pitch;px++)
+            lv_canvas_set_px_color(hotspotQrCanvas,border+x*pitch+px,
+                                   border+y*pitch+py,black);
+    }
+    lv_obj_invalidate(hotspotQrCanvas);
+    setNotice("QR: "+apName+" / WPA2, keine Internetverbindung erforderlich.");
+}
 void action(const char* id);
 // The GT911 has a 800x480 landscape touch area. An editor attached to the
 // normal screen could be displaced by LVGL focus/scroll and earlier layouts
@@ -1355,9 +1402,9 @@ lv_obj_t* configEntry(lv_obj_t* parent,int x,int y,int w,int h,const String& tex
 void switchTab(int idx){
     activePage=idx;
     const int navMap[7]={0,5,1,2,3,6,4};
-    for(int j=0;j<11;j++)lv_obj_add_flag(pages[j],LV_OBJ_FLAG_HIDDEN);
+    for(int j=0;j<12;j++)lv_obj_add_flag(pages[j],LV_OBJ_FLAG_HIDDEN);
     if(idx>=0&&idx<7)lv_obj_clear_flag(pages[navMap[idx]],LV_OBJ_FLAG_HIDDEN);
-    else if(idx>=7&&idx<11)lv_obj_clear_flag(pages[idx],LV_OBJ_FLAG_HIDDEN);
+    else if(idx>=7&&idx<12)lv_obj_clear_flag(pages[idx],LV_OBJ_FLAG_HIDDEN);
     for(int i=0;i<7;i++){
         lv_obj_set_style_bg_color(navButtons[i],lv_color_hex(i==idx?PALE_BLUE:WHITE),0);
         lv_obj_t* t=lv_obj_get_child(navButtons[i],0);
@@ -1456,7 +1503,7 @@ void makeUi(){
     sourceLabel=lbl(root,"Steuerung frei",583,84,14,SUBTLE);
 
     // Every page fits 800x480 without accidental scrolling.
-    for(int i=0;i<11;i++){
+    for(int i=0;i<12;i++){
         pages[i]=lv_obj_create(root);lv_obj_set_pos(pages[i],14,117);
         lv_obj_set_size(pages[i],772,272);
         lv_obj_set_style_bg_opa(pages[i],LV_OPA_TRANSP,0);
@@ -1553,6 +1600,7 @@ void makeUi(){
         lv_obj_set_style_border_width(field,0,0);
     }
     btn(c,"Mit WLAN verbinden",415,189,333,54,"wifi",BLUE,BG);
+    btn(c,"Hotspot QR",282,10,114,40,"hotspotqr",PALE_BLUE,BLUE);
     lbl(c,"UPDATE-KEY (aus Unraid .env)",20,140,14,SUBTLE);
     updateKeyEntry=lv_textarea_create(c);
     lv_obj_set_pos(updateKeyEntry,20,161);
@@ -1724,6 +1772,18 @@ void makeUi(){
     btn(c,"Werte sichern",196,138,165,40,"probeSave",GRAY,INK);
     btn(c,"Raster berechnen",18,188,343,42,"probePlan",BLUE,BG);
     lbl(c,"Planung; kein G38-Taster an PC14 verbunden",18,236,14,RED);
+
+    // Offline Wi-Fi QR pairing; QR includes the dynamically generated
+    // per-device WPA2 hotspot password, no third-party online service.
+    c=card(pages[11],0,0,772,268);
+    lbl(c,"Mit LumaCut-Hotspot verbinden",22,14,20);
+    lbl(c,"Mit der Handy-Kamera scannen, danach http://192.168.4.1",22,48,14,SUBTLE);
+    hotspotQrCanvas=lv_canvas_create(c);
+    lv_obj_set_pos(hotspotQrCanvas,34,62);
+    lbl(c,"1. QR-Code mit Handy scannen",285,85,14,INK);
+    lbl(c,"2. WLAN-Verbindung bestaetigen",285,126,14,INK);
+    lbl(c,"3. Browser: http://192.168.4.1",285,167,14,INK);
+    btn(c,"Zurueck",284,206,224,42,"wifigo",GRAY,INK);
 
     // Guided X/Y/Z steps/mm correction, accessible from Jog.
     // No blind screw pitch assumption: the operator measures the real travel.
@@ -2068,6 +2128,12 @@ void action(const char* id){
     if(op=="updatecheck"){
         updateCheckRequested=true;
         setNotice("LumaCut Stable-Updates werden per HTTPS geprueft.");
+        return;
+    }
+    if(op=="wifigo"){switchTab(6);return;}
+    if(op=="hotspotqr"){
+        switchTab(11);
+        showHotspotQr();
         return;
     }
     if(op=="setupgo"){switchTab(5);return;}
