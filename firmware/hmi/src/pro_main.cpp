@@ -129,6 +129,7 @@ String lastControllerError, zLiftReason;
 uint32_t postHomeStartedMs=0,scriptCommandStartedMs=0;
 
 lv_obj_t* updateKeyEntry=nullptr,*calCommandedField=nullptr,*calActualField=nullptr;
+lv_obj_t* jogSpeedButton=nullptr;
 int jogSpeedPercent=100;
 bool zScaleMeasured=false;
 uint32_t zSafetyArmUntil=0;
@@ -572,6 +573,8 @@ void updateUi(){
         "Z auf "+String(focusLiftMm,1)+" mm");
     if(autoZButton)labelChanged(lv_obj_get_child(autoZButton,0),
         autoLiftAfterHome?"Auto-Z: EIN":"Auto-Z: AUS");
+    if(jogSpeedButton)labelChanged(lv_obj_get_child(jogSpeedButton,0),
+        "Tempo "+String(jogSpeedPercent)+"% / SKR Max");
     if(releaseButton)labelChanged(lv_obj_get_child(releaseButton,0),
         motorsReleased?"Aufwecken":"Handbewegung");
     if(updateLabel)labelChanged(updateLabel,updateCheckStatus);
@@ -1485,7 +1488,7 @@ void makeUi(){
     btn(c,"Z -",593,151,153,54,"z-",PALE_BLUE,BLUE);
     lbl(c,"SCHRITTWEITE",20,192,14,SUBTLE);
     btn(c,"0.1 / 1 / 10 mm",20,211,234,44,"step",PALE_BLUE,BLUE);
-    btn(c,"Tempo 100%",20,98,234,43,"jogsound",PALE_BLUE,BLUE);
+    jogSpeedButton=btn(c,"Tempo 100%",20,98,234,43,"jogsound",PALE_BLUE,BLUE);
     btn(c,"Wege kalibrieren",20,143,234,43,"calgo",GRAY,INK);
 
     // MACROS: three dedicated programmable machine XY positions.
@@ -1799,8 +1802,12 @@ bool zDeltaAllowed(float delta){
 }
 bool zJogRawDelta(float delta){
     if(!zDeltaAllowed(delta))return false;
+    if(!knownSetting[112]||savedSetting[112]<=0){
+        zLiftReason="Z-Tempo $112 noch nicht gelesen.";return false;
+    }
+    // Use the configured Z-axis maximum, without a second arbitrary HMI cap.
     String cmds[]={"M5","$J=G91 G21 Z"+String(delta,3)+
-                        " F"+String(constrain(probeFeedMm,30.f,600.f),1)};
+                        " F"+String(savedSetting[112],1)};
     return startScript(cmds,2,true,true);
 }
 // A target such as 7.00 mm is the displayed positive position AFTER homing,
