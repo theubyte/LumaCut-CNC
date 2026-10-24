@@ -131,7 +131,14 @@ function renderDetails(){
   $("detail-duration").textContent=duration(j.elapsed_seconds);
   $("detail-state").textContent=statusText(j.status);
   $("detail-zip").href=artifact(j,"build-package.zip");
-  $("approve-update").hidden=!(j.status==="success"&&j.paired_firmware);
+  const pair=(j.status==="success"&&j.paired_firmware);
+  const ready=(pair&&j.release_ready===true);
+  $("approve-update").hidden=!pair;
+  $("approve-update").textContent=ready?
+    "Als Update für das HMI freigeben":"Neues OTA-fähiges Komplett-Build starten";
+  $("release-hint").hidden=!pair||ready;
+  $("release-hint").textContent=!ready&&pair?
+    (j.release_blocker||"Dieses Build ist nicht als OTA-Update freigabefaehig."): "";
   const files=j.files||[];
   $("artifact-list").innerHTML=files.length?files.map(f=>{
     const sha=f.sha256||"";
@@ -299,6 +306,12 @@ function showFinish(j){
 async function approveRelease(){
   const j=find(model.selected);
   if(!j||j.status!=="success"||!j.paired_firmware)return;
+  if(j.release_ready!==true){
+    // Older paired build archives lack the app-only HMI OTA image.
+    // Never publish a merged bootloader image as an OTA application.
+    await build(TARGETS.complete);
+    return;
+  }
   if(!window.confirm(
     "Dieses HMI-/SKR-Paket als STABLE-Update freigeben?\\n"+
     "Nur nach Hardwareprüfung veröffentlichen. Es erfolgt kein automatischer Flashvorgang."))return;
