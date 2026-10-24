@@ -227,6 +227,57 @@ extern status_code_t limits_lumacut_z_clearance (void);
         if original.count(off_block)!=1:
             raise RuntimeError("Upstream spindleSetStateVariable M5 ordering changed")
         original=original.replace(off_block,safer_off)
+        # A dedicated, exact-pin machine command avoids an unsafe assumption
+        # about grblHAL's numbered M64/M65 auxiliary outputs. On this board
+        # PC7/FAN1 is the only spare controllable MOSFET; all other pins are
+        # reserved for stepper timing, limits, laser or primary accessories.
+        command_hook = 'static status_code_t jtag_enable (sys_state_t state, char *args)'
+        pc7_cmd = r"""#ifdef LUMACUT_PC7_IO
+// Dedicated Pi<->SKR GPIO protocol. This is NOT a general STM32 pinmux.
+// Only the spare FAN1/PC7 MOSFET is exposed, and high-power wiring still
+// requires separate physical validation.
+static status_code_t lumacut_pc7_io (sys_state_t state, char *args)
+{
+    if(args == NULL) {
+        hal.stream.write((GPIOC->ODR & (1U << 7)) ? "[LCIO:PC7=1]\r\n"
+                                               : "[LCIO:PC7=0]\r\n");
+        return Status_OK;
+    }
+    if(args[1] != '\0' || (args[0] != '0' && args[0] != '1'))
+        return Status_InvalidStatement;
+    if(args[0] == '1' && state != STATE_IDLE)
+        return Status_IdleError;
+    // Deenergizing the spare output is always permitted.
+    if(args[0] == '1')
+        GPIOC->BSRR = 1U << 7;
+    else
+        GPIOC->BRR = 1U << 7;
+    return Status_OK;
+}
+#endif
+
+"""
+        if original.count(command_hook) != 1:
+            raise RuntimeError("grblHAL system-command hook changed")
+        original = original.replace(command_hook, pc7_cmd + command_hook, 1)
+        bootstrap = '    static const sys_command_t boot_command_list[] = {'
+        if original.count(bootstrap) != 1:
+            raise RuntimeError("grblHAL command table changed")
+        original = original.replace(bootstrap, bootstrap + r"""
+#ifdef LUMACUT_PC7_IO
+        {"LCIO", lumacut_pc7_io, { .allow_blocking = On }, { .str = "LumaCut PC7 FAN1 I/O: query or =0/1" } },
+#endif
+""", 1)
+        init_marker = ' // Stepper init'
+        if original.count(init_marker) != 1:
+            raise RuntimeError("grblHAL driver setup marker changed")
+        original = original.replace(init_marker, r"""
+#ifdef LUMACUT_PC7_IO
+    // Power-on default is OFF. Hardware pulldown remains mandatory.
+    GPIOC->BRR = 1U << 7;
+#endif
+
+""" + init_marker, 1)
         driver.write_text(original)
         # Use upstream's USB CDC environment and verified 28K bootloader
         # linker memory layout, not the unoffset FLASH linker script.
@@ -275,6 +326,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
             h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")
             h.write("  -D LUMACUT_SAFE_Z20=1\n")
             h.write("  -D LUMACUT_BED_SPINDLE_POWER=1\n")
+            h.write("  -D LUMACUT_PC7_IO=1\n")
 
         run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/env
