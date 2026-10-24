@@ -17,7 +17,7 @@ Kamera/Dateien────────┘       │
                      ├─ PA1 Laser-PWM
                      ├─ PC9 BED Laserstrom-Rückleitung (nur nach isolierter Verdrahtungsprüfung)
                      ├─ PC8 HE0 / M7, PC6 FAN0 / M8
-                     └─ PC7 derzeit NICHT fernsteuerbar
+                     └─ PC7 FAN1 Zusatz-Ausgang via $LCIO (Firmwarezustand rücklesbar)
 ```
 
 Der Pi ist die **einzige übergeordnete Steuerinstanz**. Er besitzt Konfiguration,
@@ -27,7 +27,7 @@ Signale und die zeitkritische Bewegungssteuerung. Die Motion-Planner-Ausführung
 bleibt bis zu einer getrennt getesteten STM32-Peripheral-Firmware auf grblHAL;
 Linux auf dem Pi darf keine zeitkritischen Step-Pulse über normales USB takten.
 
-## Implementiert im Branch feature/pi400-central-control-service-v1
+## Implementiert in main
 
 - Responsives Service Studio unter `/service`, direkt aus dem Dashboard erreichbar.
 - Servicepasswort `lumaservice` bei erster Inbetriebnahme, **nur als gehashter
@@ -47,6 +47,15 @@ Linux auf dem Pi darf keine zeitkritischen Step-Pulse über normales USB takten.
   jeweils exklusiv und nur im Leerlauf bei ausgeschalteten Ausgängen.
 - Hardware-Pinmatrix deklariert gesperrte Pins, elektrische Ausgabetypen
   und nicht implementierte Reserve-Pins.
+- PC7/FAN1 ist über den exakt spezifizierten grblHAL-Befehl `$LCIO=0/1`
+  schaltbar und über `$LCIO` rücklesbar. Das Service Studio kann für
+  den Ausgang Funktionsname und Anwendungsprofil verwalten. Die Funktion
+  verlangt echten SKR-Identitätsabgleich und einen unbelegten Controller.
+- Der Pi analysiert G-Code-Geometrie für eine SVG-Vorschau mit relativen
+  Bewegungen, Maßeinheiten und Kreisinterpolation; komplexe, unbekannte
+  Transformationen verweigern eine irreführende Vorschau.
+- Der LightBurn-TCP-Server blockiert unerlaubte Service- und GPIO-Befehle,
+  während reguläre G-Code-Aufträge übertragen werden können.
 - Der SKR-Build erzeugt `capabilities.json` mit einer SHA-256-Prüfsumme
   der dazugehörigen `firmware.bin`. GitHub CI prüft die Übereinstimmung
   und packt beide Dateien gemeinsam in das Pi400/SKR-USB-Archiv.
@@ -55,7 +64,7 @@ Linux auf dem Pi darf keine zeitkritischen Step-Pulse über normales USB takten.
 
 ## Funktionen, die NOCH NICHT funktionieren
 
-- Allgemeine beliebige Umbelegung physischer SKR-Pins zur Laufzeit.
+- Allgemeine beliebige Umbelegung weiterer physischer SKR-Pins zur Laufzeit.
   Dazu ist ein passendes **STM32-Firmwareprotokoll** mit Pinmux-Whitelist,
   digitalem Ein-/Ausgang, PWM, Konfliktprüfung, persistentem Zustand und
   definiertem Reset-Verhalten erforderlich.
