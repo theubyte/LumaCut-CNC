@@ -26,24 +26,13 @@ PA1-Laser-PWM, BED/PC9 Laser-24V, HE0/PC8 LEDs und FAN0/PC6 Abluft.
 
 ## 2. Erstinstallation
 
-Da das private Repository nicht anonym abrufbar ist, muss dein
-Benutzerkonto auf dem Pi zunächst read-only Zugriff bekommen.
+Das Repository ist aktuell öffentlich; HTTPS reicht für das Setup.
 Auf dem Pi (SSH/Terminal):
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y git
-ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C lumacut-pi400-install
-cat ~/.ssh/id_ed25519.pub
-```
-
-Den angezeigten **öffentlichen** Schlüssel in GitHub
-`theubyte/LumaCut-CNC → Settings → Deploy keys → Add deploy key`
-eintragen, **keine Schreibrechte**. Vor der ersten GitHub-SSH-Verbindung
-dessen echten Host-Key-Fingerprint prüfen.
-
-```bash
-git clone --branch main git@github.com:theubyte/LumaCut-CNC.git
+git clone --branch main https://github.com/theubyte/LumaCut-CNC.git
 cd LumaCut-CNC
 sudo bash pi400/install.sh
 ```
@@ -112,7 +101,9 @@ LumaCut-Oberfläche und bietet:
   (Schnappschuss / automatische Vorschau). Der Pi 400 hat keinen CSI-Kameraanschluss;
 - USB- und LightBurn-Diagnose: intern verworfene Statusberichte,
   Bytes, Fehlerzähler;
-- LED/Abluft über grblHAL-Coolant-Realtime-Overrides.
+- LED/Abluft über grblHAL-Coolant-Realtime-Overrides;
+- Service Studio mit kritischer Rechteverwaltung und PC7/FAN1-Ausgang;
+- Pi-seitige G-Code-SVG-Geometrievorschau und automatische Z-Freifahrt.
   
 **Taster-Höhenkarte:** Der gemeinsame Z-Endschalter PC2 ist
 ohne nachgewiesenen separaten G38-Probeeinstieg kein sicherer
@@ -121,7 +112,7 @@ Taster-Signalquelle und danach der automatische Messlauf.
 
 ## 5. Automatische Updates
 
-`lumacut-update.timer` prüft täglich das private GitHub
+`lumacut-update.timer` prüft täglich das öffentliche GitHub
 `main` auf einen Fast-Forward-Commit. Der Updater:
 
 1. prüft, dass kein LightBurn-/Web-/Dateijob läuft;
@@ -131,16 +122,10 @@ Taster-Signalquelle und danach der automatische Messlauf.
 4. aktualisiert den Pi-Dienst, validiert den Python-Quellcode,
    startet den Dienst und setzt ihn bei Startfehler zurück.
 
-Damit der Servicebenutzer den privaten Branch selbst lesen kann,
-ist ein **eigener read-only GitHub Deploy-Key** nötig:
-
-```bash
-sudo bash /opt/lumacut/pi400/setup-update-key.sh
-```
-
-Öffentlichen Schlüssel in GitHub unter `Deploy keys` hinzufügen;
-danach SSH-Verbindung des Benutzers `lumacut` herstellen und
-`sudo systemctl start lumacut-update` testen.
+Das öffentliche Repository ist ohne Deploy-Key über HTTPS lesbar.
+Bei einem späteren Wechsel auf ein privates Repo kann der separate
+read-only GitHub-Schlüssel über `pi400/setup-update-key.sh`
+eingerichtet werden.
 
 **SKR-Firmwareupdates sind mit alleiniger USB-Seriellverbindung
 nicht automatisch flashbar, solange kein bekannter und geprüfter
