@@ -24,6 +24,16 @@ class AuxOutputContractTest(unittest.TestCase):
         self.assertIn('galvanic isolation',BUILD)
         self.assertNotIn('-D COOLANT_ENABLE=1',BUILD)
 
+    def test_bed_laser_power_is_retained_through_zero_pwm(self):
+        self.assertIn('LUMACUT_BED_SPINDLE_POWER=1',BUILD)
+        self.assertIn('if original.count(speed_block)!=1:',BUILD)
+        self.assertIn('if original.count(zero_rpm_block)!=1:',BUILD)
+        self.assertIn('spindle_on(spindle);',BUILD)
+        self.assertIn('pwm_off(spindle);',BUILD)
+        self.assertIn('M3 S0 powers BED/laser fan without firing the laser',BUILD)
+        self.assertIn('PWM is off but BED remains energized until the explicit M5',BUILD)
+        self.assertNotIn('AUXOUTPUT2_PIN          7',BUILD)
+
     def test_mist_flood_independent_realtime_override(self):
         self.assertIn('machine.write((uint8_t)(lights?0xA1:0xA0));',HMI)
         self.assertIn('lightOn=a.indexOf(\'M\')>=0;',HMI)
