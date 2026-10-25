@@ -44,6 +44,32 @@ label{font-size:13px;color:#bcd2e4}
 .space{margin:16px 0}code{background:#1c3547;padding:2px 5px;border-radius:5px;color:#ade8ff}
 @media(max-width:850px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.metrics{grid-template-columns:repeat(2,1fr)}header{padding:16px 20px;align-items:start}}
 @media(max-width:520px){.metrics{grid-template-columns:1fr}.two{grid-template-columns:1fr}.three{grid-template-columns:1fr}h1{font-size:22px}}
+/* LumaCut Control Studio: compact, readable, responsive control surface */
+:root{color-scheme:dark}
+body{background:#0b1018;color:#f1f4f9;font-size:14px}
+header{background:#111925;border-bottom:1px solid #273343;padding-top:16px;padding-bottom:16px;position:sticky;top:0;z-index:10;backdrop-filter:blur(15px)}
+main{max-width:1520px;padding-top:18px}
+.grid{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px}
+.card{background:#151e2b;border:1px solid #2a394b;border-radius:15px;box-shadow:none;padding:19px}
+.card h2{font-size:18px;color:#f3f6fa}
+.metric{background:#0e1621;border-color:#283748;min-height:72px}
+.metric strong{font-size:22px}
+button{border-radius:9px;background:#243245;border-color:#35485c;min-height:42px}
+button.primary{background:#51b9ed;border-color:#51b9ed}
+input,select{border-radius:9px;background:#0c1520;border-color:#3a5064}
+label{display:block;margin-bottom:5px}
+.hint{border-radius:8px;background:#152b38;border-color:#64b6d9}
+.warning{background:#302621;border-color:#d6a077}
+#zSettings{display:grid;gap:11px}
+#zSettings .muted{margin:0}
+#zSettings .two{align-items:end}
+#zSettings button{width:100%;margin-top:5px}
+#alert.show{position:sticky;top:80px;z-index:9}
+.console{max-height:340px}
+.quicklinks{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 17px}
+.quicklinks a{border:1px solid #34485d;background:#172332;color:#dbeffc;padding:9px 14px;border-radius:9px;text-decoration:none;font-weight:600;font-size:13px}
+.quicklinks a:hover{background:#26384b}
+@media(max-width:850px){header{position:relative}.grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -52,8 +78,9 @@ label{font-size:13px;color:#bcd2e4}
 <div class="pill" id="connectState">Marlin wird geprüft …</div>
 </header>
 <main>
+<nav class="quicklinks" aria-label="Maschinenbereiche"><a href="#statusPanel">Status</a><a href="#controlPanel">Fahren</a><a href="#calibrationPanel">Fokus &amp; Taster</a><a href="#lightburnPanel">LightBurn</a><a href="#jobsPanel">Aufträge</a></nav>
 <div class="grid">
-<section class="card">
+<section class="card" id="statusPanel">
 <div class="headline"><h2>Maschinenstatus</h2><button class="ghost" id="refreshButton">Aktualisieren</button></div>
 <div class="metrics">
 <div class="metric"><small>SKR</small><strong id="state">Offline</strong></div>
@@ -73,9 +100,9 @@ label{font-size:13px;color:#bcd2e4}
 <button data-action="endstops">Endschalter M119 lesen</button>
 </div>
 </section>
-<section class="card">
+<section class="card" id="controlPanel">
 <h2>Direktsteuerung</h2>
-<p>Fahrbefehle sind gesperrt, während LightBurn oder ein Pi-Auftrag die Maschine steuert.</p>
+<p>LightBurn steuert den SKR exklusiv, sobald es verbunden ist. Für manuelles Joggen die LightBurn-Verbindung trennen. Speichern von Fokus- und Tasterwerten funktioniert unabhängig davon.</p>
 <div class="hint">LightBurn „Referenzieren“ (G28): ZUERST X/Y zur freien Ecke referenzieren, DANACH Maschinenboden als Z=0 setzen und 20 mm anheben. Die gesonderte Werkstückabtastung (G30) benutzt den Marlin-Z-Taster nach dem Einrichten der X/Y-Tasterversätze und verändert Maschinen-Z=0 nicht.</div>
 <div class="two"><button class="primary" data-action="home" data-motion>XYZ referenzieren (X/Y zuerst)</button>
 <button class="danger" id="stop">Software-Notstopp M112</button></div>
@@ -95,8 +122,8 @@ label{font-size:13px;color:#bcd2e4}
 <button data-accessory="exhaust">Abluft BED / PC9</button>
 </div>
 </section>
-<section class="card">
-<h2>Z-Kalibrierung</h2>
+<section class="card" id="calibrationPanel">
+<h2>Fokus &amp; Taster</h2>
 <p>Getrennte Werte für Schalter-Auslösepunkt, Sicherheitsabstand und Fokus. Änderungen werden auf dem Pi gespeichert und bleiben nach Neustart erhalten.</p>
 <form id="zSettings">
 <label>Schalter → Laserspitze (mm)
@@ -109,8 +136,8 @@ label{font-size:13px;color:#bcd2e4}
 <input id="focusGap" type="number" min="0.1" max="30" step="0.1" value="7" required></label>
 </div>
 <div class="two">
-<label>Taster relativ zum Laserpunkt X (mm; mit Vorzeichen)<input id="probeX" type="number" min="-80" max="80" step="0.1" placeholder="Kalibrieren" required></label>
-<label>Taster relativ zum Laserpunkt Y (mm; mit Vorzeichen)<input id="probeY" type="number" min="-80" max="80" step="0.1" placeholder="Kalibrieren" required></label>
+<label>Taster relativ zum Laserpunkt X (mm; mit Vorzeichen)<input id="probeX" type="number" min="-80" max="80" step="0.1" placeholder="Noch nicht gemessen"></label>
+<label>Taster relativ zum Laserpunkt Y (mm; mit Vorzeichen)<input id="probeY" type="number" min="-80" max="80" step="0.1" placeholder="Noch nicht gemessen"></label>
 </div>
 <p class="muted">Gemessen vom Laserpunkt zur Tastspitze entlang der Maschinenachsen: z. B. X+23 bedeutet Tastspitze 23 mm in +X-Richtung. Vorzeichen vor G30 kontrollieren.</p>
 <div class="metric" style="margin-top:12px"><small>Geschätzter Abstand Spitze → Referenzfläche</small><strong id="tipGap">—</strong></div>
@@ -121,9 +148,9 @@ label{font-size:13px;color:#bcd2e4}
 <p class="muted">Speichern funktioniert auch nach Homing oder bei verbundener LightBurn-Sitzung. Nach Offset-Änderungen vor dem nächsten Schnitt erneut G30 abtasten.</p>
 </form>
 </section>
-<section class="card">
+<section class="card" id="lightburnPanel">
 <h2>LightBurn über WLAN</h2>
-<div class="hint">LightBurn „Job-Ende“ auf <code>M2</code> setzen: Laser aus → Z nur nach oben bis mindestens 20 mm → X0/Y0 in die L-förmige Safezone. <code>M5 I</code> bleibt der normale Laser-Aus-Befehl für Pausen zwischen Schnitten. Beide Aktionen benötigen kein Webinterface.</div>
+<div class="hint">LightBurn: zuerst <code>G28</code> referenzieren, danach nur über einer geeigneten Werkstückstelle <code>G30</code> ausführen. Ohne eingemessenen X/Y-Tasterversatz keine automatische Abtastung. „Job-Ende“ auf <code>M2</code> setzen: Laser aus → Z nur nach oben bis mindestens 20 mm → X0/Y0 in die L-förmige Safezone. <code>M5 I</code> bleibt der normale Laser-Aus-Befehl für Pausen zwischen Schnitten. Beide Aktionen benötigen kein Webinterface.</div>
 <div class="hint warning">30-mm-Homing-Sicherheitszone: X=0–30 mm und Y=0–30 mm bleiben werkstückfrei. Schnittbewegungen sind nur bei X≥30 und Y≥30 erlaubt (nutzbar 360 × 340 mm bei Maschinenkoordinaten 390 × 370 mm). Maschinenreferenz G28 ausschließlich in frei zugänglicher Parkposition starten. Nach Einschalten ist die tatsächliche Kopfposition bis zum Homing unbekannt.</div>
 <p>LightBurn <b>Custom GCode</b> → Variante <b>Marlin</b> → Verbindung <b>Network/TCP</b>. Diese Weboberfläche und LightBurn teilen sich einen USB-Controller, führen aber nie gleichzeitig Befehle aus.</p>
 <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
@@ -133,7 +160,7 @@ label{font-size:13px;color:#bcd2e4}
 <div class="hint">Marlin-Modus: <code>M3 I</code> aktivieren. S-Werte nur <code>0–255</code>. Bei LightBurn muss nach Leerfahrten die erste G1-Bearbeitung wieder einen S-Wert erhalten. Marlin <code>M4 I</code> nicht benutzen.</div>
 <p class="muted">Der native Marlin-Gateway ist absichtlich kein GRBL-Emulator. GRBL-Befehle wie <code>$$</code>, <code>$H</code> oder <code>?</code> sind hier ungültig.</p>
 </section>
-<section class="card">
+<section class="card" id="jobsPanel">
 <h2>G-Code-Aufträge</h2>
 <p>Aufträge werden vor der Übertragung geprüft und mit echten Marlin-<code>ok</code>-Bestätigungen an das SKR übertragen.</p>
 <form id="uploadForm" class="inline"><input style="flex:1;min-width:180px" type="file" accept=".gcode,.gc,.nc" id="file"><button type="submit">Hochladen</button></form>
