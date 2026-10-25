@@ -100,6 +100,18 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     # Zero makes probing fail at the predicted Z plane, especially when the
     # removable workpiece is thicker than the reference surface.
     cfg = replace_active(cfg, "Z_PROBE_LOW_POINT", "-2")
+    # IMPORTANT: Marlin 2.1.2.9's Probe::run_z_probe regards contact
+    # above (-probe.offset.z + Z_CLEARANCE_MULTI_PROBE) as "Triggered
+    # early" and reports Probing Failed. LumaCut's Z0 is the bare bed,
+    # while a removable 3mm MDF sheet is *above* it. With the mechanical
+    # switch the observed contact is around machine Z5.37, so the stock
+    # 5mm limit rejects an otherwise valid contact.
+    # Accept expected sheet + switch height, but retain a finite upper
+    # bound for unexpected obstacles. For thicker material this limit
+    # must be reviewed against clearance and actual workpiece geometry.
+    cfg = replace_active(cfg, "Z_CLEARANCE_MULTI_PROBE", "16")
+    cfg = replace_active(cfg, "Z_CLEARANCE_BETWEEN_PROBES", "16")
+
 
 
     cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 380 }")
