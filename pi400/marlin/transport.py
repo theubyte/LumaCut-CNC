@@ -152,6 +152,9 @@ class MarlinTransport:
         self.probe_tip_offset_mm = 1.5
         self.focus_gap_mm = 7.0
         self.probe_clearance_mm = 2.0
+        # X<30 or Y<30 are permanently reserved for machine homing.
+        # Cutting must occur strictly inside the remaining rectangle.
+        self.safe_zone_xy_mm = 30.0
         self.absolute_mode = True
         self.focused_this_job = False
         self.fan_off_at = None
@@ -290,6 +293,33 @@ class MarlinTransport:
                 f"Z-Sperre: Ziel {target:.3f} mm, Minimum {minimum:.3f} mm "
                 "(2mm Tastabstand). Schneidtiefe begrenzen.")
 
+    def _xy_cut_guard_locked(self, cmd: str):
+        """Reject any armed linear cut touching the 30mm X/Y home bands.
+
+        The previous tool position matters as much as the commanded target:
+        an XY line from the home corner to the work area is not a cut.
+        G0 with laser safely extinguished is permitted in home bands.
+        """
+        if not re.match(r"^G0?1(?:\s|$)", cmd) or not self.laser_enabled:
+            return
+        coords = {letter:float(value) for letter,value in WORD.findall(cmd)}
+        if "S" in coords and coords["S"] <= 0:
+            return
+        # An inline G1 lacking S may preserve nonzero cutting power.
+        self._exchange_locked("M400", timeout=20)
+        self._exchange_locked("M114", timeout=10)
+        if self.position is None:
+            raise RuntimeError("XY-Sicherheitszone: Position nicht bestimmbar")
+        px, py = self.position[:2]
+        tx = (coords["X"] if self.absolute_mode else px + coords.get("X", 0.0)) if "X" in coords else px
+        ty = (coords["Y"] if self.absolute_mode else py + coords.get("Y", 0.0)) if "Y" in coords else py
+        limit = self.safe_zone_xy_mm
+        if min(px,py,tx,ty) < limit - 0.0001:
+            raise ValueError(
+                f"30mm-Homing-Sperrzone: Schnitt nur ab X={limit:g} "
+                f"und Y={limit:g} mm; Start X{px:.2f} Y{py:.2f}, "
+                f"Ziel X{tx:.2f} Y{ty:.2f}")
+
     def _focus_before_cut_locked(self):
         if self.focused_this_job:
             return
@@ -334,6 +364,7 @@ class MarlinTransport:
                 raise RuntimeError("SKR erst Z-sicher und vollständig referenzieren")
             try:
                 self._z_move_guard_locked(normalized)
+                self._xy_cut_guard_locked(normalized)
                 if normalized == "M3 I":
                     # Independently power cooling fan before laser PWM mode.
                     # PC6 is FAN0/M106, not laser-enable.
@@ -461,6 +492,10 @@ class MarlinTransport:
                 "laser_armed": self.laser_enabled,
                 "laser_cooling_fan_on": self.fan_power,
                 "workpiece_surface_z": self.surface_z,
+                "safe_zone_xy_mm": self.safe_zone_xy_mm,
+                "cutting_bounds": {"x_min":self.safe_zone_xy_mm,
+                                   "y_min":self.safe_zone_xy_mm,
+                                   "x_max":390.0, "y_max":370.0},
                 "probe_minimum_z": (None if self.surface_z is None else
                                     self.surface_z + self.probe_clearance_mm),
                 "laser_focus_z": (None if self.surface_z is None else
