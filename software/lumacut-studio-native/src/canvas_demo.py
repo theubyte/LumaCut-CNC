@@ -39,7 +39,7 @@ class CanvasDemoWindow(QMainWindow):
         self.setWindowTitle(f"{self.editor.title()} – LumaCut Studio Canvas")
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        if self.editor._confirm_discard():
+        if self.editor.confirm_discard():
             event.accept()
         else:
             event.ignore()

@@ -77,5 +77,5 @@ CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
     border: 1px solid {BORDER}; border-radius: 8px; margin-top: 14px; padding: 10px 8px 8px 8px;
 }}
 #LayersPanel QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {TEXT}; }}
-#LayersPanel QPushButton#ColorButton {{ border: 1px solid {BORDER}; border-radius: 5px; min-height: 22px; }}
+#LayersPanel QPushButton#ColorButton {{ border: 1px solid {BORDER}; border-radius: 5px; min-height: 20px; max-height: 20px; padding: 2px; }}
 """

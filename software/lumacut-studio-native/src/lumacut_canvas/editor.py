@@ -442,13 +442,24 @@ class CanvasEditor(QWidget):
         self.set_selection([c.id for c in copies])
 
     # --- Dateien ----------------------------------------------------------
-    def _confirm_discard(self) -> bool:
+    def confirm_discard(self) -> bool:
+        """Vor Neu/Öffnen/Schließen: True, wenn weitergemacht werden darf.
+
+        Bietet Speichern an; bricht der Nutzer den Speichern-Dialog ab, bleibt
+        das Projekt offen.
+        """
         if self.undo_stack.isClean():
             return True
         r = QMessageBox.question(self, "Ungespeicherte Änderungen",
-                                 "Änderungen am aktuellen Projekt verwerfen?",
-                                 QMessageBox.Discard | QMessageBox.Cancel, QMessageBox.Cancel)
+                                 "Änderungen am aktuellen Projekt speichern?",
+                                 QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                                 QMessageBox.Save)
+        if r == QMessageBox.Save:
+            self.save()
+            return self.undo_stack.isClean()
         return r == QMessageBox.Discard
+
+    _confirm_discard = confirm_discard
 
     def new_document(self) -> None:
         if not self._confirm_discard():

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QColorDialog, QDoubleSpinBox, QFormLayout, QFrame
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QPushButton, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
-from . import icons
+from . import icons, theme
 from .commands import AddLayerCommand, MoveLayerCommand, RemoveLayerCommand, SetLayerAttrCommand
 from .model import PASSES_RANGE, POWER_RANGE, SPEED_RANGE, Document, Layer
 
@@ -69,6 +69,9 @@ class LayersPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("LayersPanel")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        # Eigenes Stylesheet wie CanvasEditor: unabhängig davon, wann/wie das
+        # Hauptfenster seine Styles setzt.
+        self.setStyleSheet(theme.CANVAS_QSS)
         self.doc = document
         self.stack = undo_stack
         self._signature: tuple | None = None
@@ -140,6 +143,16 @@ class LayersPanel(QWidget):
 
         self.doc.add_listener(self.refresh)
         self.refresh()
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        # Ein Hauptfenster mit setPalette() vererbt seine Palette beim
+        # Einhängen und überschreibt damit die QSS-Farben der Kinder. Einmal
+        # neu polieren, sobald das Panel endgültig im Fenster sitzt.
+        if not getattr(self, "_restyled", False):
+            self._restyled = True
+            self.setStyleSheet("")
+            self.setStyleSheet(theme.CANVAS_QSS)
+        super().showEvent(event)
 
     # --- Anzeige ----------------------------------------------------------
     def _make_signature(self) -> tuple:
