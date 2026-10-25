@@ -115,6 +115,47 @@ Hardware-Anbindung (`src/scanprobe/adapters.py`, Qt-frei):
   `camera.json`, verwirft gepufferte Bilder vor jeder Aufnahme.
 * `simulated_setup()` – Fake-Maschine/Kamera/Taster mit zwei Werkstücken.
 
+## Fokuskorrektur beim Export (Höhenmesh)
+
+Checkbox **„Fokuskorrektur anwenden (Höhenmesh)"** im Scan-Panel (Standard: aus).
+Ohne Höhenmesh (nach „Auto-Probe" oder „Höhenmesh laden …") ist sie deaktiviert und ein
+Hinweis wird angezeigt. Ist sie aus, bleiben **„An Pi senden"** und der normale Export
+**unverändert**.
+
+Ist sie an, wird der normale Marlin-G-Code des Canvas (`document_to_gcode`) per
+`scanprobe.focus_export.compensate_for_export` → `apply_focus_compensation` umgerechnet:
+
+* **„An Pi senden"** (`main.py`, `_send_canvas_job`) schickt den korrigierten G-Code.
+* **„G-Code exportieren …"** im Scan-Panel speichert ihn als Datei (mit Korrektur, wenn angehakt,
+  sonst unverändert).
+* Z je Segment = Oberfläche (bilinear aus dem Mesh) + 5,5 mm (Fokus 7,0 − Tasterumschaltung 1,5);
+  lange Linien werden in ≤ 2 mm-Stücke geteilt. Die erste Brennbewegung bekommt ein explizites Z.
+
+Prüfungen (deutsche Meldungen; **Fehler** blockieren, **Warnungen** müssen bestätigt werden):
+
+| Fall | Verhalten |
+|---|---|
+| G2/G3-Bögen im G-Code | Fehler – Bögen vorher in Liniensegmente auflösen (Canvas-Export erzeugt nur Linien). |
+| Z-Wörter im G-Code (z. B. „Fokus-Absenkung je Durchgang") | Fehler – Absenkung auf 0 setzen oder ohne Korrektur exportieren. |
+| Kein Höhenmesh / keine Brennstrecke im Mesh | Fehler. |
+| Teile des Jobs außerhalb der geprobten Bereiche | Warnung mit Länge in mm und Beispielpunkt. **Fallback:** dort gilt die *höchste gemessene Oberfläche* (Fokus eher zu hoch, nie zu tief / keine Kollision). |
+| Bild-Fingerabdruck passt nicht zum aktuellen Scan (Material bewegt) | Fehler – neu proben. |
+| Kein aktueller Scan / Mesh ohne Fingerabdruck | Warnung (Lage nicht prüfbar). |
+| Mesh älter als 8 h oder ohne Zeitstempel | Warnung. |
+| Ziel-Z unter Pi-Oberfläche + 2 mm | Warnung (Pi-Sperre würde den Job ablehnen). |
+
+Grenzen:
+
+* Nur absoluter G-Code in mm (G21/G90); keine Bögen, keine eigenen Z-Werte (Z-Schritt-Ebenen
+  sind mit der Korrektur nicht kombinierbar).
+* Der Pi fokussiert vor der ersten Brennbewegung auf *seine* gemessene Oberfläche und prüft Z
+  nur gegen diese eine Oberfläche (≥ Oberfläche + 2 mm).
+* Der Pi hängt an jede Bewegung mit Z ein `M400`/`M114` an. Bei der Korrektur hat fast jedes
+  Segment Z → der Planer läuft leer, der Laser **stockt** (Punkte/Brandflecken an Segmentgrenzen
+  möglich). Empfehlung: Pi-seitig Z-Prüfung ohne `M400` für Folgezeilen. Bis dahin vorsichtig mit
+  niedriger Leistung testen.
+* Noch nicht auf echter Hardware getestet.
+
 ## Schnittstellen für die anderen Teile
 
 | Teil | Erwartung |
@@ -135,9 +176,8 @@ Details, Beispiel und Kalibrierablauf: [KAMERA_KALIBRIERUNG.md](KAMERA_KALIBRIER
 * Echte Kalibrierwerte (px/mm auf Scanhöhe, Versatz zum Laser, Verzeichnung).
 * Pi-Probe-API: Laut Doku hebt der Pi nach G30 auf max(20, Oberfläche+2). Der
   niedrige Zwischenhub (`hop_mm`) wirkt erst, wenn der Pi `safe_z` übernimmt.
-* Fokuskorrektur soll langfristig auf dem Pi laufen. Die Funktion ist dafür Qt-frei.
-  Aus der Oberfläche wird kompensierter G-Code noch nicht gesendet
-  (`apply_focus_compensation` ist vorhanden, Header: eine G/M-Anweisung pro Zeile).
+* Fokuskorrektur soll langfristig auf dem Pi laufen (Funktion ist dafür Qt-frei). Derzeit
+  rechnet Studio den G-Code um, siehe „Fokuskorrektur beim Export".
 * Pi-API ohne absolutes Verfahren und ohne Kamera-Endpunkt → Jog-basierte Bewegung
   (langsam). Ein `op=move`/Kamera-Endpunkt auf dem Pi würde den Scan stark beschleunigen.
 * Der Pi erlaubt Z-Bewegungen nur relativ zu *einer* gemessenen Oberfläche; bei mehreren
@@ -146,7 +186,7 @@ Details, Beispiel und Kalibrierablauf: [KAMERA_KALIBRIERUNG.md](KAMERA_KALIBRIER
 ## Tests
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest tests/test_scanprobe.py tests/test_scan_panel.py
+QT_QPA_PLATFORM=offscreen python -m pytest tests/test_scanprobe.py tests/test_scan_panel.py tests/test_focus_export.py
 ```
 
 Alle Tests laufen mit Fakes (`scanprobe.fakes`: synthetisches Bett, Maschine mit
