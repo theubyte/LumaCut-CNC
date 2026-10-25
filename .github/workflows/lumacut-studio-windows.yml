@@ -35,6 +35,7 @@ jobs:
           node --check marlin-postprocessor.mjs
           node --check calibrated-camera.js
           node --check camera-calibration-core.mjs
+          node --check machine-monitor.js
           npm run test:unit
       - name: Browser UI acceptance tests (Chrome/Edge)
         run: npm run test:ui
@@ -49,7 +50,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item index.html, studio.js, advanced.js, design.css, job-planner.mjs, raster-planner.mjs, unified-job.mjs, marlin-postprocessor.mjs, calibrated-camera.js, camera-calibration-core.mjs, geometry.mjs -Destination dist
+          Copy-Item index.html, studio.js, advanced.js, design.css, job-planner.mjs, raster-planner.mjs, unified-job.mjs, marlin-postprocessor.mjs, calibrated-camera.js, camera-calibration-core.mjs, geometry.mjs, machine-monitor.js -Destination dist
       - name: Generate Windows application icons
         run: npx tauri icon assets/icon.svg
       - name: Build Windows NSIS installer
