@@ -278,6 +278,13 @@ class MarlinTransport:
                 # real G30 probing, even when M119 recognizes Z_MIN.
                 self.cap_z_probe = (caps[-1] == "Cap:Z_PROBE:1") if caps else None
                 self._exchange_locked("M5 I", timeout=6.0)
+                # The installed EEPROM from earlier firmware reported
+                # M203 Z6. Marlin limits homing and probing feedrate by that
+                # runtime cap, even if the new firmware requests 7.2 mm/s.
+                # User requested 1.8x Z speed. Set 9 mm/s on every SKR USB
+                # reconnect; do not write permanent EEPROM without an
+                # explicit flash/configuration workflow.
+                self._exchange_locked("M203 Z9", timeout=6.0)
                 self.state = "Idle"
                 self.fault = ""
             except Exception as exc:
