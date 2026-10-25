@@ -77,7 +77,19 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "Z_MAX_POS", "90")
     # Native Marlin G30 uses the installed Z-min mechanical contact switch.
     # Unlike G28 it measures height without changing machine Z=0.
-    cfg = uncomment(cfg, "Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN")
+    # The upstream board example may already enable this option.
+    # Accept either state; never fail just because it is pre-enabled.
+    probe_directive = "Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN"
+    enabled = re.findall(r"(?m)^\\s*#define\\s+" + probe_directive + r"(?:\\s|$)", cfg)
+    disabled = re.findall(r"(?m)^\\s*//\\s*#define\\s+" + probe_directive + r"(?:\\s|$)", cfg)
+    if len(enabled) == 1 and not disabled:
+        pass
+    elif len(disabled) == 1 and not enabled:
+        cfg = re.sub(r"(?m)^(\\s*)//\\s*(#define\\s+" + probe_directive + r")",
+                     r"\\1\\2", cfg, count=1)
+    else:
+        raise RuntimeError("Ambiguous Z-min probe directive in Marlin example")
+
     cfg = replace_active(cfg, "Z_MIN_PROBE_ENDSTOP_INVERTING", "true")
     cfg = uncomment(cfg, "FIX_MOUNTED_PROBE")
     cfg = uncomment(cfg, "Z_SAFE_HOMING")
