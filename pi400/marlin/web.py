@@ -45,6 +45,8 @@ if CONFIG.is_file():
         logging.exception("Marlin config corrupt, using safe disabled default")
 machine.homing_verified = bool(config["validated"])
 machine.clearance_mm = float(config["z_clearance_mm"])
+machine.probe_tip_offset_mm = float(config["z_switch_tip_offset_mm"])
+machine.focus_gap_mm = float(config["focus_gap_mm"])
 job = {"file": "", "state": "idle", "line": 0, "total": 0, "error": ""}
 job_lock = threading.Lock()
 stop_job = threading.Event()
@@ -89,7 +91,10 @@ def status():
     # represents the endstop trigger, not necessarily the laser tip.
     tip_gap = None
     if result["homed"] and result["position"] is not None:
-        tip_gap = round(result["position"][2] + config["z_switch_tip_offset_mm"], 3)
+        surface = result.get("workpiece_surface_z")
+        tip_gap = (None if surface is None else
+                   round(result["position"][2] - surface +
+                         config["z_switch_tip_offset_mm"], 3))
     result.update(estimated_tip_gap_mm=tip_gap,
                   estimated_focus_adjust_mm=(None if tip_gap is None else
                     round(config["focus_gap_mm"] - tip_gap, 3)),
@@ -122,11 +127,12 @@ def manual(command, timeout=20):
     return machine.command(command, owner="web", timeout=timeout)
 
 
-def home_z_first():
+def home_z_first(probe_contact_confirmed=False):
     # Reuse the exact same atomic safe-home transaction as the LightBurn
     # G28 compatibility layer. Never let two implementations diverge.
     local_owner()
-    machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"])
+    machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"],
+                      probe_contact_confirmed=probe_contact_confirmed)
 
 
 @app.post("/api/settings")
@@ -148,11 +154,13 @@ def settings():
     config["focus_gap_mm"] = gap
     config["z_switch_tip_offset_mm"] = offset
     machine.clearance_mm = clearance
+    machine.probe_tip_offset_mm = offset
+    machine.focus_gap_mm = gap
     persist()
     return jsonify(message="Z-Offset, Sicherheitsabstand und Fokusreferenz dauerhaft gespeichert",
                    z_clearance_mm=clearance, focus_gap_mm=gap,
                    z_switch_tip_offset_mm=offset,
-                   note="Positive Offset: Laserspitze liegt beim Schalterkontakt über der Referenzfläche. Werte werden nur zur Anzeige verwendet, keine automatische Z-Korrekturfahrt.")
+                   note="Nur nach bestätigtem Tasterkontakt auf dem Werkstück fährt der Job vor der ersten G1-Schnittbewegung automatisch in den Fokus. Z bleibt stets mindestens 2 mm über dem Tastkontakt.")
 
 @app.post("/api/commission")
 def commission():
@@ -183,8 +191,12 @@ def action():
         machine.ensure_ready()
         return jsonify(message="Marlin M115 + LumaCut-Kennung bestätigt")
     if op == "home":
-        home_z_first()
-        return jsonify(message="Z, Z-Sicherheitsabstand, X/Y und M400 bestätigt")
+        confirmed = request.form.get("probe_contact_confirmed") == "1"
+        home_z_first(probe_contact_confirmed=confirmed)
+        return jsonify(message=("Werkstückoberfläche bei Z=0 erfasst; "
+                                if confirmed else
+                                "Keine Werkstückoberfläche erfasst; ") +
+                       "Z, Sicherheitsabstand, X/Y und M400 bestätigt")
     if op in ("info","position","endstops"):
         cmd = {"info":"M115", "position":"M114", "endstops":"M119"}[op]
         reply = manual(cmd, timeout=12)
