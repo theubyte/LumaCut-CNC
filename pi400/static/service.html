@@ -41,8 +41,8 @@ code{color:#9bd8f9;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}pr
 </section>
 <section class="card">
 <div class="caps">I/O-Matrix</div><h2>Zubehörkanäle zuweisen</h2><p class="sub">Aktiv: logische Zuordnung der bereits vom SKR unterstützten M7/M8-Ausgänge.</p>
-<label for="pinLights">LED-Beleuchtung</label><select id="pinLights"><option value="M7">M7 · HE0 / PC8</option><option value="M8">M8 · FAN0 / PC6</option></select>
-<label for="pinExhaust">Abluft</label><select id="pinExhaust"><option value="M8">M8 · FAN0 / PC6</option><option value="M7">M7 · HE0 / PC8</option></select>
+<label for="pinLights">LED-Beleuchtung</label><select id="pinLights"><option value="M7">M7 · HE0 / PC8</option><option value="M8">M8 · BED / PC9</option></select>
+<label for="pinExhaust">Abluft</label><select id="pinExhaust"><option value="M8">M8 · BED / PC9</option><option value="M7">M7 · HE0 / PC8</option></select>
 <p class="help">Jeder Ausgang kann nur einer Funktion zugeordnet werden. Elektrische Lasten und Verdrahtung müssen zum MOSFET-Ausgang passen.</p>
 <button id="savePins" class="primary">Belegung übernehmen</button>
 </section>
@@ -60,24 +60,24 @@ code{color:#9bd8f9;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}pr
 <button id="runCommand">An den SKR senden</button><pre id="consoleOutput">Noch keine Antwort.</pre>
 </section>
 <section class="card">
-<div class="caps">Frei belegbarer Ausgang</div><h2>FAN1 · PC7</h2>
+<div class="caps">Frei belegbarer Ausgang</div><h2>FAN0 · PC6</h2>
 <p class="sub">24-V-MOSFET des SKR; Funktionen werden vom Pi verwaltet. Zur Schaltung verwendet der Pi ausschließlich das neue $LCIO-Protokoll.</p>
-<label for="pc7Role">Funktionsprofil</label><select id="pc7Role">
+<label for="pc6Role">Funktionsprofil</label><select id="pc6Role">
 <option value="custom">Eigene Funktion</option>
 <option value="air_assist">Air Assist</option>
 <option value="worklight">Werkstückbeleuchtung</option>
 <option value="signal">Signalleuchte</option>
 <option value="exhaust2">Zusätzliche Abluft</option></select>
-<label for="pc7Name">Eigener Name</label><input id="pc7Name" maxlength="24" placeholder="z. B. Air Assist">
-<div class="buttonbar" style="margin-top:13px"><button id="savePc7" class="primary">PC7 konfigurieren</button><button id="readPc7">Ausgang lesen</button></div>
-<div class="metricbox" style="margin-top:16px"><div class="small muted">SKR meldet</div><div id="pc7Value" class="metric">Nicht ermittelt</div></div>
-<div class="buttonbar" style="margin-top:12px"><button id="pc7On" disabled>Ausgang EIN</button><button id="pc7Off">Ausgang AUS</button></div>
+<label for="pc6Name">Eigener Name</label><input id="pc6Name" maxlength="24" placeholder="z. B. Air Assist">
+<div class="buttonbar" style="margin-top:13px"><button id="savePc7" class="primary">PC6 konfigurieren</button><button id="readPc7">Ausgang lesen</button></div>
+<div class="metricbox" style="margin-top:16px"><div class="small muted">SKR meldet</div><div id="pc6Value" class="metric">Nicht ermittelt</div></div>
+<div class="buttonbar" style="margin-top:12px"><button id="pc6On" disabled>Ausgang EIN</button><button id="pc6Off">Ausgang AUS</button></div>
 <p class="help">Aktivierung ist nur im Leerlauf und nach erfolgreicher Firmwareerkennung möglich. Dieser Ausgang ist ein 24-V-Leistungsschalter, kein 3,3-V-GPIO. Verdrahtung vor Nutzung prüfen.</p>
 </section>
 <section class="card full">
 <div class="caps">SKR Hardware</div><h2>Physische Pins und Reservierungen</h2>
 <p class="sub">Ein Pin wird nur freigegeben, wenn die STM32-Firmware seine Nutzung unterstützt. USB, Endschalter, Schrittsignale und Sicherheitsleitungen bleiben fest reserviert.</p><div id="pinsList"></div>
-<div class="notice">PC7 kann mit einer passenden grblHAL-SKR-Firmware über $LCIO gesteuert werden. Andere physische Pins bleiben reserviert, bis die zugehörige STM32-Firmware ihre elektrische Funktion unterstützt.</div>
+<div class="notice">PC6 kann mit einer passenden grblHAL-SKR-Firmware über $LCIO gesteuert werden. Andere physische Pins bleiben reserviert, bis die zugehörige STM32-Firmware ihre elektrische Funktion unterstützt.</div>
 </section>
 <section class="card">
 <div class="caps">Konfiguration und Wartung</div><h2>Maschinenbackup</h2>
@@ -159,10 +159,10 @@ async function load(){
  const firmware=d.firmware||{};
  $("firmwareIdentity").textContent="SKR-Firmware: "+(firmware.version||"Noch nicht abgefragt")+(firmware.board?" · "+firmware.board:"")+(firmware.driver?" · "+firmware.driver:"");
  $("diagnostics").textContent=(d.recent||[]).slice(-25).join("\n")||"Keine GRBL-Nachrichten.";
- $("pc7Role").value=p.spare.role;
- $("pc7Name").value=p.spare.name;
- $("pc7Value").textContent=p.pc7_state===null?"Nicht ermittelt":p.pc7_state===1?"EIN":"AUS";
- $("pc7On").disabled=p.pc7_state===null;
+ $("pc6Role").value=p.spare.role;
+ $("pc6Name").value=p.spare.name;
+ $("pc6Value").textContent=p.pc6_state===null?"Nicht ermittelt":p.pc6_state===1?"EIN":"AUS";
+ $("pc6On").disabled=p.pc6_state===null;
  $("pinLights").value=p.roles.lights;
  $("pinExhaust").value=p.roles.exhaust;
  const parent=$("pinsList");parent.replaceChildren();
@@ -181,25 +181,25 @@ $("savePins").onclick=async()=>{
  message(out.message);await load();}catch(e){message(e.message,true)}
 };
 $("savePc7").onclick=async()=>{
- try{const out=await call("/api/service/pc7/config","POST",
- {pin:"PC7",role:$("pc7Role").value,name:$("pc7Name").value});
+ try{const out=await call("/api/service/pc6/config","POST",
+ {pin:"PC6",role:$("pc6Role").value,name:$("pc6Name").value});
  message(out.message);await load()}catch(e){message(e.message,true)}
 };
 $("readPc7").onclick=async()=>{
- try{const out=await call("/api/service/pc7/read","POST",{});
- $("pc7Value").textContent=out.value?"EIN":"AUS";
- $("pc7On").disabled=false;
- message("SKR meldet PC7 "+out.value);
- }catch(e){$("pc7On").disabled=true;message(e.message,true)}
+ try{const out=await call("/api/service/pc6/read","POST",{});
+ $("pc6Value").textContent=out.value?"EIN":"AUS";
+ $("pc6On").disabled=false;
+ message("SKR meldet PC6 "+out.value);
+ }catch(e){$("pc6On").disabled=true;message(e.message,true)}
 };
 async function setPc7(value){
- try{const out=await call("/api/service/pc7/set","POST",{value:String(value)});
- $("pc7Value").textContent=out.value?"EIN":"AUS";
+ try{const out=await call("/api/service/pc6/set","POST",{value:String(value)});
+ $("pc6Value").textContent=out.value?"EIN":"AUS";
  message(out.message);
  }catch(e){message(e.message,true)}
 }
-$("pc7On").onclick=()=>setPc7(1);
-$("pc7Off").onclick=()=>setPc7(0);
+$("pc6On").onclick=()=>setPc7(1);
+$("pc6Off").onclick=()=>setPc7(0);
 $("runCommand").onclick=async()=>{
  try{const command=$("command").value.trim();const out=await call("/api/service/command","POST",{command});
  $("consoleOutput").textContent=out.command+" → "+out.message+"\nAntwortzeilen in Systemprotokoll.";
