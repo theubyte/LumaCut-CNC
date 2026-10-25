@@ -142,7 +142,7 @@ document.addEventListener("lumacut:svg-imported",event=>{
 });
 // The legacy process inputs belong to the old import-only preview.
 // Avoid offering two contradictory job planners in the same interface.
-for(const group of [...document.querySelectorAll('[data-panel="process"] > .group')].slice(0,3))group.style.display="none";
+for(const group of document.querySelectorAll('[data-panel="process"] > .group')){const heading=group.querySelector(".gtitle")?.textContent?.trim();if(["Werkstück & Geometrie","Laserprozess","Vorbereitung"].includes(heading))group.style.display="none";}
 
 const undoContainer=q("undo").parentElement;
 const redoButton=document.createElement("button");redoButton.id="redo";redoButton.textContent="Wiederholen";
