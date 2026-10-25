@@ -301,6 +301,12 @@ def action():
         return jsonify(message="Werkstückoberfläche Z=%.3f mm, Fokus Z=%.3f mm" % (
             machine.surface_z, machine.status()["laser_focus_z"]),
             detail="\n".join(reply[:6]))
+    if op == "park":
+        # Same routine as LightBurn M2 / end of job: laser off, Z never
+        # downward, then X0/Y0 inside the empty keep-out band.
+        local_owner()
+        machine.park_safezone(owner="web")
+        return jsonify(message="Geparkt: Laser aus, Z-Rückzug, X0/Y0")
     if op == "start":
         return start_job()
     if op == "autorun":

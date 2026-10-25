@@ -909,6 +909,27 @@ assert calls[-2:] == ["M5 I", "park"], calls
 assert web.job["state"] == "error"
 """)
 
+    def test_web_park_action_uses_safe_park_and_respects_owner(self):
+        self._run_web_script(r"""
+from marlin import web
+calls = []
+m = web.machine
+m.park_safezone = lambda **k: calls.append(("park", k))
+m.serial = object()
+m.identity = "LumaCut"
+m.state = "Idle"
+with web.app.test_client() as client:
+    ok = client.post("/api/action", data={"op": "park"})
+    assert ok.status_code == 200, ok.data
+    assert calls == [("park", {"owner": "web"})], calls
+    m.owner = "lightburn"
+    busy = client.post("/api/action", data={"op": "park"})
+    assert busy.status_code == 400, busy.data
+    assert "LightBurn" in busy.get_json()["error"]
+    assert len(calls) == 1, calls
+    m.owner = None
+""")
+
     def test_one_click_end_to_end_against_simulated_marlin(self):
         # Studio output -> Pi preflight -> home -> G30 -> focus -> cut -> park,
         # all through the real transport against a stateful Marlin model.
