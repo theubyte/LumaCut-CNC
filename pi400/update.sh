@@ -65,7 +65,7 @@ show_api_diagnostics(){
   log "HTTP-Port: ${HTTP_PORT}; systemd-Dienst:"
   systemctl --no-pager --full status lumacut.service 2>&1 | head -n 25 >&2 || true
   log "Aktuelle TCP-Listener:"
-  ss -ltn 2>/dev/null | grep -E '(Local Address|:8080|:23|:${HTTP_PORT}([[:space:]]|$))' >&2 || true
+  ss -ltnp 2>/dev/null | head -n 35 >&2 || true
   log "Letzte Dienstmeldungen (keine Maschinen-Zugangscodes ausgeben):"
   journalctl -u lumacut.service -n 18 --no-pager --output=short 2>&1 >&2 || true
 }
