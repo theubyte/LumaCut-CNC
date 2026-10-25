@@ -1,3 +1,4 @@
+import {createUnifiedPlan,unifiedSummary} from "./unified-job.mjs";
 import {ditherGray,rasterLines,rasterDraftGcode} from "./raster-planner.mjs";
 import {planVectorJob,exportOfflineGcode,planStatistics} from "./job-planner.mjs";
 
@@ -71,3 +72,26 @@ const imageObserver=new MutationObserver(rasterChoices);imageObserver.observe(q(
 async function buildRaster(){const o=app.items.find(x=>x.id===q("rasterObject").value);if(!o)throw Error("Bild auswählen");const im=new Image();im.src=o.data;await im.decode();const ratio=Math.min(1,1000/Math.max(im.width,im.height));const w=Math.max(1,Math.round(im.width*ratio)),h=Math.max(1,Math.round(im.height*ratio));const canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;const ctx=canvas.getContext("2d",{willReadFrequently:true});ctx.drawImage(im,0,0,w,h);const gray=ditherGray(ctx.getImageData(0,0,w,h).data,w,h,q("rasterMode").value);const lines=rasterLines(gray,w,h,o,Number(q("rasterStep").value));return {o,lines,w,h}}
 q("rasterCheck").onclick=async()=>{try{const r=await buildRaster();q("rasterInfo").textContent=`${r.w} × ${r.h} Pixel · ${r.lines.length} belegte Scanlinien · Offline`}catch(e){message(e.message)}};
 q("rasterExport").onclick=async()=>{try{const r=await buildRaster();const layerSettings=app.layers.find(l=>l.id===r.o.layer);download("LumaCut-Raster-Entwurf.nc",rasterDraftGcode(r.lines,layerSettings.speed,layerSettings.power),"text/plain");message("Offline-Rasterentwurf gespeichert – nicht an die Maschine senden.")}catch(e){message("Rasterexport: "+e.message)}};
+
+async function prepareUnifiedPixels(){
+ const pixels=new Map();
+ for(const o of app.items.filter(x=>x.kind==="image")){
+  const image=new Image();image.src=o.data;await image.decode();
+  const ratio=Math.min(1,1000/Math.max(image.width,image.height));
+  const width=Math.max(1,Math.round(image.width*ratio)),height=Math.max(1,Math.round(image.height*ratio));
+  const canvas=document.createElement("canvas");canvas.width=width;canvas.height=height;
+  const context=canvas.getContext("2d",{willReadFrequently:true});context.drawImage(image,0,0,width,height);
+  pixels.set(o.id,{width,height,rgba:context.getImageData(0,0,width,height).data});
+ }
+ return pixels;
+}
+const unifiedPanel=document.createElement("div");unifiedPanel.className="group";
+unifiedPanel.innerHTML='<div class="gtitle">Gesamten Auftrag prüfen</div><button id="planUnified" class="full">Schneiden + Gravieren berechnen</button><p id="unifiedInfo" class="hint">Prüft alle Ebenen in Reihenfolge, einschließlich importierter Bilder. Keine Maschinensteuerung.</p>';
+document.querySelector('[data-panel="process"]').prepend(unifiedPanel);
+q("planUnified").onclick=async()=>{const b=q("planUnified");b.disabled=true;try{
+ const pixels=await prepareUnifiedPixels();
+ const plan=createUnifiedPlan({layers:app.layers,items:app.items},pixels,{lineSpacing:Number(q("rasterStep").value),dither:q("rasterMode").value});
+ const st=unifiedSummary(plan);
+ q("unifiedInfo").textContent=`${st.operations} Vorgänge · ${st.passes} Durchgänge gesamt · ${st.pathMm.toFixed(1)} mm aktiver Laserweg (ohne Leerfahrten)`;
+ message("Alle bearbeitbaren Ebenen gemeinsam geprüft. Offline-Plan.");
+ }catch(err){q("unifiedInfo").textContent="Blockiert: "+err.message;message(err.message)}finally{b.disabled=false}};
