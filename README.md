@@ -1,9 +1,9 @@
 # LumaCut CNC
 
-Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrechner, BTT SKR Mini MZ V1.0 mit Marlin 2.1.2.9 als Bewegungs- und Lasercontroller, dazu die eigene Software **LumaCut Studio** (Windows, später Android-Tablet). Ziel ist, LightBurn vollständig abzulösen.
+Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrechner, BTT SKR Mini MZ V1.0 mit Marlin 2.1.2.9 als Bewegungs- und Lasercontroller, dazu eigene Software: **LumaCut für Android** (Tablet-App) und **LumaCut Studio** (Windows). Ziel ist, LightBurn vollständig abzulösen.
 
 ```
- LumaCut Studio (Windows / Tablet)        Browser
+ LumaCut Android (Tablet) · Studio (Win)  Browser
             │  HTTP :8080 (Pi-API)           │
             ▼                                ▼
  ┌────────────────── Raspberry Pi 400 ──────────────────┐
@@ -36,7 +36,8 @@ Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrec
 | `pi400/marlin/` | Pi-Dienst: `transport.py` (USB-Protokoll, Sicherheitsregeln, Homing/G30/Park), `web.py` + `index.html` (Web-UI/API), `firmware_flash.py` (SKR-Update über USB), `smart_cam.py` (Motivgrenzen) |
 | `pi400/install.sh`, `update.sh`, `recover.sh` | Erstinstallation, nächtliches Auto-Update, Wiederherstellung |
 | `firmware/marlin/build.py` | Reproduzierbarer Marlin-Build mit allen LumaCut-Anpassungen |
-| `software/lumacut-studio/` | LumaCut Studio (Tauri 2, Windows; Android geplant) |
+| `android/` | **LumaCut für Android** (Tablet-App, Kotlin/Compose): Werkstatt, Aufträge mit Vorschau, Editor, Kamera, Material |
+| `software/lumacut-studio/` | LumaCut Studio (Tauri 2, Windows) |
 | `tests/` | Python-Tests für Pi-Dienst und Firmware-Update (ohne Hardware) |
 | `docs/` | Maschine, Pi-Betrieb, Firmware, Entwicklung, Studio-Plan |
 
@@ -45,6 +46,7 @@ Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrec
 - [docs/MASCHINE.md](docs/MASCHINE.md) – Hardware, Belegung, Koordinaten, Kalibrierwerte
 - [docs/PI_BETRIEB.md](docs/PI_BETRIEB.md) – Installation, Updates, Bedienung, API, Fehlersuche
 - [docs/FIRMWARE.md](docs/FIRMWARE.md) – Marlin-Build, Flashen über den Pi, Marlin-Besonderheiten
+- [docs/ANDROID_APP.md](docs/ANDROID_APP.md) – Tablet-App: Bereiche, Aufbau, APK bauen und installieren
 - [docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md) – Tests, CI, Arbeitsweise, Stolperfallen
 - [docs/LUMACUT_STUDIO_PLAN_2026-10-25.md](docs/LUMACUT_STUDIO_PLAN_2026-10-25.md) – Ziel und Fahrplan für Studio
 - [CHANGELOG.md](CHANGELOG.md) – Was wann warum geändert wurde

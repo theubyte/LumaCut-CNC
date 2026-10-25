@@ -1,0 +1,65 @@
+name: LumaCut Android APK
+# Native tablet app (android/): core unit tests, then a signed release APK.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Signing key and version
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          KS="$RUNNER_TEMP/lumacut.jks"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$KS"
+            echo "LUMACUT_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          else
+            keytool -genkeypair -keystore "$KS" -storepass ci-temporary -keypass ci-temporary -alias lumacut \
+              -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=LumaCut CI"
+            echo "LUMACUT_KEYSTORE_PASSWORD=ci-temporary" >> "$GITHUB_ENV"
+            echo "::warning::Kein Secret ANDROID_KEYSTORE_B64: APK mit Wegwerf-Schlüssel signiert, Updates erfordern Neuinstallation."
+          fi
+          echo "LUMACUT_KEYSTORE=$KS" >> "$GITHUB_ENV"
+          echo "LUMACUT_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - name: Core unit tests
+        run: gradle :core:test --no-daemon --stacktrace
+      - name: Build release APK
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
+      - name: Name the APK
+        run: cp app/build/outputs/apk/release/app-release.apk "LumaCut-1.0.${{ github.run_number }}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LumaCut-Android-APK
+          path: android/LumaCut-*.apk
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-reports
+          path: android/core/build/reports/
+          if-no-files-found: ignore
