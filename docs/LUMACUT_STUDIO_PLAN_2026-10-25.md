@@ -85,3 +85,19 @@ Die folgenden Konzepte wurden visualisiert:
 - Maschinensteuerung (Home, Probe, Fokus, Start, Park)
 
 Alle Änderungen und dieser Plan liegen auf `main`, damit weitere Entwicklung (auch durch Claude Code) nachvollziehbar bleibt.
+
+---
+
+## Architekturentscheidungen und technische Randbedingungen (Ergänzung 25.10.2026)
+
+Vorschläge aus der Code-Analyse. Sie sind noch nicht alle umgesetzt.
+
+1. **Eine Codebasis für Windows und Tablet.** Studio ist eine Tauri-2-App, und Tauri 2 baut auch für Android. Dieselbe Oberfläche läuft mit einer Touch-Ansicht auf dem Tablet, statt eine zweite App zu schreiben.
+2. **Der Pi ist der einzige Ort mit Maschinenwissen.** Die Apps schicken langfristig einen strukturierten Auftrag (Ebenen, Pfade, Graustufen-Raster, Abtastbereiche). Der Pi erzeugt daraus die Fahrbefehle und setzt Safezone, Fokus, Höhenkorrektur und Overscan um. Heute schickt Studio noch Marlin-G-Code (`marlin-postprocessor.mjs`), den der Pi Zeile für Zeile prüft.
+3. **Durchsatz zum SKR ist das größte Risiko für die Rastergravur.** Heute ist genau eine Zeile unterwegs, bis das `ok` kommt. Zuerst messen. Dann mehrere Zeilen gleichzeitig senden (`ADVANCED_OK` ist aktiv), größere Firmware-Puffer und gleiche Pixel zu einem Segment zusammenfassen. Reicht Marlin danach nicht, ist das eine eigene Grundsatzentscheidung.
+4. **Höhenmesh ohne Firmware-Änderung.** Der Pi tastet je Bereich ein Raster ab, mit Randabstand, damit die Tasterspitze nicht über die Kante fährt. Beim Ausführen rechnet er Z pro Segment ein und teilt lange Linien auf. Die Z-Achse (max. 9 mm/s) begrenzt, wie schnell die Höhe nachgeführt werden kann.
+5. **Taster nur auf Material.** Messpunkte, bei denen die versetzte Tasterspitze (X −23 / Y +15 mm) außerhalb des Werkstücks oder über Löchern läge, werden übersprungen und nie angefahren. Abtastung immer mit abgeschaltetem Laser.
+6. **Live-Status und Kopplung.** Für das Tablet braucht der Pi eine Push-Verbindung (WebSocket/SSE) statt Abfragen und vor dem WLAN-Einsatz eine Gerätekopplung (heute kein Zugangsschutz).
+7. **Kamera.** Aufnahme und Kachel-Scan gehören auf den Pi (fester Z, bekannte Positionen), das Zusammensetzen ebenfalls. Studio zeigt das Ergebnis maßgenau an. Die vorhandene Homographie-Kalibrierung (`camera-calibration-core.mjs`) ist der Startpunkt. Offen: Kameramodell und Anschluss (USB oder CSI).
+
+Reihenfolge: (1) Pi-Kern (Job-Format, Streaming-Messung, Live-Status, Pause/Abbruch, Kopplung) → (2) Studio als Hauptwerkzeug (Graustufen mit Overscan, Materialbibliothek, Vorschau mit Zeit, Text, SVG/DXF/PDF) → (3) Kamera-Scan → (4) Objekterkennung und Bereichs-Abtastung mit Mesh → (5) Tablet-Build.

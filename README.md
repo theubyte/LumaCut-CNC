@@ -1,101 +1,66 @@
-> **NEU: Experimental Marlin migration (25.10.2026).** Das SKR Mini MZ kann alternativ natives Marlin 2.1.2.9 erhalten. Ein eigenständiges Pi400-Webinterface + Marlin-USB/TCP-LightBurn-Gateway wird unter `pi400/marlin/` gebaut. **Noch nicht an echter Laserhardware getestet; nicht als sichere Laserfreigabe verwenden.** Flashen und Port-Umstellung erfolgen nur nach verifizierter Elektrik und Bootloader. Alle Schritte: [Marlin Migration](docs/PI400_MARLIN_MIGRATION.md). Die bestehende grblHAL-Steuerung bleibt als separater Rückfallzweig im Repository.\n\n> **PINBELEGUNG GEÄNDERT (25.10.2026):** Experimenteller neuer Build: FAN1/PC7 = Laserleistung, PA1 = PWM, BED/PC9 = Abluft M8, HE0/PC8 = Licht M7, FAN0/PC6 = Service-Zusatzausgang. Alte BED-Laser-/FAN0-Abluft-Anleitungen gelten für den neuen Build **nicht**. Eine direkte PWM-Verbindung zu einem auf FAN1− geschalteten Laser ist elektrisch nicht freigegeben. Siehe [FAN1-LASER Integration](docs/FAN1_LASER_PI400_RELEASE.md). Automatischer SKR-Flash über USB fehlt weiterhin.\n\n# LumaCut CNC · Raspberry Pi 400 Control Studio
+# LumaCut CNC
 
-**Aktive Architektur (Oktober 2026): Raspberry Pi 400 ohne Display
-als zentraler Webserver und LightBurn-GRBL-Gateway.**
+Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrechner, BTT SKR Mini MZ V1.0 mit Marlin 2.1.2.9 als Bewegungs- und Lasercontroller, dazu die eigene Software **LumaCut Studio** (Windows, später Android-Tablet). Ziel ist, LightBurn vollständig abzulösen.
 
-```text
-Handy / PC  ───────┐
-                   ├── Pi 400 Control Studio (HTTP 8080)
-LightBurn (GRBL) ──┘   TCP 23 → USB serial → grblHAL SKR Mini MZ V1.0
-                                           ├─ XYZ + Z20 pre-XY homing
-                                           ├─ PA1 Laser-PWM
-                                           ├─ BED PC9 Laser-24V-Schalter
-                                           ├─ HE0 PC8 24V-LEDs (M7)
-                                           ├─ FAN0 PC6 24V-Abluft (M8)
-                                           └─ FAN1 PC7 konfigurierbarer Ausgang ($LCIO)
-Pi 400 Camera ────> Control Studio (JPEG snapshot)
+```
+ LumaCut Studio (Windows / Tablet)        Browser
+            │  HTTP :8080 (Pi-API)           │
+            ▼                                ▼
+ ┌────────────────── Raspberry Pi 400 ──────────────────┐
+ │ pi400/marlin: Web-UI + API, Sicherheitsregeln,       │
+ │ Homing/Abtasten/Fokus/Park, Jobausführung,           │
+ │ Firmware-Update des SKR        (TCP :23 für LightBurn,│
+ │                                 nur Übergangsphase)   │
+ └───────────────────────┬──────────────────────────────┘
+                         │ USB (eine Zeile, ein "ok")
+                         ▼
+        BTT SKR Mini MZ V1.0 · Marlin 2.1.2.9 (firmware/marlin)
+        X/Y/Z-Motoren · Endschalter · Z-Taster · Laser PWM · Licht · Abluft
 ```
 
-Das Waveshare-ESP32-S3-HMI wird **nicht mehr benötigt**. Seine
-Quellcode-Historie bleibt als Archiv unter `firmware/hmi` erhalten.
-Keine doppelte LightBurn-USB-/UART-Gateway-Verbindung mehr.
+**Der Pi ist die einzige Stelle, die die Maschine kennt.** Safezone, Homing-Reihenfolge, Z-Untergrenze, Fokus und Laser-Freigaben werden dort durchgesetzt, egal ob ein Befehl aus Studio, dem Browser oder LightBurn kommt.
 
-## Control OS Service Studio
+## Verbindliche Abläufe
 
-In dieser Entwicklungsfassung kann der Raspberry Pi 400 über
-`http://lumacut.local:8080/service` als zentrale Bedien- und
-Konfigurationsinstanz betrieben werden. Separate Service-Anmeldung
-(Erstpasswort `lumaservice`, lokal gehasht, 10-minütige Sitzung),
-echte SKR-Diagnose, GRBL-Konfigurationskonsole und konfliktgeprüfte
-logische M7/M8-Zubehörbelegung sowie der dedizierte PC7/FAN1-Ausgang mit $LCIO-Zustandsrückmeldung sind implementiert.
+- Homing: **X/Y zuerst**, dann Z, dann Rückzug auf 20 mm (einstellbar).
+- 30-mm-Safezone in L-Form (X < 30 oder Y < 30) bleibt werkstückfrei; Schnitte nur bei X ≥ 30 und Y ≥ 30. Parkpunkt X0/Y0.
+- Werkstückoberfläche per G30 mit dem Z-Taster; Fokus standardmäßig 7 mm über dem Material.
+- Laser: PA1 PWM, Marlin `M3 I` (Inline-Modus), S 0–255. Licht `M7` (HE0/PC8), Abluft `M8` (BED/PC9).
+- Motor-Melodien nach erfolgreichem Homing und nach Jobende.
+- Ein-Klick-Ablauf: Homing → Abtasten → Fokus → Auftrag → Park.
 
-**Das ist noch keine vollständige, dynamische physische STM32-Pinbelegung.**
-Die Echtzeitsteuerung läuft weiterhin im grblHAL-Build des SKR.
-Hardwaretest, unabhängige Laser-Interlocks und automatisches SKR-Flashing
-sind nicht abgeschlossen. Status und offene Schritte:
-[Pi400 Control OS 2](docs/PI400_CONTROL_OS_2.md).
+## Repository
 
-## Installation Raspberry Pi 400
+| Pfad | Inhalt |
+|---|---|
+| `pi400/marlin/` | Pi-Dienst: `transport.py` (USB-Protokoll, Sicherheitsregeln, Homing/G30/Park), `web.py` + `index.html` (Web-UI/API), `firmware_flash.py` (SKR-Update über USB), `smart_cam.py` (Motivgrenzen) |
+| `pi400/install.sh`, `update.sh`, `recover.sh` | Erstinstallation, nächtliches Auto-Update, Wiederherstellung |
+| `firmware/marlin/build.py` | Reproduzierbarer Marlin-Build mit allen LumaCut-Anpassungen |
+| `software/lumacut-studio/` | LumaCut Studio (Tauri 2, Windows; Android geplant) |
+| `tests/` | Python-Tests für Pi-Dienst und Firmware-Update (ohne Hardware) |
+| `docs/` | Maschine, Pi-Betrieb, Firmware, Entwicklung, Studio-Plan |
 
-**[Komplette Pi400-Einrichtung, Netzwerk, LightBurn und Updates](docs/PI400_CONTROL_STUDIO.md)**.
+## Dokumentation
 
-Mit Raspberry Pi OS Lite 64-Bit und Repository-Zugriff:
+- [docs/MASCHINE.md](docs/MASCHINE.md) – Hardware, Belegung, Koordinaten, Kalibrierwerte
+- [docs/PI_BETRIEB.md](docs/PI_BETRIEB.md) – Installation, Updates, Bedienung, API, Fehlersuche
+- [docs/FIRMWARE.md](docs/FIRMWARE.md) – Marlin-Build, Flashen über den Pi, Marlin-Besonderheiten
+- [docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md) – Tests, CI, Arbeitsweise, Stolperfallen
+- [docs/LUMACUT_STUDIO_PLAN_2026-10-25.md](docs/LUMACUT_STUDIO_PLAN_2026-10-25.md) – Ziel und Fahrplan für Studio
+- [CHANGELOG.md](CHANGELOG.md) – Was wann warum geändert wurde
+
+## Schnellstart
 
 ```bash
-git clone --branch main https://github.com/theubyte/LumaCut-CNC.git
-cd LumaCut-CNC
-sudo bash pi400/install.sh
+# Pi neu aufsetzen (Raspberry Pi OS 64-bit)
+git clone https://github.com/theubyte/LumaCut-CNC.git
+sudo bash LumaCut-CNC/pi400/install.sh
 ```
 
-Danach im LAN `http://lumacut.local:8080` (HMI-Code vom
-Installationsskript eingeben). In LightBurn manuell **GRBL → Network**
-mit Pi-IP/`lumacut.local`, **Port 23**, einrichten. LightBurn Bridge
-im offiziellen Sinne ist ausschließlich für Ruida und deshalb hier
-kein Teil der Installation.
+Web-UI danach unter `http://lumacut.local:8080`. Weitere Updates holt sich der Pi jede Nacht selbst von `main`.
 
-**Achtung:** Der SKR muss die native USB-grblHAL-Firmware
-`lumacut_skr_mz_usb` erhalten, nicht die frühere
-`lumacut_skr_mz_hmi_uart`-Version. Falls der STM32 nur UART-GrblHAL
-hat, findet der Pi noch keinen GRBL-USB-Port.
+## Arbeitsweise
 
-**Automatische Pi-Softwareupdates:** `pi400/update.sh` mit
-`lumacut-update.timer`. Das öffentliche Repository kann per HTTPS
-aktualisiert werden. Read-only SSH-Deploy-Keys sind nur bei privaten Repositories erforderlich.
+Alles läuft auf `main`. Jede Commit-Message erklärt **was** geändert wurde und **warum**. Hardware-Befunde (Logs, Messwerte, Marlin-Quelltextstellen) gehören in die Commit-Message oder die Doku, damit die Entscheidung später nachvollziehbar bleibt.
 
-**Automatisches SKR-Firmwareflashen ist USB-only noch nicht
-hardwareverifiziert**. Neue Firmware-Binaries werden vom Buildserver
-als Paket geliefert; Installation via vorhandenem SD-/SWD-Bootloader,
-bis ein geeigneter Programmierweg nachgewiesen ist.
-
-## Builds und Tests
-
-- GitHub CI: [Pi 400 + SKR USB](https://github.com/theubyte/LumaCut-CNC/actions/workflows/ci.yml)
-- Unraid-Compiler: `https://luma.millione.de/`, Hauptoption
-  **Pi 400 + SKR USB**, erstellt LumaCut-Pi400-SKR-USB.zip.
-- SKR-Build: `python firmware/skr/build.py`.
-- Webserver: `python -m lumacut.app` mit
-  `PYTHONPATH=pi400` und `LUMACUT_KEY` Umgebungsvariablen.
-- Tests: `python -m unittest discover -s tests -v`.
-
-## Bedienumfang
-
-Responsive Webinterface mit Maschinenstatus, GRBL-Einstellungen,
-X/Y/Z-Jog, Homing, G-Code-Dateien, Parkplätzen, Fokus, offset-korrektem
-Werkstückraster (noch keine gemessene Höhenkarte), LEDs/Abluft,
-Router-WLAN-Auswahl, Kamera-Schnappschuss, LightBurn-Verbindung und
-Verbindungs-/Spamdiagnose. GRBL-Echtzeit-Status für die Webanzeige
-bleibt vom LightBurn-TCP-Stream getrennt. Der Pi leitet LightBurn
-`ok`, `error`, `ALARM`, `$`, `$I` und hosteigene
-`?`-Antworten zuverlässig weiter. Kritische Einstellungen sowie
-`$LCIO`/freie digitale I/O-Befehle sind über den ungeschützten
-LightBurn-TCP-Kanal gesperrt und nur über die Service-Schnittstelle zulässig.
-Die Pi-Oberfläche enthält außerdem einen G-Code-Geometrieanalysator
-mit Kreisbogen- und Auftragsvorschau.
-
-**Hardware-Status:** Software-Builds ersetzen keine Inbetriebnahme
-am realen Pi/SKR. Laserleistung für Ersttests physisch abschalten.
-Die externe Not-Aus-/Gehäuse-Schutzkette darf nicht durch die
-Websteuerung ersetzt werden.
-
-Alte Waveshare-Dokumentation: `docs/LUMACUT_CONTROL_OS.md`.
-24V-Laser/BED-Verdrahtung: `docs/24V_AUSGAENGE_LASER_LED_ABLUFT.md`.
+> Sicherheit: Die Software-Sperren ersetzen keinen Hardware-Not-Aus und keine Laserschutzmaßnahmen. Laser nie unbeaufsichtigt betreiben.
