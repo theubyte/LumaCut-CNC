@@ -525,10 +525,15 @@ def do_action(op):
     if op in ("home", "enablehome"):
         require_free()
         result = run_commands(["$H" if op == "home" else "$22=1"], timeout=150)
-        if op == "home" and config["focus"].get("auto") and controller.homed:
-            # SKR has already retracted Z before XY; Pi performs only the
-            # additional operator-configurable final clearance.
-            result += " · " + do_action("zlift")
+        if op == "home":
+            # GRBL may ACK $H before the next automatic status poll reports
+            # Idle. Do not attempt post-home Z clearance in the last
+            # observed <Home> state; wait for fresh controller confirmation.
+            controller.wait_for_idle_after_homing(timeout=15.0)
+            if config["focus"].get("auto") and controller.homed:
+                # The SKR already performs its Z clearance before XY.
+                # If this equals the configured target, zlift is a no-op.
+                result += " · " + do_action("zlift")
         return result
     if op == "toggleAutoLift":
         with config_lock:
