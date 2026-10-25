@@ -32,12 +32,13 @@ jobs:
           node --check job-planner.mjs
           node --check raster-planner.mjs
           node --check unified-job.mjs
-          node --test geometry.test.mjs job-planner.test.mjs raster-planner.test.mjs unified-job.test.mjs unified-export.test.mjs packaging.test.mjs
+          node --check marlin-postprocessor.mjs
+          node --test geometry.test.mjs job-planner.test.mjs raster-planner.test.mjs unified-job.test.mjs unified-export.test.mjs packaging.test.mjs marlin-postprocessor.test.mjs
       - name: Prepare frontend distribution
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item index.html, studio.js, advanced.js, design.css, job-planner.mjs, raster-planner.mjs, unified-job.mjs -Destination dist
+          Copy-Item index.html, studio.js, advanced.js, design.css, job-planner.mjs, raster-planner.mjs, unified-job.mjs, marlin-postprocessor.mjs -Destination dist
       - name: Generate Windows application icons
         run: npx tauri icon assets/icon.svg
       - name: Build Windows NSIS installer
