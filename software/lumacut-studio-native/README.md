@@ -65,32 +65,41 @@ in eigenen Threads, `panel.py` Oberfläche, `settings.py` Einstellungen).
   im Klartext – wer das nicht will, nutzt `LUMACUT_KEY`).
 
 **Statusanzeige** (farbig): Verbindung (getrennt / verbinde / verbunden /
-Fehler / Schlüssel abgelehnt), SKR-USB, X/Y/Z, Homed, Laser (scharf/aus),
-Besitzer, Fokus-Z, Auftrag mit Fortschritt (Zeile/Gesamt), letzter Fehler.
-Der Status wird jede Sekunde im Hintergrund abgefragt; die Oberfläche
-blockiert nie.
+Fehler / Schlüssel abgelehnt), SKR-USB, X/Y/Z, Homed, Laser (aktiv / aus /
+unbekannt), Besitzer, Fokus-Z, Auftrag mit Fortschritt (Zeile/Gesamt),
+letzter Fehler. Der Status wird jede Sekunde im Hintergrund abgefragt, und
+die Oberfläche blockiert nie. Ist der letzte gute Status älter als 3 s (der Pi
+antwortet während Home/Park/Abtasten erst danach), zeigt das Badge „Status
+N s alt“, und alle Knöpfe außer NOT-AUS sind gesperrt.
 
 **Bedienung → API**
 
 | Knopf | Anfrage |
 | --- | --- |
-| NOT-AUS (Panel, Toolbar, Taste *Pause*) | `POST /api/action op=estop` – eigener Thread, auch während Home/Probe und ohne Verbindung |
-| Notstopp quittieren | `op=estop_reset` |
+| NOT-AUS (Panel, Toolbar, Taste *Pause*) | `POST /api/action op=estop`: eigener Thread, 3 s pro Versuch, bis zu 3 Versuche bei Netzfehlern, auch während Home/Probe und ohne Verbindung; Rückmeldung „bestätigt“ / „NICHT bestätigt“ unter dem Knopf |
+| Notstopp quittieren | `op=estop_reset` (mit Rückfrage; danach neu referenzieren) |
 | Home | `op=home` |
 | Jog X±/Y±/Z± | `op=jog axis=X\|Y\|Z distance=±0.1\|1\|10` (nur gehomed) |
 | Fokus (G30) | `op=probe` – Pi merkt sich die Oberfläche und fährt vor dem ersten Laserstrich selbst auf Fokushöhe |
-| Park | `op=park` (siehe Hinweis) |
+| Park | `op=park`: Laser aus, Z-Rückzug, X0/Y0 (nur gehomed) |
 | Senden | `POST /api/upload` (multipart `file`, .gcode/.gc/.nc, max. 32 MB) |
 | Starten / Ein-Klick | `op=start name=…` / `op=autorun name=…` (mit Rückfrage) |
 | Abbrechen | `op=abort` |
 
 Fehler des Pi (`{"error": …}`) erscheinen im Panel unter „Letzte Meldung“.
 
+Alle Aufrufe mit Payload, Antwortfeldern, Fehlercodes und Zeitlimits, dazu
+Zustandsautomat, NOT-AUS-Verhalten und Einstellungen:
+**[docs/MACHINE_API.md](docs/MACHINE_API.md)**.
+
 **Hinweise / offene Punkte im Pi-Dienst**
 - Der Pi prüft `X-LumaCut-Key` derzeit nicht. Die App sendet ihn trotzdem und
   zeigt HTTP 401/403 als „Schlüssel abgelehnt“ an, sobald der Pi ihn prüft.
-- `op=park` gibt es in `web.py` noch nicht (Parken läuft nur am Auftragsende).
-  Bis dahin meldet die App das klar statt still zu scheitern.
+- `op=park` ist jetzt in `pi400/marlin/web.py` enthalten. Ein älterer
+  Pi-Dienst meldet „bietet noch kein Parken über die API“, bis er
+  aktualisiert ist.
+- `/api/status` wartet auf die Maschinensperre und liefert deshalb während
+  Home/Park/Abtasten keine Live-Position.
 
 ## Kamera-Scan und Höhenmesh
 
