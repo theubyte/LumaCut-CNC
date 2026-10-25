@@ -31,7 +31,7 @@ def patch(text):
     # The E3 V2 shares SKR MZ X/Y/Z STEP/DIR/ENABLE, limits,
     # PC10/PC11 Trinamic UART and USB PA14 pull-up gate.
     # MZ PC8/PC9 are heater MOSFETs: PC8 drives M7 cabinet LEDs;
-    # PC9 drives the BED low-side LaserTree 24V supply under spindle enable.
+    # PC9 drives M8 exhaust on BED; PC7 FAN1 gates laser supply.
     # Neither PC8 nor PC9 is a 24V-capable *logic* GPIO.
     text=change(text,
         '#define BOARD_NAME "BTT SKR MINI E3 V2.0"',
@@ -44,35 +44,35 @@ def patch(text):
         '// MZ: do not assign PC6 twice (used as fan/coolant)')
     text=change(text,
         '#define AUXOUTPUT2_PORT         GPIOC // Spindle enable\n#define AUXOUTPUT2_PIN          7',
-        '#define AUXOUTPUT2_PORT         GPIOC // MZ BED MOSFET: laser supply enable (LOW-SIDE)\n'
-        '#define AUXOUTPUT2_PIN          9')
+        '#define AUXOUTPUT2_PORT         GPIOC // MZ FAN1 MOSFET: laser supply enable (LOW-SIDE)\n'
+        '#define AUXOUTPUT2_PIN          7')
     text=change(text,
         '#define AUXOUTPUT3_PORT         GPIOC // Coolant flood\n#define AUXOUTPUT3_PIN          8',
-        '#define AUXOUTPUT3_PORT         GPIOC // MZ FAN0, flood\n#define AUXOUTPUT3_PIN          6')
+        '#define AUXOUTPUT3_PORT         GPIOC // MZ BED, flood/exhaust\n#define AUXOUTPUT3_PIN          9')
     text=change(text,
         '#define AUXOUTPUT4_PORT         GPIOC // Coolant mist\n#define AUXOUTPUT4_PIN          9',
         '#define AUXOUTPUT4_PORT         GPIOC // LumaCut HE0 PC8 24V LEDs, grblHAL M7 mist\n'
         '#define AUXOUTPUT4_PIN          8')
-    # Only FAN1/PC7 is currently unclaimed by motion, limits or spindle.
+    # Only FAN0/PC6 remains free of spindle, motion and limits.
     # Advertise this distinct MOSFET through grblHAL's Aux Output GPIO API.
     text=change(text,
         '#define AUXOUTPUT4_PIN          8',
         '#define AUXOUTPUT4_PIN          8\n'
-        '#define AUXOUTPUT5_PORT         GPIOC // FAN1 PC7 spare MOSFET\n'
-        '#define AUXOUTPUT5_PIN          7')
-    # PC9 BED now directly switches the laser module's 24V negative return.
-    # PC7 FAN1 is an auxiliary output; PC6 FAN0 drives M8 exhaust.
-    # A LOW-SIDE BED switch lifts LaserTree GND in OFF state. Therefore the
+        '#define AUXOUTPUT5_PORT         GPIOC // FAN0 PC6 spare MOSFET\n'
+        '#define AUXOUTPUT5_PIN          6')
+    # PC7 FAN1 now directly switches the laser module's 24V negative return.
+    # PC6 FAN0 is an auxiliary output; PC9 BED drives M8 exhaust.
+    # A LOW-SIDE FAN1 switch lifts LaserTree GND in OFF state. Therefore the
     # laser PWM driver must have galvanic isolation and its secondary must
-    # reference laser-side GND (BED-), not the SKR/system GND.
+    # reference laser-side GND (FAN1-), not the SKR/system GND.
     # If the laser casing is bonded to system ground, the MOSFET could be
     # bypassed; check with power disconnected before use. Never wire PA1
     # straight to the floating laser PWM pin.
     for expected in ('#define AUXOUTPUT0_PIN          1',
-                     '#define AUXOUTPUT2_PIN          9',
-                     '#define AUXOUTPUT3_PIN          6',
+                     '#define AUXOUTPUT2_PIN          7',
+                     '#define AUXOUTPUT3_PIN          9',
                      '#define AUXOUTPUT4_PIN          8',
-                     '#define AUXOUTPUT5_PIN          7',
+                     '#define AUXOUTPUT5_PIN          6',
                      '#define AUXINPUT2_PIN           14',
                      '#define Z_LIMIT_PIN             2'):
         if expected not in text: raise RuntimeError("Required pin not found: "+expected)
@@ -178,7 +178,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
                 SPINDLE_PWM_TIMER_CCR = spindle->context.pwm->pwm_overdrive;
         } else
             pwm_off(spindle);"""
-        retain_block="""#ifdef LUMACUT_BED_SPINDLE_POWER
+        retain_block="""#ifdef LUMACUT_FAN1_SPINDLE_POWER
         // Never power-cycle the module's internal fan for each S0 traverse.
         // PWM is off but BED remains energized until the explicit M5.
         pwm_off(spindle);
@@ -194,7 +194,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
             spindle_on(spindle);
             spindleSetSpeed(spindle, spindle->context.pwm->compute_value(spindle->context.pwm, rpm, false));
         }"""
-        standby_block="""#ifdef LUMACUT_BED_SPINDLE_POWER
+        standby_block="""#ifdef LUMACUT_FAN1_SPINDLE_POWER
         if(rpm == 0.0f && spindle->context.pwm->flags.rpm_controlled) {
             // M3 S0 powers BED/laser fan without firing the laser.
             // The matched LightBurn profile waits before nonzero PWM.
@@ -216,7 +216,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
         pwm_off(spindle);
     } else {"""
         safer_off="""    if(!(spindle->context.pwm->flags.cloned ? state.ccw : state.on)) {
-#ifdef LUMACUT_BED_SPINDLE_POWER
+#ifdef LUMACUT_FAN1_SPINDLE_POWER
         pwm_off(spindle);
         spindle_off(spindle);
 #else
@@ -232,15 +232,15 @@ extern status_code_t limits_lumacut_z_clearance (void);
         # PC7/FAN1 is the only spare controllable MOSFET; all other pins are
         # reserved for stepper timing, limits, laser or primary accessories.
         command_hook = 'static status_code_t jtag_enable (sys_state_t state, char *args)'
-        pc7_cmd = r"""#ifdef LUMACUT_PC7_IO
+        pc6_cmd = r"""#ifdef LUMACUT_PC6_IO
 // Dedicated Pi<->SKR GPIO protocol. This is NOT a general STM32 pinmux.
-// Only the spare FAN1/PC7 MOSFET is exposed, and high-power wiring still
+// Only the spare FAN0/PC6 MOSFET is exposed, and high-power wiring still
 // requires separate physical validation.
 static status_code_t lumacut_pc7_io (sys_state_t state, char *args)
 {
     if(args == NULL) {
-        hal.stream.write((GPIOC->ODR & (1U << 7)) ? "[LCIO:PC7=1]\r\n"
-                                               : "[LCIO:PC7=0]\r\n");
+        hal.stream.write((GPIOC->ODR & (1U << 6)) ? "[LCIO:PC6=1]\r\n"
+                                               : "[LCIO:PC6=0]\r\n");
         return Status_OK;
     }
     if(args[1] != '\0' || (args[0] != '0' && args[0] != '1'))
@@ -249,9 +249,9 @@ static status_code_t lumacut_pc7_io (sys_state_t state, char *args)
         return Status_IdleError;
     // Deenergizing the spare output is always permitted.
     if(args[0] == '1')
-        GPIOC->BSRR = 1U << 7;
+        GPIOC->BSRR = 1U << 6;
     else
-        GPIOC->BRR = 1U << 7;
+        GPIOC->BRR = 1U << 6;
     return Status_OK;
 }
 #endif
@@ -259,22 +259,22 @@ static status_code_t lumacut_pc7_io (sys_state_t state, char *args)
 """
         if original.count(command_hook) != 1:
             raise RuntimeError("grblHAL system-command hook changed")
-        original = original.replace(command_hook, pc7_cmd + command_hook, 1)
+        original = original.replace(command_hook, pc6_cmd + command_hook, 1)
         bootstrap = '    static const sys_command_t boot_command_list[] = {'
         if original.count(bootstrap) != 1:
             raise RuntimeError("grblHAL command table changed")
         original = original.replace(bootstrap, bootstrap + r"""
-#ifdef LUMACUT_PC7_IO
-        {"LCIO", lumacut_pc7_io, { .allow_blocking = On }, { .str = "LumaCut PC7 FAN1 I/O: query or =0/1" } },
+#ifdef LUMACUT_PC6_IO
+        {"LCIO", lumacut_pc7_io, { .allow_blocking = On }, { .str = "LumaCut PC6 FAN0 I/O: query or =0/1" } },
 #endif
 """, 1)
         init_marker = ' // Stepper init'
         if original.count(init_marker) != 1:
             raise RuntimeError("grblHAL driver setup marker changed")
         original = original.replace(init_marker, r"""
-#ifdef LUMACUT_PC7_IO
+#ifdef LUMACUT_PC6_IO
     // Power-on default is OFF. Hardware pulldown remains mandatory.
-    GPIOC->BRR = 1U << 7;
+    GPIOC->BRR = 1U << 6;
 #endif
 
 """ + init_marker, 1)
@@ -325,8 +325,8 @@ static status_code_t lumacut_pc7_io (sys_state_t state, char *args)
             h.write("  -D DEFAULT_HOMING_ENABLE=1\n")
             h.write("  -D DEFAULT_HOMING_SINGLE_AXIS_COMMANDS=1\n")
             h.write("  -D LUMACUT_SAFE_Z20=1\n")
-            h.write("  -D LUMACUT_BED_SPINDLE_POWER=1\n")
-            h.write("  -D LUMACUT_PC7_IO=1\n")
+            h.write("  -D LUMACUT_FAN1_SPINDLE_POWER=1\n")
+            h.write("  -D LUMACUT_PC6_IO=1\n")
 
         run("pio","run","-e",env,cwd=root,timeout=1500)
         generated=root/".pio"/"build"/env
