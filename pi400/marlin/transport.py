@@ -44,6 +44,8 @@ class MarlinLaserGuard:
             return ""
         if not cmd.isascii() or len(cmd) > 96:
             raise ValueError("G-Code überschreitet Marlin-Limit von 96 Zeichen")
+        if cmd == "G20":
+            raise ValueError("Z-Sicherheitsgrenze benötigt Millimeter, G20 gesperrt")
         if cmd.startswith(("$", "?", "!", "~")):
             raise ValueError("GRBL-Befehl am Marlin-Controller nicht zulässig")
         # Allow only known laser motion, harmless queries and lighting/exhaust.
@@ -323,6 +325,8 @@ class MarlinTransport:
                 normalized = self.guard.check(normalized, self.homing_verified)
             if not normalized:
                 return []
+            if normalized == "M3 I" and self.surface_z is None:
+                raise RuntimeError("Werkstückkontakt fehlt: Z-Taster auf Material referenzieren")
             motion = re.match(r"^G0?[0123](?:\s|$)", normalized) is not None
             if (motion or normalized == "M3 I") and not self.homed:
                 raise RuntimeError("SKR erst Z-sicher und vollständig referenzieren")
@@ -346,7 +350,6 @@ class MarlinTransport:
                     self.absolute_mode = False
                 if normalized.startswith("M3 I"):
                     self.laser_enabled = True  # PWM stays at zero until G1 S
-                    self.focused_this_job = False
                 if normalized.startswith("M5"):
                     self.laser_enabled = False
                     if self.fan_power:
@@ -492,6 +495,7 @@ class MarlinTransport:
             self.lightburn_clients += 1
             self.client = client
             self.guard = MarlinLaserGuard()
+            self.focused_this_job = False
         fragment = bytearray()
         try:
             # Line-by-line ACK backpressure. Never send blind batches to a
