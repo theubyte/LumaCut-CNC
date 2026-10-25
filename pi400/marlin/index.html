@@ -76,7 +76,7 @@ label{font-size:13px;color:#bcd2e4}
 <section class="card">
 <h2>Direktsteuerung</h2>
 <p>Fahrbefehle sind gesperrt, während LightBurn oder ein Pi-Auftrag die Maschine steuert.</p>
-<div class="hint">LightBurn „Referenzieren“ (G28): ZUERST X/Y zur freien Ecke referenzieren, DANACH Maschinenboden als Z=0 setzen und 20 mm anheben. Die gesonderte Werkstückabtastung (G30) bleibt gesperrt, bis ein nicht-nullender Probezyklus und X/Y-Tasterversatz implementiert sind.</div>
+<div class="hint">LightBurn „Referenzieren“ (G28): ZUERST X/Y zur freien Ecke referenzieren, DANACH Maschinenboden als Z=0 setzen und 20 mm anheben. Die gesonderte Werkstückabtastung (G30) benutzt den Marlin-Z-Taster nach dem Einrichten der X/Y-Tasterversätze und verändert Maschinen-Z=0 nicht.</div>
 <div class="two"><button class="primary" data-action="home" data-motion>XYZ referenzieren (X/Y zuerst)</button>
 <button class="danger" id="stop">Software-Notstopp M112</button></div>
 <div class="space"></div>
@@ -108,6 +108,11 @@ label{font-size:13px;color:#bcd2e4}
 <label>Fokusabstand Laserspitze → Werkstück (mm)
 <input id="focusGap" type="number" min="0.1" max="30" step="0.1" value="7" required></label>
 </div>
+<div class="two">
+<label>Taster relativ zum Laserpunkt X (mm; mit Vorzeichen)<input id="probeX" type="number" min="-80" max="80" step="0.1" placeholder="Kalibrieren" required></label>
+<label>Taster relativ zum Laserpunkt Y (mm; mit Vorzeichen)<input id="probeY" type="number" min="-80" max="80" step="0.1" placeholder="Kalibrieren" required></label>
+</div>
+<p class="muted">Gemessen vom Laserpunkt zur Tastspitze entlang der Maschinenachsen: z. B. X+23 bedeutet Tastspitze 23 mm in +X-Richtung. Vorzeichen vor G30 kontrollieren.</p>
 <div class="metric" style="margin-top:12px"><small>Geschätzter Abstand Spitze → Referenzfläche</small><strong id="tipGap">—</strong></div>
 <div class="metric" style="margin-top:10px"><small>Geschätzte Z-Korrektur bis Fokus (nur Anzeige)</small><strong id="focusAdjust">—</strong></div>
 <p class="muted">Nur mit bestätigter Werkstückabtastung: Der Pi setzt vor der ersten G1-Laserbewegung den Fokus. Harte untere Z-Grenze: Oberfläche + 2 mm Tastabstand. Beispiel bei Z=0 und Offset 1,5 mm: Fokus Z=5,5 mm, tiefster zulässiger Z-Wert 2,0 mm.</p>
@@ -199,7 +204,7 @@ function refreshUI(s){
  $("homed").textContent=s.homed?"JA":"NEIN";
  $("board").textContent=s.identity||"Keine gültige LumaCut-Marlin-Kennung vom SKR";
  const zCfg=s.config||{};
- for(const [id,name] of [["zOffset","z_switch_tip_offset_mm"],["zClearance","z_clearance_mm"],["focusGap","focus_gap_mm"]]){
+ for(const [id,name] of [["zOffset","z_switch_tip_offset_mm"],["zClearance","z_clearance_mm"],["focusGap","focus_gap_mm"],["probeX","probe_offset_x_mm"],["probeY","probe_offset_y_mm"]]){
    const input=$(id);
    if(document.activeElement!==input && zCfg[name]!==undefined)
      input.value=String(zCfg[name]);
@@ -256,7 +261,9 @@ $("zSettings").onsubmit=async ev=>{
  const body=param({
   z_switch_tip_offset_mm:$("zOffset").value,
   z_clearance_mm:$("zClearance").value,
-  focus_gap_mm:$("focusGap").value
+  focus_gap_mm:$("focusGap").value,
+  probe_offset_x_mm:$("probeX").value,
+  probe_offset_y_mm:$("probeY").value
  });
  try{
   const result=await api("/api/settings",{method:"POST",body});
