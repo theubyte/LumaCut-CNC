@@ -48,8 +48,11 @@ class MarlinLaserGuard:
             raise ValueError("GRBL-Befehl am Marlin-Controller nicht zulässig")
         if any(x in cmd for x in ("M42", "M500", "M502", "M997", "M303", "M104", "M140")):
             raise ValueError("Hardware-/Druckerfunktion in Laserjobs gesperrt")
-        words = WORD.findall(cmd)
-        if not words or WORD.sub("", cmd).strip():
+        # Marlin treats the I selector as a *bare flag* (M3 I, M5 I).
+        # Recognize that spelling without turning it into a GRBL parameter.
+        parsed = re.sub(r"(?<![A-Z])I(?=\s|$)", "I1", cmd)
+        words = WORD.findall(parsed)
+        if not words or WORD.sub("", parsed).strip():
             raise ValueError("Nicht unterstützte G-Code-Syntax")
         families = [f"{letter}{int(float(value))}" for letter, value in words
                     if letter in ("G", "M") and float(value).is_integer()]
@@ -256,8 +259,10 @@ class MarlinTransport:
     def emergency_stop(self):
         # Emergency parser can accept M112 during long G-code commands.
         # A hardware E-Stop / power interlock remains essential.
-        with self.lock:
-            serial_port = self.serial
+        # Do not acquire the long-running command lock: a streaming G28
+        # or G1 may be awaiting 'ok'. Marlin's EMERGENCY_PARSER accepts M112
+        # on the input stream while a move is underway.
+        serial_port = self.serial
         if serial_port is not None:
             try:
                 serial_port.write(b"M112\n")
