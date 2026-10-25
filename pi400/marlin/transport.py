@@ -419,10 +419,11 @@ class MarlinTransport:
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
                   probe_contact_confirmed: bool = False):
-        """Execute fail-closed laser-off Z-first homing as one exclusive transaction.
+        """LightBurn G28: home XY first into EMPTY L-shaped 30mm bed zone.
 
-        Do not run generic Marlin G28. Verify switch polarity, positive-Z
-        retract and available Z travel with disconnected laser first.
+        This explicitly relies on the operator keeping the X0/Y0 strips clear
+        of any material, and the physical head/probe travel being collision-free.
+        Unlike the old routine, it never attempts Z before XY are referenced.
         """
         with self.lock:
             if self.owner not in (None, owner):
@@ -442,9 +443,9 @@ class MarlinTransport:
             self.z_homed = False
             self.surface_z = None
             self.focused_this_job = False
-            commands = ("M5 I", "G28 Z", "M400",
-                        "G91", f"G0 Z{clearance:.2f} F360", "G90",
-                        "G28 X Y", "M400", "M114")
+            commands = ("M5 I", "G28 X Y", "M400",
+                        "G28 Z", "M400", "G91",
+                        f"G0 Z{clearance:.2f} F360", "G90", "M400", "M114")
             result = []
             try:
                 for cmd in commands:
@@ -466,6 +467,46 @@ class MarlinTransport:
                 raise
             finally:
                 self.owner = previous_owner
+
+    def park_safezone(self, owner: str = "web"):
+        """LightBurn M2: laser-off, Z retract, then XY park inside keep-out.
+
+        Explicit end-of-job only. M5 I is used for intermediate segments,
+        and MUST NOT trigger a park. Never drive Z downward to park.
+        """
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise RuntimeError("SKR nicht bereit / Notstopp aktiv")
+            if not self.homed:
+                raise RuntimeError("Parken erst nach gültiger XYZ-Referenzfahrt")
+            self._exchange_locked("M5 I", timeout=8)
+            self.laser_enabled = False
+            self.guard.inline = False
+            if self.fan_power:
+                self.fan_off_at = time.monotonic() + self.fan_cooldown_s
+            self._exchange_locked("M400", timeout=30)
+            self._exchange_locked("M114", timeout=8)
+            if self.position is None:
+                raise RuntimeError("Parkhöhe unbekannt: keine Fahrt")
+            # Positive Z is verified upward, and Z_max is currently 90mm.
+            # Current height always wins, to avoid a dangerous downward park.
+            z_target = max(self.position[2], self.clearance_mm,
+                           0.0 if self.surface_z is None else
+                           self.surface_z + self.probe_clearance_mm)
+            if z_target > 90.0:
+                raise RuntimeError("Z-Position außerhalb konfiguriertem Z-Hub")
+            if not self.absolute_mode:
+                self._exchange_locked("G90", timeout=8)
+                self.absolute_mode = True
+            self._exchange_locked(f"G0 Z{z_target:.3f} F360", timeout=45)
+            self._exchange_locked("M400", timeout=45)
+            self._exchange_locked("G0 X15.000 Y15.000 F6000", timeout=90)
+            self._exchange_locked("M400", timeout=90)
+            result = self._exchange_locked("M114", timeout=8)
+            self.focused_this_job = False
+            return result
 
     def probe_workpiece(self, owner: str = "web"):
         """LightBurn G30: currently blocked until a separate *nonzeroing*
@@ -579,6 +620,8 @@ class MarlinTransport:
                                 # Synchronize against Marlin (actual ACK),
                                 # without pretending to support G55+ offsets.
                                 lines = self.command("M400", owner="lightburn", timeout=15)
+                            elif normalized == "M2":
+                                lines = self.park_safezone(owner="lightburn")
                             elif normalized == "G30":
                                 lines = self.probe_workpiece(owner="lightburn")
                             elif normalized.startswith("G28"):
