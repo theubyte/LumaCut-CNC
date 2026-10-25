@@ -17,7 +17,6 @@ set -a
 # shellcheck disable=SC1090
 source "$ENV"
 set +a
-: "${LUMACUT_KEY:?}"
 : "${LUMACUT_SKR:?}"
 echo "LumaCut: Beende bisherigen GRBL-Dienst – kein SKR-Firmwareflash."
 systemctl stop lumacut.service || true
@@ -54,7 +53,7 @@ systemctl disable lumacut.service
 systemctl enable --now lumacut-marlin.service
 ready=0
 for i in $(seq 1 15); do
-  if curl -fsS --max-time 2 -H "X-LumaCut-Key: $LUMACUT_KEY" \
+  if curl -fsS --max-time 2 \
     "http://127.0.0.1:${LUMACUT_HTTP:-8080}/api/status" >/dev/null 2>&1; then
     ready=1
     break
