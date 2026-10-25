@@ -15,6 +15,10 @@ CREATED_LOCK=0
 log(){ printf '[LumaCut updater] %s\n' "$*" >&2; }
 die(){ log "FEHLER: $*"; exit 1; }
 cleanup(){
+  if (( STOPPED_SERVICE )); then
+    log "FEHLERBEHEBUNG: Starte den gestoppten LumaCut-Dienst erneut."
+    systemctl start lumacut.service || true
+  fi
   if (( CREATED_LOCK )); then rm -f "$LOCK"; fi
 }
 recover(){
@@ -94,15 +98,10 @@ git_lumacut diff --quiet || die "Lokale Änderungen vorhanden. Zuerst sichern; k
 git_lumacut diff --cached --quiet || die "Vorgemerkte lokale Änderungen vorhanden. Zuerst sichern."
 ORIGINAL_REV=$(git_lumacut rev-parse HEAD)
 
-log "Aktuelle GitHub-Version abfragen ..."
-if git_lumacut fetch --no-tags origin main; then
-  target=$(git_lumacut rev-parse FETCH_HEAD)
-else
-  log "Origin-Fetch fehlgeschlagen; verwende das öffentliche HTTPS-Repository."
-  git_lumacut fetch --no-tags "$UPSTREAM_PUBLIC" main ||
-    die "GitHub nicht erreichbar. DNS/Netzwerk/Git prüfen."
-  target=$(git_lumacut rev-parse FETCH_HEAD)
-fi
+log "Aktuelle GitHub-Version über HTTPS abfragen (unabhängig vom SSH-Deploy-Key) ..."
+GIT_TERMINAL_PROMPT=0 git_lumacut fetch --no-tags "$UPSTREAM_PUBLIC" main ||
+  die "GitHub über HTTPS nicht erreichbar. DNS/Netzwerk/Zertifikate/Git prüfen."
+target=$(git_lumacut rev-parse FETCH_HEAD)
 log "GitHub-Commit: ${target:0:12}"
 if [[ "$ORIGINAL_REV" == "$target" ]]; then
   log "Bereits aktuell. Keine Änderung notwendig."
