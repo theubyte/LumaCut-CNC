@@ -144,6 +144,14 @@ class MarlinTransport:
         self.laser_enabled = False
         self.fan_power = False
         self.fan_cooldown_s = 180
+        # A workpiece contact probe must explicitly establish surface_z.
+        # Positive machine Z must point AWAY from the material.
+        self.surface_z = None
+        self.probe_tip_offset_mm = 1.5
+        self.focus_gap_mm = 7.0
+        self.probe_clearance_mm = 2.0
+        self.absolute_mode = True
+        self.focused_this_job = False
         self.fan_off_at = None
         self.lights = False
         self.exhaust = False
@@ -168,6 +176,8 @@ class MarlinTransport:
         self.state = "Disconnected"
         self.homed = False
         self.z_homed = False
+        self.surface_z = None
+        self.focused_this_job = False
         self.laser_enabled = False
         self.guard = MarlinLaserGuard()
         self.identity = ""
@@ -238,6 +248,65 @@ class MarlinTransport:
                 self._close_locked(str(exc))
                 raise
 
+    def set_workpiece_surface(self, contact_confirmed: bool, owner: str = "web"):
+        """Declare measured Z position at physical switch contact.
+
+        Only call while switch physically touches the current workpiece;
+        NOT after retracting, nor from a normal machine home.
+        """
+        with self.lock:
+            if self.owner not in (None, owner) or not self.homed:
+                raise RuntimeError("Z-Referenz nur nach XYZ-Homing und ohne Fremdsteuerung")
+            if not contact_confirmed:
+                raise ValueError("Kontakt zur Werkstückoberfläche nicht bestätigt")
+            # Query actual position; no silent inferred zero.
+            self._exchange_locked("M400", timeout=20)
+            self._exchange_locked("M114", timeout=10)
+            if self.position is None:
+                raise RuntimeError("M114 meldet keine gültige Z-Position")
+            self.surface_z = self.position[2]
+            self.focused_this_job = False
+            return self.surface_z
+
+    def _z_move_guard_locked(self, cmd: str):
+        """Prevent tool probe from approaching closer than 2mm to material."""
+        if not re.match(r"^G0?[01](?:\\s|$)", cmd):
+            return
+        coords = {name:float(value) for name,value in WORD.findall(cmd)}
+        if "Z" not in coords:
+            return
+        if self.surface_z is None:
+            raise ValueError("Z-Fahrten nur mit vermessener Werkstückoberfläche erlaubt")
+        self._exchange_locked("M400", timeout=20)
+        self._exchange_locked("M114", timeout=10)
+        if self.position is None:
+            raise RuntimeError("Keine gültige aktuelle Z-Position")
+        target = coords["Z"] if self.absolute_mode else self.position[2] + coords["Z"]
+        minimum = self.surface_z + self.probe_clearance_mm
+        if target < minimum - 0.0001:
+            raise ValueError(
+                f"Z-Sperre: Ziel {target:.3f} mm, Minimum {minimum:.3f} mm "
+                "(2mm Tastabstand). Schneidtiefe begrenzen.")
+
+    def _focus_before_cut_locked(self):
+        if self.focused_this_job:
+            return
+        if self.surface_z is None:
+            raise RuntimeError("Fokus nicht möglich: Werkstückoberfläche nicht abgetastet")
+        goal = self.surface_z + self.focus_gap_mm - self.probe_tip_offset_mm
+        minimum = self.surface_z + self.probe_clearance_mm
+        if goal < minimum:
+            raise ValueError("Fokus würde 2mm Taster-Sicherheitsgrenze unterschreiten")
+        # Focus must precede the first laser-powered move, after LightBurn's
+        # XY positioning rapid. Restrict this to absolute machine Z.
+        self._exchange_locked("M400", timeout=20)
+        self._exchange_locked("G90", timeout=8)
+        self.absolute_mode = True
+        self._exchange_locked(f"G0 Z{goal:.3f} F360", timeout=20)
+        self._exchange_locked("M400", timeout=30)
+        self._exchange_locked("M114", timeout=8)
+        self.focused_this_job = True
+
     def command(self, cmd: str, owner: str = "web",
                 timeout: float = 20.0, use_guard=True):
         with self.lock:
@@ -256,15 +325,26 @@ class MarlinTransport:
             if (motion or normalized == "M3 I") and not self.homed:
                 raise RuntimeError("SKR erst Z-sicher und vollständig referenzieren")
             try:
+                self._z_move_guard_locked(normalized)
                 if normalized == "M3 I":
                     # Independently power cooling fan before laser PWM mode.
                     # PC6 is FAN0/M106, not laser-enable.
                     self._exchange_locked("M106 P0 S255", timeout=8)
                     self.fan_power = True
                     self.fan_off_at = None
+                # Focus on first powered G1, not while traversing XY.
+                if (re.match(r"^G0?1(?:\\s|$)",normalized) and
+                    any(k == "S" and float(v) > 0 for k,v in WORD.findall(normalized)) and
+                    self.laser_enabled and not self.focused_this_job):
+                    self._focus_before_cut_locked()
                 reply = self._exchange_locked(normalized, timeout)
+                if normalized == "G90":
+                    self.absolute_mode = True
+                elif normalized == "G91":
+                    self.absolute_mode = False
                 if normalized.startswith("M3 I"):
                     self.laser_enabled = True  # PWM stays at zero until G1 S
+                    self.focused_this_job = False
                 if normalized.startswith("M5"):
                     self.laser_enabled = False
                     if self.fan_power:
@@ -319,6 +399,8 @@ class MarlinTransport:
             self.owner = owner
             self.homed = False
             self.z_homed = False
+            self.surface_z = None
+            self.focused_this_job = False
             commands = ("M5 I", "G28 Z", "M400",
                         "G91", f"G0 Z{clearance:.2f} F360", "G90",
                         "G28 X Y", "M400", "M114")
@@ -354,6 +436,11 @@ class MarlinTransport:
                 "lights": self.lights, "exhaust": self.exhaust,
                 "laser_armed": self.laser_enabled,
                 "laser_cooling_fan_on": self.fan_power,
+                "workpiece_surface_z": self.surface_z,
+                "probe_minimum_z": (None if self.surface_z is None else
+                                    self.surface_z + self.probe_clearance_mm),
+                "laser_focus_z": (None if self.surface_z is None else
+                                  self.surface_z + self.focus_gap_mm - self.probe_tip_offset_mm),
                 "cooldown_remaining_s": (None if self.fan_off_at is None else
                     max(0, round(self.fan_off_at - time.monotonic()))),
                 "serial_errors": self.serial_errors,
