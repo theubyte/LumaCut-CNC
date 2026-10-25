@@ -138,7 +138,7 @@ class USBProtocolTests(unittest.TestCase):
         self.assertFalse(bridge.homed)
         bridge.homing_verified=True
         bridge.serial=FakeSerial([
-            "ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n",
+            "ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n",
             "X:0 Y:0 Z:20\n", "ok\n"
         ])
         response = bridge.safe_home()
@@ -146,12 +146,12 @@ class USBProtocolTests(unittest.TestCase):
         self.assertTrue(bridge.homed)
         self.assertTrue(bridge.z_homed)
         self.assertEqual(bridge.serial.writes[0], b"M5 I\n")
-        self.assertEqual(bridge.serial.writes[1], b"G28 Z\n")
-        self.assertEqual(bridge.serial.writes[4], b"G0 Z20.00 F360\n")
-        self.assertEqual(bridge.serial.writes[6], b"G28 X Y\n")
+        self.assertEqual(bridge.serial.writes[1], b"G28 X Y\n")
+        self.assertEqual(bridge.serial.writes[3], b"G28 Z\n")
+        self.assertEqual(bridge.serial.writes[6], b"G0 Z20.00 F360\n")
 
     def test_lightburn_g28_has_one_ack_and_real_marlin_usb_sequence(self):
-        responses=["ok\n"] * 8 + ["X:0 Y:0 Z:20\n","ok\n"]
+        responses=["ok\n"] * 9 + ["X:0 Y:0 Z:20\n","ok\n"]
         serial=FakeSerial(responses)
         controller=MarlinTransport("/dev/null")
         controller.serial=serial
@@ -173,6 +173,39 @@ class USBProtocolTests(unittest.TestCase):
         self.assertTrue(controller.homed)
         self.assertEqual(controller.owner,None)
         self.assertTrue(sock.closed)
+
+    def test_park_requires_home_and_moves_z_up_before_xy(self):
+        serial=FakeSerial([
+            "ok\n", "ok\n", "X:60 Y:90 Z:8\n", "ok\n",
+            "ok\n", "ok\n", "ok\n", "ok\n", "X:15 Y:15 Z:20\n", "ok\n",
+        ])
+        ctrl=MarlinTransport("/dev/null")
+        ctrl.serial=serial
+        ctrl.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        with self.assertRaisesRegex(RuntimeError,"gültiger XYZ"):
+            ctrl.park_safezone(owner="lightburn")
+        ctrl.homed=True
+        reply=ctrl.park_safezone(owner="lightburn")
+        self.assertEqual(reply[-1],"ok")
+        writes=serial.writes
+        self.assertEqual(writes[0],b"M5 I\n")
+        self.assertIn(b"G0 Z20.000 F360\n",writes)
+        self.assertIn(b"G0 X15.000 Y15.000 F6000\n",writes)
+        self.assertLess(writes.index(b"G0 Z20.000 F360\n"),
+                        writes.index(b"G0 X15.000 Y15.000 F6000\n"))
+
+    def test_safepark_never_descends_from_current_z(self):
+        serial=FakeSerial([
+            "ok\n","ok\n","X:42 Y:50 Z:35\n","ok\n",
+            "ok\n","ok\n","ok\n","ok\n","X:15 Y:15 Z:35\n","ok\n",
+        ])
+        ctrl=MarlinTransport("/dev/null")
+        ctrl.serial=serial
+        ctrl.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        ctrl.homed=True
+        ctrl.park_safezone(owner="lightburn")
+        self.assertIn(b"G0 Z35.000 F360\n",serial.writes)
+        self.assertNotIn(b"G0 Z20.000 F360\n",serial.writes)
 
     def test_lightburn_marlin_flavor_preamble_with_real_acks(self):
         # LightBurn 2.0.03 prepends a compound G00/G17/G40/G21
