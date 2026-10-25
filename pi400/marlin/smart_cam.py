@@ -72,6 +72,8 @@ def analyze_job(gcode: str, *, origin=(0.0, 0.0)) -> Bounds:
         if 91 in modes: absolute = False
         if any(v in (2,3) for v in modes):
             raise ValueError(f"Line {number}: G2/G3 arc geometry needs dedicated analyzer")
+        if line.startswith("M5"):
+            cutting = False
         if 0 not in modes and 1 not in modes:
             continue
         vals = {k: float(v) for k, v in words if k in ("X","Y","S")}
