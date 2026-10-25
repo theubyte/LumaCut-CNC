@@ -119,8 +119,6 @@ PIN_PATCH = """
 // the FAN1 laser supply return: no direct unsafe shared-ground wiring.
 // Disable Marlin's fan ownership of PC6. The laser enable is the
 // only software-controlled function allowed to use this pin.
-#undef FAN_PIN
-#define FAN_PIN -1
 #undef FAN0_PIN
 #define FAN0_PIN -1
 #undef FAN1_PIN
