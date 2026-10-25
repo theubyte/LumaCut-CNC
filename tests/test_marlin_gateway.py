@@ -234,7 +234,9 @@ class USBProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"Z-Sperre"):
             bridge.command("G0 Z1.9")
         self.assertNotIn(b"G0 Z1.9\n",serial.writes)
-        self.assertEqual(bridge.command("G0 Z2.0")[-1],"ok")
+        # A rejected out-of-bounds move is fail-closed: USB disconnects.
+        self.assertFalse(bridge.status()["connected"])
+        self.assertTrue(serial.closed)
 
     def test_no_laser_before_probing_workpiece(self):
         serial=FakeSerial([])
@@ -297,7 +299,7 @@ class GatewayFilesTests(unittest.TestCase):
         controller.serial=fake
         controller.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
         controller.homing_verified=True
-        with self.assertRaisesRegex(RuntimeError,"vollständig referenzieren"):
+        with self.assertRaisesRegex(RuntimeError,"Werkstückkontakt fehlt"):
             controller.command("M3 I")
         self.assertEqual(fake.writes, [])
 
