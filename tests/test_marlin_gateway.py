@@ -236,16 +236,42 @@ class USBProtocolTests(unittest.TestCase):
         self.assertNotIn(b"M112\n",serial.writes)
         self.assertFalse(controller.emergency_latched)
 
-    def test_lightburn_g30_must_never_rezero_bed_origin(self):
+    def test_native_g30_measures_material_without_rezero(self):
+        # Machine bed Z0 remains untouched; the only Z-probe command
+        # reaching Marlin is G30. X/Y probe offset returns to laser spot.
+        serial=FakeSerial([
+            "ok\n", "ok\n", "X:80 Y:80 Z:20\n", "ok\n",
+            "ok\n", "ok\n",
+            "Bed X: 57.000 Y: 65.000 Z: 3.000\n", "ok\n",
+            "ok\n", "ok\n", "ok\n", "ok\n",
+            "X:80 Y:80 Z:20\n", "ok\n"
+        ])
         bridge=MarlinTransport("/dev/null")
-        bridge.serial=FakeSerial([])
+        bridge.serial=serial
         bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
         bridge.homed=True
         bridge.homing_verified=True
-        with self.assertRaisesRegex(RuntimeError,"Maschinenboden Z=0"):
+        bridge.probe_xy_offset_mm=(23,15)
+        reply=bridge.probe_workpiece(owner="lightburn")
+        self.assertEqual(bridge.surface_z,3.0)
+        self.assertEqual(bridge.status()["laser_focus_z"],8.5)
+        self.assertEqual(bridge.status()["probe_minimum_z"],5.0)
+        self.assertIn(b"G30\n",serial.writes)
+        self.assertIn(b"G0 X57.000 Y65.000 F6000\n",serial.writes)
+        self.assertIn(b"G0 X80.000 Y80.000 F6000\n",serial.writes)
+        self.assertNotIn(b"G28 Z\n",serial.writes)
+        self.assertTrue(any("workpiece Z:3.000" in x for x in reply))
+
+    def test_g30_requires_calibrated_xy_offset(self):
+        serial=FakeSerial([])
+        bridge=MarlinTransport("/dev/null")
+        bridge.serial=serial
+        bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed=True
+        bridge.homing_verified=True
+        with self.assertRaisesRegex(ValueError,"X/Y-Tasterversatz"):
             bridge.probe_workpiece(owner="lightburn")
-        self.assertEqual(bridge.serial.writes,[])
-        self.assertIsNone(bridge.surface_z)
+        self.assertEqual(serial.writes,[])
 
     def test_z_motion_floor_blocks_below_2mm_from_material_contact(self):
         serial=FakeSerial([
