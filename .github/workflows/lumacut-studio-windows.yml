@@ -30,12 +30,13 @@ jobs:
           node --check studio.js
           node --check advanced.js
           node --check job-planner.mjs
-          node --test geometry.test.mjs job-planner.test.mjs
+          node --check raster-planner.mjs
+          node --test geometry.test.mjs job-planner.test.mjs raster-planner.test.mjs
       - name: Prepare frontend distribution
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item index.html, studio.js, advanced.js, design.css, job-planner.mjs -Destination dist
+          Copy-Item index.html, studio.js, advanced.js, design.css, job-planner.mjs, raster-planner.mjs -Destination dist
       - name: Generate Windows application icons
         run: npx tauri icon assets/icon.svg
       - name: Build Windows NSIS installer
