@@ -25,6 +25,11 @@ jobs:
           node-version: '22'
       - name: Install Node dependencies
         run: npm install
+      - name: Verify JavaScript syntax and calibration geometry
+        run: |
+          node --check studio.js
+          node --check advanced.js
+          node --test geometry.test.mjs
       - name: Prepare frontend distribution
         shell: pwsh
         run: |
