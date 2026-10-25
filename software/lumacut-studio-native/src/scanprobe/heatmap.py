@@ -29,33 +29,9 @@ def render_heatmap(maps: HeightMapSet, path: Optional[str | Path] = None,
         base = cv2.resize(mosaic.image, (W, H), interpolation=cv2.INTER_AREA)
     else:
         base = np.full((H, W, 3), 32, np.uint8)
-    zs = [m.filled() for m in maps.maps if m.measured_count]
-    if not zs:
-        raise ValueError("Keine gültigen Messungen")
-    lo, hi = z_range or (min(float(np.nanmin(z)) for z in zs), max(float(np.nanmax(z)) for z in zs))
+    zall, lo, hi = z_raster(maps, bounds, px_per_mm, z_range)
     span = max(hi - lo, 1e-3)
     to_px = lambda x, y: (int((x - bounds.xmin) * px_per_mm), int((y - bounds.ymin) * px_per_mm))
-    zall = np.full((H, W), np.nan, np.float32)
-    step = max(1, int(round(px_per_mm)))  # etwa 1 Abfrage pro mm, dann blockweise
-    for m in maps.maps:
-        if not m.measured_count:
-            continue
-        mask = np.zeros((H, W), np.uint8)
-        pts = np.array([to_px(x, y) for x, y in m.polygon.points], np.int32)
-        cv2.fillPoly(mask, [pts], 255)
-        rows, cols = np.nonzero(mask)
-        if rows.size == 0:
-            continue
-        for r0 in range(rows.min() - rows.min() % step, rows.max() + 1, step):
-            y = bounds.ymin + (r0 + step / 2) / px_per_mm
-            for c0 in range(cols.min() - cols.min() % step, cols.max() + 1, step):
-                blk = mask[r0:r0 + step, c0:c0 + step] > 0
-                if not blk.any():
-                    continue
-                x = bounds.xmin + (c0 + step / 2) / px_per_mm
-                zv = m.z_at(x, y, maps.method)
-                sub = zall[r0:r0 + step, c0:c0 + step]
-                sub[blk] = zv
     valid = ~np.isnan(zall)
     norm = np.zeros((H, W), np.uint8)
     norm[valid] = np.clip((zall[valid] - lo) / span * 255, 0, 255).astype(np.uint8)
@@ -100,3 +76,57 @@ def _legend(img: np.ndarray, lo: float, hi: float) -> np.ndarray:
 def _union(rects) -> Rect:
     return Rect(min(r.xmin for r in rects), min(r.ymin for r in rects),
                 max(r.xmax for r in rects), max(r.ymax for r in rects))
+
+
+def z_raster(maps: HeightMapSet, bounds: Rect, px_per_mm: float,
+             z_range: Optional[tuple[float, float]] = None) -> tuple[np.ndarray, float, float]:
+    """Z je Pixel (NaN außerhalb der Bereiche) plus Farbskala (lo, hi)."""
+    W, H = max(1, int(bounds.width * px_per_mm)), max(1, int(bounds.height * px_per_mm))
+    zs = [m.filled() for m in maps.maps if m.measured_count]
+    if not zs:
+        raise ValueError("Keine gültigen Messungen")
+    lo, hi = z_range or (min(float(np.nanmin(z)) for z in zs), max(float(np.nanmax(z)) for z in zs))
+    to_px = lambda x, y: (int((x - bounds.xmin) * px_per_mm), int((y - bounds.ymin) * px_per_mm))
+    zall = np.full((H, W), np.nan, np.float32)
+    step = max(1, int(round(px_per_mm)))  # etwa 1 Abfrage pro mm, dann blockweise
+    for m in maps.maps:
+        if not m.measured_count:
+            continue
+        mask = np.zeros((H, W), np.uint8)
+        pts = np.array([to_px(x, y) for x, y in m.polygon.points], np.int32)
+        cv2.fillPoly(mask, [pts], 255)
+        rows, cols = np.nonzero(mask)
+        if rows.size == 0:
+            continue
+        for r0 in range(rows.min() - rows.min() % step, rows.max() + 1, step):
+            y = bounds.ymin + (r0 + step / 2) / px_per_mm
+            for c0 in range(cols.min() - cols.min() % step, cols.max() + 1, step):
+                blk = mask[r0:r0 + step, c0:c0 + step] > 0
+                if not blk.any():
+                    continue
+                x = bounds.xmin + (c0 + step / 2) / px_per_mm
+                zv = m.z_at(x, y, maps.method)
+                sub = zall[r0:r0 + step, c0:c0 + step]
+                sub[blk] = zv
+    return zall, lo, hi
+
+
+def heatmap_rgba(maps: HeightMapSet, bounds: Rect, px_per_mm: float = 2.0,
+                 alpha: float = 0.6, z_range: Optional[tuple[float, float]] = None
+                 ) -> tuple[np.ndarray, float, float]:
+    """Transparente Überlagerung (RGBA, Zeile 0 = kleinstes Y) für die Arbeitsfläche.
+
+    Außerhalb der geprobten Bereiche ist Alpha 0. Rückgabe ``(bild, lo, hi)``.
+    """
+    if not maps.maps:
+        raise ValueError("Keine Höhenmeshes")
+    zall, lo, hi = z_raster(maps, bounds, px_per_mm, z_range)
+    span = max(hi - lo, 1e-3)
+    valid = ~np.isnan(zall)
+    norm = np.zeros(zall.shape, np.uint8)
+    norm[valid] = np.clip((zall[valid] - lo) / span * 255, 0, 255).astype(np.uint8)
+    bgr = cv2.applyColorMap(norm, cv2.COLORMAP_TURBO)
+    rgba = np.zeros(zall.shape + (4,), np.uint8)
+    rgba[..., :3] = bgr[..., ::-1]
+    rgba[..., 3] = np.where(valid, int(255 * alpha), 0).astype(np.uint8)
+    return rgba, lo, hi

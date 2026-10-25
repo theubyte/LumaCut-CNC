@@ -77,7 +77,8 @@ def apply_focus_compensation(gcode: str, maps: HeightMapSet,
     settings = settings or FocusSettings()
     settings.validate()
     rep = CompensationReport()
-    out: list[str] = ["G21 G90 ; LumaCut Fokuskorrektur (Höhenmesh)"]
+    # Pi-Freigabe: nur ein G/M-Befehl pro Zeile
+    out: list[str] = ["; LumaCut Fokuskorrektur (Höhenmesh)", "G21", "G90"]
     x = y = 0.0
     z: Optional[float] = start_z
     absolute, scale = True, 1.0
@@ -134,7 +135,7 @@ def apply_focus_compensation(gcode: str, maps: HeightMapSet,
         is_motion = has_xy and (motion_words or not gs or set(gs) <= {0, 1, 20, 21, 90, 91})
         if not is_motion:
             mode_only = all(k == "G" and float(v) in (20, 21, 90, 91) for k, v in words)
-            if not mode_only:  # Modus steckt schon im Kopf (G21 G90), Rest unverändert
+            if not mode_only:  # Modus steckt schon im Kopf (G21/G90), Rest unverändert
                 out.append(raw.strip())
             if "F" in vals:
                 feed = vals["F"] * scale

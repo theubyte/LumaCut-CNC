@@ -10,12 +10,18 @@ Nur dieses Modul importiert Qt. Beispiel im Hauptfenster::
     worker.failed.connect(show_error)
     worker.start()
     pause_btn.clicked.connect(worker.pause) ...
+
+Einzelschritte statt ``run()`` (z. B. nur Scan, nur Proben)::
+
+    ScanProbeWorker(workflow, task=lambda wf: wf.scan())
 """
 from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
 
-from .control import Cancelled, Progress
+from typing import Any, Callable, Optional
+
+from .control import Cancelled, Progress, RunControl
 from .workflow import ScanProbeWorkflow
 
 
@@ -26,10 +32,14 @@ class ScanProbeWorker(QThread):
     cancelled = Signal()
     failed = Signal(str)
 
-    def __init__(self, workflow: ScanProbeWorkflow, parent=None, **run_kwargs):
+    def __init__(self, workflow: ScanProbeWorkflow, parent=None,
+                 task: Optional[Callable[[ScanProbeWorkflow], Any]] = None, **run_kwargs):
         super().__init__(parent)
         self.workflow = workflow
+        self.task = task
         self.run_kwargs = run_kwargs
+        if workflow.control.cancelled:  # nach einem Abbruch frisch beginnen
+            workflow.control = RunControl()
         workflow.control.on_progress = self._on_progress
 
     def _on_progress(self, p: Progress) -> None:
@@ -48,7 +58,11 @@ class ScanProbeWorker(QThread):
 
     def run(self):  # noqa: D401 - QThread
         try:
-            self.finished_ok.emit(self.workflow.run(**self.run_kwargs))
+            if self.task is not None:
+                result = self.task(self.workflow)
+            else:
+                result = self.workflow.run(**self.run_kwargs)
+            self.finished_ok.emit(result)
         except Cancelled:
             self.cancelled.emit()
         except Exception as exc:  # an die UI melden statt Thread sterben lassen

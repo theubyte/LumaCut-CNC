@@ -41,6 +41,7 @@ class CameraCalibration:
     crop_fraction: float = 0.04           # vignettierte Ränder verwerfen
     camera_matrix: Optional[list[list[float]]] = None
     dist_coeffs: Optional[list[float]] = None
+    exposure: Optional[float] = None      # feste Belichtung (OpenCV CAP_PROP_EXPOSURE), None = Treiber
     _maps: Optional[tuple] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
@@ -135,6 +136,7 @@ class CameraCalibration:
         d = dict(d)
         d.pop("format", None)
         d.pop("_maps", None)
+        d.pop("comment", None)                # freier Kommentar erlaubt
         d["offset_mm"] = tuple(d.get("offset_mm", (0.0, 0.0)))
         return cls(**d)
 
