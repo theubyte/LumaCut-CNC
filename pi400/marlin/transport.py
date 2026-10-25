@@ -272,7 +272,7 @@ class MarlinTransport:
 
     def _z_move_guard_locked(self, cmd: str):
         """Prevent tool probe from approaching closer than 2mm to material."""
-        if not re.match(r"^G0?[01](?:\\s|$)", cmd):
+        if not re.match(r"^G0?[01](?:\s|$)", cmd):
             return
         coords = {name:float(value) for name,value in WORD.findall(cmd)}
         if "Z" not in coords:
@@ -339,7 +339,7 @@ class MarlinTransport:
                     self.fan_power = True
                     self.fan_off_at = None
                 # Focus on first powered G1, not while traversing XY.
-                if (re.match(r"^G0?1(?:\\s|$)",normalized) and
+                if (re.match(r"^G0?1(?:\s|$)",normalized) and
                     any(k == "S" and float(v) > 0 for k,v in WORD.findall(normalized)) and
                     self.laser_enabled and not self.focused_this_job):
                     self._focus_before_cut_locked()
