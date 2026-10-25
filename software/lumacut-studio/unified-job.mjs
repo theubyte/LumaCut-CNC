@@ -28,4 +28,15 @@ export function createUnifiedPlan(project,rasterData=new Map(),options={lineSpac
  if(!operations.length)throw Error("No executable operations");
  return {kind:"LumaCutOfflinePlan",version:1,operations};
 }
-export function unifiedSummary(plan){let length=0,passes=0;for(const op of plan.operations){passes+=op.process.passes;if(op.type==="vector")for(const p of op.paths)for(let i=1;i<p.length;i++)length+=Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1])*op.process.passes;else if(op.type==="raster")for(const line of op.lines)for(const s of line.segments)length+=Math.abs(s.x1-s.x0)*op.process.passes}return {operations:plan.operations.length,passes,pathMm:length}}
+export function unifiedSummary(plan){
+ let length=0,passes=0;
+ for(const op of plan.operations){
+  passes+=op.process.passes;
+  if(op.type==="vector"){
+   for(const p of op.paths)for(let i=1;i<p.length;i++)length+=Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1])*op.process.passes;
+  }else if(op.type==="raster"){
+   for(const line of op.lines)for(const seg of line.segments)length+=Math.abs(seg.x1-seg.x0)*op.process.passes;
+  }
+ }
+ return {operations:plan.operations.length,passes,pathMm:length};
+}
