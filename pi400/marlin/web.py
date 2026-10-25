@@ -490,7 +490,7 @@ def monitor_loop():
             machine.service_cooldown()
         except Exception:
             logging.exception("Laser fan cooldown processing failed")
-        if machine.owner is not None:
+        if machine.owner is not None or machine.emergency_latched:
             continue
         if machine.serial is None and time.monotonic()-last_attempt >= 8.0:
             last_attempt=time.monotonic()

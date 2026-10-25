@@ -464,6 +464,30 @@ class USBProtocolTests(unittest.TestCase):
             bridge.command("G2 X40 Y40 I-10 J0 S40")
         self.assertEqual(serial.writes, [])
 
+    def test_lightburn_g1_without_s_after_rapid_reuses_last_power(self):
+        # Seen on the machine 25.10.: LightBurn "G1 X175" after G0 without S
+        # was rejected and latched M112. Marlin resets inline power on G0.
+        serial = FakeSerial(["ok\n"] * 4)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.surface_z = 3.0
+        bridge.laser_enabled = True
+        bridge.guard.inline = True
+        bridge.focused_this_job = True
+        bridge.last_xy_commanded = (40.0, 40.0)
+        bridge.command("G1 X60 Y40 S120 F1500", owner="lightburn")
+        bridge.command("G0 X80 Y60", owner="lightburn")
+        bridge.command("G1 X175", owner="lightburn")
+        self.assertIn(b"G1 X175 S120\n", serial.writes)
+        self.assertFalse(bridge.emergency_latched)
+        # Outside LightBurn the strict rule stays: explicit S required.
+        bridge.command("G0 X80 Y60", owner="web")
+        with self.assertRaisesRegex(ValueError, "S-Leistung"):
+            bridge.command("G1 X90", owner="web")
+
     def test_laser_supply_settles_only_on_first_power_up(self):
         serial = FakeSerial(["ok\n"] * 6)
         bridge = MarlinTransport("/dev/null")

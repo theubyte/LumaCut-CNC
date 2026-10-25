@@ -143,6 +143,8 @@ class MarlinTransport:
         self.state = "Disconnected"
         self.identity = ""
         self.cap_z_probe = None
+        # LightBurn assumes S is modal; Marlin resets inline power on G0.
+        self.last_cut_s = None
         self.homed = False
         self.z_homed = False
         self.homing_verified = False
@@ -458,6 +460,15 @@ class MarlinTransport:
                     and not re.search(r"\bZ\s*[-+]?\d", normalized)
                     and not re.search(r"\bF\s*[-+]?\d", normalized)):
                 normalized += " F9000"
+            # LightBurn treats S as modal, Marlin does not: after G0 the
+            # inline power is 0, so a following G1 without S cuts at 0 and
+            # the guard rejected it (which latched M112 mid-job). Re-send
+            # the last cut power, exactly what LightBurn intended.
+            if (owner == "lightburn" and self.laser_enabled and self.guard.last_rapid
+                    and self.last_cut_s is not None
+                    and re.match(r"^G0?[123](?:\s|$)", normalized)
+                    and not any(k == "S" for k, _ in WORD.findall(normalized))):
+                normalized += f" S{self.last_cut_s:g}"
             if use_guard:
                 normalized = self.guard.check(normalized, self.homing_verified)
             if not normalized:
@@ -496,6 +507,8 @@ class MarlinTransport:
                 # record as the start point of the next segment.
                 if re.match(r"^G0?[0123](?:\s|$)", normalized):
                     coords = {k: float(v) for k, v in WORD.findall(normalized)}
+                    if "S" in coords and not normalized.startswith(("G0 ", "G00 ")):
+                        self.last_cut_s = coords["S"]
                     if "X" in coords or "Y" in coords:
                         if self.absolute_mode and "X" in coords and "Y" in coords:
                             self.last_xy_commanded = (coords["X"], coords["Y"])
