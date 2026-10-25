@@ -52,6 +52,14 @@ try{
  if(!message.includes("Marlin"))throw Error("Marlin export status missing");
  await page.locator('[data-tab="camera"]').click();
  if(!await page.locator("#startFiducials").isVisible())throw Error("Camera calibration controls unavailable");
+
+ await page.locator('[data-tab="machine"]').click();
+ await page.locator("#piAddress").fill("192.168.2.10");
+ await page.locator("#piReadStatus").click();
+ await page.waitForFunction(()=>document.querySelector("#piConnectivity")?.textContent.includes("installierten"));
+ await page.locator("#file").setInputFiles({name:"sample.svg",mimeType:"image/svg+xml",buffer:Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80"><rect x="10" y="10" width="70" height="60"/></svg>')});
+ await page.waitForFunction(()=>document.querySelectorAll("#objectList button").length>=2);
+ if(await page.locator("#graphics").evaluate(el=>getComputedStyle(el).display)!=="none")throw Error("Duplicate legacy SVG drawing visible");
  if(errors.length)throw Error("Browser JavaScript exception(s): "+errors.join(" ; "));
  console.log("LumaCut UI SMOKE SUCCESS: layers, rectangle, numeric editing, unified plan, Marlin download, camera controls.");
 }finally{
