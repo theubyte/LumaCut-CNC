@@ -387,6 +387,19 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(serial.writes, [b"G0 X120 Y120 F2400\n"])
         self.assertFalse(bridge.laser_enabled)
 
+    def test_lightburn_jog_with_stale_inline_guard_stays_laser_off(self):
+        serial = FakeSerial(["ok\n"])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.guard.inline = True  # stale protocol state after interrupted job
+        bridge.laser_enabled = False
+        bridge.command("G1 X120 Y120 F2400 S60", owner="lightburn")
+        self.assertEqual(serial.writes, [b"G0 X120 Y120 F2400\n"])
+        self.assertFalse(bridge.laser_enabled)
+
     def test_unarmed_powered_motion_outside_lightburn_not_reinterpreted(self):
         serial = FakeSerial()
         bridge = MarlinTransport("/dev/null")
