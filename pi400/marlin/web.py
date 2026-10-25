@@ -95,10 +95,12 @@ def status():
                     round(config["focus_gap_mm"] - tip_gap, 3)),
                   job=dict(job), firmware="marlin",
                   expected_pwm="PA1 / M3 I / S0..255",
-                  io={"laser_enable":"FAN1 PC7",
+                  io={"laser_supply_switch":"FAN1 / PC6 (24V low-side MOSFET)",
+                      "laser_pwm":"BL-Touch / PA1",
+                      "fan_cooldown":"NOT IMPLEMENTED: M5 I may cut fan supply",
                       "exhaust":"BED PC9 M8",
                       "lights":"HE0 PC8 M7",
-                      "aux":"FAN0 PC6 unused"},
+                      "aux":"FAN2 PC7 unused"},
                   config=dict(config))
     return jsonify(result)
 
