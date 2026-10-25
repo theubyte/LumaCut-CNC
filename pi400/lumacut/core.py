@@ -48,7 +48,7 @@ class Controller:
         self.last_status = 0.0
         self.homed = False
         self.identity = {"version": "", "firmware": "", "board": "", "driver": ""}
-        self.extra_outputs = {"PC7": None}
+        self.extra_outputs = {"PC6": None}
         self.last_error = ""
         self.replies = deque(maxlen=1024)
         self.lines = deque(maxlen=100)
@@ -144,10 +144,10 @@ class Controller:
             if line.startswith(prefix) and line.endswith("]"):
                 self.identity[field] = line[len(prefix):-1]
                 break
-        if line.startswith("[LCIO:PC7=") and line.endswith("]"):
-            pin_state = line[len("[LCIO:PC7="):-1]
+        if line.startswith("[LCIO:PC6=") and line.endswith("]"):
+            pin_state = line[len("[LCIO:PC6="):-1]
             if pin_state in ("0", "1"):
-                self.extra_outputs["PC7"] = int(pin_state)
+                self.extra_outputs["PC6"] = int(pin_state)
         match = SETTING.match(line)
         if match:
             self.settings[int(match.group(1))] = float(match.group(2))
@@ -202,7 +202,7 @@ class Controller:
                     try:
                         self.serial = self._open()
                         self.state = "Unknown"
-                        self.extra_outputs["PC7"] = None
+                        self.extra_outputs["PC6"] = None
                         self.replies.clear()
                         self.settings.clear()
                         self.identity = {"version": "", "firmware": "", "board": "", "driver": ""}
@@ -268,7 +268,7 @@ class Controller:
                         pass
                     self.serial = None
                     self.state = "Disconnected"
-                    self.extra_outputs["PC7"] = None
+                    self.extra_outputs["PC6"] = None
                     self.bootstrap_ready = False
                     self.bootstrap_pending = 0
                     self.homed = False
@@ -398,6 +398,7 @@ class Controller:
                     self.host_commands.clear()
                     self.host_fragment.clear()
                     self.host_overflow = False
+                    self.host_guard = LaserGuard()
                 self._send_locked(bytes((byte,)))
             elif byte in (10, 13):
                 if not self.host_fragment and not self.host_overflow:
