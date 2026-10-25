@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import math
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -45,7 +46,12 @@ STATUS_TIMEOUT_S = 4.0
 DEFAULT_TIMEOUT_S = 60.0
 LONG_TIMEOUT_S = 240.0
 UPLOAD_TIMEOUT_S = 120.0
-ESTOP_TIMEOUT_S = 5.0
+#: Per attempt. The Pi answers estop without taking machine.lock, so a
+#: healthy Pi replies within milliseconds even during a running move.
+ESTOP_TIMEOUT_S = 3.0
+#: Extra attempts after a network failure (never after a Pi answer).
+ESTOP_RETRIES = 2
+ESTOP_RETRY_PAUSE_S = 0.2
 _LONG_OPS = ("home", "probe", "park")
 
 
@@ -55,6 +61,15 @@ class MachineError(Exception):
 
 class ConnectionFailed(MachineError):
     """The Pi could not be reached (DNS, refused, timeout, bad URL)."""
+
+
+class StatusTimeout(ConnectionFailed):
+    """The Pi accepted the connection but did not answer in time.
+
+    GET /api/status takes ``machine.lock`` on the Pi, which home, park and
+    probe hold for the whole move, so this is expected while such a
+    command runs and does not mean the Pi is gone.
+    """
 
 
 class AuthFailed(MachineError):
@@ -131,7 +146,7 @@ class MachineStatus:
     z_homed: bool = False
     homing_verified: bool = False    # mechanics commissioned (/api/commission)
     position: tuple[float, float, float] | None = None
-    laser_armed: bool = False
+    laser_armed: bool | None = False   # None = Pi did not report it
     laser_fan_on: bool = False
     emergency_latched: bool = False
     fault: str = ""
@@ -149,29 +164,56 @@ class MachineStatus:
 
     @classmethod
     def from_json(cls, data: Any) -> "MachineStatus":
-        if not isinstance(data, dict) or data.get("firmware") != "marlin":
+        """Parse a status answer; tolerant of missing or mistyped fields.
+
+        Missing fields fall back to the safe display value (not homed,
+        laser off, no position). A different ``firmware`` (e.g. an old GRBL
+        service) or an answer without any known status field is rejected.
+        """
+        if not isinstance(data, dict):
+            raise ProtocolError("Ungültige Pi-Antwort: kein Status-Objekt")
+        firmware = data.get("firmware")
+        if firmware is not None and firmware != "marlin":
             raise ProtocolError(
                 "Der Server meldet nicht die erwartete LumaCut-Marlin-Firmware")
+        if firmware is None and not any(k in data for k in _CORE_FIELDS):
+            raise ProtocolError("Ungültige Pi-Antwort: keine Statusfelder")
+        owner = data.get("owner")
         return cls(
-            skr_connected=bool(data.get("connected")),
+            skr_connected=_bool(data.get("connected")),
             state=str(data.get("state") or ""),
-            owner=str(data.get("owner") or "Frei"),
-            homed=bool(data.get("homed")),
-            z_homed=bool(data.get("z_homed")),
-            homing_verified=bool(data.get("homing_verified")),
+            owner=owner if isinstance(owner, str) and owner else "Frei",
+            homed=_bool(data.get("homed")),
+            z_homed=_bool(data.get("z_homed")),
+            homing_verified=_bool(data.get("homing_verified")),
             position=_position(data.get("position")),
-            laser_armed=bool(data.get("laser_armed")),
-            laser_fan_on=bool(data.get("laser_cooling_fan_on")),
-            emergency_latched=bool(data.get("emergency_latched")),
+            # Missing laser state stays unknown (None): never claim "off" blindly.
+            laser_armed=(None if data.get("laser_armed") is None
+                         else _bool(data.get("laser_armed"))),
+            laser_fan_on=_bool(data.get("laser_cooling_fan_on")),
+            emergency_latched=_bool(data.get("emergency_latched")),
             fault=str(data.get("fault") or ""),
-            lights=bool(data.get("lights")),
-            exhaust=bool(data.get("exhaust")),
+            lights=_bool(data.get("lights")),
+            exhaust=_bool(data.get("exhaust")),
             workpiece_surface_z=_float(data.get("workpiece_surface_z")),
             laser_focus_z=_float(data.get("laser_focus_z")),
             probe_offset_set=data.get("probe_xy_offset_mm") is not None,
             job=JobState.from_json(data.get("job")),
             raw=data,
         )
+
+
+_CORE_FIELDS = ("connected", "homed", "position", "owner", "emergency_latched")
+
+
+def _bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "ja", "on")
+    return False
 
 
 def _int(value: Any) -> int:
@@ -239,6 +281,9 @@ class LumaCutClient:
         except (urllib.error.URLError, socket.timeout, TimeoutError,
                 ConnectionError, OSError) as exc:
             reason = getattr(exc, "reason", exc)
+            if isinstance(reason, (socket.timeout, TimeoutError)):
+                raise StatusTimeout("Pi antwortet nicht innerhalb %.0f s (%s)" % (
+                    timeout, self.base_url)) from None
             raise ConnectionFailed("Pi nicht erreichbar (%s): %s" % (
                 self.base_url, reason)) from None
         data = _decode(raw)
@@ -328,8 +373,29 @@ class LumaCutClient:
         point = {} if x is None else {"x": "%.3f" % x, "y": "%.3f" % y}
         return self.action("probe", **point)
 
-    def emergency_stop(self) -> str:
-        return self.action("estop", timeout=ESTOP_TIMEOUT_S)
+    def emergency_stop(self, retries: int = ESTOP_RETRIES,
+                       timeout: float = ESTOP_TIMEOUT_S) -> str:
+        """Software E-Stop (M112). Retries only network failures.
+
+        Every attempt is a fresh HTTP connection with a short timeout. A Pi
+        answer (also an error such as "USB getrennt") is final and never
+        retried: it is the Pi's verdict. Sending M112 twice is harmless.
+        """
+        last: ConnectionFailed | None = None
+        for attempt in range(1 + max(0, retries)):
+            if attempt:
+                time.sleep(ESTOP_RETRY_PAUSE_S)
+            try:
+                message = self.action("estop", timeout=timeout)
+            except ConnectionFailed as exc:
+                last = exc
+                continue
+            if attempt:
+                message += " (Versuch %d)" % (attempt + 1)
+            return message
+        raise ConnectionFailed(
+            "NOT-AUS nicht bestätigt nach %d Versuchen – physischen Not-Aus "
+            "benutzen! (%s)" % (1 + max(0, retries), last))
 
     def reset_emergency(self) -> str:
         return self.action("estop_reset")
