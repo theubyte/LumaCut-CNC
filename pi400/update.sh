@@ -11,7 +11,10 @@ MODE=${1:-update}
 # Marlin uses a dedicated service to prevent GRBL/Marlin serial and TCP
 # ownership conflicts. The same updater works in both machine modes.
 SERVICE=lumacut.service
-if systemctl is-active --quiet lumacut-marlin.service; then
+# A crash-looping Marlin service may be "activating" rather than "active".
+# Prioritize its enabled unit even when Python cannot start.
+if systemctl is-enabled --quiet lumacut-marlin.service 2>/dev/null || \
+   systemctl is-active --quiet lumacut-marlin.service; then
   SERVICE=lumacut-marlin.service
 fi
 ORIGINAL_REV=
@@ -147,18 +150,29 @@ systemctl stop "$SERVICE"
 STOPPED_SERVICE=1
 git_lumacut merge --ff-only "$target" || die "Git Fast-forward fehlgeschlagen."
 if ! python3 -m compileall -q "$ROOT/pi400"; then
-  log "Python-Prüfung fehlgeschlagen. Rolle auf vorherigen Commit zurück."
+  log "Python-Syntaxprüfung fehlgeschlagen. Rolle auf vorherigen Commit zurück."
   git_lumacut reset --hard "$ORIGINAL_REV"
-  die "Python-Prüfung fehlgeschlagen."
+  die "Python-Syntaxprüfung fehlgeschlagen."
+fi
+# Compileall doesn't catch missing runtime exports (e.g. MarlinTransport).
+# Import under the same user/environment as the actual service.
+if [[ "$SERVICE" == "lumacut-marlin.service" ]]; then
+  if ! runuser -u lumacut -- env PYTHONPATH="$ROOT/pi400" \
+    python3 -c 'from marlin.transport import MarlinTransport, MarlinLaserGuard, normalize, serve_tcp; from marlin import web; assert isinstance(web.machine, MarlinTransport)' ; then
+    log "LumaCut-Modulimport fehlgeschlagen. Rolle auf vorherigen Commit zurück."
+    git_lumacut reset --hard "$ORIGINAL_REV"
+    die "Importprüfung fehlgeschlagen (MarlinTransport/web.py)."
+  fi
 fi
 systemctl start "$SERVICE"
-sleep 2
-if ! systemctl is-active --quiet "$SERVICE"; then
-  log "Pi-Dienststart fehlgeschlagen. Rolle auf vorherigen Commit zurück."
+# Real health-check: 'systemctl active' may appear briefly between crashes.
+if ! response=$(status_json) || ! systemctl is-active --quiet "$SERVICE"; then
+  log "API-Starttest fehlgeschlagen. Rolle auf vorherigen Commit zurück."
+  show_api_diagnostics
   systemctl stop "$SERVICE" || true
   git_lumacut reset --hard "$ORIGINAL_REV"
   systemctl start "$SERVICE" || true
-  die "Pi-Service nach Update nicht aktiv. sudo journalctl -u lumacut -n 80 --no-pager"
+  die "Service startet nicht dauerhaft oder HTTP-API ist nicht erreichbar."
 fi
 STOPPED_SERVICE=0
 log "ERFOLG: $ORIGINAL_REV -> $target"
