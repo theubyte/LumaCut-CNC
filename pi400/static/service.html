@@ -158,7 +158,14 @@ async function load(){
  $("serialFaults").textContent=String(d.serial_faults);
  const firmware=d.firmware||{};
  $("firmwareIdentity").textContent="SKR-Firmware: "+(firmware.version||"Noch nicht abgefragt")+(firmware.board?" · "+firmware.board:"")+(firmware.driver?" · "+firmware.driver:"");
- $("diagnostics").textContent=(d.recent||[]).slice(-25).join("\n")||"Keine GRBL-Nachrichten.";
+ $("diagnostics").textContent=[
+    "RASPBERRY-PI-BRÜCKE: "+(d.bridge_rejections??0)+" Ablehnungen",
+    "Letzter Grund: "+(d.last_bridge_rejection||"keine"),
+    "SKR/GRBL: "+(d.skr_errors??0)+" echte Fehler",
+    "Letzter SKR-Fehler: "+(d.last_skr_error||"keiner"),
+    "--------------------",
+    ...(d.recent||[]).slice(-25)
+  ].join("\n");
  $("pc6Role").value=p.spare.role;
  $("pc6Name").value=p.spare.name;
  $("pc6Value").textContent=p.pc6_state===null?"Nicht ermittelt":p.pc6_state===1?"EIN":"AUS";
