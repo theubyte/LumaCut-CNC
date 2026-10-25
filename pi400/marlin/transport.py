@@ -157,6 +157,7 @@ class MarlinTransport:
         self.safe_zone_xy_mm = 30.0
         self.probe_xy_offset_mm = None
         self.last_probe_laser_xy = None
+        self.last_xy_commanded = None
         self.homing_chime_enabled = True
         self.absolute_mode = True
         self.focused_this_job = False
@@ -399,6 +400,18 @@ class MarlinTransport:
                     self.laser_enabled and not self.focused_this_job):
                     self._focus_before_cut_locked()
                 reply = self._exchange_locked(normalized, timeout)
+                # Remember the workpiece target sent by LightBurn even if
+                # asynchronous Marlin M114 reports arrive out of order.
+                if (re.match(r"^G0?[01](?:\\s|$)", normalized)
+                        and self.absolute_mode):
+                    coords = {k: float(v) for k, v in WORD.findall(normalized)}
+                    if "X" in coords or "Y" in coords:
+                        if "X" in coords and "Y" in coords:
+                            self.last_xy_commanded = (coords["X"], coords["Y"])
+                        elif self.last_xy_commanded is not None:
+                            self.last_xy_commanded = (
+                                coords.get("X", self.last_xy_commanded[0]),
+                                coords.get("Y", self.last_xy_commanded[1]))
                 if normalized == "G90":
                     self.absolute_mode = True
                 elif normalized == "G91":
@@ -465,6 +478,7 @@ class MarlinTransport:
             self.z_homed = False
             self.surface_z = None
             self.last_probe_laser_xy = None
+            self.last_xy_commanded = None
             self.focused_this_job = False
             commands = ["M5 I", "G28 X Y", "M400",
                         "G28 Z", "M400", "G91",
@@ -565,6 +579,23 @@ class MarlinTransport:
             if self.position is None:
                 raise RuntimeError("Ausgangsposition für G30 unbekannt")
             laser_x, laser_y, z = self.position
+            # Some queued M114 reports are stale (for example X0/Y0 from
+            # homing arrives after LightBurn has moved to X120/Y120).
+            # Wait for a *verified* position matching the last commanded XY.
+            if self.last_xy_commanded is not None:
+                tx, ty = self.last_xy_commanded
+                if abs(laser_x - tx) > 0.15 or abs(laser_y - ty) > 0.15:
+                    for _ in range(5):
+                        self._exchange_locked("M400", timeout=20)
+                        self._exchange_locked("M114", timeout=8)
+                        if self.position is not None:
+                            laser_x, laser_y, z = self.position
+                        if abs(laser_x - tx) <= 0.15 and abs(laser_y - ty) <= 0.15:
+                            break
+                    else:
+                        raise RuntimeError(
+                            f"G30 Positionsabgleich fehlgeschlagen: erwartet X{tx:.2f} "
+                            f"Y{ty:.2f}, Marlin meldet X{laser_x:.2f} Y{laser_y:.2f}")
             # After M2 parks at X0/Y0, a repeated G30 should use the
             # previously successful measurement location, not the park.
             # Reuse only when the requested position is inside keep-out.
