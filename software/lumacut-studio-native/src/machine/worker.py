@@ -1,21 +1,28 @@
 """Non-blocking machine I/O for the GUI.
 
-* :class:`StatusPoller` lives in its own QThread and polls GET /api/status
-  with a single-shot QTimer (no overlapping requests, no GUI blocking).
-* :class:`CommandRunner` executes actions in a QThreadPool. Motion requests
-  on the Pi block until the SKR is done (home/probe up to minutes), so the
-  emergency stop is always dispatched on its own thread and never queued
-  behind a running command.
+* :class:`StatusPoller` polls GET /api/status on its own daemon thread.
+  Requests never overlap and never run on the GUI thread.
+* :class:`CommandRunner` executes actions on daemon threads, one normal
+  command at a time. Motion requests on the Pi block until the SKR is done
+  (home/probe/park up to minutes), so the emergency stop is always
+  dispatched immediately on its own thread and connection and is never
+  queued behind a running command.
+
+Plain Python daemon threads are used on purpose: a request blocked for
+minutes inside urllib can never hang or crash application exit (a QThread
+or QThreadPool would be waited for, or destroyed while running). Results
+reach the GUI through Qt signals, which Qt queues into the GUI thread.
 """
 from __future__ import annotations
 
+import threading
+import time
 from typing import Callable
 
-from PySide6.QtCore import (QObject, QRunnable, QThread, QThreadPool, QTimer,
-                            Signal, Slot)
+from PySide6.QtCore import QObject, Signal, Slot
 
-from .client import (ApiError, AuthFailed, ConnectionFailed, LumaCutClient,
-                     MachineError, MachineStatus, ProtocolError)
+from .client import (STATUS_TIMEOUT_S, AuthFailed, LumaCutClient, MachineError,
+                     ProtocolError, StatusTimeout)
 
 
 class ConnState:
@@ -33,79 +40,130 @@ def classify(exc: BaseException) -> str:
 
 
 class StatusPoller(QObject):
-    """Polls the Pi. Create, then call :meth:`start`; signals are queued."""
+    """Polls the Pi. Create, then call :meth:`start`; signals are queued.
+
+    State rules:
+      * success                      → CONNECTED
+      * HTTP 401/403                 → AUTH_FAILED (immediately)
+      * wrong/malformed answer       → ERROR (immediately)
+      * refused / DNS / reset        → ERROR after ``FAILURE_TOLERANCE``
+                                       consecutive failures while connected
+      * timeout while connected      → stays CONNECTED (data becomes stale)
+        while a command is running, else until ``TIMEOUT_GRACE_S`` without
+        a good answer. The Pi's /api/status waits for machine.lock, which
+        home/park/probe hold for the whole move.
+    Errors back off up to ``MAX_BACKOFF_MS``.
+    """
 
     status_received = Signal(object)          # MachineStatus
     state_changed = Signal(str, str)          # ConnState, message
-    _start_requested = Signal()
-    _stop_requested = Signal()
 
-    #: consecutive failures before CONNECTED drops to ERROR
     FAILURE_TOLERANCE = 2
+    TIMEOUT_GRACE_S = 20.0
+    MAX_BACKOFF_MS = 5000
 
-    def __init__(self, client: LumaCutClient, interval_ms: int = 1000):
+    def __init__(self, client: LumaCutClient, interval_ms: int = 1000,
+                 status_timeout_s: float = STATUS_TIMEOUT_S):
         super().__init__()
         self._client = client
+        self._status_timeout = float(status_timeout_s)
         self._interval = max(250, int(interval_ms))
         self._failures = 0
         self._state = ConnState.DISCONNECTED
-        self._timer: QTimer | None = None
-        self._thread = QThread()
-        self._thread.setObjectName("lumacut-status-poller")
-        self.moveToThread(self._thread)
-        self._start_requested.connect(self._on_start)
-        self._stop_requested.connect(self._on_stop)
+        self._stop = threading.Event()
+        self._wake = threading.Event()
+        self._emit_lock = threading.RLock()
+        self._stopped = True
+        self._thread: threading.Thread | None = None
+        self._command_running = False
+        self.last_ok: float | None = None      # time.monotonic() of last success
 
     @property
     def state(self) -> str:
         return self._state
 
-    def start(self) -> None:
-        self._thread.start()
-        self._start_requested.emit()
+    def set_command_running(self, running: bool) -> None:
+        """Tell the poller that a (possibly lock-holding) command is in flight."""
+        self._command_running = bool(running)
 
-    def stop(self, wait_ms: int = 5000) -> None:
-        if not self._thread.isRunning():
+    def start(self) -> None:
+        if self._thread is not None:
             return
-        self._stop_requested.emit()
-        self._thread.quit()
-        self._thread.wait(wait_ms)
+        self._stopped = False
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, daemon=True,
+                                        name="lumacut-status-poller")
+        self._thread.start()
+
+    def stop(self, wait_ms: int = 1000) -> None:
+        """Stop polling. Never blocks longer than ``wait_ms``; idempotent.
+
+        After stop() returns no further signal is emitted except the final
+        DISCONNECTED (emitted here, in the caller's thread).
+        """
+        thread = self._thread
+        if thread is None:
+            return
+        with self._emit_lock:
+            already = self._stopped
+            self._stopped = True
+        self._stop.set()
+        self._wake.set()
+        thread.join(max(0, wait_ms) / 1000.0)   # daemon: may outlive this
+        self._thread = None
+        if not already:
+            self._state = ConnState.DISCONNECTED
+            self.state_changed.emit(ConnState.DISCONNECTED, "Getrennt")
 
     def poll_now(self) -> None:
-        QTimer.singleShot(0, self, self._poll)
+        self._wake.set()
+
+    # ---------------------------------------------------------- thread
+    def _emit(self, signal, *args) -> None:
+        with self._emit_lock:
+            if self._stopped:
+                return
+            try:
+                signal.emit(*args)
+            except RuntimeError:     # QObject already deleted on shutdown
+                self._stopped = True
 
     def _set_state(self, state: str, message: str = "") -> None:
-        if state != self._state or state != ConnState.CONNECTED:
+        with self._emit_lock:
+            if self._stopped:
+                return
             self._state = state
-            self.state_changed.emit(state, message)
+        self._emit(self.state_changed, state, message)
 
-    @Slot()
-    def _on_start(self) -> None:
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self._poll)
+    def _loop(self) -> None:
         self._failures = 0
         self._set_state(ConnState.CONNECTING, "Verbinde mit " + self._client.base_url)
-        self._poll()
+        while not self._stop.is_set():
+            self._poll_once()
+            if self._failures == 0:
+                delay = self._interval
+            else:
+                delay = min(self.MAX_BACKOFF_MS, self._interval * (1 + self._failures))
+            self._wake.wait(delay / 1000.0)
+            self._wake.clear()
 
-    @Slot()
-    def _on_stop(self) -> None:
-        if self._timer is not None:
-            self._timer.stop()
-            self._timer = None
-        self._state = ConnState.DISCONNECTED
-        self.state_changed.emit(ConnState.DISCONNECTED, "Getrennt")
-
-    @Slot()
-    def _poll(self) -> None:
-        if self._timer is None:
-            return
+    def _poll_once(self) -> None:
         try:
-            status = self._client.status()
+            status = self._client.status(timeout=self._status_timeout)
         except AuthFailed as exc:
             self._failures += 1
             self._set_state(ConnState.AUTH_FAILED, str(exc))
-        except (ConnectionFailed, ApiError, ProtocolError, MachineError) as exc:
+        except ProtocolError as exc:
+            self._failures += 1
+            self._set_state(ConnState.ERROR, str(exc))
+        except StatusTimeout as exc:
+            self._failures += 1
+            age = (time.monotonic() - self.last_ok) if self.last_ok else None
+            tolerated = (self._state == ConnState.CONNECTED and age is not None and
+                         (self._command_running or age < self.TIMEOUT_GRACE_S))
+            if not tolerated:
+                self._set_state(ConnState.ERROR, str(exc))
+        except MachineError as exc:
             self._failures += 1
             if (self._state != ConnState.CONNECTED or
                     self._failures >= self.FAILURE_TOLERANCE):
@@ -115,16 +173,11 @@ class StatusPoller(QObject):
             self._set_state(ConnState.ERROR, "Unerwarteter Fehler: %s" % exc)
         else:
             self._failures = 0
+            self.last_ok = time.monotonic()
             if self._state != ConnState.CONNECTED:
-                self._state = ConnState.CONNECTED
-                self.state_changed.emit(ConnState.CONNECTED,
-                                        "Verbunden mit " + self._client.base_url)
-            self.status_received.emit(status)
-        if self._timer is not None:
-            # Back off while the Pi is unreachable, poll fast when healthy.
-            delay = self._interval if self._failures == 0 else min(
-                5000, self._interval * (1 + self._failures))
-            self._timer.start(delay)
+                self._set_state(ConnState.CONNECTED,
+                                "Verbunden mit " + self._client.base_url)
+            self._emit(self.status_received, status)
 
 
 class _Signals(QObject):
@@ -132,67 +185,93 @@ class _Signals(QObject):
     failed = Signal(str, str, str)     # label, ConnState-ish kind, message
 
 
-class _Task(QRunnable):
-    def __init__(self, label: str, fn: Callable[[], str], signals: _Signals):
-        super().__init__()
-        self.label, self.fn, self.signals = label, fn, signals
-        self.setAutoDelete(True)
-
-    def run(self) -> None:
-        try:
-            message = self.fn()
-        except MachineError as exc:
-            self.signals.failed.emit(self.label, classify(exc), str(exc))
-        except ValueError as exc:
-            self.signals.failed.emit(self.label, "invalid", str(exc))
-        except Exception as exc:
-            self.signals.failed.emit(self.label, ConnState.ERROR,
-                                     "Unerwarteter Fehler: %s" % exc)
-        else:
-            self.signals.finished.emit(self.label, str(message or "Bestätigt"))
-
-
 class CommandRunner(QObject):
-    """Runs one machine command at a time; E-Stop bypasses the queue."""
+    """Runs one machine command at a time; the E-Stop bypasses the queue."""
 
     started = Signal(str)                 # label
     finished = Signal(str, str)           # label, message
     failed = Signal(str, str, str)        # label, kind, message
     busy_changed = Signal(bool)
 
+    #: parallel E-Stop requests (repeated presses); M112 twice is harmless
+    MAX_URGENT = 3
+
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
-        self._pool = QThreadPool(self)
-        self._pool.setMaxThreadCount(1)
-        self._estop_pool = QThreadPool(self)
-        self._estop_pool.setMaxThreadCount(2)
         self._signals = _Signals()
         self._signals.finished.connect(self._on_finished)
         self._signals.failed.connect(self._on_failed)
         self._running = 0
+        self._label = ""
+        self._threads: list[threading.Thread] = []
+        self._urgent = threading.BoundedSemaphore(self.MAX_URGENT)
 
     @property
     def busy(self) -> bool:
         return self._running > 0
 
+    @property
+    def current(self) -> str:
+        """Label of the running normal command ("" if idle)."""
+        return self._label if self._running else ""
+
     def run(self, label: str, fn: Callable[[], str]) -> bool:
-        """Queue a normal command. Returns False if one is still running."""
+        """Start a normal command. Returns False if one is still running."""
         if self._running:
             return False
         self._running += 1
+        self._label = label
         self.busy_changed.emit(True)
         self.started.emit(label)
-        self._pool.start(_Task(label, fn, self._signals))
+        self._spawn(label, fn)
         return True
 
-    def run_urgent(self, label: str, fn: Callable[[], str]) -> None:
-        """Emergency stop: dispatched immediately on a separate pool."""
+    def run_urgent(self, label: str, fn: Callable[[], str]) -> bool:
+        """Emergency stop: dispatched immediately, independent of run()."""
+        if not self._urgent.acquire(blocking=False):
+            return False        # already MAX_URGENT E-Stops in flight
         self.started.emit(label)
-        self._estop_pool.start(_Task("!" + label, fn, self._signals))
+
+        def guarded() -> str:
+            try:
+                return fn()
+            finally:
+                self._urgent.release()
+        self._spawn("!" + label, guarded)
+        return True
 
     def wait(self, ms: int = 5000) -> None:
-        self._pool.waitForDone(ms)
-        self._estop_pool.waitForDone(ms)
+        """Wait up to ``ms`` in total for running threads (never longer)."""
+        deadline = time.monotonic() + ms / 1000.0
+        for thread in list(self._threads):
+            thread.join(max(0.0, deadline - time.monotonic()))
+
+    def _spawn(self, label: str, fn: Callable[[], str]) -> None:
+        self._threads = [t for t in self._threads if t.is_alive()]
+        thread = threading.Thread(target=self._execute, args=(label, fn),
+                                  daemon=True, name="lumacut-cmd " + label)
+        self._threads.append(thread)
+        thread.start()
+
+    def _execute(self, label: str, fn: Callable[[], str]) -> None:
+        try:
+            message = fn()
+        except MachineError as exc:
+            self._send(self._signals.failed, label, classify(exc), str(exc))
+        except ValueError as exc:
+            self._send(self._signals.failed, label, "invalid", str(exc))
+        except Exception as exc:
+            self._send(self._signals.failed, label, ConnState.ERROR,
+                       "Unerwarteter Fehler: %s" % exc)
+        else:
+            self._send(self._signals.finished, label, str(message or "Bestätigt"))
+
+    @staticmethod
+    def _send(signal, *args) -> None:
+        try:
+            signal.emit(*args)
+        except RuntimeError:    # receiver deleted during application exit
+            pass
 
     @Slot(str, str)
     def _on_finished(self, label: str, message: str) -> None:
@@ -208,4 +287,5 @@ class CommandRunner(QObject):
         if not label.startswith("!") and self._running:
             self._running -= 1
             if not self._running:
+                self._label = ""
                 self.busy_changed.emit(False)
