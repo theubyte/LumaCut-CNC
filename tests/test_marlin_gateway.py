@@ -244,6 +244,50 @@ class USBProtocolTests(unittest.TestCase):
             bridge.command("M3 I")
         self.assertFalse(serial.writes)
 
+    def test_reserved_xy_30mm_zone_blocks_laser_cut(self):
+        serial=FakeSerial([
+            "ok\n", "X:29 Y:35 Z:20\n", "ok\n",
+        ])
+        bridge=MarlinTransport("/dev/null")
+        bridge.serial=serial
+        bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed=True
+        bridge.homing_verified=True
+        bridge.surface_z=3.0
+        bridge.laser_enabled=True
+        bridge.guard.inline=True
+        bridge.focused_this_job=True
+        with self.assertRaisesRegex(ValueError,"30mm-Homing-Sperrzone"):
+            bridge.command("G1 X45 Y40 S40")
+        self.assertNotIn(b"G1 X45 Y40 S40\n",serial.writes)
+
+    def test_reserved_xy_30mm_zone_allows_interior_cut(self):
+        serial=FakeSerial([
+            "ok\n", "X:35 Y:40 Z:20\n", "ok\n", "ok\n",
+        ])
+        bridge=MarlinTransport("/dev/null")
+        bridge.serial=serial
+        bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed=True
+        bridge.homing_verified=True
+        bridge.surface_z=3.0
+        bridge.laser_enabled=True
+        bridge.guard.inline=True
+        bridge.focused_this_job=True
+        self.assertEqual(bridge.command("G1 X65 Y60 S40")[-1],"ok")
+        self.assertIn(b"G1 X65 Y60 S40\n",serial.writes)
+
+    def test_reserved_xy_30mm_zone_permits_laser_off_rapid(self):
+        serial=FakeSerial(["ok\n"])
+        bridge=MarlinTransport("/dev/null")
+        bridge.serial=serial
+        bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed=True
+        bridge.homing_verified=True
+        bridge.surface_z=3.0
+        bridge.laser_enabled=False
+        self.assertEqual(bridge.command("G0 X10 Y10 F6000")[-1],"ok")
+
     def test_emergency_stop_bypasses_motion_lock_and_latches(self):
         controller=MarlinTransport("/dev/null")
         serial=FakeSerial([])
