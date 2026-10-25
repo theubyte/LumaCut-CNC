@@ -1,0 +1,5 @@
+import test from "node:test";import assert from "node:assert/strict";import {homography,transformPoint,calibrationError,validateRectangle} from "./geometry.mjs";
+test("perspective calibration reproduces four known fiducials",()=>{const pixels=[[140,70],[580,45],[610,435],[110,460]],mm=[[0,30],[300,30],[300,340],[0,340]];const H=homography(pixels,mm);for(let i=0;i<4;i++){const p=transformPoint(H,pixels[i]);assert.ok(Math.abs(p[0]-mm[i][0])<1e-6);assert.ok(Math.abs(p[1]-mm[i][1])<1e-6)}assert.ok(calibrationError(H,pixels,mm)<1e-6)});
+test("affine scale/translation",()=>{const H=homography([[0,0],[10,0],[10,10],[0,10]],[[15,30],[35,30],[35,50],[15,50]]);assert.deepEqual(transformPoint(H,[5,5]).map(n=>Math.round(n)),[25,40])});
+test("collinear fiducials are rejected",()=>assert.throws(()=>homography([[0,0],[1,1],[2,2],[3,3]],[[0,0],[1,0],[1,1],[0,1]])));
+test("30mm safe zone applies to the whole rectangle",()=>{assert.equal(validateRectangle(10,30,100,100),true);assert.equal(validateRectangle(10,29,100,100),false);assert.equal(validateRectangle(380,40,20,20),false)});
