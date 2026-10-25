@@ -151,8 +151,19 @@ async function api(endpoint,{body=null,method="GET"}={}){
  const opts={method,cache:"no-store",headers:{"X-LumaCut-Key":key}};
  if(body){opts.body=body;if(body instanceof URLSearchParams)opts.headers["Content-Type"]="application/x-www-form-urlencoded"}
  const r=await fetch(endpoint,opts);
- if(!r.ok){let m="";try{let json=await r.json();m=json.error||JSON.stringify(json)}catch{m=await r.text()}throw Error(m||"HTTP "+r.status)}
- return r.json();
+ // A Response body may only be consumed once. Parse it a single time,
+ // including HTTP 401 (missing key) and non-JSON server errors.
+ const raw=await r.text();
+ let payload=null;
+ try{payload=raw?JSON.parse(raw):null}catch{payload=null}
+ if(!r.ok){
+   const explanation=payload?.error||payload?.message||raw||"HTTP "+r.status;
+   if(r.status===401)throw Error("Maschinenzugangscode fehlt oder ist ungültig. Unten bei System & Zugang eingeben und Verbinden drücken.");
+   throw Error(String(explanation).slice(0,350));
+ }
+ if(payload===null||typeof payload!=="object")
+   throw Error("Ungültige API-Antwort von "+endpoint);
+ return payload;
 }
 function param(data){return new URLSearchParams(data)}
 async function call(op,fields={}){
@@ -191,9 +202,19 @@ function refreshUI(s){
  if(s.fault&&s.fault!==lastFault){show("SKR: "+s.fault,true);lastFault=s.fault}
 }
 async function refresh(){
- if(!key)return;
- try{refreshUI(await api("/api/status"))}
- catch(e){$("connectState").textContent="Nicht verbunden";if(!dismissed)show(e.message,true);dismissed=true}
+ if(!key){
+   $("connectState").textContent="Zugangscode erforderlich";
+   $("board").textContent="Bitte unten den Maschinenzugangscode eingeben und Verbinden drücken.";
+   return;
+ }
+ try{
+   refreshUI(await api("/api/status"));
+   dismissed=false;
+ }catch(e){
+   $("connectState").textContent="API nicht verbunden";
+   if(!dismissed)show(e.message,true);
+   dismissed=true;
+ }
 }
 async function files(){
  if(!key)return;
@@ -204,7 +225,13 @@ async function files(){
   if(r.files.some(o=>o.name===current))sel.value=current;
  }catch(e){show(e.message,true)}
 }
-$("saveKey").onclick=()=>{key=$("key").value.trim();sessionStorage.setItem("lumacut-marlin-key",key);refresh();files()};
+$("saveKey").onclick=()=>{
+ key=$("key").value.trim();
+ if(!key){show("Bitte Maschinenzugangscode eingeben.",true);return}
+ sessionStorage.setItem("lumacut-marlin-key",key);
+ dismissed=false;
+ refresh();files();
+};
 $("clearKey").onclick=()=>{key="";sessionStorage.removeItem("lumacut-marlin-key");$("key").value="";show("Abgemeldet")};
 $("refreshButton").onclick=()=>{refresh();files()};
 $("clearLog").onclick=()=>{$("console").textContent="Ansicht geleert. Neue Geräteereignisse erscheinen beim nächsten Aktualisieren."};
