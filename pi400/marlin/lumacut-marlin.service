@@ -11,6 +11,7 @@ Group=lumacut
 SupplementaryGroups=dialout video render
 WorkingDirectory=/opt/lumacut
 EnvironmentFile=/etc/lumacut/lumacut.env
+EnvironmentFile=-/etc/lumacut/lumacut-marlin-port.env
 Environment=PYTHONPATH=/opt/lumacut/pi400
 ExecStart=/usr/bin/python3 -m marlin.web
 Restart=always
