@@ -34,7 +34,7 @@ class AuxOutputContractTest(unittest.TestCase):
         self.assertIn('PWM is off but FAN1 remains energized until the explicit M5',BUILD)
         # The original upstream line is a search token in build.py, not
         # the emitted board map. Verify replacement output instead.
-        self.assertIn("'#define AUXOUTPUT2_PIN          9'",BUILD)
+        self.assertIn("'#define AUXOUTPUT2_PIN          7'",BUILD)
 
     def test_mist_flood_independent_realtime_override(self):
         self.assertIn('machine.write((uint8_t)(lights?0xA1:0xA0));',HMI)
