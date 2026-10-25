@@ -191,7 +191,7 @@ def action():
         return jsonify(message="Marlin M115 + LumaCut-Kennung bestätigt")
     if op == "home":
         home_z_first()
-        return jsonify(message="Maschinenboden Z=0 referenziert; Werkstückmessung ist separat. XYZ referenziert.")
+        return jsonify(message="X/Y zuerst, danach Maschinenboden Z=0 und Z-Rückzug: referenziert.")
     if op in ("info","position","endstops"):
         cmd = {"info":"M115", "position":"M114", "endstops":"M119"}[op]
         reply = manual(cmd, timeout=12)
@@ -292,8 +292,7 @@ def _job_worker(filename, commands):
             if normalize(command):
                 machine.command(command, owner="job", timeout=150)
             job["line"]=i
-        machine.command("M5 I", owner="job")
-        machine.command("M400", owner="job", timeout=120)
+        machine.park_safezone(owner="job")
         job["state"]="complete"
     except Exception as exc:
         job.update(state="error", error=str(exc))
