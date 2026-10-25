@@ -181,6 +181,7 @@ class USBProtocolTests(unittest.TestCase):
             "ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n",
             "X:0 Y:0 Z:20\n", "ok\n"
         ])
+        bridge.homing_chime_enabled = False
         response = bridge.safe_home()
         self.assertEqual(response[-1],"ok")
         self.assertTrue(bridge.homed)
@@ -207,6 +208,7 @@ class USBProtocolTests(unittest.TestCase):
             def sendall(self,p): self.messages.extend(p)
             def close(self): self.closed=True
         sock=FakeTCP()
+        controller.homing_chime_enabled = False
         controller.serve_client(sock)
         self.assertEqual(sock.messages.count(b"ok\r\n"),1,sock.messages)
         self.assertIn(b"X:0 Y:0 Z:20",sock.messages)
@@ -225,6 +227,7 @@ class USBProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,"gültiger XYZ"):
             ctrl.park_safezone(owner="lightburn")
         ctrl.homed=True
+        ctrl.job_chime_enabled = False
         reply=ctrl.park_safezone(owner="lightburn")
         self.assertEqual(reply[-1],"ok")
         writes=serial.writes
@@ -243,6 +246,7 @@ class USBProtocolTests(unittest.TestCase):
         ctrl.serial=serial
         ctrl.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
         ctrl.homed=True
+        ctrl.job_chime_enabled = False
         ctrl.park_safezone(owner="lightburn")
         self.assertIn(b"G0 Z35.000 F600\n",serial.writes)
         self.assertNotIn(b"G0 Z20.000 F600\n",serial.writes)
@@ -478,17 +482,77 @@ class USBProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Laserleistung"):
             bridge.command("G1 X120 Y120 S60", owner="web")
 
-    def test_home_chime_is_x_only_returns_zero_and_ends_with_m114(self):
-        from marlin.transport import MarlinTransport
-        import inspect
-        source = inspect.getsource(MarlinTransport.safe_home)
-        self.assertIn("G1 X8 F1200", source)
-        self.assertIn("G1 X-8 F1200", source)
-        self.assertIn("G1 X8 F1600", source)
-        self.assertIn("G1 X-8 F1600", source)
-        self.assertIn('commands.append("M114")', source)
-        self.assertIn('commands.extend([', source)
-        self.assertNotIn("G1 Y", source)
+    def test_homing_and_job_done_music_step_frequency_and_restoration(self):
+        for event, notes in (("home", 2), ("done", 3)):
+            with self.subTest(event=event):
+                serial = FakeSerial(["ok\n"] * 40)
+                bridge = MarlinTransport("/dev/null")
+                bridge.serial = serial
+                bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+                bridge.homed = True
+                bridge.position = [0.0, 0.0, 20.0]
+                bridge.absolute_mode = True
+                self.assertTrue(bridge._play_stepper_chime_locked(event))
+                writes = serial.writes
+                self.assertIn(b"M5 I\n", writes)
+                self.assertIn(b"M569 S0 X\n", writes)
+                self.assertIn(b"M569 S1 X\n", writes)
+                self.assertIn(b"G91\n", writes)
+                self.assertIn(b"G90\n", writes)
+                self.assertLess(writes.index(b"M569 S0 X\n"),
+                                writes.index(b"M569 S1 X\n"))
+                strokes = [w for w in writes if w.startswith(b"G1 X")]
+                self.assertEqual(len(strokes), notes * 2)
+                self.assertEqual(
+                    sum(float(w.decode().split("X")[1].split()[0])
+                        for w in strokes), 0.0)
+                self.assertNotIn(b"G1 Y", b"".join(writes))
+                self.assertFalse(bridge.laser_enabled)
+                self.assertTrue(bridge.homed)
+
+    def test_music_never_moves_when_park_is_not_verified(self):
+        serial = FakeSerial()
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.position = [143.0, 105.0, 20.0]
+        self.assertFalse(bridge._play_stepper_chime_locked("home"))
+        self.assertEqual(serial.writes, [])
+
+    def test_marlin_error_drains_ack_and_keeps_serial_alive(self):
+        from marlin.transport import MarlinCommandError
+        serial = FakeSerial(["Error:Probing Failed\n", "ok P15 B7\n",
+                             "ok P15 B7\n"])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        with self.assertRaisesRegex(MarlinCommandError, "Probing Failed"):
+            bridge.command("M119")
+        self.assertTrue(bridge.status()["connected"])
+        self.assertFalse(serial.closed)
+        self.assertEqual(bridge.command("M114")[-1], "ok P15 B7")
+
+    def test_lightburn_rejected_command_keeps_tcp_alive(self):
+        serial = FakeSerial(["ok\n"])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homing_verified = True
+        class TCP:
+            def __init__(self):
+                self.payloads = [b"M3 I\nG0\n", b""]
+                self.messages = bytearray()
+            def settimeout(self, value): pass
+            def recv(self, count): return self.payloads.pop(0)
+            def sendall(self, raw): self.messages.extend(raw)
+            def close(self): pass
+        sock = TCP()
+        bridge.serve_client(sock)
+        self.assertIn(b"Error:LumaCut", sock.messages)
+        self.assertIn(b"ok\r\n", sock.messages)
+        self.assertEqual(serial.writes, [b"G0\n"])
+        self.assertFalse(serial.closed)
 
     def test_reserved_xy_30mm_zone_permits_laser_off_rapid(self):
         serial=FakeSerial(["ok\n"])
