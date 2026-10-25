@@ -148,7 +148,7 @@ async function api(endpoint,{body=null,method="GET"}={}){
  if(body){opts.body=body;if(body instanceof URLSearchParams)opts.headers["Content-Type"]="application/x-www-form-urlencoded"}
  const r=await fetch(endpoint,opts);
  // A Response body may only be consumed once. Parse it a single time,
- // including HTTP 401 (missing key) and non-JSON server errors.
+ // including non-JSON errors returned by the Pi service.
  const raw=await r.text();
  let payload=null;
  try{payload=raw?JSON.parse(raw):null}catch{payload=null}
