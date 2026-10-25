@@ -76,6 +76,8 @@ label{font-size:13px;color:#bcd2e4}
 <section class="card">
 <h2>Direktsteuerung</h2>
 <p>Fahrbefehle sind gesperrt, während LightBurn oder ein Pi-Auftrag die Maschine steuert.</p>
+<label style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><input type="checkbox" id="surfaceContactConfirmed"> Z-Taster berührt bei G28 Z tatsächlich die Oberfläche des eingelegten Werkstücks (Z=0)</label>
+<div class="hint warning">Nur aktivieren, wenn der Z-Endschalter die Werkstückoberfläche wirklich berührt. Maschinen-Homing ohne Werkstück ist KEINE Werkstückabtastung. Nach jedem Materialwechsel neu prüfen.</div>
 <div class="two"><button class="primary" data-action="home" data-motion>XYZ referenzieren (Z zuerst)</button>
 <button class="danger" id="stop">Software-Notstopp M112</button></div>
 <div class="space"></div>
@@ -109,7 +111,8 @@ label{font-size:13px;color:#bcd2e4}
 </div>
 <div class="metric" style="margin-top:12px"><small>Geschätzter Abstand Spitze → Referenzfläche</small><strong id="tipGap">—</strong></div>
 <div class="metric" style="margin-top:10px"><small>Geschätzte Z-Korrektur bis Fokus (nur Anzeige)</small><strong id="focusAdjust">—</strong></div>
-<p class="muted">Die Anzeige ist keine Werkstückabtastung. Der Offset löst keine automatische Bewegung aus und ersetzt keine Kalibrierung am realen Schalter.</p>
+<p class="muted">Nur mit bestätigter Werkstückabtastung: Der Pi setzt vor der ersten G1-Laserbewegung den Fokus. Harte untere Z-Grenze: Oberfläche + 2 mm Tastabstand. Beispiel bei Z=0 und Offset 1,5 mm: Fokus Z=5,5 mm, tiefster zulässiger Z-Wert 2,0 mm.</p>
+<div class="metric" style="margin-top:10px"><small>Werkstück Z-Referenz / Mindest-Z / Kühlung</small><strong id="workpieceSafety" style="font-size:13px">Noch nicht eingemessen</strong></div>
 <button type="submit" class="primary" id="saveZSettings">Z-Einstellungen speichern</button>
 </form>
 </section>
@@ -201,7 +204,12 @@ function refreshUI(s){
      input.value=String(zCfg[name]);
  }
  $("tipGap").textContent=s.estimated_tip_gap_mm==null?"Noch nicht referenziert":s.estimated_tip_gap_mm.toFixed(2)+" mm";
- $("focusAdjust").textContent=s.estimated_focus_adjust_mm==null?"Noch nicht referenziert":s.estimated_focus_adjust_mm.toFixed(2)+" mm";
+ $("focusAdjust").textContent=s.estimated_focus_adjust_mm==null?"Werkstückkontakt fehlt":s.estimated_focus_adjust_mm.toFixed(2)+" mm";
+ $("workpieceSafety").textContent=s.workpiece_surface_z==null?
+   "Keine Werkstückoberfläche bestätigt":
+   "Z-Min "+s.probe_minimum_z.toFixed(2)+" mm · Z-Fokus "+s.laser_focus_z.toFixed(2)+" mm · Fan "+
+   (s.laser_cooling_fan_on?"EIN":"AUS")+
+   (s.cooldown_remaining_s!=null?" · Nachlauf "+s.cooldown_remaining_s+" s":"");
  $("saveZSettings").disabled=!ownerFree(s)||Boolean(s.homed);
  $("commands").textContent=s.command_count||0;
  $("errors").textContent=s.serial_errors||0;
@@ -258,7 +266,10 @@ $("zSettings").onsubmit=async ev=>{
 $("refreshButton").onclick=()=>{refresh();files()};
 $("clearLog").onclick=()=>{$("console").textContent="Ansicht geleert. Neue Geräteereignisse erscheinen beim nächsten Aktualisieren."};
 for(const b of document.querySelectorAll("[data-action]"))
- b.onclick=()=>call(b.dataset.action,b.dataset.action==="start"?{name:$("jobSelect").value}:{});
+ b.onclick=()=>call(b.dataset.action,
+  b.dataset.action==="start"?{name:$("jobSelect").value}:
+  b.dataset.action==="home"?{probe_contact_confirmed:$("surfaceContactConfirmed").checked?"1":"0"}:{});
+
 for(const b of document.querySelectorAll("[data-axis]"))
  b.onclick=()=>call("jog",{axis:b.dataset.axis,distance:String(Number($("step").value)*Number(b.dataset.direction))});
 for(const b of document.querySelectorAll("[data-accessory]"))
