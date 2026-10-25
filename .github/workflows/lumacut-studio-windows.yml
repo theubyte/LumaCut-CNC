@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/lumacut-studio-initial
+      - main
     paths:
       - 'software/lumacut-studio/**'
       - '.github/workflows/lumacut-studio-windows.yml'
