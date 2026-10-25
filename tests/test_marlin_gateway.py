@@ -203,7 +203,7 @@ class USBProtocolTests(unittest.TestCase):
         self.assertFalse(controller.emergency_latched)
 
     def test_lightburn_workpiece_probe_g30_keeps_xy_homing_and_retracts(self):
-        serial=FakeSerial(["ok\\n"]*7 + ["X:0.00 Y:0.00 Z:20.00\\n", "ok\\n"])
+        serial=FakeSerial(["ok\n"]*7 + ["X:0.00 Y:0.00 Z:20.00\n", "ok\n"])
         bridge=MarlinTransport("/dev/null")
         bridge.serial=serial
         bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
@@ -214,13 +214,13 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(bridge.surface_z,0.0)
         self.assertEqual(bridge.status()["laser_focus_z"],5.5)
         self.assertEqual(bridge.status()["probe_minimum_z"],2.0)
-        self.assertEqual(serial.writes[:3],[b"M5 I\\n",b"G28 Z\\n",b"M400\\n"])
-        self.assertEqual(serial.writes[4],b"G0 Z20.00 F360\\n")
+        self.assertEqual(serial.writes[:3],[b"M5 I\n",b"G28 Z\n",b"M400\n"])
+        self.assertEqual(serial.writes[4],b"G0 Z20.00 F360\n")
         self.assertEqual(reply[-1],"ok")
 
     def test_z_motion_floor_blocks_below_2mm_from_material_contact(self):
-        serial=FakeSerial(["ok\\n"]*4 +
-                          ["X:0 Y:0 Z:20\\n","ok\\n"]*2)
+        serial=FakeSerial(["ok\n"]*4 +
+                          ["X:0 Y:0 Z:20\n","ok\n"]*2)
         bridge=MarlinTransport("/dev/null")
         bridge.serial=serial
         bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
@@ -229,7 +229,7 @@ class USBProtocolTests(unittest.TestCase):
         bridge.surface_z=0.0
         with self.assertRaisesRegex(ValueError,"Z-Sperre"):
             bridge.command("G0 Z1.9")
-        self.assertNotIn(b"G0 Z1.9\\n",serial.writes)
+        self.assertNotIn(b"G0 Z1.9\n",serial.writes)
         self.assertEqual(bridge.command("G0 Z2.0")[-1],"ok")
 
     def test_no_laser_before_probing_workpiece(self):
