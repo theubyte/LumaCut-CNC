@@ -95,9 +95,9 @@ def status():
                     round(config["focus_gap_mm"] - tip_gap, 3)),
                   job=dict(job), firmware="marlin",
                   expected_pwm="PA1 / M3 I / S0..255",
-                  io={"laser_supply_switch":"FAN1 / PC6 (24V low-side MOSFET)",
+                  io={"laser_supply_switch":"FAN1 / PC6 (M106/M107, low-side)",
                       "laser_pwm":"BL-Touch / PA1",
-                      "fan_cooldown":"NOT IMPLEMENTED: M5 I may cut fan supply",
+                      "fan_cooldown":"180s via Pi: requires firmware FAN0 PC6; no crash-proof fan timer",
                       "exhaust":"BED PC9 M8",
                       "lights":"HE0 PC8 M7",
                       "aux":"FAN2 PC7 unused"},
@@ -329,6 +329,10 @@ def monitor_loop():
     last_attempt=0.0
     while running:
         time.sleep(2.0)
+        try:
+            machine.service_cooldown()
+        except Exception:
+            logging.exception("Laser fan cooldown processing failed")
         if machine.owner is not None:
             continue
         if machine.serial is None and time.monotonic()-last_attempt >= 8.0:
