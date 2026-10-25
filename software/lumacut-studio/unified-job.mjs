@@ -40,3 +40,37 @@ export function unifiedSummary(plan){
  }
  return {operations:plan.operations.length,passes,pathMm:length};
 }
+
+function validatePoint(x,y){if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||x>390||y<30||y>370)throw Error("Unsafe or invalid machine-preview coordinate")}
+export function exportUnifiedDraft(plan){
+ if(plan?.kind!=="LumaCutOfflinePlan"||plan.version!==1||!Array.isArray(plan.operations)||!plan.operations.length)throw Error("Invalid offline job plan");
+ const out=["; LUMACUT UNIFIED OFFLINE DRAFT","; UNSAFE FOR LIVE MACHINE: UNVALIDATED COORDINATE SYSTEM, Z, HOMING AND INTERLOCKS","G21","G90","M5"];
+ for(const op of plan.operations){
+  const p=op.process;
+  if(!Number.isFinite(p.feed)||p.feed<=0||p.feed>6000||!Number.isFinite(p.power)||p.power<0||p.power>100||!Number.isInteger(p.passes)||p.passes<1||p.passes>30)throw Error("Invalid process");
+  const laser=Math.round(p.power*10);
+  out.push("; Layer "+String(op.layer).replace(/[\r\n]/g," "),"; Object "+String(op.object).replace(/[\r\n]/g," "));
+  for(let pass=0;pass<p.passes;pass++){
+   out.push("; Pass "+(pass+1));
+   if(op.type==="vector"){
+    for(const path of op.paths){
+     if(path.length<2)throw Error("Invalid path");
+     for(const [x,y] of path)validatePoint(x,y);
+     out.push("M5",`G0 X${path[0][0].toFixed(3)} Y${path[0][1].toFixed(3)}`,`M4 S${laser}`);
+     for(const [x,y] of path.slice(1))out.push(`G1 X${x.toFixed(3)} Y${y.toFixed(3)} F${p.feed}`);
+     out.push("M5");
+    }
+   }else if(op.type==="raster"){
+    for(const line of op.lines){
+     const segments=line.reverse?[...line.segments].reverse():line.segments;
+     for(const segment of segments){
+      const ax=line.reverse?segment.x1:segment.x0,bx=line.reverse?segment.x0:segment.x1;
+      validatePoint(ax,line.y);validatePoint(bx,line.y);
+      out.push("M5",`G0 X${ax.toFixed(3)} Y${line.y.toFixed(3)}`,`M4 S${laser}`,`G1 X${bx.toFixed(3)} Y${line.y.toFixed(3)} F${p.feed}`,"M5");
+     }
+    }
+   }else throw Error("Unsupported operation");
+  }
+ }
+ out.push("M5","M2");return out.join("\n")+"\n";
+}
