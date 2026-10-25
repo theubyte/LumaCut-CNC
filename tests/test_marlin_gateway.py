@@ -2,6 +2,7 @@
 import os
 import sys
 import tempfile
+import subprocess
 import threading
 import time
 import unittest
@@ -59,8 +60,10 @@ class GuardTests(unittest.TestCase):
         for command in ("G28", "G28 Z", "G0 X5", "G1 X5"):
             with self.assertRaisesRegex(ValueError,"verifizier|bestätig"):
                 g.check(command,False)
-        self.assertEqual(g.check("G28 Z",True),"G28 Z")
-        self.assertEqual(g.check("G28 X Y",True),"G28 X Y")
+        with self.assertRaisesRegex(ValueError,"nur über Pi"):
+            g.check("G28 Z",True)
+        with self.assertRaisesRegex(ValueError,"nur über Pi"):
+            g.check("G28 X Y",True)
 
 
 class USBProtocolTests(unittest.TestCase):
@@ -100,10 +103,22 @@ class USBProtocolTests(unittest.TestCase):
         bridge.serial=serial
         bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
         bridge.homing_verified=True
-        bridge.command("G28 Z")
+        with self.assertRaisesRegex(ValueError,"nur über Pi"):
+            bridge.command("G28 Z")
         self.assertFalse(bridge.homed)
-        bridge.command("G28 X Y")
+        bridge.homing_verified=True
+        bridge.serial=FakeSerial([
+            "ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n",
+            "X:0 Y:0 Z:20\n", "ok\n"
+        ])
+        response = bridge.safe_home()
+        self.assertEqual(response[-1],"ok")
         self.assertTrue(bridge.homed)
+        self.assertTrue(bridge.z_homed)
+        self.assertEqual(bridge.serial.writes[0], b"M5 I\n")
+        self.assertEqual(bridge.serial.writes[1], b"G28 Z\n")
+        self.assertEqual(bridge.serial.writes[4], b"G0 Z20.00 F360\n")
+        self.assertEqual(bridge.serial.writes[6], b"G28 X Y\n")
 
     def test_timeout_disconnects_and_fails_closed(self):
         serial=FakeSerial([])
@@ -117,6 +132,46 @@ class USBProtocolTests(unittest.TestCase):
 
 
 class GatewayFilesTests(unittest.TestCase):
+    def test_no_unsafe_marlin_commands_or_unhomed_power(self):
+        guard = MarlinLaserGuard()
+        for cmd in ("M42 P7 S255", "M999", "M106 S255", "G92 X100",
+                    "M3 S255", "G0 X40 S255", "M3 I S150"):
+            with self.subTest(cmd=cmd):
+                with self.assertRaises(ValueError):
+                    guard.check(cmd, True)
+        fake=FakeSerial([])
+        controller=MarlinTransport("/dev/null")
+        controller.serial=fake
+        controller.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        controller.homing_verified=True
+        with self.assertRaisesRegex(RuntimeError,"vollständig referenzieren"):
+            controller.command("M3 I")
+        self.assertEqual(fake.writes, [])
+
+    def test_marlin_web_api_import_and_health(self):
+        import subprocess
+        import tempfile
+        source = r"""
+from marlin import web
+with web.app.test_client() as client:
+  assert client.get("/").status_code == 200
+  assert client.get("/api/status").status_code == 401
+  good = client.get("/api/status", headers={"X-LumaCut-Key":"test-secret-123456"})
+  assert good.status_code == 200, good.data
+  payload = good.get_json()
+  assert payload["firmware"] == "marlin"
+  assert payload["homing_verified"] is False
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env=os.environ.copy()
+            env["LUMACUT_KEY"]="test-secret-123456"
+            env["LUMACUT_DATA"]=tmp
+            env["PYTHONPATH"]=str(ROOT/"pi400")
+            result=subprocess.run([sys.executable,"-c",source],env=env,
+                                  cwd=ROOT,text=True,capture_output=True,timeout=15)
+            self.assertEqual(result.returncode,0,result.stderr)
+
+
     def test_machine_web_and_service_modules_compile(self):
         import subprocess
         paths=[str(ROOT/"pi400"/"marlin"/p)
