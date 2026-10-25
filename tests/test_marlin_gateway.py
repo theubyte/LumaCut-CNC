@@ -205,9 +205,9 @@ class GatewayFilesTests(unittest.TestCase):
 from marlin import web
 with web.app.test_client() as client:
   assert client.get("/").status_code == 200
-  assert client.get("/api/status").status_code == 401
-  good = client.get("/api/status", headers={"X-LumaCut-Key":"test-secret-123456"})
+  good = client.get("/api/status")
   assert good.status_code == 200, good.data
+  assert client.get("/api/jobs").status_code == 200
   payload = good.get_json()
   assert payload["firmware"] == "marlin"
   assert payload["homing_verified"] is False
@@ -227,8 +227,10 @@ with web.app.test_client() as client:
         self.assertIn("const raw=await r.text();",ui)
         self.assertNotIn("await r.json();m=",ui)
         self.assertNotIn("m=await r.text()",ui)
-        self.assertIn("Maschinenzugangscode fehlt oder ist ungültig",ui)
-        self.assertIn("Zugangscode erforderlich",ui)
+        self.assertNotIn('id="saveKey"',ui)
+        self.assertNotIn('id="key"',ui)
+        self.assertNotIn("X-LumaCut-Key",ui)
+        self.assertIn("Keine Anmeldung erforderlich",ui)
 
     def test_machine_web_and_service_modules_compile(self):
         import subprocess
