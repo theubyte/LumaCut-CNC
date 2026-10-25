@@ -208,6 +208,11 @@ class LumaCutStudio(QMainWindow):
         except ValueError as exc:
             self.statusBar().showMessage(f"Senden nicht möglich: {exc}", 6000)
             return
+        # --- scan integration (scan agent) ---
+        gcode = self.scan_panel.prepare_job_gcode(gcode)  # unverändert ohne Fokuskorrektur
+        if gcode is None:
+            return
+        # --- end scan integration ---
         stem = self.canvas.file_path.name.split(".")[0] if self.canvas.file_path else "canvas"
         self.machine_panel.send_gcode(f"{stem}.gcode", gcode, start=False)
         self.statusBar().showMessage(f"Gesendet: {stem}.gcode {estimate_gcode(gcode).summary()}", 10000)

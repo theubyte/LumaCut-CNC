@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from . import adapters
 from .calibration import CameraCalibration
 from .detection import DetectedObject
+from .focus_export import FocusExport, compensate_for_export
 from .geometry import DEFAULT_LIMITS, Rect
 from .heatmap import heatmap_rgba
 from .heightmap import HeightMapSet
@@ -235,6 +236,7 @@ class ScanPanel(QWidget):
         self.mosaic: Optional[Mosaic] = None
         self.objects: list[DetectedObject] = []
         self.maps: Optional[HeightMapSet] = None
+        self.last_focus_export: Optional[FocusExport] = None
         self.last_notes: list[str] = []
         self.last_error = ""
         self._kind = ""
@@ -347,6 +349,21 @@ class ScanPanel(QWidget):
         self.reuse_check = QCheckBox("Geladenes Mesh nach Kontrollmessung wiederverwenden")
         self.reuse_check.setChecked(True)
         lay.addWidget(self.reuse_check)
+        # Export mit Fokuskorrektur (unkorrigierter Export bleibt Standard)
+        self.focus_check = QCheckBox("Fokuskorrektur anwenden (Höhenmesh)")
+        self.focus_check.setChecked(False)
+        self.focus_check.setToolTip(
+            "Z je Segment aus dem Höhenmesh – gilt für „An Pi senden“ und „G-Code exportieren“.")
+        lay.addWidget(self.focus_check)
+        self.focus_hint = QLabel("")
+        self.focus_hint.setWordWrap(True)
+        self.focus_hint.setStyleSheet("color: #93a1b5;")
+        lay.addWidget(self.focus_hint)
+        self.export_button = QPushButton("G-Code exportieren …")
+        self.export_button.setToolTip("Sichtbare Ebenen als Marlin-G-Code speichern "
+                                      "(mit Fokuskorrektur, falls angehakt)")
+        self.export_button.clicked.connect(self._export_dialog)
+        lay.addWidget(self.export_button)
         self.clear_button = QPushButton("Scan-Anzeige leeren")
         self.clear_button.clicked.connect(self.clear)
         lay.addWidget(self.clear_button)
@@ -379,6 +396,13 @@ class ScanPanel(QWidget):
         self.camera_edit.setEnabled(not busy and self.mode == MODE_PI)
         self.probe_button.setEnabled(not busy and (bool(self.checked_objects()) or bool(self.design_bounds())))
         self.save_button.setEnabled(not busy and self.maps is not None)
+        has_maps = self.maps is not None and bool(self.maps.maps)
+        if not has_maps:
+            self.focus_check.setChecked(False)
+        self.focus_check.setEnabled(not busy and has_maps)
+        self.focus_hint.setText("" if has_maps else
+                                "Fokuskorrektur: erst „Auto-Probe“ ausführen oder Höhenmesh laden.")
+        self.export_button.setEnabled(not busy)
         self.pause_button.setEnabled(busy)
         self.cancel_button.setEnabled(busy)
         if not busy and self.pause_button.isChecked():
@@ -506,6 +530,8 @@ class ScanPanel(QWidget):
             start = _machine_xy(wf.machine)
             job = wf.plan_probe(areas, start)
             res = wf.probe_areas(job, start, mosaic)
+            if mosaic is not None and res.maps is not None and res.maps.maps:
+                res.maps.add_fingerprints(mosaic)  # für die Prüfung beim Export
             return {"job": job, "probe": res, "notes": notes + job.warnings}
         return self._start("probe", task, need_camera=False)
 
@@ -728,6 +754,76 @@ class ScanPanel(QWidget):
                 self._notify(f"Geladen: {path}")
             except Exception as exc:  # noqa: BLE001
                 self._error(f"Höhenmesh ungültig: {exc}")
+
+    # ------------------------------------------------------ G-Code-Export
+    def _pi_surface_z(self) -> Optional[float]:
+        if self.mode != MODE_PI:
+            return None
+        client = self.client_provider() if self.client_provider else None
+        if client is None:
+            return None
+        try:
+            return client.status().workpiece_surface_z
+        except Exception:  # noqa: BLE001 - nur Zusatzprüfung
+            return None
+
+    def compensate(self, gcode: str) -> FocusExport:
+        """Fokuskorrektur mit allen Prüfungen (ohne Dialog)."""
+        res = compensate_for_export(gcode, self.maps, mosaic=self.mosaic,
+                                    pi_surface_z=self._pi_surface_z())
+        self.last_focus_export = res
+        return res
+
+    def prepare_job_gcode(self, gcode: str) -> Optional[str]:
+        """Hook für jeden G-Code-Export/Versand.
+
+        Ohne Haken bei „Fokuskorrektur anwenden“ kommt ``gcode`` unverändert
+        zurück. Mit Haken: korrigierter G-Code, oder ``None`` bei Fehler bzw.
+        wenn Warnungen nicht bestätigt wurden.
+        """
+        self.last_focus_export = None
+        if not self.focus_check.isChecked():
+            return gcode
+        res = self.compensate(gcode)
+        if not res.ok:
+            self._error(" ".join(res.errors))
+            if self.ask:
+                QMessageBox.critical(self, "Fokuskorrektur nicht möglich", res.summary())
+            return None
+        if res.warnings and self.ask:
+            answer = QMessageBox.warning(
+                self, "Fokuskorrektur – bitte prüfen", res.summary() + "\n\nTrotzdem fortfahren?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                self._notify("Export abgebrochen (Fokuskorrektur).")
+                return None
+        r = res.report
+        self._notify(f"Fokuskorrektur: Z {r.z_min:.2f} … {r.z_max:.2f} mm"
+                     + (f", {len(res.warnings)} Warnung(en)" if res.warnings else ""))
+        return res.gcode
+
+    def export_gcode(self, path: str | Path) -> bool:
+        """Canvas → Marlin-G-Code (ggf. fokuskorrigiert) → Datei."""
+        from lumacut_canvas.gcode import document_to_gcode
+        try:
+            gcode = document_to_gcode(self.canvas.document)
+        except ValueError as exc:
+            self._error(f"Export nicht möglich: {exc}")
+            return False
+        out = self.prepare_job_gcode(gcode)
+        if out is None:
+            return False
+        Path(path).write_text(out, encoding="utf-8")
+        self._notify(f"G-Code gespeichert: {Path(path).name}"
+                     + (" (fokuskorrigiert)" if self.last_focus_export else ""))
+        return True
+
+    def _export_dialog(self) -> None:
+        name = "auftrag_fokus.gcode" if self.focus_check.isChecked() else "auftrag.gcode"
+        path, _ = QFileDialog.getSaveFileName(self, "G-Code exportieren", name, "G-Code (*.gcode *.nc)")
+        if path:
+            self.export_gcode(path)
 
     def clear(self) -> None:
         self.mosaic, self.objects, self.maps = None, [], None
