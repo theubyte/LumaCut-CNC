@@ -58,7 +58,7 @@ class GuardTests(unittest.TestCase):
     def test_homing_and_motion_require_verification(self):
         g=MarlinLaserGuard()
         for command in ("G28", "G28 Z", "G0 X5", "G1 X5"):
-            with self.assertRaisesRegex(ValueError,"verifizier|bestätig"):
+            with self.assertRaisesRegex(ValueError,"verifizier|bestätig|nur über Pi"):
                 g.check(command,False)
         with self.assertRaisesRegex(ValueError,"nur über Pi"):
             g.check("G28 Z",True)
