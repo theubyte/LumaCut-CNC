@@ -219,6 +219,9 @@ input,select{background:#0a1624;border:1px solid #3a5268;padding:11px 13px;borde
 <div class="panel span4"><h2>Systemdiagnose</h2><div class="kpi"><small>SKR-Verbindung</small><strong id="usbDiag">—</strong></div>
 <div class="kpi" style="margin-top:10px"><small>Interne Statusberichte gefiltert</small><strong id="spamDiag">—</strong></div>
 <div class="kpi" style="margin-top:10px"><small>Serielle Störungen</small><strong id="faultDiag">—</strong></div>
+<div class="kpi" style="margin-top:10px"><small>GRBL-Fehler direkt vom SKR</small><strong id="skrErrorDiag">—</strong></div>
+<div class="kpi" style="margin-top:10px"><small>Vom Raspberry Pi abgelehnte LightBurn-Anfragen</small><strong id="bridgeDiag">—</strong></div>
+<p class="caption" id="bridgeReason" style="overflow-wrap:anywhere">Letzte Bridge-Ablehnung: keine</p>
 <button id="refreshDiag" style="margin-top:12px">Diagnose aktualisieren</button></div></div></section>
 <section id="system" class="tab"><div class="layout">
 <div class="panel span6"><h2>Zugang & Status</h2>
@@ -523,6 +526,9 @@ function updateDiagnostics(s){
  el("usbDiag").textContent=s.connected?"USB verbunden":"SKR USB getrennt";
  el("spamDiag").textContent=d.suppressed_status??"—";
  el("faultDiag").textContent=d.serial_faults??"—";
+ el("skrErrorDiag").textContent=(d.skr_errors??"0")+" · "+(s.last_skr_error||"keine Meldung");
+ el("bridgeDiag").textContent=d.bridge_rejections??"0";
+ el("bridgeReason").textContent="Letzte Bridge-Ablehnung: "+(s.last_bridge_rejection||"keine");
 }
 el("cameraSnap").onclick=cameraSnapshot;
 el("cameraAuto").onclick=()=>{cameraAuto=!cameraAuto;notify(cameraAuto?"Kamera-Autovorschau EIN":"Kamera-Autovorschau AUS")};
