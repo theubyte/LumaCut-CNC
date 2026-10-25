@@ -75,7 +75,7 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "Y_BED_SIZE", "370")
     cfg = replace_active(cfg, "X_MIN_POS", "0")
     cfg = replace_active(cfg, "Z_MAX_POS", "90")
-    cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 400 }")
+    cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 380 }")
     cfg = replace_active(cfg, "DEFAULT_MAX_FEEDRATE", "{ 100, 100, 6 }")
     cfg = replace_active(cfg, "DEFAULT_MAX_ACCELERATION", "{ 500, 500, 100 }")
     cfg = replace_active(cfg, "DEFAULT_ACCELERATION", "500")
@@ -110,11 +110,19 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
 
 
 PIN_PATCH = """
-// LumaCut CNC experimental headless laser/power map.
-// Stock FAN1 is PC7, stock HE0 PC8, BED PC9, FAN0 PC6.
-// Laser power: PC7 (FAN1), PWM PA1. This is a low-side MOSFET and
-// **MUST** have galvanically isolated PWM + external emergency interlock.
-// There must be no other Marlin feature controlling these power pins.
+// LumaCut CNC: FAN1 board header is PC6, FAN2 header is PC7.
+// FAN1 VCC is the supplied 24V rail. PC6 drives its switched
+// low-side GND MOSFET; PC6 does NOT generate or source 24V.
+// The laser PSU requires a qualified external interlock / emergency cut.
+// PA1 is ONLY the logic-level PWM command, not a laser power output.
+// Keep the PA1 control circuit suitably isolated from switching
+// the FAN1 laser supply return: no direct unsafe shared-ground wiring.
+// Disable Marlin's fan ownership of PC6. The laser enable is the
+// only software-controlled function allowed to use this pin.
+#undef FAN_PIN
+#define FAN_PIN -1
+#undef FAN0_PIN
+#define FAN0_PIN -1
 #undef FAN1_PIN
 #define FAN1_PIN -1
 #undef CONTROLLER_FAN_PIN
@@ -123,7 +131,7 @@ PIN_PATCH = """
 #define HEATER_0_PIN -1
 #undef HEATER_BED_PIN
 #define HEATER_BED_PIN -1
-#define SPINDLE_LASER_ENA_PIN PC7
+#define SPINDLE_LASER_ENA_PIN PC6
 #define SPINDLE_LASER_PWM_PIN PA1
 #define COOLANT_MIST_PIN PC8
 #define COOLANT_FLOOD_PIN PC9
@@ -200,7 +208,7 @@ def main():
             "environment": PIO_ENV,
             "cpu": "STM32F103RC",
             "usb": "Marlin native USB CDC",
-            "laser": {"enable": "FAN1 PC7", "pwm": "PA1",
+            "laser": {"enable": "FAN1 PC6 (24V VCC / switched low-side GND)", "pwm": "PA1",
                       "mode": "M3 I", "s_max": 255},
             "accessories": {"lights": "M7 HE0 PC8",
                             "exhaust": "M8 BED PC9"},
