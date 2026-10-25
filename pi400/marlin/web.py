@@ -356,10 +356,34 @@ def main():
         app.run(host="0.0.0.0", port=HTTP, threaded=True, use_reloader=False)
     finally:
         running=False
-        try:
-            machine.emergency_stop()
-        except Exception:
-            pass
+        # Normal service maintenance must not leave the SKR hard-killed.
+        # Still hard-stop any live LightBurn/job ownership or armed cutter.
+        # With idle, verified USB, explicitly send cutter-off and wait for
+        # completion; if that fails, escalate to the emergency parser.
+        with machine.lock:
+            unsafe = (machine.owner is not None or
+                      machine.laser_enabled or
+                      machine.state == "Busy")
+            idle_connected = (machine.serial is not None and
+                              bool(machine.identity) and
+                              not machine.emergency_latched)
+        if unsafe:
+            try:
+                machine.emergency_stop()
+            except Exception:
+                logging.exception("Could not issue emergency stop on exit")
+        elif idle_connected:
+            try:
+                machine.command("M5 I", owner="shutdown", timeout=5)
+                machine.command("M400", owner="shutdown", timeout=5)
+            except Exception:
+                logging.exception("Cutter-off handshake failed; issuing M112")
+                try:
+                    machine.emergency_stop()
+                except Exception:
+                    logging.exception("Emergency stop failed")
+        # No USB means there is no safe software stop to send.
+        # Physical laser power interlocks remain necessary.
 
 
 if __name__=="__main__":
