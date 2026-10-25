@@ -80,13 +80,13 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     # The upstream board example may already enable this option.
     # Accept either state; never fail just because it is pre-enabled.
     probe_directive = "Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN"
-    enabled = re.findall(r"(?m)^\\s*#define\\s+" + probe_directive + r"(?:\\s|$)", cfg)
-    disabled = re.findall(r"(?m)^\\s*//\\s*#define\\s+" + probe_directive + r"(?:\\s|$)", cfg)
+    enabled = re.findall(r"(?m)^\s*#define\s+" + probe_directive + r"(?:\s|$)", cfg)
+    disabled = re.findall(r"(?m)^\s*//\s*#define\s+" + probe_directive + r"(?:\s|$)", cfg)
     if len(enabled) == 1 and not disabled:
         pass
     elif len(disabled) == 1 and not enabled:
-        cfg = re.sub(r"(?m)^(\\s*)//\\s*(#define\\s+" + probe_directive + r")",
-                     r"\\1\\2", cfg, count=1)
+        cfg = re.sub(r"(?m)^(\s*)//\s*(#define\s+" + probe_directive + r")",
+                     r"\1\2", cfg, count=1)
     else:
         raise RuntimeError("Ambiguous Z-min probe directive in Marlin example")
 
