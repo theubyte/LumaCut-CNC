@@ -70,7 +70,7 @@ class SetGeometryCommand(QUndoCommand):
     def _apply(self, values: dict[str, Geometry]) -> None:
         self.doc.begin_batch()
         for sid, g in values.items():
-            self.doc.set_geometry(sid, Geometry(*g.as_tuple()))
+            self.doc.set_geometry(sid, g.copy())
         self.doc.end_batch()
 
     def redo(self) -> None:

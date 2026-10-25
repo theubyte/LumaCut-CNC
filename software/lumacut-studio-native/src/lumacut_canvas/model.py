@@ -13,6 +13,7 @@ benachrichtigt registrierte Listener nach jeder Änderung.
 
 from __future__ import annotations
 
+import math
 import uuid
 from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable
@@ -77,38 +78,114 @@ class Layer:
         ).normalized()
 
 
+def normalize_angle(deg: float) -> float:
+    """Winkel auf (-180, 180] Grad bringen (0 bleibt exakt 0)."""
+    a = math.fmod(float(deg), 360.0)
+    if a <= -180.0:
+        a += 360.0
+    elif a > 180.0:
+        a -= 360.0
+    return 0.0 if abs(a) < 1e-9 else a
+
+
+def rotate_point(px: float, py: float, cx: float, cy: float, deg: float) -> tuple[float, float]:
+    """Punkt um (cx, cy) drehen; positive Grad = im Uhrzeigersinn auf dem
+    Bildschirm (Y nach unten), identisch zu ``QTransform.rotate``."""
+    if deg == 0:
+        return px, py
+    r = math.radians(deg)
+    c, s = math.cos(r), math.sin(r)
+    dx, dy = px - cx, py - cy
+    return cx + dx * c - dy * s, cy + dx * s + dy * c
+
+
 @dataclass
 class Geometry:
-    """Geometrie als zwei Punkte p1=(x, y) und p2=(x+w, y+h).
+    """Geometrie als zwei Punkte p1=(x, y) und p2=(x+w, y+h) plus Drehung.
 
     Für Rechteck, Ellipse und Text ist das die Box (w, h > 0).
     Für Linien sind w/h vorzeichenbehaftet (Linie von p1 nach p2).
-    Diese einheitliche Darstellung erlaubt es, Verschieben und Skalieren
-    für alle Formen gleich zu behandeln.
+    ``rot`` dreht das Objekt in Grad um die Boxmitte (im Uhrzeigersinn).
+    Diese einheitliche Darstellung erlaubt es, Verschieben, Skalieren und
+    Drehen für alle Formen gleich zu behandeln.
     """
 
     x: float
     y: float
     w: float
     h: float
+    rot: float = 0.0
 
-    def bounds(self) -> Rect:
+    def center(self) -> tuple[float, float]:
+        return self.x + self.w / 2, self.y + self.h / 2
+
+    def local_bounds(self) -> Rect:
+        """Box ohne Drehung."""
         return Rect.from_points(self.x, self.y, self.x + self.w, self.y + self.h)
 
+    def corner_points(self) -> list[tuple[float, float]]:
+        """Eckpunkte (Linie: Endpunkte) nach der Drehung."""
+        cx, cy = self.center()
+        if self.w == 0 or self.h == 0:
+            pts = [(self.x, self.y), (self.x + self.w, self.y + self.h)]
+        else:
+            pts = [(self.x, self.y), (self.x + self.w, self.y),
+                   (self.x + self.w, self.y + self.h), (self.x, self.y + self.h)]
+        return [rotate_point(px, py, cx, cy, self.rot) for px, py in pts]
+
+    def bounds(self) -> Rect:
+        """Achsparallele Hüllbox (bei Drehung die der gedrehten Box)."""
+        if self.rot == 0:
+            return self.local_bounds()
+        pts = self.corner_points()
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        return Rect.from_points(min(xs), min(ys), max(xs), max(ys))
+
     def translated(self, dx: float, dy: float) -> "Geometry":
-        return Geometry(self.x + dx, self.y + dy, self.w, self.h)
+        return Geometry(self.x + dx, self.y + dy, self.w, self.h, self.rot)
+
+    def with_center(self, cx: float, cy: float) -> "Geometry":
+        return Geometry(cx - self.w / 2, cy - self.h / 2, self.w, self.h, self.rot)
+
+    def rotated(self, delta_deg: float, cx: float, cy: float) -> "Geometry":
+        """Um den Punkt (cx, cy) drehen (z. B. Mitte einer Mehrfachauswahl)."""
+        ncx, ncy = rotate_point(*self.center(), cx, cy, delta_deg)
+        g = self.with_center(ncx, ncy)
+        g.rot = normalize_angle(self.rot + delta_deg)
+        return g
 
     def mapped(self, old: Rect, new: Rect) -> "Geometry":
-        """Bildet die Geometrie affin von Box ``old`` auf Box ``new`` ab."""
+        """Bildet die Geometrie von Box ``old`` auf Box ``new`` ab.
+
+        Ungedreht exakt affin. Gedrehte Objekte bleiben formtreu (keine
+        Scherung): ihre Mitte wird affin abgebildet und Breite/Höhe werden mit
+        dem in Objektrichtung wirkenden Faktor skaliert. Bei gleichmäßiger
+        Skalierung (Umschalt) ist das exakt.
+        """
         sx = new.w / old.w if old.w > 0 else 1.0
         sy = new.h / old.h if old.h > 0 else 1.0
-        x1 = new.x + (self.x - old.x) * sx
-        y1 = new.y + (self.y - old.y) * sy
-        x2 = new.x + (self.x + self.w - old.x) * sx
-        y2 = new.y + (self.y + self.h - old.y) * sy
-        return Geometry(x1, y1, x2 - x1, y2 - y1)
+        if self.rot == 0:
+            x1 = new.x + (self.x - old.x) * sx
+            y1 = new.y + (self.y - old.y) * sy
+            x2 = new.x + (self.x + self.w - old.x) * sx
+            y2 = new.y + (self.y + self.h - old.y) * sy
+            return Geometry(x1, y1, x2 - x1, y2 - y1)
+        cx, cy = self.center()
+        ncx = new.x + (cx - old.x) * sx
+        ncy = new.y + (cy - old.y) * sy
+        r = math.radians(self.rot)
+        c, s = abs(math.cos(r)), abs(math.sin(r))
+        fw = math.hypot(sx * c, sy * s)
+        fh = math.hypot(sx * s, sy * c)
+        g = Geometry(0, 0, self.w * fw, self.h * fh, self.rot)
+        return g.with_center(ncx, ncy)
+
+    def copy(self) -> "Geometry":
+        return Geometry(self.x, self.y, self.w, self.h, self.rot)
 
     def as_tuple(self) -> tuple[float, float, float, float]:
+        """Box (x, y, w, h) ohne Drehung."""
         return (self.x, self.y, self.w, self.h)
 
 
@@ -127,12 +204,14 @@ class Shape:
         return self.geom.bounds()
 
     def copy(self, new_identity: bool = False) -> "Shape":
-        return replace(self, geom=replace(self.geom),
+        return replace(self, geom=self.geom.copy(),
                        id=new_id() if new_identity else self.id)
 
     def to_dict(self) -> dict:
         d = {"id": self.id, "kind": self.kind, "layer": self.layer_id,
              "x": self.geom.x, "y": self.geom.y, "w": self.geom.w, "h": self.geom.h}
+        if self.geom.rot:
+            d["rot"] = self.geom.rot
         if self.kind == "text":
             d["text"] = self.text
             d["font"] = self.font_family
@@ -144,7 +223,8 @@ class Shape:
         if kind not in SHAPE_KINDS:
             raise ValueError(f"Unbekannter Objekttyp: {kind}")
         return Shape(kind=kind, layer_id=str(d["layer"]),
-                     geom=Geometry(float(d["x"]), float(d["y"]), float(d["w"]), float(d["h"])),
+                     geom=Geometry(float(d["x"]), float(d["y"]), float(d["w"]), float(d["h"]),
+                                   normalize_angle(float(d.get("rot", 0.0)))),
                      text=str(d.get("text", "")), font_family=str(d.get("font", "Segoe UI")),
                      id=str(d.get("id") or new_id()))
 
@@ -159,6 +239,7 @@ def constrain_geometry(g: Geometry) -> Geometry:
     b = g.bounds()
     if is_inside_work_area(b):
         return g
+    g = g.copy()
     s = fit_scale(b)
     if s < 1.0:
         nb = Rect(b.x, b.y, b.w * s, b.h * s)
@@ -166,6 +247,21 @@ def constrain_geometry(g: Geometry) -> Geometry:
         b = nb
     dx, dy = clamp_offset(b)
     return g.translated(dx, dy)
+
+
+def keep_inside_together(geoms: dict[str, Geometry]) -> dict[str, Geometry]:
+    """Verschiebt mehrere Geometrien *gemeinsam* in die Arbeitsfläche, damit
+    die Anordnung (z. B. einer Gruppe nach dem Drehen) erhalten bleibt."""
+    r: Rect | None = None
+    for g in geoms.values():
+        b = g.bounds()
+        r = b if r is None else r.united(b)
+    if r is None:
+        return geoms
+    dx, dy = clamp_offset(r)
+    if dx == 0 and dy == 0:
+        return geoms
+    return {k: g.translated(dx, dy) for k, g in geoms.items()}
 
 
 Listener = Callable[[], None]
@@ -180,7 +276,9 @@ class Document:
     """
 
     FORMAT = "lumacut-canvas"
-    VERSION = 1
+    # Version 2: Drehung ("rot"). Ältere Dateien (v1) werden weiter gelesen;
+    # ältere Programmversionen lehnen v2 ab, statt die Drehung still zu verlieren.
+    VERSION = 2
 
     def __init__(self, with_default_layer: bool = True) -> None:
         self.layers: list[Layer] = []

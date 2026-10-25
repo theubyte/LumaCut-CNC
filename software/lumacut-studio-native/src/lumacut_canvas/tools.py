@@ -1,4 +1,4 @@
-"""Werkzeuge: Auswahl (Verschieben/Skalieren/Rahmenauswahl), Rechteck,
+"""Werkzeuge: Auswahl (Verschieben/Skalieren/Drehen/Rahmenauswahl), Rechteck,
 Ellipse, Linie, Text.
 
 Der :class:`ToolController` bekommt Mausereignisse in Szene-mm von der
@@ -19,7 +19,8 @@ from PySide6.QtWidgets import QGraphicsRectItem, QInputDialog
 
 from . import theme
 from .commands import AddShapesCommand, SetGeometryCommand, SetTextCommand
-from .model import Geometry, Shape
+from .items import ROTATE_HANDLE
+from .model import Geometry, Shape, keep_inside_together, normalize_angle, rotate_point
 from .shape_paths import text_aspect
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, clamp_offset
 
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
 MIN_SIZE_MM = 0.5
 DEFAULT_SIZE_MM = 20.0
 DEFAULT_TEXT_HEIGHT_MM = 10.0
+ROTATE_SNAP_DEG = 15.0
 
 
 class Tool(str, Enum):
@@ -48,20 +50,24 @@ def _clamp_point(p: QPointF) -> QPointF:
     return QPointF(min(max(p.x(), 0.0), WORK_WIDTH_MM), min(max(p.y(), 0.0), WORK_HEIGHT_MM))
 
 
-def resize_bounds(orig: Rect, handle: int, pos: QPointF, proportional: bool) -> Rect:
+def resize_bounds(orig: Rect, handle: int, pos: QPointF, proportional: bool,
+                  clamp: bool = True) -> Rect:
     """Neue Auswahlbox, wenn Griff ``handle`` nach ``pos`` gezogen wird.
 
     Die gegenüberliegende Kante/Ecke bleibt fest. Mit ``proportional``
     (Umschalt) bleibt das Seitenverhältnis erhalten. Ergebnis wird auf die
-    Arbeitsfläche begrenzt.
+    Arbeitsfläche begrenzt (``clamp=False`` für gedrehte Rahmen, deren
+    lokales Koordinatensystem nicht achsparallel zur Fläche ist).
     """
     left, top, right, bottom = orig.x, orig.y, orig.right, orig.bottom
     moves_l = handle in (0, 6, 7)
     moves_r = handle in (2, 3, 4)
     moves_t = handle in (0, 1, 2)
     moves_b = handle in (4, 5, 6)
-    x = min(max(pos.x(), 0.0), WORK_WIDTH_MM)
-    y = min(max(pos.y(), 0.0), WORK_HEIGHT_MM)
+    x, y = pos.x(), pos.y()
+    if clamp:
+        x = min(max(x, 0.0), WORK_WIDTH_MM)
+        y = min(max(y, 0.0), WORK_HEIGHT_MM)
     if moves_l:
         left = min(x, right - MIN_SIZE_MM)
     if moves_r:
@@ -78,7 +84,8 @@ def resize_bounds(orig: Rect, handle: int, pos: QPointF, proportional: bool) -> 
         # Nicht über die Fläche hinaus wachsen lassen.
         max_w = right if moves_l else (WORK_WIDTH_MM - left if moves_r else WORK_WIDTH_MM)
         max_h = bottom if moves_t else (WORK_HEIGHT_MM - top if moves_b else WORK_HEIGHT_MM)
-        s = min(s, max_w / orig.w, max_h / orig.h)
+        if clamp:
+            s = min(s, max_w / orig.w, max_h / orig.h)
         w, h = orig.w * s, orig.h * s
         if moves_l:
             left = right - w
@@ -99,16 +106,19 @@ def resize_bounds(orig: Rect, handle: int, pos: QPointF, proportional: bool) -> 
 class ToolController:
     HANDLE_CURSORS = {0: Qt.SizeFDiagCursor, 4: Qt.SizeFDiagCursor, 2: Qt.SizeBDiagCursor,
                       6: Qt.SizeBDiagCursor, 1: Qt.SizeVerCursor, 5: Qt.SizeVerCursor,
-                      3: Qt.SizeHorCursor, 7: Qt.SizeHorCursor}
+                      3: Qt.SizeHorCursor, 7: Qt.SizeHorCursor, ROTATE_HANDLE: Qt.PointingHandCursor}
 
     def __init__(self, editor: "CanvasEditor") -> None:
         self.ed = editor
         self.tool = Tool.SELECT
-        self._mode: str | None = None  # "move" | "resize" | "rubber" | "draw"
+        self._mode: str | None = None  # "move" | "resize" | "rotate" | "rubber" | "draw"
         self._start = QPointF()
         self._orig: dict[str, Geometry] = {}
         self._orig_bounds: Rect | None = None
         self._handle: int | None = None
+        self._frame_angle = 0.0          # Drehung des Auswahlrahmens beim Start
+        self._frame_center = QPointF()
+        self._rot_start = 0.0
         self._moved = False
         self._preview_id: str | None = None
         self._rubber = QGraphicsRectItem()
@@ -146,7 +156,7 @@ class ToolController:
 
     def cancel(self) -> None:
         """Laufenden Zug abbrechen und Ausgangszustand wiederherstellen."""
-        if self._mode in ("move", "resize") and self._orig:
+        if self._mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if self._mode == "draw" and self._preview_id and self.doc.has_shape(self._preview_id):
             self.doc.remove_shape(self._preview_id)
@@ -158,7 +168,7 @@ class ToolController:
         self.doc.begin_batch()
         for sid, g in geoms.items():
             if self.doc.has_shape(sid):
-                self.doc.shape(sid).geom = Geometry(*g.as_tuple())
+                self.doc.shape(sid).geom = g.copy()
         self.doc.changed()
         self.doc.end_batch()
 
@@ -183,10 +193,18 @@ class ToolController:
     def _press_select(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
         handle = self.ed.scene.overlay.handle_at(pos) if self.ed.selection else None
         if handle is not None:
-            self._mode = "resize"
+            ov = self.ed.scene.overlay
+            self._orig = {i: self.doc.shape(i).geom.copy() for i in self.ed.selection}
+            # Rahmen (bei einem gedrehten Einzelobjekt dessen ungedrehte Box).
+            self._orig_bounds = ov.rect
+            self._frame_angle = ov.angle
+            self._frame_center = ov.center()
             self._handle = handle
-            self._orig = {i: Geometry(*self.doc.shape(i).geom.as_tuple()) for i in self.ed.selection}
-            self._orig_bounds = self.doc.selection_bounds(self.ed.selection)
+            if handle == ROTATE_HANDLE:
+                self._mode = "rotate"
+                self._rot_start = self._angle_to(pos)
+            else:
+                self._mode = "resize"
             return
         hit = self.ed.scene.editable_shape_at(pos)
         shift = bool(mods & Qt.ShiftModifier)
@@ -199,7 +217,7 @@ class ToolController:
             self.ed.set_selection(sel)
             if hit in sel:
                 self._mode = "move"
-                self._orig = {i: Geometry(*self.doc.shape(i).geom.as_tuple()) for i in sel}
+                self._orig = {i: self.doc.shape(i).geom.copy() for i in sel}
                 self._orig_bounds = self.doc.selection_bounds(sel)
             return
         self._mode = "rubber"
@@ -227,9 +245,9 @@ class ToolController:
         if self._mode == "move":
             self._drag_move(pos, shift)
         elif self._mode == "resize":
-            nb = resize_bounds(self._orig_bounds, self._handle, self.snap_point(pos), shift)  # type: ignore[arg-type]
-            self._apply({i: g.mapped(self._orig_bounds, nb) for i, g in self._orig.items()})  # type: ignore[arg-type]
-            self.ed.refresh_selection_overlay()
+            self._drag_resize(pos, shift)
+        elif self._mode == "rotate":
+            self._drag_rotate(pos, shift)
         elif self._mode == "rubber":
             self._rubber.setRect(QRectF(self._start, pos).normalized())
         elif self._mode == "draw":
@@ -252,6 +270,59 @@ class ToolController:
         dx, dy = dx + cx, dy + cy
         self._apply({i: g.translated(dx, dy) for i, g in self._orig.items()})
         self.ed.refresh_selection_overlay()
+
+    def _angle_to(self, pos: QPointF) -> float:
+        c = self._frame_center
+        return math.degrees(math.atan2(pos.y() - c.y(), pos.x() - c.x()))
+
+    def _drag_resize(self, pos: QPointF, proportional: bool) -> None:
+        ob = self._orig_bounds
+        assert ob is not None and self._handle is not None
+        a = self._frame_angle
+        if not a:
+            nb = resize_bounds(ob, self._handle, self.snap_point(pos), proportional)
+            self._apply({i: g.mapped(ob, nb) for i, g in self._orig.items()})
+        else:
+            # Gedrehtes Einzelobjekt: im eigenen (ungedrehten) Koordinatensystem
+            # skalieren, damit Griffe entlang der Objektkanten wirken.
+            c = self._frame_center
+            lx, ly = rotate_point(pos.x(), pos.y(), c.x(), c.y(), -a)
+            nb = resize_bounds(ob, self._handle, QPointF(lx, ly), proportional, clamp=False)
+            new = {}
+            for i, g in self._orig.items():
+                lg = Geometry(g.x, g.y, g.w, g.h).mapped(ob, nb)
+                wx, wy = rotate_point(*lg.center(), c.x(), c.y(), a)
+                ng = lg.with_center(wx, wy)
+                ng.rot = g.rot
+                new[i] = ng
+            self._apply(new)
+        self.ed.refresh_selection_overlay()
+
+    def rotation_delta(self, pos: QPointF, snap: bool) -> float:
+        """Drehwinkel seit Zugbeginn; mit ``snap`` auf 15°-Schritte (absolut
+        beim Einzelobjekt, relativ bei Mehrfachauswahl)."""
+        delta = normalize_angle(self._angle_to(pos) - self._rot_start)
+        if snap:
+            base = self._frame_angle
+            delta = round((base + delta) / ROTATE_SNAP_DEG) * ROTATE_SNAP_DEG - base
+        return delta
+
+    def _drag_rotate(self, pos: QPointF, snap: bool) -> None:
+        delta = self.rotation_delta(pos, snap)
+        c = self._frame_center
+        new = keep_inside_together({i: g.rotated(delta, c.x(), c.y()) for i, g in self._orig.items()})
+        self._apply(new)
+        ob = self._orig_bounds
+        if ob is not None and len(self._orig) > 1:
+            # Mehrfachauswahl: ursprünglichen Rahmen mitdrehen (statt springender Hüllbox).
+            first = next(iter(self._orig))
+            ref = self._orig[first].rotated(delta, c.x(), c.y())
+            dx, dy = new[first].x - ref.x, new[first].y - ref.y
+            self.ed.scene.overlay.set_rect(Rect(ob.x + dx, ob.y + dy, ob.w, ob.h),
+                                           normalize_angle(self._frame_angle + delta))
+        else:
+            self.ed.refresh_selection_overlay()
+        self.ed.notify(f"Drehung: {normalize_angle(self._frame_angle + delta):.1f}°")
 
     def _drag_draw(self, pos: QPointF, constrain: bool) -> None:
         a = _clamp_point(self.snap_point(self._start))
@@ -277,11 +348,11 @@ class ToolController:
 
     def release(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
         mode, self._mode = self._mode, None
-        if mode in ("move", "resize"):
+        if mode in ("move", "resize", "rotate"):
             if self._moved:
-                new = {i: Geometry(*self.doc.shape(i).geom.as_tuple()) for i in self._orig}
+                new = {i: self.doc.shape(i).geom.copy() for i in self._orig}
                 self._apply(self._orig)
-                label = "Verschieben" if mode == "move" else "Skalieren"
+                label = {"move": "Verschieben", "resize": "Skalieren", "rotate": "Drehen"}[mode]
                 self.ed.undo_stack.push(SetGeometryCommand(self.doc, self._orig, new, label))
             self._orig = {}
         elif mode == "rubber":

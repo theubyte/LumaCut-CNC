@@ -148,6 +148,15 @@ def _link(p, c):
     p.drawRoundedRect(QRectF(11, 8.5, 10, 7), 3.5, 3.5)
 
 
+def _rotate(p, c, cw: bool = True):
+    if not cw:
+        p.translate(24, 0); p.scale(-1, 1)
+    _pen(p, c); path = QPainterPath(); path.arcMoveTo(QRectF(5, 5, 14, 14), 150)
+    path.arcTo(QRectF(5, 5, 14, 14), 150, -280); p.drawPath(path)
+    end = path.currentPosition()
+    p.drawPolyline(QPolygonF([QPointF(end.x() - 4.2, end.y() - 0.6), end, QPointF(end.x() - 0.2, end.y() + 4.2)]))
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "undo": _undo, "redo": _redo, "delete": _delete, "fit": _fit,
@@ -157,6 +166,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "lock": _lock, "unlock": lambda p, c: _lock(p, c, True),
     "plus": _plus, "up": lambda p, c: _arrow(p, c, True), "down": lambda p, c: _arrow(p, c, False),
     "duplicate": _duplicate, "link": _link,
+    "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
 }
 
 

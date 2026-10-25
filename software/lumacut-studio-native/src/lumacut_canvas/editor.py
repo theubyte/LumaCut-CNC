@@ -31,11 +31,25 @@ from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand
                        SetShapeLayerCommand, SetTextCommand)
 from .document_io import FILE_SUFFIX, load_into, save_document
 from .export import export_png, export_svg
-from .model import Document, Geometry, Shape
+from .model import Document, Geometry, Shape, keep_inside_together, normalize_angle
 from .tools import TOOL_LABELS, TOOL_SHORTCUTS, Tool, ToolController
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, clamp_offset
 
 PASTE_OFFSET_MM = 5.0
+ROTATE_STEP_DEG = 15.0
+
+
+def _angle_spin() -> QDoubleSpinBox:
+    s = QDoubleSpinBox()
+    s.setRange(-180.0, 180.0)
+    s.setWrapping(True)
+    s.setDecimals(1)
+    s.setSingleStep(ROTATE_STEP_DEG)
+    s.setSuffix(" °")
+    s.setKeyboardTracking(False)
+    s.setAlignment(Qt.AlignRight)
+    s.setFixedWidth(84)
+    return s
 
 
 def _mm_spin(minimum: float, maximum: float) -> QDoubleSpinBox:
@@ -83,6 +97,16 @@ class PropertyBar(QWidget):
         self.ratio.setIcon(icons.icon("link"))
         self.ratio.setToolTip("Seitenverhältnis beibehalten")
         lay.addWidget(self.ratio)
+        lay.addSpacing(8)
+        angle_label = QLabel("Winkel")
+        self.angle = _angle_spin()
+        tip = "Drehung um die Mitte (im Uhrzeigersinn). Am Griff ziehen; Umschalt rastet in 15°-Schritten."
+        angle_label.setToolTip(tip)
+        self.angle.setToolTip(tip)
+        lay.addWidget(angle_label)
+        lay.addWidget(self.angle)
+        self.angle.valueChanged.connect(self._angle_edited)
+        self._angle_shown = 0.0
         lay.addSpacing(12)
         lay.addWidget(QLabel("Ebene"))
         self.layer = QComboBox()
@@ -100,7 +124,7 @@ class PropertyBar(QWidget):
         self.refresh()
 
     def _spins(self) -> tuple[QDoubleSpinBox, ...]:
-        return (self.x, self.y, self.w, self.h)
+        return (self.x, self.y, self.w, self.h, self.angle)
 
     def refresh(self) -> None:
         ed = self.ed
@@ -125,8 +149,17 @@ class PropertyBar(QWidget):
             self.title.setText(names[kinds.pop()] if len(sel) == 1 else f"{len(sel)} Objekte")
             self.x.setValue(b.x)
             self.y.setValue(b.y)
-            self.w.setValue(b.w)
-            self.h.setValue(b.h)
+            g = doc.shape(sel[0]).geom
+            if len(sel) == 1 and g.rot:
+                # Gedrehtes Einzelobjekt: eigene Breite/Höhe statt Hüllbox.
+                self.w.setValue(abs(g.w))
+                self.h.setValue(abs(g.h))
+            else:
+                self.w.setValue(b.w)
+                self.h.setValue(b.h)
+            rots = {round(doc.shape(i).geom.rot, 6) for i in sel}
+            self._angle_shown = rots.pop() if len(rots) == 1 else 0.0
+            self.angle.setValue(self._angle_shown)
             layers = {doc.shape(i).layer_id for i in sel}
             self.layer.setCurrentIndex(self.layer.findData(layers.pop()) if len(layers) == 1 else -1)
         single_text = len(sel) == 1 and doc.shape(sel[0]).kind == "text"
@@ -147,6 +180,10 @@ class PropertyBar(QWidget):
             return
         w, h = self.w.value(), self.h.value()
         sender = self.sender()
+        g0 = doc.shape(sel[0]).geom
+        if len(sel) == 1 and g0.rot:
+            self._edit_rotated_single(sel[0], g0, ob, sender)
+            return
         if self.ratio.isChecked() and ob.w > 0 and ob.h > 0:
             if sender is self.w:
                 h = ob.h * w / ob.w
@@ -157,9 +194,38 @@ class PropertyBar(QWidget):
         if ob.h == 0:
             h = 0.0
         nb = Rect(self.x.value(), self.y.value(), w, h)
-        old = {i: Geometry(*doc.shape(i).geom.as_tuple()) for i in sel}
+        old = {i: doc.shape(i).geom.copy() for i in sel}
         new = {i: g.mapped(ob, nb) for i, g in old.items()}
         ed.undo_stack.push(SetGeometryCommand(doc, old, new, "Maße ändern"))
+
+    def _edit_rotated_single(self, sid: str, g: Geometry, ob: Rect, sender) -> None:
+        """Maße eines gedrehten Objekts: X/Y verschieben die Hüllbox, B/H ändern
+        die eigene Größe um die Mitte."""
+        if sender in (self.x, self.y):
+            ng = g.translated(self.x.value() - ob.x, self.y.value() - ob.y)
+        else:
+            w, h = self.w.value(), self.h.value()
+            aw, ah = abs(g.w), abs(g.h)
+            if self.ratio.isChecked() and aw > 0 and ah > 0:
+                if sender is self.w:
+                    h = ah * w / aw
+                elif sender is self.h:
+                    w = aw * h / ah
+            cx, cy = g.center()
+            ng = Geometry(0, 0, w if g.w >= 0 else -w, h if g.h >= 0 else -h, g.rot).with_center(cx, cy)
+            if aw == 0:
+                ng.w = 0.0
+            if ah == 0:
+                ng.h = 0.0
+            ng = ng.with_center(cx, cy)
+        self.ed.undo_stack.push(SetGeometryCommand(self.ed.document, {sid: g.copy()}, {sid: ng}, "Maße ändern"))
+
+    def _angle_edited(self, value: float) -> None:
+        if self._updating:
+            return
+        delta = normalize_angle(value - self._angle_shown)
+        if delta:
+            self.ed.rotate_selection(delta)
 
     def _layer_chosen(self, index: int) -> None:
         lid = self.layer.itemData(index)
@@ -273,6 +339,10 @@ class CanvasEditor(QWidget):
         self._act("export", "Exportieren (SVG/PNG) …", self.export_dialog, QKeySequence("Ctrl+E"), "export")
         self._act("delete", "Löschen", self.delete_selection, QKeySequence.Delete, "delete")
         self._act("duplicate", "Duplizieren", self.duplicate_selection, QKeySequence("Ctrl+D"), "duplicate")
+        self._act("rotate_cw", "90° im Uhrzeigersinn drehen", lambda: self.rotate_selection(90.0),
+                  QKeySequence("Ctrl+R"), "rotate_cw")
+        self._act("rotate_ccw", "90° gegen den Uhrzeigersinn drehen", lambda: self.rotate_selection(-90.0),
+                  QKeySequence("Ctrl+Shift+R"), "rotate_ccw")
         self._act("copy", "Kopieren", self.copy_selection, QKeySequence.Copy)
         self._act("paste", "Einfügen", self.paste, QKeySequence.Paste)
         self._act("select_all", "Alles auswählen", self.select_all, QKeySequence.SelectAll)
@@ -297,7 +367,8 @@ class CanvasEditor(QWidget):
     def _build_layout(self) -> None:
         a = self.actions_by_name
         bar = self._toolbar("ActionBar", Qt.Horizontal)
-        for name in ("open", "save", "export", None, "undo", "redo", None, "duplicate", "delete", None,
+        for name in ("open", "save", "export", None, "undo", "redo", None, "duplicate", "delete",
+                     "rotate_ccw", "rotate_cw", None,
                      "zoom_out", "zoom_in", "fit", None, "grid", "snap"):
             bar.addSeparator() if name is None else bar.addAction(a[name])
         self.zoom_label = QLabel("100 %")
@@ -384,8 +455,25 @@ class CanvasEditor(QWidget):
         self.property_bar.refresh()
         self.selectionChanged.emit(list(ids))
 
+    def selection_frame(self) -> tuple[Rect, float] | None:
+        """Auswahlrahmen: ein gedrehtes Einzelobjekt bekommt einen gedrehten
+        Rahmen (Griffe an den Objektkanten), sonst die achsparallele Hüllbox."""
+        sel = [i for i in self.selection if self.document.has_shape(i)]
+        if not sel:
+            return None
+        if len(sel) == 1:
+            g = self.document.shape(sel[0]).geom
+            if g.rot:
+                return g.local_bounds(), g.rot
+        b = self.document.selection_bounds(sel)
+        return (b, 0.0) if b is not None else None
+
     def refresh_selection_overlay(self) -> None:
-        self.scene.overlay.set_rect(self.document.selection_bounds(self.selection) if self.selection else None)
+        frame = self.selection_frame()
+        if frame is None:
+            self.scene.overlay.set_rect(None)
+        else:
+            self.scene.overlay.set_rect(*frame)
 
     def set_backdrop(self, image: QImage | None) -> None:
         self.view.set_backdrop(image)
@@ -409,9 +497,23 @@ class CanvasEditor(QWidget):
         dx, dy = dx + cx, dy + cy
         if dx == 0 and dy == 0:
             return
-        old = {i: Geometry(*doc.shape(i).geom.as_tuple()) for i in self.selection}
+        old = {i: doc.shape(i).geom.copy() for i in self.selection}
         new = {i: g.translated(dx, dy) for i, g in old.items()}
         self.undo_stack.push(SetGeometryCommand(doc, old, new, "Verschieben"))
+
+    def rotate_selection(self, delta_deg: float) -> None:
+        """Auswahl um ihre Mitte drehen (ein Undo-Schritt); die Anordnung
+        mehrerer Objekte bleibt erhalten und gemeinsam in der Fläche."""
+        doc = self.document
+        sel = [i for i in self.selection if doc.has_shape(i)]
+        frame = self.selection_frame()
+        if not sel or frame is None or not delta_deg:
+            return
+        r = frame[0]
+        cx, cy = r.x + r.w / 2, r.y + r.h / 2
+        old = {i: doc.shape(i).geom.copy() for i in sel}
+        new = keep_inside_together({i: g.rotated(delta_deg, cx, cy) for i, g in old.items()})
+        self.undo_stack.push(SetGeometryCommand(doc, old, new, "Drehen"))
 
     def copy_selection(self) -> None:
         self._clipboard = [self.document.shape(i).copy() for i in self.selection]
