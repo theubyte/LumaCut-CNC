@@ -222,6 +222,14 @@ with web.app.test_client() as client:
             self.assertEqual(result.returncode,0,result.stderr)
 
 
+    def test_web_api_handles_http_errors_without_double_read(self):
+        ui=(ROOT/"pi400"/"marlin"/"index.html").read_text(encoding="utf-8")
+        self.assertIn("const raw=await r.text();",ui)
+        self.assertNotIn("await r.json();m=",ui)
+        self.assertNotIn("m=await r.text()",ui)
+        self.assertIn("Maschinenzugangscode fehlt oder ist ungültig",ui)
+        self.assertIn("Zugangscode erforderlich",ui)
+
     def test_machine_web_and_service_modules_compile(self):
         import subprocess
         paths=[str(ROOT/"pi400"/"marlin"/p)
