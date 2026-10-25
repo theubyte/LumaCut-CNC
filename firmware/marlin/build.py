@@ -64,6 +64,11 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "X_MIN_ENDSTOP_INVERTING", "true")
     cfg = replace_active(cfg, "Y_MIN_ENDSTOP_INVERTING", "true")
     cfg = replace_active(cfg, "Z_MIN_ENDSTOP_INVERTING", "true")
+    # Verified by physical jogging: stock Mega Zero X/Y motor direction
+    # is opposite on LumaCut. Z already moves correctly; leave Z alone.
+    cfg = replace_active(cfg, "INVERT_X_DIR", "false")
+    cfg = replace_active(cfg, "INVERT_Y_DIR", "false")
+    cfg = replace_active(cfg, "INVERT_Z_DIR", "false")
     cfg = replace_active(cfg, "EXTRUDERS", "0")
     cfg = replace_active(cfg, "TEMP_SENSOR_0", "0")
     cfg = replace_active(cfg, "X_BED_SIZE", "390")
