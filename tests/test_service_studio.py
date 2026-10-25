@@ -54,7 +54,7 @@ class PinMapTests(unittest.TestCase):
         c = Controller("/dev/null")
         for line in ("[VER:1.1f.20261015:]",
                      "[FIRMWARE:grblHAL]",
-                     "[BOARD:LumaCut SKR Mini MZ v1.0 EXPERIMENTAL]",
+                     "[BOARD:LumaCut SKR Mini MZ v1.0 FAN1-LASER EXPERIMENTAL]",
                      "[DRIVER:STM32F103RC@72MHz]"):
             c._read_response(line)
         self.assertEqual(c.status()["identity"]["firmware"], "grblHAL")
