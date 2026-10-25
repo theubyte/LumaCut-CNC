@@ -374,6 +374,7 @@ class CanvasEditor(QWidget):
         self._act("zoom_in", "Vergrößern", lambda: self.view.zoom_by(1.25), QKeySequence.ZoomIn, "zoom_in")
         self._act("zoom_out", "Verkleinern", lambda: self.view.zoom_by(0.8), QKeySequence.ZoomOut, "zoom_out")
         self._act("fit", "Arbeitsfläche einpassen", self.view.fit_work_area, QKeySequence("Ctrl+0"), "fit")
+        self._act("fit_selection", "Auswahl einpassen", self.fit_selection, QKeySequence("Ctrl+Shift+A"))
         g = self._act("grid", "Raster anzeigen", lambda on: self.view.set_grid_visible(on), "Ctrl+'",
                       "grid", checkable=True)
         g.setChecked(True)
@@ -578,6 +579,16 @@ class CanvasEditor(QWidget):
         self.set_roi(None)
 
     # --- Bearbeiten -------------------------------------------------------
+    def fit_selection(self) -> None:
+        """Zoom to the selection (Ctrl+Shift+A), or to all objects, or the work area."""
+        doc = self.document
+        ids = [i for i in self.selection if doc.has_shape(i)] or [s.id for s in doc.shapes]
+        r = doc.selection_bounds(ids) if ids else None
+        if r is None:
+            self.view.fit_work_area()
+        else:
+            self.view.fit_rect(QRectF(r.x, r.y, r.w, r.h))
+
     def select_all(self) -> None:
         self.set_selection([s.id for s in self.document.shapes])
 

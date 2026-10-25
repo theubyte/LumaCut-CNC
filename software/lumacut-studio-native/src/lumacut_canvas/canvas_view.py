@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (QColor, QFont, QImage, QMouseEvent, QPainter, QPaintEvent, QPen,
                            QWheelEvent)
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QWidget
@@ -119,17 +119,44 @@ class CanvasView(QGraphicsView):
     def px_per_mm(self) -> float:
         return self.transform().m11()
 
-    def set_zoom(self, px_per_mm: float) -> None:
+    def set_zoom(self, px_per_mm: float, anchor: QPointF | None = None) -> None:
+        """Zoom to ``px_per_mm`` (clamped); ``anchor`` = viewport point that
+        stays fixed (default: view centre). Explicit anchoring instead of
+        ``AnchorUnderMouse`` keeps the point under the *event* position fixed
+        (wheel/pinch), independent of QCursor."""
         px_per_mm = max(MIN_SCALE, min(MAX_SCALE, px_per_mm))
         f = px_per_mm / self.px_per_mm
+        if abs(f - 1.0) < 1e-9:
+            return
+        vp = self.viewport().rect()
+        if anchor is None:
+            anchor = QPointF(vp.width() / 2.0, vp.height() / 2.0)
+        before = self.mapToScene(anchor.toPoint())
+        self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self.scale(f, f)
+        after = self.mapFromScene(before)
+        hb, vb = self.horizontalScrollBar(), self.verticalScrollBar()
+        hb.setValue(hb.value() + round(after.x() - anchor.x()))
+        vb.setValue(vb.value() + round(after.y() - anchor.y()))
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self._after_zoom()
 
-    def zoom_by(self, factor: float) -> None:
-        self.set_zoom(self.px_per_mm * factor)
+    def zoom_by(self, factor: float, anchor: QPointF | None = None) -> None:
+        self.set_zoom(self.px_per_mm * factor, anchor)
 
     def fit_work_area(self) -> None:
         self.fitInView(QRectF(-8, -8, WORK_WIDTH_MM + 16, WORK_HEIGHT_MM + 16), Qt.KeepAspectRatio)
+        self._after_zoom()
+
+    def fit_rect(self, rect: QRectF, margin_mm: float = 5.0) -> None:
+        """Fit a scene rectangle (mm), e.g. the selection; respects MAX_SCALE."""
+        if rect.isNull() or rect.width() < 0 or rect.height() < 0:
+            return self.fit_work_area()
+        r = rect.adjusted(-margin_mm, -margin_mm, margin_mm, margin_mm)
+        self.fitInView(r, Qt.KeepAspectRatio)
+        if self.px_per_mm > MAX_SCALE or self.px_per_mm < MIN_SCALE:
+            self.set_zoom(self.px_per_mm)  # clamps
+            self.centerOn(r.center())
         self._after_zoom()
 
     def _after_zoom(self) -> None:
@@ -152,10 +179,21 @@ class CanvasView(QGraphicsView):
         self.viewChanged.emit()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
-        steps = event.angleDelta().y() / 120.0
+        # Wheel (and Ctrl+wheel) zooms at the pointer like LightBurn; trackpads
+        # without angle delta report pixel deltas.
+        steps = event.angleDelta().y() / 120.0 or event.pixelDelta().y() / 60.0
         if steps:
-            self.zoom_by(1.15 ** steps)
+            self.zoom_by(1.15 ** max(-4.0, min(4.0, steps)), event.position())
         event.accept()
+
+    def viewportEvent(self, event) -> bool:  # noqa: N802
+        # Trackpad pinch (macOS/Windows precision touchpads) zooms at the fingers.
+        if event.type() == QEvent.NativeGesture and \
+                event.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
+            self.zoom_by(1.0 + event.value(), event.position())
+            event.accept()
+            return True
+        return super().viewportEvent(event)
 
     # --- Maus -------------------------------------------------------------
     def _scene_pos(self, event: QMouseEvent) -> QPointF:
