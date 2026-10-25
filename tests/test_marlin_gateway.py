@@ -503,6 +503,8 @@ class USBProtocolTests(unittest.TestCase):
                                 writes.index(b"M569 S1 X\n"))
                 strokes = [w for w in writes if w.startswith(b"G1 X")]
                 self.assertEqual(len(strokes), notes * 2)
+                self.assertIn(b"F588\n", b"\n".join(strokes) + b"\n")
+                self.assertIn(b"F392\n", b"\n".join(strokes) + b"\n")
                 self.assertEqual(
                     sum(float(w.decode().split("X")[1].split()[0])
                         for w in strokes), 0.0)
