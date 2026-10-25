@@ -249,7 +249,7 @@ class MarlinTransport:
             if not normalized:
                 return []
             motion = re.match(r"^G0?[0123](?:\s|$)", normalized) is not None
-            if motion and not self.homed:
+            if (motion or normalized == "M3 I") and not self.homed:
                 raise RuntimeError("SKR erst Z-sicher und vollständig referenzieren")
             try:
                 reply = self._exchange_locked(normalized, timeout)
@@ -292,16 +292,18 @@ class MarlinTransport:
             commands = ("M5 I", "G28 Z", "M400",
                         "G91", f"G0 Z{clearance:.2f} F360", "G90",
                         "G28 X Y", "M400", "M114")
-            collected = []
+            result = []
             try:
-                for index, cmd in enumerate(commands):
-                    collected.extend(self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35))
+                for cmd in commands:
+                    result = self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35)
                     if cmd == "G28 Z":
                         self.z_homed = True
                 self.homed = True
                 self.guard = MarlinLaserGuard()
                 self.laser_enabled = False
-                return collected
+                # One upstream G28 must receive exactly one ACK. Sending
+                # nine internal ACKs would corrupt LightBurn flow control.
+                return result
             except Exception as exc:
                 self._close_locked("Referenzfahrt fehlgeschlagen: " + str(exc))
                 raise
