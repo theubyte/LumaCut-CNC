@@ -16,6 +16,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import MarlinTransport, MarlinLaserGuard, normalize, serve_tcp
+from .smart_cam import analyze_job
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "marlin"
@@ -268,6 +269,22 @@ def jobs():
                           for p in sorted(JOBS.iterdir())
                           if p.is_file() and p.suffix.lower() in (".gcode",".gc",".nc")])
 
+
+@app.get("/api/jobs/<path:filename>/geometry")
+def job_geometry(filename):
+    """Preview actual powered toolpath envelope before an automatic probe."""
+    if filename != Path(filename).name:
+        raise ValueError("Unzulässiger Dateiname")
+    path = JOBS / filename
+    if not path.is_file():
+        raise ValueError("Auftrag nicht gefunden")
+    bounds = analyze_job(path.read_text(encoding="utf-8"))
+    return jsonify(bounds={"xmin": bounds.xmin, "ymin": bounds.ymin,
+                           "xmax": bounds.xmax, "ymax": bounds.ymax},
+                   segments=bounds.segments,
+                   center=bounds.center,
+                   probe_candidates=bounds.probe_grid(),
+                   warning="Rasterpunkte sind Kandidaten: Materialabdeckung noch nicht vermessen.")
 
 @app.post("/api/upload")
 def upload():
