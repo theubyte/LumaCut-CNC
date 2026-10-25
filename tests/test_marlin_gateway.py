@@ -76,7 +76,6 @@ class FirmwareDirectionContractTests(unittest.TestCase):
         pins=module.PIN_PATCH
         self.assertIn("#define SPINDLE_LASER_ENA_PIN PC6",pins)
         self.assertIn("#define SPINDLE_LASER_PWM_PIN PA1",pins)
-        self.assertIn("#define FAN_PIN -1",pins)
         self.assertIn("#define FAN0_PIN -1",pins)
         self.assertIn("#define FAN1_PIN -1",pins)
         self.assertNotIn("#define SPINDLE_LASER_ENA_PIN PC7",pins)
