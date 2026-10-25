@@ -155,6 +155,7 @@ class MarlinTransport:
         # X<30 or Y<30 are permanently reserved for machine homing.
         # Cutting must occur strictly inside the remaining rectangle.
         self.safe_zone_xy_mm = 30.0
+        self.probe_xy_offset_mm = None
         self.absolute_mode = True
         self.focused_this_job = False
         self.fan_off_at = None
@@ -508,17 +509,58 @@ class MarlinTransport:
             self.focused_this_job = False
             return result
 
-    def probe_workpiece(self, owner: str = "web"):
-        """LightBurn G30: currently blocked until a separate *nonzeroing*
-        contact-probe cycle exists in SKR firmware.
-
-        A second G28 Z would rewrite the permanent machine-bed origin to
-        the material top and invalidate soft limits. Never do that.
-        """
-        raise RuntimeError(
-            "G30 Werkstueckmessung noch nicht freigegeben: "
-            "separater Probe-Eingang und nicht-nullender Tastzyklus fehlen. "
-            "Maschinenboden Z=0 darf nicht ueberschrieben werden.")
+    def probe_workpiece(self, owner: str = "lightburn"):
+        """Intercept LightBurn G30; use native Marlin probe, preserve bed Z0."""
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if not self.homed or not self.homing_verified:
+                raise RuntimeError("Zuerst LightBurn G28 referenzieren")
+            if self.serial is None or self.emergency_latched:
+                raise RuntimeError("SKR nicht verbunden / Notstopp aktiv")
+            if self.laser_enabled:
+                raise RuntimeError("Werkstückabtastung bei aktivem Laser unzulässig")
+            if self.probe_xy_offset_mm is None:
+                raise ValueError("X/Y-Tasterversatz muss zuerst kalibriert sein")
+            self.surface_z = None
+            self.focused_this_job = False
+            self._exchange_locked("M5 I", timeout=8)
+            self._exchange_locked("M400", timeout=20)
+            self._exchange_locked("M114", timeout=8)
+            if self.position is None:
+                raise RuntimeError("Ausgangsposition für G30 unbekannt")
+            laser_x, laser_y, z = self.position
+            dx, dy = self.probe_xy_offset_mm
+            # Offset is (probe-tip minus laser-point) in machine XY.
+            # Reposition head so probe reaches the selected laser XY point.
+            x, y = laser_x - dx, laser_y - dy
+            if not (self.safe_zone_xy_mm <= x <= 390 and
+                    self.safe_zone_xy_mm <= y <= 370):
+                raise ValueError("Werkstück-Abtastpunkt außerhalb X30..390/Y30..370")
+            if z < self.clearance_mm:
+                self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F360", timeout=45)
+                self._exchange_locked("M400", timeout=45)
+            self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F6000", timeout=60)
+            self._exchange_locked("M400", timeout=60)
+            replies = self._exchange_locked("G30", timeout=120)
+            contact = None
+            for line in replies:
+                match = re.search(
+                    r"\bBed\s+X:\s*[-+]?\d+(?:\.\d+)?\s+Y:\s*[-+]?\d+(?:\.\d+)?\s+Z:\s*([-+]?\d+(?:\.\d+)?)",
+                    line, re.IGNORECASE)
+                if match:
+                    contact = float(match.group(1))
+            if contact is None or not 0.0 <= contact <= 90.0:
+                raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
+            self.surface_z = contact
+            lift = max(self.clearance_mm, contact + self.probe_clearance_mm)
+            self._exchange_locked(f"G0 Z{lift:.3f} F360", timeout=45)
+            self._exchange_locked("M400", timeout=45)
+            self._exchange_locked(f"G0 X{laser_x:.3f} Y{laser_y:.3f} F6000", timeout=60)
+            self._exchange_locked("M400", timeout=60)
+            self._exchange_locked("M114", timeout=8)
+            self.focused_this_job = False
+            return [f"echo:LumaCut workpiece Z:{contact:.3f}"] + replies
 
     def status(self):
         with self.lock:
@@ -534,6 +576,7 @@ class MarlinTransport:
                 "laser_cooling_fan_on": self.fan_power,
                 "workpiece_surface_z": self.surface_z,
                 "safe_zone_xy_mm": self.safe_zone_xy_mm,
+                "probe_xy_offset_mm": self.probe_xy_offset_mm,
                 "cutting_bounds": {"x_min":self.safe_zone_xy_mm,
                                    "y_min":self.safe_zone_xy_mm,
                                    "x_max":390.0, "y_max":370.0},
