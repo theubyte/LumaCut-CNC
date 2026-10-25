@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "de.millione.lumacut.studio",
   "build": {
-    "frontendDist": ".."
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
