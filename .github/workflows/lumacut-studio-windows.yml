@@ -33,12 +33,23 @@ jobs:
           node --check raster-planner.mjs
           node --check unified-job.mjs
           node --check marlin-postprocessor.mjs
-          node --test geometry.test.mjs job-planner.test.mjs raster-planner.test.mjs unified-job.test.mjs unified-export.test.mjs packaging.test.mjs marlin-postprocessor.test.mjs
+          node --check calibrated-camera.js
+          node --check camera-calibration-core.mjs
+          npm run test:unit
+      - name: Browser UI acceptance tests (Chrome/Edge)
+        run: npm run test:ui
+      - name: Upload UI screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaCut-Studio-UI-Smoke
+          path: software/lumacut-studio/test-artifacts/windows-ui.png
+          if-no-files-found: ignore
       - name: Prepare frontend distribution
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item index.html, studio.js, advanced.js, design.css, job-planner.mjs, raster-planner.mjs, unified-job.mjs, marlin-postprocessor.mjs -Destination dist
+          Copy-Item index.html, studio.js, advanced.js, design.css, job-planner.mjs, raster-planner.mjs, unified-job.mjs, marlin-postprocessor.mjs, calibrated-camera.js, camera-calibration-core.mjs, geometry.mjs -Destination dist
       - name: Generate Windows application icons
         run: npx tauri icon assets/icon.svg
       - name: Build Windows NSIS installer
