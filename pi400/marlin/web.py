@@ -30,7 +30,9 @@ config = {
     "validated": False,        # NEVER assumed from old grblHAL firmware
     "z_clearance_mm": 20.0,
     "focus_gap_mm": 7.0,
-    "z_switch_tip_offset_mm": 1.5,  # tip height above reference plane at switch trigger
+    "z_switch_tip_offset_mm": 1.5,
+    "probe_offset_x_mm": None,
+    "probe_offset_y_mm": None,  # tip height above reference plane at switch trigger
     "travels": {"x": 390.0, "y": 370.0, "z": 90.0},
 }
 CONFIG = DATA / "config.json"
@@ -47,6 +49,9 @@ machine.homing_verified = bool(config["validated"])
 machine.clearance_mm = float(config["z_clearance_mm"])
 machine.probe_tip_offset_mm = float(config["z_switch_tip_offset_mm"])
 machine.focus_gap_mm = float(config["focus_gap_mm"])
+if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is not None:
+    machine.probe_xy_offset_mm = (float(config["probe_offset_x_mm"]),
+                                  float(config["probe_offset_y_mm"]))
 job = {"file": "", "state": "idle", "line": 0, "total": 0, "error": ""}
 job_lock = threading.Lock()
 stop_job = threading.Event()
@@ -143,12 +148,21 @@ def settings():
     clearance = float(request.form.get("z_clearance_mm", "nan"))
     gap = float(request.form.get("focus_gap_mm", "nan"))
     offset = float(request.form.get("z_switch_tip_offset_mm", "nan"))
+    # Off-axis switch displacement relative to laser spot, signed machine XY.
+    probe_x = float(request.form.get("probe_offset_x_mm", "nan"))
+    probe_y = float(request.form.get("probe_offset_y_mm", "nan"))
     if not (math.isfinite(clearance) and 0.5 <= clearance <= 50):
         raise ValueError("Z-Rückzug muss zwischen 0,5 und 50 mm liegen")
     if not (math.isfinite(gap) and 0.1 <= gap <= 30):
         raise ValueError("Fokusabstand muss zwischen 0,1 und 30 mm liegen")
     if not (math.isfinite(offset) and -20 <= offset <= 20):
         raise ValueError("Schalter-zu-Spitze-Offset muss zwischen -20 und +20 mm liegen")
+    if not (math.isfinite(probe_x) and -80 <= probe_x <= 80 and
+            math.isfinite(probe_y) and -80 <= probe_y <= 80):
+        raise ValueError("Taster-X/Y-Versatz muss -80..80 mm sein")
+    config["probe_offset_x_mm"] = probe_x
+    config["probe_offset_y_mm"] = probe_y
+    machine.probe_xy_offset_mm = (probe_x, probe_y)
     config["z_clearance_mm"] = clearance
     config["focus_gap_mm"] = gap
     config["z_switch_tip_offset_mm"] = offset
@@ -159,7 +173,8 @@ def settings():
     return jsonify(message="Z-Offset, Sicherheitsabstand und Fokusreferenz dauerhaft gespeichert",
                    z_clearance_mm=clearance, focus_gap_mm=gap,
                    z_switch_tip_offset_mm=offset,
-                   note="Nur nach bestätigtem Tasterkontakt auf dem Werkstück fährt der Job vor der ersten G1-Schnittbewegung automatisch in den Fokus. Z bleibt stets mindestens 2 mm über dem Tastkontakt.")
+                   probe_offset_x_mm=probe_x, probe_offset_y_mm=probe_y,
+                   note="LightBurn G28 referenziert Boden, G30 tastet Werkstück über X/Y-Tasterversatz ab, ohne Maschinen-Z0 zu verändern.")
 
 @app.post("/api/commission")
 def commission():
