@@ -9,7 +9,11 @@ function xy(x,y){if(!valid(x)||!valid(y)||x<MARLIN_PROFILE.homingReserve||y<MARL
 function check(line){if(!line||line.length>96||!(/^[\x20-\x7E]*$/.test(line)))throw Error("Invalid or non-ASCII Marlin command");}
 export function postprocessMarlinOffline(plan){
  if(plan?.kind!=="LumaCutOfflinePlan"||plan.version!==1||!Array.isArray(plan.operations)||!plan.operations.length)throw Error("Invalid plan");
- const out=["; LUMACUT MARLIN OFFLINE DRAFT - NOT VALIDATED FOR REAL MACHINE","; REQUIRES HOMING, FOCUS, INTERLOCK AND MACHINE GEOMETRY VERIFICATION","G21","G90","M5 I"];
+ // One M3 I for the whole job. Marlin runs M3/M5 with planner.synchronize(),
+ // so toggling per path or raster segment stopped the head every time and
+ // overburnt starts/ends. In inline mode G0 already forces power 0 and each
+ // G1 carries its own S, so the laser is still off on every travel move.
+ const out=["; LUMACUT MARLIN JOB FOR PI 400 (homing, G30 probe, focus and park run on the Pi)","G21","G90","M5 I","M3 I"];
  for(const op of plan.operations){
   const p=op.process;if(!valid(p.feed)||p.feed<=0||p.feed>6000||!valid(p.power)||p.power<0||p.power>100||!Number.isInteger(p.passes)||p.passes<1||p.passes>30)throw Error("Invalid layer settings");
   const power=Math.round(p.power/100*MARLIN_PROFILE.pwmMax);
@@ -20,16 +24,15 @@ export function postprocessMarlinOffline(plan){
     for(const path of op.paths){
      if(!Array.isArray(path)||path.length<2)throw Error("Invalid vector");
      const coords=path.map(point=>xy(point[0],point[1]));
-     out.push("M5 I",`G0 ${coords[0]}`,"M3 I");
+     out.push(`G0 ${coords[0]}`);
      for(const coord of coords.slice(1))out.push(`G1 ${coord} F${p.feed} S${power}`);
-     out.push("M5 I");
     }
    }else if(op.type==="raster"){
     for(const row of op.lines){
      const segs=row.reverse?[...row.segments].reverse():row.segments;
      for(const segment of segs){
       const a=row.reverse?segment.x1:segment.x0,b=row.reverse?segment.x0:segment.x1;
-      out.push("M5 I",`G0 ${xy(a,row.y)}`,"M3 I",`G1 ${xy(b,row.y)} F${p.feed} S${power}`,"M5 I");
+      out.push(`G0 ${xy(a,row.y)}`,`G1 ${xy(b,row.y)} F${p.feed} S${power}`);
      }
     }
    }else throw Error("Unsupported operation");

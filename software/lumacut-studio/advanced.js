@@ -119,6 +119,13 @@ marlinExportButton.onclick=async()=>{
  finally{marlinExportButton.disabled=false;}
 };
 
+// The machine panel (machine-monitor.js) sends this exact job to the Pi.
+window.lumacutStudio={async marlinJob(){
+ const pixels=await prepareUnifiedPixels();
+ const plan=createUnifiedPlan({layers:app.layers,items:app.items},pixels,{lineSpacing:Number(q("rasterStep").value),dither:q("rasterMode").value});
+ return postprocessMarlinOffline(plan);
+}};
+
 document.addEventListener("lumacut:svg-imported",event=>{
  const paths=event.detail?.paths;
  if(!Array.isArray(paths)||paths.length===0||paths.length>3000)return message("SVG-Import nicht als gültige Vektorgeometrie erfasst.");
