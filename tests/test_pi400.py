@@ -91,6 +91,8 @@ class Pi400TransportTests(unittest.TestCase):
         c.serial = FakeSerial()
         c.host = sock
         c.owner = "host"
+        c.bootstrap_ready = True
+        c.settings[32] = 1
         c._forward_host_bytes_locked(b"$LCIO=1\n$110=6000\n$I\nM64 P0\nG1 X10 F1000\n?")
         self.assertEqual(bytes(c.serial.written), b"$I\nG1 X10 F1000\n?")
         self.assertEqual(bytes(sock.lines), b"error:9\r\n"*3)
@@ -113,6 +115,8 @@ class Pi400TransportTests(unittest.TestCase):
         c.serial = FakeSerial()
         c.host = sock
         c.owner = "host"
+        c.bootstrap_ready = True
+        c.settings[32] = 1
         c._forward_host_bytes_locked(b"$110")
         c._forward_host_bytes_locked(b"=100\r\nG0 X2\r\n")
         self.assertEqual(bytes(c.serial.written), b"G0 X2\n")
