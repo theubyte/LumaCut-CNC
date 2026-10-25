@@ -50,6 +50,10 @@ class Controller:
         self.identity = {"version": "", "firmware": "", "board": "", "driver": ""}
         self.extra_outputs = {"PC6": None}
         self.last_error = ""
+        self.last_skr_error = ""
+        self.skr_errors = 0
+        self.last_bridge_rejection = ""
+        self.bridge_rejections = 0
         self.replies = deque(maxlen=1024)
         self.lines = deque(maxlen=100)
         self.bytes_usb = 0
@@ -108,9 +112,28 @@ class Controller:
 
     def disconnect_host(self):
         with self.cond:
-            if self.owner == "host" and self.state in ("Run", "Jog"):
-                self._send_locked(b"!")  # feed hold on dropped stream
-            self._disconnect_host_locked()
+            try:
+                if self.owner == "host" and self.state in ("Run", "Jog"):
+                    self._send_locked(b"!")  # feed hold on dropped stream
+            except (OSError, ConnectionError):
+                LOG.warning("Unable to feed-hold after LightBurn disconnect", exc_info=True)
+            finally:
+                self._disconnect_host_locked()
+
+    def _bridge_rejected_locked(self, reason: str, command: str = ""):
+        """Synthetic rejections must never masquerade as SKR error:9.
+
+        GRBL error:9 specifically means a controller alarm or jog lockout.
+        Bridge rejections are therefore reported with a vendor MSG and
+        error:20 (unsupported G-code) for a command that needs an ACK.
+        """
+        detail = reason[:160]
+        self.bridge_rejections += 1
+        self.last_bridge_rejection = detail
+        LOG.warning("Pi LightBurn bridge rejection: %s command=%r", detail, command[:120])
+        if self.host is not None:
+            self.host.sendall(("[MSG:LumaCut bridge: " + detail +
+                               "]\r\nerror:20\r\n").encode("ascii", "replace"))
 
     def _send_locked(self, data: bytes):
         if self.serial is None:
@@ -157,6 +180,11 @@ class Controller:
             self.last_error = line
         if line.startswith("error:"):
             self.last_error = line
+            self.last_skr_error = line
+            self.skr_errors += 1
+            pending = self.host_commands[0] if self.host_commands else "local/bootstrap"
+            LOG.warning("SKR native GRBL error: %s pending=%r state=%s",
+                        line, pending[:140], self.state)
         self.lines.append(line)
         if line == "ok" or line.startswith("error:"):
             if self.bootstrap_pending > 0 and self.host is None:
@@ -293,7 +321,11 @@ class Controller:
                 "settings": dict(self.settings),
                 "recent": list(self.lines)[-16:],
                 "last_error": self.last_error,
+                "last_skr_error": self.last_skr_error,
+                "last_bridge_rejection": self.last_bridge_rejection,
                 "diagnostics": {
+                    "bridge_rejections": self.bridge_rejections,
+                    "skr_errors": self.skr_errors,
                     "usb_bytes": self.bytes_usb,
                     "host_bytes": self.bytes_host,
                     "suppressed_status": self.suppressed_reports,
@@ -412,23 +444,24 @@ class Controller:
                     allowed = self.host_command_allowed(command)
                 self.host_fragment.clear()
                 self.host_overflow = False
-                if allowed and command:
-                    # Blocks powered M3 in GRBL laser mode, which otherwise
-                    # may fire during G0 positioning. M4 is motion-gated.
-                    if not self.bootstrap_ready or self.settings.get(32) != 1:
-                        allowed = False
-                    else:
+                reason = None
+                if not allowed:
+                    reason = "blocked service command or malformed G-code"
+                elif command:
+                    if not self.bootstrap_ready:
+                        reason = "SKR firmware bootstrap incomplete"
+                    elif self.settings.get(32) != 1 and not command.startswith("$"):
+                        reason = "SKR laser mode $32=1 is required"
+                    elif not command.startswith("$"):
                         try:
-                            if not command.startswith("$"):
-                                self.host_guard.check(command)
+                            self.host_guard.check(command)
                         except ValueError as exc:
-                            LOG.warning("Unsafe LightBurn line rejected: %s", exc)
-                            allowed = False
-                if allowed and command:
+                            reason = str(exc)
+                if reason:
+                    self._bridge_rejected_locked(reason, command)
+                elif command:
                     self.host_commands.append(command)
                     self._send_locked((command + "\n").encode("ascii"))
-                elif not allowed and self.host is not None:
-                    self.host.sendall(b"error:9\r\n")
             elif 32 <= byte <= 126:
                 if len(self.host_fragment) < 240 and not self.host_overflow:
                     self.host_fragment.append(byte)
@@ -441,14 +474,42 @@ class Controller:
 
     def serve_host(self, client: socket.socket):
         client.settimeout(0.25)
+        # Detect half-open LightBurn clients on Linux/Pi without dropping an
+        # actively streaming socket. A second connection never steals a job.
+        if hasattr(socket, "SO_KEEPALIVE"):
+            try:
+                client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                for flag, value in (("TCP_KEEPIDLE", 15),
+                                    ("TCP_KEEPINTVL", 5),
+                                    ("TCP_KEEPCNT", 3)):
+                    if hasattr(socket, flag):
+                        client.setsockopt(socket.IPPROTO_TCP,
+                                          getattr(socket, flag), value)
+            except OSError:
+                LOG.debug("TCP keepalive tuning unavailable", exc_info=True)
         with self.cond:
-            if (self.owner is not None or self.serial is None or
-                    not self.bootstrap_ready or
-                    not self.lightburn_enabled or
-                    self.state not in ("Idle", "Alarm", "Unknown") or
-                    (self.maintenance_file and self.maintenance_file.exists())):
-                LOG.warning("Rejecting extra/unready LightBurn connection: owner=%s ready=%s state=%s", self.owner, self.bootstrap_ready, self.state)
-                client.sendall(b"error:9\r\n[MSG:LumaCut client occupied or SKR not ready]\r\n")
+            reason = None
+            if self.owner is not None:
+                reason = "machine already owned by " + self.owner
+            elif self.serial is None:
+                reason = "SKR USB port disconnected"
+            elif not self.bootstrap_ready:
+                reason = "SKR not ready: check FAN1-LASER firmware revision and USB bootstrap"
+            elif not self.lightburn_enabled:
+                reason = "LightBurn TCP disabled in LumaCut"
+            elif self.state not in ("Idle", "Alarm", "Unknown", "Hold"):
+                reason = "machine not idle: " + self.state
+            elif self.maintenance_file and self.maintenance_file.exists():
+                reason = "Pi firmware update in progress"
+            if reason is not None:
+                self.bridge_rejections += 1
+                self.last_bridge_rejection = reason
+                LOG.warning("LightBurn TCP connection refused: %s", reason)
+                try:
+                    client.sendall(("[MSG:LumaCut bridge: " + reason +
+                                    "]\r\n").encode("ascii", "replace"))
+                except OSError:
+                    pass
                 client.close()
                 return
             self.host = client
