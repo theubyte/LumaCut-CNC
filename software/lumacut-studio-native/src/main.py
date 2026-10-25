@@ -19,6 +19,9 @@ from lumacut_canvas.editor import CanvasEditor
 from lumacut_canvas.gcode import document_to_gcode
 from lumacut_canvas.layers_panel import LayersPanel
 # --- end canvas integration ---
+# --- scan integration (scan agent) ---
+from scanprobe.panel import ScanPanel
+# --- end scan integration ---
 
 
 class LumaCutStudio(QMainWindow):
@@ -117,15 +120,14 @@ class LumaCutStudio(QMainWindow):
         right_layout.addWidget(design)
 
         # Scan & Probe
+        # --- scan integration (scan agent) ---
         scan = QGroupBox("Scan & Probe")
         scan_layout = QVBoxLayout(scan)
-        scan_layout.addWidget(QLabel("Kopf-Kamera scannt bei fester Höhe.\nErkannte Bereiche werden automatisch geprobt."))
-        btn_scan = QPushButton("Scan starten")
-        btn_scan.setObjectName("primary")
-        scan_layout.addWidget(btn_scan)
-        btn_probe = QPushButton("Bereiche proben")
-        scan_layout.addWidget(btn_probe)
+        self.scan_panel = ScanPanel(
+            self.canvas, client_provider=lambda: getattr(self.machine_panel, "_client", None))
+        scan_layout.addWidget(self.scan_panel)
         right_layout.addWidget(scan)
+        # --- end scan integration ---
 
         # --- machine integration (machine agent) ---
         machine = QGroupBox("Maschine")
@@ -162,6 +164,9 @@ class LumaCutStudio(QMainWindow):
         self.canvas.cursorMoved.connect(
             lambda x, y: self.cursor_label.setText(f"X {x:7.1f} mm   Y {y:7.1f} mm"))
         self.canvas.statusMessage.connect(lambda text: status.showMessage(text, 5000))
+        # --- scan integration (scan agent) ---
+        self.scan_panel.statusMessage.connect(lambda text: status.showMessage(text, 6000))
+        # --- end scan integration ---
         self.canvas.fileChanged.connect(lambda t: self.setWindowTitle(f"{t} – LumaCut Studio"))
         self.setWindowTitle(f"{self.canvas.title()} – LumaCut Studio")
         # --- end canvas integration ---
@@ -180,6 +185,9 @@ class LumaCutStudio(QMainWindow):
             event.ignore()
             return
         # --- end canvas integration ---
+        # --- scan integration (scan agent) ---
+        self.scan_panel.shutdown()
+        # --- end scan integration ---
         self.machine_panel.shutdown()
         super().closeEvent(event)
     # --- end machine integration ---
