@@ -1,3 +1,4 @@
+import {postprocessMarlinOffline} from "./marlin-postprocessor.mjs";
 import {createUnifiedPlan,unifiedSummary,exportUnifiedDraft} from "./unified-job.mjs";
 import {ditherGray,rasterLines,rasterDraftGcode} from "./raster-planner.mjs";
 import {planVectorJob,exportOfflineGcode,planStatistics} from "./job-planner.mjs";
@@ -100,3 +101,19 @@ const exportCombined=document.createElement("button");exportCombined.id="exportU
 q("unifiedPanelPlaceholder")?.append(exportCombined);
 unifiedPanel.append(exportCombined);
 exportCombined.onclick=async()=>{exportCombined.disabled=true;try{const pixels=await prepareUnifiedPixels();const plan=createUnifiedPlan({layers:app.layers,items:app.items},pixels,{lineSpacing:Number(q("rasterStep").value),dither:q("rasterMode").value});download("LumaCut-Gesamtauftrag-UNGEPRUEFT.nc",exportUnifiedDraft(plan),"text/plain");message("Vollständiger Offline-G-Code erzeugt. NICHT auf Maschine ausführen.")}catch(e){message("Gesamtexport blockiert: "+e.message)}finally{exportCombined.disabled=false}};
+
+const marlinExportButton=document.createElement("button");
+marlinExportButton.id="exportMarlinDraft";marlinExportButton.className="full";
+marlinExportButton.textContent="Pi 400 / Marlin Offline-Entwurf";
+unifiedPanel.append(marlinExportButton);
+marlinExportButton.onclick=async()=>{
+ marlinExportButton.disabled=true;
+ try{
+  const pixels=await prepareUnifiedPixels();
+  const plan=createUnifiedPlan({layers:app.layers,items:app.items},pixels,{lineSpacing:Number(q("rasterStep").value),dither:q("rasterMode").value});
+  const content=postprocessMarlinOffline(plan);
+  download("LumaCut-Marlin-NICHT-FREIGEGEBEN.gcode",content,"text/plain");
+  message("Marlin-G-Code als Offline-Entwurf exportiert. Erst nach Maschinenkalibrierung verwenden.");
+ }catch(err){message("Marlin-Export blockiert: "+err.message);}
+ finally{marlinExportButton.disabled=false;}
+};
