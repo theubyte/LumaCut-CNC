@@ -362,7 +362,7 @@ class MarlinTransport:
                 raise RuntimeError("Werkstückkontakt fehlt: Z-Taster auf Material referenzieren")
             motion = re.match(r"^G0?[0123](?:\s|$)", normalized) is not None
             if (motion or normalized == "M3 I") and not self.homed:
-                raise RuntimeError("Nach USB-Neustart oder Pi-Start zuerst G28 in LightBurn senden; ohne Maschinenreferenz kein Positionsbezug")
+                raise RuntimeError("Maschine nicht referenziert: in LightBurn zuerst Home (G28) ausfuehren; danach G30 fuer Werkstueckfokus")
             try:
                 self._z_move_guard_locked(normalized)
                 self._xy_cut_guard_locked(normalized)
@@ -620,7 +620,9 @@ class MarlinTransport:
         client.settimeout(1.0)
         with self.lock:
             if self.owner is not None or self.serial is None or not self.identity:
-                client.sendall(b"Error:LumaCut Marlin gateway busy or not ready\r\n")
+                # Do not generate repeated unsolicited error lines for every
+                # reconnect attempt. LightBurn reconnects aggressively when
+                # a previous stream aborts.
                 client.close()
                 return
             self.owner = "lightburn"
