@@ -533,6 +533,37 @@ class USBProtocolTests(unittest.TestCase):
         self.assertFalse(serial.closed)
         self.assertEqual(bridge.command("M114")[-1], "ok P15 B7")
 
+    def test_lightburn_probing_failed_preserves_tcp_and_usb(self):
+        serial = FakeSerial([
+            "ok\n", "ok\n", "X:120.00 Y:120.00 Z:20.00\n",
+            "ok\n", "ok\n", "ok\n", "Error:Probing Failed\n",
+            "ok P15 B7\n", "ok P15 B7\n",
+        ])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.position = [120.0, 120.0, 20.0]
+        bridge.probe_xy_offset_mm = (0.0, 0.0)
+        class TCP:
+            def __init__(self):
+                self.payloads = [b"G30\nG0\n", b""]
+                self.messages = bytearray()
+            def settimeout(self, value): pass
+            def recv(self, count): return self.payloads.pop(0)
+            def sendall(self, raw): self.messages.extend(raw)
+            def close(self): pass
+        sock = TCP()
+        bridge.serve_client(sock)
+        self.assertIn(b"Probing Failed", sock.messages)
+        self.assertIn(b"ok P15 B7", sock.messages)
+        self.assertTrue(bridge.status()["connected"])
+        self.assertFalse(serial.closed)
+        self.assertTrue(bridge.homed)
+        self.assertFalse(bridge.laser_enabled)
+        self.assertIn(b"G0\n", serial.writes)
+
     def test_lightburn_rejected_command_keeps_tcp_alive(self):
         serial = FakeSerial(["ok\n"])
         bridge = MarlinTransport("/dev/null")
