@@ -359,7 +359,6 @@ class MarlinTransport:
             # command must NEVER activate the laser: convert XY-only jogging
             # to a rapid without any S word, while laser mode is off.
             if (owner == "lightburn" and not self.laser_enabled
-                    and not self.guard.inline
                     and re.match(r"^G0?1(?:\s|$)", normalized)
                     and re.search(r"\b[XY]\s*[-+]?\d", normalized)
                     and not re.search(r"\bZ\s*[-+]?\d", normalized)
@@ -726,8 +725,8 @@ class MarlinTransport:
                             for line in lines:
                                 client.sendall((line + "\r\n").encode("ascii", "replace"))
                         except (ValueError, RuntimeError) as exc:
-                            LOG.warning("Rejected LightBurn Marlin command: %s", exc)
-                            client.sendall(("Error:LumaCut " + str(exc)[:130] +
+                            LOG.warning("Rejected LightBurn command %r: %s", normalized, exc)
+                            client.sendall(("Error:LumaCut [" + normalized[:55] + "] " + str(exc)[:95] +
                                             "\r\n").encode("ascii", "replace"))
                             # Don't fake 'ok' after rejecting a command.
                             return
