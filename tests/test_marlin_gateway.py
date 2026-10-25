@@ -156,7 +156,7 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(bridge.serial.writes[0], b"M5 I\n")
         self.assertEqual(bridge.serial.writes[1], b"G28 X Y\n")
         self.assertEqual(bridge.serial.writes[3], b"G28 Z\n")
-        self.assertEqual(bridge.serial.writes[6], b"G0 Z20.00 F360\n")
+        self.assertEqual(bridge.serial.writes[6], b"G0 Z20.00 F600\n")
 
     def test_lightburn_g28_has_one_ack_and_real_marlin_usb_sequence(self):
         responses=["ok\n"] * 9 + ["X:0 Y:0 Z:20\n","ok\n"]
@@ -197,10 +197,10 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(reply[-1],"ok")
         writes=serial.writes
         self.assertEqual(writes[0],b"M5 I\n")
-        self.assertIn(b"G0 Z20.000 F360\n",writes)
-        self.assertIn(b"G0 X0.000 Y0.000 F6000\n",writes)
-        self.assertLess(writes.index(b"G0 Z20.000 F360\n"),
-                        writes.index(b"G0 X0.000 Y0.000 F6000\n"))
+        self.assertIn(b"G0 Z20.000 F600\n",writes)
+        self.assertIn(b"G0 X0.000 Y0.000 F9000\n",writes)
+        self.assertLess(writes.index(b"G0 Z20.000 F600\n"),
+                        writes.index(b"G0 X0.000 Y0.000 F9000\n"))
 
     def test_safepark_never_descends_from_current_z(self):
         serial=FakeSerial([
@@ -212,8 +212,8 @@ class USBProtocolTests(unittest.TestCase):
         ctrl.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
         ctrl.homed=True
         ctrl.park_safezone(owner="lightburn")
-        self.assertIn(b"G0 Z35.000 F360\n",serial.writes)
-        self.assertNotIn(b"G0 Z20.000 F360\n",serial.writes)
+        self.assertIn(b"G0 Z35.000 F600\n",serial.writes)
+        self.assertNotIn(b"G0 Z20.000 F600\n",serial.writes)
 
     def test_lightburn_marlin_flavor_preamble_with_real_acks(self):
         # LightBurn 2.0.03 prepends a compound G00/G17/G40/G21
@@ -265,8 +265,8 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(bridge.status()["laser_focus_z"],8.5)
         self.assertEqual(bridge.status()["probe_minimum_z"],5.0)
         self.assertIn(b"G30\n",serial.writes)
-        self.assertIn(b"G0 X57.000 Y65.000 F6000\n",serial.writes)
-        self.assertIn(b"G0 X80.000 Y80.000 F6000\n",serial.writes)
+        self.assertIn(b"G0 X57.000 Y65.000 F9000\n",serial.writes)
+        self.assertIn(b"G0 X80.000 Y80.000 F9000\n",serial.writes)
         self.assertNotIn(b"G28 Z\n",serial.writes)
         self.assertTrue(any("workpiece Z:3.000" in x for x in reply))
 
@@ -344,6 +344,16 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(bridge.command("G1 X65 Y60 S40")[-1],"ok")
         self.assertIn(b"G1 X65 Y60 S40\n",serial.writes)
 
+    def test_xy_rapid_without_f_uses_fast_travel_not_previous_z_feed(self):
+        serial = FakeSerial(["ok\n"])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.command("G0 X120 Y120")
+        self.assertEqual(serial.writes, [b"G0 X120 Y120 F9000\n"])
+
     def test_reserved_xy_30mm_zone_permits_laser_off_rapid(self):
         serial=FakeSerial(["ok\n"])
         bridge=MarlinTransport("/dev/null")
@@ -353,7 +363,7 @@ class USBProtocolTests(unittest.TestCase):
         bridge.homing_verified=True
         bridge.surface_z=3.0
         bridge.laser_enabled=False
-        self.assertEqual(bridge.command("G0 X10 Y10 F6000")[-1],"ok")
+        self.assertEqual(bridge.command("G0 X10 Y10 F9000")[-1],"ok")
 
     def test_emergency_stop_bypasses_motion_lock_and_latches(self):
         controller=MarlinTransport("/dev/null")
