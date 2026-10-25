@@ -49,6 +49,15 @@ def local_path(shape: Shape) -> QPainterPath:
         path.moveTo(g.x, g.y)
         path.lineTo(g.x + g.w, g.y + g.h)
         return path
+    if shape.kind in ("polygon", "path"):
+        pts = shape.abs_points()
+        if pts:
+            path.moveTo(*pts[0])
+            for p in pts[1:]:
+                path.lineTo(*p)
+            if shape.kind == "polygon":
+                path.closeSubpath()
+        return path
     b = g.local_bounds()
     box = QRectF(b.x, b.y, b.w, b.h)
     if shape.kind == "rect":

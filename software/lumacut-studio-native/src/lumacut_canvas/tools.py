@@ -38,12 +38,15 @@ class Tool(str, Enum):
     RECT = "rect"
     ELLIPSE = "ellipse"
     LINE = "line"
+    POLYGON = "polygon"
     TEXT = "text"
 
 
 TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
-               Tool.LINE: "Linie", Tool.TEXT: "Text"}
-TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L", Tool.TEXT: "T"}
+               Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.TEXT: "Text"}
+TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
+                  Tool.POLYGON: "P", Tool.TEXT: "T"}
+CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
 
 
 def _clamp_point(p: QPointF) -> QPointF:
@@ -122,6 +125,8 @@ class ToolController:
         self._moved = False
         self._preview_id: str | None = None
         self.roi_pending = False  # Editor.request_roi(): nächster Zug zieht einen Bereich auf
+        self._poly: list[tuple[float, float]] = []  # gesetzte Polygonpunkte (mm)
+        self._hover: tuple[float, float] | None = None
         self._rubber = QGraphicsRectItem()
         pen = QPen(QColor(theme.ACCENT), 1, Qt.DashLine)
         pen.setCosmetic(True)
@@ -162,8 +167,10 @@ class ToolController:
         """Laufenden Zug abbrechen und Ausgangszustand wiederherstellen."""
         if self._mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
-        if self._mode == "draw" and self._preview_id and self.doc.has_shape(self._preview_id):
+        if self._mode in ("draw", "poly") and self._preview_id and self.doc.has_shape(self._preview_id):
             self.doc.remove_shape(self._preview_id)
+        self._poly = []
+        self._hover = None
         self._rubber.setVisible(False)
         self._mode = None
         self._preview_id = None
@@ -201,6 +208,8 @@ class ToolController:
             self._press_select(pos, mods)
         elif self.tool == Tool.TEXT:
             self._create_text(pos)
+        elif self.tool == Tool.POLYGON:
+            self._press_polygon(pos, mods)
         elif self._active_layer_ok():
             self._mode = "draw"
 
@@ -244,6 +253,10 @@ class ToolController:
         self._rubber.setVisible(True)
 
     def move(self, pos: QPointF, mods: Qt.KeyboardModifier, dragging: bool) -> None:
+        if self._mode == "poly":
+            self._hover = self._poly_point(pos, bool(mods & Qt.ShiftModifier))
+            self._update_poly_preview()
+            return
         if self._mode is None or not dragging:
             if self.tool == Tool.SELECT and self._mode is None and not self.roi_pending:
                 h = self.ed.scene.overlay.handle_at(pos) if self.ed.selection else None
@@ -365,8 +378,82 @@ class ToolController:
         else:
             self.doc.set_geometry(self._preview_id, geom)
 
+    # --- Polygon -----------------------------------------------------------
+    def _poly_point(self, pos: QPointF, constrain: bool) -> tuple[float, float]:
+        p = _clamp_point(self.snap_point(pos))
+        if constrain and self._poly:  # Umschalt: Kante auf 45°-Schritte
+            lx, ly = self._poly[-1]
+            w, h = p.x() - lx, p.y() - ly
+            ang = round(math.atan2(h, w) / (math.pi / 4)) * (math.pi / 4)
+            length = w * math.cos(ang) + h * math.sin(ang)  # Projektion auf die Richtung
+            p = _clamp_point(QPointF(lx + length * math.cos(ang), ly + length * math.sin(ang)))
+        return (p.x(), p.y())
+
+    def _press_polygon(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
+        if not self._poly and not self._active_layer_ok():
+            return
+        self._mode = "poly"
+        if len(self._poly) >= 3:
+            fx, fy = self._poly[0]
+            if math.hypot(pos.x() - fx, pos.y() - fy) * self.ed.view.px_per_mm <= CLOSE_SNAP_PX:
+                self.finish_polygon()
+                return
+        p = self._poly_point(pos, bool(mods & Qt.ShiftModifier))
+        if not self._poly or math.hypot(p[0] - self._poly[-1][0], p[1] - self._poly[-1][1]) > 1e-6:
+            self._poly.append(p)
+        self._hover = None
+        self._update_poly_preview()
+        if len(self._poly) == 1:
+            self.ed.notify("Polygon: klicken = Punkt, Doppelklick/Enter = schließen, "
+                           "Rücktaste = letzter Punkt weg, Esc = abbrechen")
+
+    def _update_poly_preview(self) -> None:
+        pts = self._poly + ([self._hover] if self._hover and self._hover != self._poly[-1] else [])
+        if len(pts) < 2:
+            if self._preview_id and self.doc.has_shape(self._preview_id):
+                self.doc.remove_shape(self._preview_id)
+            self._preview_id = None
+            return
+        kind = "polygon" if len(pts) >= 3 else "path"
+        shape = Shape.from_points(kind, pts, self.doc.active_layer_id)
+        if self._preview_id and self.doc.has_shape(self._preview_id):
+            prev = self.doc.shape(self._preview_id)
+            self.doc.begin_batch()
+            prev.kind, prev.points = shape.kind, shape.points
+            prev.geom = shape.geom
+            self.doc.changed()
+            self.doc.end_batch()
+        else:
+            self.doc.add_shape(shape)
+            self._preview_id = shape.id
+
+    def remove_last_polygon_point(self) -> None:
+        if self._poly:
+            self._poly.pop()
+            self._update_poly_preview()
+            if not self._poly:
+                self.cancel()
+
+    def finish_polygon(self) -> Shape | None:
+        """Laufendes Polygon schließen und als ein Undo-Schritt anlegen."""
+        pts = list(self._poly)
+        self.cancel()  # Vorschau entfernen, Zustand zurücksetzen
+        if len(pts) < 3:
+            if pts:
+                self.ed.notify("Polygon braucht mindestens 3 Punkte.")
+            return None
+        shape = Shape.from_points("polygon", pts, self.doc.active_layer_id)
+        if max(shape.geom.w, shape.geom.h) < MIN_SIZE_MM:
+            return None
+        self.ed.undo_stack.push(AddShapesCommand(self.doc, [shape], "Polygon zeichnen"))
+        self.ed.set_selection([shape.id])
+        return shape
+
     def release(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
         mode, self._mode = self._mode, None
+        if mode == "poly":
+            self._mode = mode  # Polygon bleibt über mehrere Klicks aktiv
+            return
         if mode in ("move", "resize", "rotate"):
             if self._moved:
                 new = {i: self.doc.shape(i).geom.copy() for i in self._orig}
@@ -431,6 +518,9 @@ class ToolController:
         return shape
 
     def double_click(self, pos: QPointF) -> None:
+        if self.tool == Tool.POLYGON and self._mode == "poly":
+            self.finish_polygon()  # der erste Klick des Doppelklicks hat den Punkt schon gesetzt
+            return
         if self.tool != Tool.SELECT:
             return
         hit = self.ed.scene.editable_shape_at(pos)
@@ -443,6 +533,16 @@ class ToolController:
     def key_press(self, event: QKeyEvent) -> bool:
         """Pfeiltasten verschieben die Auswahl (1 mm, mit Umschalt 10 mm)."""
         keys = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
+        if self._mode == "poly":
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                self.finish_polygon()
+                return True
+            if event.key() == Qt.Key_Backspace:
+                self.remove_last_polygon_point()
+                return True
+            if event.key() == Qt.Key_Escape:
+                self.cancel()
+                return True
         if event.key() == Qt.Key_Escape and self.roi_pending:
             self.cancel()  # nur die Bereichsauswahl abbrechen, Auswahl bleibt
             return True

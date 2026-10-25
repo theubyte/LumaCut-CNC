@@ -25,7 +25,9 @@ POWER_RANGE = (1.0, 100.0)          # Prozent
 SPEED_RANGE = (1.0, 6000.0)         # mm/min (Marlin-Vorschub F)
 PASSES_RANGE = (1, 30)
 
-SHAPE_KINDS = ("rect", "ellipse", "line", "text")
+SHAPE_KINDS = ("rect", "ellipse", "line", "text", "polygon", "path")
+# Objekte mit Stützpunkten: "polygon" geschlossen, "path" (Freihand) offen.
+POINT_KINDS = {"polygon": 3, "path": 2}  # Art -> Mindestanzahl Punkte
 
 # Vorgabefarben für neue Ebenen, gut unterscheidbar auf dunklem Grund.
 LAYER_COLORS = ("#4cd4b0", "#f3a64b", "#6fa8ff", "#f36b73", "#c08cff",
@@ -204,9 +206,30 @@ class Shape:
     # Gruppen sind reine Zugehörigkeit; Objekte bleiben flach in ihrer Ebene,
     # darum laufen Export, G-Code und Ebenen unverändert über alle Objekte.
     groups: tuple[str, ...] = ()
+    # Stützpunkte für polygon/path, normiert auf die (ungedrehte) Objektbox
+    # (0..1). Dadurch wirken Verschieben, Skalieren und Drehen ohne Sonderfälle.
+    points: tuple[tuple[float, float], ...] = ()
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
+
+    def abs_points(self) -> list[tuple[float, float]]:
+        """Stützpunkte in mm im ungedrehten Objektrahmen."""
+        g = self.geom
+        return [(g.x + u * g.w, g.y + v * g.h) for u, v in self.points]
+
+    @staticmethod
+    def from_points(kind: str, pts: list[tuple[float, float]], layer_id: str) -> "Shape":
+        """Polygon/Freihand aus Punkten in Arbeitsflächen-mm anlegen."""
+        if kind not in POINT_KINDS:
+            raise ValueError(f"{kind} hat keine Stützpunkte")
+        if len(pts) < POINT_KINDS[kind]:
+            raise ValueError(f"{kind} braucht mindestens {POINT_KINDS[kind]} Punkte")
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        x, y = min(xs), min(ys)
+        w, h = max(xs) - x, max(ys) - y
+        norm = tuple(((px - x) / w if w > 0 else 0.0, (py - y) / h if h > 0 else 0.0) for px, py in pts)
+        return Shape(kind, Geometry(x, y, w, h), layer_id, points=norm)
 
     def copy(self, new_identity: bool = False) -> "Shape":
         return replace(self, geom=self.geom.copy(),
@@ -222,6 +245,8 @@ class Shape:
         if self.kind == "text":
             d["text"] = self.text
             d["font"] = self.font_family
+        if self.kind in POINT_KINDS:
+            d["points"] = [[round(u, 6), round(v, 6)] for u, v in self.points]
         return d
 
     @staticmethod
@@ -229,7 +254,10 @@ class Shape:
         kind = str(d["kind"])
         if kind not in SHAPE_KINDS:
             raise ValueError(f"Unbekannter Objekttyp: {kind}")
-        return Shape(kind=kind, layer_id=str(d["layer"]),
+        points = tuple((float(u), float(v)) for u, v in d.get("points", ())) if kind in POINT_KINDS else ()
+        if kind in POINT_KINDS and len(points) < POINT_KINDS[kind]:
+            raise ValueError(f"{kind} braucht mindestens {POINT_KINDS[kind]} Punkte")
+        return Shape(kind=kind, layer_id=str(d["layer"]), points=points,
                      geom=Geometry(float(d["x"]), float(d["y"]), float(d["w"]), float(d["h"]),
                                    normalize_angle(float(d.get("rot", 0.0)))),
                      text=str(d.get("text", "")), font_family=str(d.get("font", "Segoe UI")),

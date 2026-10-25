@@ -45,6 +45,14 @@ def _line(p, c):
     p.setBrush(QColor(c)); p.drawEllipse(QPointF(5, 19), 1.6, 1.6); p.drawEllipse(QPointF(19, 5), 1.6, 1.6)
 
 
+def _polygon(p, c):
+    pts = [QPointF(12, 4), QPointF(20, 10), QPointF(17, 19.5), QPointF(7, 19.5), QPointF(4, 10)]
+    _pen(p, c); p.drawPolygon(QPolygonF(pts))
+    p.setBrush(QColor(c))
+    for q in pts:
+        p.drawEllipse(q, 1.4, 1.4)
+
+
 def _text(p, c):
     _pen(p, c, 2.2); p.drawLine(QPointF(5, 5.5), QPointF(19, 5.5)); p.drawLine(QPointF(12, 5.5), QPointF(12, 19.5))
     _pen(p, c, 1.6); p.drawLine(QPointF(9.5, 19.5), QPointF(14.5, 19.5))
@@ -171,6 +179,7 @@ def _group(p, c, ungroup: bool = False):
 
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
+    "polygon": _polygon,
     "undo": _undo, "redo": _redo, "delete": _delete, "fit": _fit,
     "zoom_in": lambda p, c: _zoom(p, c, True), "zoom_out": lambda p, c: _zoom(p, c, False),
     "grid": _grid, "snap": _snap, "open": _open, "save": _save, "export": _export,

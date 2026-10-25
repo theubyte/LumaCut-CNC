@@ -149,7 +149,8 @@ class PropertyBar(QWidget):
             self.layer.setCurrentIndex(-1)
         else:
             kinds = {doc.shape(i).kind for i in sel}
-            names = {"rect": "Rechteck", "ellipse": "Ellipse", "line": "Linie", "text": "Text"}
+            names = {"rect": "Rechteck", "ellipse": "Ellipse", "line": "Linie", "text": "Text",
+                     "polygon": "Polygon", "path": "Freihand"}
             tops = {doc.shape(i).groups[0] if doc.shape(i).groups else i for i in sel}
             if len(sel) == 1:
                 self.title.setText(names.get(kinds.pop(), "Objekt"))

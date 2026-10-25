@@ -56,10 +56,12 @@ class ShapeItem(QGraphicsItem):
         self.update()
 
     def _rebuild_hit(self) -> None:
-        if self._kind == "line":
+        if self._kind in ("line", "path", "polygon"):
             stroker = QPainterPathStroker()
             stroker.setWidth(self.hit_tolerance_mm * 2)
             self._hit = stroker.createStroke(self._path)
+            if self._kind == "polygon":  # Polygone sind wie Flächen auch innen anklickbar
+                self._hit = self._hit.united(self._path)
         else:
             # Flächen sind innen anklickbar, auch wenn nur der Umriss gelasert wird.
             # Die Klickfläche dreht mit dem Objekt mit.
