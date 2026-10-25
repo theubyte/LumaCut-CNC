@@ -355,6 +355,12 @@ class MarlinTransport:
             if self.emergency_latched:
                 raise RuntimeError("M112-Notstopp aktiv; keine weiteren Bewegungen")
             normalized = normalize(cmd)
+            # A bare G0/G1 from LightBurn changes only the modal motion
+            # type; there is no destination and thus no motion to authorize.
+            # In particular this must not erase a confirmed homing state.
+            if normalized in ("G0", "G00", "G1", "G01"):
+                if owner == "lightburn":
+                    return self._exchange_locked(normalized, timeout)
             # LightBurn's Move arrows may issue a G1 X/Y ... S... jog,
             # even though no M3 I laser mode has been enabled. A Move
             # command must NEVER activate the laser: convert XY-only jogging
