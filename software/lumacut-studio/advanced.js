@@ -1,3 +1,4 @@
+import {validateProject} from "./project-validator.mjs";
 import {postprocessMarlinOffline} from "./marlin-postprocessor.mjs";
 import {createUnifiedPlan,unifiedSummary,exportUnifiedDraft} from "./unified-job.mjs";
 import {ditherGray,rasterLines,rasterDraftGcode} from "./raster-planner.mjs";
@@ -10,7 +11,7 @@ const app={layers:defaultLayers,active:"engrave",tool:"select",selected:null,ite
 const uuid=()=>crypto.randomUUID?.()||String(Date.now()+Math.random());
 function message(t){const el=q("toast");el.hidden=false;el.textContent=t;setTimeout(()=>el.hidden=true,5000)}
 function persist(){try{localStorage.setItem(KEY,JSON.stringify(app.materials))}catch{}}
-function snapshot(){app.history.push(JSON.stringify({layers:app.layers,items:app.items,active:app.active}));if(app.history.length>35)app.history.shift()}
+function snapshot(){app.redoHistory=[];app.history.push(JSON.stringify({layers:app.layers,items:app.items,active:app.active}));if(app.history.length>35)app.history.shift()}
 function layer(){return app.layers.find(x=>x.id===app.active)}
 function paintLayers(){q("layerList").replaceChildren();for(const l of app.layers){const row=document.createElement("div");row.className="layer"+(l.id===app.active?" active":"");const radio=document.createElement("button");radio.textContent=l.id===app.active?"●":"○";radio.onclick=()=>{app.active=l.id;paintLayers()};row.append(radio);const name=document.createElement("input");name.value=l.name;name.onchange=()=>{l.name=name.value;paintObjects()};row.append(name);const toggle=document.createElement("button");toggle.title="Schneiden/Gravieren";toggle.textContent=l.mode==="cut"?"✂":"▨";toggle.onclick=()=>{l.mode=l.mode==="cut"?"engrave":"cut";l.color=l.mode==="cut"?"#ff847b":"#4cd4b0";render()};row.append(toggle);const power=document.createElement("input");power.type="number";power.min=0;power.max=100;power.title="Leistung %";power.value=l.power;power.style.width="49px";power.onchange=()=>l.power=Math.max(0,Math.min(100,Number(power.value)||0));row.append(power);const del=document.createElement("button");del.textContent="×";del.onclick=()=>{if(app.layers.length<2)return message("Mindestens eine Ebene behalten.");snapshot();app.layers=app.layers.filter(x=>x.id!==l.id);app.items=app.items.filter(x=>x.layer!==l.id);app.active=app.layers[0].id;render()};row.append(del);const second=document.createElement("div");second.style.cssText="display:flex;gap:5px;margin:-6px 0 10px 38px;align-items:center;color:#93a1b5;font-size:11px";second.innerHTML="Tempo";const speed=document.createElement("input");speed.type="number";speed.min="1";speed.max="6000";speed.style.width="72px";speed.value=l.speed;speed.onchange=()=>l.speed=Number(speed.value);second.append(speed);const passes=document.createElement("input");passes.type="number";passes.min="1";passes.max="30";passes.style.width="47px";passes.value=l.passes;passes.title="Durchgänge";passes.onchange=()=>l.passes=Number(passes.value);second.append("DG",passes);q("layerList").append(row,second)}} 
 function paintObjects(){const el=q("objectList");el.replaceChildren();for(const o of app.items){const b=document.createElement("button");b.textContent=(o.kind==="image"?"▧ ": "◇ ")+o.kind+" · "+app.layers.find(l=>l.id===o.layer)?.name;b.style.cssText="display:block;width:100%;margin-bottom:5px;text-align:left;border-color:"+(o.id===app.selected?"#4cd4b0":"#28303d");b.onclick=()=>{app.selected=o.id;render()};el.append(b)}}
@@ -26,14 +27,14 @@ overlay.addEventListener("pointerdown",e=>{const [x,y]=point(e);if(app.tool==="s
 overlay.addEventListener("pointermove",e=>{if(selectionDrag){const [x,y]=point(e);const o=app.items.find(it=>it.id===selectionDrag.id);if(o){const dx=x-selectionDrag.x,dy=y-selectionDrag.y;const newX=selectionDrag.originX+dx,newY=selectionDrag.originY+dy;if(newX>=0&&newY>=30){o.x=newX;o.y=newY;if(selectionDrag.points)o.points=selectionDrag.points.map(p=>[p[0]+dx,p[1]+dy]);render()}}return}if(!drag)return;const [x,y]=point(e);drag.w=x-drag.x;drag.h=y-drag.y;if(drag.kind==="free")drag.points.push([x,y]);const previous=app.items.filter(o=>o.id!==drag.id);app.items=[...previous,normal(drag)];render()});
 overlay.addEventListener("pointerup",()=>{if(selectionDrag){selectionDrag=null;render();return}if(!drag)return;app.items=app.items.filter(o=>o.id!==drag.id);const o=normal(drag);if(o.kind==="free"&&o.points.length>1||Math.abs(o.w)>1||Math.abs(o.h)>1)app.items.push(o);drag=null;render()});
 function normal(o){const n={...o};if(["rect","ellipse"].includes(n.kind)){if(n.w<0){n.x+=n.w;n.w=-n.w}if(n.h<0){n.y+=n.h;n.h=-n.h}}return n}
-q("undo").onclick=()=>{if(!app.history.length)return;Object.assign(app,JSON.parse(app.history.pop()));render()};
+q("undo").onclick=()=>{if(!app.history.length)return;app.redoHistory??=[];app.redoHistory.push(JSON.stringify({layers:app.layers,items:app.items,active:app.active}));Object.assign(app,JSON.parse(app.history.pop()));render()};
 q("deleteSelected").onclick=()=>{snapshot();app.items=app.items.filter(o=>o.id!==app.selected);app.selected=null;render()};
 q("importImage").onclick=()=>q("imageFile").click();
 q("imageFile").onchange=async e=>{const f=e.target.files[0];if(!f)return;if(f.size>4e6)return message("Maximal 4 MB pro Bild.");const data=await new Promise((resolve,reject)=>{const r=new FileReader;r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(f)});const img=new Image;img.onload=()=>{snapshot();const w=100,h=100*img.height/img.width;app.items.push({id:uuid(),kind:"image",layer:app.active,x:30,y:40,w,h,data});render();message("Bild importiert. Raster-Gravurpfad noch nicht implementiert.")};img.src=data};
 function download(name,value,mime){const blob=new Blob([value],{type:mime}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),5000)}
 q("saveProject").onclick=()=>download("LumaCut-Projekt.json",JSON.stringify({schema:2,layers:app.layers,items:app.items,active:app.active},null,2),"application/json");
 q("loadProject").onclick=()=>q("projectFile").click();
-q("projectFile").onchange=async e=>{try{const f=e.target.files[0];if(!f)return;const d=JSON.parse(await f.text());if(d.schema!==2||!Array.isArray(d.layers)||!Array.isArray(d.items)||d.items.length>3000||d.layers.length>100)throw Error("Ungültiges Projektformat");snapshot();app.layers=d.layers;app.items=d.items;app.active=d.active||d.layers[0]?.id;render()}catch(err){message(err.message)}};
+q("projectFile").onchange=async e=>{try{const f=e.target.files[0];if(!f)return;if(f.size>8_000_000)throw Error("Projektdatei ist zu groß.");const d=JSON.parse(await f.text());validateProject(d);snapshot();app.layers=d.layers;app.items=d.items;app.active=d.active||d.layers[0]?.id;render()}catch(err){message(err.message)}};
 function materials(){q("materialSelect").replaceChildren();app.materials.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.textContent=m.name;q("materialSelect").append(o)})}materials();
 q("materialApply").onclick=()=>{const m=app.materials[Number(q("materialSelect").value)],l=layer();if(!m||!l)return;l.power=m.power;l.speed=m.speed;l.passes=m.passes;render();message("Materialwerte auf ausgewählte Ebene angewendet.")};
 q("materialSave").onclick=()=>{const name=prompt("Profilname");if(!name)return;const l=layer();app.materials.push({name,power:l.power,speed:l.speed,passes:l.passes});persist();materials()};
@@ -142,3 +143,21 @@ document.addEventListener("lumacut:svg-imported",event=>{
 // The legacy process inputs belong to the old import-only preview.
 // Avoid offering two contradictory job planners in the same interface.
 for(const group of [...document.querySelectorAll('[data-panel="process"] > .group')].slice(0,3))group.style.display="none";
+
+const undoContainer=q("undo").parentElement;
+const redoButton=document.createElement("button");redoButton.id="redo";redoButton.textContent="Wiederholen";
+q("undo").after(redoButton);
+redoButton.onclick=()=>{if(!app.redoHistory?.length)return;app.history.push(JSON.stringify({layers:app.layers,items:app.items,active:app.active}));Object.assign(app,JSON.parse(app.redoHistory.pop()));render()};
+document.addEventListener("keydown",e=>{
+ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();q("saveProject").click();return}
+ if(/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName||""))return;
+ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();(e.shiftKey?q("redo"):q("undo")).click()}
+ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="y"){e.preventDefault();redoButton.click()}
+ if(e.key==="Delete"&&app.selected){e.preventDefault();q("deleteSelected").click()}
+});
+const AUTO_SAVE="lumacut.studio.autosave.v2";let autoSaveTimer;
+try{const restored=JSON.parse(localStorage.getItem(AUTO_SAVE)||"null");if(restored){validateProject(restored);app.layers=restored.layers;app.items=restored.items;app.active=restored.active;render();q("empty").hidden=app.items.length>0}}catch(error){console.warn("Autosave is unavailable:",error)}
+const autoSaveObserver=new MutationObserver(()=>{clearTimeout(autoSaveTimer);autoSaveTimer=setTimeout(()=>{
+ try{const doc={schema:2,layers:app.layers,items:app.items,active:app.active};const serialized=JSON.stringify(doc);if(serialized.length>3_500_000)return;validateProject(doc);localStorage.setItem(AUTO_SAVE,serialized)}catch(e){console.warn("Autosave skipped:",e)}
+},1000)});
+autoSaveObserver.observe(q("drawings"),{childList:true});
