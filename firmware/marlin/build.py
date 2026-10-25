@@ -58,6 +58,12 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "SERIAL_PORT_2", "2")
     cfg = replace_active(cfg, "BAUDRATE", "115200")
     cfg = replace_active(cfg, "CUSTOM_MACHINE_NAME", '"LumaCut CNC Marlin"')
+    # LumaCut endstops are active-low / normally-closed in this installation.
+    # Stock Mega Zero config reports all three unpressed switches as
+    # TRIGGERED. Invert only the three installed MIN inputs (M119 check).
+    cfg = replace_active(cfg, "X_MIN_ENDSTOP_INVERTING", "true")
+    cfg = replace_active(cfg, "Y_MIN_ENDSTOP_INVERTING", "true")
+    cfg = replace_active(cfg, "Z_MIN_ENDSTOP_INVERTING", "true")
     cfg = replace_active(cfg, "EXTRUDERS", "0")
     cfg = replace_active(cfg, "TEMP_SENSOR_0", "0")
     cfg = replace_active(cfg, "X_BED_SIZE", "390")
