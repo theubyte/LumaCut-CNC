@@ -177,12 +177,13 @@ class USBProtocolTests(unittest.TestCase):
     def test_lightburn_marlin_flavor_preamble_with_real_acks(self):
         # LightBurn 2.0.03 prepends a compound G00/G17/G40/G21
         # and G54 even when the user's custom start is only G21/G90.
-        serial=FakeSerial(["ok\n"]*8)
+        serial=FakeSerial(["ok\n"]*9)
         controller=MarlinTransport("/dev/null")
         controller.serial=serial
         controller.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
         controller.homing_verified=True
         controller.homed=True
+        controller.surface_z=0.0
         class TCP:
             def __init__(self):
                 self.messages=bytearray()
@@ -198,7 +199,7 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(
             serial.writes,
             [b"G21\n",b"G90\n",b"G21\n",b"M400\n",
-             b"G90\n",b"M3 I\n",b"M5 I\n"])
+             b"G90\n",b"M106 P0 S255\n",b"M3 I\n",b"M5 I\n"])
         self.assertNotIn(b"M112\n",serial.writes)
         self.assertFalse(controller.emergency_latched)
 
@@ -357,7 +358,7 @@ with web.app.test_client() as client:
         self.assertIn('estimated_tip_gap_mm',ui)
         # Offset must not secretly change homing motion without confirming
         # whether the probe point is physically above or below laser tip.
-        self.assertNotIn('machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"],',web)
+        self.assertIn("probe_contact_confirmed=probe_contact_confirmed",web)
 
     def test_machine_web_and_service_modules_compile(self):
         import subprocess
