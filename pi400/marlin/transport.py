@@ -19,7 +19,7 @@ POSITION_RE = re.compile(
     r"(?:^|\s)X:([-+]?\d+(?:\.\d+)?)\s+Y:([-+]?\d+(?:\.\d+)?)\s+Z:([-+]?\d+(?:\.\d+)?)")
 WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 COMMENT = re.compile(r"\([^()]*\)")
-READ_ONLY = frozenset({"M114", "M115", "M119", "M503", "M400"})
+READ_ONLY = frozenset({"M105", "M114", "M115", "M119", "M503", "M400"})
 
 
 def normalize(line: str) -> str:
@@ -46,8 +46,15 @@ class MarlinLaserGuard:
             raise ValueError("G-Code überschreitet Marlin-Limit von 96 Zeichen")
         if cmd.startswith(("$", "?", "!", "~")):
             raise ValueError("GRBL-Befehl am Marlin-Controller nicht zulässig")
-        if any(x in cmd for x in ("M42", "M500", "M502", "M997", "M303", "M104", "M140")):
-            raise ValueError("Hardware-/Druckerfunktion in Laserjobs gesperrt")
+        # Allow only known laser motion, harmless queries and lighting/exhaust.
+        # Other Marlin commands can switch heater MOSFETs, disable software
+        # limits or remap machine coordinates, so they are never forwarded.
+        if cmd in READ_ONLY or cmd in ("M7", "M8", "M9", "M5", "M5 I",
+                                         "G90", "G91", "G20", "G21"):
+            if cmd.startswith("M5"):
+                self.inline = False
+                self.last_rapid = False
+            return cmd
         # Marlin treats the I selector as a *bare flag* (M3 I, M5 I).
         # Recognize that spelling without turning it into a GRBL parameter.
         parsed = re.sub(r"(?<![A-Z])I(?=\s|$)", "I1", cmd)
@@ -59,16 +66,25 @@ class MarlinLaserGuard:
             raise ValueError("Nicht unterstützte G-Code-Syntax")
         families = [f"{letter}{int(float(value))}" for letter, value in words
                     if letter in ("G", "M") and float(value).is_integer()]
+        allowed_families = {"G0", "G1", "G2", "G3", "G4", "G28",
+                            "G90", "G91", "G20", "G21", "M3", "M5",
+                            "M7", "M8", "M9", "M105", "M112", "M114",
+                            "M115", "M119", "M400", "M410", "M503"}
+        if any(f not in allowed_families for f in families):
+            raise ValueError("Marlin-G-Code nicht freigegeben")
+        if len(families) > 1:
+            raise ValueError("Pro Zeile nur ein G/M-Befehl erlaubt")
+        if any(l not in "GMXYZIJRFSP" for l, _ in words):
+            raise ValueError("Unbekannter G-Code-Parameter")
         if any(m in families for m in ("M112", "M410")):
             # Emergency command handled out-of-band by transport.
             return cmd
         if "M4" in families:
             raise ValueError("Marlin M4 I nutzt Vorschub statt S-Leistung: M3 I erforderlich")
         if "M3" in families:
-            # Only M3 I without power safely selects Marlin continuous inline.
-            other = {letter for letter, val in words if letter not in ("M", "I")}
-            has_i = any(l == "I" for l, _ in words)
-            if not has_i or other:
+            # A single bare I flag is required, never M3 S which can fire
+            # the laser immediately while stationary.
+            if cmd != "M3 I":
                 raise ValueError("Nur Marlin M3 I ohne S/O ist freigegeben")
             self.inline = True
             self.last_rapid = False
@@ -79,15 +95,16 @@ class MarlinLaserGuard:
             self.last_rapid = False
             return cmd
         if "G28" in families:
-            if not homing_verified:
-                raise ValueError("G28 erst nach verifizierter Endschalter-/Z-Richtung freigeben")
-            if self.inline:
-                raise ValueError("Vor G28 Laser mit M5 I deaktivieren")
+            # Native Marlin G28 may move XY before Z retracting. The Pi
+            # intercepts all G28 and executes a safe, staged home sequence.
+            raise ValueError("G28 nur über Pi-Zuerst-Z-Referenzfahrt erlaubt")
         if any(m in families for m in ("G0", "G1", "G2", "G3")):
             if not homing_verified:
                 raise ValueError("Fahrbewegung erst nach bestätigter Mechanik-Konfiguration freigeben")
             is_rapid = "G0" in families
             if is_rapid:
+                if any(l == "S" and float(v) > 0 for l, v in words):
+                    raise ValueError("G0 darf keine Laserleistung S>0 enthalten")
                 self.last_rapid = True
             # A powered cut after a G0 requires a new S, per Marlin firmware.
             if any(m in families for m in ("G1", "G2", "G3")):
@@ -113,7 +130,10 @@ class MarlinTransport:
         self.state = "Disconnected"
         self.identity = ""
         self.homed = False
+        self.z_homed = False
         self.homing_verified = False
+        self.emergency_latched = False
+        self.clearance_mm = 20.0
         self.position = None
         self.fault = ""
         self.lines = deque(maxlen=80)
@@ -143,6 +163,7 @@ class MarlinTransport:
         self.serial = None
         self.state = "Disconnected"
         self.homed = False
+        self.z_homed = False
         self.laser_enabled = False
         self.guard = MarlinLaserGuard()
         self.identity = ""
@@ -188,6 +209,8 @@ class MarlinTransport:
 
     def ensure_ready(self):
         with self.lock:
+            if self.emergency_latched:
+                raise RuntimeError("M112-Notstopp verriegelt – Hardware/USB prüfen und Dienst kontrolliert neu starten")
             if self.serial is not None and self.identity:
                 return
             if self.owner is not None:
@@ -218,20 +241,18 @@ class MarlinTransport:
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity:
                 raise ConnectionError("Marlin USB nicht bereit")
+            if self.emergency_latched:
+                raise RuntimeError("M112-Notstopp aktiv; keine weiteren Bewegungen")
             normalized = normalize(cmd)
             if use_guard:
                 normalized = self.guard.check(normalized, self.homing_verified)
             if not normalized:
                 return []
+            motion = re.match(r"^G0?[0123](?:\s|$)", normalized) is not None
+            if motion and not self.homed:
+                raise RuntimeError("SKR erst Z-sicher und vollständig referenzieren")
             try:
                 reply = self._exchange_locked(normalized, timeout)
-                if normalized.startswith("G28"):
-                    # A successful Z-only home never implies XYZ is homed.
-                    parts = normalized.split()
-                    if len(parts) == 1 or ("X" in parts and "Y" in parts):
-                        self.homed = True
-                    else:
-                        self.homed = False
                 if normalized.startswith("M3 I"):
                     self.laser_enabled = True  # PWM stays at zero until G1 S
                 if normalized.startswith("M5"):
@@ -248,12 +269,52 @@ class MarlinTransport:
                 self._close_locked(str(exc))
                 raise
 
+    def safe_home(self, owner: str = "web", clearance_mm: float | None = None):
+        """Execute fail-closed laser-off Z-first homing as one exclusive transaction.
+
+        Do not run generic Marlin G28. Verify switch polarity, positive-Z
+        retract and available Z travel with disconnected laser first.
+        """
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if not self.homing_verified:
+                raise PermissionError("Mechanik/Z-Endschalter nicht verifiziert")
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+            clearance = self.clearance_mm if clearance_mm is None else clearance_mm
+            if not isinstance(clearance, (int, float)) or not 0.5 <= clearance <= 50:
+                raise ValueError("Unzulässiger Z-Sicherheitsabstand")
+            previous_owner = self.owner
+            self.owner = owner
+            self.homed = False
+            self.z_homed = False
+            commands = ("M5 I", "G28 Z", "M400",
+                        "G91", f"G0 Z{clearance:.2f} F360", "G90",
+                        "G28 X Y", "M400", "M114")
+            collected = []
+            try:
+                for index, cmd in enumerate(commands):
+                    collected.extend(self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35))
+                    if cmd == "G28 Z":
+                        self.z_homed = True
+                self.homed = True
+                self.guard = MarlinLaserGuard()
+                self.laser_enabled = False
+                return collected
+            except Exception as exc:
+                self._close_locked("Referenzfahrt fehlgeschlagen: " + str(exc))
+                raise
+            finally:
+                self.owner = previous_owner
+
     def status(self):
         with self.lock:
             return {
                 "connected": self.serial is not None and bool(self.identity),
                 "state": self.state, "owner": self.owner or "Frei",
                 "identity": self.identity, "homed": self.homed,
+                "z_homed": self.z_homed, "emergency_latched": self.emergency_latched,
                 "homing_verified": self.homing_verified,
                 "position": self.position, "fault": self.fault,
                 "lights": self.lights, "exhaust": self.exhaust,
@@ -275,7 +336,9 @@ class MarlinTransport:
             try:
                 serial_port.write(b"M112\n")
                 self.fault = "M112 ausgelöst: SKR stromlos schalten und prüfen"
+                self.emergency_latched = True
                 self.homed = False
+                self.z_homed = False
                 self.laser_enabled = False
             except Exception as exc:
                 self.fault = "Software-Notstopp fehlgeschlagen: " + str(exc)
@@ -310,7 +373,14 @@ class MarlinTransport:
                         cmd = fragment.decode("ascii", errors="replace")
                         fragment.clear()
                         try:
-                            lines = self.command(cmd, owner="lightburn", timeout=150.0)
+                            if normalize(cmd).startswith("G28"):
+                                # The LightBurn Home button MUST trigger the
+                                # same safe Z-first sequence as the web HMI.
+                                if normalize(cmd) != "G28":
+                                    raise ValueError("G28 nur ohne Achsen über Pi erlaubt")
+                                lines = self.safe_home(owner="lightburn")
+                            else:
+                                lines = self.command(cmd, owner="lightburn", timeout=150.0)
                             for line in lines:
                                 client.sendall((line + "\r\n").encode("ascii", "replace"))
                         except (ValueError, RuntimeError) as exc:
@@ -327,9 +397,15 @@ class MarlinTransport:
         except (OSError, ConnectionError, TimeoutError):
             LOG.warning("LightBurn Marlin connection lost", exc_info=True)
         finally:
+            # Marlin may still be in continuous inline laser mode if a Wi-Fi
+            # client disappears mid-job. Fail closed instead of leaving it
+            # armed until the firmware timeout. Hardware cutoff still needed.
+            if self.laser_enabled and not self.emergency_latched:
+                try:
+                    self.emergency_stop()
+                except Exception:
+                    LOG.error("Could not issue M112 after unsafe LightBurn disconnect")
             with self.lock:
-                # Do NOT reset firmware during motion. Emergency parser M112
-                # is only triggered by deliberate user action.
                 if self.client is client:
                     self.owner = None
                     self.client = None
