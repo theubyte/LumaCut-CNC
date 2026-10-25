@@ -1,4 +1,4 @@
-# LumaCut Control OS – zentrale Pi-400-Maschinensteuerung
+> **PINBELEGUNG GEÄNDERT (25.10.2026):** Experimenteller neuer Build: FAN1/PC7 = Laserleistung, PA1 = PWM, BED/PC9 = Abluft M8, HE0/PC8 = Licht M7, FAN0/PC6 = Service-Zusatzausgang. Alte BED-Laser-/FAN0-Abluft-Anleitungen gelten für den neuen Build **nicht**. Eine direkte PWM-Verbindung zu einem auf FAN1− geschalteten Laser ist elektrisch nicht freigegeben. Siehe [FAN1-LASER Integration](FAN1_LASER_PI400_RELEASE.md). Automatischer SKR-Flash über USB fehlt weiterhin.\n\n# LumaCut Control OS – zentrale Pi-400-Maschinensteuerung
 
 Entwicklungsstand: 24.10.2026. Diese Datei unterscheidet bewusst **implementiert**
 von **nur entworfen**. Ein erfolgreicher Build ist keine Freigabe für Laserbetrieb.
