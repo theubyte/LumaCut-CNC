@@ -233,6 +233,14 @@ with web.app.test_client() as client:
             self.assertEqual(result.returncode,0,result.stderr)
 
 
+    def test_idle_service_shutdown_does_not_automatically_send_m112(self):
+        source=(ROOT/"pi400"/"marlin"/"web.py").read_text()
+        footer=source.split("def main():",1)[1]
+        self.assertIn('machine.command("M5 I", owner="shutdown"',footer)
+        self.assertIn('machine.command("M400", owner="shutdown"',footer)
+        self.assertIn('if unsafe:',footer)
+        self.assertIn('machine.emergency_stop()',footer)
+
     def test_web_api_handles_http_errors_without_double_read(self):
         ui=(ROOT/"pi400"/"marlin"/"index.html").read_text(encoding="utf-8")
         self.assertIn("const raw=await r.text();",ui)
