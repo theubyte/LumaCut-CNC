@@ -95,7 +95,7 @@ def homepage():
 @app.get("/api/status")
 def status():
     result = machine.status()
-    result.update(job=dict(job), firmware="marlin", wifi_connected=True,
+    result.update(job=dict(job), firmware="marlin",
                   expected_pwm="PA1 / M3 I / S0..255",
                   io={"laser_enable":"FAN1 PC7",
                       "exhaust":"BED PC9 M8",
@@ -123,23 +123,10 @@ def manual(command, timeout=20):
 
 
 def home_z_first():
-    if not machine.homing_verified:
-        raise RuntimeError("Z-Homingrichtung/Endstop nicht verifiziert")
-    # For *this machine* the independent Z-min switch must be shown to
-    # retract the tool by POSITIVE Z; only commission after dry run.
-    # Homing X/Y is deliberately forbidden before Z is clear.
+    # Reuse the exact same atomic safe-home transaction as the LightBurn
+    # G28 compatibility layer. Never let two implementations diverge.
     local_owner()
-    machine.command("M5 I", owner="web")
-    machine.command("G28 Z", owner="web", timeout=150)
-    machine.command("M400", owner="web", timeout=30)
-    machine.command("G91", owner="web")
-    machine.command("G0 Z%.2f F360" % config["z_clearance_mm"],
-                    owner="web", timeout=30)
-    machine.command("G90", owner="web")
-    machine.command("G28 X Y", owner="web", timeout=150)
-    machine.command("M400", owner="web", timeout=30)
-    machine.command("M114", owner="web", timeout=10)
-    machine.homed = True
+    machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"])
 
 
 @app.post("/api/commission")
