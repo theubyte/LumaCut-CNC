@@ -75,6 +75,13 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "Y_BED_SIZE", "370")
     cfg = replace_active(cfg, "X_MIN_POS", "0")
     cfg = replace_active(cfg, "Z_MAX_POS", "90")
+    # Native Marlin G30 uses the installed Z-min mechanical contact switch.
+    # Unlike G28 it measures height without changing machine Z=0.
+    cfg = replace_active(cfg, "Z_MIN_PROBE_ENDSTOP_INVERTING", "true")
+    cfg = uncomment(cfg, "FIX_MOUNTED_PROBE")
+    cfg = replace_active(cfg, "NOZZLE_TO_PROBE_OFFSET", "{ 0, 0, 0 }")
+    cfg = replace_active(cfg, "Z_PROBE_LOW_POINT", "0")
+
     cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 380 }")
     cfg = replace_active(cfg, "DEFAULT_MAX_FEEDRATE", "{ 100, 100, 6 }")
     cfg = replace_active(cfg, "DEFAULT_MAX_ACCELERATION", "{ 500, 500, 100 }")
