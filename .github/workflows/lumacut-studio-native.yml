@@ -1,0 +1,50 @@
+name: LumaCut Studio Native (Windows)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'software/lumacut-studio-native/**'
+      - '.github/workflows/lumacut-studio-native.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: software/lumacut-studio-native
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install pyinstaller
+
+      # Tests laufen headless vor dem Build; schlägt ein Test fehl, bricht der
+      # Job hier ab und es wird keine .exe gebaut.
+      - name: Run tests (headless)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: '1'
+        run: python -m pytest -q
+
+      - name: Build executable
+        run: |
+          pyinstaller --windowed --name LumaCutStudio --clean --noconfirm src/main.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaCutStudio-Windows
+          path: software/lumacut-studio-native/dist/LumaCutStudio/
+          retention-days: 14

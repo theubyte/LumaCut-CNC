@@ -1,0 +1,99 @@
+"""Export der Arbeitsfläche (SVG/PNG) und Übergabe an die Jobplanung.
+
+:func:`job_layers` ist die Schnittstelle für den Job-/Maschinenteil: pro
+sichtbarer Ebene die Laserparameter und alle Konturen als Polylinien in
+**Maschinen**-mm (Safezone-Versatz bereits eingerechnet).
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen
+from PySide6.QtSvg import QSvgGenerator
+
+from .model import Document
+from .shape_paths import shape_path
+from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
+
+
+@dataclass
+class JobLayer:
+    layer_id: str
+    name: str
+    power_percent: float
+    speed_mm_min: float
+    passes: int
+    polylines: list[list[tuple[float, float]]]  # Maschinen-mm
+
+
+def job_layers(doc: Document) -> list[JobLayer]:
+    """Ebenen in Ausführungsreihenfolge (unterste Ebene zuerst).
+
+    Ellipsen und Text werden in Polylinien zerlegt (Qt-Flattening).
+    Ausgeblendete Ebenen werden nicht gelasert.
+    """
+    result: list[JobLayer] = []
+    for layer in reversed(doc.layers):
+        if not layer.visible:
+            continue
+        polys: list[list[tuple[float, float]]] = []
+        for s in doc.shapes_in_layer(layer.id):
+            path = shape_path(s)
+            if s.kind == "line":
+                a, b = path.elementAt(0), path.elementAt(1)
+                polys.append([to_machine(a.x, a.y), to_machine(b.x, b.y)])
+                continue
+            for poly in path.toSubpathPolygons():
+                polys.append([to_machine(p.x(), p.y()) for p in poly])
+        if polys:
+            result.append(JobLayer(layer.id, layer.name, layer.power, layer.speed,
+                                   layer.passes, polys))
+    return result
+
+
+def _paint(doc: Document, p: QPainter, line_width_mm: float) -> None:
+    p.setRenderHint(QPainter.Antialiasing)
+    for layer in reversed(doc.layers):
+        if not layer.visible:
+            continue
+        color = QColor(layer.color)
+        for s in doc.shapes_in_layer(layer.id):
+            pen = QPen(color, line_width_mm)
+            pen.setCosmetic(False)
+            p.setPen(pen)
+            p.setBrush(QBrush(color) if s.kind == "text" else Qt.NoBrush)
+            p.drawPath(shape_path(s))
+
+
+def export_svg(doc: Document, path: str | os.PathLike[str]) -> None:
+    """SVG in mm-Maßstab (viewBox = 0 0 360 340)."""
+    gen = QSvgGenerator()
+    gen.setFileName(os.fspath(path))
+    gen.setTitle("LumaCut Studio")
+    # 25.4 dpi -> 1 Benutzereinheit = 1 mm
+    gen.setResolution(int(round(25.4)))
+    gen.setSize(QSize(int(WORK_WIDTH_MM), int(WORK_HEIGHT_MM)))
+    gen.setViewBox(QRectF(0, 0, WORK_WIDTH_MM, WORK_HEIGHT_MM))
+    p = QPainter(gen)
+    _paint(doc, p, 0.2)
+    p.end()
+
+
+def export_png(doc: Document, path: str | os.PathLike[str], px_per_mm: float = 10.0,
+               background: QColor | None = None) -> QImage:
+    """Rastert die Arbeitsfläche (Standard 10 px/mm = 254 dpi)."""
+    img = QImage(int(WORK_WIDTH_MM * px_per_mm), int(WORK_HEIGHT_MM * px_per_mm),
+                 QImage.Format_ARGB32)
+    img.fill(background or QColor(255, 255, 255))
+    p = QPainter(img)
+    p.scale(px_per_mm, px_per_mm)
+    _paint(doc, p, max(0.15, 1.5 / px_per_mm))
+    p.end()
+    img.setDotsPerMeterX(int(px_per_mm * 1000))
+    img.setDotsPerMeterY(int(px_per_mm * 1000))
+    if not img.save(os.fspath(path)):
+        raise OSError(f"PNG konnte nicht gespeichert werden: {path}")
+    return img

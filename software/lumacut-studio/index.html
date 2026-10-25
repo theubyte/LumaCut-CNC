@@ -1,28 +1,148 @@
 <!doctype html>
-<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LumaCut Studio — Prototype</title>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LumaCut Studio</title>
 <style>
-:root{color-scheme:dark;--bg:#0b0e13;--panel:#131820;--panel2:#1a212b;--stroke:#28303d;--text:#edf2f7;--muted:#93a1b5;--accent:#4cd4b0;--danger:#f36b73}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 Inter,system-ui,-apple-system,Segoe UI,sans-serif}button,input,select{font:inherit}button{border:1px solid var(--stroke);background:var(--panel2);color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer}button:hover{border-color:#526275}button.primary{background:var(--accent);border-color:var(--accent);color:#09251f;font-weight:700}button:disabled{opacity:.4;cursor:not-allowed}.layout{height:100vh;display:grid;grid-template-rows:64px minmax(0,1fr) 32px}.top{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--stroke);padding:0 22px;background:#10141b}.brand{font-size:19px;font-weight:800;letter-spacing:-.6px}.brand span{color:var(--accent)}.sub{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:1.2px}.topright{display:flex;align-items:center;gap:10px}.pill{border:1px solid var(--stroke);padding:9px 12px;border-radius:999px;color:var(--muted)}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#8993a3;margin-right:8px}.main{display:grid;grid-template-columns:76px minmax(350px,1fr) 330px;min-height:0}.nav{border-right:1px solid var(--stroke);background:#10141b;display:flex;align-items:center;flex-direction:column;gap:12px;padding:22px 7px}.nav button{width:57px;height:55px;padding:4px;font-size:11px}.nav button.active{color:var(--accent);border-color:#3a7369;background:#172b2a}.canvascol{min-height:0;display:flex;flex-direction:column}.workspacebar{padding:13px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--stroke)}.workspace{min-height:0;flex:1;position:relative;display:grid;place-items:center;overflow:hidden;background-color:#0c1118;background-image:linear-gradient(#1a26331d 1px,transparent 1px),linear-gradient(90deg,#1a26331d 1px,transparent 1px);background-size:24px 24px}.bed{width:min(76%,640px);aspect-ratio:390 / 370;background:#e9ecef;border:6px solid #2e3c4c;box-shadow:0 26px 75px #0009;position:relative;overflow:hidden}.safe{position:absolute;left:0;top:0;right:0;height:8.11%;background:repeating-linear-gradient(45deg,#efb95f50,#efb95f50 7px,#efb95f20 7px,#efb95f20 14px);z-index:2;pointer-events:none}.bed svg{position:absolute;inset:0;width:100%;height:100%}.bed svg *{vector-effect:non-scaling-stroke}.axis{position:absolute;bottom:12px;left:16px;color:#52616e;font-size:11px;pointer-events:none}.empty{position:absolute;color:#6b7785;text-align:center;pointer-events:none}.aside{border-left:1px solid var(--stroke);background:var(--panel);overflow:auto;padding:18px}.heading{font-weight:800;font-size:15px;margin-bottom:18px}.group{padding:0 0 18px;margin-bottom:17px;border-bottom:1px solid var(--stroke)}.gtitle{color:#d1dbe6;font-weight:700;margin-bottom:12px}.field{display:grid;grid-template-columns:1fr 102px;align-items:center;gap:10px;margin:10px 0;color:var(--muted)}input,select{width:100%;min-width:0;padding:9px;border:1px solid #384453;border-radius:9px;background:#0c1118;color:var(--text)}input[type=checkbox]{width:auto}.hint{font-size:12px;color:var(--muted);line-height:1.5}.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.full{width:100%}.stat{display:flex;justify-content:space-between;padding:9px 0;color:var(--muted)}.stat b{color:var(--text)}footer{border-top:1px solid var(--stroke);padding:7px 20px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between}.warning{color:#eebc71}.toast{position:absolute;bottom:20px;left:20px;background:#202c38;color:#e4f6f1;padding:12px;border-radius:12px;max-width:410px;box-shadow:0 7px 35px #0008}@media(max-width:950px){.main{grid-template-columns:60px minmax(300px,1fr)}.aside{grid-column:1 / -1;max-height:45vh}.nav button{width:45px}.layout{height:auto;min-height:100vh}.workspace{min-height:500px}.bed{width:min(82%,500px)}}
-</style><style id="studio-v2">
-:root{--accent:#4cd4b0} .main{grid-template-columns:76px 255px minmax(350px,1fr) 330px}.layerspanel{background:#101820;border-right:1px solid var(--stroke);padding:15px;overflow:auto}.layerspanel h3{margin:5px 0 14px}.layer{display:flex;gap:6px;align-items:center;background:#19232e;border:1px solid #344353;border-radius:10px;padding:9px 5px;margin-bottom:8px}.layer.active{border-color:var(--accent)}.layer label{flex:1;min-width:0}.layer input{width:100%;padding:4px}.layer button{padding:4px 6px}.toolselected{border-color:var(--accent);color:var(--accent)}#editorOverlay{position:absolute;inset:0;width:100%;height:100%;z-index:3;cursor:crosshair}#cameraView{width:100%;max-height:230px;object-fit:contain;background:#080c12;border-radius:8px}#rasterPreview{pointer-events:none}.tabs{display:flex;gap:7px;margin-bottom:15px;flex-wrap:wrap}.tabs button{padding:8px}.small{font-size:12px}.panel{display:none}.panel.current{display:block}.modal{position:fixed;inset:0;background:#000b;z-index:20;display:grid;place-items:center}.dialog{width:min(90vw,700px);max-height:90vh;overflow:auto;background:#19222e;border:1px solid #395064;padding:25px;border-radius:16px}.modal[hidden]{display:none} @media(max-width:1250px){.main{grid-template-columns:60px minmax(220px,1fr) 330px}.layerspanel{grid-column:1/-1;grid-row:2}.canvascol{grid-column:2;grid-row:1}.aside{grid-column:3;grid-row:1;max-height:none}} 
-</style><link rel="stylesheet" href="./design.css"></head><body><div class="layout">
-<header class="top"><div><div class="brand">Luma<span>Cut</span> <span style="color:#edf2f7">Studio</span></div><div class="sub">DESIGN WORKSPACE · VERSION 0.5</div></div><div class="topright"><span class="pill"><i class="dot"></i>Offline · kein Controller verbunden</span><button id="importTop" class="primary">+ SVG importieren</button></div></header>
-<div class="main"><nav class="nav" aria-label="Werkzeuge"><button class="active" title="Arbeitsbereich">▦<div>Canvas</div></button><button id="fit" title="Ansicht zurücksetzen">⌗<div>Ansicht</div></button><button id="clear" title="Projekt leeren">×<div>Leeren</div></button></nav>
-<section class="layerspanel"><h3>Ebenen</h3><button id="addLayer" class="full">+ Ebene</button><div id="layerList" style="margin-top:14px"></div><p class="hint">Jede Ebene hat eigene Laserwerte. Rot = Schneiden, Türkis = Gravieren.</p></section><section class="canvascol"><div class="workspacebar"><div><b id="filename">Neues Projekt</b> <span class="hint" id="dims">· Arbeitsbereich 390 × 370 mm</span></div><span class="hint">X → · Y ↓ (Vorschaukoordinaten)</span></div><div class="workspace"><div class="bed" id="bed"><div class="safe" title="Reservierte Homingzone, 30 mm"></div><svg id="preview" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 370"><g id="graphics"></g><g id="drawings"></g><g id="rasterPreview"></g></svg><svg id="editorOverlay" viewBox="0 0 390 370"></svg><span class="axis">0,0 · Maschinenbett</span><div class="empty" id="empty"><b>Deine Kreativität startet hier.</b><div>SVG-Datei importieren, um die Vorschau zu öffnen.</div></div></div><div class="toast" id="toast" hidden></div></div></section>
-<aside class="aside"><div class="heading">LumaCut Studio <span class="small">0.3</span></div><div class="tabs"><button data-tab="design" class="toolselected">Design</button><button data-tab="process">Laser</button><button data-tab="camera">Kamera</button></div><div class="panel current" data-panel="design"><div class="gtitle">Zeichnen</div><div class="actions"><button data-tool="select">Auswahl</button><button data-tool="rect">Rechteck</button><button data-tool="ellipse">Ellipse</button><button data-tool="line">Linie</button><button data-tool="free">Freihand</button><button data-tool="text">Text</button></div><p class="hint">Werkzeug auswählen, dann auf der Arbeitsfläche ziehen. Text wird als Designobjekt gespeichert, aber noch nicht als G-Code exportiert.</p><div class="actions"><button id="undo">Rückgängig</button><button id="deleteSelected">Löschen</button><button id="importImage">Bild importieren</button><button id="saveProject">Projekt speichern</button><button id="loadProject">Projekt öffnen</button></div><div id="selectionInspector" class="group" style="margin-top:18px"><div class="gtitle">Ausgewähltes Objekt</div><p id="selectedName" class="hint">Kein Objekt ausgewählt</p><label class="field">Position X (mm)<input id="shapeX" type="number" step=".1"></label><label class="field">Position Y (mm)<input id="shapeY" type="number" step=".1"></label><label class="field">Breite (mm)<input id="shapeW" type="number" min="0.1" step=".1"></label><label class="field">Höhe (mm)<input id="shapeH" type="number" min="0.1" step=".1"></label><button id="applyGeometry" class="full">Maße übernehmen</button></div><div class="gtitle" style="margin-top:14px">Objekte</div><div id="objectList" class="hint"></div></div><div class="panel" data-panel="process">
-<div class="group"><div class="gtitle">Werkstück &amp; Geometrie</div>
-<label class="field">Breite (mm)<input id="width" type="number" min=".1" max="390" step=".1" value="100"></label>
-<label class="field">Position X (mm)<input id="offsetX" type="number" min="0" step=".1" value="10"></label>
-<label class="field">Position Y (mm)<input id="offsetY" type="number" min="0" step=".1" value="40"></label>
-<div class="hint">Die ersten 30 mm in Y bleiben als Safezone frei. Koordinaten sind Vorschaukoordinaten; eine Maschinenkalibrierung steht noch aus.</div></div>
-<div class="group"><div class="gtitle">Laserprozess</div><label class="field">Modus<select id="mode"><option value="cut">Vektor schneiden</option><option value="engrave">Vektor gravieren</option></select></label>
-<label class="field">Leistung (%)<input id="power" type="number" min="1" max="100" value="60"></label>
-<label class="field">Tempo (mm/min)<input id="speed" type="number" min="1" max="6000" value="1200"></label>
-<label class="field">Durchgänge<input id="passes" type="number" min="1" max="30" value="1"></label>
-<label class="field">Zustellung (mm)<input id="stepdown" type="number" min="0" max="10" step=".1" value="0"></label>
-<div class="hint">Zustellung ist für eine spätere referenzierte Maschine vorbereitet und wird in diesem 2D-Export nicht ausgeführt.</div></div>
-<div class="group"><div class="gtitle">Vorbereitung</div><div class="stat">Geometrien <b id="shapeCount">0</b></div><div class="stat">Schnittweg <b id="pathLength">—</b></div><div class="stat">Jobstatus <b>Entwurf</b></div><div class="actions"><button id="simulate">Vorschau prüfen</button></div></div>
-<div class="hint warning">Prototyp: Kein automatisches Homing, keine Z-Abtastung, keine Laserfreigabe und kein Streaming. Export ausschließlich für Offlineprüfung, nicht unmittelbar auf Hardware ausführen.</div>
-<div class="group"><div class="gtitle">Materialbibliothek</div><select id="materialSelect"></select><div class="actions" style="margin-top:10px"><button id="materialApply">Profil anwenden</button><button id="materialSave">Profil speichern</button><button id="materialDelete">Profil löschen</button></div><p class="hint">Profile werden lokal auf diesem Computer gespeichert. Werte müssen am eigenen Material ermittelt werden.</p></div></div><div class="panel" data-panel="camera"><div class="gtitle">Arbeitsflächenkamera</div><button id="cameraStart">Kamera einschalten</button><button id="cameraStop">Ausschalten</button><video id="cameraView" autoplay muted playsinline></video><p class="hint">Liveansicht und auswählbarer Scan-Ausschnitt. Der Scan ist zunächst eine Bildaufnahme, keine geometrisch korrigierte Maschinenvermessung.</p><div class="field">Scan X (mm)<input id="scanX" type="number" value="30"></div><div class="field">Scan Y (mm)<input id="scanY" type="number" value="50"></div><div class="field">Breite (mm)<input id="scanW" type="number" value="120"></div><div class="field">Höhe (mm)<input id="scanH" type="number" value="100"></div><button id="cameraCapture">Scanbereich aufnehmen</button><canvas id="scanResult" style="width:100%;margin-top:10px"></canvas><div class="gtitle" style="margin-top:15px">Kalibrierung</div><p class="hint">Kalibrierbrett mit vier Referenzpunkten ist geplant. Automatische Lasermarkierung, Bildpunkterkennung und maßhaltige Perspektivkorrektur sind noch nicht implementiert.</p><button id="calibrationGuide">Kalibrieranleitung</button></div></aside></div><footer><span>LumaCut Studio 0.5 · Design-Workspace</span><span>SVG-Vektorvorschau · Offline</span></footer></div>
-<input id="file" type="file" accept=".svg,image/svg+xml" hidden><input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp" hidden><input id="projectFile" type="file" accept=".json,application/json" hidden><script type="module" src="./advanced.js"></script>
-<script type="module" src="./studio.js"></script><script type="module" src="./calibrated-camera.js"></script><script type="module" src="./machine-monitor.js"></script></body></html>
+:root{color-scheme:dark;--bg:#0b0e13;--panel:#131820;--panel2:#1a212b;--stroke:#28303d;--text:#edf2f7;--muted:#93a1b5;--accent:#4cd4b0;--danger:#f36b73;--warn:#eebc71}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+button,input,select{font:inherit}button{border:1px solid var(--stroke);background:var(--panel2);color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer}
+button:hover{border-color:#526275}button.primary{background:var(--accent);border-color:var(--accent);color:#09251f;font-weight:700}
+button.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+.layout{height:100vh;display:grid;grid-template-rows:60px minmax(0,1fr) 28px}
+.top{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--stroke);padding:0 20px;background:#10141b}
+.brand{font-size:18px;font-weight:800;letter-spacing:-.5px}.brand span{color:var(--accent)}
+.main{display:grid;grid-template-columns:72px 240px minmax(0,1fr) 320px;min-height:0}
+.nav{border-right:1px solid var(--stroke);background:#10141b;display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 6px}
+.nav button{width:56px;height:52px;padding:4px;font-size:11px}
+.layers{background:#101820;border-right:1px solid var(--stroke);padding:14px;overflow:auto}
+.canvascol{display:flex;flex-direction:column;min-height:0}
+.workspacebar{padding:10px 16px;border-bottom:1px solid var(--stroke);display:flex;justify-content:space-between;align-items:center}
+.workspace{flex:1;position:relative;display:grid;place-items:center;overflow:hidden;background:#0c1118}
+.bed{width:min(78%,680px);aspect-ratio:360/340;background:#e9ecef;border:5px solid #2e3c4c;position:relative;overflow:hidden}
+.bed svg{position:absolute;inset:0;width:100%;height:100%}
+.aside{border-left:1px solid var(--stroke);background:var(--panel);overflow:auto;padding:16px}
+.heading{font-weight:800;font-size:15px;margin-bottom:14px}
+.group{padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid var(--stroke)}
+.gtitle{font-weight:700;margin-bottom:10px;color:#d1dbe6}
+.field{display:grid;grid-template-columns:1fr 90px;gap:8px;margin:8px 0;align-items:center;color:var(--muted)}
+input,select{width:100%;padding:8px;border:1px solid #384453;border-radius:8px;background:#0c1118;color:var(--text)}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.full{width:100%}
+.stat{display:flex;justify-content:space-between;padding:6px 0;color:var(--muted)}
+.stat b{color:var(--text)}
+footer{border-top:1px solid var(--stroke);padding:6px 16px;color:var(--muted);font-size:11px;display:flex;justify-content:space-between}
+.tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.tabs button{padding:7px 10px}
+.panel{display:none}.panel.current{display:block}
+.hint{font-size:12px;color:var(--muted);line-height:1.45}
+.status-ok{color:var(--accent)}
+.status-warn{color:var(--warn)}
+@media(max-width:1100px){.main{grid-template-columns:60px minmax(0,1fr) 300px}.layers{display:none}}
+</style>
+</head>
+<body>
+<div class="layout">
+<header class="top">
+  <div><div class="brand">Luma<span>Cut</span> Studio</div><div class="sub" style="font-size:11px;color:var(--muted)">Arbeitsfläche 360 × 340 mm · Safezone intern</div></div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <span class="pill" id="connStatus" style="border:1px solid var(--stroke);padding:6px 12px;border-radius:999px;color:var(--muted)">Nicht verbunden</span>
+    <button id="btnStartJob" class="primary">Start Job</button>
+  </div>
+</header>
+<div class="main">
+  <nav class="nav">
+    <button class="active" title="Canvas">▦<div>Canvas</div></button>
+    <button title="Ebenen">≡<div>Ebenen</div></button>
+    <button title="Maschine">⚙<div>Maschine</div></button>
+  </nav>
+  <section class="layers">
+    <h3 style="margin:4px 0 12px">Ebenen</h3>
+    <button id="addLayer" class="full">+ Ebene</button>
+    <div id="layerList" style="margin-top:12px"></div>
+    <p class="hint">Jede Ebene hat eigene Leistung, Geschwindigkeit und Durchgänge.</p>
+  </section>
+  <section class="canvascol">
+    <div class="workspacebar">
+      <div><b id="filename">Neues Projekt</b> <span class="hint">· 360 × 340 mm</span></div>
+      <span class="hint">Safezone intern · nicht sichtbar</span>
+    </div>
+    <div class="workspace">
+      <div class="bed" id="bed">
+        <svg id="preview" viewBox="0 0 360 340"><g id="graphics"></g></svg>
+      </div>
+    </div>
+  </section>
+  <aside class="aside">
+    <div class="heading">Steuerung</div>
+    <div class="tabs">
+      <button data-tab="design" class="toolselected">Design</button>
+      <button data-tab="scan">Scan & Probe</button>
+      <button data-tab="machine">Maschine</button>
+    </div>
+    <div class="panel current" data-panel="design">
+      <div class="gtitle">Werkzeuge</div>
+      <div class="actions">
+        <button data-tool="select">Auswahl</button>
+        <button data-tool="rect">Rechteck</button>
+        <button data-tool="ellipse">Ellipse</button>
+        <button data-tool="text">Text</button>
+      </div>
+      <div class="group" style="margin-top:16px">
+        <div class="gtitle">Material</div>
+        <select id="materialSelect"></select>
+        <div class="actions" style="margin-top:8px"><button id="materialApply">Anwenden</button><button id="materialSave">Speichern</button></div>
+      </div>
+    </div>
+    <div class="panel" data-panel="scan">
+      <div class="gtitle">Kamera-Scan</div>
+      <p class="hint">Kopf-montierte Kamera scannt die Fläche bei fester Höhe. Einzelbilder werden zu einem scharfen Gesamtbild zusammengesetzt.</p>
+      <button id="btnScan" class="full primary">Scan starten</button>
+      <div class="stat" style="margin-top:10px">Fortschritt <b id="scanProgress">—</b></div>
+      <div class="gtitle" style="margin-top:16px">Auto-Probe</div>
+      <p class="hint">Erkannte oder markierte Bereiche werden automatisch mit dem Z-Taster abgetastet. Jeder Bereich bekommt sein eigenes Höhenmesh.</p>
+      <button id="btnAutoProbe" class="full">Bereiche proben</button>
+      <div class="stat">Probe-Bereiche <b id="probeCount">0</b></div>
+    </div>
+    <div class="panel" data-panel="machine">
+      <div class="gtitle">Status</div>
+      <div class="stat">X <b id="posX">—</b></div>
+      <div class="stat">Y <b id="posY">—</b></div>
+      <div class="stat">Z <b id="posZ">—</b></div>
+      <div class="stat">Homed <b id="homedStatus">—</b></div>
+      <div class="stat">Laser <b id="laserStatus">Aus</b></div>
+      <div class="gtitle" style="margin-top:14px">Aktionen</div>
+      <div class="actions">
+        <button id="btnHome">Home</button>
+        <button id="btnPark">Park</button>
+        <button id="btnFocus">Fokus</button>
+        <button id="btnJog">Jog</button>
+      </div>
+      <button id="btnEmergency" class="full danger" style="margin-top:10px">Not-Aus</button>
+    </div>
+  </aside>
+</div>
+<footer>
+  <span>LumaCut Studio · 360 × 340 mm</span>
+  <span id="jobStatus">Bereit</span>
+</footer>
+</div>
+<script type="module">
+document.querySelectorAll('[data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-tab]').forEach(b => b.classList.remove('toolselected'));
+    btn.classList.add('toolselected');
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('current'));
+    document.querySelector(`[data-panel="${btn.dataset.tab}"]`).classList.add('current');
+  });
+});
+['btnScan','btnAutoProbe','btnHome','btnPark','btnFocus','btnEmergency'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('click', () => {
+    document.getElementById('jobStatus').textContent = id.replace('btn','') + ' …';
+  });
+});
+</script>
+</body>
+</html>

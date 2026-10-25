@@ -1,0 +1,81 @@
+"""Dunkles Farbschema und QSS für den Canvas-Editor.
+
+Farben passen zum bestehenden Studio (main.py, design.css): Hintergrund
+#0b0e13, Akzent #4cd4b0. Die Regeln sind über objectName auf den Editor
+beschränkt, damit andere Panels (Maschine, Scan) ihr Aussehen behalten.
+"""
+
+from __future__ import annotations
+
+BG = "#0b0e13"
+PANEL = "#10141b"
+SURFACE = "#131820"
+SURFACE_2 = "#1a212b"
+BORDER = "#28303d"
+BORDER_HOVER = "#526275"
+TEXT = "#edf2f7"
+TEXT_DIM = "#93a1b5"
+ACCENT = "#4cd4b0"
+ACCENT_TEXT = "#09251f"
+DANGER = "#f36b73"
+
+# Canvas-Farben
+CANVAS_OUTSIDE = "#080b10"
+CANVAS_WORK = "#111720"
+GRID_MINOR = "#18202b"
+GRID_MAJOR = "#243041"
+WORK_BORDER = "#3a4a5e"
+SELECTION = ACCENT
+
+CANVAS_QSS = f"""
+#CanvasEditor, #LayersPanel {{ background: {BG}; }}
+#CanvasEditor QToolBar {{ background: {PANEL}; border: none; spacing: 2px; padding: 4px; }}
+#CanvasEditor QToolBar#ToolStrip {{ border-right: 1px solid {BORDER}; padding: 6px 4px; }}
+#CanvasEditor QToolBar#ActionBar {{ border-bottom: 1px solid {BORDER}; }}
+#CanvasEditor QToolButton {{
+    background: transparent; border: 1px solid transparent; border-radius: 6px;
+    padding: 5px; color: {TEXT};
+}}
+#CanvasEditor QToolButton:hover {{ background: {SURFACE_2}; border-color: {BORDER}; }}
+#CanvasEditor QToolButton:checked {{ background: #173a33; border-color: {ACCENT}; }}
+#CanvasEditor QToolButton:disabled {{ color: #4a5566; }}
+#PropertyBar {{ background: {PANEL}; border-bottom: 1px solid {BORDER}; }}
+#PropertyBar QLabel {{ color: {TEXT_DIM}; padding: 0 2px 0 8px; }}
+#PropertyBar QLabel#PropTitle {{ color: {TEXT}; font-weight: 600; padding-left: 4px; }}
+#CanvasEditor QDoubleSpinBox, #CanvasEditor QLineEdit, #CanvasEditor QComboBox,
+#LayersPanel QDoubleSpinBox, #LayersPanel QSpinBox, #LayersPanel QLineEdit {{
+    background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 5px;
+    padding: 3px 6px; color: {TEXT}; selection-background-color: {ACCENT};
+    selection-color: {ACCENT_TEXT}; min-height: 20px;
+}}
+#CanvasEditor QDoubleSpinBox:focus, #CanvasEditor QLineEdit:focus,
+#LayersPanel QDoubleSpinBox:focus, #LayersPanel QSpinBox:focus, #LayersPanel QLineEdit:focus {{
+    border-color: {ACCENT};
+}}
+#CanvasEditor QDoubleSpinBox:disabled, #CanvasEditor QLineEdit:disabled,
+#CanvasEditor QComboBox:disabled {{ color: #4a5566; }}
+#CanvasEditor QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {BORDER}; }}
+#Ruler {{ background: {PANEL}; }}
+CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
+
+#LayersPanel QLabel#SectionTitle {{ color: {TEXT}; font-weight: 600; font-size: 13px; padding: 2px 0; }}
+#LayersPanel QLabel#Hint {{ color: {TEXT_DIM}; font-size: 11px; }}
+#LayersPanel QListWidget {{
+    background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 6px; outline: none; padding: 2px;
+}}
+#LayersPanel QListWidget::item {{ border-radius: 5px; margin: 1px; }}
+#LayersPanel QListWidget::item:selected {{ background: #173a33; }}
+#LayersPanel QListWidget::item:hover:!selected {{ background: {SURFACE_2}; }}
+#LayersPanel QLabel#LayerName {{ color: {TEXT}; font-weight: 600; background: transparent; }}
+#LayersPanel QLabel#LayerSummary {{ color: {TEXT_DIM}; font-size: 11px; background: transparent; }}
+#LayersPanel QWidget#LayerRow {{ background: transparent; }}
+#LayersPanel QToolButton {{
+    background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 3px;
+}}
+#LayersPanel QToolButton:hover {{ background: {SURFACE_2}; border-color: {BORDER}; }}
+#LayersPanel QGroupBox {{
+    border: 1px solid {BORDER}; border-radius: 8px; margin-top: 14px; padding: 10px 8px 8px 8px;
+}}
+#LayersPanel QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {TEXT}; }}
+#LayersPanel QPushButton#ColorButton {{ border: 1px solid {BORDER}; border-radius: 5px; min-height: 20px; max-height: 20px; padding: 2px; }}
+"""
