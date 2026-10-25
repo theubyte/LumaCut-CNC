@@ -1,8 +1,14 @@
 name: LumaCut Marlin Firmware
 
-# Firmware compilation on demand; routine code checks run locally.
+# Compile on firmware-only changes (not on regular Pi/web commits).
+# Manual builds remain available.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/marlin/**'
+      - '.github/workflows/marlin.yml'
 
 permissions:
   contents: read
