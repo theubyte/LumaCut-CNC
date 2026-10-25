@@ -471,15 +471,16 @@ class MarlinTransport:
                         "G28 Z", "M400", "G91",
                         f"G0 Z{clearance:.2f} F600", "G90", "M400"]
             if self.homing_chime_enabled:
-                # Two motor tones via small X-only step pulses. The toolhead
-                # stays in the empty 30 mm homing strip; net movement is zero.
-                # This is an audible stepper chirp, not a hardware speaker.
-                # At 80 steps/mm, F300 ~= 400 steps/s, F375 ~= 500 steps/s.
-                # Tiny reversal ramps influence the perceived pitch.
+                # K1-style stepper sound: longer, reversible X strokes
+                # let the motion planner actually reach the commanded step
+                # frequency. 0.8mm strokes were inaudible on quiet TMC2209.
+                # All strokes stay within the empty X=0..8mm home strip;
+                # no PWM / no Z / no residual position shift.
                 commands.extend([
-                    "G91", "G1 X0.8 F300", "G1 X-0.8 F300",
-                    "G1 X0.8 F375", "G1 X-0.8 F375",
-                    "G90", "M400",
+                    "G91",
+                    "G1 X8 F1200", "G1 X-8 F1200", "M400",
+                    "G1 X8 F1600", "G1 X-8 F1600", "M400",
+                    "G90",
                 ])
             commands.append("M114")
             result = []
