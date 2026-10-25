@@ -1,67 +1,50 @@
-# LumaCut CNC – lokale Tests statt GitHub Actions
+# LumaCut CNC – schneller hybrider Testablauf
 
-**Projektentscheidung (25.10.2026):** GitHub dient als Quellcode-Speicher
-und Versionskontrolle. Die beiden GitHub-Actions-Workflows
-`.github/workflows/ci.yml` und `.github/workflows/marlin.yml`
-werden **nicht mehr bei Pushes oder Pull Requests gestartet**.
-Ein manueller `workflow_dispatch` bleibt nur als optionaler Rückfallweg.
+GitHub ist der Quellcode- und Versionsspeicher. **Firmware-Builds dürfen
+gezielt über GitHub Actions laufen**, wenn PlatformIO oder die STM32-Toolchain
+in der Assistenzumgebung fehlen. Der Marlin-Workflow wird **nicht automatisch
+bei jedem Commit** ausgelöst, sondern nur bei Bedarf manuell gestartet.
 
-## Standardablauf bei einer Änderung
+## Standard für jede Änderung
 
-1. Änderungen lokal in einem Arbeitsverzeichnis erstellen.
-2. Ohne Verbindung zur echten Maschine Syntax-/Frontend-Prüfungen ausführen.
-3. USB-Marlin-Transport, TCP-LightBurn-Brücke, Homing, Laserbefehle,
-   Notstopp und Pi-Webinterface anhand automatisierter Simulationstests prüfen.
-4. Bei Änderungen an Boardpins, PWM oder Firmware: Marlin mit dem lokal
-   installierten PlatformIO inklusive STM32F103RC-Toolchain kompilieren,
-   die resultierende `firmware.bin` und ihren SHA256 prüfen.
-5. **Erst nach bestandenem Test** Quellcode nach GitHub pushen.
-   Kein automatischer GitHub-Build ist für den normalen Arbeitsablauf nötig.
-6. Hardwaretest separat: mit getrennter Laserleitung starten,
-   Endschalter, Z-Richtung, Interlock und PWM elektrisch verifizieren.
-   GitHub-/lokale Unit-Tests ersetzen **keinen** solchen Hardwaretest.
+1. **Kurzer lokaler Check**: geänderte Python-/Webdateien prüfen;
+   bei Marlin USB-Transport, Homing, Laser-Sicherheit oder LightBurn nur
+   die relevanten Simulationstests ausführen:
+   `bash scripts/local-test.sh quick`.
+2. **Firmware geändert?** GitHub Actions
+   `LumaCut Marlin Firmware` manuell auslösen. Der Workflow baut
+   ausschließlich `firmware.bin` und `manifest.json`, ohne parallel den
+   vollständigen Python-Testkatalog auszuführen. Marlin-Quellen und
+   PlatformIO-Pakete werden zwischen Builds gecacht.
+3. **Größere Code-Umbauten / Releases**: auf Bedarf
+   `bash scripts/local-test.sh full` (gesamte Regressionstests).
+4. **Früheres grblHAL**: nur für Legacy-Arbeiten kompilieren; Standard ist
+   das neue Marlin-System.
+5. Geprüfte Änderungen und eindeutigen Teststatus mit Commit auf GitHub speichern.
 
-## Lokale Befehle (Entwicklungsrechner)
+## Befehle
 
 ```bash
-bash scripts/setup-local.sh       # einmalig, mit Netzwerk; richtet .venv ein
-bash scripts/local-test.sh syntax # Python/Bash/JavaScript/JSON
-bash scripts/local-test.sh quick  # Marlin-/Pi-Simulationstests
-bash scripts/local-test.sh full   # alle Regressionstests inkl. altem grblHAL
-bash scripts/local-test.sh firmware  # Marlin-Binary lokal mit PlatformIO bauen
+bash scripts/setup-local.sh        # einmalig, nur wenn lokale Pakete fehlen
+bash scripts/local-test.sh quick   # kurzer Standardtest
+bash scripts/local-test.sh syntax  # breite Syntaxprüfung
+bash scripts/local-test.sh full    # vollständige Regression
+bash scripts/local-test.sh firmware # optional Marlin-Firmware lokal statt GitHub
 ```
 
-Die Marlin-Quellen werden beim ersten Build nach
-`~/.cache/lumacut/upstreams` geladen und danach wiederverwendet.
-Die benötigten ARM/PlatformIO-Pakete können beim ersten Aufruf noch
-heruntergeladen werden. Ohne Internet und ohne lokalen Cache kann
-**kein vollständiger Firmwarebuild** durchgeführt werden. Eine bestehende
-lokale Installation kann später mit
-`python firmware/marlin/build.py --offline` arbeiten.
+In der GitHub-Oberfläche:
+`Actions → LumaCut Marlin Firmware → Run workflow`.
+Danach ist die Firmware unter **Artifacts** verfügbar.
 
-## Transparente Testergebnisse
+## Aussagekraft
 
-Jeder Testbericht unterscheidet verbindlich:
+- **Syntaxprüfung:** Code lässt sich interpretieren.
+- **Lokale Simulation:** Antworten und Fehlersituationen mit Test-Doubles geprüft.
+- **GitHub-Firmwarebuild:** STM32-Marlin kompiliert und Paket erzeugt.
+- **Hardwaretest:** Echte Funktion von Motoren, Endschaltern, PWM,
+  Abschaltung und Laser am SKR überprüft.
 
-- **Quelltext-/Syntaxprüfung**: Code lässt sich parsen.
-- **Automatisierte Simulationstests**: Transport- und Sicherheitslogik mit
-  Fake-Serial/Mock-Webrequests geprüft.
-- **Firmware-Build**: Marlin für das Zielboard tatsächlich kompiliert;
-  Binärdatei und Checksumme geprüft.
-- **Echter Hardwaretest**: Nur nach Messungen und Tests am realen SKR;
-  niemals aus einem lokalen Build ableiten.
-
-Wenn die Arbeitsumgebung einen benötigten Compiler oder Python-Pakete
-nicht enthält, muss dies als **nicht ausgeführt** gemeldet werden.
-Tests niemals als bestanden darstellen, wenn sie nicht gelaufen sind.
-
-## Architektur
-
-Raspberry Pi 400 (Wi-Fi Webinterface und LightBurn TCP) verbindet sich über
-USB mit BTT SKR Mini MZ V1.0 (Marlin). Marlin ist der aktuelle
-Entwicklungszweig; der ältere grblHAL-Code bleibt zu Vergleichs- und
-Rettungszwecken versioniert. Den Laserkopf vor Hardwarediagnose und
-Firmwareumstellung elektrisch trennen. Die direkte PA1-PWM-Verbindung zu
-einem mit Low-Side-FAN1− versorgten Lasermodul ist ohne geeignete
-galvanisch getrennte Schnittstelle und unabhängigen Interlock nicht
-freigegeben.
+Diese vier Stufen strikt auseinanderhalten. Ein erfolgreich erzeugtes
+Firmware-Binary ist kein Nachweis elektrischer Sicherheit. Insbesondere
+benötigt die Kombination FAN1-Low-Side-Masse mit PA1-PWM eine geeignete
+Signaltrennung sowie einen unabhängig wirkenden Hardware-Interlock.
