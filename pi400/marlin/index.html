@@ -76,8 +76,7 @@ label{font-size:13px;color:#bcd2e4}
 <section class="card">
 <h2>Direktsteuerung</h2>
 <p>Fahrbefehle sind gesperrt, während LightBurn oder ein Pi-Auftrag die Maschine steuert.</p>
-<label style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><input type="checkbox" id="surfaceContactConfirmed"> Z-Taster berührt bei G28 Z tatsächlich die Oberfläche des eingelegten Werkstücks (Z=0)</label>
-<div class="hint warning">Nur aktivieren, wenn der Z-Endschalter die Werkstückoberfläche wirklich berührt. Maschinen-Homing ohne Werkstück ist KEINE Werkstückabtastung. Nach jedem Materialwechsel neu prüfen.</div>
+<div class="hint">LightBurn „Referenzieren“ (G28) ist die normale Maschinenreferenzfahrt. Dabei wird der Boden als Z=0 gesetzt. Die gesonderte Werkstückabtastung (G30) bleibt gesperrt, bis ein nicht-nullender Probezyklus und X/Y-Tasterversatz implementiert sind.</div>
 <div class="two"><button class="primary" data-action="home" data-motion>XYZ referenzieren (Z zuerst)</button>
 <button class="danger" id="stop">Software-Notstopp M112</button></div>
 <div class="space"></div>
@@ -268,7 +267,7 @@ $("clearLog").onclick=()=>{$("console").textContent="Ansicht geleert. Neue Gerä
 for(const b of document.querySelectorAll("[data-action]"))
  b.onclick=()=>call(b.dataset.action,
   b.dataset.action==="start"?{name:$("jobSelect").value}:
-  b.dataset.action==="home"?{probe_contact_confirmed:$("surfaceContactConfirmed").checked?"1":"0"}:{});
+  b.dataset.action==="home"?{}:{});
 
 for(const b of document.querySelectorAll("[data-axis]"))
  b.onclick=()=>call("jog",{axis:b.dataset.axis,distance:String(Number($("step").value)*Number(b.dataset.direction))});
