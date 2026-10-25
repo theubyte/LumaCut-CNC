@@ -142,6 +142,9 @@ class MarlinTransport:
         self.serial_errors = 0
         self.lightburn_clients = 0
         self.laser_enabled = False
+        self.fan_power = False
+        self.fan_cooldown_s = 180
+        self.fan_off_at = None
         self.lights = False
         self.exhaust = False
         self.client = None
@@ -253,11 +256,19 @@ class MarlinTransport:
             if (motion or normalized == "M3 I") and not self.homed:
                 raise RuntimeError("SKR erst Z-sicher und vollständig referenzieren")
             try:
+                if normalized == "M3 I":
+                    # Independently power cooling fan before laser PWM mode.
+                    # PC6 is FAN0/M106, not laser-enable.
+                    self._exchange_locked("M106 P0 S255", timeout=8)
+                    self.fan_power = True
+                    self.fan_off_at = None
                 reply = self._exchange_locked(normalized, timeout)
                 if normalized.startswith("M3 I"):
                     self.laser_enabled = True  # PWM stays at zero until G1 S
                 if normalized.startswith("M5"):
                     self.laser_enabled = False
+                    if self.fan_power:
+                        self.fan_off_at = time.monotonic() + self.fan_cooldown_s
                 if normalized == "M7":
                     self.lights = True
                 if normalized == "M8":
@@ -269,6 +280,24 @@ class MarlinTransport:
                 self.serial_errors += 1
                 self._close_locked(str(exc))
                 raise
+
+    def service_cooldown(self):
+        """Release PC6 only after cooldown and confirmed safe laser-off.
+
+        This is a Pi-mediated timer, not an independent hardware timer.
+        """
+        with self.lock:
+            if (self.owner is not None or self.serial is None or
+                not self.identity or self.emergency_latched or
+                not self.fan_power or self.fan_off_at is None or
+                time.monotonic() < self.fan_off_at or self.laser_enabled):
+                return False
+            self._exchange_locked("M5 I", timeout=8)
+            self._exchange_locked("M400", timeout=15)
+            self._exchange_locked("M107 P0", timeout=8)
+            self.fan_power = False
+            self.fan_off_at = None
+            return True
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None):
         """Execute fail-closed laser-off Z-first homing as one exclusive transaction.
@@ -302,6 +331,8 @@ class MarlinTransport:
                 self.homed = True
                 self.guard = MarlinLaserGuard()
                 self.laser_enabled = False
+                if self.fan_power:
+                    self.fan_off_at = time.monotonic() + self.fan_cooldown_s
                 # One upstream G28 must receive exactly one ACK. Sending
                 # nine internal ACKs would corrupt LightBurn flow control.
                 return result
@@ -322,6 +353,9 @@ class MarlinTransport:
                 "position": self.position, "fault": self.fault,
                 "lights": self.lights, "exhaust": self.exhaust,
                 "laser_armed": self.laser_enabled,
+                "laser_cooling_fan_on": self.fan_power,
+                "cooldown_remaining_s": (None if self.fan_off_at is None else
+                    max(0, round(self.fan_off_at - time.monotonic()))),
                 "serial_errors": self.serial_errors,
                 "command_count": self.commands,
                 "lightburn_clients": self.lightburn_clients,
