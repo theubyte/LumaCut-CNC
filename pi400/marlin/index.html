@@ -115,7 +115,7 @@ label{font-size:13px;color:#bcd2e4}
 <p class="muted">Gemessen vom Laserpunkt zur Tastspitze entlang der Maschinenachsen: z. B. X+23 bedeutet Tastspitze 23 mm in +X-Richtung. Vorzeichen vor G30 kontrollieren.</p>
 <div class="metric" style="margin-top:12px"><small>Geschätzter Abstand Spitze → Referenzfläche</small><strong id="tipGap">—</strong></div>
 <div class="metric" style="margin-top:10px"><small>Geschätzte Z-Korrektur bis Fokus (nur Anzeige)</small><strong id="focusAdjust">—</strong></div>
-<p class="muted">Nur mit bestätigter Werkstückabtastung: Der Pi setzt vor der ersten G1-Laserbewegung den Fokus. Harte untere Z-Grenze: Oberfläche + 2 mm Tastabstand. Beispiel bei Z=0 und Offset 1,5 mm: Fokus Z=5,5 mm, tiefster zulässiger Z-Wert 2,0 mm.</p>
+<p class="muted">Nur mit bestätigter Werkstückabtastung: Der Pi setzt vor der ersten G1-Laserbewegung den Fokus. Harte untere Z-Grenze: Oberfläche + 2 mm Tastabstand. Beispiel: Maschinenboden Z=0, Werkstückoberfläche bei Z=3 mm, Offset 1,5 mm: Fokus Z=8,5 mm, tiefster zulässiger Z-Wert 5,0 mm.</p>
 <div class="metric" style="margin-top:10px"><small>Werkstück Z-Referenz / Mindest-Z / Kühlung</small><strong id="workpieceSafety" style="font-size:13px">Noch nicht eingemessen</strong></div>
 <button type="submit" class="primary" id="saveZSettings">Z-Einstellungen speichern</button>
 </form>
@@ -123,7 +123,7 @@ label{font-size:13px;color:#bcd2e4}
 <section class="card">
 <h2>LightBurn über WLAN</h2>
 <div class="hint">LightBurn „Job-Ende“ auf <code>M2</code> setzen: Laser aus → Z nur nach oben bis mindestens 20 mm → X0/Y0 in die L-förmige Safezone. <code>M5 I</code> bleibt der normale Laser-Aus-Befehl für Pausen zwischen Schnitten. Beide Aktionen benötigen kein Webinterface.</div>
-<div class="hint warning">30-mm-Homing-Sicherheitszone: X=0–30 mm und Y=0–30 mm bleiben werkstückfrei. Schnittbewegungen sind nur bei X≥30 und Y≥30 erlaubt. Maschinenreferenz G28 ausschließlich in frei zugänglicher Parkposition starten. Nach Einschalten ist die tatsächliche Kopfposition bis zum Homing unbekannt.</div>
+<div class="hint warning">30-mm-Homing-Sicherheitszone: X=0–30 mm und Y=0–30 mm bleiben werkstückfrei. Schnittbewegungen sind nur bei X≥30 und Y≥30 erlaubt (nutzbar 360 × 340 mm bei Maschinenkoordinaten 390 × 370 mm). Maschinenreferenz G28 ausschließlich in frei zugänglicher Parkposition starten. Nach Einschalten ist die tatsächliche Kopfposition bis zum Homing unbekannt.</div>
 <p>LightBurn <b>Custom GCode</b> → Variante <b>Marlin</b> → Verbindung <b>Network/TCP</b>. Diese Weboberfläche und LightBurn teilen sich einen USB-Controller, führen aber nie gleichzeitig Befehle aus.</p>
 <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
 <div class="metric"><small>IP/Hostname</small><strong style="font-size:15px" id="hostname">—</strong></div>
