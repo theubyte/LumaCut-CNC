@@ -31,3 +31,27 @@ def _collect_qt_garbage():
     yield
     import gc
     gc.collect()
+
+
+_EXIT_STATUS = 0
+
+
+def pytest_sessionfinish(session, exitstatus):
+    global _EXIT_STATUS
+    _EXIT_STATUS = int(exitstatus)
+
+
+def pytest_unconfigure(config):
+    """Prozess nach dem Testlauf hart beenden (gleicher Exit-Code).
+
+    Die Tests lassen Fenster/Widgets zurück, die PySide6 sonst erst beim
+    Interpreter-Ende in undefinierter Reihenfolge nach der QApplication
+    zerstört – das stürzte unter Linux sporadisch mit Segfault (Exit 139) ab,
+    obwohl alle Tests bestanden hatten. Ergebnis und Zusammenfassung sind zu
+    diesem Zeitpunkt bereits ausgegeben.
+    """
+    if "PySide6.QtWidgets" not in sys.modules or os.environ.get("LUMACUT_TEST_NO_HARD_EXIT"):
+        return
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_EXIT_STATUS)
