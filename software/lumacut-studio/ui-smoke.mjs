@@ -2,12 +2,12 @@ import {chromium} from "playwright";
 import {createServer} from "node:http";
 import {readFile,mkdir} from "node:fs/promises";
 import path from "node:path";
-const cwd=process.cwd();
+const cwd=process.cwd();const root=process.env.LUMACUT_UI_ROOT?path.resolve(cwd,process.env.LUMACUT_UI_ROOT):cwd;
 const mime={".html":"text/html; charset=utf-8",".js":"text/javascript; charset=utf-8",".mjs":"text/javascript; charset=utf-8",".css":"text/css; charset=utf-8",".svg":"image/svg+xml"};
 const server=createServer(async(req,res)=>{
  try{
-  const target=path.resolve(cwd,"."+decodeURIComponent(new URL(req.url,"http://localhost").pathname));
-  if(!target.startsWith(cwd+path.sep))throw Error("outside root");
+  const target=path.resolve(root,"."+decodeURIComponent(new URL(req.url,"http://localhost").pathname));
+  if(!target.startsWith(root+path.sep))throw Error("outside root");
   const body=await readFile(target);
   res.setHeader("Content-Type",mime[path.extname(target)]||"application/octet-stream");
   res.end(body);
