@@ -394,6 +394,19 @@ class USBProtocolTests(unittest.TestCase):
         bridge.command("G0 X120 Y120", owner="lightburn")
         self.assertEqual(bridge.last_xy_commanded, (120.0, 120.0))
 
+    def test_lightburn_bare_g0_is_modal_without_homing(self):
+        serial = FakeSerial(["ok\n"])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homing_verified = True
+        bridge.homed = False
+        result = bridge.command("G0", owner="lightburn")
+        self.assertEqual(result[-1], "ok")
+        self.assertEqual(serial.writes, [b"G0\n"])
+        self.assertFalse(bridge.homed)
+        self.assertFalse(bridge.laser_enabled)
+
     def test_lightburn_move_jog_with_s_does_not_require_m3(self):
         serial = FakeSerial(["ok\n"])
         bridge = MarlinTransport("/dev/null")
