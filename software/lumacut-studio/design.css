@@ -25,3 +25,8 @@ footer{background:#0d141c;border-top:1px solid #243441;color:#9eacba;font-size:1
 @media(max-width:1200px){.main{grid-template-columns:70px minmax(190px,240px) minmax(330px,1fr) 320px}.layerspanel{grid-column:auto;grid-row:auto}.canvascol{grid-column:auto;grid-row:auto}.aside{grid-column:auto;grid-row:auto}.workspace{padding:15px}.bed{width:min(94%,calc((100vh - 260px)*390/370))}}
 @media(max-width:1020px){.layout{height:auto;min-height:100vh}.main{grid-template-columns:70px minmax(0,1fr) 320px;grid-template-rows:minmax(470px,70vh) auto}.nav{grid-row:1/3}.layerspanel{grid-column:2;grid-row:2;max-height:none}.canvascol{grid-column:2;grid-row:1}.aside{grid-column:3;grid-row:1/3}.bed{width:min(80%,460px)}}
 @media(max-width:750px){.top{padding:12px}.topright .pill{display:none}.layout{grid-template-rows:72px auto 34px}.main{display:flex;flex-direction:column}.nav{flex-direction:row;justify-content:center}.canvascol{min-height:480px}.workspace{min-height:430px}.bed{width:min(80%,390px)}.layerspanel,.aside{width:100%}}
+
+/* Visualize the Pi Marlin reserved margins on both axes. */
+.bed::after{content:"";position:absolute;left:0;top:0;bottom:0;width:7.6923%;z-index:2;pointer-events:none;background:repeating-linear-gradient(-45deg,#d9a24c33,#d9a24c33 7px,#f4c77855 7px,#f4c77855 14px);border-right:1px dashed #bf9154}
+#editorOverlay{touch-action:none}
+@media(min-width:1200px){.tabs button{font-size:12px}}
