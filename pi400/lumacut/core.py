@@ -14,6 +14,8 @@ import time
 from collections import deque
 from pathlib import Path
 
+from .laser_guard import LaserGuard
+
 LOG = logging.getLogger(__name__)
 STATUS = re.compile(r"^<([^|>]+)")
 SETTING = re.compile(r"^\$(\d+)=([-+]?\d+(?:\.\d+)?)")
@@ -35,6 +37,7 @@ class Controller:
         self.host_commands = deque(maxlen=32768)
         self.host_fragment = bytearray()
         self.host_overflow = False
+        self.host_guard = LaserGuard()
         self.bootstrap_ready = False
         self.bootstrap_pending = 0
         self.lightburn_enabled = True
@@ -99,6 +102,7 @@ class Controller:
         self.host_commands.clear()
         self.host_fragment.clear()
         self.host_overflow = False
+        self.host_guard = LaserGuard()
         if self.owner == "host":
             self.owner = None
 
@@ -204,6 +208,7 @@ class Controller:
                         self.identity = {"version": "", "firmware": "", "board": "", "driver": ""}
                         self.bootstrap_pending = 2
                         self.bootstrap_ready = False
+                        self.last_error = ""
                         # USB CDC is the only control channel. Identify real
                         # grblHAL and read machine limits before allowing
                         # LightBurn streams or Pi motion commands.
@@ -251,6 +256,11 @@ class Controller:
                     self.faults += 1
                     if self.host is not None:
                         self._disconnect_host_locked()
+                    # Wake blocked G-code senders immediately on USB loss.
+                    # Waiting for 30-second ACK deadlines leaves jobs stuck.
+                    self.replies.clear()
+                    self.replies.append("error:SKR-USB-disconnected")
+                    self.cond.notify_all()
                     try:
                         if self.serial:
                             self.serial.close()
@@ -401,6 +411,17 @@ class Controller:
                 self.host_fragment.clear()
                 self.host_overflow = False
                 if allowed and command:
+                    # Blocks powered M3 in GRBL laser mode, which otherwise
+                    # may fire during G0 positioning. M4 is motion-gated.
+                    if not self.bootstrap_ready or self.settings.get(32) != 1:
+                        allowed = False
+                    else:
+                        try:
+                            self.host_guard.check(command)
+                        except ValueError as exc:
+                            LOG.warning("Unsafe LightBurn line rejected: %s", exc)
+                            allowed = False
+                if allowed and command:
                     self.host_commands.append(command)
                     self._send_locked((command + "\n").encode("ascii"))
                 elif not allowed and self.host is not None:
@@ -423,7 +444,8 @@ class Controller:
                     not self.lightburn_enabled or
                     self.state not in ("Idle", "Alarm", "Unknown") or
                     (self.maintenance_file and self.maintenance_file.exists())):
-                client.sendall(b"error:9\r\n")
+                LOG.warning("Rejecting extra/unready LightBurn connection: owner=%s ready=%s state=%s", self.owner, self.bootstrap_ready, self.state)
+                client.sendall(b"error:9\r\n[MSG:LumaCut client occupied or SKR not ready]\r\n")
                 client.close()
                 return
             self.host = client
@@ -431,6 +453,7 @@ class Controller:
             self.host_commands.clear()
             self.host_fragment.clear()
             self.host_overflow = False
+            self.host_guard = LaserGuard()
             self.owner = "host"
             self.bytes_host = 0
         try:
