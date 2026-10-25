@@ -98,10 +98,12 @@ class HomingPiIntegrationTests(unittest.TestCase):
                                       "tip": 0.0, "auto": True}
             module.controller.homed = False
             try:
-                with patch.object(module.controller, "status", side_effect=lambda: state), \\
-                     patch.object(module.controller, "wait_for_idle_after_homing",
-                                  side_effect=fake_wait), \\
-                     patch.object(module, "run_commands", side_effect=fake_send):
+                with (
+                    patch.object(module.controller, "status", side_effect=lambda: state),
+                    patch.object(module.controller, "wait_for_idle_after_homing",
+                                 side_effect=fake_wait),
+                    patch.object(module, "run_commands", side_effect=fake_send),
+                ):
                     result = module.do_action("home")
                 self.assertIn("Z bereits auf Sicherheitsabstand", result)
                 self.assertEqual(events, ["send $H", "wait Idle"])
