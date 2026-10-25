@@ -300,6 +300,8 @@ class MarlinTransport:
         # Focus must precede the first laser-powered move, after LightBurn's
         # XY positioning rapid. Restrict this to absolute machine Z.
         self._exchange_locked("M400", timeout=20)
+        if not self.absolute_mode:
+            raise ValueError("Automatischer Fokus benötigt absolute Z-Koordinaten (G90)")
         self._exchange_locked("G90", timeout=8)
         self.absolute_mode = True
         self._exchange_locked(f"G0 Z{goal:.3f} F360", timeout=20)
@@ -379,7 +381,8 @@ class MarlinTransport:
             self.fan_off_at = None
             return True
 
-    def safe_home(self, owner: str = "web", clearance_mm: float | None = None):
+    def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
+                  probe_contact_confirmed: bool = False):
         """Execute fail-closed laser-off Z-first homing as one exclusive transaction.
 
         Do not run generic Marlin G28. Verify switch polarity, positive-Z
@@ -393,6 +396,8 @@ class MarlinTransport:
             if self.serial is None or not self.identity or self.emergency_latched:
                 raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
             clearance = self.clearance_mm if clearance_mm is None else clearance_mm
+            if not isinstance(probe_contact_confirmed, bool):
+                raise ValueError("Tasterkontakt muss ausdrücklich bestätigt werden")
             if not isinstance(clearance, (int, float)) or not 0.5 <= clearance <= 50:
                 raise ValueError("Unzulässiger Z-Sicherheitsabstand")
             previous_owner = self.owner
@@ -410,6 +415,9 @@ class MarlinTransport:
                     result = self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35)
                     if cmd == "G28 Z":
                         self.z_homed = True
+                        # Only if the Z switch is physically touching the
+                        # actual material surface at the instant it triggers.
+                        self.surface_z = 0.0 if probe_contact_confirmed else None
                 self.homed = True
                 self.guard = MarlinLaserGuard()
                 self.laser_enabled = False
