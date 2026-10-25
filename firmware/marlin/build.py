@@ -77,6 +77,7 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "Z_MAX_POS", "90")
     # Native Marlin G30 uses the installed Z-min mechanical contact switch.
     # Unlike G28 it measures height without changing machine Z=0.
+    cfg = uncomment(cfg, "Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN")
     cfg = replace_active(cfg, "Z_MIN_PROBE_ENDSTOP_INVERTING", "true")
     cfg = uncomment(cfg, "FIX_MOUNTED_PROBE")
     cfg = uncomment(cfg, "Z_SAFE_HOMING")
