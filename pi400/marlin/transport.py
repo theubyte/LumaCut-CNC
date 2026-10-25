@@ -362,7 +362,7 @@ class MarlinTransport:
                 raise RuntimeError("Werkstückkontakt fehlt: Z-Taster auf Material referenzieren")
             motion = re.match(r"^G0?[0123](?:\s|$)", normalized) is not None
             if (motion or normalized == "M3 I") and not self.homed:
-                raise RuntimeError("SKR erst Z-sicher und vollständig referenzieren")
+                raise RuntimeError("Nach USB-Neustart oder Pi-Start zuerst G28 in LightBurn senden; ohne Maschinenreferenz kein Positionsbezug")
             try:
                 self._z_move_guard_locked(normalized)
                 self._xy_cut_guard_locked(normalized)
@@ -515,7 +515,7 @@ class MarlinTransport:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if not self.homed or not self.homing_verified:
-                raise RuntimeError("Zuerst LightBurn G28 referenzieren")
+                raise RuntimeError("G30 benötigt Maschinenreferenz: zuerst G28 senden")
             if self.serial is None or self.emergency_latched:
                 raise RuntimeError("SKR nicht verbunden / Notstopp aktiv")
             if self.laser_enabled:
