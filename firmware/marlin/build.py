@@ -115,7 +115,17 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
 
 
     cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 380 }")
-    cfg = replace_active(cfg, "DEFAULT_MAX_FEEDRATE", "{ 150, 150, 10 }")
+    # Z switch and G30 use Marlin's own feedrates, not Pi G0 F values.
+    # Original BTT example: Z homing 240 mm/min (4 mm/s),
+    # G30 fast 240 mm/min, G30 slow 120 mm/min.
+    # LumaCut target: 1.8x speed (432 / 432 / 216 mm/min).
+    # The previous M503 showed an EEPROM M203 Z6 cap. Host sets
+    # runtime M203 Z9 on connection; keep firmware's 9mm/s hard cap too.
+    cfg = replace_active(cfg, "HOMING_FEEDRATE_MM_M",
+                         "{ (50*60), (50*60), 432 }")
+    cfg = replace_active(cfg, "Z_PROBE_FEEDRATE_FAST", "432")
+    cfg = replace_active(cfg, "Z_PROBE_FEEDRATE_SLOW", "216")
+    cfg = replace_active(cfg, "DEFAULT_MAX_FEEDRATE", "{ 150, 150, 9 }")
     cfg = replace_active(cfg, "DEFAULT_MAX_ACCELERATION", "{ 500, 500, 100 }")
     cfg = replace_active(cfg, "DEFAULT_ACCELERATION", "500")
     cfg = replace_active(cfg, "DEFAULT_TRAVEL_ACCELERATION", "500")
