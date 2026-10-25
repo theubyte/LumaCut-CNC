@@ -301,6 +301,11 @@ def action():
         return jsonify(message="Werkstückoberfläche Z=%.3f mm, Fokus Z=%.3f mm" % (
             machine.surface_z, machine.status()["laser_focus_z"]),
             detail="\n".join(reply[:6]))
+    if op == "park":
+        # Same end-of-job park as LightBurn M2: laser off, Z up, X0/Y0, melody.
+        local_owner()
+        machine.park_safezone(owner="web")
+        return jsonify(message="Geparkt auf X0/Y0")
     if op == "start":
         return start_job()
     if op == "autorun":
@@ -330,9 +335,35 @@ def _optional_point(form):
 
 @app.get("/api/jobs")
 def jobs():
-    return jsonify(files=[{"name": p.name, "bytes": p.stat().st_size}
+    return jsonify(files=[{"name": p.name, "bytes": p.stat().st_size,
+                           "modified": int(p.stat().st_mtime)}
                           for p in sorted(JOBS.iterdir())
                           if p.is_file() and p.suffix.lower() in (".gcode",".gc",".nc")])
+
+
+def _job_path(filename):
+    if filename != Path(filename).name:
+        raise ValueError("Unzulässiger Dateiname")
+    path = JOBS / filename
+    if not path.is_file() or path.suffix.lower() not in (".gcode", ".gc", ".nc"):
+        raise ValueError("Auftrag nicht gefunden")
+    return path
+
+
+@app.get("/api/jobs/<path:filename>/content")
+def job_content(filename):
+    """Raw G-code for the toolpath preview in Studio and the tablet app."""
+    return _job_path(filename).read_text(encoding="utf-8"), 200, {
+        "Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.post("/api/jobs/<path:filename>/delete")
+def job_delete(filename):
+    path = _job_path(filename)
+    if job["state"] in ("homing", "probing", "running") and job["file"] == path.name:
+        raise RuntimeError("Laufender Auftrag kann nicht gelöscht werden")
+    path.unlink()
+    return jsonify(message="Auftrag gelöscht: " + path.name)
 
 
 @app.get("/api/jobs/<path:filename>/geometry")

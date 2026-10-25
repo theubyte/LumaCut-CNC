@@ -881,6 +881,30 @@ else:
 web.preflight("G28\nG30\nG0 X40 Y40\nM3 I\nG1 X60 Y40 S100\nM5 I\nM2\n")
 """)
 
+    def test_job_content_delete_and_park_endpoints(self):
+        self._run_web_script(r"""
+from marlin import web
+(web.JOBS / "Schild.gcode").write_text("G21\nM3 I\nG0 X40 Y40\nG1 X50 S10 F600\n", encoding="utf-8")
+(web.DATA / "config.json").write_text("{}", encoding="utf-8")
+with web.app.test_client() as c:
+    r = c.get("/api/jobs")
+    assert r.get_json()["files"][0]["name"] == "Schild.gcode" and "modified" in r.get_json()["files"][0]
+    r = c.get("/api/jobs/Schild.gcode/content")
+    assert r.status_code == 200 and "G1 X50 S10" in r.get_data(as_text=True), r.data
+    assert c.get("/api/jobs/..%2Fconfig.json/content").status_code == 400
+    assert c.get("/api/jobs/config.json/content").status_code == 400
+    web.job.update(file="Schild.gcode", state="running")
+    assert c.post("/api/jobs/Schild.gcode/delete").status_code == 400
+    web.job.update(state="complete")
+    assert c.post("/api/jobs/Schild.gcode/delete").status_code == 200
+    assert not (web.JOBS / "Schild.gcode").exists()
+    calls = []
+    web.machine.park_safezone = lambda owner: calls.append(owner)
+    web.local_owner = lambda: None
+    r = c.post("/api/action", data={"op": "park"})
+    assert r.status_code == 200 and calls == ["web"], (r.data, calls)
+""")
+
     def test_one_click_order_and_controlled_stop_without_m112(self):
         self._run_web_script(r"""
 from marlin import web
