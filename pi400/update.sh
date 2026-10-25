@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # LumaCut Pi 400 fail-closed updater with actionable diagnostics.
 # Never flashes the SKR. Refuses updates while LightBurn/jobs own the motion controller.
+# Run nightly by lumacut-update.timer; manual: sudo bash pi400/update.sh [update|diagnose]
 set -Eeuo pipefail
 
 ROOT=/opt/lumacut
@@ -8,15 +9,7 @@ ENV_FILE=/etc/lumacut/lumacut.env
 LOCK=/var/lib/lumacut/maintenance.lock
 UPSTREAM_PUBLIC=https://github.com/theubyte/LumaCut-CNC.git
 MODE=${1:-update}
-# Marlin uses a dedicated service to prevent GRBL/Marlin serial and TCP
-# ownership conflicts. The same updater works in both machine modes.
-SERVICE=lumacut.service
-# A crash-looping Marlin service may be "activating" rather than "active".
-# Prioritize its enabled unit even when Python cannot start.
-if systemctl is-enabled --quiet lumacut-marlin.service 2>/dev/null || \
-   systemctl is-active --quiet lumacut-marlin.service; then
-  SERVICE=lumacut-marlin.service
-fi
+SERVICE=lumacut-marlin.service
 ORIGINAL_REV=
 STOPPED_SERVICE=0
 CREATED_LOCK=0
@@ -50,10 +43,8 @@ trap 'recover "$LINENO"' ERR
 [[ "$MODE" == "update" || "$MODE" == "diagnose" ]] || die "Verwendung: update.sh [update|diagnose]"
 [[ -f "$ENV_FILE" ]] || die "Maschinen-Konfigurationsdatei fehlt: $ENV_FILE"
 [[ -d "$ROOT/.git" ]] || die "Git-Arbeitsverzeichnis fehlt: $ROOT"
-# The file is root-owned and not printed. Never put the access key into logs.
 # shellcheck disable=SC1090
 source "$ENV_FILE"
-[[ -n "${LUMACUT_KEY:-}" ]] || die "LUMACUT_KEY nicht gesetzt"
 HTTP_PORT=${LUMACUT_HTTP:-8080}
 
 status_json(){
@@ -61,7 +52,7 @@ status_json(){
   # systemctl reports active before Flask has bound its TCP port. In
   # particular, a restart followed immediately by update used to fail.
   for attempt in {1..15}; do
-    if answer=$(curl -fs --max-time 2 -H "X-LumaCut-Key: $LUMACUT_KEY" \
+    if answer=$(curl -fs --max-time 2 \
       "http://127.0.0.1:${HTTP_PORT}/api/status" 2>/dev/null); then
       printf '%s' "$answer"
       return 0
@@ -156,13 +147,11 @@ if ! python3 -m compileall -q "$ROOT/pi400"; then
 fi
 # Compileall doesn't catch missing runtime exports (e.g. MarlinTransport).
 # Import under the same user/environment as the actual service.
-if [[ "$SERVICE" == "lumacut-marlin.service" ]]; then
-  if ! runuser -u lumacut -- env PYTHONPATH="$ROOT/pi400" \
-    python3 -c 'from marlin.transport import MarlinTransport, MarlinLaserGuard, normalize, serve_tcp; from marlin import web; assert isinstance(web.machine, MarlinTransport)' ; then
-    log "LumaCut-Modulimport fehlgeschlagen. Rolle auf vorherigen Commit zurück."
-    git_lumacut reset --hard "$ORIGINAL_REV"
-    die "Importprüfung fehlgeschlagen (MarlinTransport/web.py)."
-  fi
+if ! runuser -u lumacut -- env PYTHONPATH="$ROOT/pi400" \
+  python3 -c 'from marlin.transport import MarlinTransport, MarlinLaserGuard, normalize, serve_tcp; from marlin import web; assert isinstance(web.machine, MarlinTransport)' ; then
+  log "LumaCut-Modulimport fehlgeschlagen. Rolle auf vorherigen Commit zurück."
+  git_lumacut reset --hard "$ORIGINAL_REV"
+  die "Importprüfung fehlgeschlagen (MarlinTransport/web.py)."
 fi
 systemctl start "$SERVICE"
 # Real health-check: 'systemctl active' may appear briefly between crashes.
@@ -176,4 +165,4 @@ if ! response=$(status_json) || ! systemctl is-active --quiet "$SERVICE"; then
 fi
 STOPPED_SERVICE=0
 log "ERFOLG: $ORIGINAL_REV -> $target"
-log "Hinweis: Die passende SKR-FAN1-LASER-Firmware wird separat benötigt."
+log "Hinweis: SKR-Firmware wird nicht automatisch aktualisiert (Web-UI: Karte SKR-Firmware)."

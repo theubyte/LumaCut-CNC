@@ -1,8 +1,7 @@
 [Unit]
-Description=LumaCut CNC Marlin (experimental) Pi400 Wi-Fi Web + USB LightBurn gateway
+Description=LumaCut CNC Pi 400: Marlin USB gateway, web UI and TCP 23
 After=network-online.target
 Wants=network-online.target
-Conflicts=lumacut.service
 
 [Service]
 Type=simple

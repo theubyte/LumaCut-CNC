@@ -1,4 +1,5 @@
 """USB enumeration after grblHAL->Marlin flash: no real hardware needed."""
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -64,15 +65,25 @@ class USBDetectTests(unittest.TestCase):
             self.assertEqual(ports[0], str(first))
             self.assertEqual(ports.count(str(first)), 1)
 
-    def test_activation_keeps_previous_usb_path_separate(self):
-        activate = (ROOT / "pi400/marlin/activate.sh").read_text()
-        unit = (ROOT / "pi400/marlin/lumacut-marlin.service").read_text()
-        self.assertIn("python3 -m marlin.usb_detect", activate)
-        self.assertIn("DETECTED_PORT=", activate)
-        self.assertIn("lumacut-marlin-port.env", activate)
+    def test_installer_pins_verified_port_in_separate_file(self):
+        install = (ROOT / "pi400/install.sh").read_text(encoding="utf-8")
+        unit = (ROOT / "pi400/marlin/lumacut-marlin.service").read_text(encoding="utf-8")
+        self.assertIn("python3 -m marlin.usb_detect", install)
+        self.assertIn("/dev/serial/by-id", install)
+        self.assertIn("PORT_ENV=/etc/lumacut/lumacut-marlin-port.env", install)
         self.assertIn("EnvironmentFile=-/etc/lumacut/lumacut-marlin-port.env", unit)
-        self.assertNotIn('sed -i', activate)
-        self.assertNotIn('flash', activate.split('DETECTED_PORT=')[1].split('cp "$ROOT')[0])
+        self.assertNotIn("sed -i", install)
+        # Installing never flashes the SKR.
+        self.assertNotIn("M997", install)
+        self.assertNotIn("/api/firmware", install)
+
+    def test_installer_retires_old_grbl_service(self):
+        install = (ROOT / "pi400/install.sh").read_text(encoding="utf-8")
+        self.assertIn("systemctl disable --now lumacut.service", install)
+        self.assertIn("systemctl enable --now lumacut-marlin.service", install)
+        result = subprocess.run(["bash", "-n", str(ROOT / "pi400/install.sh")],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

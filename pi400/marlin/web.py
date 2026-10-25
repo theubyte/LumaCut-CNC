@@ -1,7 +1,7 @@
 """Headless Raspberry Pi 400 control server for native Marlin on SKR Mini MZ.
 
-Dedicated process and systemd unit, separate from existing grblHAL app.
-LightBurn uses Custom GCode/Marlin + Network TCP 23 via the Pi Wi-Fi.
+Web UI and HTTP API on port 8080 for LumaCut Studio and browsers.
+TCP 23 remains for LightBurn (Marlin device) until Studio replaces it.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ machine = MarlinTransport(USB)
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 config = {
-    "validated": False,        # NEVER assumed from old grblHAL firmware
+    "validated": False,        # mechanics confirmed once via /api/commission
     "z_clearance_mm": 20.0,
     "focus_gap_mm": 7.0,
     "z_switch_tip_offset_mm": 1.5,

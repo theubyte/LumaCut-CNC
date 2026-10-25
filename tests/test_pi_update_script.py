@@ -33,7 +33,7 @@ class PiUpdaterTests(unittest.TestCase):
         source = UPDATER.read_text(encoding="utf-8")
         self.assertNotIn("stm32flash ", source)
         self.assertNotIn("pio run -t upload", source)
-        self.assertIn('FAN1-LASER-Firmware wird separat benötigt', source)
+        self.assertIn('SKR-Firmware wird nicht automatisch aktualisiert', source)
 
 
 if __name__ == "__main__":
