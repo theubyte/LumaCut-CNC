@@ -284,7 +284,7 @@ class MarlinTransport:
         if self.position is None:
             raise RuntimeError("Keine gültige aktuelle Z-Position")
         target = coords["Z"] if self.absolute_mode else self.position[2] + coords["Z"]
-        minimum = self.surface_z + self.probe_clearance_mm
+        minimum = max(0.0, self.surface_z + self.probe_clearance_mm)
         if target < minimum - 0.0001:
             raise ValueError(
                 f"Z-Sperre: Ziel {target:.3f} mm, Minimum {minimum:.3f} mm "
@@ -325,6 +325,8 @@ class MarlinTransport:
                 normalized = self.guard.check(normalized, self.homing_verified)
             if not normalized:
                 return []
+            if normalized.startswith(("G0 ", "G1 ")) and "Z" in normalized and self.surface_z is None:
+                raise RuntimeError("Keine Werkstückhöhe bekannt; keine Z-Fahrt über LightBurn freigeben")
             if normalized == "M3 I" and self.surface_z is None:
                 raise RuntimeError("Werkstückkontakt fehlt: Z-Taster auf Material referenzieren")
             motion = re.match(r"^G0?[0123](?:\s|$)", normalized) is not None
@@ -399,8 +401,8 @@ class MarlinTransport:
             if self.serial is None or not self.identity or self.emergency_latched:
                 raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
             clearance = self.clearance_mm if clearance_mm is None else clearance_mm
-            if not isinstance(probe_contact_confirmed, bool):
-                raise ValueError("Tasterkontakt muss ausdrücklich bestätigt werden")
+            if probe_contact_confirmed:
+                raise ValueError("G28 referenziert ausschließlich den Maschinenboden; Werkstückkontakt separat mit G30")
             if not isinstance(clearance, (int, float)) or not 0.5 <= clearance <= 50:
                 raise ValueError("Unzulässiger Z-Sicherheitsabstand")
             previous_owner = self.owner
@@ -418,9 +420,8 @@ class MarlinTransport:
                     result = self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35)
                     if cmd == "G28 Z":
                         self.z_homed = True
-                        # Only if the Z switch is physically touching the
-                        # actual material surface at the instant it triggers.
-                        self.surface_z = 0.0 if probe_contact_confirmed else None
+                        # G28 Z is a BED / MACHINE origin, NEVER workpiece Z.
+                        self.surface_z = None
                 self.homed = True
                 self.guard = MarlinLaserGuard()
                 self.laser_enabled = False
@@ -436,43 +437,16 @@ class MarlinTransport:
                 self.owner = previous_owner
 
     def probe_workpiece(self, owner: str = "web"):
-        """LightBurn G30: use installed mechanical Z-min contact switch.
+        """LightBurn G30: currently blocked until a separate *nonzeroing*
+        contact-probe cycle exists in SKR firmware.
 
-        This is only valid if Z-min physically trips on the *workpiece*
-        underneath the sensing tip. G30 is intercepted, not sent to native
-        Marlin (which reports Z_PROBE:0). The switch must already have been
-        physically verified and must not be a fixed machine-frame limit.
+        A second G28 Z would rewrite the permanent machine-bed origin to
+        the material top and invalidate soft limits. Never do that.
         """
-        with self.lock:
-            if self.owner not in (None, owner):
-                raise RuntimeError("Steuerung belegt: " + self.owner)
-            if not self.homed or not self.homing_verified:
-                raise RuntimeError("Zuerst normale LightBurn-Referenzfahrt G28 ausführen")
-            if self.serial is None or self.emergency_latched:
-                raise RuntimeError("Marlin USB nicht bereit oder Notstopp")
-            if self.laser_enabled:
-                raise RuntimeError("Werkstückabtastung bei aktivem Laser verboten")
-            self.surface_z = None
-            self.focused_this_job = False
-            self._exchange_locked("M5 I", timeout=8)
-            # Marlin Z-min switch is used for touch-off; G28 Z establishes
-            # machine Z=0 exactly at switch trip. No independent probe exists.
-            try:
-                self._exchange_locked("G28 Z", timeout=150)
-                self._exchange_locked("M400", timeout=30)
-                self._exchange_locked("G91", timeout=8)
-                self._exchange_locked(
-                    f"G0 Z{self.clearance_mm:.2f} F360", timeout=35)
-                self._exchange_locked("G90", timeout=8)
-                self.absolute_mode = True
-                self._exchange_locked("M400", timeout=35)
-                reply = self._exchange_locked("M114", timeout=8)
-                self.surface_z = 0.0
-                self.z_homed = True
-                return reply
-            except Exception as exc:
-                self._close_locked("Werkstückabtastung fehlgeschlagen: " + str(exc))
-                raise
+        raise RuntimeError(
+            "G30 Werkstueckmessung noch nicht freigegeben: "
+            "separater Probe-Eingang und nicht-nullender Tastzyklus fehlen. "
+            "Maschinenboden Z=0 darf nicht ueberschrieben werden.")
 
     def status(self):
         with self.lock:
