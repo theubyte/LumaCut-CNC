@@ -158,7 +158,7 @@ class USBProtocolTests(unittest.TestCase):
     def test_lightburn_marlin_flavor_preamble_with_real_acks(self):
         # LightBurn 2.0.03 prepends a compound G00/G17/G40/G21
         # and G54 even when the user's custom start is only G21/G90.
-        serial=FakeSerial(["ok\\n"]*8)
+        serial=FakeSerial(["ok\n"]*8)
         controller=MarlinTransport("/dev/null")
         controller.serial=serial
         controller.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
@@ -168,19 +168,19 @@ class USBProtocolTests(unittest.TestCase):
             def __init__(self):
                 self.messages=bytearray()
                 self.payloads=[
-                    b"G21\\nG90\\nG00 G17 G40 G21\\nG54\\nG90\\nM3 I\\nM5 I\\n", b""]
+                    b"G21\nG90\nG00 G17 G40 G21\nG54\nG90\nM3 I\nM5 I\n", b""]
             def settimeout(self, v): pass
             def recv(self, n): return self.payloads.pop(0)
             def sendall(self, raw): self.messages.extend(raw)
             def close(self): pass
         client=TCP()
         controller.serve_client(client)
-        self.assertEqual(client.messages.count(b"ok\\r\\n"),7)
+        self.assertEqual(client.messages.count(b"ok\r\n"),7)
         self.assertEqual(
             serial.writes,
-            [b"G21\\n",b"G90\\n",b"G21\\n",b"M400\\n",
-             b"G90\\n",b"M3 I\\n",b"M5 I\\n"])
-        self.assertNotIn(b"M112\\n",serial.writes)
+            [b"G21\n",b"G90\n",b"G21\n",b"M400\n",
+             b"G90\n",b"M3 I\n",b"M5 I\n"])
+        self.assertNotIn(b"M112\n",serial.writes)
         self.assertFalse(controller.emergency_latched)
 
     def test_emergency_stop_bypasses_motion_lock_and_latches(self):
