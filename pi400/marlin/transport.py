@@ -157,6 +157,7 @@ class MarlinTransport:
         self.safe_zone_xy_mm = 30.0
         self.probe_xy_offset_mm = None
         self.last_probe_laser_xy = None
+        self.homing_chime_enabled = True
         self.absolute_mode = True
         self.focused_this_job = False
         self.fan_off_at = None
@@ -466,9 +467,21 @@ class MarlinTransport:
             self.surface_z = None
             self.last_probe_laser_xy = None
             self.focused_this_job = False
-            commands = ("M5 I", "G28 X Y", "M400",
+            commands = ["M5 I", "G28 X Y", "M400",
                         "G28 Z", "M400", "G91",
-                        f"G0 Z{clearance:.2f} F600", "G90", "M400", "M114")
+                        f"G0 Z{clearance:.2f} F600", "G90", "M400"]
+            if self.homing_chime_enabled:
+                # Two motor tones via small X-only step pulses. The toolhead
+                # stays in the empty 30 mm homing strip; net movement is zero.
+                # This is an audible stepper chirp, not a hardware speaker.
+                # At 80 steps/mm, F300 ~= 400 steps/s, F375 ~= 500 steps/s.
+                # Tiny reversal ramps influence the perceived pitch.
+                commands.extend([
+                    "G91", "G1 X0.8 F300", "G1 X-0.8 F300",
+                    "G1 X0.8 F375", "G1 X-0.8 F375",
+                    "G90", "M400",
+                ])
+            commands.append("M114")
             result = []
             try:
                 for cmd in commands:
@@ -483,7 +496,7 @@ class MarlinTransport:
                 if self.fan_power:
                     self.fan_off_at = time.monotonic() + self.fan_cooldown_s
                 # One upstream G28 must receive exactly one ACK. Sending
-                # nine internal ACKs would corrupt LightBurn flow control.
+                # internal ACKs would corrupt LightBurn flow control.
                 return result
             except Exception as exc:
                 self._close_locked("Referenzfahrt fehlgeschlagen: " + str(exc))
