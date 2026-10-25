@@ -120,6 +120,32 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(bridge.serial.writes[4], b"G0 Z20.00 F360\n")
         self.assertEqual(bridge.serial.writes[6], b"G28 X Y\n")
 
+    def test_emergency_stop_bypasses_motion_lock_and_latches(self):
+        controller=MarlinTransport("/dev/null")
+        serial=FakeSerial([])
+        controller.serial=serial
+        controller.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        controller.homed=True
+        controller.emergency_stop()
+        self.assertIn(b"M112\n",serial.writes)
+        self.assertTrue(controller.status()["emergency_latched"])
+        self.assertFalse(controller.status()["homed"])
+        with self.assertRaisesRegex(RuntimeError,"Notstopp"):
+            controller.command("M114")
+
+    def test_estop_with_missing_usb_is_not_falsely_acknowledged(self):
+        controller=MarlinTransport("/dev/null")
+        with self.assertRaisesRegex(ConnectionError,"NICHT übertragen"):
+            controller.emergency_stop()
+        self.assertTrue(controller.status()["emergency_latched"])
+
+    def test_job_cannot_embed_emergency_commands(self):
+        guard=MarlinLaserGuard()
+        for cmd in ("M112","M410"):
+            with self.subTest(cmd=cmd):
+                with self.assertRaisesRegex(ValueError,"Notstopp"):
+                    guard.check(cmd, True)
+
     def test_timeout_disconnects_and_fails_closed(self):
         serial=FakeSerial([])
         bridge=MarlinTransport("/dev/null")
