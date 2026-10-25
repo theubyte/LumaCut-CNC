@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LumaCut CNC · Marlin Control</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#edf5ff;background:#08111d}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 88% -10%,#1a3347 0,transparent 40%),#08111d;min-height:100vh}
+button,input,select{font:inherit}button{cursor:pointer;border:1px solid #2e4b62;background:#173044;color:#eef6ff;border-radius:13px;padding:12px 15px;min-height:43px;transition:.16s}
+button:hover:not(:disabled){background:#24475c;border-color:#6595ad}button:disabled{opacity:.36;cursor:not-allowed}
+button.primary{background:#52c6ef;border-color:#52c6ef;color:#001524;font-weight:720}
+button.danger{background:#57252f;border-color:#ad5261;color:#ffccd3;font-weight:750}
+button.ghost{background:transparent}
+input,select{width:100%;background:#0a1927;border:1px solid #30506b;border-radius:12px;padding:12px;color:#f2f8ff}
+input[type=checkbox]{width:auto;accent-color:#60cbf2}
+h1,h2,h3,p{margin-top:0}h1{font-size:26px;letter-spacing:-.7px;margin-bottom:5px}h2{font-size:16px;margin-bottom:14px}h3{font-size:13px;color:#b5cbe0;margin-bottom:10px}
+p{color:#a9c1d8;line-height:1.65}small,.muted{color:#9bb4ca;font-size:12px}
+header{padding:28px max(20px,calc((100vw - 1240px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid #1e374d}
+.brand{display:flex;align-items:center;gap:14px}.brand-symbol{background:#58c6ee;color:#082235;font-weight:900;font-size:20px;width:42px;height:42px;border-radius:14px;display:grid;place-items:center}
+.pill{padding:8px 12px;background:#102b35;color:#a8e9c9;border:1px solid #2a645b;border-radius:999px;font-size:12px}
+main{max-width:1280px;margin:auto;padding:24px 20px 55px}
+.grid{display:grid;grid-template-columns:1.2fr 1fr;gap:18px;align-items:start}
+.card{background:linear-gradient(145deg,#11263a,#0b1a2b);border:1px solid #294258;border-radius:20px;padding:22px;min-width:0;box-shadow:0 8px 32px #0001}
+.full{grid-column:1/-1}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.three{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
+.metric{background:#0a1b2b;border:1px solid #25435a;padding:14px;border-radius:14px;min-height:84px}
+.metric small{display:block;margin-bottom:8px}.metric strong{font-size:20px;letter-spacing:-.3px}
+.hint{border-left:3px solid #61c8ee;background:#092438;padding:12px 14px;color:#cde9f4;border-radius:8px;font-size:13px;margin:12px 0}
+.warning{border-left-color:#ec9872;background:#33251e;color:#ffd8bf}
+section{margin-bottom:18px}
+.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.controls button:nth-child(1){grid-column:2}
+.console{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word;color:#a7dfd6;background:#06121d;border:1px solid #254058;padding:16px;border-radius:14px;max-height:250px;overflow:auto}
+.inline{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+label{font-size:13px;color:#bcd2e4}
+.headline{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#alert{font-size:13px;padding:13px 16px;border-radius:13px;display:none;white-space:pre-wrap;word-break:break-word}
+#alert.show{display:block;background:#192c3f;border:1px solid #315e7a;color:#e4f3ff}
+#alert.error{background:#44232c;border-color:#89465b;color:#ffdbe5}
+.bar{height:8px;background:#172c42;border-radius:8px;overflow:hidden;margin-top:8px}.bar span{display:block;height:100%;background:#56c6ec;width:0}
+.jog{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;max-width:360px}
+.jog .center{display:grid;place-items:center;color:#75acc9;font-size:13px}
+.space{margin:16px 0}code{background:#1c3547;padding:2px 5px;border-radius:5px;color:#ade8ff}
+@media(max-width:850px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.metrics{grid-template-columns:repeat(2,1fr)}header{padding:16px 20px;align-items:start}}
+@media(max-width:520px){.metrics{grid-template-columns:1fr}.two{grid-template-columns:1fr}.three{grid-template-columns:1fr}h1{font-size:22px}}
+</style>
+</head>
+<body>
+<header>
+<div class="brand"><div class="brand-symbol">L</div><div><h1>LumaCut CNC</h1><small>MARLIN CONTROL OS · Raspberry Pi 400 · SKR Mini MZ V1.0</small></div></div>
+<div class="pill" id="connectState">Marlin wird geprüft …</div>
+</header>
+<main>
+<div class="grid">
+<section class="card">
+<div class="headline"><h2>Maschinenstatus</h2><button class="ghost" id="refreshButton">Aktualisieren</button></div>
+<div class="metrics">
+<div class="metric"><small>SKR</small><strong id="state">Offline</strong></div>
+<div class="metric"><small>Steuerung</small><strong id="owner">—</strong></div>
+<div class="metric"><small>Referenziert</small><strong id="homed">NEIN</strong></div>
+</div>
+<h3>Maschinenposition</h3>
+<div style="font:600 24px/1.4 ui-monospace,Consolas,monospace" id="position">X — Y — Z —</div>
+<p class="muted" style="margin-top:10px" id="board">Firmware noch nicht identifiziert</p>
+<div class="hint warning" id="safety">Hardware noch nicht verifiziert. Laser-Versorgung getrennt lassen und Not-Aus prüfen.</div>
+<div class="two">
+<button data-action="connect">SKR-Verbindung prüfen</button>
+<button data-action="info">Marlin M115 lesen</button>
+</div>
+<div class="two" style="margin-top:10px">
+<button data-action="position">Position M114 lesen</button>
+<button data-action="endstops">Endschalter M119 lesen</button>
+</div>
+</section>
+<section class="card">
+<h2>Direktsteuerung</h2>
+<p>Fahrbefehle sind gesperrt, während LightBurn oder ein Pi-Auftrag die Maschine steuert.</p>
+<div class="two"><button class="primary" data-action="home" data-motion>XYZ referenzieren (Z zuerst)</button>
+<button class="danger" id="stop">Software-Notstopp M112</button></div>
+<div class="space"></div>
+<h3>Joggen</h3>
+<div class="inline"><label>Schrittweite
+<select id="step"><option value="0.1">0,1 mm</option><option value="1" selected>1 mm</option><option value="10">10 mm</option></select></label></div>
+<div class="jog">
+<div></div><button data-axis="Y" data-direction="1">Y +</button><button data-axis="Z" data-direction="1">Z +</button>
+<button data-axis="X" data-direction="-1">X −</button><span class="center">XY</span><button data-axis="X" data-direction="1">X +</button>
+<div></div><button data-axis="Y" data-direction="-1">Y −</button><button data-axis="Z" data-direction="-1">Z −</button>
+</div>
+<div class="space"></div>
+<h3>Zubehör über SKR</h3>
+<div class="two">
+<button data-accessory="light">LED HE0 / PC8</button>
+<button data-accessory="exhaust">Abluft BED / PC9</button>
+</div>
+</section>
+<section class="card">
+<h2>LightBurn über WLAN</h2>
+<p>LightBurn <b>Custom GCode</b> → Variante <b>Marlin</b> → Verbindung <b>Network/TCP</b>. Diese Weboberfläche und LightBurn teilen sich einen USB-Controller, führen aber nie gleichzeitig Befehle aus.</p>
+<div class="metrics" style="grid-template-columns:repeat(2,1fr)">
+<div class="metric"><small>IP/Hostname</small><strong style="font-size:15px" id="hostname">—</strong></div>
+<div class="metric"><small>TCP-Port</small><strong>23</strong></div>
+</div>
+<div class="hint">Marlin-Modus: <code>M3 I</code> aktivieren. S-Werte nur <code>0–255</code>. Bei LightBurn muss nach Leerfahrten die erste G1-Bearbeitung wieder einen S-Wert erhalten. Marlin <code>M4 I</code> nicht benutzen.</div>
+<p class="muted">Der native Marlin-Gateway ist absichtlich kein GRBL-Emulator. GRBL-Befehle wie <code>$$</code>, <code>$H</code> oder <code>?</code> sind hier ungültig.</p>
+</section>
+<section class="card">
+<h2>G-Code-Aufträge</h2>
+<p>Aufträge werden vor der Übertragung geprüft und mit echten Marlin-<code>ok</code>-Bestätigungen an das SKR übertragen.</p>
+<form id="uploadForm" class="inline"><input style="flex:1;min-width:180px" type="file" accept=".gcode,.gc,.nc" id="file"><button type="submit">Hochladen</button></form>
+<div class="space"></div>
+<div class="two"><select id="jobSelect"><option>Keine Dateien</option></select><button data-action="start" data-motion>Auftrag starten</button></div>
+<div class="space"></div>
+<div class="metric"><small>Aktueller Auftrag</small><strong id="jobStatus" style="font-size:15px">Keiner</strong>
+<div class="bar"><span id="jobProgress"></span></div><small id="jobDetails"></small></div>
+</section>
+<section class="card">
+<h2>Maschinenfreigabe</h2>
+<p>Die Firmware wird zunächst im gesperrten Testbetrieb gestartet. Erst Endschalter, Motordrehrichtung, Z-Rückzug, PWM-Pegel, galvanische Trennung und unabhängiger Not-Aus müssen bei getrennter Laserversorgung geprüft werden.</p>
+<div class="hint warning">Diese Softwarefreigabe bestätigt keine elektrische Sicherheit und ersetzt weder Messungen noch Hardware-Interlocks.</div>
+<label><input type="checkbox" id="commissionCheck"> Ich habe die Prüfungen ohne verbundenen Laser abgeschlossen.</label>
+<div class="two" style="margin-top:12px">
+<button id="commissionEnable">Mechanik nach Prüfung freigeben</button>
+<button id="commissionDisable">Freigabe zurücknehmen</button>
+</div>
+</section>
+<section class="card">
+<h2>System & Zugang</h2>
+<label>Maschinenzugangscode (bleibt nur in dieser Browser-Sitzung)
+<input id="key" type="password" placeholder="LUMACUT_KEY" autocomplete="off"></label>
+<div class="two" style="margin-top:12px"><button id="saveKey" class="primary">Verbinden</button><button id="clearKey">Abmelden</button></div>
+<p class="muted" style="margin-top:16px">Zugriff nur im vertrauenswürdigen WLAN. Nicht direkt ins Internet weiterleiten.</p>
+<div class="metrics" style="grid-template-columns:repeat(2,1fr)"><div class="metric"><small>Übertragene Befehle</small><strong id="commands">0</strong></div>
+<div class="metric"><small>Serielle Fehler</small><strong id="errors">0</strong></div></div>
+</section>
+<section class="card full">
+<div class="headline"><h2>Marlin-Ereignisprotokoll</h2><button class="ghost" id="clearLog">Ansicht leeren</button></div>
+<div id="alert" role="alert"></div>
+<pre class="console" id="console">Keine Meldungen.</pre>
+</section>
+</div>
+</main>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+let key=sessionStorage.getItem("lumacut-marlin-key")||"", snapshot=null, lastFault="", dismissed=false;
+$("key").value=key;
+$("hostname").textContent=location.hostname;
+function show(msg,error=false){const el=$("alert");el.textContent=msg;el.className="show"+(error?" error":"");dismissed=false}
+async function api(endpoint,{body=null,method="GET"}={}){
+ const opts={method,cache:"no-store",headers:{"X-LumaCut-Key":key}};
+ if(body){opts.body=body;if(body instanceof URLSearchParams)opts.headers["Content-Type"]="application/x-www-form-urlencoded"}
+ const r=await fetch(endpoint,opts);
+ if(!r.ok){let m="";try{let json=await r.json();m=json.error||JSON.stringify(json)}catch{m=await r.text()}throw Error(m||"HTTP "+r.status)}
+ return r.json();
+}
+function param(data){return new URLSearchParams(data)}
+async function call(op,fields={}){
+ try{
+  const res=await api("/api/action",{method:"POST",body:param({...fields,op})});
+  show(res.message||"Bestätigt");refresh();
+ }catch(e){show(e.message,true)}
+}
+function ownerFree(s){return s&&s.connected&&s.owner==="Frei"&&s.state==="Idle"}
+function refreshUI(s){
+ snapshot=s;
+ $("connectState").textContent=s.connected?"USB verbunden · Marlin":"SKR getrennt";
+ $("state").textContent=s.state||"Offline";
+ $("owner").textContent=s.owner||"Frei";
+ $("homed").textContent=s.homed?"JA":"NEIN";
+ $("board").textContent=s.identity||"Keine gültige LumaCut-Marlin-Kennung vom SKR";
+ $("commands").textContent=s.command_count||0;
+ $("errors").textContent=s.serial_errors||0;
+ $("position").textContent=s.position?["X","Y","Z"].map((axis,i)=>axis+" "+s.position[i].toFixed(2)).join("  "):"X — Y — Z —";
+ const valid=Boolean(s.config?.validated);
+ $("safety").textContent=valid?
+   "Mechanik-Softwarefreigabe aktiv. Dies bestätigt NICHT die elektrische Laser-Sicherheit.":
+   "Gesperrt: Endschalter/Z-Richtung und Hardware-Interlock müssen geprüft werden.";
+ $("commissionCheck").checked=valid;
+ for(const button of document.querySelectorAll("[data-motion]")){
+  button.disabled=!ownerFree(s)||!valid||(button.dataset.action==="start"&&!s.homed);
+ }
+ for(const button of document.querySelectorAll("[data-axis]"))
+  button.disabled=!ownerFree(s)||!valid||!s.homed;
+ for(const button of document.querySelectorAll("[data-accessory]"))
+  button.disabled=!ownerFree(s);
+ $("jobStatus").textContent=s.job?.state||"Kein Auftrag";
+ $("jobProgress").style.width=Math.max(0,Math.min(100,100*(s.job?.line||0)/Math.max(1,s.job?.total||1)))+"%";
+ $("jobDetails").textContent=(s.job?.file||"")+(s.job?.error?" · "+s.job.error:"");
+ $("console").textContent=(s.recent||[]).join("\n")||"Keine seriellen Nachrichten";
+ if(s.fault&&s.fault!==lastFault){show("SKR: "+s.fault,true);lastFault=s.fault}
+}
+async function refresh(){
+ if(!key)return;
+ try{refreshUI(await api("/api/status"))}
+ catch(e){$("connectState").textContent="Nicht verbunden";if(!dismissed)show(e.message,true);dismissed=true}
+}
+async function files(){
+ if(!key)return;
+ try{
+  const r=await api("/api/jobs"), sel=$("jobSelect"),current=sel.value;
+  sel.replaceChildren();
+  for(const item of r.files){const opt=new Option(item.name,item.name);sel.append(opt)}
+  if(r.files.some(o=>o.name===current))sel.value=current;
+ }catch(e){show(e.message,true)}
+}
+$("saveKey").onclick=()=>{key=$("key").value.trim();sessionStorage.setItem("lumacut-marlin-key",key);refresh();files()};
+$("clearKey").onclick=()=>{key="";sessionStorage.removeItem("lumacut-marlin-key");$("key").value="";show("Abgemeldet")};
+$("refreshButton").onclick=()=>{refresh();files()};
+$("clearLog").onclick=()=>{$("console").textContent="Ansicht geleert. Neue Geräteereignisse erscheinen beim nächsten Aktualisieren."};
+for(const b of document.querySelectorAll("[data-action]"))
+ b.onclick=()=>call(b.dataset.action,b.dataset.action==="start"?{name:$("jobSelect").value}:{});
+for(const b of document.querySelectorAll("[data-axis]"))
+ b.onclick=()=>call("jog",{axis:b.dataset.axis,distance:String(Number($("step").value)*Number(b.dataset.direction))});
+for(const b of document.querySelectorAll("[data-accessory]"))
+ b.onclick=()=>{const type=b.dataset.accessory;call(type,{on:snapshot&&snapshot[type==="light"?"lights":"exhaust"]?"0":"1"})};
+$("stop").onclick=()=>{
+ if(confirm("Marlin-Notstopp M112 auslösen? Die Maschine muss danach am physischen Not-Aus geprüft und zurückgesetzt werden."))
+  call("estop");
+};
+$("uploadForm").onsubmit=async ev=>{
+ ev.preventDefault();const file=$("file").files?.[0];if(!file){show("Datei auswählen",true);return}
+ const data=new FormData();data.append("file",file);
+ try{const r=await api("/api/upload",{method:"POST",body:data});show(r.message);await files()}
+ catch(e){show(e.message,true)}
+};
+async function commission(enable){
+ if(enable&&!$("commissionCheck").checked){show("Vor Freigabe Prüfungen bestätigen",true);return}
+ try{
+  const r=await api("/api/commission",{method:"POST",body:param({
+   enable:enable?"1":"0",confirm:"TESTS_BESTANDEN_LASER_GETRENNT"})});
+  show(r.message);refresh();
+ }catch(e){show(e.message,true)}
+}
+$("commissionEnable").onclick=()=>commission(true);
+$("commissionDisable").onclick=()=>commission(false);
+if(key){refresh();files()}
+setInterval(refresh,1800);
+setInterval(files,12000);
+</script>
+</body></html>
