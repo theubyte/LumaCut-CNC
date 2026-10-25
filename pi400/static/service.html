@@ -69,7 +69,7 @@ code{color:#9bd8f9;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}pr
 <option value="signal">Signalleuchte</option>
 <option value="exhaust2">Zusätzliche Abluft</option></select>
 <label for="pc6Name">Eigener Name</label><input id="pc6Name" maxlength="24" placeholder="z. B. Air Assist">
-<div class="buttonbar" style="margin-top:13px"><button id="savePc7" class="primary">PC6 konfigurieren</button><button id="readPc7">Ausgang lesen</button></div>
+<div class="buttonbar" style="margin-top:13px"><button id="savePc6" class="primary">PC6 konfigurieren</button><button id="readPc6">Ausgang lesen</button></div>
 <div class="metricbox" style="margin-top:16px"><div class="small muted">SKR meldet</div><div id="pc6Value" class="metric">Nicht ermittelt</div></div>
 <div class="buttonbar" style="margin-top:12px"><button id="pc6On" disabled>Ausgang EIN</button><button id="pc6Off">Ausgang AUS</button></div>
 <p class="help">Aktivierung ist nur im Leerlauf und nach erfolgreicher Firmwareerkennung möglich. Dieser Ausgang ist ein 24-V-Leistungsschalter, kein 3,3-V-GPIO. Verdrahtung vor Nutzung prüfen.</p>
@@ -180,26 +180,26 @@ $("savePins").onclick=async()=>{
  try{const out=await call("/api/service/pins","POST",{lights:$("pinLights").value,exhaust:$("pinExhaust").value});
  message(out.message);await load();}catch(e){message(e.message,true)}
 };
-$("savePc7").onclick=async()=>{
+$("savePc6").onclick=async()=>{
  try{const out=await call("/api/service/pc6/config","POST",
  {pin:"PC6",role:$("pc6Role").value,name:$("pc6Name").value});
  message(out.message);await load()}catch(e){message(e.message,true)}
 };
-$("readPc7").onclick=async()=>{
+$("readPc6").onclick=async()=>{
  try{const out=await call("/api/service/pc6/read","POST",{});
  $("pc6Value").textContent=out.value?"EIN":"AUS";
  $("pc6On").disabled=false;
  message("SKR meldet PC6 "+out.value);
  }catch(e){$("pc6On").disabled=true;message(e.message,true)}
 };
-async function setPc7(value){
+async function setPc6(value){
  try{const out=await call("/api/service/pc6/set","POST",{value:String(value)});
  $("pc6Value").textContent=out.value?"EIN":"AUS";
  message(out.message);
  }catch(e){message(e.message,true)}
 }
-$("pc6On").onclick=()=>setPc7(1);
-$("pc6Off").onclick=()=>setPc7(0);
+$("pc6On").onclick=()=>setPc6(1);
+$("pc6Off").onclick=()=>setPc6(0);
 $("runCommand").onclick=async()=>{
  try{const command=$("command").value.trim();const out=await call("/api/service/command","POST",{command});
  $("consoleOutput").textContent=out.command+" → "+out.message+"\nAntwortzeilen in Systemprotokoll.";
