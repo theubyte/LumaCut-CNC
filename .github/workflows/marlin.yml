@@ -1,36 +1,44 @@
-name: LumaCut Marlin Experimental
+name: LumaCut Marlin Firmware
 
-# Archived manual fallback only; commits no longer run on GitHub.
+# Firmware compilation on demand; routine code checks run locally.
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: lumacut-marlin-build
+  cancel-in-progress: true
+
 jobs:
-  marlin-firmware:
+  firmware:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install PlatformIO
-        run: python -m pip install platformio==6.1.18
-      - name: Build Marlin
+          cache: pip
+          cache-dependency-path: firmware/marlin/requirements.txt
+      - name: Cache Marlin sources and PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/lumacut/upstreams
+          key: ${{ runner.os }}-marlin-2.1.2.9-pio-6.2.0-v1
+      - name: Install compiler
+        run: pip install -r firmware/marlin/requirements.txt
+      - name: Compile SKR Mini MZ firmware
         run: python firmware/marlin/build.py
-      - name: Upload STM32F103RC firmware and manifest
+      - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: LumaCut-Marlin-EXPERIMENTAL-${{ github.sha }}
-          path: firmware/marlin/dist/
+          name: LumaCut-Marlin-${{ github.sha }}
+          path: |
+            firmware/marlin/dist/firmware.bin
+            firmware/marlin/dist/manifest.json
           if-no-files-found: error
-
-  pi-marlin-tests:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install Flask pyserial
-      - run: python -m compileall -q pi400/marlin pi400/lumacut
-      - run: PYTHONPATH=pi400 python -m unittest discover -s tests -p "test_marlin_*.py" -v
+          retention-days: 14
