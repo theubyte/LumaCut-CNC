@@ -476,7 +476,7 @@ class Controller:
         client.settimeout(0.25)
         # Detect half-open LightBurn clients on Linux/Pi without dropping an
         # actively streaming socket. A second connection never steals a job.
-        if hasattr(socket, "SO_KEEPALIVE"):
+        if hasattr(socket, "SO_KEEPALIVE") and hasattr(client, "setsockopt"):
             try:
                 client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 for flag, value in (("TCP_KEEPIDLE", 15),
