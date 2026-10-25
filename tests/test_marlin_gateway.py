@@ -66,6 +66,22 @@ class GuardTests(unittest.TestCase):
             g.check("G28 X Y",True)
 
 
+class ProbeContactHeightTests(unittest.TestCase):
+    def test_marlin_2129_early_trigger_threshold_for_3mm_mdf(self):
+        from importlib.util import spec_from_file_location, module_from_spec
+        spec = spec_from_file_location("lumacut_marlin_build",
+                                       ROOT / "firmware" / "marlin" / "build.py")
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # The original Marlin 2.1.2.9 tolerance is 5mm; the actual switch
+        # triggered at Z5.37 above the bare-bed origin and was rejected.
+        self.assertGreater(5.37, 5.0)
+        source = (ROOT / "firmware" / "marlin" / "build.py").read_text(encoding="utf-8")
+        self.assertIn('replace_active(cfg, "Z_CLEARANCE_MULTI_PROBE", "16")', source)
+        self.assertIn('replace_active(cfg, "Z_CLEARANCE_BETWEEN_PROBES", "16")', source)
+        self.assertLess(5.37, 16.0)
+
+
 class ProbePinConfigurationTests(unittest.TestCase):
     def test_g30_shares_zmin_pin(self):
         source = (ROOT / "firmware" / "marlin" / "build.py").read_text(encoding="utf-8")
