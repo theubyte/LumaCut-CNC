@@ -120,6 +120,7 @@ input,select{background:#0a1624;border:1px solid #3a5268;padding:11px 13px;borde
 <path d="M95 10v140 M180 10v140 M265 10v140 M10 45h340 M10 80h340 M10 115h340" stroke="#254358"/>
 <circle id="spot" cx="180" cy="80" r="7" fill="#ff7883" stroke="#fff" style="display:none"/></svg><p id="touchHint" class="caption">Arbeitsfeld-Touch: erst nach XYZ-Homing und Freigabe im Service Studio.</p></div>
 <div class="panel span5"><h2>Schnellzugriff</h2>
+<p id="ownerHint" class="caption" role="status">Prüfe Steuerungsfreigabe …</p>
 <div class="two"><button class="primary" data-op="home">Referenzfahrt</button><button data-op="readcfg">GRBL lesen</button>
 <button data-op="frame">Kontur testen</button><button data-op="park">Parken</button>
 <button data-op="toggle">Pause / Weiter</button><button class="stop" data-op="abort">Abbrechen</button></div>
@@ -240,7 +241,13 @@ input,select{background:#0a1624;border:1px solid #3a5268;padding:11px 13px;borde
 const el=id=>document.getElementById(id);
 let key=sessionStorage.getItem("lc-key")||"", cfg={},params={},net={};
 el("key").value=key;
-function notify(message,error=false){el("log").textContent=message;el("log").classList.toggle("bad",error)}
+let transientHomeError=false;
+let lastMachineState=null;
+function notify(message,error=false){
+  transientHomeError=error&&String(message).includes("SKR nicht im Leerlauf: Home");
+  el("log").textContent=message;
+  el("log").classList.toggle("bad",error);
+}
 function enc(data){return new URLSearchParams(data)}
 async function api(path,options={}){
   let h=Object.assign({},options.headers||{},{"X-LumaCut-Key":key});
@@ -265,6 +272,35 @@ async function action(op,extra={}){
 }
 document.querySelectorAll("button[data-op]").forEach(b=>b.onclick=()=>action(b.dataset.op,
   /^[xyz][+-]$/.test(b.dataset.op)?{step:el("jogstep").value}:{}));
+// Motion and local GRBL queries cannot share the SKR USB port with LightBurn.
+// Retain Pause/Abort and accessory controls; they have explicit safety semantics.
+const LOCAL_OPS=new Set(["home","enablehome","readcfg","frame","park","p0","p1","p2",
+ "start","x+","x-","y+","y-","z+","z-","zlift","motorHold","motorRelease",
+ "flipx","flipy","flipz","softon"]);
+function updateControlAvailability(s){
+  lastMachineState=s;
+  const available=Boolean(s.connected&&s.ready);
+  const owned=s.owner&&s.owner!=="Frei";
+  const idle=s.state==="Idle";
+  const alarm=s.state==="Alarm";
+  for(const button of document.querySelectorAll("button[data-op]")){
+    if(!LOCAL_OPS.has(button.dataset.op))continue;
+    const validState=idle||(alarm&&["home","enablehome","readcfg"].includes(button.dataset.op));
+    button.disabled=!available||owned||!validState;
+    button.title=!available?"SKR nicht bereit":owned?
+      "LightBurn oder ein Pi-Auftrag hat die exklusive Steuerung":
+      !validState?"SKR ist "+s.state+"; erst Idle abwarten":"";
+  }
+  const hint=el("ownerHint");
+  hint.textContent=owned?(s.owner==="host"?
+      "LightBurn verbunden: Manuelle Pi-Bewegungen sind gesperrt. Referenzfahrt und Joggen in LightBurn bedienen.":
+      "Ein Pi-Auftrag steuert die Maschine. Manuelle Bewegungen sind gesperrt.") :
+    !available?"SKR nicht bereit. USB und Firmware prüfen.":
+    s.state==="Home"?"Referenzfahrt läuft: SKR meldet Home. Bis Idle keine zusätzlichen Bewegungen ausführen.":
+    !idle?"SKR-Zustand: "+s.state+". Auf Idle warten.":
+    "SKR bereit: lokale Bewegung und LightBurn werden exklusiv verwaltet.";
+  el("preview").setAttribute("aria-disabled",String(!available||owned||!idle));
+}
 async function refresh(){
  if(!key)return;
  try{
@@ -273,14 +309,19 @@ async function refresh(){
   el("connection").classList.toggle("online",Boolean(s.ready));
   el("connection").classList.toggle("offline",!s.ready);
   updateDiagnostics(s);
+  updateControlAvailability(s);
+  if(transientHomeError&&s.state==="Idle")
+    notify("Referenzfahrt abgeschlossen: SKR meldet wieder Idle.");
   el("state").textContent=s.state||"—";el("owner").textContent=s.owner||"Frei";
   el("position").textContent=s.position||"—";el("jobname").textContent=s.job||"Kein Job";
   const m=s.machine||{},w=m.work_area||{},p=m.coordinates||{};
   el("homed").textContent=m.homed?"JA":"—";
   el("machineSize").textContent=(w.x_mm||0)+" × "+(w.y_mm||0)+" mm";
-  el("touchHint").textContent=(!m.homed?"Erst XYZ referenzieren":
+  el("touchHint").textContent=s.owner!=="Frei"?"LightBurn/Pi-Auftrag steuert: Arbeitsfeld-Touch ist gesperrt.":
+    s.state!=="Idle"?"SKR ist "+s.state+"; erst Idle abwarten.":
+    !m.homed?"Erst XYZ referenzieren":
     !cfg.touch_jog_enabled?"Touchbewegung im Service-Menü freischalten":
-    "Auf eine Position im Arbeitsfeld tippen → Z-Sicherheitsabstand, danach XY.");
+    "Auf eine Position im Arbeitsfeld tippen → Z-Sicherheitsabstand, danach XY.";
   const spot=el("spot");spot.style.display="none";
   if(p.valid&&w.x_mm>0&&w.y_mm>0){
     let x=p.zero_at_max?(p.x_mm+w.x_mm)/w.x_mm:p.x_mm/w.x_mm;
@@ -310,6 +351,10 @@ async function readConfig(){
 const touchArea=el("preview");
 touchArea.addEventListener("click",async e=>{
  if(!key){notify("Bitte zuerst Maschinenzugangscode eingeben",true);return}
+ if(!lastMachineState||!lastMachineState.ready||lastMachineState.owner!=="Frei"||
+    lastMachineState.state!=="Idle"){
+  notify("Arbeitsfeld gesperrt: LightBurn/Pi-Auftrag belegt oder SKR nicht Idle.",true);return
+ }
  if(!cfg.touch_jog_enabled){notify("Arbeitsfeld-Touch zuerst im Service Studio freigeben",true);return}
  const rect=touchArea.getBoundingClientRect();
  const x=(e.clientX-rect.left)*360/rect.width,
