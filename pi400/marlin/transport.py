@@ -502,7 +502,7 @@ class MarlinTransport:
                 self.absolute_mode = True
             self._exchange_locked(f"G0 Z{z_target:.3f} F360", timeout=45)
             self._exchange_locked("M400", timeout=45)
-            self._exchange_locked("G0 X15.000 Y15.000 F6000", timeout=90)
+            self._exchange_locked("G0 X0.000 Y0.000 F6000", timeout=90)
             self._exchange_locked("M400", timeout=90)
             result = self._exchange_locked("M114", timeout=8)
             self.focused_this_job = False
