@@ -295,6 +295,7 @@ class CanvasEditor(QWidget):
         self.view = CanvasView(self.scene)
         self.tools = ToolController(self)
         self.view.tool_handler = self.tools
+        self.view.zoom_anchor_provider = self._selection_center
         self.view.cursorMoved.connect(self.cursorMoved)
         self.view.viewChanged.connect(self._emit_zoom)
 
@@ -579,6 +580,12 @@ class CanvasEditor(QWidget):
         self.set_roi(None)
 
     # --- Bearbeiten -------------------------------------------------------
+    def _selection_center(self) -> QPointF | None:
+        """Mitte der Auswahl (mm) als Mausrad-Zoomanker, None ohne Auswahl."""
+        ids = [i for i in self.selection if self.document.has_shape(i)]
+        r = self.document.selection_bounds(ids) if ids else None
+        return None if r is None else QPointF(r.x + r.w / 2.0, r.y + r.h / 2.0)
+
     def fit_selection(self) -> None:
         """Zoom to the selection (Ctrl+Shift+A), or to all objects, or the work area."""
         doc = self.document

@@ -108,6 +108,10 @@ class CanvasView(QGraphicsView):
         self._overlays: dict[str, tuple[float, int, object]] = {}  # key -> (z, Reihenfolge, Overlay)
         self._overlay_seq = 0
         self.tool_handler = None  # wird vom Editor gesetzt (tools.ToolController)
+        # Liefert die Zoom-Mitte für das Mausrad (Auswahl-Mitte in mm) oder None
+        # (= am Mauszeiger zoomen). Wird vom Editor gesetzt.
+        self.zoom_anchor_provider = None
+        self._wheel_anchor: tuple[tuple[float, float], QPointF] | None = None
         self._pan_start: QPointF | None = None
         self._space_down = False
         self._fitted_once = False
@@ -119,11 +123,13 @@ class CanvasView(QGraphicsView):
     def px_per_mm(self) -> float:
         return self.transform().m11()
 
-    def set_zoom(self, px_per_mm: float, anchor: QPointF | None = None) -> None:
+    def set_zoom(self, px_per_mm: float, anchor: QPointF | None = None,
+                 scene_pt: QPointF | None = None) -> None:
         """Zoom to ``px_per_mm`` (clamped); ``anchor`` = viewport point that
         stays fixed (default: view centre). Explicit anchoring instead of
         ``AnchorUnderMouse`` keeps the point under the *event* position fixed
-        (wheel/pinch), independent of QCursor."""
+        (wheel/pinch), independent of QCursor. ``scene_pt`` (mm): diesen
+        Szenenpunkt an ``anchor`` festhalten (Standard: der Punkt unter ``anchor``)."""
         px_per_mm = max(MIN_SCALE, min(MAX_SCALE, px_per_mm))
         f = px_per_mm / self.px_per_mm
         if abs(f - 1.0) < 1e-9:
@@ -131,18 +137,29 @@ class CanvasView(QGraphicsView):
         vp = self.viewport().rect()
         if anchor is None:
             anchor = QPointF(vp.width() / 2.0, vp.height() / 2.0)
-        before = self.mapToScene(anchor.toPoint())
+        before = QPointF(scene_pt) if scene_pt is not None else \
+            self.viewportTransform().inverted()[0].map(QPointF(anchor))
         self.setTransformationAnchor(QGraphicsView.NoAnchor)
         self.scale(f, f)
-        after = self.mapFromScene(before)
-        hb, vb = self.horizontalScrollBar(), self.verticalScrollBar()
-        hb.setValue(hb.value() + round(after.x() - anchor.x()))
-        vb.setValue(vb.value() + round(after.y() - anchor.y()))
+        self._pin(before, anchor)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self._after_zoom()
+        self._pin(before, anchor)  # _after_zoom kann die Ansicht minimal verschieben
 
-    def zoom_by(self, factor: float, anchor: QPointF | None = None) -> None:
-        self.set_zoom(self.px_per_mm * factor, anchor)
+    def _pin(self, scene_pt: QPointF, anchor: QPointF) -> None:
+        """Scrollleisten so stellen, dass ``scene_pt`` bei ``anchor`` (Viewport) liegt."""
+        hb, vb = self.horizontalScrollBar(), self.verticalScrollBar()
+        for _ in range(3):  # Scrollwerte sind ganzzahlig -> ggf. nachkorrigieren
+            after = self.viewportTransform().map(scene_pt)
+            dx, dy = round(after.x() - anchor.x()), round(after.y() - anchor.y())
+            if not dx and not dy:
+                break
+            hb.setValue(hb.value() + dx)
+            vb.setValue(vb.value() + dy)
+
+    def zoom_by(self, factor: float, anchor: QPointF | None = None,
+                scene_pt: QPointF | None = None) -> None:
+        self.set_zoom(self.px_per_mm * factor, anchor, scene_pt)
 
     def fit_work_area(self) -> None:
         self.fitInView(QRectF(-8, -8, WORK_WIDTH_MM + 16, WORK_HEIGHT_MM + 16), Qt.KeepAspectRatio)
@@ -183,8 +200,41 @@ class CanvasView(QGraphicsView):
         # without angle delta report pixel deltas.
         steps = event.angleDelta().y() / 120.0 or event.pixelDelta().y() / 60.0
         if steps:
-            self.zoom_by(1.15 ** max(-4.0, min(4.0, steps)), event.position())
+            self.zoom_wheel(1.15 ** max(-4.0, min(4.0, steps)), event.position())
         event.accept()
+
+    def zoom_wheel(self, factor: float, pos: QPointF) -> None:
+        """Mausrad-Zoom mit Ankerwahl.
+
+        * Keine Auswahl: der Punkt unter dem Mauszeiger bleibt stehen.
+        * Mit Auswahl (``zoom_anchor_provider`` liefert deren Mitte in mm): die
+          Mitte der Auswahl bleibt an ihrer Bildschirmposition. Liegt sie
+          außerhalb des Sichtbereichs, wird nach dem Zoomen auf sie zentriert –
+          man zoomt also immer *zur* Auswahl hin.
+        """
+        center = self.zoom_anchor_provider() if self.zoom_anchor_provider else None
+        if center is None:
+            self.zoom_by(factor, pos)
+            return
+        now = self._viewport_pos(center)
+        last = self._wheel_anchor
+        # Aufeinanderfolgende Radschritte nutzen denselben Zielpunkt, sonst
+        # summieren sich die ganzzahligen Scroll-Rundungen (je ≤ 0,5 px) auf.
+        if last and last[0] == (center.x(), center.y()) and \
+                abs(last[1].x() - now.x()) <= 2 and abs(last[1].y() - now.y()) <= 2:
+            now = last[1]
+        if self.viewport().rect().contains(now.toPoint()):
+            self.zoom_by(factor, now, center)
+            self._wheel_anchor = ((center.x(), center.y()), QPointF(now))
+        else:
+            self.zoom_by(factor)
+            self.centerOn(center)
+            self._wheel_anchor = None
+            self.viewChanged.emit()
+
+    def _viewport_pos(self, scene_pt: QPointF) -> QPointF:
+        """Exakte (nicht gerundete) Viewport-Position eines Szenenpunkts."""
+        return self.viewportTransform().map(scene_pt)
 
     def viewportEvent(self, event) -> bool:  # noqa: N802
         # Trackpad pinch (macOS/Windows precision touchpads) zooms at the fingers.
