@@ -22,6 +22,11 @@ from lumacut_canvas.layers_panel import LayersPanel
 # --- scan integration (scan agent) ---
 from scanprobe.panel import ScanPanel
 # --- end scan integration ---
+# --- job tools integration (review agent) ---
+from lumacut_job.estimate import estimate_gcode
+from lumacut_job.planner import optimized_document_gcode
+from lumacut_job.qt_tools import install_job_tools
+# --- end job tools integration ---
 
 
 class LumaCutStudio(QMainWindow):
@@ -170,6 +175,9 @@ class LumaCutStudio(QMainWindow):
         self.canvas.fileChanged.connect(lambda t: self.setWindowTitle(f"{t} – LumaCut Studio"))
         self.setWindowTitle(f"{self.canvas.title()} – LumaCut Studio")
         # --- end canvas integration ---
+        # --- job tools integration (review agent) ---
+        install_job_tools(self)  # Zeit schätzen, Rahmen, Materialtest
+        # --- end job tools integration ---
 
 
     # --- machine integration (machine agent) ---
@@ -195,12 +203,14 @@ class LumaCutStudio(QMainWindow):
     # --- canvas integration (canvas agent) ---
     def _send_canvas_job(self):
         try:
-            gcode = document_to_gcode(self.canvas.document)
+            # job tools (review agent): inner shapes first, reduced travel
+            gcode = optimized_document_gcode(self.canvas.document)
         except ValueError as exc:
             self.statusBar().showMessage(f"Senden nicht möglich: {exc}", 6000)
             return
         stem = self.canvas.file_path.name.split(".")[0] if self.canvas.file_path else "canvas"
         self.machine_panel.send_gcode(f"{stem}.gcode", gcode, start=False)
+        self.statusBar().showMessage(f"Gesendet: {stem}.gcode {estimate_gcode(gcode).summary()}", 10000)
     # --- end canvas integration ---
 
 
