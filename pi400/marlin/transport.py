@@ -77,8 +77,9 @@ class MarlinLaserGuard:
         if any(l not in "GMXYZIJRFSP" for l, _ in words):
             raise ValueError("Unbekannter G-Code-Parameter")
         if any(m in families for m in ("M112", "M410")):
-            # Emergency command handled out-of-band by transport.
-            return cmd
+            # Emergency commands are not legal job-file instructions.
+            # The dedicated emergency endpoint writes M112 immediately.
+            raise ValueError("Notstopp ausschließlich über separaten M112-Kanal")
         if "M4" in families:
             raise ValueError("Marlin M4 I nutzt Vorschub statt S-Leistung: M3 I erforderlich")
         if "M3" in families:
@@ -334,6 +335,11 @@ class MarlinTransport:
         # or G1 may be awaiting 'ok'. Marlin's EMERGENCY_PARSER accepts M112
         # on the input stream while a move is underway.
         serial_port = self.serial
+        if serial_port is None:
+            self.emergency_latched = True
+            self.homed = False
+            self.fault = "Software-Notstopp NICHT übertragen: USB getrennt, physischen Not-Aus benutzen"
+            raise ConnectionError(self.fault)
         if serial_port is not None:
             try:
                 serial_port.write(b"M112\n")
@@ -375,6 +381,10 @@ class MarlinTransport:
                         cmd = fragment.decode("ascii", errors="replace")
                         fragment.clear()
                         try:
+                            if normalize(cmd) == "M112":
+                                self.emergency_stop()
+                                client.sendall(b"Error:LumaCut M112 emergency stop sent; reset required\r\n")
+                                return
                             if normalize(cmd).startswith("G28"):
                                 # The LightBurn Home button MUST trigger the
                                 # same safe Z-first sequence as the web HMI.
