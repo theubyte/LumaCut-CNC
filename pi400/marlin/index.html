@@ -95,6 +95,25 @@ label{font-size:13px;color:#bcd2e4}
 </div>
 </section>
 <section class="card">
+<h2>Z-Kalibrierung</h2>
+<p>Getrennte Werte für Schalter-Auslösepunkt, Sicherheitsabstand und Fokus. Änderungen werden auf dem Pi gespeichert und bleiben nach Neustart erhalten.</p>
+<form id="zSettings">
+<label>Schalter → Laserspitze (mm)
+<input id="zOffset" type="number" step="0.1" min="-20" max="20" value="1.5" required></label>
+<p class="muted">Positiv: Beim Schalterkontakt ist die Laserspitze um diesen Wert über der Referenzfläche. Bei umgekehrter Geometrie einen negativen Wert verwenden.</p>
+<div class="two">
+<label>Sicherheitsrückzug nach Homing (mm)
+<input id="zClearance" type="number" min="0.5" max="50" step="0.1" value="20" required></label>
+<label>Fokusabstand Laserspitze → Werkstück (mm)
+<input id="focusGap" type="number" min="0.1" max="30" step="0.1" value="7" required></label>
+</div>
+<div class="metric" style="margin-top:12px"><small>Geschätzter Abstand Spitze → Referenzfläche</small><strong id="tipGap">—</strong></div>
+<div class="metric" style="margin-top:10px"><small>Geschätzte Z-Korrektur bis Fokus (nur Anzeige)</small><strong id="focusAdjust">—</strong></div>
+<p class="muted">Die Anzeige ist keine Werkstückabtastung. Der Offset löst keine automatische Bewegung aus und ersetzt keine Kalibrierung am realen Schalter.</p>
+<button type="submit" class="primary" id="saveZSettings">Z-Einstellungen speichern</button>
+</form>
+</section>
+<section class="card">
 <h2>LightBurn über WLAN</h2>
 <p>LightBurn <b>Custom GCode</b> → Variante <b>Marlin</b> → Verbindung <b>Network/TCP</b>. Diese Weboberfläche und LightBurn teilen sich einen USB-Controller, führen aber nie gleichzeitig Befehle aus.</p>
 <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
@@ -175,6 +194,15 @@ function refreshUI(s){
  $("owner").textContent=s.owner||"Frei";
  $("homed").textContent=s.homed?"JA":"NEIN";
  $("board").textContent=s.identity||"Keine gültige LumaCut-Marlin-Kennung vom SKR";
+ const zCfg=s.config||{};
+ for(const [id,name] of [["zOffset","z_switch_tip_offset_mm"],["zClearance","z_clearance_mm"],["focusGap","focus_gap_mm"]]){
+   const input=$(id);
+   if(document.activeElement!==input && zCfg[name]!==undefined)
+     input.value=String(zCfg[name]);
+ }
+ $("tipGap").textContent=s.estimated_tip_gap_mm==null?"Noch nicht referenziert":s.estimated_tip_gap_mm.toFixed(2)+" mm";
+ $("focusAdjust").textContent=s.estimated_focus_adjust_mm==null?"Noch nicht referenziert":s.estimated_focus_adjust_mm.toFixed(2)+" mm";
+ $("saveZSettings").disabled=!ownerFree(s)||Boolean(s.homed);
  $("commands").textContent=s.command_count||0;
  $("errors").textContent=s.serial_errors||0;
  $("position").textContent=s.position?["X","Y","Z"].map((axis,i)=>axis+" "+s.position[i].toFixed(2)).join("  "):"X — Y — Z —";
@@ -214,6 +242,19 @@ async function files(){
   if(r.files.some(o=>o.name===current))sel.value=current;
  }catch(e){show(e.message,true)}
 }
+$("zSettings").onsubmit=async ev=>{
+ ev.preventDefault();
+ const body=param({
+  z_switch_tip_offset_mm:$("zOffset").value,
+  z_clearance_mm:$("zClearance").value,
+  focus_gap_mm:$("focusGap").value
+ });
+ try{
+  const result=await api("/api/settings",{method:"POST",body});
+  show(result.message||"Gespeichert");
+  refresh();
+ }catch(e){show(e.message,true)}
+};
 $("refreshButton").onclick=()=>{refresh();files()};
 $("clearLog").onclick=()=>{$("console").textContent="Ansicht geleert. Neue Geräteereignisse erscheinen beim nächsten Aktualisieren."};
 for(const b of document.querySelectorAll("[data-action]"))
