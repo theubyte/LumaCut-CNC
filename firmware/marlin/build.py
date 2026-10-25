@@ -128,14 +128,35 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--output", type=pathlib.Path,
                     default=ROOT / "dist")
+    ap.add_argument("--cache-dir", type=pathlib.Path,
+                    default=pathlib.Path.home() / ".cache" / "lumacut" / "upstreams",
+                    help="Keep pinned upstream Marlin repositories for faster local builds")
+    ap.add_argument("--offline", action="store_true",
+                    help="Only use previously cached upstream repositories")
     args = ap.parse_args()
+
+    def clone_once(repo_name: str, upstream: str, ref: str) -> pathlib.Path:
+        cache = args.cache_dir.expanduser().resolve()
+        cache.mkdir(parents=True, exist_ok=True)
+        destination = cache / (repo_name + "-" + VERSION)
+        if destination.exists():
+            if not (destination / ".git").is_dir():
+                raise RuntimeError("Incomplete Marlin cache: " + str(destination))
+            return destination
+        if args.offline:
+            raise RuntimeError("Upstream checkout not cached: " + str(destination))
+        run("git", "clone", "--depth", "1", "--branch", ref,
+            upstream, str(destination), timeout=500)
+        return destination
+
+    marlin_source = clone_once("Marlin", UPSTREAM, VERSION)
+    examples_source = clone_once("Configurations", CONFIGS, f"release-{VERSION}")
     with tempfile.TemporaryDirectory(prefix="lumacut-marlin-") as base:
         build = pathlib.Path(base)
         src, examples = build / "Marlin", build / "Configurations"
-        run("git", "clone", "--depth", "1", "--branch", VERSION,
-            UPSTREAM, str(src), timeout=500)
-        run("git", "clone", "--depth", "1", "--branch", f"release-{VERSION}",
-            CONFIGS, str(examples), timeout=500)
+        ignore = shutil.ignore_patterns(".git", ".pio", "__pycache__")
+        shutil.copytree(marlin_source, src, ignore=ignore)
+        shutil.copytree(examples_source, examples, ignore=ignore)
         matched = examples / EXAMPLE
         config = (matched / "Configuration.h").read_text()
         adv = (matched / "Configuration_adv.h").read_text()
