@@ -15,10 +15,12 @@ function render(){paintLayers();paintObjects();const root=q("drawings");root.rep
 q("addLayer").onclick=()=>{snapshot();const id=uuid();app.layers.push({id,name:"Neue Ebene",mode:"engrave",power:20,speed:2000,passes:1,color:"#4cd4b0"});app.active=id;render()};
 document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-tab]").forEach(x=>x.classList.remove("toolselected"));b.classList.add("toolselected");document.querySelectorAll("[data-panel]").forEach(x=>x.classList.toggle("current",x.dataset.panel===b.dataset.tab))});
 document.querySelectorAll("[data-tool]").forEach(b=>b.onclick=()=>{app.tool=b.dataset.tool;document.querySelectorAll("[data-tool]").forEach(x=>x.classList.remove("toolselected"));b.classList.add("toolselected")});
-const overlay=q("editorOverlay");const point=e=>{const r=overlay.getBoundingClientRect();return [Math.max(0,Math.min(390,(e.clientX-r.left)/r.width*390)),Math.max(0,Math.min(370,(e.clientY-r.top)/r.height*370))]};let drag=null;
-overlay.addEventListener("pointerdown",e=>{const [x,y]=point(e);if(app.tool==="select")return;if(y<30)return message("30 mm Homingzone bleibt reserviert.");if(app.tool==="text"){const t=prompt("Text eingeben");if(t){snapshot();app.items.push({id:uuid(),layer:app.active,kind:"text",x,y,text:t,size:12});render()}return}snapshot();drag={id:uuid(),layer:app.active,kind:app.tool,x,y,w:0,h:0,points:[[x,y]]};overlay.setPointerCapture(e.pointerId)});
-overlay.addEventListener("pointermove",e=>{if(!drag)return;const [x,y]=point(e);drag.w=x-drag.x;drag.h=y-drag.y;if(drag.kind==="free")drag.points.push([x,y]);const previous=app.items.filter(o=>o.id!==drag.id);app.items=[...previous,normal(drag)];render()});
-overlay.addEventListener("pointerup",()=>{if(!drag)return;app.items=app.items.filter(o=>o.id!==drag.id);const o=normal(drag);if(o.kind==="free"&&o.points.length>1||Math.abs(o.w)>1||Math.abs(o.h)>1)app.items.push(o);drag=null;render()});
+const overlay=q("editorOverlay");const point=e=>{const r=overlay.getBoundingClientRect();return [Math.max(0,Math.min(390,(e.clientX-r.left)/r.width*390)),Math.max(0,Math.min(370,(e.clientY-r.top)/r.height*370))]};let drag=null,selectionDrag=null;
+function hitTest(x,y){for(const o of [...app.items].reverse()){let x0=o.x,y0=o.y,x1=o.x+(o.w||0),y1=o.y+(o.h||0);if(o.kind==="free"&&o.points?.length){x0=Math.min(...o.points.map(p=>p[0]));y0=Math.min(...o.points.map(p=>p[1]));x1=Math.max(...o.points.map(p=>p[0]));y1=Math.max(...o.points.map(p=>p[1]))}if(o.kind==="text"){x1=x0+Math.max(15,o.text.length*(o.size||12)*.6);y0-=o.size||12;y1=o.y}if(x>=Math.min(x0,x1)-4&&x<=Math.max(x0,x1)+4&&y>=Math.min(y0,y1)-4&&y<=Math.max(y0,y1)+4)return o}return null}
+
+overlay.addEventListener("pointerdown",e=>{const [x,y]=point(e);if(app.tool==="select"){const picked=hitTest(x,y);app.selected=picked?.id||null;if(picked){snapshot();selectionDrag={id:picked.id,x,y,originX:picked.x,originY:picked.y,points:picked.points?.map(p=>[...p])};overlay.setPointerCapture(e.pointerId)}render();return;}if(y<30)return message("30 mm Homingzone bleibt reserviert.");if(app.tool==="text"){const t=prompt("Text eingeben");if(t){snapshot();app.items.push({id:uuid(),layer:app.active,kind:"text",x,y,text:t,size:12});render()}return}snapshot();drag={id:uuid(),layer:app.active,kind:app.tool,x,y,w:0,h:0,points:[[x,y]]};overlay.setPointerCapture(e.pointerId)});
+overlay.addEventListener("pointermove",e=>{if(selectionDrag){const [x,y]=point(e);const o=app.items.find(it=>it.id===selectionDrag.id);if(o){const dx=x-selectionDrag.x,dy=y-selectionDrag.y;const newX=selectionDrag.originX+dx,newY=selectionDrag.originY+dy;if(newX>=0&&newY>=30){o.x=newX;o.y=newY;if(selectionDrag.points)o.points=selectionDrag.points.map(p=>[p[0]+dx,p[1]+dy]);render()}}return}if(!drag)return;const [x,y]=point(e);drag.w=x-drag.x;drag.h=y-drag.y;if(drag.kind==="free")drag.points.push([x,y]);const previous=app.items.filter(o=>o.id!==drag.id);app.items=[...previous,normal(drag)];render()});
+overlay.addEventListener("pointerup",()=>{if(selectionDrag){selectionDrag=null;render();return}if(!drag)return;app.items=app.items.filter(o=>o.id!==drag.id);const o=normal(drag);if(o.kind==="free"&&o.points.length>1||Math.abs(o.w)>1||Math.abs(o.h)>1)app.items.push(o);drag=null;render()});
 function normal(o){const n={...o};if(["rect","ellipse"].includes(n.kind)){if(n.w<0){n.x+=n.w;n.w=-n.w}if(n.h<0){n.y+=n.h;n.h=-n.h}}return n}
 q("undo").onclick=()=>{if(!app.history.length)return;Object.assign(app,JSON.parse(app.history.pop()));render()};
 q("deleteSelected").onclick=()=>{snapshot();app.items=app.items.filter(o=>o.id!==app.selected);app.selected=null;render()};
@@ -37,3 +39,16 @@ q("cameraStop").onclick=()=>{app.camera?.getTracks().forEach(t=>t.stop());app.ca
 q("cameraCapture").onclick=()=>{const v=q("cameraView");if(!v.videoWidth)return message("Zuerst Kamera einschalten.");const x=Number(q("scanX").value),y=Number(q("scanY").value),w=Number(q("scanW").value),h=Number(q("scanH").value);if(x<0||y<30||w<=0||h<=0||x+w>390||y+h>370)return message("Scanrechteck außerhalb der Arbeitsfläche.");const c=q("scanResult");c.width=640;c.height=480;const ctx=c.getContext("2d");const sx=x/390*v.videoWidth,sy=y/370*v.videoHeight,sw=w/390*v.videoWidth,sh=h/370*v.videoHeight;ctx.drawImage(v,sx,sy,sw,sh,0,0,c.width,c.height);message("Kameraausschnitt aufgenommen (unkalibrierte Bildzuordnung).")};
 q("calibrationGuide").onclick=()=>message("Auto-Kalibrierung braucht die noch fehlende Pi-Kamera-Steuerung, Fiducial-Erkennung und Positionsvalidierung.");
 render();
+
+// Draft export from the legacy SVG preview does not include editor objects/layers.
+// Disable it whenever advanced editor objects exist, preventing silent incomplete jobs.
+const legacyExport=q("export");
+function gateLegacyExport(){if(app.items.length){legacyExport.disabled=true;legacyExport.title="Editor-Ebenen und Bilder benötigen den neuen validierten Jobplaner";}}
+const oldAdvancedRender=render;
+// Observe editor model updates after all event-driven render calls.
+const originalAdvancedExportClick=legacyExport.onclick;
+legacyExport.addEventListener("click",e=>{if(app.items.length){e.preventDefault();e.stopImmediatePropagation();message("Export gesperrt: Der bisherige SVG-Export ignoriert Editor-Objekte und Ebenen.");}},true);
+const originalRenderForGate=render;
+const gateObserver=new MutationObserver(gateLegacyExport);
+gateObserver.observe(q("drawings"),{childList:true});
+gateLegacyExport();
