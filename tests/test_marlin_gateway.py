@@ -80,6 +80,14 @@ class ProbeContactHeightTests(unittest.TestCase):
         self.assertIn('replace_active(cfg, "Z_CLEARANCE_MULTI_PROBE", "16")', source)
         self.assertIn('replace_active(cfg, "Z_CLEARANCE_BETWEEN_PROBES", "16")', source)
         self.assertLess(5.37, 16.0)
+        example = (
+            "#define Z_CLEARANCE_BETWEEN_PROBES  5 // (mm)\\n"
+            "#define Z_CLEARANCE_MULTI_PROBE     5 // (mm)\\n"
+        )
+        patched = module.replace_active(example, "Z_CLEARANCE_MULTI_PROBE", "16")
+        patched = module.replace_active(patched, "Z_CLEARANCE_BETWEEN_PROBES", "16")
+        self.assertIn("#define Z_CLEARANCE_MULTI_PROBE 16", patched)
+        self.assertIn("#define Z_CLEARANCE_BETWEEN_PROBES 16", patched)
 
 
 class ProbePinConfigurationTests(unittest.TestCase):
