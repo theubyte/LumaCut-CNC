@@ -1,0 +1,28 @@
+[Unit]
+Description=LumaCut CNC Marlin (experimental) Pi400 Wi-Fi Web + USB LightBurn gateway
+After=network-online.target
+Wants=network-online.target
+Conflicts=lumacut.service
+
+[Service]
+Type=simple
+User=lumacut
+Group=lumacut
+SupplementaryGroups=dialout video render
+WorkingDirectory=/opt/lumacut
+EnvironmentFile=/etc/lumacut/lumacut.env
+Environment=PYTHONPATH=/opt/lumacut/pi400
+ExecStart=/usr/bin/python3 -m marlin.web
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+NoNewPrivileges=yes
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ProtectSystem=strict
+ReadWritePaths=/var/lib/lumacut
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
