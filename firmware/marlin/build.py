@@ -110,17 +110,17 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
 
 
 PIN_PATCH = """
-// LumaCut CNC: FAN1 board header is PC6, FAN2 header is PC7.
-// FAN1 VCC is the supplied 24V rail. PC6 drives its switched
-// low-side GND MOSFET; PC6 does NOT generate or source 24V.
-// The laser PSU requires a qualified external interlock / emergency cut.
-// PA1 is ONLY the logic-level PWM command, not a laser power output.
-// Keep the PA1 control circuit suitably isolated from switching
-// the FAN1 laser supply return: no direct unsafe shared-ground wiring.
-// Disable Marlin's fan ownership of PC6. The laser enable is the
-// only software-controlled function allowed to use this pin.
+// LumaCut CNC laser 24V rail/fan on FAN1 connector, controlled by
+// FAN0 firmware output PC6 (M106 P0 S255/M107 P0).
+// PC6 is a switched low-side MOSFET, not a 24V source.
+// Laser power remains on during post-job cooldown, while PWM PA1 is
+// disabled by M5 I. PC7 (unused FAN2 pin) satisfies Marlin laser
+// enable; it MUST NOT be wired to a live laser power rail.
+// IMPORTANT: this is Pi-mediated cooldown, not hardware-backed.
+// Provide a laser-rated independent emergency cutoff / fan after-run
+// controller for cooling during controller failure or power loss.
 #undef FAN0_PIN
-#define FAN0_PIN -1
+#define FAN0_PIN PC6
 #undef FAN1_PIN
 #define FAN1_PIN -1
 #undef CONTROLLER_FAN_PIN
@@ -129,7 +129,7 @@ PIN_PATCH = """
 #define HEATER_0_PIN -1
 #undef HEATER_BED_PIN
 #define HEATER_BED_PIN -1
-#define SPINDLE_LASER_ENA_PIN PC6
+#define SPINDLE_LASER_ENA_PIN PC7
 #define SPINDLE_LASER_PWM_PIN PA1
 #define COOLANT_MIST_PIN PC8
 #define COOLANT_FLOOD_PIN PC9
@@ -206,7 +206,7 @@ def main():
             "environment": PIO_ENV,
             "cpu": "STM32F103RC",
             "usb": "Marlin native USB CDC",
-            "laser": {"enable": "FAN1 PC6 (24V VCC / switched low-side GND)", "pwm": "PA1",
+            "laser": {"supply": "FAN1 PC6 / FAN0 M106-M107 (Pi 180s cooldown)", "enable": "PC7 unwired", "pwm": "PA1",
                       "mode": "M3 I", "s_max": 255},
             "accessories": {"lights": "M7 HE0 PC8",
                             "exhaust": "M8 BED PC9"},
