@@ -203,21 +203,16 @@ class USBProtocolTests(unittest.TestCase):
         self.assertNotIn(b"M112\n",serial.writes)
         self.assertFalse(controller.emergency_latched)
 
-    def test_lightburn_workpiece_probe_g30_keeps_xy_homing_and_retracts(self):
-        serial=FakeSerial(["ok\n"]*7 + ["X:0.00 Y:0.00 Z:20.00\n", "ok\n"])
+    def test_lightburn_g30_must_never_rezero_bed_origin(self):
         bridge=MarlinTransport("/dev/null")
-        bridge.serial=serial
+        bridge.serial=FakeSerial([])
         bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
         bridge.homed=True
         bridge.homing_verified=True
-        bridge.clearance_mm=20.0
-        reply=bridge.probe_workpiece(owner="lightburn")
-        self.assertEqual(bridge.surface_z,0.0)
-        self.assertEqual(bridge.status()["laser_focus_z"],5.5)
-        self.assertEqual(bridge.status()["probe_minimum_z"],2.0)
-        self.assertEqual(serial.writes[:3],[b"M5 I\n",b"G28 Z\n",b"M400\n"])
-        self.assertEqual(serial.writes[4],b"G0 Z20.00 F360\n")
-        self.assertEqual(reply[-1],"ok")
+        with self.assertRaisesRegex(RuntimeError,"Maschinenboden Z=0"):
+            bridge.probe_workpiece(owner="lightburn")
+        self.assertEqual(bridge.serial.writes,[])
+        self.assertIsNone(bridge.surface_z)
 
     def test_z_motion_floor_blocks_below_2mm_from_material_contact(self):
         serial=FakeSerial([
@@ -360,7 +355,7 @@ with web.app.test_client() as client:
         self.assertIn('estimated_tip_gap_mm',ui)
         # Offset must not secretly change homing motion without confirming
         # whether the probe point is physically above or below laser tip.
-        self.assertIn("probe_contact_confirmed=probe_contact_confirmed",web)
+        self.assertIn("machine.safe_home(owner=\"web\", clearance_mm=",web)
 
     def test_machine_web_and_service_modules_compile(self):
         import subprocess
