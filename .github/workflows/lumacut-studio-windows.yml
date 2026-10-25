@@ -32,7 +32,7 @@ jobs:
           node --check job-planner.mjs
           node --check raster-planner.mjs
           node --check unified-job.mjs
-          node --test geometry.test.mjs job-planner.test.mjs raster-planner.test.mjs unified-job.test.mjs
+          node --test geometry.test.mjs job-planner.test.mjs raster-planner.test.mjs unified-job.test.mjs unified-export.test.mjs
       - name: Prepare frontend distribution
         shell: pwsh
         run: |
