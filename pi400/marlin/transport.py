@@ -165,6 +165,7 @@ class MarlinTransport:
         self.last_probe_laser_xy = None
         self.last_xy_commanded = None
         self.homing_chime_enabled = True
+        self.job_chime_enabled = True
         self.absolute_mode = True
         self.focused_this_job = False
         self.fan_off_at = None
@@ -490,6 +491,80 @@ class MarlinTransport:
             self.fan_off_at = None
             return True
 
+    def _play_stepper_chime_locked(self, event: str) -> bool:
+        """Play musical STEP frequencies on TMC2209 X, returning to X0.
+
+        Tones use real planner STEP pulses, not M300 (which needs a buzzer).
+        The X driver is temporarily changed from quiet StealthChop to audible
+        spreadCycle via Marlin M569, then restored. Each note uses a small
+        reversible X motion inside the completely empty 30mm homing strip.
+        The physical step frequency is (feed_mm_min / 60) * steps_per_mm.
+        Call only AFTER completed homing or parked job, at X0/Y0 with Z safe.
+        """
+        if (event not in ("home", "done") or not self.homed
+                or self.serial is None or self.laser_enabled
+                or not self.absolute_mode or self.position is None):
+            return False
+        x, y, z = self.position
+        if abs(x) > 0.15 or abs(y) > 0.15 or z < self.clearance_mm - 0.15:
+            LOG.warning("Skip stepper chime: not verified in X0/Y0 safe park")
+            return False
+        notes = ((784.0, 2.0), (523.25, 2.0)) if event == "home" else (
+            (523.25, 1.5), (659.25, 1.5), (784.0, 2.0))
+        step_per_mm = 80.0  # LumaCut X M92 EEPROM; adjust if calibrated.
+        spread = False
+        relative = False
+        started_motion = False
+        ok = False
+        try:
+            self._exchange_locked("M400", timeout=20)
+            self._exchange_locked("M5 I", timeout=8)
+            self._exchange_locked("M569 S0 X", timeout=8)
+            spread = True
+            self._exchange_locked("G91", timeout=8)
+            relative = True
+            for frequency_hz, stroke_mm in notes:
+                feed = round(frequency_hz * 60.0 / step_per_mm)
+                started_motion = True
+                self._exchange_locked(f"G1 X{stroke_mm:g} F{feed}", timeout=15)
+                self._exchange_locked(f"G1 X{-stroke_mm:g} F{feed}", timeout=15)
+                self._exchange_locked("M400", timeout=20)
+                self._exchange_locked("G4 P60", timeout=8)
+            ok = True
+        except Exception as exc:
+            LOG.warning("Stepper music '%s' unavailable: %s", event, exc)
+            self.fault = ("Motormelodie: " + str(exc))[:200]
+            if started_motion:
+                # If a stroke failed, the logical park coordinate may be
+                # wrong. Don't permit subsequent processing without homing.
+                self.homed = False
+        finally:
+            if relative and self.serial is not None:
+                try:
+                    self._exchange_locked("G90", timeout=8)
+                    self.absolute_mode = True
+                except Exception:
+                    self.homed = False
+                    ok = False
+            if spread and self.serial is not None:
+                try:
+                    self._exchange_locked("M569 S1 X", timeout=8)
+                except Exception:
+                    LOG.error("Could not restore X driver StealthChop mode")
+                    ok = False
+            if self.serial is not None:
+                try:
+                    self._exchange_locked("M400", timeout=20)
+                    self._exchange_locked("M114", timeout=8)
+                    if self.position is None or max(
+                        abs(self.position[0]), abs(self.position[1])) > 0.15:
+                        self.homed = False
+                        ok = False
+                except Exception:
+                    self.homed = False
+                    ok = False
+        return ok
+
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
                   probe_contact_confirmed: bool = False):
         """LightBurn G28: home XY first into EMPTY L-shaped 30mm bed zone.
@@ -520,20 +595,7 @@ class MarlinTransport:
             self.focused_this_job = False
             commands = ["M5 I", "G28 X Y", "M400",
                         "G28 Z", "M400", "G91",
-                        f"G0 Z{clearance:.2f} F600", "G90", "M400"]
-            if self.homing_chime_enabled:
-                # K1-style stepper sound: longer, reversible X strokes
-                # let the motion planner actually reach the commanded step
-                # frequency. 0.8mm strokes were inaudible on quiet TMC2209.
-                # All strokes stay within the empty X=0..8mm home strip;
-                # no PWM / no Z / no residual position shift.
-                commands.extend([
-                    "G91",
-                    "G1 X8 F1200", "G1 X-8 F1200", "M400",
-                    "G1 X8 F1600", "G1 X-8 F1600", "M400",
-                    "G90",
-                ])
-            commands.append("M114")
+                        f"G0 Z{clearance:.2f} F600", "G90", "M400", "M114"]
             result = []
             try:
                 for cmd in commands:
@@ -543,8 +605,14 @@ class MarlinTransport:
                         # G28 Z is a BED / MACHINE origin, NEVER workpiece Z.
                         self.surface_z = None
                 self.homed = True
+                self.absolute_mode = True
                 self.guard = MarlinLaserGuard()
                 self.laser_enabled = False
+                if self.homing_chime_enabled:
+                    self._play_stepper_chime_locked("home")
+                    if not self.homed:
+                        raise RuntimeError("Motor melody lost verified coordinates; home again")
+                    result = self._exchange_locked("M114", timeout=8)
                 if self.fan_power:
                     self.fan_off_at = time.monotonic() + self.fan_cooldown_s
                 # One upstream G28 must receive exactly one ACK. Sending
@@ -594,6 +662,12 @@ class MarlinTransport:
             self._exchange_locked("M400", timeout=90)
             result = self._exchange_locked("M114", timeout=8)
             self.focused_this_job = False
+            self.last_xy_commanded = (0.0, 0.0)
+            if self.job_chime_enabled:
+                self._play_stepper_chime_locked("done")
+                if not self.homed:
+                    raise RuntimeError("Motor melody lost verified coordinates; home again")
+                result = self._exchange_locked("M114", timeout=8)
             return result
 
     def probe_workpiece(self, owner: str = "lightburn"):
