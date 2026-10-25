@@ -136,15 +136,51 @@ class FirmwareDirectionContractTests(unittest.TestCase):
         self.assertIn('cfg = replace_active(cfg, "Z_MIN_ENDSTOP_INVERTING", "true")',build)
 
 
+class ZSpeedProfileTests(unittest.TestCase):
+    def test_firmware_sets_both_z_homing_and_g30_speeds_to_1_8x(self):
+        from importlib.util import module_from_spec, spec_from_file_location
+        spec = spec_from_file_location(
+            "lumacut_z_speed_build", ROOT / "firmware" / "marlin" / "build.py")
+        module = module_from_spec(spec)
+        spec.loader.exec_module(module)
+        example = (
+            "#define HOMING_FEEDRATE_MM_M { (50*60), (50*60), (4*60) }\n"
+            "#define Z_PROBE_FEEDRATE_FAST (4*60)\n"
+            "#define Z_PROBE_FEEDRATE_SLOW (Z_PROBE_FEEDRATE_FAST / 2)\n"
+            "#define DEFAULT_MAX_FEEDRATE { 500, 500, 5, 30 }\n"
+        )
+        source = (ROOT / "firmware" / "marlin" / "build.py").read_text()
+        self.assertIn('replace_active(cfg, "HOMING_FEEDRATE_MM_M",', source)
+        self.assertIn('replace_active(cfg, "Z_PROBE_FEEDRATE_FAST", "432")', source)
+        self.assertIn('replace_active(cfg, "Z_PROBE_FEEDRATE_SLOW", "216")', source)
+        self.assertIn('replace_active(cfg, "DEFAULT_MAX_FEEDRATE", "{ 150, 150, 9 }")', source)
+        homing = module.replace_active(
+            example, "HOMING_FEEDRATE_MM_M", "{ (50*60), (50*60), 432 }")
+        fast = module.replace_active(homing, "Z_PROBE_FEEDRATE_FAST", "432")
+        slow = module.replace_active(fast, "Z_PROBE_FEEDRATE_SLOW", "216")
+        result = module.replace_active(
+            slow, "DEFAULT_MAX_FEEDRATE", "{ 150, 150, 9 }")
+        for line in (
+            "#define HOMING_FEEDRATE_MM_M { (50*60), (50*60), 432 }",
+            "#define Z_PROBE_FEEDRATE_FAST 432",
+            "#define Z_PROBE_FEEDRATE_SLOW 216",
+            "#define DEFAULT_MAX_FEEDRATE { 150, 150, 9 }",
+        ):
+            self.assertIn(line, result)
+        self.assertEqual(432 / 240, 1.8)
+        self.assertEqual(216 / 120, 1.8)
+        self.assertLessEqual(432 / 60, 9)
+
+
 class USBProtocolTests(unittest.TestCase):
     def test_actual_marlin_m115_and_no_grbl_identity_spoof(self):
         serial=FakeSerial([
             "FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin\n",
-            "ok P15 B3\n", "ok\n"
+            "ok P15 B3\n", "ok\n", "ok\n"
         ])
         bridge=MarlinTransport("/dev/null",serial_factory=lambda *a,**k:serial)
         bridge.ensure_ready()
-        self.assertEqual(serial.writes,[b"M115\n",b"M5 I\n"])
+        self.assertEqual(serial.writes,[b"M115\n",b"M5 I\n",b"M203 Z9\n"])
         self.assertTrue(bridge.status()["connected"])
         self.assertIn("LumaCut CNC",bridge.status()["identity"])
 
