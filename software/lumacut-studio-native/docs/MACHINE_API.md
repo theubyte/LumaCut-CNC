@@ -319,5 +319,8 @@ Der Software-NOT-AUS ersetzt **nicht** den physischen Not-Aus-Schalter.
    „feat(pi400): op=park in /api/action“. Ältere Pis melden das klar (siehe
    oben).
 7. **Kein HTTPS:** Die Verbindung läuft unverschlüsselt im LAN.
-8. **CI:** Der GitHub-Workflow führt die nativen Tests (`pytest`) noch nicht
-   aus. Lokal: `QT_QPA_PLATFORM=offscreen python -m pytest tests`.
+8. **Tests:** Die Maschinen-Tests (`tests/test_machine_*.py`) laufen gegen
+   den Fake-Pi (`tests/fake_pi.py`) und im Workflow
+   `lumacut-studio-native.yml` headless vor dem .exe-Build. Gegen einen
+   echten Pi ist die Anbindung noch nicht getestet. Lokal:
+   `QT_QPA_PLATFORM=offscreen python -m pytest tests`.
