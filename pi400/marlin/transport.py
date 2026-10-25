@@ -385,7 +385,9 @@ class MarlinTransport:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity:
-                raise ConnectionError("SKR USB nicht verbunden")
+                raise ConnectionError("Marlin USB nicht bereit")
+            if self.emergency_latched:
+                raise RuntimeError("M112-Notstopp aktiv; keine weiteren Bewegungen")
             normalized = normalize(cmd)
             # A bare G0/G1 from LightBurn changes only the modal motion
             # type; there is no destination and thus no motion to authorize.
@@ -447,11 +449,15 @@ class MarlinTransport:
                         if "X" in coords and "Y" in coords:
                             self.last_xy_commanded = (coords["X"], coords["Y"])
                         elif self.last_xy_commanded is not None:
-                            lx, ly = self.last_xy_commanded
-                            self.last_xy_commanded = (coords.get("X", lx),
-                                                      coords.get("Y", ly))
-                if normalized == "M3 I":
-                    self.laser_enabled = True
+                            self.last_xy_commanded = (
+                                coords.get("X", self.last_xy_commanded[0]),
+                                coords.get("Y", self.last_xy_commanded[1]))
+                if normalized == "G90":
+                    self.absolute_mode = True
+                elif normalized == "G91":
+                    self.absolute_mode = False
+                if normalized.startswith("M3 I"):
+                    self.laser_enabled = True  # PWM stays at zero until G1 S
                 if normalized.startswith("M5"):
                     self.laser_enabled = False
                     if self.fan_power:
@@ -557,15 +563,73 @@ class MarlinTransport:
                 try:
                     self._exchange_locked("M400", timeout=20)
                     self._exchange_locked("M114", timeout=8)
-                    if self.position is not None:
-                        x, y, z = self.position
-                        if abs(x) > 0.2 or abs(y) > 0.2:
-                            self.homed = False
-                            ok = False
+                    if self.position is None or max(
+                        abs(self.position[0]), abs(self.position[1])) > 0.15:
+                        self.homed = False
+                        ok = False
                 except Exception:
                     self.homed = False
                     ok = False
         return ok
+
+    def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
+                  probe_contact_confirmed: bool = False):
+        """LightBurn G28: home XY first into EMPTY L-shaped 30mm bed zone.
+
+        This explicitly relies on the operator keeping the X0/Y0 strips clear
+        of any material, and the physical head/probe travel being collision-free.
+        Unlike the old routine, it never attempts Z before XY are referenced.
+        """
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if not self.homing_verified:
+                raise PermissionError("Mechanik/Z-Endschalter nicht verifiziert")
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+            clearance = self.clearance_mm if clearance_mm is None else clearance_mm
+            if probe_contact_confirmed:
+                raise ValueError("G28 referenziert ausschließlich den Maschinenboden; Werkstückkontakt separat mit G30")
+            if not isinstance(clearance, (int, float)) or not 0.5 <= clearance <= 50:
+                raise ValueError("Unzulässiger Z-Sicherheitsabstand")
+            previous_owner = self.owner
+            self.owner = owner
+            self.homed = False
+            self.z_homed = False
+            self.surface_z = None
+            self.last_probe_laser_xy = None
+            self.last_xy_commanded = None
+            self.focused_this_job = False
+            commands = ["M5 I", "G28 X Y", "M400",
+                        "G28 Z", "M400", "G91",
+                        f"G0 Z{clearance:.2f} F600", "G90", "M400", "M114"]
+            result = []
+            try:
+                for cmd in commands:
+                    result = self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35)
+                    if cmd == "G28 Z":
+                        self.z_homed = True
+                        # G28 Z is a BED / MACHINE origin, NEVER workpiece Z.
+                        self.surface_z = None
+                self.homed = True
+                self.absolute_mode = True
+                self.guard = MarlinLaserGuard()
+                self.laser_enabled = False
+                if self.homing_chime_enabled:
+                    self._play_stepper_chime_locked("home")
+                    if not self.homed:
+                        raise RuntimeError("Motor melody lost verified coordinates; home again")
+                    result = self._exchange_locked("M114", timeout=8)
+                if self.fan_power:
+                    self.fan_off_at = time.monotonic() + self.fan_cooldown_s
+                # One upstream G28 must receive exactly one ACK. Sending
+                # internal ACKs would corrupt LightBurn flow control.
+                return result
+            except Exception as exc:
+                self._close_locked("Referenzfahrt fehlgeschlagen: " + str(exc))
+                raise
+            finally:
+                self.owner = previous_owner
 
     def park_safezone(self, owner: str = "web"):
         """LightBurn M2: laser-off, Z retract, then XY park inside keep-out.
@@ -588,9 +652,14 @@ class MarlinTransport:
             self._exchange_locked("M400", timeout=30)
             self._exchange_locked("M114", timeout=8)
             if self.position is None:
-                raise RuntimeError("Parken: aktuelle Position unbekannt")
-            z = self.position[2]
-            z_target = max(z, self.clearance_mm)
+                raise RuntimeError("Parkhöhe unbekannt: keine Fahrt")
+            # Positive Z is verified upward, and Z_max is currently 90mm.
+            # Current height always wins, to avoid a dangerous downward park.
+            z_target = max(self.position[2], self.clearance_mm,
+                           0.0 if self.surface_z is None else
+                           self.surface_z + self.probe_clearance_mm)
+            if z_target > 90.0:
+                raise RuntimeError("Z-Position außerhalb konfiguriertem Z-Hub")
             if not self.absolute_mode:
                 self._exchange_locked("G90", timeout=8)
                 self.absolute_mode = True
@@ -675,29 +744,14 @@ class MarlinTransport:
             self._exchange_locked("M400", timeout=60)
             replies = self._exchange_locked("G30", timeout=120)
             contact = None
-            failed = False
             for line in replies:
-                if "probing failed" in line.lower() or "error:" in line.lower():
-                    failed = True
                 match = re.search(
                     r"\bBed\s+X:\s*[-+]?\d+(?:\.\d+)?\s+Y:\s*[-+]?\d+(?:\.\d+)?\s+Z:\s*([-+]?\d+(?:\.\d+)?)",
                     line, re.IGNORECASE)
                 if match:
                     contact = float(match.group(1))
-                # Fallback: some Marlin builds report the contact in an echo or M114-style line
-                m2 = re.search(r"Z:\s*([-+]?\d+(?:\.\d+)?)", line)
-                if m2 and contact is None:
-                    try:
-                        cand = float(m2.group(1))
-                        if 0.0 <= cand <= 90.0:
-                            contact = cand
-                    except ValueError:
-                        pass
             if contact is None or not 0.0 <= contact <= 90.0:
-                msg = "Marlin G30 meldet keinen gültigen Z-Tastkontakt"
-                if failed:
-                    msg += " (Probing Failed). Prüfe Cap:Z_PROBE:1 und Z_CLEARANCE_MULTI_PROBE."
-                raise RuntimeError(msg)
+                raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
             self.surface_z = contact
             self.last_probe_laser_xy = (laser_x, laser_y)
             lift = max(self.clearance_mm, contact + self.probe_clearance_mm)
@@ -715,23 +769,27 @@ class MarlinTransport:
                 "connected": self.serial is not None and bool(self.identity),
                 "state": self.state, "owner": self.owner or "Frei",
                 "identity": self.identity, "homed": self.homed,
-                "z_homed": self.z_homed,
+                "z_homed": self.z_homed, "z_probe_supported": self.cap_z_probe, "emergency_latched": self.emergency_latched,
                 "homing_verified": self.homing_verified,
-                "emergency_latched": self.emergency_latched,
-                "position": self.position,
-                "fault": self.fault, "commands": self.commands,
-                "serial_errors": self.serial_errors,
-                "lightburn_clients": self.lightburn_clients,
-                "laser_enabled": self.laser_enabled,
-                "fan_power": self.fan_power,
+                "position": self.position, "fault": self.fault,
                 "lights": self.lights, "exhaust": self.exhaust,
+                "laser_armed": self.laser_enabled,
+                "laser_cooling_fan_on": self.fan_power,
                 "workpiece_surface_z": self.surface_z,
+                "safe_zone_xy_mm": self.safe_zone_xy_mm,
                 "probe_xy_offset_mm": self.probe_xy_offset_mm,
-                "last_probe_laser_xy": self.last_probe_laser_xy,
+                "cutting_bounds": {"x_min":self.safe_zone_xy_mm,
+                                   "y_min":self.safe_zone_xy_mm,
+                                   "x_max":390.0, "y_max":370.0},
                 "probe_minimum_z": (None if self.surface_z is None else
                                     self.surface_z + self.probe_clearance_mm),
                 "laser_focus_z": (None if self.surface_z is None else
                                   self.surface_z + self.focus_gap_mm - self.probe_tip_offset_mm),
+                "cooldown_remaining_s": (None if self.fan_off_at is None else
+                    max(0, round(self.fan_off_at - time.monotonic()))),
+                "serial_errors": self.serial_errors,
+                "command_count": self.commands,
+                "lightburn_clients": self.lightburn_clients,
                 "recent": list(self.lines)[-25:]
             }
 
@@ -790,17 +848,32 @@ class MarlinTransport:
                             continue
                         cmd = fragment.decode("ascii", errors="replace")
                         fragment.clear()
-                        normalized = normalize(cmd)
-                        if not normalized:
-                            client.sendall(b"ok\r\n")
-                            continue
                         try:
-                            if normalized == "G28":
-                                lines = self.safe_home(owner="lightburn")
-                            elif normalized == "G30":
-                                lines = self.probe_workpiece(owner="lightburn")
+                            normalized = normalize(cmd)
+                            if normalized == "M112":
+                                self.emergency_stop()
+                                client.sendall(b"Error:LumaCut M112 emergency stop sent; reset required\r\n")
+                                return
+                            if normalized == "G00 G17 G40 G21":
+                                # LightBurn's Marlin-flavor initialization:
+                                # G00 is a modal rapid with no destination;
+                                # G17 and G40 don't change our XY laser
+                                # trajectory. Send real G21 to Marlin and
+                                # return its genuine ACK.
+                                lines = self.command("G21", owner="lightburn", timeout=15)
+                            elif normalized == "G54":
+                                # This controller uses the default frame only.
+                                # Synchronize against Marlin (actual ACK),
+                                # without pretending to support G55+ offsets.
+                                lines = self.command("M400", owner="lightburn", timeout=15)
                             elif normalized == "M2":
                                 lines = self.park_safezone(owner="lightburn")
+                            elif normalized == "G30":
+                                lines = self.probe_workpiece(owner="lightburn")
+                            elif normalized.startswith("G28"):
+                                if normalized != "G28":
+                                    raise ValueError("G28 nur ohne Achsen über Pi erlaubt")
+                                lines = self.safe_home(owner="lightburn")
                             else:
                                 lines = self.command(cmd, owner="lightburn", timeout=150.0)
                             for line in lines:
