@@ -1,3 +1,4 @@
+import {planVectorJob,exportOfflineGcode,planStatistics} from "./job-planner.mjs";
 
 const q=id=>document.getElementById(id),ns="http://www.w3.org/2000/svg";
 const KEY="lumacut.studio.v2.materials";
@@ -56,3 +57,9 @@ gateLegacyExport();
 function syncInspector(){const o=app.items.find(it=>it.id===app.selected);q("selectedName").textContent=o?o.kind+" · "+(app.layers.find(l=>l.id===o.layer)?.name||"Ebene"):"Kein Objekt ausgewählt";const dims=o?boundsOf(o):null;for(const [field,value] of Object.entries({shapeX:dims?.x,shapeY:dims?.y,shapeW:dims?.w,shapeH:dims?.h})){const input=q(field);if(document.activeElement!==input)input.value=value===undefined?"":Number(value.toFixed(2));input.disabled=!o}}
 function boundsOf(o){if(o.kind==="free"&&o.points?.length){const xs=o.points.map(p=>p[0]),ys=o.points.map(p=>p[1]);return{x:Math.min(...xs),y:Math.min(...ys),w:Math.max(...xs)-Math.min(...xs),h:Math.max(...ys)-Math.min(...ys)}}return{x:o.x,y:o.y,w:o.w||0,h:o.h||0}}
 q("applyGeometry").onclick=()=>{const o=app.items.find(it=>it.id===app.selected);if(!o)return;const vals=["shapeX","shapeY","shapeW","shapeH"].map(id=>Number(q(id).value));const [x,y,w,h]=vals;if(!vals.every(Number.isFinite)||x<0||y<30||w<=0||h<=0||x+w>390||y+h>370)return message("Objektmaße außerhalb des zulässigen Arbeitsbereichs.");const b=boundsOf(o);snapshot();if(o.kind==="free"&&o.points?.length){o.points=o.points.map(p=>[x+(p[0]-b.x)/Math.max(b.w,.001)*w,y+(p[1]-b.y)/Math.max(b.h,.001)*h])}else{o.x=x;o.y=y;o.w=w;o.h=h}render();message("Objektgeometrie aktualisiert.")};
+
+const plannerPanel=document.createElement("div");plannerPanel.className="group";plannerPanel.innerHTML='<div class="gtitle">Jobplanung (Offline)</div><div class="actions"><button id="planLayers">Ebenen prüfen</button><button id="exportLayers">Vektor-G-Code exportieren</button></div><p id="planSummary" class="hint">Nur Vektorformen, ohne Maschinenfreigabe.</p>';
+document.querySelector('[data-panel="process"]').append(plannerPanel);
+function currentPlan(){return planVectorJob({layers:app.layers,items:app.items})}
+q("planLayers").onclick=()=>{try{const p=currentPlan(),s=planStatistics(p);q("planSummary").textContent=`${s.layers} Ebenen · ${s.segments} Segmente · ${s.lengthMm.toFixed(1)} mm Bearbeitungsweg (ohne Leerfahrten)`;message("Offline-Vektorplanung erfolgreich.")}catch(err){q("planSummary").textContent=err.message;message("Planung nicht möglich: "+err.message)}};
+q("exportLayers").onclick=()=>{try{const p=currentPlan();download("LumaCut-Offline-Entwurf.nc",exportOfflineGcode(p),"text/plain");message("Offline-Entwurf gespeichert – nicht direkt an den Laser senden.")}catch(err){message("Export blockiert: "+err.message)}};
