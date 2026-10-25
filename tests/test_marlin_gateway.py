@@ -219,8 +219,11 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(reply[-1],"ok")
 
     def test_z_motion_floor_blocks_below_2mm_from_material_contact(self):
-        serial=FakeSerial(["ok\n"]*4 +
-                          ["X:0 Y:0 Z:20\n","ok\n"]*2)
+        serial=FakeSerial([
+            "ok\n", "X:0 Y:0 Z:20\n", "ok\n",
+            "ok\n", "X:0 Y:0 Z:20\n", "ok\n",
+            "ok\n",
+        ])
         bridge=MarlinTransport("/dev/null")
         bridge.serial=serial
         bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
