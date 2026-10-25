@@ -27,6 +27,7 @@ class JobLayer:
     speed_mm_min: float
     passes: int
     polylines: list[list[tuple[float, float]]]  # Maschinen-mm
+    z_step_mm: float = 0.0  # Fokus-Absenkung je Durchgang
 
 
 def job_layers(doc: Document) -> list[JobLayer]:
@@ -50,7 +51,7 @@ def job_layers(doc: Document) -> list[JobLayer]:
                 polys.append([to_machine(p.x(), p.y()) for p in poly])
         if polys:
             result.append(JobLayer(layer.id, layer.name, layer.power, layer.speed,
-                                   layer.passes, polys))
+                                   layer.passes, polys, layer.z_step))
     return result
 
 

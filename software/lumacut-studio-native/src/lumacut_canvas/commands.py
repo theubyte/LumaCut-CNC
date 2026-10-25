@@ -220,7 +220,7 @@ class SetLayerAttrCommand(QUndoCommand):
 
     LABELS = {"name": "Ebene umbenennen", "color": "Ebenenfarbe", "power": "Leistung",
               "speed": "Geschwindigkeit", "passes": "Durchgänge",
-              "visible": "Sichtbarkeit", "locked": "Sperre"}
+              "visible": "Sichtbarkeit", "locked": "Sperre", "z_step": "Fokus-Absenkung"}
 
     def __init__(self, doc: Document, layer_id: str, attr: str, value) -> None:
         super().__init__(self.LABELS.get(attr, attr))

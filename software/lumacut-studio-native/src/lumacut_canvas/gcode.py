@@ -4,7 +4,10 @@
 marlin-postprocessor.mjs``) und der Pi-Freigabeprüfung
 (``pi400/marlin/transport.py``): einmal ``M3 I`` (Inline-Laser) für den
 ganzen Auftrag, G0 ohne Leistung, jedes G1 mit eigenem ``S`` (0..255) und
-``F``; am Ende ``M5 I`` und ``M400``. Referenzfahrt, Fokus und Parken
+``F``; am Ende ``M5 I`` und ``M400``. Ebenen mit ``z_step`` senken den
+Fokus zwischen den Durchgängen relativ ab (``G91`` / ``G0 Z-… F600`` /
+``G90``) und fahren nach der Ebene wieder auf die Ausgangshöhe; der Pi
+fokussiert vor der ersten Leistungsfahrt absolut, daher erst ab Durchgang 2. Referenzfahrt, Fokus und Parken
 übernimmt der Pi – deshalb kein G28 hier.
 
 Die Funktion erzeugt nur Text; sie startet nie eine Maschine.
@@ -15,7 +18,8 @@ from __future__ import annotations
 import re
 
 from .export import JobLayer, job_layers
-from .model import PASSES_RANGE, POWER_RANGE, SPEED_RANGE, Document
+from .model import (MAX_FOCUS_DROP_MM, PASSES_RANGE, POWER_RANGE, SPEED_RANGE,
+                    Z_STEP_RANGE, Document)
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
 
 PWM_MAX = 255
@@ -48,16 +52,25 @@ def layers_to_gcode(layers: list[JobLayer]) -> str:
                 and SPEED_RANGE[0] <= layer.speed_mm_min <= SPEED_RANGE[1]
                 and PASSES_RANGE[0] <= layer.passes <= PASSES_RANGE[1]):
             raise ValueError(f"Ungültige Ebenen-Parameter: {layer.name}")
+        z_step = float(getattr(layer, "z_step_mm", 0.0) or 0.0)
+        drop = z_step * (layer.passes - 1)
+        if not Z_STEP_RANGE[0] <= z_step <= Z_STEP_RANGE[1] or drop > MAX_FOCUS_DROP_MM + _EPS:
+            raise ValueError(f"Fokus-Absenkung zu groß ({drop:.2f} mm > "
+                             f"{MAX_FOCUS_DROP_MM:g} mm): {layer.name}")
         s = round(layer.power_percent / 100 * PWM_MAX)
         f = f"{layer.speed_mm_min:g}"
         out.append("; LAYER " + _comment(layer.name))
         for p in range(layer.passes):
+            if p and z_step > 0:
+                out += ["G91", f"G0 Z{-z_step:.3f} F600", "G90"]
             out.append(f"; PASS {p + 1} OF {layer.passes}")
             for line in layer.polylines:
                 if len(line) < 2:
                     continue
                 out.append(f"G0 {_xy(*line[0])}")
                 out.extend(f"G1 {_xy(*pt)} F{f} S{s}" for pt in line[1:])
+        if z_step > 0 and drop > 0:
+            out += ["G91", f"G0 Z{drop:.3f} F600", "G90"]  # zurück auf Fokushöhe
     out += ["M5 I", "M400"]
     return "\n".join(out) + "\n"
 

@@ -24,6 +24,12 @@ from .workarea import Rect, clamp_offset, fit_scale, is_inside_work_area
 POWER_RANGE = (1.0, 100.0)          # Prozent
 SPEED_RANGE = (1.0, 6000.0)         # mm/min (Marlin-Vorschub F)
 PASSES_RANGE = (1, 30)
+# Fokus-Absenkung je Durchgang in mm (Z fährt nach jedem Durchgang um diesen
+# Wert tiefer, z. B. für Mehrfach-Schnitte in dickem Material). Die Summe
+# über alle Durchgänge ist durch MAX_FOCUS_DROP_MM begrenzt: Der Pi fokussiert
+# auf Oberfläche + 5,5 mm und sperrt Z unter Oberfläche + 2 mm.
+Z_STEP_RANGE = (0.0, 2.0)
+MAX_FOCUS_DROP_MM = 3.0
 
 SHAPE_KINDS = ("rect", "ellipse", "line", "text", "polygon", "path")
 # Objekte mit Stützpunkten: "polygon" geschlossen, "path" (Freihand) offen.
@@ -54,6 +60,7 @@ class Layer:
     visible: bool = True
     locked: bool = False
     id: str = field(default_factory=new_id)
+    z_step: float = 0.0             # mm Fokus-Absenkung je Durchgang (0 = aus)
 
     def normalized(self) -> "Layer":
         """Kopie mit Parametern im gültigen Bereich."""
@@ -62,12 +69,13 @@ class Layer:
             power=_clamp(float(self.power), *POWER_RANGE),
             speed=_clamp(float(self.speed), *SPEED_RANGE),
             passes=int(_clamp(int(self.passes), *PASSES_RANGE)),
+            z_step=round(_clamp(float(self.z_step), *Z_STEP_RANGE), 3),
         )
 
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "color": self.color,
                 "power": self.power, "speed": self.speed, "passes": self.passes,
-                "visible": self.visible, "locked": self.locked}
+                "visible": self.visible, "locked": self.locked, "z_step": self.z_step}
 
     @staticmethod
     def from_dict(d: dict) -> "Layer":
@@ -76,7 +84,7 @@ class Layer:
             color=str(d.get("color", LAYER_COLORS[0])),
             power=float(d.get("power", 50.0)), speed=float(d.get("speed", 1500.0)),
             passes=int(d.get("passes", 1)), visible=bool(d.get("visible", True)),
-            locked=bool(d.get("locked", False)),
+            locked=bool(d.get("locked", False)), z_step=float(d.get("z_step", 0.0)),
         ).normalized()
 
 
@@ -426,6 +434,7 @@ class Document:
             setattr(layer, k, v)
         normalized = layer.normalized()
         layer.power, layer.speed, layer.passes = normalized.power, normalized.speed, normalized.passes
+        layer.z_step = normalized.z_step
         self.changed()
 
     # --- Objekte ----------------------------------------------------------
