@@ -167,6 +167,8 @@ label{display:block;margin-bottom:5px}
 <div class="space"></div>
 <div class="two"><select id="jobSelect"><option>Keine Dateien</option></select><button data-action="start" data-motion>Auftrag starten</button></div>
 <div class="space"></div>
+<div class="inline"><button id="previewGeometry" type="button">Motivfläche analysieren</button><small>Vorschau aus gespeichertem LightBurn-GCode</small></div><pre id="geometryOutput" class="console" style="margin-top:12px;min-height:64px">Noch kein Auftrag analysiert</pre>
+<div class="space"></div>
 <div class="metric"><small>Aktueller Auftrag</small><strong id="jobStatus" style="font-size:15px">Keiner</strong>
 <div class="bar"><span id="jobProgress"></span></div><small id="jobDetails"></small></div>
 </section>
@@ -286,6 +288,20 @@ async function files(){
   if(r.files.some(o=>o.name===current))sel.value=current;
  }catch(e){show(e.message,true)}
 }
+$("previewGeometry").onclick=async()=>{
+  const name=$("jobSelect").value;
+  if(!name || name==="Keine Dateien"){show("Erst G-Code hochladen und auswählen",true);return}
+  try{
+    const result=await api("/api/jobs/"+encodeURIComponent(name)+"/geometry");
+    const b=result.bounds;
+    $("geometryOutput").textContent=
+      "Motiv X "+b.xmin.toFixed(2)+"–"+b.xmax.toFixed(2)+" mm\n"+
+      "Motiv Y "+b.ymin.toFixed(2)+"–"+b.ymax.toFixed(2)+" mm\n"+
+      result.segments+" Bearbeitungssegmente\n"+
+      result.probe_candidates.length+" mögliche Messpunkte (noch KEINE automatische Abtastung).\n"+
+      result.warning;
+  }catch(e){$("geometryOutput").textContent=e.message;show(e.message,true)}
+};
 $("zSettings").onsubmit=async ev=>{
  ev.preventDefault();
  const body=param({
