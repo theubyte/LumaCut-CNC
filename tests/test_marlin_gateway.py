@@ -69,7 +69,7 @@ class GuardTests(unittest.TestCase):
 class ProbePinConfigurationTests(unittest.TestCase):
     def test_g30_shares_zmin_pin(self):
         source = (ROOT / "firmware" / "marlin" / "build.py").read_text(encoding="utf-8")
-        self.assertIn('uncomment(cfg, "Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN")', source)
+        self.assertIn('probe_directive = "Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN"', source)
         self.assertIn('uncomment(cfg, "FIX_MOUNTED_PROBE")', source)
         self.assertIn('replace_active(cfg, "Z_MIN_ENDSTOP_INVERTING", "true")', source)
 
