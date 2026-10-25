@@ -258,9 +258,44 @@ def action():
                     if other: manual("M7")
         return jsonify(message=("Licht" if op=="light" else "Abluft") +
                        (" EIN" if target else " AUS"))
+    if op == "probe":
+        # Web counterpart of LightBurn G30: measure the workpiece below the
+        # current laser XY (or at an explicitly given point).
+        local_owner()
+        if not machine.homed:
+            raise RuntimeError("Vor dem Abtasten referenzieren")
+        point = _optional_point(request.form)
+        if point is not None:
+            machine.command("G0 X%.3f Y%.3f" % point, owner="web", timeout=60)
+        reply = machine.probe_workpiece(owner="web")
+        return jsonify(message="Werkstückoberfläche Z=%.3f mm, Fokus Z=%.3f mm" % (
+            machine.surface_z, machine.status()["laser_focus_z"]),
+            detail="\n".join(reply[:6]))
     if op == "start":
         return start_job()
+    if op == "autorun":
+        return start_job(automatic=True)
+    if op == "abort":
+        if job["state"] not in ("homing", "probing", "running"):
+            raise RuntimeError("Kein laufender Auftrag")
+        stop_job.set()
+        return jsonify(message="Abbruch angefordert: Laser aus, danach Parkposition")
     raise ValueError("Unbekannte Marlin-Aktion: " + op)
+
+
+def _optional_point(form):
+    raw_x = form.get("x", "").strip()
+    raw_y = form.get("y", "").strip()
+    if not raw_x and not raw_y:
+        return None
+    import math
+    x, y = float(raw_x), float(raw_y)
+    travels = config["travels"]
+    if not (math.isfinite(x) and math.isfinite(y) and
+            machine.safe_zone_xy_mm <= x <= travels["x"] and
+            machine.safe_zone_xy_mm <= y <= travels["y"]):
+        raise ValueError("Abtastpunkt außerhalb X30..390 / Y30..370")
+    return x, y
 
 
 @app.get("/api/jobs")
@@ -306,12 +341,19 @@ def upload():
     return jsonify(message="Marlin-Auftrag geprüft und gespeichert: " + basename)
 
 
+# Workflow commands a LightBurn export may contain. The job worker runs them
+# through the same staged Pi routines as the LightBurn TCP gateway.
+WORKFLOW = ("G28", "G30", "M2")
+
+
 def preflight(text):
     if not machine.homing_verified:
         raise RuntimeError("Mechanik noch nicht freigegeben")
     safety = MarlinLaserGuard()
     lines = 0
     for number, line in enumerate(text.splitlines(), 1):
+        if normalize(line) in WORKFLOW:
+            continue
         try:
             command = safety.check(line, machine.homing_verified)
             if command: lines+=1
@@ -319,41 +361,108 @@ def preflight(text):
             raise ValueError("G-Code Zeile %d: %s" % (number, exc))
     if not lines:
         raise ValueError("G-Code ist leer")
+    # Reject a motif touching the 30 mm home bands before anything moves,
+    # instead of stopping half-way through the job.
+    bounds = _powered_bounds(text)
+    travels = config["travels"]
+    limit = machine.safe_zone_xy_mm
+    if bounds is not None and (bounds.xmin < limit or bounds.ymin < limit or
+                               bounds.xmax > travels["x"] or bounds.ymax > travels["y"]):
+        raise ValueError(
+            "Motiv X%.1f..%.1f / Y%.1f..%.1f liegt außerhalb X%g..%g / Y%g..%g "
+            "(30-mm-Safezone)" % (bounds.xmin, bounds.xmax, bounds.ymin, bounds.ymax,
+                                   limit, travels["x"], limit, travels["y"]))
 
 
-def _job_worker(filename, commands):
+def _powered_bounds(text):
+    try:
+        return analyze_job(text)
+    except ValueError:
+        # Arcs or no powered moves: the live cut guard still checks them.
+        return None
+
+
+def _stop_after_job_error():
+    """Laser off and park without M112 when the USB link still works.
+
+    An M112 latches the gateway until the service restarts and the SKR is
+    power-cycled; a rejected line or an operator abort does not need that.
+    M5 waits for the already buffered segments, then switches PA1 off.
+    Escalates to M112 if the controlled stop itself fails.
+    """
+    try:
+        machine.command("M5 I", owner="job", timeout=60)
+        if machine.homed:
+            machine.park_safezone(owner="job")
+    except Exception:
+        logging.exception("Controlled job stop failed; issuing M112")
+        try:
+            machine.emergency_stop()
+        except Exception:
+            pass
+
+
+def _job_worker(filename, commands, probe_point=None):
     job.update(file=filename, state="running", line=0, total=len(commands), error="")
     try:
+        if probe_point is not None:
+            # One-click: home XY then Z, probe the material under the motif,
+            # focus happens automatically before the first powered G1.
+            job["state"] = "homing"
+            machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
+            if stop_job.is_set():
+                raise RuntimeError("Abgebrochen")
+            job["state"] = "probing"
+            machine.command("G0 X%.3f Y%.3f" % probe_point, owner="job", timeout=60)
+            machine.probe_workpiece(owner="job")
+            job["state"] = "running"
         machine.command("M5 I", owner="job")
         for i, command in enumerate(commands, 1):
             if stop_job.is_set():
-                raise RuntimeError("Abgebrochen: M112 / Hardware prüfen")
-            if normalize(command):
+                raise RuntimeError("Abgebrochen")
+            normalized = normalize(command)
+            if normalized == "G28":
+                machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
+            elif normalized == "G30":
+                machine.probe_workpiece(owner="job")
+            elif normalized == "M2":
+                pass  # the worker always parks once at the end
+            elif normalized:
                 machine.command(command, owner="job", timeout=150)
             job["line"]=i
         machine.park_safezone(owner="job")
         job["state"]="complete"
     except Exception as exc:
-        job.update(state="error", error=str(exc))
-        try:
-            machine.emergency_stop()
-        except Exception:
-            pass
+        job.update(state="aborted" if stop_job.is_set() else "error", error=str(exc))
+        if not machine.emergency_latched:
+            _stop_after_job_error()
     finally:
         with machine.lock:
             machine.owner=None
         job_lock.release()
 
 
-def start_job():
+def start_job(automatic=False):
     local_owner()
-    if not machine.homed:
+    if not machine.homed and not automatic:
         raise RuntimeError("Vor dem Job referenzieren")
     filename = request.form.get("name","")
     if filename != Path(filename).name or not (JOBS / filename).is_file():
         raise ValueError("Unbekannte Auftragsdatei")
     content = (JOBS / filename).read_text(encoding="utf-8")
     preflight(content)
+    probe_point = None
+    if automatic:
+        if machine.probe_xy_offset_mm is None:
+            raise ValueError("X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen")
+        probe_point = _optional_point(request.form)
+        if probe_point is None:
+            bounds = _powered_bounds(content)
+            if bounds is None:
+                raise ValueError("Motivmitte nicht bestimmbar: Abtastpunkt X/Y angeben")
+            # The material lies under the motif; its centre is the most
+            # likely point with material below the switch.
+            probe_point = bounds.center
     if not job_lock.acquire(blocking=False):
         raise RuntimeError("Ein Auftrag läuft bereits")
     stop_job.clear()
@@ -364,9 +473,12 @@ def start_job():
         machine.owner="job"
     commands = content.splitlines()
     thread = threading.Thread(target=_job_worker,
-                              args=(filename,commands), daemon=True,
+                              args=(filename,commands,probe_point), daemon=True,
                               name="marlin-gcode-job")
     thread.start()
+    if automatic:
+        return jsonify(message="Ein-Klick-Ablauf gestartet: Homing → Abtasten bei X%.1f Y%.1f "
+                       "→ Fokus → %s → Park" % (probe_point[0], probe_point[1], filename))
     return jsonify(message="Job gestartet: " + filename)
 
 

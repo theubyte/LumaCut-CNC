@@ -17,6 +17,9 @@ from collections import deque
 LOG = logging.getLogger("lumacut.marlin")
 POSITION_RE = re.compile(
     r"(?:^|\s)X:([-+]?\d+(?:\.\d+)?)\s+Y:([-+]?\d+(?:\.\d+)?)\s+Z:([-+]?\d+(?:\.\d+)?)")
+PROBE_RESULT_RE = re.compile(
+    r"\bBed\s+X:\s*[-+]?\d+(?:\.\d+)?\s+Y:\s*[-+]?\d+(?:\.\d+)?\s+Z:\s*([-+]?\d+(?:\.\d+)?)",
+    re.IGNORECASE)
 WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 COMMENT = re.compile(r"\([^()]*\)")
 READ_ONLY = frozenset({"M105", "M114", "M115", "M119", "M503", "M400"})
@@ -24,6 +27,8 @@ READ_ONLY = frozenset({"M105", "M114", "M115", "M119", "M503", "M400"})
 
 class MarlinCommandError(RuntimeError):
     """Marlin rejected a command but the serial protocol was re-synchronized."""
+
+    responses: list = []
 
 
 
@@ -152,6 +157,7 @@ class MarlinTransport:
         self.laser_enabled = False
         self.fan_power = False
         self.fan_cooldown_s = 180
+        self.laser_supply_settle_ms = 800
         # A workpiece contact probe must explicitly establish surface_z.
         # Positive machine Z must point AWAY from the material.
         self.surface_z = None
@@ -195,6 +201,11 @@ class MarlinTransport:
         self.surface_z = None
         self.focused_this_job = False
         self.laser_enabled = False
+        # A reconnecting SKR boots with PC6 off; force a fresh M106 and
+        # supply settle time instead of trusting the stale flag.
+        self.fan_power = False
+        self.fan_off_at = None
+        self.last_xy_commanded = None
         self.guard = MarlinLaserGuard()
         self.identity = ""
         self.cap_z_probe = None
@@ -242,7 +253,12 @@ class MarlinTransport:
                         responses.append(trailing)
                         if trailing.lower().startswith("ok"):
                             self.state = "Idle"
-                            raise MarlinCommandError(self.fault)
+                            # Keep the report lines Marlin printed between
+                            # the error and its ACK (G30 reports the stop
+                            # position there) for callers that can use them.
+                            error = MarlinCommandError(self.fault)
+                            error.responses = responses
+                            raise error
                 except TimeoutError as exc:
                     raise ConnectionError(
                         self.fault + " (SKR hat kein abschliessendes ok geliefert)"
@@ -285,6 +301,16 @@ class MarlinTransport:
                 # reconnect; do not write permanent EEPROM without an
                 # explicit flash/configuration workflow.
                 self._exchange_locked("M203 Z9", timeout=6.0)
+                # The same stale EEPROM may still hold the Mega Zero example
+                # probe offset { -40, -10, 2 }. Marlin then shifts every G30
+                # by X+40/Y+10, adds 2 mm to the result and lowers the
+                # "triggered early" limit by 2 mm. The Pi applies the real
+                # X/Y switch offset itself, so the firmware offset must be 0.
+                try:
+                    self._exchange_locked("M851 X0 Y0 Z0", timeout=6.0)
+                except MarlinCommandError:
+                    LOG.warning("M851 X/Y not accepted, resetting Z offset only")
+                    self._exchange_locked("M851 Z0", timeout=6.0)
                 self.state = "Idle"
                 self.fault = ""
             except Exception as exc:
@@ -337,26 +363,44 @@ class MarlinTransport:
         The previous tool position matters as much as the commanded target:
         an XY line from the home corner to the work area is not a cut.
         G0 with laser safely extinguished is permitted in home bands.
+
+        The start point is the Pi's own record of the last commanded XY,
+        not an M400/M114 query: M400 drains Marlin's planner, so querying
+        before every segment stopped the head at each vector node and burnt
+        dots/uneven lines into the material. Every XY move reaches Marlin
+        through this gateway, so the commanded record is exact.
         """
-        if not re.match(r"^G0?1(?:\s|$)", cmd) or not self.laser_enabled:
+        if not re.match(r"^G0?[123](?:\s|$)", cmd) or not self.laser_enabled:
             return
         coords = {letter:float(value) for letter,value in WORD.findall(cmd)}
         if "S" in coords and coords["S"] <= 0:
             return
         # An inline G1 lacking S may preserve nonzero cutting power.
-        self._exchange_locked("M400", timeout=20)
-        self._exchange_locked("M114", timeout=10)
-        if self.position is None:
-            raise RuntimeError("XY-Sicherheitszone: Position nicht bestimmbar")
-        px, py = self.position[:2]
-        tx = (coords["X"] if self.absolute_mode else px + coords.get("X", 0.0)) if "X" in coords else px
-        ty = (coords["Y"] if self.absolute_mode else py + coords.get("Y", 0.0)) if "Y" in coords else py
+        if self.last_xy_commanded is None:
+            self._exchange_locked("M400", timeout=20)
+            self._exchange_locked("M114", timeout=10)
+            if self.position is None:
+                raise RuntimeError("XY-Sicherheitszone: Position nicht bestimmbar")
+            self.last_xy_commanded = (self.position[0], self.position[1])
+        px, py = self.last_xy_commanded
+        tx, ty = self._xy_target(coords, px, py)
+        lowest_x, lowest_y = min(px, tx), min(py, ty)
+        if "I" in coords or "J" in coords:
+            # Arc: the whole circle is a conservative envelope.
+            cx, cy = px + coords.get("I", 0.0), py + coords.get("J", 0.0)
+            radius = ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+            lowest_x, lowest_y = min(lowest_x, cx - radius), min(lowest_y, cy - radius)
         limit = self.safe_zone_xy_mm
-        if min(px,py,tx,ty) < limit - 0.0001:
+        if min(lowest_x, lowest_y) < limit - 0.0001:
             raise ValueError(
                 f"30mm-Homing-Sperrzone: Schnitt nur ab X={limit:g} "
                 f"und Y={limit:g} mm; Start X{px:.2f} Y{py:.2f}, "
                 f"Ziel X{tx:.2f} Y{ty:.2f}")
+
+    def _xy_target(self, coords, px, py):
+        tx = (coords["X"] if self.absolute_mode else px + coords["X"]) if "X" in coords else px
+        ty = (coords["Y"] if self.absolute_mode else py + coords["Y"]) if "Y" in coords else py
+        return tx, ty
 
     def _focus_before_cut_locked(self):
         if self.focused_this_job:
@@ -431,7 +475,13 @@ class MarlinTransport:
                 if normalized == "M3 I":
                     # Independently power cooling fan before laser PWM mode.
                     # PC6 is FAN0/M106, not laser-enable.
-                    self._exchange_locked("M106 P0 S255", timeout=8)
+                    if not self.fan_power:
+                        self._exchange_locked("M106 P0 S255", timeout=8)
+                        # PC6 also switches the laser module's 24 V rail.
+                        # A diode module needs a moment after power-up;
+                        # otherwise the first line of a job burns weak.
+                        self._exchange_locked(
+                            f"G4 P{int(self.laser_supply_settle_ms)}", timeout=10)
                     self.fan_power = True
                     self.fan_off_at = None
                 # Focus on first powered G1, not while traversing XY.
@@ -442,16 +492,16 @@ class MarlinTransport:
                 reply = self._exchange_locked(normalized, timeout)
                 # Remember the workpiece target sent by LightBurn even if
                 # asynchronous Marlin M114 reports arrive out of order.
-                if (re.match(r"^G0?[01](?:\s|$)", normalized)
-                        and self.absolute_mode):
+                # Relative moves are tracked too: the cut guard uses this
+                # record as the start point of the next segment.
+                if re.match(r"^G0?[0123](?:\s|$)", normalized):
                     coords = {k: float(v) for k, v in WORD.findall(normalized)}
                     if "X" in coords or "Y" in coords:
-                        if "X" in coords and "Y" in coords:
+                        if self.absolute_mode and "X" in coords and "Y" in coords:
                             self.last_xy_commanded = (coords["X"], coords["Y"])
                         elif self.last_xy_commanded is not None:
-                            self.last_xy_commanded = (
-                                coords.get("X", self.last_xy_commanded[0]),
-                                coords.get("Y", self.last_xy_commanded[1]))
+                            self.last_xy_commanded = self._xy_target(
+                                coords, *self.last_xy_commanded)
                 if normalized == "G90":
                     self.absolute_mode = True
                 elif normalized == "G91":
@@ -613,6 +663,7 @@ class MarlinTransport:
                         self.surface_z = None
                 self.homed = True
                 self.absolute_mode = True
+                self.last_xy_commanded = (0.0, 0.0)
                 self.guard = MarlinLaserGuard()
                 self.laser_enabled = False
                 if self.homing_chime_enabled:
@@ -742,14 +793,28 @@ class MarlinTransport:
                 self._exchange_locked("M400", timeout=45)
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=60)
             self._exchange_locked("M400", timeout=60)
-            replies = self._exchange_locked("G30", timeout=120)
-            contact = None
-            for line in replies:
-                match = re.search(
-                    r"\bBed\s+X:\s*[-+]?\d+(?:\.\d+)?\s+Y:\s*[-+]?\d+(?:\.\d+)?\s+Z:\s*([-+]?\d+(?:\.\d+)?)",
-                    line, re.IGNORECASE)
-                if match:
-                    contact = float(match.group(1))
+            self.last_xy_commanded = (x, y)
+            start_z = max(z, self.clearance_mm)
+            note = ""
+            try:
+                replies = self._exchange_locked("G30", timeout=120)
+                contact = None
+                for line in replies:
+                    # Only the dedicated G30 result line is a measurement.
+                    # The "X: Y: Z:" report that follows it is the position
+                    # AFTER Marlin's post-probe raise, never the contact.
+                    match = PROBE_RESULT_RE.search(line)
+                    if match:
+                        contact = float(match.group(1))
+            except MarlinCommandError as exc:
+                if "probing failed" not in str(exc).lower():
+                    raise
+                replies = list(exc.responses)
+                contact = self._early_trigger_contact_locked(start_z)
+                note = ("echo:LumaCut G30: Marlin meldete 'Probing Failed' "
+                        "(Kontakt oberhalb Firmware-Grenze Z_CLEARANCE_MULTI_PROBE), "
+                        f"Taster bestaetigt geschaltet bei Z{contact:.3f}")
+                LOG.warning(note)
             if contact is None or not 0.0 <= contact <= 90.0:
                 raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
             self.surface_z = contact
@@ -760,8 +825,49 @@ class MarlinTransport:
             self._exchange_locked(f"G0 X{laser_x:.3f} Y{laser_y:.3f} F9000", timeout=60)
             self._exchange_locked("M400", timeout=60)
             self._exchange_locked("M114", timeout=8)
+            self.last_xy_commanded = (laser_x, laser_y)
             self.focused_this_job = False
-            return [f"echo:LumaCut workpiece Z:{contact:.3f}"] + replies
+            self.fault = ""
+            head = [f"echo:LumaCut workpiece Z:{contact:.3f}"] + ([note] if note else [])
+            # Never forward Marlin's own Error line: LightBurn would abort
+            # the job although the contact is measured and valid.
+            return head + [line for line in replies
+                           if not line.startswith(("Error:", "echo:Error:"))]
+
+    def _early_trigger_contact_locked(self, start_z: float) -> float:
+        """Evaluate a G30 that Marlin rejected as 'Probing Failed'.
+
+        Marlin 2.1.2.9 (single probing, Probe::run_z_probe) reports failure
+        in two different situations:
+          * no trigger: the head reached Z_PROBE_LOW_POINT (-2 mm), switch open
+          * triggered early: contact above -offset.z + Z_CLEARANCE_MULTI_PROBE
+            (5 mm in the stock example config, 16 mm in the LumaCut build).
+        In the second case Marlin has stopped the stepper at the trigger and
+        set current_position from the stepper counts; nothing raises the head
+        afterwards (fixed probe, no stow move). M114 therefore reports the
+        exact contact height and M119 still reads the pressed switch.
+        Accept only that physically confirmed case.
+        """
+        self._exchange_locked("M400", timeout=20)
+        self.position = None
+        self._exchange_locked("M114", timeout=8)
+        if self.position is None:
+            raise RuntimeError("G30 fehlgeschlagen und Kontakthöhe nicht lesbar (M114)")
+        stop_z = self.position[2]
+        endstops = self._exchange_locked("M119", timeout=8)
+        pressed = any(re.match(r"^\s*z_(?:min|probe)\s*:\s*TRIGGERED", line, re.IGNORECASE)
+                      for line in endstops)
+        if not pressed:
+            raise RuntimeError(
+                f"G30 ohne Tasterkontakt bis Z{stop_z:.2f}: kein Material unter dem "
+                "Taster oder X/Y-Tasterversatz falsch")
+        if stop_z >= start_z - 0.3:
+            raise RuntimeError(
+                f"Z-Taster war schon beim G30-Start (Z{start_z:.2f}) gedrückt: "
+                "Taster klemmt/Verdrahtung prüfen, Material zu hoch für Z-Rückzug")
+        if stop_z < 0.0:
+            raise RuntimeError(f"G30-Kontakt Z{stop_z:.2f} unter Maschinenboden: Z-Referenz prüfen")
+        return stop_z
 
     def status(self):
         with self.lock:

@@ -107,6 +107,8 @@ label{display:block;margin-bottom:5px}
 <div class="two"><button class="primary" data-action="home" data-motion>XYZ referenzieren (X/Y zuerst)</button>
 <button class="danger" id="stop">Software-Notstopp M112</button></div>
 <div class="space"></div>
+<button data-action="probe" data-motion data-needs-home style="width:100%">Werkstück unter Laserpunkt abtasten (G30)</button>
+<div class="space"></div>
 <h3>Joggen</h3>
 <div class="inline"><label>Schrittweite
 <select id="step"><option value="0.1">0,1 mm</option><option value="1" selected>1 mm</option><option value="10">10 mm</option></select></label></div>
@@ -166,6 +168,10 @@ label{display:block;margin-bottom:5px}
 <form id="uploadForm" class="inline"><input style="flex:1;min-width:180px" type="file" accept=".gcode,.gc,.nc" id="file"><button type="submit">Hochladen</button></form>
 <div class="space"></div>
 <div class="two"><select id="jobSelect"><option>Keine Dateien</option></select><button data-action="start" data-motion>Auftrag starten</button></div>
+<div class="space"></div>
+<button class="primary" data-action="autorun" data-motion style="width:100%">Ein-Klick: Homing → Abtasten → Fokus → Auftrag → Park</button>
+<p class="muted">Abgetastet wird unter der Motivmitte; dort muss Material liegen. Fokus wird vor der ersten Laserbewegung automatisch angefahren.</p>
+<button class="danger" id="abortJob" style="width:100%">Auftrag abbrechen (Laser aus, parken)</button>
 <div class="space"></div>
 <div class="inline"><button id="previewGeometry" type="button">Motivfläche analysieren</button><small>Vorschau aus gespeichertem LightBurn-GCode</small></div><pre id="geometryOutput" class="console" style="margin-top:12px;min-height:64px">Noch kein Auftrag analysiert</pre>
 <div class="space"></div>
@@ -258,8 +264,9 @@ function refreshUI(s){
    "Gesperrt: Endschalter/Z-Richtung und Hardware-Interlock müssen geprüft werden.";
  if(valid) $("commissionCheck").checked=true; // retain manual test checkbox while locked
  for(const button of document.querySelectorAll("[data-motion]")){
-  button.disabled=!ownerFree(s)||!valid||(button.dataset.action==="start"&&!s.homed);
+  button.disabled=!ownerFree(s)||!valid||((button.dataset.action==="start"||"needsHome" in button.dataset)&&!s.homed);
  }
+ $("abortJob").disabled=!["homing","probing","running"].includes(s.job?.state);
  for(const button of document.querySelectorAll("[data-axis]"))
   button.disabled=!ownerFree(s)||!valid||!s.homed;
  for(const button of document.querySelectorAll("[data-accessory]"))
@@ -322,8 +329,8 @@ $("refreshButton").onclick=()=>{refresh();files()};
 $("clearLog").onclick=()=>{$("console").textContent="Ansicht geleert. Neue Geräteereignisse erscheinen beim nächsten Aktualisieren."};
 for(const b of document.querySelectorAll("[data-action]"))
  b.onclick=()=>call(b.dataset.action,
-  b.dataset.action==="start"?{name:$("jobSelect").value}:
-  b.dataset.action==="home"?{}:{});
+  ["start","autorun"].includes(b.dataset.action)?{name:$("jobSelect").value}:{});
+$("abortJob").onclick=()=>call("abort");
 
 for(const b of document.querySelectorAll("[data-axis]"))
  b.onclick=()=>call("jog",{axis:b.dataset.axis,distance:String(Number($("step").value)*Number(b.dataset.direction))});

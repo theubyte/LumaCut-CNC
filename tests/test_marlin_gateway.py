@@ -81,8 +81,8 @@ class ProbeContactHeightTests(unittest.TestCase):
         self.assertIn('replace_active(cfg, "Z_CLEARANCE_BETWEEN_PROBES", "16")', source)
         self.assertLess(5.37, 16.0)
         example = (
-            "#define Z_CLEARANCE_BETWEEN_PROBES  5 // (mm)\\n"
-            "#define Z_CLEARANCE_MULTI_PROBE     5 // (mm)\\n"
+            "#define Z_CLEARANCE_BETWEEN_PROBES  5 // (mm)\n"
+            "#define Z_CLEARANCE_MULTI_PROBE     5 // (mm)\n"
         )
         patched = module.replace_active(example, "Z_CLEARANCE_MULTI_PROBE", "16")
         patched = module.replace_active(patched, "Z_CLEARANCE_BETWEEN_PROBES", "16")
@@ -118,7 +118,7 @@ class FirmwareDirectionContractTests(unittest.TestCase):
         self.assertIn('cfg = uncomment(cfg, "Z_SAFE_HOMING")',build)
         self.assertIn('replace_active(cfg, "Z_SAFE_HOMING_X_POINT", "0")',build)
         self.assertIn('replace_active(cfg, "Z_SAFE_HOMING_Y_POINT", "0")',build)
-        self.assertIn('replace_active(cfg, "Z_PROBE_LOW_POINT", "0")',build)
+        self.assertIn('replace_active(cfg, "Z_PROBE_LOW_POINT", "-2")',build)
 
     def test_default_z_steps_match_calibrated_value(self):
         build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
@@ -176,11 +176,13 @@ class USBProtocolTests(unittest.TestCase):
     def test_actual_marlin_m115_and_no_grbl_identity_spoof(self):
         serial=FakeSerial([
             "FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin\n",
-            "ok P15 B3\n", "ok\n", "ok\n"
+            "ok P15 B3\n", "ok\n", "ok\n", "ok\n"
         ])
         bridge=MarlinTransport("/dev/null",serial_factory=lambda *a,**k:serial)
         bridge.ensure_ready()
-        self.assertEqual(serial.writes,[b"M115\n",b"M5 I\n",b"M203 Z9\n"])
+        # M851 clears a stale EEPROM probe offset (Mega Zero -40/-10/+2).
+        self.assertEqual(serial.writes,[b"M115\n",b"M5 I\n",b"M203 Z9\n",
+                                        b"M851 X0 Y0 Z0\n"])
         self.assertTrue(bridge.status()["connected"])
         self.assertIn("LumaCut CNC",bridge.status()["identity"])
 
@@ -312,7 +314,7 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(
             serial.writes,
             [b"G21\n",b"G90\n",b"G21\n",b"M400\n",
-             b"G90\n",b"M106 P0 S255\n",b"M3 I\n",b"M5 I\n"])
+             b"G90\n",b"M106 P0 S255\n",b"G4 P800\n",b"M3 I\n",b"M5 I\n"])
         self.assertNotIn(b"M112\n",serial.writes)
         self.assertFalse(controller.emergency_latched)
 
@@ -345,7 +347,7 @@ class USBProtocolTests(unittest.TestCase):
     def test_repeat_g30_from_park_reuses_last_valid_material_point(self):
         responses = [
             "ok\n", "ok\n", "X:0 Y:0 Z:20\n", "ok\n",
-            "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n",
+            "ok\n", "ok\n", "ok\n", "ok\n", "ok\n",
             "Bed X: 97.000 Y: 105.000 Z: 3.000\n", "ok\n",
             "ok\n", "ok\n", "ok\n", "ok\n",
             "X:120 Y:120 Z:20\n", "ok\n"
@@ -363,6 +365,118 @@ class USBProtocolTests(unittest.TestCase):
         self.assertIn(b"G0 X97.000 Y105.000 F9000\n", serial.writes)
         self.assertIn(b"G30\n", serial.writes)
         self.assertEqual(bridge.surface_z, 3.0)
+
+    def _probe_bridge(self, responses):
+        serial = FakeSerial(responses)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.probe_xy_offset_mm = (0.0, 0.0)
+        return bridge, serial
+
+    def test_g30_early_trigger_uses_confirmed_contact_height(self):
+        # Stock Z_CLEARANCE_MULTI_PROBE 5: contact at 7.37 mm is valid but
+        # Marlin reports Probing Failed and leaves the head at the contact.
+        bridge, serial = self._probe_bridge([
+            "ok\n", "ok\n", "X:120.00 Y:120.00 Z:20.00\n", "ok\n",
+            "ok\n", "ok\n",
+            "Error:Probing Failed\n",
+            "X:120.00 Y:120.00 Z:7.37 E:0.00 Count X:9600 Y:9600 Z:2800\n",
+            "ok\n",
+            "ok\n",
+            "X:120.00 Y:120.00 Z:7.37 E:0.00 Count X:9600 Y:9600 Z:2800\n", "ok\n",
+            "Reporting endstop status\n", "x_min: open\n", "y_min: open\n",
+            "z_min: TRIGGERED\n", "ok\n",
+            "ok\n", "ok\n", "ok\n", "ok\n",
+            "X:120.00 Y:120.00 Z:20.00\n", "ok\n",
+        ])
+        reply = bridge.probe_workpiece()
+        self.assertAlmostEqual(bridge.surface_z, 7.37)
+        self.assertIn(b"M119\n", serial.writes)
+        self.assertIn(b"G0 Z20.000 F600\n", serial.writes)
+        self.assertFalse(any(line.startswith("Error:") for line in reply))
+        self.assertTrue(any("workpiece Z:7.370" in line for line in reply))
+        self.assertEqual(bridge.last_xy_commanded, (120.0, 120.0))
+
+    def test_g30_switch_pressed_at_start_is_rejected(self):
+        bridge, serial = self._probe_bridge([
+            "ok\n", "ok\n", "X:120.00 Y:120.00 Z:20.00\n", "ok\n",
+            "ok\n", "ok\n",
+            "Error:Probing Failed\n", "X:120.00 Y:120.00 Z:19.90\n", "ok\n",
+            "ok\n", "X:120.00 Y:120.00 Z:19.90\n", "ok\n",
+            "z_min: TRIGGERED\n", "ok\n",
+        ])
+        with self.assertRaisesRegex(RuntimeError, "schon beim G30-Start"):
+            bridge.probe_workpiece()
+        self.assertIsNone(bridge.surface_z)
+
+    def test_g30_ignores_post_probe_position_report(self):
+        # The X:/Y:/Z: report after "Bed" is the raised head, not contact.
+        bridge, serial = self._probe_bridge([
+            "ok\n", "ok\n", "X:120.00 Y:120.00 Z:20.00\n", "ok\n",
+            "ok\n", "ok\n",
+            "Bed X: 120.00 Y: 120.00 Z: 4.20\n",
+            "X:120.00 Y:120.00 Z:20.20 E:0.00 Count X:9600 Y:9600 Z:7676\n", "ok\n",
+            "ok\n", "ok\n", "ok\n", "ok\n", "ok\n",
+        ])
+        bridge.probe_workpiece()
+        self.assertAlmostEqual(bridge.surface_z, 4.2)
+
+    def test_continuous_cut_never_drains_planner_between_segments(self):
+        # M400 before each vector node stopped the head and burnt dots.
+        serial = FakeSerial(["ok\n"] * 4)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.surface_z = 3.0
+        bridge.laser_enabled = True
+        bridge.guard.inline = True
+        bridge.focused_this_job = True
+        bridge.last_xy_commanded = (40.0, 40.0)
+        for cmd in ("G1 X50 Y40 S100 F1200", "G1 X50 Y50 S100",
+                    "G1 X40 Y50 S100", "G1 X40 Y40 S100"):
+            bridge.command(cmd, owner="lightburn")
+        self.assertNotIn(b"M400\n", serial.writes)
+        self.assertNotIn(b"M114\n", serial.writes)
+        self.assertEqual(bridge.last_xy_commanded, (40.0, 40.0))
+
+    def test_tracked_start_point_blocks_cut_out_of_home_band(self):
+        serial = FakeSerial([])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.surface_z = 3.0
+        bridge.laser_enabled = True
+        bridge.guard.inline = True
+        bridge.focused_this_job = True
+        bridge.last_xy_commanded = (29.0, 35.0)
+        with self.assertRaisesRegex(ValueError, "30mm-Homing-Sperrzone"):
+            bridge.command("G1 X45 Y40 S40")
+        bridge.last_xy_commanded = (40.0, 40.0)
+        # Arc around X30: the circle reaches X20, inside the home band.
+        with self.assertRaisesRegex(ValueError, "30mm-Homing-Sperrzone"):
+            bridge.command("G2 X40 Y40 I-10 J0 S40")
+        self.assertEqual(serial.writes, [])
+
+    def test_laser_supply_settles_only_on_first_power_up(self):
+        serial = FakeSerial(["ok\n"] * 6)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.surface_z = 3.0
+        bridge.command("M3 I")
+        bridge.command("M5 I")
+        bridge.command("M3 I")
+        self.assertEqual(serial.writes, [b"M106 P0 S255\n", b"G4 P800\n",
+                                         b"M3 I\n", b"M5 I\n", b"M3 I\n"])
 
     def test_g30_requires_calibrated_xy_offset(self):
         serial=FakeSerial([])
@@ -390,9 +504,10 @@ class USBProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"Z-Sperre"):
             bridge.command("G0 Z1.9")
         self.assertNotIn(b"G0 Z1.9\n",serial.writes)
-        # A rejected out-of-bounds move is fail-closed: USB disconnects.
-        self.assertFalse(bridge.status()["connected"])
-        self.assertTrue(serial.closed)
+        # The move never reached Marlin. Since 8af184c a rejected G-code
+        # keeps the healthy USB link (no forced reconnect / re-home).
+        self.assertTrue(bridge.status()["connected"])
+        self.assertFalse(serial.closed)
 
     def test_no_laser_before_probing_workpiece(self):
         serial=FakeSerial([])
@@ -575,7 +690,15 @@ class USBProtocolTests(unittest.TestCase):
         serial = FakeSerial([
             "ok\n", "ok\n", "X:120.00 Y:120.00 Z:20.00\n",
             "ok\n", "ok\n", "ok\n", "Error:Probing Failed\n",
-            "ok P15 B7\n", "ok P15 B7\n",
+            # Real 2.1.2.9 G30: report_current_position() follows the error.
+            "X:120.00 Y:120.00 Z:-2.00 E:0.00 Count X:9600 Y:9600 Z:-760\n",
+            "ok P15 B7\n",
+            "ok P15 B7\n",
+            "X:120.00 Y:120.00 Z:-2.00 E:0.00 Count X:9600 Y:9600 Z:-760\n",
+            "ok P15 B7\n",
+            "Reporting endstop status\n", "x_min: open\n", "y_min: open\n",
+            "z_min: open\n", "ok P15 B7\n",
+            "ok P15 B7\n",
         ])
         bridge = MarlinTransport("/dev/null")
         bridge.serial = serial
@@ -594,7 +717,8 @@ class USBProtocolTests(unittest.TestCase):
             def close(self): pass
         sock = TCP()
         bridge.serve_client(sock)
-        self.assertIn(b"Probing Failed", sock.messages)
+        self.assertIn(b"ohne Tasterkontakt", sock.messages)
+        self.assertIsNone(bridge.surface_z)
         self.assertIn(b"ok P15 B7", sock.messages)
         self.assertTrue(bridge.status()["connected"])
         self.assertFalse(serial.closed)
@@ -711,6 +835,141 @@ with web.app.test_client() as client:
                                   cwd=ROOT,text=True,capture_output=True,timeout=15)
             self.assertEqual(result.returncode,0,result.stderr)
 
+    def _run_web_script(self, source):
+        with tempfile.TemporaryDirectory() as tmp:
+            env=os.environ.copy()
+            env["LUMACUT_DATA"]=tmp
+            env["PYTHONPATH"]=str(ROOT/"pi400")
+            result=subprocess.run([sys.executable,"-c",source],env=env,
+                                  cwd=ROOT,text=True,capture_output=True,timeout=30)
+            self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_preflight_rejects_safezone_motif_and_accepts_workflow_lines(self):
+        self._run_web_script(r"""
+from marlin import web
+web.machine.homing_verified = True
+try:
+    web.preflight("G0 X40 Y40\nM3 I\nG1 X20 Y40 S100\nM5 I\n")
+except ValueError as exc:
+    assert "Safezone" in str(exc), exc
+else:
+    raise AssertionError("motif in home band accepted")
+web.preflight("G28\nG30\nG0 X40 Y40\nM3 I\nG1 X60 Y40 S100\nM5 I\nM2\n")
+""")
+
+    def test_one_click_order_and_controlled_stop_without_m112(self):
+        self._run_web_script(r"""
+from marlin import web
+calls = []
+m = web.machine
+m.safe_home = lambda **k: calls.append("home")
+m.probe_workpiece = lambda **k: calls.append("probe")
+m.park_safezone = lambda **k: calls.append("park")
+m.emergency_stop = lambda: calls.append("M112")
+m.homed = True
+def command(cmd, **k):
+    if cmd.startswith("G1 X99"):
+        raise ValueError("rejected")
+    calls.append(cmd)
+m.command = command
+web.job_lock.acquire()
+web._job_worker("a.gcode", ["G0 X40 Y40", "M3 I", "G1 X60 S10", "M5 I"], (50.0, 50.0))
+assert calls == ["home", "G0 X50.000 Y50.000", "probe", "M5 I",
+                 "G0 X40 Y40", "M3 I", "G1 X60 S10", "M5 I", "park"], calls
+assert web.job["state"] == "complete"
+calls.clear()
+web.job_lock.acquire()
+web._job_worker("b.gcode", ["M3 I", "G1 X99 S10"])
+assert "M112" not in calls, calls
+assert calls[-2:] == ["M5 I", "park"], calls
+assert web.job["state"] == "error"
+""")
+
+    def test_one_click_end_to_end_against_simulated_marlin(self):
+        # Studio output -> Pi preflight -> home -> G30 -> focus -> cut -> park,
+        # all through the real transport against a stateful Marlin model.
+        self._run_web_script(r"""
+import re, time
+from marlin import web
+from marlin.transport import MarlinTransport
+
+class MarlinSim:
+    def __init__(self):
+        self.pos = [150.0, 150.0, 40.0]
+        self.absolute = True
+        self.out = []
+        self.writes = []
+    def report(self):
+        x, y, z = self.pos
+        return "X:%.2f Y:%.2f Z:%.2f E:0.00 Count X:0 Y:0 Z:0" % (x, y, z)
+    def write(self, raw):
+        cmd = raw.decode().strip()
+        self.writes.append(cmd)
+        words = dict((k, float(v)) for k, v in re.findall(r"([XYZ])([-+]?[0-9.]+)", cmd))
+        reply = []
+        if cmd == "M115":
+            reply.append("FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin")
+            reply.append("Cap:Z_PROBE:1")
+        elif cmd == "G28 X Y":
+            self.pos[0] = self.pos[1] = 0.0
+        elif cmd == "G28 Z":
+            self.pos[2] = 0.0
+        elif cmd in ("G90", "G91"):
+            self.absolute = cmd == "G90"
+        elif re.match(r"G[0123] ", cmd):
+            for i, axis in enumerate("XYZ"):
+                if axis in words:
+                    self.pos[i] = words[axis] if self.absolute else self.pos[i] + words[axis]
+        elif cmd == "M114":
+            reply.append(self.report())
+        elif cmd == "G30":
+            self.pos[2] = 3.0
+            reply.append("Bed X: %.2f Y: %.2f Z: 3.00" % tuple(self.pos[:2]))
+            reply.append(self.report())
+        elif cmd == "M119":
+            reply += ["Reporting endstop status", "z_min: open"]
+        self.out += [r + "\n" for r in reply] + ["ok\n"]
+        return len(raw)
+    def readline(self):
+        return self.out.pop(0).encode() if self.out else b""
+    def reset_input_buffer(self):
+        pass
+    def close(self):
+        pass
+
+sim = MarlinSim()
+web.machine = m = MarlinTransport("/dev/null", serial_factory=lambda *a, **k: sim)
+m.homing_verified = True
+m.probe_xy_offset_mm = (10.0, 5.0)
+m.ensure_ready()
+gcode = ("G21\nG90\nM5 I\nM3 I\n; LAYER engrave\nG0 X279.094 Y276.357\n"
+         "G1 X388.781 Y276.357 F2000 S77\nG1 X388.781 Y354.412 F2000 S77\n"
+         "G1 X279.094 Y354.412 F2000 S77\nG1 X279.094 Y276.357 F2000 S77\nM5 I\nM400\n")
+web.preflight(gcode)
+center = web._powered_bounds(gcode).center
+web.job_lock.acquire()
+m.owner = "job"
+web._job_worker("studio.gcode", gcode.splitlines(), center)
+assert web.job["state"] == "complete", web.job
+w = sim.writes
+# Focus (surface 3 + gap 7 - switch offset 1.5) right before the first cut.
+order = [w.index(c) for c in ("G28 X Y", "G28 Z", "G30", "M3 I", "G0 Z8.500 F600")]
+assert order == sorted(order), order
+assert w.index("G0 Z20.00 F600") > w.index("G28 Z")
+# Switch tip lands on the motif centre: head moved by the X/Y probe offset.
+approach = [c for c in w[:w.index("G30")] if c.startswith("G0 X")][-1]
+px, py = map(float, re.findall(r"[XY]([-+]?[0-9.]+)", approach))
+assert abs(px - (center[0] - 10)) < 0.02 and abs(py - (center[1] - 5)) < 0.02, approach
+cuts = [i for i, c in enumerate(w) if c.startswith("G1 X") and "S77" in c]
+assert len(cuts) == 4 and cuts == list(range(cuts[0], cuts[0] + 4)), w[cuts[0]:cuts[-1] + 1]
+assert w.index("G0 Z8.500 F600") < cuts[0]
+assert w.index("G4 P800") < w.index("M3 I")
+park = w.index("G0 X0.000 Y0.000 F9000")
+assert park > cuts[-1] and w[park - 2].startswith("G0 Z20.000")
+assert w.count("M569 S0 X") == 2, "homing and job-end melodies"
+assert "M112" not in w
+assert m.surface_z == 3.0 and abs(m.position[0]) < 0.01 and abs(m.position[1]) < 0.01
+""")
 
     def test_idle_service_shutdown_does_not_automatically_send_m112(self):
         source=(ROOT/"pi400"/"marlin"/"web.py").read_text()
