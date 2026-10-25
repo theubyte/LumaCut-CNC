@@ -76,7 +76,7 @@ def override_for_role(role, roles):
     return bytes((0xA1,)) if channel == "M7" else bytes((0xA0,))
 
 
-SPARE_PC7_ROLES = ("custom", "air_assist", "worklight", "signal", "exhaust2")
+SPARE_PC6_ROLES = ("custom", "air_assist", "worklight", "signal", "exhaust2")
 
 
 def validate_spare_config(data):
@@ -85,7 +85,7 @@ def validate_spare_config(data):
         raise ValueError("Ungültiges GPIO-Profil")
     if set(data) != {"pin", "role", "name"}:
         raise ValueError("Unbekannte GPIO-Konfigurationsfelder")
-    if data["pin"] != "PC6" or data["role"] not in SPARE_PC7_ROLES:
+    if data["pin"] != "PC6" or data["role"] not in SPARE_PC6_ROLES:
         raise ValueError("Nur freier Ausgang PC6 mit gültigem Funktionsprofil")
     name = data["name"]
     if not isinstance(name, str) or not 1 <= len(name) <= 24:
