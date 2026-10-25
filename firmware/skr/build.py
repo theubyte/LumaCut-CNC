@@ -41,7 +41,7 @@ def patch(text):
         '#define BOARD_NAME "LumaCut SKR Mini MZ v1.0 4-axis EXPERIMENTAL"')
     text=change(text,
         '#define AUXOUTPUT1_PORT         GPIOC // Spindle direction\n#define AUXOUTPUT1_PIN          6',
-        '// MZ: do not assign PC6 twice (used as fan/coolant)')
+        '// MZ: do not assign PC6 twice (reserved for auxiliary FAN0)')
     text=change(text,
         '#define AUXOUTPUT2_PORT         GPIOC // Spindle enable\n#define AUXOUTPUT2_PIN          7',
         '#define AUXOUTPUT2_PORT         GPIOC // MZ FAN1 MOSFET: laser supply enable (LOW-SIDE)\n'
@@ -166,9 +166,9 @@ extern status_code_t limits_lumacut_z_clearance (void);
 #endif
 """,1)
         motion.write_text(body)
-        # Laser power is the BED low-side FET (PC9) mapped to the spindle
+        # Laser power is the FAN1 low-side FET (PC7) mapped to the spindle
         # enable GPIO. Keep the 24V supply energized through S0/no-burn
-        # traverses while M3/M4 remains active. M5 always switches BED off.
+        # traverses while M3/M4 remains active. M5 always switches FAN1 off.
         # M3 S0 therefore permits a warm-up dwell BEFORE PWM > 0.
         driver=root/"Src"/"driver.c"
         original=driver.read_text()
@@ -180,7 +180,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
             pwm_off(spindle);"""
         retain_block="""#ifdef LUMACUT_FAN1_SPINDLE_POWER
         // Never power-cycle the module's internal fan for each S0 traverse.
-        // PWM is off but BED remains energized until the explicit M5.
+        // PWM is off but FAN1 remains energized until the explicit M5.
         pwm_off(spindle);
 #else
 """+speed_block+"""
@@ -196,7 +196,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
         }"""
         standby_block="""#ifdef LUMACUT_FAN1_SPINDLE_POWER
         if(rpm == 0.0f && spindle->context.pwm->flags.rpm_controlled) {
-            // M3 S0 powers BED/laser fan without firing the laser.
+            // M3 S0 powers FAN1/laser fan without firing the laser.
             // The matched LightBurn profile waits before nonzero PWM.
             spindle_on(spindle);
             pwm_off(spindle);
@@ -210,7 +210,7 @@ extern status_code_t limits_lumacut_z_clearance (void);
         if original.count(zero_rpm_block)!=1:
             raise RuntimeError("Upstream spindleSetStateVariable() logic changed")
         original=original.replace(zero_rpm_block,standby_block)
-        # Drop laser PWM to zero before lifting BED-/laser return.
+        # Drop laser PWM to zero before lifting FAN1-/laser return.
         off_block="""    if(!(spindle->context.pwm->flags.cloned ? state.ccw : state.on)) {
         spindle_off(spindle);
         pwm_off(spindle);
@@ -229,14 +229,14 @@ extern status_code_t limits_lumacut_z_clearance (void);
         original=original.replace(off_block,safer_off)
         # A dedicated, exact-pin machine command avoids an unsafe assumption
         # about grblHAL's numbered M64/M65 auxiliary outputs. On this board
-        # PC7/FAN1 is the only spare controllable MOSFET; all other pins are
+        # PC6/FAN0 is the spare controllable MOSFET; all other pins are
         # reserved for stepper timing, limits, laser or primary accessories.
         command_hook = 'static status_code_t jtag_enable (sys_state_t state, char *args)'
         pc6_cmd = r"""#ifdef LUMACUT_PC6_IO
 // Dedicated Pi<->SKR GPIO protocol. This is NOT a general STM32 pinmux.
 // Only the spare FAN0/PC6 MOSFET is exposed, and high-power wiring still
 // requires separate physical validation.
-static status_code_t lumacut_pc7_io (sys_state_t state, char *args)
+static status_code_t lumacut_pc6_io (sys_state_t state, char *args)
 {
     if(args == NULL) {
         hal.stream.write((GPIOC->ODR & (1U << 6)) ? "[LCIO:PC6=1]\r\n"
@@ -265,7 +265,7 @@ static status_code_t lumacut_pc7_io (sys_state_t state, char *args)
             raise RuntimeError("grblHAL command table changed")
         original = original.replace(bootstrap, bootstrap + r"""
 #ifdef LUMACUT_PC6_IO
-        {"LCIO", lumacut_pc7_io, { .allow_blocking = On }, { .str = "LumaCut PC6 FAN0 I/O: query or =0/1" } },
+        {"LCIO", lumacut_pc6_io, { .allow_blocking = On }, { .str = "LumaCut PC6 FAN0 I/O: query or =0/1" } },
 #endif
 """, 1)
         init_marker = ' // Stepper init'
@@ -289,7 +289,7 @@ static status_code_t lumacut_pc7_io (sys_state_t state, char *args)
             h.write("build_flags = "+chr(36)+"{env:"+src_env+".build_flags}\n")
             if args.bridge:
                 h.write("  -D SERIAL_PORT=1\n")
-            h.write("  -D COOLANT_ENABLE=3\n") # M8 PC6 exhaust AND M7 PC8 LEDs
+            h.write("  -D COOLANT_ENABLE=3\n") # M8 PC9 BED exhaust AND M7 PC8 HE0 LEDs
             h.write("  -D SPINDLE0_ENABLE=SPINDLE_PWM0_NODIR\n")
             # Pi-400 USB builds do NOT enable the obsolete Waveshare keypad.
             # PA9/PA10 (USART1) remain free for a separately validated STM32
