@@ -24,6 +24,8 @@ jobs:
           node-version: '22'
       - name: Install Node dependencies
         run: npm install
+      - name: Generate Windows application icons
+        run: npx tauri icon assets/icon.svg
       - name: Build Windows NSIS installer
         run: npm run build:windows
       - name: Upload Windows installer
