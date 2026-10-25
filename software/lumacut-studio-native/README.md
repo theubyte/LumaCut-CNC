@@ -20,6 +20,33 @@ pip install pyinstaller
 pyinstaller --windowed --name LumaCutStudio src/main.py
 ```
 
+## Arbeitsfläche (Canvas)
+
+Code: `src/lumacut_canvas/` (eigenes Paket, Modell ohne Qt-Abhängigkeit).
+Eigenständig testen: `python src/canvas_demo.py`.
+
+- **Werkzeuge:** Auswahl (V), Rechteck (R), Ellipse (E), Linie (L), Text (T).
+  *Umschalt* beim Zeichnen = Quadrat/Kreis/45°-Linie; Klick ohne Ziehen legt
+  ein 20-mm-Objekt an. Doppelklick auf Text = Text ändern.
+- **Bearbeiten:** Verschieben (Maus oder Pfeiltasten 1 mm, *Umschalt* 10 mm),
+  Skalieren über 8 Griffe (*Umschalt* = Seitenverhältnis halten), Entf,
+  Strg+D duplizieren, Strg+C/V, Strg+Z/Strg+Y, X/Y/B/H in mm in der Eigenschaftsleiste.
+- **Ansicht:** Mausrad = Zoom, mittlere Maustaste oder Leertaste+Ziehen = Verschieben,
+  Strg+0 = Fläche einpassen, Raster und Fangen (1 mm) umschaltbar, Lineale in mm,
+  Cursorposition in mm in der Statusleiste.
+- **Ebenen:** Farbe, Name, sichtbar, gesperrt, Reihenfolge; je Ebene
+  Leistung (1–100 %), Geschwindigkeit (1–6000 mm/min) und Durchgänge (1–30).
+  Objekte übernehmen Farbe und Parameter ihrer Ebene. Ausgeblendete Ebenen
+  werden nicht gelasert; die unterste Ebene läuft zuerst.
+- **Dateien:** Speichern/Öffnen als `*.lumacut.json` (Format `lumacut-canvas`, v1, mm),
+  Export als SVG oder PNG (Strg+E).
+- **An die Maschine:** „Design senden“ (Toolbar) erzeugt Marlin-G-Code
+  (`lumacut_canvas/gcode.py`, Regeln wie `marlin-postprocessor.mjs`) und lädt
+  ihn über das Maschinen-Panel hoch; gestartet wird erst mit „Start Job“.
+- Die Arbeitsfläche zeigt 0–360 × 0–340 mm. Objekte werden still in der Fläche
+  gehalten; der interne Safezone-Versatz wird nur beim Export für die Maschine
+  addiert (`lumacut_canvas/workarea.py`).
+
 ## Maschinenanbindung (Pi-API)
 
 Das Panel **Maschine** (rechte Spalte) spricht direkt mit dem Flask-Dienst des
@@ -79,3 +106,12 @@ QT_QPA_PLATFORM=offscreen python -m pytest tests
 
 Die Maschinen-Tests (`tests/test_machine_*.py`) laufen gegen einen lokalen
 Fake-Pi (`tests/fake_pi.py`) und brauchen keine Hardware.
+
+Canvas-Tests (`tests/test_model.py`, `test_layers.py`, `test_serialization.py`,
+`test_undo.py`, `test_editor.py`, `test_gcode.py`) laufen ebenfalls offscreen.
+Unter Windows (PowerShell):
+
+```powershell
+pip install -r requirements.txt -r requirements-dev.txt
+$env:QT_QPA_PLATFORM = "offscreen"; python -m pytest tests
+```
