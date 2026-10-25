@@ -126,6 +126,28 @@ class SetTextCommand(QUndoCommand):
         self.doc.set_text(self.sid, self.old)
 
 
+class SetGroupsCommand(QUndoCommand):
+    """Gruppenzugehörigkeit mehrerer Objekte setzen (Gruppieren/Entgruppieren)."""
+
+    def __init__(self, doc: Document, new: dict[str, tuple[str, ...]], text: str) -> None:
+        super().__init__(text)
+        self.doc = doc
+        self.new = new
+        self.old = {i: doc.shape(i).groups for i in new}
+
+    def _apply(self, values: dict[str, tuple[str, ...]]) -> None:
+        self.doc.begin_batch()
+        for i, g in values.items():
+            self.doc.set_groups(i, g)
+        self.doc.end_batch()
+
+    def redo(self) -> None:
+        self._apply(self.new)
+
+    def undo(self) -> None:
+        self._apply(self.old)
+
+
 class AddLayerCommand(QUndoCommand):
     def __init__(self, doc: Document, layer: Layer, index: int = 0) -> None:
         super().__init__("Ebene hinzufügen")

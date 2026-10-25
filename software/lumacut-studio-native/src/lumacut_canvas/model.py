@@ -96,7 +96,8 @@ def rotate_point(px: float, py: float, cx: float, cy: float, deg: float) -> tupl
     r = math.radians(deg)
     c, s = math.cos(r), math.sin(r)
     dx, dy = px - cx, py - cy
-    return cx + dx * c - dy * s, cy + dx * s + dy * c
+    # Auf 1 nm runden, damit 90°-Drehungen keine -1e-15-Ränder erzeugen.
+    return round(cx + dx * c - dy * s, 9), round(cy + dx * s + dy * c, 9)
 
 
 @dataclass
@@ -199,6 +200,10 @@ class Shape:
     text: str = ""
     font_family: str = "Segoe UI"
     id: str = field(default_factory=new_id)
+    # Gruppenzugehörigkeit, äußerste Gruppe zuerst (verschachtelte Gruppen).
+    # Gruppen sind reine Zugehörigkeit; Objekte bleiben flach in ihrer Ebene,
+    # darum laufen Export, G-Code und Ebenen unverändert über alle Objekte.
+    groups: tuple[str, ...] = ()
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -212,6 +217,8 @@ class Shape:
              "x": self.geom.x, "y": self.geom.y, "w": self.geom.w, "h": self.geom.h}
         if self.geom.rot:
             d["rot"] = self.geom.rot
+        if self.groups:
+            d["groups"] = list(self.groups)
         if self.kind == "text":
             d["text"] = self.text
             d["font"] = self.font_family
@@ -226,7 +233,8 @@ class Shape:
                      geom=Geometry(float(d["x"]), float(d["y"]), float(d["w"]), float(d["h"]),
                                    normalize_angle(float(d.get("rot", 0.0)))),
                      text=str(d.get("text", "")), font_family=str(d.get("font", "Segoe UI")),
-                     id=str(d.get("id") or new_id()))
+                     id=str(d.get("id") or new_id()),
+                     groups=tuple(str(g) for g in d.get("groups", ()) if g))
 
 
 def constrain_geometry(g: Geometry) -> Geometry:
@@ -276,7 +284,7 @@ class Document:
     """
 
     FORMAT = "lumacut-canvas"
-    # Version 2: Drehung ("rot"). Ältere Dateien (v1) werden weiter gelesen;
+    # Version 2: Drehung ("rot") und Gruppen ("groups"). Ältere Dateien (v1) werden weiter gelesen;
     # ältere Programmversionen lehnen v2 ab, statt die Drehung still zu verlieren.
     VERSION = 2
 
@@ -433,6 +441,31 @@ class Document:
     def set_text(self, shape_id: str, text: str) -> None:
         self.shape(shape_id).text = text
         self.changed()
+
+    def set_groups(self, shape_id: str, groups: tuple[str, ...]) -> None:
+        self.shape(shape_id).groups = tuple(groups)
+        self.changed()
+
+    def group_members(self, group_id: str) -> list[str]:
+        return [s.id for s in self.shapes if group_id in s.groups]
+
+    def unit_of(self, shape_id: str) -> list[str]:
+        """Alle Objekte, die zusammen mit ``shape_id`` ausgewählt werden
+        (die äußerste Gruppe oder nur das Objekt selbst)."""
+        s = self.shape(shape_id)
+        if not s.groups:
+            return [shape_id]
+        top = s.groups[0]
+        return [o.id for o in self.shapes if o.groups and o.groups[0] == top]
+
+    def expand_to_groups(self, ids: Iterable[str]) -> list[str]:
+        """Auswahl auf ganze (äußerste) Gruppen erweitern; nur bearbeitbare
+        Objekte, Reihenfolge wie im Dokument."""
+        wanted: set[str] = set()
+        for sid in ids:
+            if self.has_shape(sid):
+                wanted.update(self.unit_of(sid))
+        return [s.id for s in self.shapes if s.id in wanted and self.is_editable(s.id)]
 
     def is_editable(self, shape_id: str) -> bool:
         """Objekt ist sichtbar und nicht gesperrt (über seine Ebene)."""

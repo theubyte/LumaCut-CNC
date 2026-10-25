@@ -157,6 +157,18 @@ def _rotate(p, c, cw: bool = True):
     p.drawPolyline(QPolygonF([QPointF(end.x() - 4.2, end.y() - 0.6), end, QPointF(end.x() - 0.2, end.y() + 4.2)]))
 
 
+def _group(p, c, ungroup: bool = False):
+    pen = QPen(QColor(c), 1.3, Qt.DashLine if not ungroup else Qt.SolidLine)
+    if not ungroup:
+        pen.setDashPattern([2, 2])
+        p.setPen(pen); p.setBrush(Qt.NoBrush); p.drawRect(QRectF(3, 3, 18, 18))
+    _pen(p, c, 1.6)
+    if ungroup:
+        p.drawRect(QRectF(3.5, 3.5, 8, 8)); p.drawRect(QRectF(12.5, 12.5, 8, 8))
+    else:
+        p.drawRect(QRectF(6, 6, 7, 7)); p.drawEllipse(QRectF(11, 11, 7, 7))
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "undo": _undo, "redo": _redo, "delete": _delete, "fit": _fit,
@@ -166,6 +178,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "lock": _lock, "unlock": lambda p, c: _lock(p, c, True),
     "plus": _plus, "up": lambda p, c: _arrow(p, c, True), "down": lambda p, c: _arrow(p, c, False),
     "duplicate": _duplicate, "link": _link,
+    "group": _group, "ungroup": lambda p, c: _group(p, c, True),
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
 }
 

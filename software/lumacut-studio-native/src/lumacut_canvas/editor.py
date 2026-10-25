@@ -27,11 +27,11 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGridLayo
 
 from . import icons, theme
 from .canvas_view import CanvasScene, CanvasView, Ruler
-from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand,
+from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand, SetGroupsCommand,
                        SetShapeLayerCommand, SetTextCommand)
 from .document_io import FILE_SUFFIX, load_into, save_document
 from .export import export_png, export_svg
-from .model import Document, Geometry, Shape, keep_inside_together, normalize_angle
+from .model import Document, Geometry, Shape, keep_inside_together, new_id, normalize_angle
 from .tools import TOOL_LABELS, TOOL_SHORTCUTS, Tool, ToolController
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, clamp_offset
 
@@ -146,7 +146,13 @@ class PropertyBar(QWidget):
         else:
             kinds = {doc.shape(i).kind for i in sel}
             names = {"rect": "Rechteck", "ellipse": "Ellipse", "line": "Linie", "text": "Text"}
-            self.title.setText(names[kinds.pop()] if len(sel) == 1 else f"{len(sel)} Objekte")
+            tops = {doc.shape(i).groups[0] if doc.shape(i).groups else i for i in sel}
+            if len(sel) == 1:
+                self.title.setText(names.get(kinds.pop(), "Objekt"))
+            elif len(tops) == 1:
+                self.title.setText(f"Gruppe ({len(sel)})")
+            else:
+                self.title.setText(f"{len(sel)} Objekte")
             self.x.setValue(b.x)
             self.y.setValue(b.y)
             g = doc.shape(sel[0]).geom
@@ -343,6 +349,9 @@ class CanvasEditor(QWidget):
                   QKeySequence("Ctrl+R"), "rotate_cw")
         self._act("rotate_ccw", "90° gegen den Uhrzeigersinn drehen", lambda: self.rotate_selection(-90.0),
                   QKeySequence("Ctrl+Shift+R"), "rotate_ccw")
+        self._act("group", "Gruppieren", self.group_selection, QKeySequence("Ctrl+G"), "group")
+        self._act("ungroup", "Gruppierung aufheben", self.ungroup_selection, QKeySequence("Ctrl+Shift+G"),
+                  "ungroup")
         self._act("copy", "Kopieren", self.copy_selection, QKeySequence.Copy)
         self._act("paste", "Einfügen", self.paste, QKeySequence.Paste)
         self._act("select_all", "Alles auswählen", self.select_all, QKeySequence.SelectAll)
@@ -368,7 +377,7 @@ class CanvasEditor(QWidget):
         a = self.actions_by_name
         bar = self._toolbar("ActionBar", Qt.Horizontal)
         for name in ("open", "save", "export", None, "undo", "redo", None, "duplicate", "delete",
-                     "rotate_ccw", "rotate_cw", None,
+                     "rotate_ccw", "rotate_cw", "group", "ungroup", None,
                      "zoom_out", "zoom_in", "fit", None, "grid", "snap"):
             bar.addSeparator() if name is None else bar.addAction(a[name])
         self.zoom_label = QLabel("100 %")
@@ -447,7 +456,8 @@ class CanvasEditor(QWidget):
         self.documentChanged.emit()
 
     def set_selection(self, ids: list[str]) -> None:
-        ids = [i for i in dict.fromkeys(ids) if self.document.has_shape(i) and self.document.is_editable(i)]
+        """Auswahl setzen; Gruppen werden automatisch ganz ausgewählt."""
+        ids = self.document.expand_to_groups(dict.fromkeys(ids))
         if ids == self.selection:
             return
         self.selection = ids
@@ -515,6 +525,35 @@ class CanvasEditor(QWidget):
         new = keep_inside_together({i: g.rotated(delta_deg, cx, cy) for i, g in old.items()})
         self.undo_stack.push(SetGeometryCommand(doc, old, new, "Drehen"))
 
+    def group_selection(self) -> None:
+        """Auswahl zu einer (ggf. verschachtelten) Gruppe zusammenfassen."""
+        doc = self.document
+        sel = [i for i in self.selection if doc.has_shape(i)]
+        units = {doc.shape(i).groups[0] if doc.shape(i).groups else i for i in sel}
+        if len(units) < 2:
+            self.notify("Zum Gruppieren mindestens zwei Objekte oder Gruppen auswählen.")
+            return
+        gid = new_id()
+        self.undo_stack.push(SetGroupsCommand(doc, {i: (gid,) + doc.shape(i).groups for i in sel},
+                                              "Gruppieren"))
+        self.notify(f"Gruppe aus {len(units)} Elementen erstellt")
+
+    def ungroup_selection(self) -> None:
+        """Äußerste Gruppe der ausgewählten Objekte auflösen (innere bleiben)."""
+        doc = self.document
+        sel = [i for i in self.selection if doc.has_shape(i) and doc.shape(i).groups]
+        if not sel:
+            self.notify("Keine Gruppe ausgewählt.")
+            return
+        # Alle Mitglieder (auch ausgeblendete/gesperrte) verlieren die Gruppe.
+        tops = {doc.shape(i).groups[0] for i in sel}
+        members = [s.id for s in doc.shapes if s.groups and s.groups[0] in tops]
+        keep = list(self.selection)
+        self.undo_stack.push(SetGroupsCommand(doc, {i: doc.shape(i).groups[1:] for i in members},
+                                              "Gruppierung aufheben"))
+        self.selection = []
+        self.set_selection(keep)
+
     def copy_selection(self) -> None:
         self._clipboard = [self.document.shape(i).copy() for i in self.selection]
         self._paste_count = 0
@@ -534,8 +573,11 @@ class CanvasEditor(QWidget):
         doc = self.document
         fallback = doc.active_layer_id
         copies = []
+        # Kopien bilden eigene Gruppen (gleiche Struktur, neue IDs).
+        remap: dict[str, str] = {}
         for s in shapes:
             c = s.copy(new_identity=True)
+            c.groups = tuple(remap.setdefault(g, new_id()) for g in s.groups)
             c.geom = c.geom.translated(offset, offset)
             if not any(l.id == c.layer_id for l in doc.layers):
                 c.layer_id = fallback  # type: ignore[assignment]

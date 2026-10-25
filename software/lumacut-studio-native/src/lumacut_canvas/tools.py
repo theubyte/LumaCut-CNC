@@ -209,12 +209,15 @@ class ToolController:
         hit = self.ed.scene.editable_shape_at(pos)
         shift = bool(mods & Qt.ShiftModifier)
         if hit is not None:
+            # Gruppen werden immer als Ganzes (äußerste Gruppe) gewählt.
+            unit = self.doc.unit_of(hit)
             sel = list(self.ed.selection)
             if shift:
-                sel = [s for s in sel if s != hit] if hit in sel else sel + [hit]
+                sel = [s for s in sel if s not in unit] if hit in sel else sel + unit
             elif hit not in sel:
-                sel = [hit]
+                sel = unit
             self.ed.set_selection(sel)
+            sel = self.ed.selection
             if hit in sel:
                 self._mode = "move"
                 self._orig = {i: self.doc.shape(i).geom.copy() for i in sel}
