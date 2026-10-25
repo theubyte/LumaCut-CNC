@@ -1,10 +1,10 @@
 """Ensure laser, exhaust and cabinet LED pins stay separate on SKR Mini MZ.
 
 The grblHAL bridge must expose the three physical MOSFET channels:
- PC9 BED  = laser power switch controlled by spindle enable (low side)
- PC6 FAN0 = M8 flood/exhaust
+ PC7 FAN1 = laser power switch controlled by spindle enable (low side)
+ PC9 BED  = M8 flood/exhaust
  PC8 HE0  = M7 mist/cabinet 24 V LED
- PC7 FAN1 = unused spare
+ PC6 FAN0 = auxiliary output
 """
 from pathlib import Path
 import unittest
@@ -17,21 +17,21 @@ PORTAL=(ROOT/"firmware/hmi/src/mobile_portal.h").read_text(encoding="utf-8")
 class AuxOutputContractTest(unittest.TestCase):
     def test_24v_channels_are_unique_and_enabled(self):
         self.assertIn('-D COOLANT_ENABLE=3',BUILD)
-        self.assertIn('AUXOUTPUT3_PIN          6',BUILD)
+        self.assertIn('AUXOUTPUT3_PIN          9',BUILD)
         self.assertIn('AUXOUTPUT4_PIN          8',BUILD)
-        self.assertIn('AUXOUTPUT2_PIN          9',BUILD)
-        self.assertIn('PC9 BED now directly switches',BUILD)
+        self.assertIn('AUXOUTPUT2_PIN          7',BUILD)
+        self.assertIn('PC7 FAN1 now directly switches',BUILD)
         self.assertIn('galvanic isolation',BUILD)
         self.assertNotIn('-D COOLANT_ENABLE=1',BUILD)
 
     def test_bed_laser_power_is_retained_through_zero_pwm(self):
-        self.assertIn('LUMACUT_BED_SPINDLE_POWER=1',BUILD)
+        self.assertIn('LUMACUT_FAN1_SPINDLE_POWER=1',BUILD)
         self.assertIn('if original.count(speed_block)!=1:',BUILD)
         self.assertIn('if original.count(zero_rpm_block)!=1:',BUILD)
         self.assertIn('spindle_on(spindle);',BUILD)
         self.assertIn('pwm_off(spindle);',BUILD)
-        self.assertIn('M3 S0 powers BED/laser fan without firing the laser',BUILD)
-        self.assertIn('PWM is off but BED remains energized until the explicit M5',BUILD)
+        self.assertIn('M3 S0 powers FAN1/laser fan without firing the laser',BUILD)
+        self.assertIn('PWM is off but FAN1 remains energized until the explicit M5',BUILD)
         # The original upstream line is a search token in build.py, not
         # the emitted board map. Verify replacement output instead.
         self.assertIn("'#define AUXOUTPUT2_PIN          9'",BUILD)
