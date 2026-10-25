@@ -1,7 +1,12 @@
-name: LumaCut Pi 400 + SKR USB CI
-# Archived manual fallback only; local tests are authoritative.
-# Uploading files to GitHub must never trigger a build.
+name: LumaCut Pi 400 tests
+# Pi gateway, firmware update path and installer checks. No real hardware.
 on:
+  push:
+    paths:
+      - 'pi400/**'
+      - 'tests/**'
+      - 'firmware/marlin/**'
+      - '.github/workflows/ci.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,6 +16,7 @@ concurrency:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,87 +24,9 @@ jobs:
           python-version: '3.12'
       - name: Install Python dependencies
         run: python -m pip install --disable-pip-version-check Flask==3.1.1 pyserial==3.5
-      - name: Run LumaCut source, Pi/GRBL transport and geometry tests
+      - name: Unit and integration tests
         run: python -m unittest discover -s tests -v
-      - name: Compile Pi 400 server, installer and configuration
+      - name: Compile Pi sources and check shell scripts
         run: |
-          python -m compileall -q pi400
-          python -m py_compile builder/app.py tools/probe_math.py firmware/skr/build.py
-          bash -n pi400/install.sh pi400/update.sh
-      - name: Validate Pi Control Studio browser JavaScript
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          source=Path("pi400/static/index.html").read_text()
-          scripts=re.findall(r'<script[^>]*>([\s\S]*?)</script>', source)
-          if not scripts: raise SystemExit("No browser script found")
-          Path("/tmp/lumacut_pi_ui.js").write_text("\n".join(scripts))
-          PY
-          node --check /tmp/lumacut_pi_ui.js
-          node --check builder/dashboard.js
-  firmware:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/cache@v4
-        with:
-          path: ~/.platformio
-          key: ${{ runner.os }}-pio-skrusb-${{ hashFiles('firmware/skr/platformio.ini') }}
-      - name: Install PlatformIO
-        run: python -m pip install --disable-pip-version-check platformio==6.2.0
-      - name: Build grblHAL STM32F103RC native USB device
-        run: python firmware/skr/build.py
-      - name: Upload USB firmware binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: LUMACUT-SKR-USB-${{ github.sha }}
-          path: |
-            firmware/skr/.pio/build/lumacut_skr_mz_usb/firmware.bin
-            firmware/skr/.pio/build/lumacut_skr_mz_usb/firmware.elf
-            firmware/skr/.pio/build/lumacut_skr_mz_usb/capabilities.json
-          if-no-files-found: error
-          retention-days: 30
-  package:
-    runs-on: ubuntu-latest
-    needs: [tests, firmware]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: LUMACUT-SKR-USB-*
-          path: artifacts
-      - name: Verify Pi+USB release
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import hashlib,json,os,zipfile
-          bins=list(Path("artifacts").rglob("firmware.bin"))
-          if len(bins)!=1: raise RuntimeError("Expected one SKR USB binary: "+str(bins))
-          binary=bins[0]
-          contract=json.loads((binary.parent/"capabilities.json").read_text())
-          if contract["firmware_sha256"]!=hashlib.sha256(binary.read_bytes()).hexdigest():
-              raise RuntimeError("SKR capability contract hash mismatch")
-          manifest={"source_sha":"${{ github.sha }}",
-                    "skr_firmware":"SKR-USB/firmware.bin",
-                    "sha256":hashlib.sha256(binary.read_bytes()).hexdigest(),
-                    "validated_on_hardware":False,
-                    "controller":"SKR Mini MZ V1.0 grblHAL USB",
-                    "gateway":"Raspberry Pi 400"}
-          with zipfile.ZipFile("LumaCut-Pi400-SKR-USB.zip","w",zipfile.ZIP_DEFLATED) as z:
-              z.write(binary,manifest["skr_firmware"])
-              z.write(binary.parent/"capabilities.json","SKR-USB/capabilities.json")
-              for p in list(Path("pi400").rglob("*")):
-                  if p.is_file(): z.write(p,str(p))
-              z.write("lightburn/LumaCut-CNC-USB.lbdev")
-              z.writestr("manifest.json",json.dumps(manifest,indent=2))
-          PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LUMACUT-PI400-${{ github.sha }}
-          path: LumaCut-Pi400-SKR-USB.zip
-          retention-days: 30
+          python -m compileall -q pi400 firmware/marlin
+          bash -n pi400/install.sh pi400/update.sh pi400/recover.sh

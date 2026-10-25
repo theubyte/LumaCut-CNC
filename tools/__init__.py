@@ -1,1 +1,0 @@
-"""Hardwarefreie CNC-Geometrietools."""
