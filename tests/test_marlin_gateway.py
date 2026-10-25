@@ -190,9 +190,9 @@ class USBProtocolTests(unittest.TestCase):
         writes=serial.writes
         self.assertEqual(writes[0],b"M5 I\n")
         self.assertIn(b"G0 Z20.000 F360\n",writes)
-        self.assertIn(b"G0 X15.000 Y15.000 F6000\n",writes)
+        self.assertIn(b"G0 X0.000 Y0.000 F6000\n",writes)
         self.assertLess(writes.index(b"G0 Z20.000 F360\n"),
-                        writes.index(b"G0 X15.000 Y15.000 F6000\n"))
+                        writes.index(b"G0 X0.000 Y0.000 F6000\n"))
 
     def test_safepark_never_descends_from_current_z(self):
         serial=FakeSerial([
