@@ -66,6 +66,17 @@ class GuardTests(unittest.TestCase):
             g.check("G28 X Y",True)
 
 
+class FirmwareDirectionContractTests(unittest.TestCase):
+    def test_lumacut_x_y_reversed_only(self):
+        build=(ROOT/"firmware/marlin/build.py").read_text(encoding="utf-8")
+        self.assertIn('cfg = replace_active(cfg, "INVERT_X_DIR", "false")',build)
+        self.assertIn('cfg = replace_active(cfg, "INVERT_Y_DIR", "false")',build)
+        self.assertIn('cfg = replace_active(cfg, "INVERT_Z_DIR", "false")',build)
+        self.assertIn('cfg = replace_active(cfg, "X_MIN_ENDSTOP_INVERTING", "true")',build)
+        self.assertIn('cfg = replace_active(cfg, "Y_MIN_ENDSTOP_INVERTING", "true")',build)
+        self.assertIn('cfg = replace_active(cfg, "Z_MIN_ENDSTOP_INVERTING", "true")',build)
+
+
 class USBProtocolTests(unittest.TestCase):
     def test_actual_marlin_m115_and_no_grbl_identity_spoof(self):
         serial=FakeSerial([
