@@ -80,6 +80,14 @@ class FirmwareDirectionContractTests(unittest.TestCase):
         self.assertIn("#define FAN1_PIN -1",pins)
         self.assertNotIn("#define SPINDLE_LASER_ENA_PIN PC6",pins)
 
+    def test_firmware_native_probe_has_fixed_bed_origin(self):
+        build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
+        self.assertIn('cfg = uncomment(cfg, "FIX_MOUNTED_PROBE")',build)
+        self.assertIn('cfg = uncomment(cfg, "Z_SAFE_HOMING")',build)
+        self.assertIn('replace_active(cfg, "Z_SAFE_HOMING_X_POINT", "15")',build)
+        self.assertIn('replace_active(cfg, "Z_SAFE_HOMING_Y_POINT", "15")',build)
+        self.assertIn('replace_active(cfg, "Z_PROBE_LOW_POINT", "0")',build)
+
     def test_default_z_steps_match_calibrated_value(self):
         build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
         self.assertIn(
