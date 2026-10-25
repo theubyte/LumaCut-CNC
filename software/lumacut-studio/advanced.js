@@ -117,3 +117,28 @@ marlinExportButton.onclick=async()=>{
  }catch(err){message("Marlin-Export blockiert: "+err.message);}
  finally{marlinExportButton.disabled=false;}
 };
+
+document.addEventListener("lumacut:svg-imported",event=>{
+ const paths=event.detail?.paths;
+ if(!Array.isArray(paths)||paths.length===0||paths.length>3000)return message("SVG-Import nicht als gültige Vektorgeometrie erfasst.");
+ let count=0;
+ const converted=[];
+ for(const raw of paths){
+  if(!Array.isArray(raw)||raw.length<2||raw.length>5000)return message("SVG-Pfad zu komplex. Bitte vereinfachen.");
+  count+=raw.length;if(count>100000)return message("SVG zu komplex: mehr als 100.000 Stützpunkte.");
+  const points=raw.map(p=>[Number(p.x),Number(p.y)]);
+  if(points.some(p=>!p.every(Number.isFinite)))return message("SVG enthält ungültige Koordinaten.");
+  const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]);
+  const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y;
+  if(x<0||y<30||x+w>390||y+h>370)return message("SVG außerhalb der nutzbaren Arbeitsfläche.");
+  converted.push({id:uuid(),kind:"free",layer:app.active,x,y,w,h,points});
+ }
+ if(!converted.length)return;
+ snapshot();app.items.push(...converted);
+ q("graphics").style.display="none";
+ render();q("empty").hidden=true;
+ message(converted.length+" SVG-Pfade in Ebene „"+(layer()?.name||"")+"“ übernommen.");
+});
+// The legacy process inputs belong to the old import-only preview.
+// Avoid offering two contradictory job planners in the same interface.
+for(const group of [...document.querySelectorAll('[data-panel="process"] > .group')].slice(0,3))group.style.display="none";
