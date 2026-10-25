@@ -243,6 +243,23 @@ with web.app.test_client() as client:
         self.assertNotIn("X-LumaCut-Key",ui)
         self.assertIn("Keine Anmeldung erforderlich",ui)
 
+    def test_z_switch_tip_offset_wired_end_to_end(self):
+        web=(ROOT/"pi400"/"marlin"/"web.py").read_text()
+        ui=(ROOT/"pi400"/"marlin"/"index.html").read_text()
+        self.assertIn('"z_switch_tip_offset_mm": 1.5',web)
+        self.assertIn('request.form.get("z_switch_tip_offset_mm"',web)
+        self.assertIn('config["z_switch_tip_offset_mm"] = offset',web)
+        self.assertIn('persist()',web)
+        self.assertIn('estimated_tip_gap_mm=tip_gap',web)
+        self.assertIn('estimated_focus_adjust_mm=',web)
+        self.assertIn('id="zOffset"',ui)
+        self.assertIn('id="saveZSettings"',ui)
+        self.assertIn('"/api/settings"',ui)
+        self.assertIn('estimated_tip_gap_mm',ui)
+        # Offset must not secretly change homing motion without confirming
+        # whether the probe point is physically above or below laser tip.
+        self.assertNotIn('machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"],',web)
+
     def test_machine_web_and_service_modules_compile(self):
         import subprocess
         paths=[str(ROOT/"pi400"/"marlin"/p)
