@@ -57,6 +57,7 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "SERIAL_PORT", "-1")
     cfg = replace_active(cfg, "SERIAL_PORT_2", "2")
     cfg = replace_active(cfg, "BAUDRATE", "115200")
+    cfg = replace_active(cfg, "CUSTOM_MACHINE_NAME", '"LumaCut CNC Marlin"')
     cfg = replace_active(cfg, "EXTRUDERS", "0")
     cfg = replace_active(cfg, "TEMP_SENSOR_0", "0")
     cfg = replace_active(cfg, "X_BED_SIZE", "390")
@@ -79,7 +80,7 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     adv = uncomment(adv, "LASER_FEATURE")
     adv = replace_active(adv, "SPINDLE_LASER_ACTIVE_STATE", "HIGH")
     adv = replace_active(adv, "CUTTER_POWER_UNIT", "PWM255")
-    adv = replace_active(adv, "SPEED_POWER_STARTUP", "0") if False else adv
+    # Make bare M3 fail-safe at zero rather than Marlin's stock 80% power.
     # The above keyword occurs in both spindle and laser branches. Replace
     # only the *laser* branch after checking a unique exact source token.
     laser_default = "#define SPEED_POWER_STARTUP        80    // (%)"
