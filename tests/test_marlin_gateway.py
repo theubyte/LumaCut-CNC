@@ -67,6 +67,26 @@ class GuardTests(unittest.TestCase):
 
 
 class FirmwareDirectionContractTests(unittest.TestCase):
+    def test_laser_power_pin_is_fan1_pc6_and_pwm_is_pa1(self):
+        import importlib.util
+        spec=importlib.util.spec_from_file_location(
+            "lumacut_build",ROOT/"firmware"/"marlin"/"build.py")
+        module=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        pins=module.PIN_PATCH
+        self.assertIn("#define SPINDLE_LASER_ENA_PIN PC6",pins)
+        self.assertIn("#define SPINDLE_LASER_PWM_PIN PA1",pins)
+        self.assertIn("#define FAN_PIN -1",pins)
+        self.assertIn("#define FAN0_PIN -1",pins)
+        self.assertIn("#define FAN1_PIN -1",pins)
+        self.assertNotIn("#define SPINDLE_LASER_ENA_PIN PC7",pins)
+
+    def test_default_z_steps_match_calibrated_value(self):
+        build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
+        self.assertIn(
+            'replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 380 }")',
+            build)
+
     def test_lumacut_x_y_reversed_only(self):
         build=(ROOT/"firmware/marlin/build.py").read_text(encoding="utf-8")
         self.assertIn('cfg = replace_active(cfg, "INVERT_X_DIR", "false")',build)
