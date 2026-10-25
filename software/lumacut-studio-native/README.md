@@ -149,6 +149,15 @@ Zustandsautomat, NOT-AUS-Verhalten und Einstellungen:
 Kachel-Scan, Objekterkennung, Mehrbereichs-Proben, Höhenmeshes und
 Fokuskorrektur: siehe [docs/SCAN_PROBE.md](docs/SCAN_PROBE.md) (`src/scanprobe/`).
 
+## Materialbibliothek
+
+*Material → Materialbibliothek …*: Startwerte (Leistung, mm/min, Durchgänge,
+Fokus-Absenkung je Durchgang) für 25 Materialien und LaserTree LT-80W
+(10 W optisch) bzw. 5/10/20/40-W-Dioden auf die aktive Ebene anwenden,
+Presets speichern, 3D-Relief aus Graustufenbild. Warnliste für nicht
+laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
+(`src/lumacut_materials/`).
+
 ## Tests
 
 ```bash
