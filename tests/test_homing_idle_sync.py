@@ -8,7 +8,6 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pi400"))
@@ -66,50 +65,53 @@ class HomingIdleTransportTests(unittest.TestCase):
 
 class HomingPiIntegrationTests(unittest.TestCase):
     def test_post_home_z_waits_for_idle_and_no_extra_move_if_already_at_target(self):
+        # Importing Flask app in this test process would pollute the module's
+        # singleton DATA/maintenance path for test_pi400.Pi400WebTests. Execute
+        # the integration scenario in an isolated Python interpreter.
+        import subprocess
         import tempfile
-        os.environ.setdefault("LUMACUT_KEY", "unit-test-long-private-key")
+        script = r"""
+from unittest.mock import patch
+from lumacut import app as module
+
+events = []
+state = {
+    "owner": "Frei", "state": "Idle", "connected": True,
+    "bootstrap_ready": True, "homed": False,
+    "position": [-1, -1, -20],
+    "settings": {112: 1200, 132: 100},
+}
+def fake_send(commands, timeout=15):
+    events.append("send " + commands[0])
+    if commands[0] == "$H":
+        state["state"] = "Home"
+        state["homed"] = True
+        module.controller.homed = True
+    return "ok"
+def fake_wait(timeout=15):
+    events.append("wait Idle")
+    assert state["state"] == "Home"
+    state["state"] = "Idle"
+module.config["focus"] = {"lift": 20.0, "gap": 7.0, "tip": 0.0, "auto": True}
+module.controller.homed = False
+with (
+    patch.object(module.controller, "status", side_effect=lambda: state),
+    patch.object(module.controller, "wait_for_idle_after_homing", side_effect=fake_wait),
+    patch.object(module, "run_commands", side_effect=fake_send),
+):
+    result = module.do_action("home")
+assert "Z bereits auf Sicherheitsabstand" in result, result
+assert events == ["send $H", "wait Idle"], events
+"""
         with tempfile.TemporaryDirectory() as root:
-            os.environ.setdefault("LUMACUT_DATA", root)
-            from lumacut import app as module
-            previous = dict(module.config["focus"])
-            was_homed = module.controller.homed
-            events = []
-            state = {
-                "owner": "Frei", "state": "Idle",
-                "connected": True, "bootstrap_ready": True, "homed": False,
-                "position": [-1, -1, -20],
-                "settings": {112: 1200, 132: 100},
-            }
-
-            def fake_send(commands, timeout=15):
-                events.append("send " + commands[0])
-                if commands[0] == "$H":
-                    state["state"] = "Home"  # status poll has not refreshed yet
-                    state["homed"] = True
-                    module.controller.homed = True
-                return "ok"
-
-            def fake_wait(timeout=15):
-                events.append("wait Idle")
-                self.assertEqual(state["state"], "Home")
-                state["state"] = "Idle"
-
-            module.config["focus"] = {"lift": 20.0, "gap": 7.0,
-                                      "tip": 0.0, "auto": True}
-            module.controller.homed = False
-            try:
-                with (
-                    patch.object(module.controller, "status", side_effect=lambda: state),
-                    patch.object(module.controller, "wait_for_idle_after_homing",
-                                 side_effect=fake_wait),
-                    patch.object(module, "run_commands", side_effect=fake_send),
-                ):
-                    result = module.do_action("home")
-                self.assertIn("Z bereits auf Sicherheitsabstand", result)
-                self.assertEqual(events, ["send $H", "wait Idle"])
-            finally:
-                module.config["focus"] = previous
-                module.controller.homed = was_homed
+            env = os.environ.copy()
+            env.update(LUMACUT_KEY="unit-test-long-private-key",
+                       LUMACUT_DATA=root, PYTHONPATH=str(ROOT / "pi400"))
+            process = subprocess.run([sys.executable, "-c", script], cwd=ROOT,
+                                     env=env, capture_output=True, text=True,
+                                     timeout=15)
+        self.assertEqual(process.returncode, 0,
+                         process.stdout + "\n" + process.stderr)
 
     def test_ui_blocks_local_controls_during_home_and_lightburn_host(self):
         page = (ROOT / "pi400" / "static" / "index.html").read_text(encoding="utf-8")
