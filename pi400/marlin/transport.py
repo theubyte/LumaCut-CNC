@@ -402,7 +402,7 @@ class MarlinTransport:
                 reply = self._exchange_locked(normalized, timeout)
                 # Remember the workpiece target sent by LightBurn even if
                 # asynchronous Marlin M114 reports arrive out of order.
-                if (re.match(r"^G0?[01](?:\\s|$)", normalized)
+                if (re.match(r"^G0?[01](?:\s|$)", normalized)
                         and self.absolute_mode):
                     coords = {k: float(v) for k, v in WORD.findall(normalized)}
                     if "X" in coords or "Y" in coords:
