@@ -6,10 +6,14 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QLabel, QPushButton, QListWidget, QStackedWidget,
     QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox, QComboBox,
-    QStatusBar, QToolBar, QFrame
+    QStatusBar, QToolBar, QFrame, QScrollArea
 )
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction, QFont, QPalette, QColor
+from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QShortcut
+
+# --- machine integration (machine agent) ---
+from machine.panel import MachinePanel, ESTOP_STYLE
+# --- end machine integration ---
 
 
 class LumaCutStudio(QMainWindow):
@@ -57,6 +61,21 @@ class LumaCutStudio(QMainWindow):
         start_btn = QPushButton("Start Job")
         start_btn.setObjectName("primary")
         toolbar.addWidget(start_btn)
+        # --- machine integration (machine agent) ---
+        # The machine panel owns connection, status and job control; the
+        # toolbar only mirrors its state and offers an always-visible E-Stop.
+        self.machine_panel = MachinePanel()
+        self.machine_panel.connection_changed.connect(self._on_machine_state)
+        start_btn.clicked.connect(self.machine_panel.start_job)
+        toolbar.addWidget(QLabel("   "))
+        estop_btn = QPushButton("NOT-AUS")
+        estop_btn.setStyleSheet(ESTOP_STYLE)
+        estop_btn.setToolTip("Software-Notstopp M112 (Pause/Untbr-Taste)")
+        estop_btn.clicked.connect(self.machine_panel.emergency_stop)
+        toolbar.addWidget(estop_btn)
+        QShortcut(QKeySequence(Qt.Key_Pause), self, self.machine_panel.emergency_stop,
+                  context=Qt.ApplicationShortcut)
+        # --- end machine integration ---
 
         # Central splitter
         central = QWidget()
@@ -111,26 +130,24 @@ class LumaCutStudio(QMainWindow):
         scan_layout.addWidget(btn_probe)
         right_layout.addWidget(scan)
 
-        # Machine
+        # --- machine integration (machine agent) ---
         machine = QGroupBox("Maschine")
         machine_layout = QVBoxLayout(machine)
-        machine_layout.addWidget(QLabel("X: —   Y: —   Z: —"))
-        machine_layout.addWidget(QLabel("Homed: —   Laser: Aus"))
-        btn_home = QPushButton("Home")
-        btn_park = QPushButton("Park")
-        btn_focus = QPushButton("Fokus")
-        machine_layout.addWidget(btn_home)
-        machine_layout.addWidget(btn_park)
-        machine_layout.addWidget(btn_focus)
-        btn_estop = QPushButton("Not-Aus")
-        btn_estop.setObjectName("danger")
-        machine_layout.addWidget(btn_estop)
+        machine_layout.addWidget(self.machine_panel)
         right_layout.addWidget(machine)
+        # --- end machine integration ---
 
         right_layout.addStretch()
-        splitter.addWidget(right)
+        # --- machine integration (machine agent) ---
+        # The machine panel is tall; keep the right column scrollable.
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_scroll.setFrameShape(QFrame.NoFrame)
+        right_scroll.setWidget(right)
+        splitter.addWidget(right_scroll)
+        # --- end machine integration ---
 
-        splitter.setSizes([220, 800, 320])
+        splitter.setSizes([220, 760, 380])
 
         # Status bar
         status = QStatusBar()
@@ -138,8 +155,22 @@ class LumaCutStudio(QMainWindow):
         status.showMessage("LumaCut Studio · Arbeitsfläche 360 × 340 mm · Safezone intern")
 
 
+    # --- machine integration (machine agent) ---
+    def _on_machine_state(self, state, text):
+        colours = {"connected": "#4cd4b0", "connecting": "#6cb4ff",
+                   "error": "#f36b73", "auth_failed": "#f36b73"}
+        self.status_label.setText(text[:90])
+        self.status_label.setStyleSheet("color: %s;" % colours.get(state, "#93a1b5"))
+
+    def closeEvent(self, event):
+        self.machine_panel.shutdown()
+        super().closeEvent(event)
+    # --- end machine integration ---
+
+
 def main():
     app = QApplication(sys.argv)
+    app.setOrganizationName("LumaCut")  # QSettings scope (machine settings)
     app.setApplicationName("LumaCut Studio")
     win = LumaCutStudio()
     win.show()
