@@ -22,6 +22,11 @@ COMMENT = re.compile(r"\([^()]*\)")
 READ_ONLY = frozenset({"M105", "M114", "M115", "M119", "M503", "M400"})
 
 
+class MarlinCommandError(RuntimeError):
+    """Marlin rejected a command but the serial protocol was re-synchronized."""
+
+
+
 def normalize(line: str) -> str:
     while True:
         transformed = COMMENT.sub("", line)
@@ -226,7 +231,21 @@ class MarlinTransport:
             if line.startswith(("Error:", "echo:Error:", "Resend:", "rs ")):
                 self.serial_errors += 1
                 self.fault = "Marlin: " + line[:150]
-                raise RuntimeError(self.fault)
+                # A Marlin error is usually followed by a normal "ok".
+                # Consume that trailing ACK before the next command;
+                # otherwise M114/G30 will read a stale ACK as its own.
+                ack_deadline = min(deadline, time.monotonic() + 4.0)
+                try:
+                    while True:
+                        trailing = self._read_line_locked(ack_deadline)
+                        responses.append(trailing)
+                        if trailing.lower().startswith("ok"):
+                            self.state = "Idle"
+                            raise MarlinCommandError(self.fault)
+                except TimeoutError as exc:
+                    raise ConnectionError(
+                        self.fault + " (SKR hat kein abschliessendes ok geliefert)"
+                    ) from exc
             if lower.startswith("ok"):
                 self.commands += 1
                 self.state = "Idle"
@@ -442,6 +461,12 @@ class MarlinTransport:
                 if normalized == "M9":
                     self.lights = self.exhaust = False
                 return reply
+            except (ValueError, MarlinCommandError) as exc:
+                # Rejected G-code is not the same as a disconnected USB cable.
+                # The laser state is handled by the LightBurn session on errors.
+                self.fault = str(exc)[:200]
+                self.state = "Idle"
+                raise
             except Exception as exc:
                 self.serial_errors += 1
                 self._close_locked(str(exc))
@@ -776,8 +801,15 @@ class MarlinTransport:
                             LOG.warning("Rejected LightBurn command %r: %s", normalized, exc)
                             client.sendall(("Error:LumaCut [" + normalized[:55] + "] " + str(exc)[:95] +
                                             "\r\n").encode("ascii", "replace"))
-                            # Don't fake 'ok' after rejecting a command.
-                            return
+                            # Do not fake "ok": LightBurn must abort this job,
+                            # but a rejected G-code must not look like USB loss.
+                            # If cutting was armed, latch emergency stop.
+                            if self.laser_enabled and not self.emergency_latched:
+                                self.emergency_stop()
+                                return
+                            if self.serial is None or self.emergency_latched:
+                                return
+                            continue
                     elif 32 <= b <= 126 and len(fragment) < 95:
                         fragment.append(b)
                     else:
