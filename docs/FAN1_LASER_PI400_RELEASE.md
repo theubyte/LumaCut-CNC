@@ -64,13 +64,15 @@ soft-reset. None of this replaces a **hardware** emergency power cutoff.
 1. Download machine backup (`$$`, `$I`, configurations), disconnect
    laser power and PWM, and close LightBurn.
 2. Verify GitHub Actions has passed for the exact **same commit**.
-3. Extract the **SKR-USB** artifact and follow the *verified* SKR Mini MZ
-   firmware loader procedure. Do not attempt Pi-serial flashing: no confirmed
-   automatic SKR USB bootloader path is implemented.
-4. Check `$I` from SKR using direct USB serial. It MUST contain
-   `FAN1-LASER`; confirm `$32=1` via `$$` before test jobs.
-5. Only then update Pi software: `sudo bash /opt/lumacut/pi400/update.sh`.
-   Inspect service logs and health: `sudo journalctl -u lumacut -n 70 --no-pager`.
+3. **Update Pi software FIRST**: `sudo bash /opt/lumacut/pi400/update.sh`
+   with LightBurn closed and machine idle. The updated Pi deliberately
+   refuses to control the still-old SKR pin-map firmware.
+4. Extract the matching **SKR-USB** artifact and follow the *verified* SKR
+   Mini MZ firmware loader procedure. Do not attempt Pi-serial flashing:
+   no confirmed automatic SKR USB bootloader path is implemented.
+5. Check `$I` from SKR using direct USB serial. It MUST contain
+   `FAN1-LASER`; confirm `$32=1` via `$` before test jobs.
+   Inspect service logs: `sudo journalctl -u lumacut -n 70 --no-pager`.
 6. Reimport the new LightBurn device profile. Prove `?` status and `ok`
    replies using one TCP client. Test non-laser motion only.
 7. Verify independent E-stop, laser disable, dummy-load switching,
