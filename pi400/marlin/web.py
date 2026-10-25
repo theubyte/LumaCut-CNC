@@ -9,21 +9,17 @@ import json
 import logging
 import os
 import re
-import secrets
 import threading
 import time
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import MarlinTransport, MarlinLaserGuard, normalize, serve_tcp
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "marlin"
 JOBS = DATA / "jobs"
-KEY = os.environ.get("LUMACUT_KEY", "")
-if len(KEY) < 16:
-    raise RuntimeError("LUMACUT_KEY muss mindestens 16 Zeichen lang sein")
 USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
 HTTP = int(os.environ.get("LUMACUT_HTTP", "8080"))
 TCP = int(os.environ.get("LUMACUT_TCP", "23"))
@@ -58,15 +54,6 @@ def persist():
     temporary = CONFIG.with_suffix(".tmp")
     temporary.write_text(json.dumps(config, indent=2), encoding="utf-8")
     os.replace(temporary, CONFIG)
-
-
-@app.before_request
-def authorize():
-    if request.path == "/":
-        return None
-    if not secrets.compare_digest(request.headers.get("X-LumaCut-Key", ""), KEY):
-        return Response("LumaCut Maschinenzugangscode erforderlich", 401)
-    return None
 
 
 @app.after_request
