@@ -435,6 +435,45 @@ class MarlinTransport:
             finally:
                 self.owner = previous_owner
 
+    def probe_workpiece(self, owner: str = "web"):
+        """LightBurn G30: use installed mechanical Z-min contact switch.
+
+        This is only valid if Z-min physically trips on the *workpiece*
+        underneath the sensing tip. G30 is intercepted, not sent to native
+        Marlin (which reports Z_PROBE:0). The switch must already have been
+        physically verified and must not be a fixed machine-frame limit.
+        """
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if not self.homed or not self.homing_verified:
+                raise RuntimeError("Zuerst normale LightBurn-Referenzfahrt G28 ausführen")
+            if self.serial is None or self.emergency_latched:
+                raise RuntimeError("Marlin USB nicht bereit oder Notstopp")
+            if self.laser_enabled:
+                raise RuntimeError("Werkstückabtastung bei aktivem Laser verboten")
+            self.surface_z = None
+            self.focused_this_job = False
+            self._exchange_locked("M5 I", timeout=8)
+            # Marlin Z-min switch is used for touch-off; G28 Z establishes
+            # machine Z=0 exactly at switch trip. No independent probe exists.
+            try:
+                self._exchange_locked("G28 Z", timeout=150)
+                self._exchange_locked("M400", timeout=30)
+                self._exchange_locked("G91", timeout=8)
+                self._exchange_locked(
+                    f"G0 Z{self.clearance_mm:.2f} F360", timeout=35)
+                self._exchange_locked("G90", timeout=8)
+                self.absolute_mode = True
+                self._exchange_locked("M400", timeout=35)
+                reply = self._exchange_locked("M114", timeout=8)
+                self.surface_z = 0.0
+                self.z_homed = True
+                return reply
+            except Exception as exc:
+                self._close_locked("Werkstückabtastung fehlgeschlagen: " + str(exc))
+                raise
+
     def status(self):
         with self.lock:
             return {
@@ -531,6 +570,8 @@ class MarlinTransport:
                                 # Synchronize against Marlin (actual ACK),
                                 # without pretending to support G55+ offsets.
                                 lines = self.command("M400", owner="lightburn", timeout=15)
+                            elif normalized == "G30":
+                                lines = self.probe_workpiece(owner="lightburn")
                             elif normalized.startswith("G28"):
                                 if normalized != "G28":
                                     raise ValueError("G28 nur ohne Achsen über Pi erlaubt")
