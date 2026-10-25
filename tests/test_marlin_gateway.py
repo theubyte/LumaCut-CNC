@@ -270,6 +270,28 @@ class USBProtocolTests(unittest.TestCase):
         self.assertNotIn(b"G28 Z\n",serial.writes)
         self.assertTrue(any("workpiece Z:3.000" in x for x in reply))
 
+    def test_repeat_g30_from_park_reuses_last_valid_material_point(self):
+        responses = [
+            "ok\n", "ok\n", "X:0 Y:0 Z:20\n", "ok\n",
+            "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n",
+            "Bed X: 97.000 Y: 105.000 Z: 3.000\n", "ok\n",
+            "ok\n", "ok\n", "ok\n", "ok\n",
+            "X:120 Y:120 Z:20\n", "ok\n"
+        ]
+        serial = FakeSerial(responses)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.probe_xy_offset_mm = (23, 15)
+        bridge.last_probe_laser_xy = (120, 120)
+        bridge.probe_workpiece()
+        self.assertIn(b"G0 X120.000 Y120.000 F9000\n", serial.writes)
+        self.assertIn(b"G0 X97.000 Y105.000 F9000\n", serial.writes)
+        self.assertIn(b"G30\n", serial.writes)
+        self.assertEqual(bridge.surface_z, 3.0)
+
     def test_g30_requires_calibrated_xy_offset(self):
         serial=FakeSerial([])
         bridge=MarlinTransport("/dev/null")
