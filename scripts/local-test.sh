@@ -32,6 +32,38 @@ case "$MODE" in syntax|quick|full|firmware|legacy) ;; *)
   exit 2
 esac
 
+# Standard: only current Marlin/Pi files and targeted regression tests.
+# Full legacy regression and firmware compilation are explicit opt-ins.
+if [[ "$MODE" == "quick" ]]; then
+  step "Schnelltest: Marlin Python-Syntax"
+  check "$PY" - <<'PY'
+from pathlib import Path
+paths = list(Path("pi400/marlin").glob("*.py"))
+for file in paths:
+    compile(file.read_text(encoding="utf-8"), str(file), "exec")
+print("Marlin Python-Dateien:", len(paths))
+PY
+  step "Schnelltest: Marlin USB/TCP, Homing und Fehlerfaelle"
+  check "$PY" -m unittest discover -s tests -p 'test_marlin_*.py' -q
+  if command -v node >/dev/null; then
+    step "Schnelltest: Marlin Web-UI JavaScript"
+    tmpjs=$(mktemp --suffix=.js)
+    trap 'rm -f "$tmpjs"' EXIT
+    check "$PY" - "$tmpjs" <<'PY'
+from pathlib import Path
+import re, sys
+source = Path("pi400/marlin/index.html").read_text(encoding="utf-8")
+scripts = re.findall(r'<script[^>]*>([\s\S]*?)</script>', source)
+if len(scripts) != 1:
+    raise RuntimeError("Marlin UI JS Block missing/duplicated")
+Path(sys.argv[1]).write_text(scripts[0], encoding="utf-8")
+PY
+    check node --check "$tmpjs"
+  fi
+  step "Schnelltest bestanden: $PASSED Pruefschritte"
+  exit 0
+fi
+
 step "Python-Quelltext ohne neue Dateien kompilieren"
 check "$PY" - <<'PY'
 import pathlib
