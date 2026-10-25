@@ -337,7 +337,7 @@ class MarlinTransport:
             raise ValueError("Automatischer Fokus benötigt absolute Z-Koordinaten (G90)")
         self._exchange_locked("G90", timeout=8)
         self.absolute_mode = True
-        self._exchange_locked(f"G0 Z{goal:.3f} F360", timeout=20)
+        self._exchange_locked(f"G0 Z{goal:.3f} F600", timeout=20)
         self._exchange_locked("M400", timeout=30)
         self._exchange_locked("M114", timeout=8)
         self.focused_this_job = True
@@ -352,6 +352,14 @@ class MarlinTransport:
             if self.emergency_latched:
                 raise RuntimeError("M112-Notstopp aktiv; keine weiteren Bewegungen")
             normalized = normalize(cmd)
+            # LightBurn often emits G0 X... Y... without an F word.
+            # Marlin's modal feedrate might still be the slow Z feedrate;
+            # give XY-only rapids their own travel speed every time.
+            if (re.match(r"^G0?0(?:\\s|$)", normalized)
+                    and re.search(r"\\b[XY]\\s*[-+]?\\d", normalized)
+                    and not re.search(r"\\bZ\\s*[-+]?\\d", normalized)
+                    and not re.search(r"\\bF\\s*[-+]?\\d", normalized)):
+                normalized += " F9000"
             if use_guard:
                 normalized = self.guard.check(normalized, self.homing_verified)
             if not normalized:
@@ -446,7 +454,7 @@ class MarlinTransport:
             self.focused_this_job = False
             commands = ("M5 I", "G28 X Y", "M400",
                         "G28 Z", "M400", "G91",
-                        f"G0 Z{clearance:.2f} F360", "G90", "M400", "M114")
+                        f"G0 Z{clearance:.2f} F600", "G90", "M400", "M114")
             result = []
             try:
                 for cmd in commands:
@@ -501,9 +509,9 @@ class MarlinTransport:
             if not self.absolute_mode:
                 self._exchange_locked("G90", timeout=8)
                 self.absolute_mode = True
-            self._exchange_locked(f"G0 Z{z_target:.3f} F360", timeout=45)
+            self._exchange_locked(f"G0 Z{z_target:.3f} F600", timeout=45)
             self._exchange_locked("M400", timeout=45)
-            self._exchange_locked("G0 X0.000 Y0.000 F6000", timeout=90)
+            self._exchange_locked("G0 X0.000 Y0.000 F9000", timeout=90)
             self._exchange_locked("M400", timeout=90)
             result = self._exchange_locked("M114", timeout=8)
             self.focused_this_job = False
@@ -538,9 +546,9 @@ class MarlinTransport:
                     self.safe_zone_xy_mm <= y <= 370):
                 raise ValueError("Werkstück-Abtastpunkt außerhalb X30..390/Y30..370")
             if z < self.clearance_mm:
-                self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F360", timeout=45)
+                self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F600", timeout=45)
                 self._exchange_locked("M400", timeout=45)
-            self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F6000", timeout=60)
+            self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=60)
             self._exchange_locked("M400", timeout=60)
             replies = self._exchange_locked("G30", timeout=120)
             contact = None
@@ -554,9 +562,9 @@ class MarlinTransport:
                 raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
             self.surface_z = contact
             lift = max(self.clearance_mm, contact + self.probe_clearance_mm)
-            self._exchange_locked(f"G0 Z{lift:.3f} F360", timeout=45)
+            self._exchange_locked(f"G0 Z{lift:.3f} F600", timeout=45)
             self._exchange_locked("M400", timeout=45)
-            self._exchange_locked(f"G0 X{laser_x:.3f} Y{laser_y:.3f} F6000", timeout=60)
+            self._exchange_locked(f"G0 X{laser_x:.3f} Y{laser_y:.3f} F9000", timeout=60)
             self._exchange_locked("M400", timeout=60)
             self._exchange_locked("M114", timeout=8)
             self.focused_this_job = False
