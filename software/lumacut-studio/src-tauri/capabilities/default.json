@@ -1,0 +1,10 @@
+{
+  "identifier": "default",
+  "description": "LumaCut Studio offline design workspace",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}
