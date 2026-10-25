@@ -35,10 +35,10 @@ def patch(text):
     # Neither PC8 nor PC9 is a 24V-capable *logic* GPIO.
     text=change(text,
         '#define BOARD_NAME "BTT SKR MINI E3 V2.0"',
-        '#define BOARD_NAME "LumaCut SKR Mini MZ v1.0 EXPERIMENTAL"')
+        '#define BOARD_NAME "LumaCut SKR Mini MZ v1.0 FAN1-LASER EXPERIMENTAL"')
     text=change(text,
         '#define BOARD_NAME "BTT SKR MINI E3 V2.0 4-axis"',
-        '#define BOARD_NAME "LumaCut SKR Mini MZ v1.0 4-axis EXPERIMENTAL"')
+        '#define BOARD_NAME "LumaCut SKR Mini MZ v1.0 FAN1-LASER 4-axis EXPERIMENTAL"')
     text=change(text,
         '#define AUXOUTPUT1_PORT         GPIOC // Spindle direction\n#define AUXOUTPUT1_PIN          6',
         '// MZ: do not assign PC6 twice (reserved for auxiliary FAN0)')
