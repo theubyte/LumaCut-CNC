@@ -1,8 +1,8 @@
 import {validateProject} from "./project-validator.mjs";
 import {postprocessMarlinOffline} from "./marlin-postprocessor.mjs";
-import {createUnifiedPlan,unifiedSummary,exportUnifiedDraft} from "./unified-job.mjs";
-import {ditherGray,rasterLines,rasterDraftGcode} from "./raster-planner.mjs";
-import {planVectorJob,exportOfflineGcode,planStatistics} from "./job-planner.mjs";
+import {createUnifiedPlan,unifiedSummary} from "./unified-job.mjs";
+import {ditherGray,rasterLines} from "./raster-planner.mjs";
+import {planVectorJob,planStatistics} from "./job-planner.mjs";
 
 const q=id=>document.getElementById(id),ns="http://www.w3.org/2000/svg";
 const KEY="lumacut.studio.v2.materials";
@@ -45,35 +45,24 @@ q("cameraCapture").onclick=()=>{const v=q("cameraView");if(!v.videoWidth)return 
 q("calibrationGuide").onclick=()=>message("Auto-Kalibrierung braucht die noch fehlende Pi-Kamera-Steuerung, Fiducial-Erkennung und Positionsvalidierung.");
 render();
 
-// Draft export from the legacy SVG preview does not include editor objects/layers.
-// Disable it whenever advanced editor objects exist, preventing silent incomplete jobs.
-const legacyExport=q("export");
-function gateLegacyExport(){if(app.items.length){legacyExport.disabled=true;legacyExport.title="Editor-Ebenen und Bilder benötigen den neuen validierten Jobplaner";}}
 const oldAdvancedRender=render;
 // Observe editor model updates after all event-driven render calls.
-const originalAdvancedExportClick=legacyExport.onclick;
-legacyExport.addEventListener("click",e=>{if(app.items.length){e.preventDefault();e.stopImmediatePropagation();message("Export gesperrt: Der bisherige SVG-Export ignoriert Editor-Objekte und Ebenen.");}},true);
 const originalRenderForGate=render;
-const gateObserver=new MutationObserver(gateLegacyExport);
-gateObserver.observe(q("drawings"),{childList:true});
-gateLegacyExport();
 
 function syncInspector(){const o=app.items.find(it=>it.id===app.selected);q("selectedName").textContent=o?o.kind+" · "+(app.layers.find(l=>l.id===o.layer)?.name||"Ebene"):"Kein Objekt ausgewählt";const dims=o?boundsOf(o):null;for(const [field,value] of Object.entries({shapeX:dims?.x,shapeY:dims?.y,shapeW:dims?.w,shapeH:dims?.h})){const input=q(field);if(document.activeElement!==input)input.value=value===undefined?"":Number(value.toFixed(2));input.disabled=!o}}
 function boundsOf(o){if(o.kind==="free"&&o.points?.length){const xs=o.points.map(p=>p[0]),ys=o.points.map(p=>p[1]);return{x:Math.min(...xs),y:Math.min(...ys),w:Math.max(...xs)-Math.min(...xs),h:Math.max(...ys)-Math.min(...ys)}}return{x:o.x,y:o.y,w:o.w||0,h:o.h||0}}
 q("applyGeometry").onclick=()=>{const o=app.items.find(it=>it.id===app.selected);if(!o)return;const vals=["shapeX","shapeY","shapeW","shapeH"].map(id=>Number(q(id).value));const [x,y,w,h]=vals;if(!vals.every(Number.isFinite)||x<0||y<30||w<=0||h<=0||x+w>390||y+h>370)return message("Objektmaße außerhalb des zulässigen Arbeitsbereichs.");const b=boundsOf(o);snapshot();if(o.kind==="free"&&o.points?.length){o.points=o.points.map(p=>[x+(p[0]-b.x)/Math.max(b.w,.001)*w,y+(p[1]-b.y)/Math.max(b.h,.001)*h])}else{o.x=x;o.y=y;o.w=w;o.h=h}render();message("Objektgeometrie aktualisiert.")};
 
-const plannerPanel=document.createElement("div");plannerPanel.className="group";plannerPanel.innerHTML='<div class="gtitle">Jobplanung (Offline)</div><div class="actions"><button id="planLayers">Ebenen prüfen</button><button id="exportLayers">Vektor-G-Code exportieren</button></div><p id="planSummary" class="hint">Nur Vektorformen, ohne Maschinenfreigabe.</p>';
+const plannerPanel=document.createElement("div");plannerPanel.className="group";plannerPanel.innerHTML='<div class="gtitle">Jobplanung (Offline)</div><div class="actions"><button id="planLayers">Ebenen prüfen</button></div><p id="planSummary" class="hint">Nur Vektorformen, ohne Maschinenfreigabe.</p>';
 document.querySelector('[data-panel="process"]').append(plannerPanel);
 function currentPlan(){return planVectorJob({layers:app.layers,items:app.items})}
 q("planLayers").onclick=()=>{try{const p=currentPlan(),s=planStatistics(p);q("planSummary").textContent=`${s.layers} Ebenen · ${s.segments} Segmente · ${s.lengthMm.toFixed(1)} mm Bearbeitungsweg (ohne Leerfahrten)`;message("Offline-Vektorplanung erfolgreich.")}catch(err){q("planSummary").textContent=err.message;message("Planung nicht möglich: "+err.message)}};
-q("exportLayers").onclick=()=>{try{const p=currentPlan();download("LumaCut-Offline-Entwurf.nc",exportOfflineGcode(p),"text/plain");message("Offline-Entwurf gespeichert – nicht direkt an den Laser senden.")}catch(err){message("Export blockiert: "+err.message)}};
 
-const rasterPanel=document.createElement("div");rasterPanel.className="group";rasterPanel.innerHTML='<div class="gtitle">Bitmap-Gravur (Offline)</div><label class="field">Bild<select id="rasterObject"></select></label><label class="field">Bildmodus<select id="rasterMode"><option value="threshold">Schwarzweiß</option><option value="floyd-steinberg">Floyd-Steinberg</option><option value="grayscale">Graustufen-Vorschau</option></select></label><label class="field">Linienabstand mm<input id="rasterStep" type="number" min=".05" max="2" step=".05" value=".15"></label><div class="actions"><button id="rasterCheck">Raster prüfen</button><button id="rasterExport">Raster-Entwurf exportieren</button></div><p class="hint" id="rasterInfo">Keine Hardwarefreigabe. Graustufen werden für den aktuellen Schwarzweiß-Bahnplan bei 128 quantisiert.</p>';document.querySelector('[data-panel="process"]').append(rasterPanel);
+const rasterPanel=document.createElement("div");rasterPanel.className="group";rasterPanel.innerHTML='<div class="gtitle">Bitmap-Gravur (Offline)</div><label class="field">Bild<select id="rasterObject"></select></label><label class="field">Bildmodus<select id="rasterMode"><option value="threshold">Schwarzweiß</option><option value="floyd-steinberg">Floyd-Steinberg</option><option value="grayscale">Graustufen-Vorschau</option></select></label><label class="field">Linienabstand mm<input id="rasterStep" type="number" min=".05" max="2" step=".05" value=".15"></label><div class="actions"><button id="rasterCheck">Raster prüfen</button></div><p class="hint" id="rasterInfo">Keine Hardwarefreigabe. Graustufen werden für den aktuellen Schwarzweiß-Bahnplan bei 128 quantisiert.</p>';document.querySelector('[data-panel="process"]').append(rasterPanel);
 function rasterChoices(){const selected=q("rasterObject").value;q("rasterObject").replaceChildren();for(const obj of app.items.filter(o=>o.kind==="image")){const opt=document.createElement("option");opt.value=obj.id;opt.textContent="Bild "+obj.id.slice(0,7);q("rasterObject").append(opt)}if([...q("rasterObject").options].some(o=>o.value===selected))q("rasterObject").value=selected}
 const imageObserver=new MutationObserver(rasterChoices);imageObserver.observe(q("rasterPreview"),{childList:true});rasterChoices();
 async function buildRaster(){const o=app.items.find(x=>x.id===q("rasterObject").value);if(!o)throw Error("Bild auswählen");const im=new Image();im.src=o.data;await im.decode();const ratio=Math.min(1,1000/Math.max(im.width,im.height));const w=Math.max(1,Math.round(im.width*ratio)),h=Math.max(1,Math.round(im.height*ratio));const canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;const ctx=canvas.getContext("2d",{willReadFrequently:true});ctx.drawImage(im,0,0,w,h);const gray=ditherGray(ctx.getImageData(0,0,w,h).data,w,h,q("rasterMode").value);const lines=rasterLines(gray,w,h,o,Number(q("rasterStep").value));return {o,lines,w,h}}
 q("rasterCheck").onclick=async()=>{try{const r=await buildRaster();q("rasterInfo").textContent=`${r.w} × ${r.h} Pixel · ${r.lines.length} belegte Scanlinien · Offline`}catch(e){message(e.message)}};
-q("rasterExport").onclick=async()=>{try{const r=await buildRaster();const layerSettings=app.layers.find(l=>l.id===r.o.layer);download("LumaCut-Raster-Entwurf.nc",rasterDraftGcode(r.lines,layerSettings.speed,layerSettings.power),"text/plain");message("Offline-Rasterentwurf gespeichert – nicht an die Maschine senden.")}catch(e){message("Rasterexport: "+e.message)}};
 
 async function prepareUnifiedPixels(){
  const pixels=new Map();
@@ -98,14 +87,10 @@ q("planUnified").onclick=async()=>{const b=q("planUnified");b.disabled=true;try{
  message("Alle bearbeitbaren Ebenen gemeinsam geprüft. Offline-Plan.");
  }catch(err){q("unifiedInfo").textContent="Blockiert: "+err.message;message(err.message)}finally{b.disabled=false}};
 
-const exportCombined=document.createElement("button");exportCombined.id="exportUnifiedDraft";exportCombined.className="full";exportCombined.textContent="Gesamtauftrag als Offline-G-Code";
-q("unifiedPanelPlaceholder")?.append(exportCombined);
-unifiedPanel.append(exportCombined);
-exportCombined.onclick=async()=>{exportCombined.disabled=true;try{const pixels=await prepareUnifiedPixels();const plan=createUnifiedPlan({layers:app.layers,items:app.items},pixels,{lineSpacing:Number(q("rasterStep").value),dither:q("rasterMode").value});download("LumaCut-Gesamtauftrag-UNGEPRUEFT.nc",exportUnifiedDraft(plan),"text/plain");message("Vollständiger Offline-G-Code erzeugt. NICHT auf Maschine ausführen.")}catch(e){message("Gesamtexport blockiert: "+e.message)}finally{exportCombined.disabled=false}};
 
 const marlinExportButton=document.createElement("button");
 marlinExportButton.id="exportMarlinDraft";marlinExportButton.className="full";
-marlinExportButton.textContent="Pi 400 / Marlin Offline-Entwurf";
+marlinExportButton.textContent="Marlin-G-Code speichern (Pi 400)";
 unifiedPanel.append(marlinExportButton);
 marlinExportButton.onclick=async()=>{
  marlinExportButton.disabled=true;
@@ -113,8 +98,8 @@ marlinExportButton.onclick=async()=>{
   const pixels=await prepareUnifiedPixels();
   const plan=createUnifiedPlan({layers:app.layers,items:app.items},pixels,{lineSpacing:Number(q("rasterStep").value),dither:q("rasterMode").value});
   const content=postprocessMarlinOffline(plan);
-  download("LumaCut-Marlin-NICHT-FREIGEGEBEN.gcode",content,"text/plain");
-  message("Marlin-G-Code als Offline-Entwurf exportiert. Erst nach Maschinenkalibrierung verwenden.");
+  download("LumaCut-Auftrag.gcode",content,"text/plain");
+  message("Marlin-G-Code gespeichert. Direkt senden: Reiter Maschine.");
  }catch(err){message("Marlin-Export blockiert: "+err.message);}
  finally{marlinExportButton.disabled=false;}
 };

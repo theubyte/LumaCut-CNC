@@ -12,7 +12,7 @@ A green CI installer build is **not** proof of usable machine control.
 ## Laser output gate (not yet complete)
 - [ ] Freeze machine configuration: travel, axis orientation, homing switches, reserved zone and offsets
 - [ ] Machine handshake implemented and simulated with controller transcripts
-- [ ] Vector and raster planner deterministic tests, clipping, bounds and M4/M5 semantics
+- [ ] Vector and raster planner deterministic tests, clipping, bounds and Marlin M3 I / M5 I semantics
 - [ ] Tested Z probe lifecycle, focus lift, and pass offsets with defined coordinate systems
 - [ ] Hardware interlocks and E-stop proven by real test
 - [ ] Dry-run and supervised first physical engraving

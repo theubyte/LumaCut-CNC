@@ -1,5 +1,5 @@
-import test from "node:test";import assert from "node:assert/strict";import {ditherGray,rasterLines,rasterDraftGcode} from "./raster-planner.mjs";
+import test from "node:test";import assert from "node:assert/strict";import {ditherGray,rasterLines} from "./raster-planner.mjs";
 test("threshold black/white",()=>assert.deepEqual(ditherGray([0,0,0,255,255,255,255,255],2,1),[0,255]));
 test("Floyd-Steinberg deterministic",()=>{const pixels=Array(16).fill(0).flatMap((_,i)=>[i*16,i*16,i*16,255]);assert.deepEqual(ditherGray(pixels,4,4,"floyd-steinberg"),ditherGray(pixels,4,4,"floyd-steinberg"))});
 test("raster safe zone",()=>assert.throws(()=>rasterLines([0],1,1,{x:0,y:29,w:10,h:10}),/outside/));
-test("black scanline creates draft",()=>{const l=rasterLines([0,0,255,255],4,1,{x:20,y:40,w:40,h:10});assert.equal(l.length,1);assert.match(rasterDraftGcode(l,1000,50),/M4 S500/);assert.match(rasterDraftGcode(l,1000,50),/NOT FOR MACHINE/)});
+test("black scanline becomes one segment",()=>{const l=rasterLines([0,0,255,255],4,1,{x:40,y:40,w:40,h:10});assert.equal(l.length,1);assert.deepEqual(l[0].segments,[{x0:40,x1:60}])});
