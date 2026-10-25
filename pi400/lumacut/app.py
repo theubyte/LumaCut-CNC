@@ -21,10 +21,11 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory, session
 
 from .core import Controller, serve_lightburn
-from .pins import (DEFAULT_ROLES, DEFAULT_SPARE, SPARE_PC7_ROLES, accessories_for_roles,
+from .pins import (DEFAULT_ROLES, DEFAULT_SPARE, SPARE_PC6_ROLES, accessories_for_roles,
                    manifest, override_for_role, validate_roles, validate_spare_config)
 from .service_auth import ServiceAuth
 from .planner import analyze_file
+from .laser_guard import check_program, clean
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.getenv("LUMACUT_DATA", "/var/lib/lumacut"))
@@ -62,22 +63,22 @@ config = {
     "touch_jog_enabled": False,
     "lightburn_tcp_enabled": True,
     "pin_roles": dict(DEFAULT_ROLES),
-    "spare_pc7": dict(DEFAULT_SPARE),
+    "spare_pc6": dict(DEFAULT_SPARE),
 }
 try:
     if CONFIG_PATH.exists():
         saved = json.loads(CONFIG_PATH.read_text())
         if isinstance(saved, dict):
-            for name in ("focus", "probe", "parks", "jog_percent", "lightburn_tcp_enabled", "pin_roles", "spare_pc7", "touch_jog_enabled"):
+            for name in ("focus", "probe", "parks", "jog_percent", "lightburn_tcp_enabled", "pin_roles", "spare_pc6", "touch_jog_enabled"):
                 if name in saved:
                     config[name] = saved[name]
 except Exception:
     logging.exception("Configuration recovery; previous config retained")
 config["pin_roles"] = __import__("lumacut.pins", fromlist=["effective_roles"]).effective_roles(config["pin_roles"])
 try:
-    config["spare_pc7"] = validate_spare_config(config["spare_pc7"])
+    config["spare_pc6"] = validate_spare_config(config["spare_pc6"])
 except ValueError:
-    config["spare_pc7"] = dict(DEFAULT_SPARE)
+    config["spare_pc6"] = dict(DEFAULT_SPARE)
 controller.lightburn_enabled = bool(config["lightburn_tcp_enabled"])
 
 
@@ -175,9 +176,9 @@ def service_password():
 def service_pins():
     require_service()
     return jsonify({**manifest(config["pin_roles"]),
-                    "spare": dict(config["spare_pc7"]),
-                    "spare_roles": SPARE_PC7_ROLES,
-                    "pc7_state": controller.status()["extra_outputs"]["PC7"]})
+                    "spare": dict(config["spare_pc6"]),
+                    "spare_roles": SPARE_PC6_ROLES,
+                    "pc6_state": controller.status()["extra_outputs"]["PC6"]})
 
 
 @app.post("/api/service/pins")
@@ -195,19 +196,19 @@ def service_save_pins():
                    roles=proposed)
 
 
-@app.post("/api/service/pc7/config")
-def service_pc7_config():
+@app.post("/api/service/pc6/config")
+def service_pc6_config():
     require_service()
     require_free()
-    if controller.status()["extra_outputs"]["PC7"] == 1:
-        raise RuntimeError("FAN1 vor dem Umbelegen abschalten")
+    if controller.status()["extra_outputs"]["PC6"] == 1:
+        raise RuntimeError("FAN0 vor dem Umbelegen abschalten")
     entry = validate_spare_config({"pin": request.form.get("pin"),
                                    "role": request.form.get("role"),
                                    "name": request.form.get("name")})
     with config_lock:
-        config["spare_pc7"] = entry
+        config["spare_pc6"] = entry
         persist()
-    return jsonify(message="PC7-Funktion gespeichert", spare=entry)
+    return jsonify(message="PC6-Funktion gespeichert", spare=entry)
 
 
 def verified_lumacut_controller():
@@ -221,32 +222,32 @@ def verified_lumacut_controller():
         raise RuntimeError("Unbekannter SKR-Build. GPIO-Umschaltung gesperrt")
 
 
-@app.post("/api/service/pc7/read")
-def service_pc7_read():
+@app.post("/api/service/pc6/read")
+def service_pc6_read():
     verified_lumacut_controller()
     run_commands(["$LCIO"], timeout=10)
-    state = controller.status()["extra_outputs"]["PC7"]
+    state = controller.status()["extra_outputs"]["PC6"]
     if state is None:
         raise RuntimeError("SKR meldet kein unterstütztes $LCIO-Protokoll")
-    return jsonify(pin="PC7", value=state)
+    return jsonify(pin="PC6", value=state)
 
 
-@app.post("/api/service/pc7/set")
-def service_pc7_set():
+@app.post("/api/service/pc6/set")
+def service_pc6_set():
     verified_lumacut_controller()
     desired = request.form.get("value")
     if desired not in ("0", "1"):
-        raise ValueError("PC7-Ausgang erwartet 0 oder 1")
+        raise ValueError("PC6-Ausgang erwartet 0 oder 1")
     # First read proves that the dedicated command is implemented in the
     # current physical SKR firmware; never assume an aux M64 port number.
     run_commands(["$LCIO"], timeout=10)
-    if controller.status()["extra_outputs"]["PC7"] is None:
-        raise RuntimeError("PC7 nur mit passender SKR-Firmware steuerbar")
+    if controller.status()["extra_outputs"]["PC6"] is None:
+        raise RuntimeError("PC6 nur mit passender SKR-Firmware steuerbar")
     run_commands(["$LCIO=" + desired, "$LCIO"], timeout=10)
-    actual = controller.status()["extra_outputs"]["PC7"]
+    actual = controller.status()["extra_outputs"]["PC6"]
     if actual != int(desired):
-        raise RuntimeError("SKR bestätigt den neuen PC7-Zustand nicht")
-    return jsonify(pin="PC7", value=actual, message="FAN1 PC7 Zustand bestätigt")
+        raise RuntimeError("SKR bestätigt den neuen PC6-Zustand nicht")
+    return jsonify(pin="PC6", value=actual, message="FAN0 PC6 Zustand bestätigt")
 
 
 @app.get("/api/service/backup")
@@ -267,7 +268,7 @@ def service_backup():
             "probe": config["probe"],
             "parks": config["parks"],
             "pin_roles": config["pin_roles"],
-            "spare_pc7": config["spare_pc7"],
+            "spare_pc6": config["spare_pc6"],
             "touch_jog_enabled": config["touch_jog_enabled"],
             "jog_percent": config["jog_percent"],
         },
@@ -802,6 +803,11 @@ def start_job():
             continue
         if line.startswith("$") or not Controller.host_command_allowed(line):
             raise PermissionError("Zeile %d: Service/GPIO-Befehl in G-Code-Datei gesperrt" % index)
+    # Reject the entire program before energizing any output. grblHAL must
+    # have laser mode enabled for M4 to inhibit emission during G0.
+    check_program(snapshot)
+    if controller.status()["settings"].get(32) != 1:
+        raise RuntimeError("SKR $32=1 (Lasermodus) erforderlich, Job gesperrt")
     with controller.lock:
         controller._acquire_local("job")
     job_thread = threading.Thread(target=_run_job, args=(selected_job, snapshot),
@@ -819,6 +825,10 @@ def start_job():
 def _run_job(job_name, snapshot):
     job_progress.update(name=job_name, line=0, state="running")
     try:
+        # Do not inherit a powered spindle state from an earlier job.
+        initial = controller.command("M5", owner="job", timeout=10)
+        if initial != "ok":
+            raise RuntimeError("Laser vor Start nicht sicher abschaltbar: " + initial)
         lines = snapshot.splitlines()
         job_progress["total"] = len(lines)
         for i, raw in enumerate(lines):
@@ -828,8 +838,12 @@ def _run_job(job_name, snapshot):
                 time.sleep(0.1)
             if job_cancel.is_set():
                 break
-            cmd = raw.strip()
-            if not cmd or cmd.startswith(";") or cmd.startswith("("):
+            cmd = clean(raw)
+            if not cmd or cmd.startswith("%"):
+                continue
+            # M2/M30 program-end commands can reset GRBL's modal state;
+            # the Pi performs an explicit M5 and waits for planner Idle.
+            if cmd in ("M2", "M30"):
                 continue
             ack = controller.command(cmd, owner="job", timeout=30)
             if ack != "ok":
@@ -852,7 +866,8 @@ def _run_job(job_name, snapshot):
         logging.exception("G-code job aborted")
         job_progress["state"] = "error: " + str(exc)[:100]
         try:
-            controller.realtime(b"!")
+            controller.realtime(b"\x18")  # reset planner and PWM on job fault
+            controller.homed = False
         except Exception:
             pass
     finally:
