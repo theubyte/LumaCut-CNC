@@ -127,12 +127,11 @@ def manual(command, timeout=20):
     return machine.command(command, owner="web", timeout=timeout)
 
 
-def home_z_first(probe_contact_confirmed=False):
+def home_z_first():
     # Reuse the exact same atomic safe-home transaction as the LightBurn
     # G28 compatibility layer. Never let two implementations diverge.
     local_owner()
-    machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"],
-                      probe_contact_confirmed=probe_contact_confirmed)
+    machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"])
 
 
 @app.post("/api/settings")
@@ -191,12 +190,8 @@ def action():
         machine.ensure_ready()
         return jsonify(message="Marlin M115 + LumaCut-Kennung bestätigt")
     if op == "home":
-        confirmed = request.form.get("probe_contact_confirmed") == "1"
-        home_z_first(probe_contact_confirmed=confirmed)
-        return jsonify(message=("Werkstückoberfläche bei Z=0 erfasst; "
-                                if confirmed else
-                                "Keine Werkstückoberfläche erfasst; ") +
-                       "Z, Sicherheitsabstand, X/Y und M400 bestätigt")
+        home_z_first()
+        return jsonify(message="Maschinenboden Z=0 referenziert; Werkstückmessung ist separat. XYZ referenziert.")
     if op in ("info","position","endstops"):
         cmd = {"info":"M115", "position":"M114", "endstops":"M119"}[op]
         reply = manual(cmd, timeout=12)
