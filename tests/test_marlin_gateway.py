@@ -120,6 +120,30 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(bridge.serial.writes[4], b"G0 Z20.00 F360\n")
         self.assertEqual(bridge.serial.writes[6], b"G28 X Y\n")
 
+    def test_lightburn_g28_has_one_ack_and_real_marlin_usb_sequence(self):
+        responses=["ok\n"] * 8 + ["X:0 Y:0 Z:20\n","ok\n"]
+        serial=FakeSerial(responses)
+        controller=MarlinTransport("/dev/null")
+        controller.serial=serial
+        controller.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        controller.homing_verified=True
+        class FakeTCP:
+            def __init__(self):
+                self.payloads=[b"G28\r\n",b""]
+                self.messages=bytearray()
+                self.closed=False
+            def settimeout(self,t): self.timeout=t
+            def recv(self,n): return self.payloads.pop(0)
+            def sendall(self,p): self.messages.extend(p)
+            def close(self): self.closed=True
+        sock=FakeTCP()
+        controller.serve_client(sock)
+        self.assertEqual(sock.messages.count(b"ok\r\n"),1,sock.messages)
+        self.assertIn(b"X:0 Y:0 Z:20",sock.messages)
+        self.assertTrue(controller.homed)
+        self.assertEqual(controller.owner,None)
+        self.assertTrue(sock.closed)
+
     def test_emergency_stop_bypasses_motion_lock_and_latches(self):
         controller=MarlinTransport("/dev/null")
         serial=FakeSerial([])
