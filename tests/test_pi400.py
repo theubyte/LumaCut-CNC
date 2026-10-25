@@ -146,7 +146,7 @@ class Pi400TransportTests(unittest.TestCase):
             c.bootstrap_pending=2
             self.assertFalse(c.bootstrap_ready)
             c._read_response("[FIRMWARE:grblHAL]")
-            c._read_response("[BOARD:LumaCut SKR Mini MZ v1.0 EXPERIMENTAL]")
+            c._read_response("[BOARD:LumaCut SKR Mini MZ v1.0 FAN1-LASER EXPERIMENTAL]")
             for setting in ("$30=1000","$32=1","$130=450","$131=450","$132=80"):
                 c._read_response(setting)
             self.assertFalse(c.bootstrap_ready)
