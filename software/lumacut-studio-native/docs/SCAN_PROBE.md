@@ -80,6 +80,41 @@ gcode_z, report = apply_focus_compensation(gcode, res.maps)
 Qt: `scanprobe.qt_bridge.ScanProbeWorker(workflow, design_bounds=...)` als QThread mit
 Signalen `progress`, `tile_captured`, `finished_ok`, `cancelled`, `failed`.
 
+## Bedienung in LumaCut Studio (Scan-Panel)
+
+Rechte Spalte, Gruppe **„Scan & Probe"** (`src/scanprobe/panel.py`, eingebunden in `main.py`):
+
+1. **Modus** wählen: „Simulation (ohne Hardware)" (eingebautes Testbett, keine Hardware – zum Ausprobieren
+   und für Tests) oder „Maschine (Pi-API + Kamera)" (nutzt die Verbindung aus dem Maschinen-Panel).
+2. Nur Pi-Modus: **Kamera-Quelle** (USB-Index `0` oder Stream-URL) eintragen und
+   bei „Kalibrierung" **„Laden …"** → `camera.json`, siehe
+   **[KAMERA_KALIBRIERUNG.md](KAMERA_KALIBRIERUNG.md)** (Werte, Format, Ablauf).
+3. **„Scan starten"**: Kachel-Scan + Objekterkennung. Das Mosaik wird Canvas-Hintergrund,
+   erkannte Objekte erscheinen in der Liste und als gestrichelte Hilfsformen auf dem Canvas
+   (nicht Teil des Dokuments, nicht anwählbar).
+4. Objekte in der Liste an-/abhaken, **Rasterabstand** einstellen, optional
+   **„Nur Werkstücke unter dem Design proben"** (Standard; Bereiche aus den Bounding-Boxen
+   der sichtbaren Designformen ∩ erkannte Werkstücke – ohne Scan direkt aus dem Design).
+5. **„Auto-Probe"**: probt nur die angehakten Objekte bzw. Designbereiche. Danach liegt die
+   Höhen-Heatmap halbtransparent über dem Canvas, Min/Max-Z wird angezeigt.
+6. **„Scan + Probe (komplett)"**: beides in einem Lauf; mit „Geladenes Mesh nach
+   Kontrollmessung wiederverwenden" werden passende Bereiche nur per Bildvergleich + 3 Kontrollpunkten geprüft.
+7. Während des Laufs: Fortschritt, Phase und Restzeit; **Pause/Fortsetzen** und
+   **Abbrechen** (an sicheren Punkten, `RunControl`). Vor echten Läufen fragt Studio nach.
+8. Anzeige-Schalter Scanbild/Werkstück-Umrisse/Höhenkarte, **„Höhenmesh speichern …"/„Laden …"** (`hoehen.json`),
+   **„Scan-Anzeige leeren"**.
+
+Hardware-Anbindung (`src/scanprobe/adapters.py`, Qt-frei):
+
+* `PiMachine` – `move_to` über die Pi-API. Da der Pi **keinen absoluten Fahrbefehl**
+  hat, wird mit erlaubten Jog-Schritten (10/1/0,1 mm) gefahren: langsam (ein HTTP-Aufruf
+  je Schritt), aber sicher; Z wird nie unter Oberfläche + 2 mm geschickt, Z nach unten
+  wird abgerundet. Vorher: verbunden, gehomt, kein Not-Aus, kein Job aktiv.
+* `PiProbe` – `op=probe` an (x, y) des Laserpunkts; Z wird aus der Antwort gelesen.
+* `OpenCvCamera` – `cv2.VideoCapture` (USB/URL), feste Auflösung/Belichtung aus
+  `camera.json`, verwirft gepufferte Bilder vor jeder Aufnahme.
+* `simulated_setup()` – Fake-Maschine/Kamera/Taster mit zwei Werkstücken.
+
 ## Schnittstellen für die anderen Teile
 
 | Teil | Erwartung |
@@ -91,7 +126,8 @@ Signalen `progress`, `tile_captured`, `finished_ok`, `cancelled`, `failed`.
 
 Kalibrierung `camera.json` (`lumacut-camera-calibration/1`): `px_per_mm` auf
 Scanhöhe, `offset_mm` (Bildmitte relativ zum Laserpunkt), `rotation_deg`, Spiegelung,
-optional `camera_matrix`/`dist_coeffs` aus `cv2.calibrateCamera`.
+optional `camera_matrix`/`dist_coeffs` aus `cv2.calibrateCamera`, `exposure`.
+Details, Beispiel und Kalibrierablauf: [KAMERA_KALIBRIERUNG.md](KAMERA_KALIBRIERUNG.md).
 
 ## Offene Punkte (Hardware)
 
@@ -100,11 +136,17 @@ optional `camera_matrix`/`dist_coeffs` aus `cv2.calibrateCamera`.
 * Pi-Probe-API: Laut Doku hebt der Pi nach G30 auf max(20, Oberfläche+2). Der
   niedrige Zwischenhub (`hop_mm`) wirkt erst, wenn der Pi `safe_z` übernimmt.
 * Fokuskorrektur soll langfristig auf dem Pi laufen. Die Funktion ist dafür Qt-frei.
+  Aus der Oberfläche wird kompensierter G-Code noch nicht gesendet
+  (`apply_focus_compensation` ist vorhanden, Header: eine G/M-Anweisung pro Zeile).
+* Pi-API ohne absolutes Verfahren und ohne Kamera-Endpunkt → Jog-basierte Bewegung
+  (langsam). Ein `op=move`/Kamera-Endpunkt auf dem Pi würde den Scan stark beschleunigen.
+* Der Pi erlaubt Z-Bewegungen nur relativ zu *einer* gemessenen Oberfläche; bei mehreren
+  unterschiedlich hohen Werkstücken gilt die zuletzt gemessene.
 
 ## Tests
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest tests/test_scanprobe.py
+QT_QPA_PLATFORM=offscreen python -m pytest tests/test_scanprobe.py tests/test_scan_panel.py
 ```
 
 Alle Tests laufen mit Fakes (`scanprobe.fakes`: synthetisches Bett, Maschine mit
