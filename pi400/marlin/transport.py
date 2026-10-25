@@ -381,14 +381,25 @@ class MarlinTransport:
                         cmd = fragment.decode("ascii", errors="replace")
                         fragment.clear()
                         try:
-                            if normalize(cmd) == "M112":
+                            normalized = normalize(cmd)
+                            if normalized == "M112":
                                 self.emergency_stop()
                                 client.sendall(b"Error:LumaCut M112 emergency stop sent; reset required\r\n")
                                 return
-                            if normalize(cmd).startswith("G28"):
-                                # The LightBurn Home button MUST trigger the
-                                # same safe Z-first sequence as the web HMI.
-                                if normalize(cmd) != "G28":
+                            if normalized == "G00 G17 G40 G21":
+                                # LightBurn's Marlin-flavor initialization:
+                                # G00 is a modal rapid with no destination;
+                                # G17 and G40 don't change our XY laser
+                                # trajectory. Send real G21 to Marlin and
+                                # return its genuine ACK.
+                                lines = self.command("G21", owner="lightburn", timeout=15)
+                            elif normalized == "G54":
+                                # This controller uses the default frame only.
+                                # Synchronize against Marlin (actual ACK),
+                                # without pretending to support G55+ offsets.
+                                lines = self.command("M400", owner="lightburn", timeout=15)
+                            elif normalized.startswith("G28"):
+                                if normalized != "G28":
                                     raise ValueError("G28 nur ohne Achsen über Pi erlaubt")
                                 lines = self.safe_home(owner="lightburn")
                             else:
