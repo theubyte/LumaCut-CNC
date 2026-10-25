@@ -25,6 +25,11 @@ jobs:
           node-version: '22'
       - name: Install Node dependencies
         run: npm install
+      - name: Prepare frontend distribution
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item index.html, studio.js -Destination dist
       - name: Generate Windows application icons
         run: npx tauri icon assets/icon.svg
       - name: Build Windows NSIS installer
