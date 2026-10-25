@@ -55,7 +55,9 @@ class LaserSafetyTests(unittest.TestCase):
         c.settings[32] = 0
         c._forward_host_bytes_locked(b"M4 S0\nG0 X5\n")
         self.assertEqual(bytes(c.serial.written), b"")
-        self.assertEqual(bytes(c.host.written), b"error:9\r\n" * 2)
+        self.assertEqual(c.host.written.count(b"error:20\r\n"), 2)
+        self.assertIn(b"$32=1", c.host.written)
+        self.assertNotIn(b"error:9", c.host.written)
         c.settings[32] = 1
         c._forward_host_bytes_locked(b"M4 S0\nG0 X5\n")
         self.assertEqual(bytes(c.serial.written), b"M4 S0\nG0 X5\n")
@@ -79,7 +81,9 @@ class LaserSafetyTests(unittest.TestCase):
         c.bootstrap_ready = True
         c.settings[32] = 1
         c._forward_host_bytes_locked(b"M3 S0\nS250\nG0 X50\nM5\nM4 S0\nG1 X60 S250\n")
-        self.assertEqual(bytes(c.host.written), b"error:9\r\n")
+        self.assertEqual(c.host.written.count(b"error:20\r\n"), 1)
+        self.assertIn(b"M3 mit Laserleistung verboten", c.host.written)
+        self.assertNotIn(b"error:9", c.host.written)
         self.assertEqual(bytes(c.serial.written),
                          b"M3 S0\nG0 X50\nM5\nM4 S0\nG1 X60 S250\n")
 
