@@ -376,6 +376,27 @@ class USBProtocolTests(unittest.TestCase):
         bridge.command("G0 X120 Y120")
         self.assertEqual(serial.writes, [b"G0 X120 Y120 F9000\n"])
 
+    def test_lightburn_move_jog_with_s_does_not_require_m3(self):
+        serial = FakeSerial(["ok\n"])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.command("G1 X120 Y120 F2400 S60", owner="lightburn")
+        self.assertEqual(serial.writes, [b"G0 X120 Y120 F2400\n"])
+        self.assertFalse(bridge.laser_enabled)
+
+    def test_unarmed_powered_motion_outside_lightburn_not_reinterpreted(self):
+        serial = FakeSerial()
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        with self.assertRaisesRegex(ValueError, "Laserleistung"):
+            bridge.command("G1 X120 Y120 S60", owner="web")
+
     def test_reserved_xy_30mm_zone_permits_laser_off_rapid(self):
         serial=FakeSerial(["ok\n"])
         bridge=MarlinTransport("/dev/null")
