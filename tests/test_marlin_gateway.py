@@ -66,6 +66,14 @@ class GuardTests(unittest.TestCase):
             g.check("G28 X Y",True)
 
 
+class ProbePinConfigurationTests(unittest.TestCase):
+    def test_g30_shares_zmin_pin(self):
+        source = (ROOT / "firmware" / "marlin" / "build.py").read_text(encoding="utf-8")
+        self.assertIn('uncomment(cfg, "Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN")', source)
+        self.assertIn('uncomment(cfg, "FIX_MOUNTED_PROBE")', source)
+        self.assertIn('replace_active(cfg, "Z_MIN_ENDSTOP_INVERTING", "true")', source)
+
+
 class FirmwareDirectionContractTests(unittest.TestCase):
     def test_laser_power_pin_is_fan1_pc6_and_pwm_is_pa1(self):
         import importlib.util
