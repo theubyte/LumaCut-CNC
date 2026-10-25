@@ -1,4 +1,4 @@
-import {createUnifiedPlan,unifiedSummary} from "./unified-job.mjs";
+import {createUnifiedPlan,unifiedSummary,exportUnifiedDraft} from "./unified-job.mjs";
 import {ditherGray,rasterLines,rasterDraftGcode} from "./raster-planner.mjs";
 import {planVectorJob,exportOfflineGcode,planStatistics} from "./job-planner.mjs";
 
@@ -95,3 +95,8 @@ q("planUnified").onclick=async()=>{const b=q("planUnified");b.disabled=true;try{
  q("unifiedInfo").textContent=`${st.operations} Vorgänge · ${st.passes} Durchgänge gesamt · ${st.pathMm.toFixed(1)} mm aktiver Laserweg (ohne Leerfahrten)`;
  message("Alle bearbeitbaren Ebenen gemeinsam geprüft. Offline-Plan.");
  }catch(err){q("unifiedInfo").textContent="Blockiert: "+err.message;message(err.message)}finally{b.disabled=false}};
+
+const exportCombined=document.createElement("button");exportCombined.id="exportUnifiedDraft";exportCombined.className="full";exportCombined.textContent="Gesamtauftrag als Offline-G-Code";
+q("unifiedPanelPlaceholder")?.append(exportCombined);
+unifiedPanel.append(exportCombined);
+exportCombined.onclick=async()=>{exportCombined.disabled=true;try{const pixels=await prepareUnifiedPixels();const plan=createUnifiedPlan({layers:app.layers,items:app.items},pixels,{lineSpacing:Number(q("rasterStep").value),dither:q("rasterMode").value});download("LumaCut-Gesamtauftrag-UNGEPRUEFT.nc",exportUnifiedDraft(plan),"text/plain");message("Vollständiger Offline-G-Code erzeugt. NICHT auf Maschine ausführen.")}catch(e){message("Gesamtexport blockiert: "+e.message)}finally{exportCombined.disabled=false}};
