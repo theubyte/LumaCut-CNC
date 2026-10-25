@@ -176,7 +176,7 @@ function refreshUI(s){
  $("safety").textContent=valid?
    "Mechanik-Softwarefreigabe aktiv. Dies bestätigt NICHT die elektrische Laser-Sicherheit.":
    "Gesperrt: Endschalter/Z-Richtung und Hardware-Interlock müssen geprüft werden.";
- $("commissionCheck").checked=valid;
+ if(valid) $("commissionCheck").checked=true; // retain manual test checkbox while locked
  for(const button of document.querySelectorAll("[data-motion]")){
   button.disabled=!ownerFree(s)||!valid||(button.dataset.action==="start"&&!s.homed);
  }
