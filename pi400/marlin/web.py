@@ -33,6 +33,7 @@ app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 config = {
     "validated": False,        # NEVER assumed from old grblHAL firmware
     "z_clearance_mm": 20.0,
+    "focus_gap_mm": 7.0,
     "travels": {"x": 390.0, "y": 370.0, "z": 90.0},
 }
 CONFIG = DATA / "config.json"
@@ -46,6 +47,7 @@ if CONFIG.is_file():
     except Exception:
         logging.exception("Marlin config corrupt, using safe disabled default")
 machine.homing_verified = bool(config["validated"])
+machine.clearance_mm = float(config["z_clearance_mm"])
 job = {"file": "", "state": "idle", "line": 0, "total": 0, "error": ""}
 job_lock = threading.Lock()
 stop_job = threading.Event()
@@ -128,6 +130,26 @@ def home_z_first():
     local_owner()
     machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"])
 
+
+@app.post("/api/settings")
+def settings():
+    local_owner()
+    if machine.homed:
+        raise RuntimeError("Sicherheits-/Fokusparameter nur vor neuer Referenzfahrt ändern")
+    import math
+    clearance = float(request.form.get("z_clearance_mm", "nan"))
+    gap = float(request.form.get("focus_gap_mm", "nan"))
+    if not (math.isfinite(clearance) and 0.5 <= clearance <= 50):
+        raise ValueError("Z-Rückzug muss zwischen 0,5 und 50 mm liegen")
+    if not (math.isfinite(gap) and 0.1 <= gap <= 30):
+        raise ValueError("Fokusabstand muss zwischen 0,1 und 30 mm liegen")
+    config["z_clearance_mm"] = clearance
+    config["focus_gap_mm"] = gap
+    machine.clearance_mm = clearance
+    persist()
+    return jsonify(message="Z-Sicherheitsabstand und Fokusreferenz gespeichert",
+                   z_clearance_mm=clearance, focus_gap_mm=gap,
+                   note="Fokusabstand ist nur Referenz, keine automatische Werkstückabtastung")
 
 @app.post("/api/commission")
 def commission():
