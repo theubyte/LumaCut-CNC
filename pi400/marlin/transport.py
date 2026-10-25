@@ -51,6 +51,9 @@ class MarlinLaserGuard:
         # Marlin treats the I selector as a *bare flag* (M3 I, M5 I).
         # Recognize that spelling without turning it into a GRBL parameter.
         parsed = re.sub(r"(?<![A-Z])I(?=\s|$)", "I1", cmd)
+        if cmd.startswith("G28"):
+            # Marlin G28 takes bare axis flags such as "G28 Z" / "G28 X Y".
+            parsed = re.sub(r"\b([XYZ])\b", r"\g<1>1", parsed)
         words = WORD.findall(parsed)
         if not words or WORD.sub("", parsed).strip():
             raise ValueError("Nicht unterstützte G-Code-Syntax")
@@ -223,7 +226,12 @@ class MarlinTransport:
             try:
                 reply = self._exchange_locked(normalized, timeout)
                 if normalized.startswith("G28"):
-                    self.homed = True  # Marlin G28 ACK follows execution
+                    # A successful Z-only home never implies XYZ is homed.
+                    parts = normalized.split()
+                    if len(parts) == 1 or ("X" in parts and "Y" in parts):
+                        self.homed = True
+                    else:
+                        self.homed = False
                 if normalized.startswith("M3 I"):
                     self.laser_enabled = True  # PWM stays at zero until G1 S
                 if normalized.startswith("M5"):
