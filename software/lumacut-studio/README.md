@@ -1,3 +1,28 @@
+# LumaCut Studio v0.2 (early preview)
+
+This is an early feature preview, NOT a validated laser job sender. Build via GitHub Actions workflow `lumacut-studio-windows.yml`; a green workflow must be confirmed before claiming a working Windows installer.
+
+## New editor features
+- Draw rectangle, ellipse, line, freehand and text objects on the 390 x 370 preview bed
+- Create and rename multiple process layers; assign cut/engrave designation and per-layer power, feed and passes
+- Import JPG, PNG, WebP images for placement preview (raster engraving toolpaths NOT implemented)
+- Save and load LumaCut JSON design projects
+- Locally editable material library, with profile values applied to selected layer
+- Optional camera live view, plus uncalibrated rectangular still capture
+
+## Unimplemented / hardware-dependent
+- Camera-to-bed homography and pixel-to-millimetre registration
+- Controller-driven fiducial marker engraving and automatic optical calibration
+- Moving-camera mosaics and area-dependent scanning
+- Bitmap dithering/raster G-code, reliable layer-scheduled job planning
+- DXF/DWG support, robust transforms, full editing operations, tested machine streaming
+- Safe Z probing, homing, interlocks and hardware state-machine integration
+- In-app signed autoupdate
+
+**Do not run generated G-code on the machine.** The earlier draft vector export does not include newer editor layers and raster artwork, and uses non-validated coordinates. It is retained only for offline prototype experimentation. Do not assume vector or raster import equals machine-ready output.
+
+---
+
 # LumaCut Studio (Preview 0.1)
 
 Independent software track alongside LightBurn; existing controller firmware remains untouched.
