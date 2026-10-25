@@ -418,7 +418,8 @@ class Controller:
                         allowed = False
                     else:
                         try:
-                            self.host_guard.check(command)
+                            if not command.startswith("$"):
+                                self.host_guard.check(command)
                         except ValueError as exc:
                             LOG.warning("Unsafe LightBurn line rejected: %s", exc)
                             allowed = False
