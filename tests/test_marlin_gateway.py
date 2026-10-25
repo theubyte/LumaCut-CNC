@@ -74,11 +74,11 @@ class FirmwareDirectionContractTests(unittest.TestCase):
         module=importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         pins=module.PIN_PATCH
-        self.assertIn("#define SPINDLE_LASER_ENA_PIN PC6",pins)
+        self.assertIn("#define SPINDLE_LASER_ENA_PIN PC7",pins)
         self.assertIn("#define SPINDLE_LASER_PWM_PIN PA1",pins)
-        self.assertIn("#define FAN0_PIN -1",pins)
+        self.assertIn("#define FAN0_PIN PC6",pins)
         self.assertIn("#define FAN1_PIN -1",pins)
-        self.assertNotIn("#define SPINDLE_LASER_ENA_PIN PC7",pins)
+        self.assertNotIn("#define SPINDLE_LASER_ENA_PIN PC6",pins)
 
     def test_default_z_steps_match_calibrated_value(self):
         build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
@@ -201,6 +201,47 @@ class USBProtocolTests(unittest.TestCase):
              b"G90\n",b"M3 I\n",b"M5 I\n"])
         self.assertNotIn(b"M112\n",serial.writes)
         self.assertFalse(controller.emergency_latched)
+
+    def test_lightburn_workpiece_probe_g30_keeps_xy_homing_and_retracts(self):
+        serial=FakeSerial(["ok\\n"]*7 + ["X:0.00 Y:0.00 Z:20.00\\n", "ok\\n"])
+        bridge=MarlinTransport("/dev/null")
+        bridge.serial=serial
+        bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed=True
+        bridge.homing_verified=True
+        bridge.clearance_mm=20.0
+        reply=bridge.probe_workpiece(owner="lightburn")
+        self.assertEqual(bridge.surface_z,0.0)
+        self.assertEqual(bridge.status()["laser_focus_z"],5.5)
+        self.assertEqual(bridge.status()["probe_minimum_z"],2.0)
+        self.assertEqual(serial.writes[:3],[b"M5 I\\n",b"G28 Z\\n",b"M400\\n"])
+        self.assertEqual(serial.writes[4],b"G0 Z20.00 F360\\n")
+        self.assertEqual(reply[-1],"ok")
+
+    def test_z_motion_floor_blocks_below_2mm_from_material_contact(self):
+        serial=FakeSerial(["ok\\n"]*4 +
+                          ["X:0 Y:0 Z:20\\n","ok\\n"]*2)
+        bridge=MarlinTransport("/dev/null")
+        bridge.serial=serial
+        bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed=True
+        bridge.homing_verified=True
+        bridge.surface_z=0.0
+        with self.assertRaisesRegex(ValueError,"Z-Sperre"):
+            bridge.command("G0 Z1.9")
+        self.assertNotIn(b"G0 Z1.9\\n",serial.writes)
+        self.assertEqual(bridge.command("G0 Z2.0")[-1],"ok")
+
+    def test_no_laser_before_probing_workpiece(self):
+        serial=FakeSerial([])
+        bridge=MarlinTransport("/dev/null")
+        bridge.serial=serial
+        bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed=True
+        bridge.homing_verified=True
+        with self.assertRaisesRegex(RuntimeError,"Werkstückkontakt fehlt"):
+            bridge.command("M3 I")
+        self.assertFalse(serial.writes)
 
     def test_emergency_stop_bypasses_motion_lock_and_latches(self):
         controller=MarlinTransport("/dev/null")
