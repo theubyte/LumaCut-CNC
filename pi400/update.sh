@@ -48,8 +48,26 @@ source "$ENV_FILE"
 HTTP_PORT=${LUMACUT_HTTP:-8080}
 
 status_json(){
-  curl -fsS --max-time 5 -H "X-LumaCut-Key: $LUMACUT_KEY" \
-    "http://127.0.0.1:${HTTP_PORT}/api/status"
+  local answer attempt
+  # systemctl reports active before Flask has bound its TCP port. In
+  # particular, a restart followed immediately by update used to fail.
+  for attempt in {1..15}; do
+    if answer=$(curl -fs --max-time 2 -H "X-LumaCut-Key: $LUMACUT_KEY" \
+      "http://127.0.0.1:${HTTP_PORT}/api/status" 2>/dev/null); then
+      printf '%s' "$answer"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+show_api_diagnostics(){
+  log "HTTP-Port: ${HTTP_PORT}; systemd-Dienst:"
+  systemctl --no-pager --full status lumacut.service 2>&1 | head -n 25 >&2 || true
+  log "Aktuelle TCP-Listener:"
+  ss -ltn 2>/dev/null | grep -E '(Local Address|:8080|:23|:${HTTP_PORT}([[:space:]]|$))' >&2 || true
+  log "Letzte Dienstmeldungen (keine Maschinen-Zugangscodes ausgeben):"
+  journalctl -u lumacut.service -n 18 --no-pager --output=short 2>&1 >&2 || true
 }
 safe_state(){
   local payload="$1"
@@ -79,6 +97,7 @@ if [[ "$MODE" == "diagnose" ]]; then
     safe_state "$response" || true
   else
     log "HTTP-Status nicht erreichbar auf 127.0.0.1:${HTTP_PORT}"
+    show_api_diagnostics
   fi
   log "Arbeitsbaum mit Änderungen:"
   git_lumacut status --short || true
@@ -90,7 +109,7 @@ exec 9>/run/lumacut-update.flock
 flock -n 9 || die "Ein anderer LumaCut-Updater läuft bereits."
 [[ ! -e "$LOCK" ]] || die "Bereits vorhandene Wartungssperre: $LOCK"
 systemctl is-active --quiet lumacut.service || die "Pi-Service ist nicht aktiv. Bitte zuerst den Servicefehler beheben."
-response=$(status_json) || die "Steuerungs-API unter 127.0.0.1:${HTTP_PORT} nicht erreichbar."
+response=$(status_json) || { show_api_diagnostics; die "Steuerungs-API unter 127.0.0.1:${HTTP_PORT} nicht erreichbar."; }
 safe_state "$response" || die "LightBurn schließen, alle Jobs beenden und erneut aktualisieren."
 
 # Refuse tracked local modifications rather than silently discarding them.
