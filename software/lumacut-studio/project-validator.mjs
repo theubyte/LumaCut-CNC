@@ -21,7 +21,7 @@ export function validateProject(data){
   }else if(o.kind==="text"){
    if(typeof o.text!=="string"||o.text.length>2000)throw Error("Ungültiger Text");
   }else{
-   if(!finite(o.w)||!finite(o.h)||o.w<0||o.h<0)throw Error("Ungültige Objektgröße");
+   if(!finite(o.w)||!finite(o.h)||(o.kind!=="line"&&(o.w<0||o.h<0)))throw Error("Ungültige Objektgröße");
   }
   if(o.kind==="image"&&(!/^data:image\/(png|jpeg|webp);base64,/.test(o.data)||o.data.length>6000000))throw Error("Ungültiges Bildformat oder Dateigröße");
  }
