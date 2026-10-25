@@ -11,14 +11,14 @@ from __future__ import annotations
 DEFAULT_ROLES = {"lights": "M7", "exhaust": "M8"}
 ASSIGNABLE = {
     "M7": {"pin": "PC8", "connector": "HE0", "kind": "24V low-side MOSFET"},
-    "M8": {"pin": "PC6", "connector": "FAN0", "kind": "24V low-side MOSFET"},
+    "M8": {"pin": "PC9", "connector": "BED", "kind": "24V low-side MOSFET"},
 }
 PINS = (
     ("PA1", "Laser PWM", "laser_pwm", "reserved"),
-    ("PC9", "BED laser supply", "laser_supply", "reserved"),
+    ("PC9", "BED / M8 exhaust", "accessory", "assignable"),
     ("PC8", "HE0 / M7", "accessory", "assignable"),
-    ("PC6", "FAN0 / M8", "accessory", "assignable"),
-    ("PC7", "FAN1 / $LCIO", "digital_output", "assignable"),
+    ("PC6", "FAN0 / $LCIO", "digital_output", "assignable"),
+    ("PC7", "FAN1 laser supply enable", "laser_supply", "reserved"),
     ("PC2", "Z limit", "hard_limit", "reserved"),
     ("X-STOP", "X limit connector", "hard_limit", "reserved"),
     ("Y-STOP", "Y limit connector", "hard_limit", "reserved"),
@@ -56,10 +56,10 @@ def manifest(roles):
                  for pin, function, group, availability in PINS],
         "limitations": [
             "M7/M8 unterstützen logische Rollentausch-Konfiguration.",
-            "PC7/FAN1 unterstützt über die neue STM32-Firmware $LCIO=0/1 und $LCIO-Abfrage.",
+            "PC6/FAN0 unterstützt über die neue STM32-Firmware $LCIO=0/1 und $LCIO-Abfrage.",
             "Die physische STM32-Pinbelegung ist weiterhin im grblHAL-Build festgelegt.",
-            "FAN0, HE0 und BED sind MOSFET-Leistungsausgänge, keine Logik-GPIOs.",
-            "Laserfreigabe und Not-Aus müssen hardwareseitig unabhängig wirken.",
+            "FAN0, FAN1, HE0 und BED sind MOSFET-Leistungsausgänge, keine Logik-GPIOs.",
+            "Laserfreigabe und Not-Aus müssen hardwareseitig unabhängig wirken. FAN1-Minus braucht eine isolierte PWM-Schnittstelle zu PA1.",
             "Nicht vorhandene und sicherheitsrelevante GPIOs lassen sich nicht als frei verfügbaren Pin zuweisen.",
         ],
     }
@@ -85,14 +85,14 @@ def validate_spare_config(data):
         raise ValueError("Ungültiges GPIO-Profil")
     if set(data) != {"pin", "role", "name"}:
         raise ValueError("Unbekannte GPIO-Konfigurationsfelder")
-    if data["pin"] != "PC7" or data["role"] not in SPARE_PC7_ROLES:
-        raise ValueError("Nur freier Ausgang PC7 mit gültigem Funktionsprofil")
+    if data["pin"] != "PC6" or data["role"] not in SPARE_PC7_ROLES:
+        raise ValueError("Nur freier Ausgang PC6 mit gültigem Funktionsprofil")
     name = data["name"]
     if not isinstance(name, str) or not 1 <= len(name) <= 24:
         raise ValueError("Name des Ausgangs: 1–24 Zeichen")
     if not all(ch.isalnum() or ch in " -_" for ch in name):
         raise ValueError("Im Namen nur Buchstaben, Zahlen, Leerzeichen, - und _")
-    return {"pin": "PC7", "role": data["role"], "name": name.strip()}
+    return {"pin": "PC6", "role": data["role"], "name": name.strip()}
 
 
-DEFAULT_SPARE = {"pin": "PC7", "role": "custom", "name": "FAN1 Zusatzgerät"}
+DEFAULT_SPARE = {"pin": "PC6", "role": "custom", "name": "FAN0 Zusatzgerät"}
