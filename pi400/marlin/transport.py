@@ -359,18 +359,18 @@ class MarlinTransport:
             # to a rapid without any S word, while laser mode is off.
             if (owner == "lightburn" and not self.laser_enabled
                     and not self.guard.inline
-                    and re.match(r"^G0?1(?:\\s|$)", normalized)
+                    and re.match(r"^G0?1(?:\s|$)", normalized)
                     and re.search(r"\b[XY]\s*[-+]?\d", normalized)
                     and not re.search(r"\bZ\s*[-+]?\d", normalized)
                     and any(k == "S" for k, _ in WORD.findall(normalized))):
                 normalized = re.sub(r"^G0?1", "G0", normalized)
-                normalized = re.sub(r"\\s*S\\s*[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)", "", normalized)
+                normalized = re.sub(r"\s*S\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)", "", normalized)
             # LightBurn often emits G0 X... Y... without an F word.
             # Marlin's modal feedrate might still be the slow Z feedrate;
             # give XY-only rapids their own travel speed every time.
             if (re.match(r"^G0?0(?:\s|$)", normalized)
-                    and re.search(r"\\b[XY]\\s*[-+]?\\d", normalized)
-                    and not re.search(r"\\bZ\\s*[-+]?\\d", normalized)
+                    and re.search(r"\b[XY]\s*[-+]?\d", normalized)
+                    and not re.search(r"\bZ\s*[-+]?\d", normalized)
                     and not re.search(r"\bF\s*[-+]?\d", normalized)):
                 normalized += " F9000"
             if use_guard:
