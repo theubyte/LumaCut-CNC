@@ -189,6 +189,15 @@ label{display:block;margin-bottom:5px}
 </div>
 </section>
 <section class="card">
+<h2>SKR-Firmware</h2>
+<p>Neue <code>firmware.bin</code> direkt über den Pi flashen. Die microSD-Karte bleibt dauerhaft im SKR; der Pi schreibt die Datei per USB darauf und startet das SKR neu, der Bootloader übernimmt sie.</p>
+<form id="firmwareForm" class="inline"><input style="flex:1;min-width:180px" type="file" accept=".bin" id="firmwareFile"><button type="submit" id="firmwareFlash">Flashen</button></form>
+<div class="metric" style="margin-top:12px"><small>Firmware-Update</small><strong id="firmwareStatus" style="font-size:14px">—</strong>
+<div class="bar"><span id="firmwareProgress"></span></div></div>
+<div class="space"></div>
+<button id="estopReset" style="width:100%">Notstopp quittieren (nach Reset des SKR)</button>
+</section>
+<section class="card">
 <h2>System & Verbindung</h2>
 <p class="muted">Keine Anmeldung erforderlich. Die Steuerung ist für Geräte in deinem WLAN direkt erreichbar. WLAN-Zugang schützen und Port 8080 nicht im Router ins Internet freigeben.</p>
 <div class="metrics" style="grid-template-columns:repeat(2,1fr)"><div class="metric"><small>Übertragene Befehle</small><strong id="commands">0</strong></div>
@@ -267,6 +276,12 @@ function refreshUI(s){
   button.disabled=!ownerFree(s)||!valid||((button.dataset.action==="start"||"needsHome" in button.dataset)&&!s.homed);
  }
  $("abortJob").disabled=!["homing","probing","running"].includes(s.job?.state);
+ const fw=s.firmware_update||{};
+ $("firmwareStatus").textContent=fw.state&&fw.state!=="idle"?fw.state+" · "+(fw.message||""):
+   (s.firmware_upload_supported?"Bereit: Update über den Pi möglich":"Aktuelle Firmware kann keine Dateien empfangen – einmalig per SD-Karte flashen");
+ $("firmwareProgress").style.width=(fw.progress||0)+"%";
+ $("firmwareFlash").disabled=!ownerFree(s)||!s.firmware_upload_supported||["uploading","rebooting"].includes(fw.state);
+ $("estopReset").disabled=!s.emergency_latched;
  for(const button of document.querySelectorAll("[data-axis]"))
   button.disabled=!ownerFree(s)||!valid||!s.homed;
  for(const button of document.querySelectorAll("[data-accessory]"))
@@ -331,6 +346,14 @@ for(const b of document.querySelectorAll("[data-action]"))
  b.onclick=()=>call(b.dataset.action,
   ["start","autorun"].includes(b.dataset.action)?{name:$("jobSelect").value}:{});
 $("abortJob").onclick=()=>call("abort");
+$("estopReset").onclick=()=>call("estop_reset");
+$("firmwareForm").onsubmit=async ev=>{
+ ev.preventDefault();const file=$("firmwareFile").files?.[0];if(!file){show("firmware.bin auswählen",true);return}
+ if(!confirm("SKR jetzt flashen? Laser wird abgeschaltet, das SKR startet neu und muss danach neu referenziert werden."))return;
+ const data=new FormData();data.append("file",file);
+ try{const r=await api("/api/firmware",{method:"POST",body:data});show(r.message);refresh()}
+ catch(e){show(e.message,true)}
+};
 
 for(const b of document.querySelectorAll("[data-axis]"))
  b.onclick=()=>call("jog",{axis:b.dataset.axis,distance:String(Number($("step").value)*Number(b.dataset.direction))});

@@ -143,6 +143,8 @@ class MarlinTransport:
         self.state = "Disconnected"
         self.identity = ""
         self.cap_z_probe = None
+        self.cap_binary_transfer = False
+        self.firmware = {"state": "idle", "progress": 0, "message": ""}
         # LightBurn assumes S is modal; Marlin resets inline power on G0.
         self.last_cut_s = None
         self.homed = False
@@ -211,6 +213,7 @@ class MarlinTransport:
         self.guard = MarlinLaserGuard()
         self.identity = ""
         self.cap_z_probe = None
+        self.cap_binary_transfer = False
         if message:
             self.fault = message[:200]
 
@@ -270,13 +273,13 @@ class MarlinTransport:
                 self.state = "Idle"
                 return responses
 
-    def ensure_ready(self):
+    def ensure_ready(self, owner=None):
         with self.lock:
             if self.emergency_latched:
-                raise RuntimeError("M112-Notstopp verriegelt – Hardware/USB prüfen und Dienst kontrolliert neu starten")
+                raise RuntimeError("M112-Notstopp verriegelt – SKR zurücksetzen, dann Notstopp quittieren")
             if self.serial is not None and self.identity:
                 return
-            if self.owner is not None:
+            if self.owner not in (None, owner):
                 raise RuntimeError("SKR noch nicht bereit, während Client verbunden ist")
             self._close_locked()
             try:
@@ -295,6 +298,9 @@ class MarlinTransport:
                 # A firmware compiled without HAS_BED_PROBE cannot perform
                 # real G30 probing, even when M119 recognizes Z_MIN.
                 self.cap_z_probe = (caps[-1] == "Cap:Z_PROBE:1") if caps else None
+                # Needed for firmware updates over USB (M28 B1 + M997).
+                self.cap_binary_transfer = "Cap:BINARY_FILE_TRANSFER:1" in (
+                    line.strip() for line in reply)
                 self._exchange_locked("M5 I", timeout=6.0)
                 # The installed EEPROM from earlier firmware reported
                 # M203 Z6. Marlin limits homing and probing feedrate by that
@@ -882,6 +888,121 @@ class MarlinTransport:
             raise RuntimeError(f"G30-Kontakt Z{stop_z:.2f} unter Maschinenboden: Z-Referenz prüfen")
         return stop_z
 
+    def clear_emergency(self):
+        """Release the M112 latch once the SKR has demonstrably restarted.
+
+        After M112 Marlin sits in kill() and answers nothing. A fresh M115
+        reply with LumaCut identity therefore proves a reset/power cycle:
+        the board is unhomed with laser PWM and the PC6 rail off.
+        """
+        with self.lock:
+            if not self.emergency_latched:
+                return "Kein Notstopp aktiv"
+            if self.owner is not None:
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            self._close_locked()
+            self.emergency_latched = False
+            try:
+                self.ensure_ready()
+            except Exception as exc:
+                self.emergency_latched = True
+                raise RuntimeError("SKR antwortet noch nicht: Reset-Taste am SKR drücken "
+                                   "oder 24 V und USB kurz trennen (" + str(exc)[:80] + ")")
+            self.fault = ""
+            return "Notstopp quittiert: SKR neu gestartet, bitte neu referenzieren"
+
+    def flash_firmware(self, image: bytes, settle_timeout: float = 120.0,
+                       boot_wait: float = 8.0, poll: float = 3.0):
+        """Write firmware.bin to the SKR SD over USB, reboot it, verify M115.
+
+        Runs for minutes: call from a worker thread. Ownership 'firmware'
+        keeps LightBurn, jobs and the heartbeat away for the whole update.
+        """
+        from .firmware_flash import BinaryUploader, TARGET_NAME, validate_image
+        info = validate_image(image)
+        expected = info["build"]
+        with self.lock:
+            if self.owner is not None:
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise RuntimeError("SKR nicht bereit oder Notstopp aktiv")
+            if not self.cap_binary_transfer:
+                raise RuntimeError(
+                    "Aktuelle SKR-Firmware kann keine Dateien empfangen "
+                    "(Cap:BINARY_FILE_TRANSFER:0): einmalig per SD-Karte flashen")
+            self.owner = "firmware"
+            previous = self.identity
+            self.firmware = {"state": "uploading", "progress": 0,
+                             "message": "Laser aus, SD-Karte prüfen"}
+        try:
+            with self.lock:
+                self._exchange_locked("M5 I", timeout=8)
+                self._exchange_locked("M400", timeout=60)
+                # PC6 switches the laser module's 24 V rail: off before reset.
+                self._exchange_locked("M107 P0", timeout=8)
+                self._exchange_locked("M9", timeout=8)
+                self.laser_enabled = False
+                self.fan_power = False
+                self.lights = self.exhaust = False
+                media = self._exchange_locked("M21", timeout=15)
+                if not any("SD card ok" in line for line in media):
+                    raise RuntimeError("Keine SD-Karte im SKR erkannt (M21): "
+                                       "microSD (FAT32) dauerhaft im SKR stecken lassen")
+                try:
+                    self._exchange_locked("M30 " + TARGET_NAME, timeout=15)
+                except MarlinCommandError:
+                    pass  # no previous firmware.bin on the card
+                self.state = "Busy"
+                self.serial.reset_input_buffer()
+                port = self.serial
+            # Outside the lock so /api/status stays responsive; the
+            # 'firmware' owner already keeps every other sender out.
+            uploader = BinaryUploader(port, log=self.lines.append)
+
+            def progress(done, total):
+                self.firmware.update(progress=round(100 * done / total),
+                                     message=f"Übertrage {done // 1024} / {total // 1024} KB")
+            uploader.upload(TARGET_NAME, image, progress)
+            with self.lock:
+                self.firmware.update(state="rebooting", progress=100,
+                                     message="SKR startet neu, Bootloader flasht")
+                # M997 reboots immediately: no 'ok' will follow.
+                self.serial.write(b"M997\n")
+                self.serial.flush()
+                time.sleep(0.5)
+                self._close_locked("Firmware-Update: SKR startet neu")
+            deadline = time.monotonic() + settle_timeout
+            time.sleep(boot_wait)  # bootloader flashes ~145 KB, USB is gone meanwhile
+            last_error = ""
+            while time.monotonic() < deadline:
+                try:
+                    self.ensure_ready(owner="firmware")
+                    break
+                except Exception as exc:
+                    last_error = str(exc)
+                    time.sleep(poll)
+            else:
+                raise RuntimeError("SKR nach dem Flashen nicht wieder erreichbar: " + last_error[:120])
+            with self.lock:
+                running = self.identity
+            if expected and f"({expected})" not in running:
+                raise RuntimeError(
+                    f"SKR läuft nicht mit dem neuen Build ({expected}); "
+                    "Bootloader hat die Datei nicht übernommen. Meldung: " + running[:120])
+            if not expected and running == previous:
+                raise RuntimeError("SKR meldet unveränderte Firmware nach dem Flashen")
+            self.firmware = {"state": "done", "progress": 100,
+                             "message": "Neue Firmware aktiv: " + (expected or running[:60])}
+            return self.firmware["message"]
+        except Exception as exc:
+            self.firmware = {"state": "error", "progress": self.firmware.get("progress", 0),
+                             "message": str(exc)[:200]}
+            raise
+        finally:
+            with self.lock:
+                if self.owner == "firmware":
+                    self.owner = None
+
     def status(self):
         with self.lock:
             return {
@@ -889,6 +1010,8 @@ class MarlinTransport:
                 "state": self.state, "owner": self.owner or "Frei",
                 "identity": self.identity, "homed": self.homed,
                 "z_homed": self.z_homed, "z_probe_supported": self.cap_z_probe, "emergency_latched": self.emergency_latched,
+                "firmware_upload_supported": self.cap_binary_transfer,
+                "firmware_update": dict(self.firmware),
                 "homing_verified": self.homing_verified,
                 "position": self.position, "fault": self.fault,
                 "lights": self.lights, "exhaust": self.exhaust,

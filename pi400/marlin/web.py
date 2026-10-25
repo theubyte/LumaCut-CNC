@@ -202,6 +202,34 @@ def commission():
                    hardware_electrically_verified=False)
 
 
+@app.post("/api/firmware")
+def firmware_upload():
+    """Flash a new SKR firmware.bin through USB (no SD card handling)."""
+    from .firmware_flash import MAX_IMAGE, validate_image
+    incoming = request.files.get("file")
+    if incoming is None or not incoming.filename:
+        raise ValueError("firmware.bin auswählen")
+    image = incoming.read(MAX_IMAGE + 1)
+    info = validate_image(image)
+    local_owner()
+    if job_lock.locked():
+        raise RuntimeError("Während eines Auftrags wird nicht geflasht")
+    if not machine.cap_binary_transfer:
+        raise RuntimeError("Aktuelle SKR-Firmware kann keine Dateien empfangen: "
+                           "einmalig per SD-Karte eine Firmware mit Pi-Update flashen")
+    threading.Thread(target=_flash_worker, args=(image,), daemon=True,
+                     name="skr-firmware-update").start()
+    return jsonify(message="Firmware-Update gestartet (%d KB, Build %s). SKR startet gleich neu."
+                   % (info["bytes"] // 1024, info["build"] or "unbekannt"))
+
+
+def _flash_worker(image):
+    try:
+        logging.info("SKR firmware update: %s", machine.flash_firmware(image))
+    except Exception:
+        logging.exception("SKR firmware update failed")
+
+
 @app.post("/api/action")
 def action():
     op = request.form.get("op", "")
@@ -209,6 +237,8 @@ def action():
         stop_job.set()
         machine.emergency_stop()
         return jsonify(message="Marlin M112 ausgelöst – physischen Not-Aus prüfen")
+    if op == "estop_reset":
+        return jsonify(message=machine.clear_emergency())
     if op == "connect":
         machine.ensure_ready()
         return jsonify(message="Marlin M115 + LumaCut-Kennung bestätigt")

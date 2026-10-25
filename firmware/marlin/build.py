@@ -150,6 +150,11 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     adv = uncomment(adv, "COOLANT_CONTROL")
     adv = uncomment(adv, "EMERGENCY_PARSER")
     adv = uncomment(adv, "ADVANCED_OK")
+    # Firmware update from the Pi without removing the SD card:
+    # 'M28 B1' binary transfer writes firmware.bin to the onboard SD,
+    # M997 reboots (STM32F1 HAL: hal.reboot()) and the BTT bootloader
+    # flashes it. The SD card stays in the SKR permanently.
+    adv = uncomment(adv, "BINARY_FILE_TRANSFER")
     adv = replace_active(adv, "TX_BUFFER_SIZE", "128")
     adv = replace_active(adv, "BUFSIZE", "8")
     adv = adv.replace("//#define RX_BUFFER_SIZE 1024",
@@ -259,6 +264,7 @@ def main():
                       "mode": "M3 I", "s_max": 255},
             "accessories": {"lights": "M7 HE0 PC8",
                             "exhaust": "M8 BED PC9"},
+            "update": "Pi: M28 B1 binary transfer to SD + M997 (SD card stays in SKR)",
             "hardware_verified": False,
             "do_not_flash_before_isolation_interlock_test": True,
             "sha256": hashlib.sha256(fw.read_bytes()).hexdigest()
