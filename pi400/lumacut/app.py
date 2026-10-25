@@ -218,7 +218,9 @@ def verified_lumacut_controller():
     # expected build filename or a user-configurable UI description.
     run_commands(["$I"], timeout=12)
     identity = controller.status()["identity"]
-    if identity.get("firmware") != "grblHAL" or "LumaCut SKR Mini MZ" not in identity.get("board", ""):
+    if (identity.get("firmware") != "grblHAL" or
+            "LumaCut SKR Mini MZ" not in identity.get("board", "") or
+            "FAN1-LASER" not in identity.get("board", "")):
         raise RuntimeError("Unbekannter SKR-Build. GPIO-Umschaltung gesperrt")
 
 
