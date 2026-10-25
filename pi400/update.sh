@@ -8,6 +8,12 @@ ENV_FILE=/etc/lumacut/lumacut.env
 LOCK=/var/lib/lumacut/maintenance.lock
 UPSTREAM_PUBLIC=https://github.com/theubyte/LumaCut-CNC.git
 MODE=${1:-update}
+# Marlin uses a dedicated service to prevent GRBL/Marlin serial and TCP
+# ownership conflicts. The same updater works in both machine modes.
+SERVICE=lumacut.service
+if systemctl is-active --quiet lumacut-marlin.service; then
+  SERVICE=lumacut-marlin.service
+fi
 ORIGINAL_REV=
 STOPPED_SERVICE=0
 CREATED_LOCK=0
@@ -17,7 +23,7 @@ die(){ log "FEHLER: $*"; exit 1; }
 cleanup(){
   if (( STOPPED_SERVICE )); then
     log "FEHLERBEHEBUNG: Starte den gestoppten LumaCut-Dienst erneut."
-    systemctl start lumacut.service || true
+    systemctl start "$SERVICE" || true
   fi
   if (( CREATED_LOCK )); then rm -f "$LOCK"; fi
 }
@@ -30,7 +36,7 @@ recover(){
       log "Vorheriger Programmstand: $ORIGINAL_REV"
       log "Ein bereits aktualisierter Arbeitsbaum wird nicht blind überschrieben."
     fi
-    systemctl start lumacut.service || true
+    systemctl start "$SERVICE" || true
   fi
   exit "$status"
 }
@@ -63,11 +69,11 @@ status_json(){
 }
 show_api_diagnostics(){
   log "HTTP-Port: ${HTTP_PORT}; systemd-Dienst:"
-  systemctl --no-pager --full status lumacut.service 2>&1 | head -n 25 >&2 || true
+  systemctl --no-pager --full status "$SERVICE" 2>&1 | head -n 25 >&2 || true
   log "Aktuelle TCP-Listener:"
   ss -ltnp 2>/dev/null | head -n 35 >&2 || true
   log "Letzte Dienstmeldungen (keine Maschinen-Zugangscodes ausgeben):"
-  journalctl -u lumacut.service -n 18 --no-pager --output=short 2>&1 >&2 || true
+  journalctl -u "$SERVICE" -n 18 --no-pager --output=short 2>&1 >&2 || true
 }
 safe_state(){
   local payload="$1"
@@ -91,7 +97,7 @@ PY
 git_lumacut(){ runuser -u lumacut -- git -C "$ROOT" "$@"; }
 
 log "Installierter Commit: $(git_lumacut rev-parse --short HEAD)"
-log "Pi-Service: $(systemctl is-active lumacut.service || true)"
+log "Pi-Service: $(systemctl is-active "$SERVICE" || true)"
 if [[ "$MODE" == "diagnose" ]]; then
   if response=$(status_json); then
     safe_state "$response" || true
@@ -108,7 +114,7 @@ fi
 exec 9>/run/lumacut-update.flock
 flock -n 9 || die "Ein anderer LumaCut-Updater läuft bereits."
 [[ ! -e "$LOCK" ]] || die "Bereits vorhandene Wartungssperre: $LOCK"
-systemctl is-active --quiet lumacut.service || die "Pi-Service ist nicht aktiv. Bitte zuerst den Servicefehler beheben."
+systemctl is-active --quiet "$SERVICE" || die "Pi-Service ist nicht aktiv. Bitte zuerst den Servicefehler beheben."
 response=$(status_json) || { show_api_diagnostics; die "Steuerungs-API unter 127.0.0.1:${HTTP_PORT} nicht erreichbar."; }
 safe_state "$response" || die "LightBurn schließen, alle Jobs beenden und erneut aktualisieren."
 
@@ -137,7 +143,7 @@ CREATED_LOCK=1
 sleep 0.25
 response=$(status_json) || die "API wurde vor dem Update nicht mehr erreicht."
 safe_state "$response" || die "Maschine wurde vor Update belegt."
-systemctl stop lumacut.service
+systemctl stop "$SERVICE"
 STOPPED_SERVICE=1
 git_lumacut merge --ff-only "$target" || die "Git Fast-forward fehlgeschlagen."
 if ! python3 -m compileall -q "$ROOT/pi400"; then
@@ -145,13 +151,13 @@ if ! python3 -m compileall -q "$ROOT/pi400"; then
   git_lumacut reset --hard "$ORIGINAL_REV"
   die "Python-Prüfung fehlgeschlagen."
 fi
-systemctl start lumacut.service
+systemctl start "$SERVICE"
 sleep 2
-if ! systemctl is-active --quiet lumacut.service; then
+if ! systemctl is-active --quiet "$SERVICE"; then
   log "Pi-Dienststart fehlgeschlagen. Rolle auf vorherigen Commit zurück."
-  systemctl stop lumacut.service || true
+  systemctl stop "$SERVICE" || true
   git_lumacut reset --hard "$ORIGINAL_REV"
-  systemctl start lumacut.service || true
+  systemctl start "$SERVICE" || true
   die "Pi-Service nach Update nicht aktiv. sudo journalctl -u lumacut -n 80 --no-pager"
 fi
 STOPPED_SERVICE=0
