@@ -154,6 +154,10 @@ class Controller:
             self.accessories["lights"] = "M" in accessory
             self.accessories["exhaust"] = "F" in accessory
             self.last_status = time.monotonic()
+            # Wake local homing completion checks as soon as grblHAL
+            # reports a fresh machine state. A $H 'ok' alone is not
+            # sufficient proof that the previous <Home> report is stale.
+            self.cond.notify_all()
             # Host status requests are independently tracked. The unsolicited
             # dashboard polls remain internal, preventing console spam.
             if self.host is not None:
@@ -367,6 +371,33 @@ class Controller:
             finally:
                 if owner == "local":
                     self.owner = None
+
+    def wait_for_idle_after_homing(self, timeout=15.0):
+        """Wait for a *fresh* Idle status after the $H acknowledgment.
+
+        The status poller owns the serial RX stream. Never race it by
+        reading the serial port directly, and never weaken Home guards
+        simply because a prior $H command returned 'ok'.
+        """
+        with self.cond:
+            minimum_status_time = time.monotonic()
+            deadline = minimum_status_time + timeout
+            while True:
+                if self.serial is None or not self.bootstrap_ready:
+                    raise ConnectionError("SKR USB nach Referenzfahrt nicht bereit")
+                if self.state in ("Alarm", "Door", "Sleep", "Check"):
+                    self.homed = False
+                    raise RuntimeError(
+                        "Referenzfahrt konnte nicht abgeschlossen werden: " + self.state)
+                if (self.state == "Idle" and
+                        self.last_status >= minimum_status_time and self.homed):
+                    return
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        "SKR meldet nach $H noch " + self.state +
+                        " statt Idle. Keine weitere Z-Bewegung ausgeführt.")
+                self.cond.wait(timeout=min(remaining, 0.5))
 
     def command_batch(self, commands, timeout=10.0):
         with self.lock:
