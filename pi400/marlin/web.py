@@ -30,6 +30,7 @@ config = {
     "validated": False,        # NEVER assumed from old grblHAL firmware
     "z_clearance_mm": 20.0,
     "focus_gap_mm": 7.0,
+    "z_switch_tip_offset_mm": 1.5,  # tip height above reference plane at switch trigger
     "travels": {"x": 390.0, "y": 370.0, "z": 90.0},
 }
 CONFIG = DATA / "config.json"
@@ -84,7 +85,15 @@ def homepage():
 @app.get("/api/status")
 def status():
     result = machine.status()
-    result.update(job=dict(job), firmware="marlin",
+    # This is an estimate, not a measured surface map. Marlin Z=0
+    # represents the endstop trigger, not necessarily the laser tip.
+    tip_gap = None
+    if result["homed"] and result["position"] is not None:
+        tip_gap = round(result["position"][2] + config["z_switch_tip_offset_mm"], 3)
+    result.update(estimated_tip_gap_mm=tip_gap,
+                  estimated_focus_adjust_mm=(None if tip_gap is None else
+                    round(config["focus_gap_mm"] - tip_gap, 3)),
+                  job=dict(job), firmware="marlin",
                   expected_pwm="PA1 / M3 I / S0..255",
                   io={"laser_enable":"FAN1 PC7",
                       "exhaust":"BED PC9 M8",
@@ -126,17 +135,22 @@ def settings():
     import math
     clearance = float(request.form.get("z_clearance_mm", "nan"))
     gap = float(request.form.get("focus_gap_mm", "nan"))
+    offset = float(request.form.get("z_switch_tip_offset_mm", "nan"))
     if not (math.isfinite(clearance) and 0.5 <= clearance <= 50):
         raise ValueError("Z-Rückzug muss zwischen 0,5 und 50 mm liegen")
     if not (math.isfinite(gap) and 0.1 <= gap <= 30):
         raise ValueError("Fokusabstand muss zwischen 0,1 und 30 mm liegen")
+    if not (math.isfinite(offset) and -20 <= offset <= 20):
+        raise ValueError("Schalter-zu-Spitze-Offset muss zwischen -20 und +20 mm liegen")
     config["z_clearance_mm"] = clearance
     config["focus_gap_mm"] = gap
+    config["z_switch_tip_offset_mm"] = offset
     machine.clearance_mm = clearance
     persist()
-    return jsonify(message="Z-Sicherheitsabstand und Fokusreferenz gespeichert",
+    return jsonify(message="Z-Offset, Sicherheitsabstand und Fokusreferenz dauerhaft gespeichert",
                    z_clearance_mm=clearance, focus_gap_mm=gap,
-                   note="Fokusabstand ist nur Referenz, keine automatische Werkstückabtastung")
+                   z_switch_tip_offset_mm=offset,
+                   note="Positive Offset: Laserspitze liegt beim Schalterkontakt über der Referenzfläche. Werte werden nur zur Anzeige verwendet, keine automatische Z-Korrekturfahrt.")
 
 @app.post("/api/commission")
 def commission():
