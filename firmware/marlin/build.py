@@ -80,8 +80,8 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "Z_MIN_PROBE_ENDSTOP_INVERTING", "true")
     cfg = uncomment(cfg, "FIX_MOUNTED_PROBE")
     cfg = uncomment(cfg, "Z_SAFE_HOMING")
-    cfg = replace_active(cfg, "Z_SAFE_HOMING_X_POINT", "15")
-    cfg = replace_active(cfg, "Z_SAFE_HOMING_Y_POINT", "15")
+    cfg = replace_active(cfg, "Z_SAFE_HOMING_X_POINT", "0")
+    cfg = replace_active(cfg, "Z_SAFE_HOMING_Y_POINT", "0")
     cfg = replace_active(cfg, "NOZZLE_TO_PROBE_OFFSET", "{ 0, 0, 0 }")
     cfg = replace_active(cfg, "Z_PROBE_LOW_POINT", "0")
 
