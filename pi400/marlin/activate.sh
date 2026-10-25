@@ -3,7 +3,7 @@
 # Does not flash SKR or move axes.
 set -Eeuo pipefail
 [[ $EUID -eq 0 ]] || { echo "Bitte mit sudo starten" >&2; exit 1; }
-[[ "\${1:-}" == "--laser-disconnected" ]] || {
+[[ "${1:-}" == "--laser-disconnected" ]] || {
   echo "Abbruch: Nur bei physisch getrennter Laser-Versorgung und PWM." >&2
   echo "Nach einem SKR-Marlin-Flash: sudo bash pi400/marlin/activate.sh --laser-disconnected" >&2
   exit 1
@@ -17,8 +17,8 @@ set -a
 # shellcheck disable=SC1090
 source "$ENV"
 set +a
-: "\${LUMACUT_KEY:?}"
-: "\${LUMACUT_SKR:?}"
+: "${LUMACUT_KEY:?}"
+: "${LUMACUT_SKR:?}"
 echo "LumaCut: Beende bisherigen GRBL-Dienst – kein SKR-Firmwareflash."
 systemctl stop lumacut.service || true
 systemctl stop lumacut-marlin.service 2>/dev/null || true
@@ -50,7 +50,7 @@ systemctl enable --now lumacut-marlin.service
 ready=0
 for i in $(seq 1 15); do
   if curl -fsS --max-time 2 -H "X-LumaCut-Key: $LUMACUT_KEY" \
-    "http://127.0.0.1:\${LUMACUT_HTTP:-8080}/api/status" >/dev/null 2>&1; then
+    "http://127.0.0.1:${LUMACUT_HTTP:-8080}/api/status" >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -61,6 +61,6 @@ done
   exit 1
 }
 trap - ERR
-echo "LumaCut MARLIN aktiv – Control OS: http://lumacut.local:\${LUMACUT_HTTP:-8080}"
-echo "LightBurn Custom GCode/Marlin über Pi-IP TCP \${LUMACUT_TCP:-23}"
+echo "LumaCut MARLIN aktiv – Control OS: http://lumacut.local:${LUMACUT_HTTP:-8080}"
+echo "LightBurn Custom GCode/Marlin über Pi-IP TCP ${LUMACUT_TCP:-23}"
 echo "Bewegungen bleiben gesperrt, bis Mechanik/Z-Homing einzeln geprüft wurden."
