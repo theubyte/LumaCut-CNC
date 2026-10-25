@@ -1,15 +1,8 @@
 name: LumaCut Marlin Experimental
 
+# Archived manual fallback only; commits no longer run on GitHub.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'firmware/marlin/**'
-      - 'pi400/lumacut/marlin_**'
-      - 'pi400/marlin/**'
-      - 'tests/test_marlin_*'
-      - '.github/workflows/marlin.yml'
 
 jobs:
   marlin-firmware:
