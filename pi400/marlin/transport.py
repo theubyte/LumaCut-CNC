@@ -132,6 +132,7 @@ class MarlinTransport:
         self.owner = None
         self.state = "Disconnected"
         self.identity = ""
+        self.cap_z_probe = None
         self.homed = False
         self.z_homed = False
         self.homing_verified = False
@@ -190,6 +191,7 @@ class MarlinTransport:
         self.laser_enabled = False
         self.guard = MarlinLaserGuard()
         self.identity = ""
+        self.cap_z_probe = None
         if message:
             self.fault = message[:200]
 
@@ -250,6 +252,11 @@ class MarlinTransport:
                     raise RuntimeError("SKR meldet kein echtes Marlin M115")
                 if "LumaCut CNC" not in self.identity:
                     raise RuntimeError("Fremde/alte Marlin-Firmware: LumaCut CNC Kennung fehlt")
+                caps = [line.strip() for line in reply
+                        if line.strip().startswith("Cap:Z_PROBE:")]
+                # A firmware compiled without HAS_BED_PROBE cannot perform
+                # real G30 probing, even when M119 recognizes Z_MIN.
+                self.cap_z_probe = (caps[-1] == "Cap:Z_PROBE:1") if caps else None
                 self._exchange_locked("M5 I", timeout=6.0)
                 self.state = "Idle"
                 self.fault = ""
@@ -575,6 +582,10 @@ class MarlinTransport:
                 raise RuntimeError("SKR nicht verbunden / Notstopp aktiv")
             if self.laser_enabled:
                 raise RuntimeError("Werkstückabtastung bei aktivem Laser unzulässig")
+            if self.cap_z_probe is False:
+                raise RuntimeError("SKR meldet Cap:Z_PROBE:0: G30 nicht installiert. "
+                                   "Aktuelle SKR-Firmware mit Z-MIN-Probe flashen "
+                                   "und M115 Cap:Z_PROBE:1 pruefen.")
             if self.probe_xy_offset_mm is None:
                 raise ValueError("X/Y-Tasterversatz muss zuerst kalibriert sein")
             self.surface_z = None
@@ -652,7 +663,7 @@ class MarlinTransport:
                 "connected": self.serial is not None and bool(self.identity),
                 "state": self.state, "owner": self.owner or "Frei",
                 "identity": self.identity, "homed": self.homed,
-                "z_homed": self.z_homed, "emergency_latched": self.emergency_latched,
+                "z_homed": self.z_homed, "z_probe_supported": self.cap_z_probe, "emergency_latched": self.emergency_latched,
                 "homing_verified": self.homing_verified,
                 "position": self.position, "fault": self.fault,
                 "lights": self.lights, "exhaust": self.exhaust,
