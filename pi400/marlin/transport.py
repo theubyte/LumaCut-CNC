@@ -156,6 +156,7 @@ class MarlinTransport:
         # Cutting must occur strictly inside the remaining rectangle.
         self.safe_zone_xy_mm = 30.0
         self.probe_xy_offset_mm = None
+        self.last_probe_laser_xy = None
         self.absolute_mode = True
         self.focused_this_job = False
         self.fan_off_at = None
@@ -451,6 +452,7 @@ class MarlinTransport:
             self.homed = False
             self.z_homed = False
             self.surface_z = None
+            self.last_probe_laser_xy = None
             self.focused_this_job = False
             commands = ("M5 I", "G28 X Y", "M400",
                         "G28 Z", "M400", "G91",
@@ -538,6 +540,17 @@ class MarlinTransport:
             if self.position is None:
                 raise RuntimeError("Ausgangsposition für G30 unbekannt")
             laser_x, laser_y, z = self.position
+            # After M2 parks at X0/Y0, a repeated G30 should use the
+            # previously successful measurement location, not the park.
+            # Reuse only when the requested position is inside keep-out.
+            if laser_x < self.safe_zone_xy_mm or laser_y < self.safe_zone_xy_mm:
+                if self.last_probe_laser_xy is None:
+                    raise ValueError("G30 in Parkzone: zuerst eine Werkstueckposition anfahren")
+                laser_x, laser_y = self.last_probe_laser_xy
+                self._exchange_locked(
+                    f"G0 X{laser_x:.3f} Y{laser_y:.3f} F9000", timeout=60)
+                self._exchange_locked("M400", timeout=60)
+                self._exchange_locked("M114", timeout=8)
             dx, dy = self.probe_xy_offset_mm
             # Offset is (probe-tip minus laser-point) in machine XY.
             # Reposition head so probe reaches the selected laser XY point.
@@ -561,6 +574,7 @@ class MarlinTransport:
             if contact is None or not 0.0 <= contact <= 90.0:
                 raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
             self.surface_z = contact
+            self.last_probe_laser_xy = (laser_x, laser_y)
             lift = max(self.clearance_mm, contact + self.probe_clearance_mm)
             self._exchange_locked(f"G0 Z{lift:.3f} F600", timeout=45)
             self._exchange_locked("M400", timeout=45)
