@@ -295,6 +295,10 @@ def service_diagnostics():
                    serial_faults=info["diagnostics"]["serial_faults"],
                    suppressed_status=info["diagnostics"]["suppressed_status"],
                    settings=info["settings"], recent=info["recent"],
+                   last_bridge_rejection=info["last_bridge_rejection"],
+                   last_skr_error=info["last_skr_error"],
+                   bridge_rejections=info["diagnostics"]["bridge_rejections"],
+                   skr_errors=info["diagnostics"]["skr_errors"],
                    limitations=manifest(config["pin_roles"])["limitations"])
 
 
@@ -351,6 +355,8 @@ def status():
         firmware=stat["identity"],
         extra_outputs=stat["extra_outputs"],
         last_error=stat["last_error"],
+        last_bridge_rejection=stat["last_bridge_rejection"],
+        last_skr_error=stat["last_skr_error"],
         recent=stat["recent"],
     )
 
