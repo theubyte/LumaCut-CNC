@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import socket
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -29,6 +31,13 @@ class FakePi:
         self.actions = set(ACTIONS)
         self.fail: dict[str, tuple[int, dict]] = {}
         self.redirect = False
+        #: seconds to sleep before answering, keyed by "status" or an op
+        #: (simulates the Pi holding machine.lock during home/park/probe)
+        self.delay: dict[str, float] = {}
+        #: number of requests to drop without any answer, keyed like delay
+        self.drop: dict[str, int] = {}
+        #: raw bytes to send instead of the status JSON (malformed answers)
+        self.raw_status: bytes | None = None
         self.lock = threading.Lock()
         fake = self
 
@@ -53,6 +62,23 @@ class FakePi:
                     fake.requests.append(entry)
                 return entry
 
+            def _hiccup(self, key):
+                """Apply delay/drop for key. Returns True if the request was dropped."""
+                with fake.lock:
+                    delay = fake.delay.get(key, 0.0)
+                    dropped = fake.drop.get(key, 0) > 0
+                    if dropped:
+                        fake.drop[key] -= 1
+                if delay:
+                    time.sleep(delay)
+                if dropped:
+                    self.close_connection = True
+                    try:
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                return dropped
+
             def _auth(self):
                 if fake.required_key and self.headers.get("X-LumaCut-Key") != fake.required_key:
                     self._reply(401, {"error": "Schlüssel fehlt oder falsch"})
@@ -66,6 +92,19 @@ class FakePi:
                 if not self._auth():
                     return
                 if self.path == "/api/status":
+                    if self._hiccup("status"):
+                        return
+                    if "status" in fake.fail:
+                        code, data = fake.fail["status"]
+                        return self._reply(code, data)
+                    if fake.raw_status is not None:
+                        raw = fake.raw_status
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(raw)))
+                        self.end_headers()
+                        self.wfile.write(raw)
+                        return
                     return self._reply(200, fake.status)
                 if self.path == "/api/jobs":
                     return self._reply(200, {"files": [{"name": "a.gcode", "bytes": 3}]})
@@ -82,6 +121,8 @@ class FakePi:
                     form = dict(urllib.parse.parse_qsl(entry["body"].decode()))
                     entry["form"] = form
                     op = form.get("op", "")
+                    if self._hiccup(op):
+                        return
                     if op in fake.fail:
                         code, data = fake.fail[op]
                         return self._reply(code, data)
