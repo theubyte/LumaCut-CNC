@@ -30,6 +30,9 @@ class FakeSocket:
     def close(self):
         self.closed=True
 
+    def settimeout(self, timeout):
+        self.timeout=timeout
+
 
 class Pi400TransportTests(unittest.TestCase):
     def test_unsolicited_status_never_spams_lightburn(self):
@@ -95,7 +98,10 @@ class Pi400TransportTests(unittest.TestCase):
         c.settings[32] = 1
         c._forward_host_bytes_locked(b"$LCIO=1\n$110=6000\n$I\nM64 P0\nG1 X10 F1000\n?")
         self.assertEqual(bytes(c.serial.written), b"$I\nG1 X10 F1000\n?")
-        self.assertEqual(bytes(sock.lines), b"error:9\r\n"*3)
+        self.assertEqual(sock.lines.count(b"error:20\r\n"), 3)
+        self.assertEqual(sock.lines.count(b"[MSG:LumaCut bridge:"), 3)
+        self.assertNotIn(b"error:9", sock.lines)
+        self.assertEqual(c.status()["diagnostics"]["bridge_rejections"], 3)
         self.assertEqual(c.host_pending, 1)
         self.assertEqual(list(c.host_commands), ["$I", "G1 X10 F1000"])
         self.assertTrue(c.host_command_allowed("$H"))
@@ -120,10 +126,31 @@ class Pi400TransportTests(unittest.TestCase):
         c._forward_host_bytes_locked(b"$110")
         c._forward_host_bytes_locked(b"=100\r\nG0 X2\r\n")
         self.assertEqual(bytes(c.serial.written), b"G0 X2\n")
-        self.assertEqual(bytes(sock.lines), b"error:9\r\n")
+        self.assertEqual(sock.lines.count(b"error:20\r\n"), 1)
         c._forward_host_bytes_locked(b"G0 X" + b"0"*400 + b"\n")
-        self.assertEqual(bytes(sock.lines), b"error:9\r\n"*2)
+        self.assertEqual(sock.lines.count(b"error:20\r\n"), 2)
+        self.assertNotIn(b"error:9", sock.lines)
         self.assertEqual(bytes(c.serial.written), b"G0 X2\n")
+
+    def test_refused_connection_never_imitates_grbl_alarm_lockout(self):
+        c = Controller("/dev/null")
+        sock = FakeSocket()
+        c.owner = "host"  # an existing LightBurn session owns the bridge
+        c.serve_host(sock)
+        self.assertTrue(sock.closed)
+        self.assertIn(b"machine already owned by host", sock.lines)
+        self.assertNotIn(b"error:9", sock.lines)
+        self.assertEqual(c.status()["diagnostics"]["bridge_rejections"], 1)
+
+    def test_authentic_skr_error9_has_distinct_origin(self):
+        c = Controller("/dev/null")
+        with c.cond:
+            c._read_response("<Alarm|MPos:0,0,0>")
+            c._read_response("error:9")
+        info = c.status()
+        self.assertEqual(info["last_skr_error"], "error:9")
+        self.assertEqual(info["diagnostics"]["skr_errors"], 1)
+        self.assertEqual(info["diagnostics"]["bridge_rejections"], 0)
 
     def test_exclusive_host_ownership(self):
         c=Controller("/dev/null")
