@@ -14,6 +14,11 @@ from PySide6.QtGui import QAction, QFont, QPalette, QColor, QKeySequence, QShort
 # --- machine integration (machine agent) ---
 from machine.panel import MachinePanel, ESTOP_STYLE
 # --- end machine integration ---
+# --- canvas integration (canvas agent) ---
+from lumacut_canvas.editor import CanvasEditor
+from lumacut_canvas.gcode import document_to_gcode
+from lumacut_canvas.layers_panel import LayersPanel
+# --- end canvas integration ---
 
 
 class LumaCutStudio(QMainWindow):
@@ -86,28 +91,20 @@ class LumaCutStudio(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         layout.addWidget(splitter)
 
-        # Left: Layers
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.addWidget(QLabel("<b>Ebenen</b>"))
-        self.layer_list = QListWidget()
-        self.layer_list.addItem("Ebene 1 – Schneiden")
-        self.layer_list.addItem("Ebene 2 – Gravieren")
-        left_layout.addWidget(self.layer_list)
-        add_layer = QPushButton("+ Ebene")
-        left_layout.addWidget(add_layer)
-        left_layout.addStretch()
-        splitter.addWidget(left)
-
-        # Center: Canvas placeholder
-        center = QFrame()
-        center.setStyleSheet("background: #0c1118; border: 1px solid #28303d;")
-        center_layout = QVBoxLayout(center)
-        canvas_label = QLabel("Arbeitsfläche 360 × 340 mm\n\nSafezone intern und unsichtbar\n\n(Canvas folgt)")
-        canvas_label.setAlignment(Qt.AlignCenter)
-        canvas_label.setStyleSheet("color: #93a1b5; font-size: 16px;")
-        center_layout.addWidget(canvas_label)
-        splitter.addWidget(center)
+        # --- canvas integration (canvas agent) ---
+        # Left: Ebenen-Panel, Center: Canvas-Editor (Paket lumacut_canvas).
+        self.canvas = CanvasEditor()
+        self.layers_panel = LayersPanel(self.canvas.document, self.canvas.undo_stack)
+        self.layers_panel.setMinimumWidth(295)
+        splitter.addWidget(self.layers_panel)
+        splitter.addWidget(self.canvas)
+        send_btn = QPushButton("Design senden")
+        send_btn.setToolTip("Sichtbare Ebenen als G-Code an den Pi übertragen (startet nicht)")
+        send_btn.clicked.connect(self._send_canvas_job)
+        start_action = next(a for a in toolbar.actions() if toolbar.widgetForAction(a) is start_btn)
+        toolbar.insertWidget(start_action, send_btn)  # Ablauf: senden, dann starten
+        toolbar.insertWidget(start_action, QLabel(" "))
+        # --- end canvas integration ---
 
         # Right: Controls
         right = QWidget()
@@ -148,11 +145,26 @@ class LumaCutStudio(QMainWindow):
         # --- end machine integration ---
 
         splitter.setSizes([220, 760, 380])
+        # --- canvas integration (canvas agent) ---
+        splitter.setSizes([290, 760, 380])
+        splitter.setStretchFactor(1, 1)
+        # --- end canvas integration ---
 
         # Status bar
         status = QStatusBar()
         self.setStatusBar(status)
         status.showMessage("LumaCut Studio · Arbeitsfläche 360 × 340 mm · Safezone intern")
+        # --- canvas integration (canvas agent) ---
+        status.showMessage("Arbeitsfläche 360 × 340 mm · Werkzeuge: V R E L T · Mittlere Maustaste/Leertaste = Verschieben")
+        self.cursor_label = QLabel("X —  Y —")
+        self.cursor_label.setMinimumWidth(190)
+        status.addPermanentWidget(self.cursor_label)
+        self.canvas.cursorMoved.connect(
+            lambda x, y: self.cursor_label.setText(f"X {x:7.1f} mm   Y {y:7.1f} mm"))
+        self.canvas.statusMessage.connect(lambda text: status.showMessage(text, 5000))
+        self.canvas.fileChanged.connect(lambda t: self.setWindowTitle(f"{t} – LumaCut Studio"))
+        self.setWindowTitle(f"{self.canvas.title()} – LumaCut Studio")
+        # --- end canvas integration ---
 
 
     # --- machine integration (machine agent) ---
@@ -163,9 +175,25 @@ class LumaCutStudio(QMainWindow):
         self.status_label.setStyleSheet("color: %s;" % colours.get(state, "#93a1b5"))
 
     def closeEvent(self, event):
+        # --- canvas integration (canvas agent) ---
+        if not self.canvas.confirm_discard():
+            event.ignore()
+            return
+        # --- end canvas integration ---
         self.machine_panel.shutdown()
         super().closeEvent(event)
     # --- end machine integration ---
+
+    # --- canvas integration (canvas agent) ---
+    def _send_canvas_job(self):
+        try:
+            gcode = document_to_gcode(self.canvas.document)
+        except ValueError as exc:
+            self.statusBar().showMessage(f"Senden nicht möglich: {exc}", 6000)
+            return
+        stem = self.canvas.file_path.name.split(".")[0] if self.canvas.file_path else "canvas"
+        self.machine_panel.send_gcode(f"{stem}.gcode", gcode, start=False)
+    # --- end canvas integration ---
 
 
 def main():
