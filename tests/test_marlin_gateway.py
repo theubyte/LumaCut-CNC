@@ -401,10 +401,10 @@ class USBProtocolTests(unittest.TestCase):
         from marlin.transport import MarlinTransport
         import inspect
         source = inspect.getsource(MarlinTransport.safe_home)
-        self.assertIn("G1 X0.8 F300", source)
-        self.assertIn("G1 X-0.8 F300", source)
-        self.assertIn("G1 X0.8 F375", source)
-        self.assertIn("G1 X-0.8 F375", source)
+        self.assertIn("G1 X8 F1200", source)
+        self.assertIn("G1 X-8 F1200", source)
+        self.assertIn("G1 X8 F1600", source)
+        self.assertIn("G1 X-8 F1600", source)
         self.assertIn('commands.append("M114")', source)
         self.assertIn('commands.extend([', source)
         self.assertNotIn("G1 Y", source)
