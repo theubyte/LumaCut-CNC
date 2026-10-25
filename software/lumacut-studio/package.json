@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "build:windows": "tauri build --bundles nsis"
+    "build:windows": "tauri build --bundles nsis",
+    "test:ui": "node ui-smoke.mjs",
+    "test:unit": "node --test geometry.test.mjs job-planner.test.mjs raster-planner.test.mjs unified-job.test.mjs unified-export.test.mjs packaging.test.mjs marlin-postprocessor.test.mjs camera-calibration.test.mjs"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0"
+    "@tauri-apps/cli": "^2.0.0",
+    "playwright": "^1.52.0"
   }
 }
