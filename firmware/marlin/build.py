@@ -96,7 +96,11 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "Z_SAFE_HOMING_X_POINT", "0")
     cfg = replace_active(cfg, "Z_SAFE_HOMING_Y_POINT", "0")
     cfg = replace_active(cfg, "NOZZLE_TO_PROBE_OFFSET", "{ 0, 0, 0 }")
-    cfg = replace_active(cfg, "Z_PROBE_LOW_POINT", "0")
+    # Give G30 a small controlled search below the expected contact point.
+    # Zero makes probing fail at the predicted Z plane, especially when the
+    # removable workpiece is thicker than the reference surface.
+    cfg = replace_active(cfg, "Z_PROBE_LOW_POINT", "-2")
+
 
     cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 380 }")
     cfg = replace_active(cfg, "DEFAULT_MAX_FEEDRATE", "{ 150, 150, 10 }")
