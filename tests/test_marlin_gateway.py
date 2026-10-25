@@ -127,7 +127,7 @@ class GatewayFilesTests(unittest.TestCase):
 
     def test_ui_contains_real_marlin_protocol_and_accessory_actions(self):
         ui=(ROOT/"pi400"/"marlin"/"index.html").read_text()
-        self.assertIn("Marlin Control OS",ui)
+        self.assertIn("MARLIN CONTROL OS",ui)
         for cmd in ("M3 I","M114","M115","M119","M112","LUMACUT_KEY"):
             if cmd=="LUMACUT_KEY":continue
             self.assertIn(cmd,ui)
