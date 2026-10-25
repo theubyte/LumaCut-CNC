@@ -1,0 +1,9 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {postprocessMarlinOffline} from "./marlin-postprocessor.mjs";
+const vector=(x=40)=>({kind:"LumaCutOfflinePlan",version:1,operations:[{type:"vector",layer:"cut",object:"r",process:{feed:750,power:50,passes:2},paths:[[[x,40],[50,40],[50,60],[x,60],[x,40]]]}]});
+test("Marlin mode uses M3 I and S0..255, never GRBL M4",()=>{const s=postprocessMarlinOffline(vector());assert.match(s,/M3 I/);assert.match(s,/S128/);assert.doesNotMatch(s,/\bM4\b/);assert.doesNotMatch(s,/S500/);assert.equal((s.match(/M3 I/g)||[]).length,2)});
+test("Every powered G1 follows inline arm without M4",()=>{const lines=postprocessMarlinOffline(vector()).split("\n");let armed=false;for(const line of lines){if(line==="M3 I")armed=true;if(line==="M5 I")armed=false;if(line.startsWith("G1")){assert.ok(armed);assert.match(line,/S\d+/);}}assert.ok(lines.includes("M400"));});
+test("Reserved 30mm in both X and Y blocked",()=>assert.throws(()=>postprocessMarlinOffline(vector(29)),/outside configured/));
+test("Raster reverse scanlines produce correctly ordered movements",()=>{const p={kind:"LumaCutOfflinePlan",version:1,operations:[{type:"raster",layer:"engrave",process:{feed:1000,power:20,passes:1},lines:[{y:75,reverse:true,segments:[{x0:40,x1:50},{x0:70,x1:80}]}]}]};const g=postprocessMarlinOffline(p);assert.ok(g.indexOf("G0 X80.000")<g.indexOf("G0 X50.000"));assert.match(g,/S51/);});
+test("NaN motion blocked before emitting file",()=>{const p=vector();p.operations[0].paths[0][0][0]=NaN;assert.throws(()=>postprocessMarlinOffline(p),/outside configured/);});
