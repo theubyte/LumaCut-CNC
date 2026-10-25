@@ -121,6 +121,7 @@ class ToolController:
         self._rot_start = 0.0
         self._moved = False
         self._preview_id: str | None = None
+        self.roi_pending = False  # Editor.request_roi(): nächster Zug zieht einen Bereich auf
         self._rubber = QGraphicsRectItem()
         pen = QPen(QColor(theme.ACCENT), 1, Qt.DashLine)
         pen.setCosmetic(True)
@@ -151,6 +152,9 @@ class ToolController:
 
     def update_cursor(self) -> None:
         vp = self.ed.view.viewport()
+        if self.roi_pending:
+            vp.setCursor(Qt.CrossCursor)
+            return
         vp.setCursor(Qt.ArrowCursor if self.tool == Tool.SELECT
                      else Qt.IBeamCursor if self.tool == Tool.TEXT else Qt.CrossCursor)
 
@@ -163,6 +167,10 @@ class ToolController:
         self._rubber.setVisible(False)
         self._mode = None
         self._preview_id = None
+        if self.roi_pending:
+            self.roi_pending = False
+            self.update_cursor()
+            self.ed.roiCancelled.emit()
 
     def _apply(self, geoms: dict[str, Geometry]) -> None:
         self.doc.begin_batch()
@@ -183,7 +191,13 @@ class ToolController:
     def press(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
         self._start = pos
         self._moved = False
-        if self.tool == Tool.SELECT:
+        if self.roi_pending:
+            self._mode = "roi"
+            p = _clamp_point(self.snap_point(pos))
+            self._start = p
+            self._rubber.setRect(QRectF(p, p))
+            self._rubber.setVisible(True)
+        elif self.tool == Tool.SELECT:
             self._press_select(pos, mods)
         elif self.tool == Tool.TEXT:
             self._create_text(pos)
@@ -231,7 +245,7 @@ class ToolController:
 
     def move(self, pos: QPointF, mods: Qt.KeyboardModifier, dragging: bool) -> None:
         if self._mode is None or not dragging:
-            if self.tool == Tool.SELECT and self._mode is None:
+            if self.tool == Tool.SELECT and self._mode is None and not self.roi_pending:
                 h = self.ed.scene.overlay.handle_at(pos) if self.ed.selection else None
                 vp = self.ed.view.viewport()
                 if h is not None:
@@ -253,6 +267,8 @@ class ToolController:
             self._drag_rotate(pos, shift)
         elif self._mode == "rubber":
             self._rubber.setRect(QRectF(self._start, pos).normalized())
+        elif self._mode == "roi":
+            self._rubber.setRect(QRectF(self._start, _clamp_point(self.snap_point(pos))).normalized())
         elif self._mode == "draw":
             self._drag_draw(pos, shift)
 
@@ -369,6 +385,14 @@ class ToolController:
                 self.ed.set_selection(sel + [h for h in hits if h not in sel])
         elif mode == "draw":
             self._finish_draw(pos)
+        elif mode == "roi":
+            self._rubber.setVisible(False)
+            r = QRectF(self._start, _clamp_point(self.snap_point(pos))).normalized()
+            if r.width() >= MIN_SIZE_MM and r.height() >= MIN_SIZE_MM:
+                self.roi_pending = False
+                self.update_cursor()
+                self.ed._roi_finished(Rect(r.x(), r.y(), r.width(), r.height()))
+            # Zu kleiner Zug (Klick): weiter auf einen Bereich warten, Esc bricht ab.
 
     def _finish_draw(self, pos: QPointF) -> None:
         pid, self._preview_id = self._preview_id, None
@@ -419,6 +443,9 @@ class ToolController:
     def key_press(self, event: QKeyEvent) -> bool:
         """Pfeiltasten verschieben die Auswahl (1 mm, mit Umschalt 10 mm)."""
         keys = {Qt.Key_Left: (-1, 0), Qt.Key_Right: (1, 0), Qt.Key_Up: (0, -1), Qt.Key_Down: (0, 1)}
+        if event.key() == Qt.Key_Escape and self.roi_pending:
+            self.cancel()  # nur die Bereichsauswahl abbrechen, Auswahl bleibt
+            return True
         if event.key() == Qt.Key_Escape:
             self.cancel()
             self.ed.set_selection([])

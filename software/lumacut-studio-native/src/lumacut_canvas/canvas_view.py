@@ -7,6 +7,7 @@ absichtlich nicht gezeichnet.
 
 from __future__ import annotations
 
+import logging
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -18,6 +19,8 @@ from . import theme
 from .items import SelectionOverlay, ShapeItem
 from .model import Document
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
+
+_log = logging.getLogger(__name__)
 
 SCENE_MARGIN_MM = 60.0
 MIN_SCALE = 0.4    # px/mm
@@ -102,6 +105,8 @@ class CanvasView(QGraphicsView):
         self.setFocusPolicy(Qt.StrongFocus)
         self.show_grid = True
         self.backdrop: QImage | None = None
+        self._overlays: dict[str, tuple[float, int, object]] = {}  # key -> (z, Reihenfolge, Overlay)
+        self._overlay_seq = 0
         self.tool_handler = None  # wird vom Editor gesetzt (tools.ToolController)
         self._pan_start: QPointF | None = None
         self._space_down = False
@@ -226,6 +231,7 @@ class CanvasView(QGraphicsView):
         p.fillRect(work, QColor(theme.CANVAS_WORK))
         if self.backdrop is not None and not self.backdrop.isNull():
             p.drawImage(work, self.backdrop)
+        self._paint_overlays(p, work)
         if self.show_grid:
             self._draw_grid(p, rect.intersected(work))
         pen = QPen(QColor(theme.WORK_BORDER), 1.0)
@@ -258,6 +264,49 @@ class CanvasView(QGraphicsView):
         self.backdrop = image
         self.resetCachedContent()
         self.viewport().update()
+
+    # --- Overlays (Scan-Bilder, Höhenkarten …) unter den Objekten -----------
+    def add_overlay(self, key: str, overlay, z: float = 0.0) -> None:
+        """Overlay unter ``key`` einhängen (ersetzt ein vorhandenes gleichen Namens)."""
+        if not callable(getattr(overlay, "paint", None)):
+            raise TypeError("Overlay braucht eine Methode paint(painter, work_rect)")
+        self._overlay_seq += 1
+        self._overlays[key] = (float(z), self._overlay_seq, overlay)
+        self.refresh_overlays()
+
+    def remove_overlay(self, key: str) -> bool:
+        found = self._overlays.pop(key, None) is not None
+        if found:
+            self.refresh_overlays()
+        return found
+
+    def overlay(self, key: str):
+        entry = self._overlays.get(key)
+        return entry[2] if entry else None
+
+    def overlay_keys(self) -> list[str]:
+        """Schlüssel in Zeichenreihenfolge (unten zuerst)."""
+        return [k for k, _ in sorted(self._overlays.items(), key=lambda kv: kv[1][:2])]
+
+    def refresh_overlays(self) -> None:
+        """Nach Änderungen am Overlay-Objekt (Bild, Sichtbarkeit …) neu zeichnen."""
+        self.resetCachedContent()
+        self.viewport().update()
+
+    def _paint_overlays(self, p: QPainter, work: QRectF) -> None:
+        for key in self.overlay_keys():
+            ov = self._overlays[key][2]
+            if not getattr(ov, "visible", True):
+                continue
+            p.save()
+            p.setClipRect(work)
+            p.setOpacity(max(0.0, min(1.0, float(getattr(ov, "opacity", 1.0)))))
+            try:
+                ov.paint(p, QRectF(work))
+            except Exception:  # fremder Code darf das Zeichnen des Canvas nie abbrechen
+                _log.exception("Overlay %r konnte nicht gezeichnet werden", key)
+            finally:
+                p.restore()
 
     def set_grid_visible(self, on: bool) -> None:
         self.show_grid = on

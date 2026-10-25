@@ -11,6 +11,9 @@ Schnittstelle für die Hauptanwendung und andere Module::
     editor.cursorMoved         # Signal(float, float) in Arbeitsflächen-mm
     editor.statusMessage       # Signal(str) für die Statusleiste
     editor.set_backdrop(img)   # Kamerascan als Hintergrund (Scan-Modul)
+    editor.add_overlay(key, overlay, z)   # weitere Bilder/Zeichnungen unter den Objekten
+    editor.request_roi()       # Bereich aufziehen -> roiSelected(x, y, w, h) in mm
+    editor.add_toolbar_action(action)     # eigene Aktion in die Aktionsleiste
     export.job_layers(editor.document)  # Laserparameter + Polylinien in Maschinen-mm
 """
 
@@ -19,9 +22,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QActionGroup, QImage, QKeySequence, QUndoStack
-from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGridLayout, QHBoxLayout,
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QKeySequence, QPen, QUndoStack
+from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphicsRectItem,
+                               QGridLayout, QHBoxLayout,
                                QLabel, QLineEdit, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
@@ -268,6 +272,8 @@ class CanvasEditor(QWidget):
     cursorMoved = Signal(float, float)  # noqa: N815
     statusMessage = Signal(str)  # noqa: N815
     fileChanged = Signal(str)  # noqa: N815
+    roiSelected = Signal(float, float, float, float)  # x, y, w, h in Arbeitsflächen-mm  # noqa: N815
+    roiCancelled = Signal()  # noqa: N815
 
     def __init__(self, document: Document | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -290,6 +296,15 @@ class CanvasEditor(QWidget):
         self.view.tool_handler = self.tools
         self.view.cursorMoved.connect(self.cursorMoved)
         self.view.viewChanged.connect(self._emit_zoom)
+
+        self.roi: Rect | None = None
+        self._roi_item = QGraphicsRectItem()
+        roi_pen = QPen(QColor(theme.ACCENT), 1.5, Qt.DashDotLine)
+        roi_pen.setCosmetic(True)
+        self._roi_item.setPen(roi_pen)
+        self._roi_item.setZValue(1.9e9)
+        self._roi_item.setVisible(False)
+        self.scene.addItem(self._roi_item)
 
         self.actions_by_name: dict[str, QAction] = {}
         self._build_actions()
@@ -376,13 +391,15 @@ class CanvasEditor(QWidget):
     def _build_layout(self) -> None:
         a = self.actions_by_name
         bar = self._toolbar("ActionBar", Qt.Horizontal)
+        self.action_bar = bar
         for name in ("open", "save", "export", None, "undo", "redo", None, "duplicate", "delete",
                      "rotate_ccw", "rotate_cw", "group", "ungroup", None,
                      "zoom_out", "zoom_in", "fit", None, "grid", "snap"):
             bar.addSeparator() if name is None else bar.addAction(a[name])
         self.zoom_label = QLabel("100 %")
         self.zoom_label.setStyleSheet(f"color: {theme.TEXT_DIM}; padding: 0 8px;")
-        bar.addWidget(self.zoom_label)
+        self._zoom_label_action = bar.addWidget(self.zoom_label)
+        self._extension_separator = None
 
         strip = self._toolbar("ToolStrip", Qt.Vertical)
         for t in Tool:
@@ -487,6 +504,77 @@ class CanvasEditor(QWidget):
 
     def set_backdrop(self, image: QImage | None) -> None:
         self.view.set_backdrop(image)
+
+    # --- Integrations-Hooks (Scan & Probe u. a.) ---------------------------
+    def add_overlay(self, key: str, overlay, z: float = 0.0) -> None:
+        """Bild/Zeichnung unter den Objekten einblenden (siehe ``overlays``)."""
+        self.view.add_overlay(key, overlay, z)
+
+    def remove_overlay(self, key: str) -> bool:
+        return self.view.remove_overlay(key)
+
+    def overlay(self, key: str):
+        return self.view.overlay(key)
+
+    def refresh_overlays(self) -> None:
+        self.view.refresh_overlays()
+
+    def add_toolbar_action(self, action: QAction, name: str | None = None) -> QAction:
+        """Fremde Aktion rechts in die Aktionsleiste (vor die Zoomanzeige) hängen.
+
+        Das Kürzel der Aktion gilt dann im ganzen Fenster; ``name`` macht sie
+        unter ``actions_by_name`` auffindbar."""
+        bar = self.action_bar
+        if self._extension_separator is None:
+            self._extension_separator = bar.insertSeparator(self._zoom_label_action)
+        bar.insertAction(self._zoom_label_action, action)
+        if action.shortcut():
+            action.setShortcutContext(Qt.WindowShortcut)
+            self.addAction(action)
+        key = name or action.objectName()
+        if key:
+            if key in self.actions_by_name and self.actions_by_name[key] is not action:
+                raise ValueError(f"Aktion {key!r} existiert bereits")
+            self.actions_by_name[key] = action
+        return action
+
+    def request_roi(self, hint: str = "Bereich auf der Arbeitsfläche aufziehen (Esc bricht ab)") -> None:
+        """Nächster Mauszug zieht einen Bereich auf; Ergebnis über ``roiSelected``
+        (x, y, w, h in mm, auf die Fläche begrenzt), Abbruch über ``roiCancelled``.
+        Das aktive Werkzeug und das Dokument bleiben unverändert."""
+        if self.tools.roi_pending:
+            return
+        self.tools.cancel()
+        self.tools.roi_pending = True
+        self.tools.update_cursor()
+        self.view.setFocus()
+        self.notify(hint)
+
+    def cancel_roi(self) -> None:
+        if self.tools.roi_pending:
+            self.tools.cancel()
+
+    @property
+    def roi_pending(self) -> bool:
+        return self.tools.roi_pending
+
+    def _roi_finished(self, r: Rect) -> None:
+        self.set_roi(r)
+        self.notify(f"Bereich: {r.w:.1f} × {r.h:.1f} mm bei X {r.x:.1f} / Y {r.y:.1f}")
+        self.roiSelected.emit(r.x, r.y, r.w, r.h)
+
+    def set_roi(self, r: Rect | None) -> None:
+        """Bereich gestrichelt anzeigen (``None`` blendet ihn aus). Nicht Teil des Dokuments."""
+        self.roi = r
+        item = self._roi_item
+        if r is None:
+            item.setVisible(False)
+        else:
+            item.setRect(QRectF(r.x, r.y, r.w, r.h))
+            item.setVisible(True)
+
+    def clear_roi(self) -> None:
+        self.set_roi(None)
 
     # --- Bearbeiten -------------------------------------------------------
     def select_all(self) -> None:
