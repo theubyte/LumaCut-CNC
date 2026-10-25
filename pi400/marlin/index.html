@@ -76,8 +76,8 @@ label{font-size:13px;color:#bcd2e4}
 <section class="card">
 <h2>Direktsteuerung</h2>
 <p>Fahrbefehle sind gesperrt, während LightBurn oder ein Pi-Auftrag die Maschine steuert.</p>
-<div class="hint">LightBurn „Referenzieren“ (G28) ist die normale Maschinenreferenzfahrt. Dabei wird der Boden als Z=0 gesetzt. Die gesonderte Werkstückabtastung (G30) bleibt gesperrt, bis ein nicht-nullender Probezyklus und X/Y-Tasterversatz implementiert sind.</div>
-<div class="two"><button class="primary" data-action="home" data-motion>XYZ referenzieren (Z zuerst)</button>
+<div class="hint">LightBurn „Referenzieren“ (G28): ZUERST X/Y zur freien Ecke referenzieren, DANACH Maschinenboden als Z=0 setzen und 20 mm anheben. Die gesonderte Werkstückabtastung (G30) bleibt gesperrt, bis ein nicht-nullender Probezyklus und X/Y-Tasterversatz implementiert sind.</div>
+<div class="two"><button class="primary" data-action="home" data-motion>XYZ referenzieren (X/Y zuerst)</button>
 <button class="danger" id="stop">Software-Notstopp M112</button></div>
 <div class="space"></div>
 <h3>Joggen</h3>
@@ -117,6 +117,7 @@ label{font-size:13px;color:#bcd2e4}
 </section>
 <section class="card">
 <h2>LightBurn über WLAN</h2>
+<div class="hint">LightBurn „Job-Ende“ auf <code>M2</code> setzen: Laser aus → Z nur nach oben bis mindestens 20 mm → X15/Y15 in die L-förmige Safezone. <code>M5 I</code> bleibt der normale Laser-Aus-Befehl für Pausen zwischen Schnitten. Beide Aktionen benötigen kein Webinterface.</div>
 <div class="hint warning">30-mm-Homing-Sicherheitszone: X=0–30 mm und Y=0–30 mm bleiben werkstückfrei. Schnittbewegungen sind nur bei X≥30 und Y≥30 erlaubt. Maschinenreferenz G28 ausschließlich in frei zugänglicher Parkposition starten. Nach Einschalten ist die tatsächliche Kopfposition bis zum Homing unbekannt.</div>
 <p>LightBurn <b>Custom GCode</b> → Variante <b>Marlin</b> → Verbindung <b>Network/TCP</b>. Diese Weboberfläche und LightBurn teilen sich einen USB-Controller, führen aber nie gleichzeitig Befehle aus.</p>
 <div class="metrics" style="grid-template-columns:repeat(2,1fr)">
