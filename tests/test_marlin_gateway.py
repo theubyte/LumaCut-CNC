@@ -468,6 +468,56 @@ with web.app.test_client() as client:
         # whether the probe point is physically above or below laser tip.
         self.assertIn("machine.safe_home(owner=\"web\", clearance_mm=",web)
 
+    def test_focus_settings_save_during_lightburn_session(self):
+        source = r"""
+from marlin import web
+web.machine.homed = True
+web.machine.owner = "lightburn"
+with web.app.test_client() as client:
+  r = client.post("/api/settings", data={
+    "z_switch_tip_offset_mm": "1.5",
+    "z_clearance_mm": "20",
+    "focus_gap_mm": "7",
+    "probe_offset_x_mm": "23",
+    "probe_offset_y_mm": "15"
+  })
+  assert r.status_code == 200, r.data
+  assert web.machine.probe_xy_offset_mm == (23, 15)
+  assert web.machine.focus_gap_mm == 7.0
+  assert web.CONFIG.is_file()
+  assert client.get("/api/status").get_json()["config"]["probe_offset_x_mm"] == 23
+  empty = client.post("/api/settings", data={
+    "z_switch_tip_offset_mm": "1.5",
+    "z_clearance_mm": "20",
+    "focus_gap_mm": "7",
+    "probe_offset_x_mm": "",
+    "probe_offset_y_mm": ""
+  })
+  assert empty.status_code == 200, empty.data
+  assert web.machine.probe_xy_offset_mm is None
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env["LUMACUT_DATA"] = tmp
+            env["PYTHONPATH"] = str(ROOT / "pi400")
+            run = subprocess.run([sys.executable, "-c", source], env=env,
+                                 cwd=ROOT, capture_output=True, text=True,
+                                 timeout=15)
+            self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_lightburn_busy_reconnect_does_not_spam_error_lines(self):
+        controller = MarlinTransport("/dev/null")
+        controller.owner = "lightburn"
+        class Reconnect:
+            def __init__(self): self.lines=[]; self.closed=False
+            def settimeout(self, value): pass
+            def sendall(self, value): self.lines.append(value)
+            def close(self): self.closed=True
+        socket = Reconnect()
+        controller.serve_client(socket)
+        self.assertTrue(socket.closed)
+        self.assertEqual(socket.lines, [])
+
     def test_machine_web_and_service_modules_compile(self):
         import subprocess
         paths=[str(ROOT/"pi400"/"marlin"/p)
