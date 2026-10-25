@@ -27,6 +27,9 @@ from lumacut_job.estimate import estimate_gcode
 from lumacut_job.planner import optimized_document_gcode
 from lumacut_job.qt_tools import install_job_tools
 # --- end job tools integration ---
+# --- materials integration (materials agent) ---
+from lumacut_materials.dialog import install_materials
+# --- end materials integration ---
 
 
 class LumaCutStudio(QMainWindow):
@@ -178,6 +181,9 @@ class LumaCutStudio(QMainWindow):
         # --- job tools integration (review agent) ---
         install_job_tools(self)  # Zeit schätzen, Rahmen, Materialtest
         # --- end job tools integration ---
+        # --- materials integration (materials agent) ---
+        install_materials(self)  # Menü Material → Materialbibliothek
+        # --- end materials integration ---
 
 
     # --- machine integration (machine agent) ---
