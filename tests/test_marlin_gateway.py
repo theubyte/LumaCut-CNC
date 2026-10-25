@@ -397,6 +397,18 @@ class USBProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Laserleistung"):
             bridge.command("G1 X120 Y120 S60", owner="web")
 
+    def test_home_chime_is_x_only_returns_zero_and_ends_with_m114(self):
+        from marlin.transport import MarlinTransport
+        import inspect
+        source = inspect.getsource(MarlinTransport.safe_home)
+        self.assertIn("G1 X0.8 F300", source)
+        self.assertIn("G1 X-0.8 F300", source)
+        self.assertIn("G1 X0.8 F375", source)
+        self.assertIn("G1 X-0.8 F375", source)
+        self.assertIn('commands.append("M114")', source)
+        self.assertIn('commands.extend([', source)
+        self.assertNotIn("G1 Y", source)
+
     def test_reserved_xy_30mm_zone_permits_laser_off_rapid(self):
         serial=FakeSerial(["ok\n"])
         bridge=MarlinTransport("/dev/null")
