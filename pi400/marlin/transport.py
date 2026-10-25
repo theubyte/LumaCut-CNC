@@ -287,7 +287,7 @@ class MarlinTransport:
         This is a Pi-mediated timer, not an independent hardware timer.
         """
         with self.lock:
-            if (self.owner is not None or self.serial is None or
+            if (self.owner not in (None, "lightburn") or self.serial is None or
                 not self.identity or self.emergency_latched or
                 not self.fan_power or self.fan_off_at is None or
                 time.monotonic() < self.fan_off_at or self.laser_enabled):
