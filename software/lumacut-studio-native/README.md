@@ -65,6 +65,11 @@ Fehler des Pi (`{"error": …}`) erscheinen im Panel unter „Letzte Meldung“.
 - `op=park` gibt es in `web.py` noch nicht (Parken läuft nur am Auftragsende).
   Bis dahin meldet die App das klar statt still zu scheitern.
 
+## Kamera-Scan und Höhenmesh
+
+Kachel-Scan, Objekterkennung, Mehrbereichs-Proben, Höhenmeshes und
+Fokuskorrektur: siehe [docs/SCAN_PROBE.md](docs/SCAN_PROBE.md) (`src/scanprobe/`).
+
 ## Tests
 
 ```bash
