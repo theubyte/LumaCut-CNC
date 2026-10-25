@@ -30,19 +30,24 @@ rollback(){
   systemctl start lumacut.service
 }
 trap rollback ERR
-echo "Erwarte Marlin 2.1.x mit eindeutigem LumaCut CNC Namen."
-runuser -u lumacut -- env PYTHONPATH="$ROOT/pi400" \
-  LUMACUT_SKR="$LUMACUT_SKR" python3 - <<'PY'
-import os
-from marlin.transport import MarlinTransport
-m=MarlinTransport(os.environ["LUMACUT_SKR"])
-try:
-    m.ensure_ready()
-    print("Bestätigte Marlin-Firmware:", m.status()["identity"])
-finally:
-    with m.lock:
-        m._close_locked()
-PY
+echo "Suche USB-Geraete und pruefe echte Marlin-LumaCut-Identitaet via M115."
+# The old grblHAL USB identity may disappear after flashing Marlin.
+# Probe serial devices but accept only an explicitly LumaCut-named Marlin.
+DETECTED_PORT=$(runuser -u lumacut -- env PYTHONPATH="$ROOT/pi400" \
+  python3 -m marlin.usb_detect "$LUMACUT_SKR") || {
+  echo "SKR nicht als LumaCut Marlin erkannt; Firmware/USB-Verbindung pruefen." >&2
+  exit 2
+}
+[[ "$DETECTED_PORT" == /dev/* ]] || { echo "Ungueltiger USB-Pfad" >&2; exit 2; }
+echo "Verifizierter SKR-USB-Pfad: $DETECTED_PORT"
+# Keep the old grblHAL machine USB config completely unchanged.
+# A separate Marlin override survives reboot and is read only by
+# lumacut-marlin.service after the regular EnvironmentFile.
+umask 077
+TEMP_PORT_FILE=$(mktemp /etc/lumacut/.marlin-port.XXXXXXXX)
+printf 'LUMACUT_SKR=%s\n' "$DETECTED_PORT" > "$TEMP_PORT_FILE"
+chmod 600 "$TEMP_PORT_FILE"
+mv -f "$TEMP_PORT_FILE" /etc/lumacut/lumacut-marlin-port.env
 cp "$ROOT/pi400/marlin/lumacut-marlin.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl disable lumacut.service
