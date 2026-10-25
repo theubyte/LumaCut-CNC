@@ -400,6 +400,19 @@ class USBProtocolTests(unittest.TestCase):
         bridge.command("G0 X120 Y120")
         self.assertEqual(serial.writes, [b"G0 X120 Y120 F9000\n"])
 
+    def test_g30_rejects_firmware_without_probe_capability_before_motion(self):
+        serial = FakeSerial()
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.cap_z_probe = False
+        with self.assertRaisesRegex(RuntimeError, "Cap:Z_PROBE:0"):
+            bridge.probe_workpiece(owner="lightburn")
+        self.assertEqual(serial.writes, [])
+        self.assertFalse(bridge.laser_enabled)
+
     def test_g30_tracks_commanded_xy_independent_of_stale_m114(self):
         serial = FakeSerial(["ok\\n"])
         bridge = MarlinTransport("/dev/null")
