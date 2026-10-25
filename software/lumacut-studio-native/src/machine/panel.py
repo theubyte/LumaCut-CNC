@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QGridLayout, QGroupBox, QHBoxLayout, QLabel,
                                QLineEdit, QMessageBox, QProgressBar,
@@ -39,6 +39,10 @@ STATE_TEXT = {
     ConnState.ERROR: ("Fehler", BAD),
     ConnState.AUTH_FAILED: ("Schlüssel abgelehnt", BAD),
 }
+
+#: Status older than this is shown as stale and motion controls are locked.
+STALE_AFTER_S = 3.0
+ESTOP_LABEL = "NOT-AUS"
 
 ESTOP_STYLE = ("QPushButton { background: #d7263d; color: white; font-weight: bold;"
                " font-size: 15px; border: 2px solid #ff9b96; border-radius: 8px;"
@@ -69,14 +73,22 @@ class MachinePanel(QWidget):
         self._poller: StatusPoller | None = None
         self._state = ConnState.DISCONNECTED
         self._status: MachineStatus | None = None
+        self._status_at: float | None = None     # monotonic time of last status
+        self._stale = False
         self._job_path: Path | None = None
         self._uploaded: str = ""
         self._runner = CommandRunner(self)
         self._runner.started.connect(self._on_command_started)
         self._runner.finished.connect(self._on_command_finished)
         self._runner.failed.connect(self._on_command_failed)
-        self._runner.busy_changed.connect(lambda _b: self._update_enabled())
+        self._runner.busy_changed.connect(self._on_busy_changed)
         self._build()
+        # Stale-data watchdog runs in the GUI thread, so it still fires when
+        # the poll thread is stuck in a request.
+        self._stale_timer = QTimer(self)
+        self._stale_timer.setInterval(500)
+        self._stale_timer.timeout.connect(self._check_stale)
+        self._stale_timer.start()
         self._apply_state(ConnState.DISCONNECTED, "Nicht verbunden")
         if self._settings.auto_connect:
             self.connect_to_pi()
@@ -94,6 +106,10 @@ class MachinePanel(QWidget):
         self.estop_button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.estop_button.clicked.connect(self.emergency_stop)
         root.addWidget(self.estop_button)
+        self.estop_label = QLabel("")
+        self.estop_label.setWordWrap(True)
+        self.estop_label.setVisible(False)
+        root.addWidget(self.estop_label)
 
         # Connection
         conn = QGroupBox("Verbindung (Pi 400)")
@@ -259,18 +275,21 @@ class MachinePanel(QWidget):
         self.url_edit.setText(new.base_url)
         self._client = LumaCutClient(new.base_url, new.api_key)
         self._poller = StatusPoller(self._client, new.poll_ms)
-        self._poller.state_changed.connect(self._apply_state)
-        self._poller.status_received.connect(self._apply_status)
+        self._poller.state_changed.connect(self._on_poller_state)
+        self._poller.status_received.connect(self._on_poller_status)
+        self._poller.set_command_running(self._runner.busy)
         self._poller.start()
 
     def disconnect_from_pi(self) -> None:
         poller, self._poller = self._poller, None
         if poller is not None:
-            poller.state_changed.disconnect(self._apply_state)
-            poller.status_received.disconnect(self._apply_status)
-            poller.stop()
+            poller.state_changed.disconnect(self._on_poller_state)
+            poller.status_received.disconnect(self._on_poller_status)
+            poller.stop(wait_ms=200)    # daemon thread; never blocks the GUI long
             poller.deleteLater()
         self._status = None
+        self._status_at = None
+        self._stale = False
         self._apply_state(ConnState.DISCONNECTED, "Getrennt")
 
     def shutdown(self) -> None:
@@ -278,12 +297,58 @@ class MachinePanel(QWidget):
         if getattr(self, "_shut_down", False):
             return
         self._shut_down = True
+        self._stale_timer.stop()
         self.disconnect_from_pi()
-        self._runner.wait(2000)
+        # Commands run on daemon threads: wait briefly so a just-sent E-Stop
+        # gets its answer, but never hang application exit on a long Home.
+        self._runner.wait(1000)
 
     @property
     def connection_state(self) -> str:
         return self._state
+
+    @property
+    def stale(self) -> bool:
+        """True while connected but the last status is older than STALE_AFTER_S."""
+        return self._stale
+
+    @Slot(str, str)
+    def _on_poller_state(self, state: str, message: str) -> None:
+        if self.sender() is self._poller:   # ignore queued signals of old pollers
+            self._apply_state(state, message)
+
+    @Slot(object)
+    def _on_poller_status(self, status: MachineStatus) -> None:
+        if self.sender() is self._poller:
+            self._apply_status(status)
+
+    @Slot(bool)
+    def _on_busy_changed(self, busy: bool) -> None:
+        if self._poller is not None:
+            self._poller.set_command_running(busy)
+        self._update_enabled()
+
+    @Slot()
+    def _check_stale(self) -> None:
+        age = (None if self._status_at is None else
+               time.monotonic() - self._status_at)
+        stale = (self._state == ConnState.CONNECTED and
+                 (age is None or age > STALE_AFTER_S))
+        if stale:
+            busy = self._runner.current
+            text = ("Pi beschäftigt (%s)" % busy) if busy else "Keine Statusdaten"
+            if age is not None:
+                text += " · Status %.0f s alt" % age
+            badge(self.conn_badge, text, WARN)
+            self.pos_label.setStyleSheet(
+                "font-family: monospace; font-size: 14px; color: %s;" % MUTED)
+        if stale != self._stale:
+            self._stale = stale
+            if not stale:
+                if self._state == ConnState.CONNECTED:
+                    badge(self.conn_badge, *STATE_TEXT[ConnState.CONNECTED])
+                self.pos_label.setStyleSheet("font-family: monospace; font-size: 14px;")
+            self._update_enabled()
 
     @Slot(str, str)
     def _apply_state(self, state: str, message: str) -> None:
@@ -312,6 +377,9 @@ class MachinePanel(QWidget):
     @Slot(object)
     def _apply_status(self, status: MachineStatus) -> None:
         self._status = status
+        self._status_at = time.monotonic()
+        if self._stale:
+            self._check_stale()
         if status.emergency_latched:
             badge(self.skr_label, "NOTSTOPP VERRIEGELT", BAD)
         elif status.skr_connected:
@@ -329,7 +397,9 @@ class MachinePanel(QWidget):
             badge(self.homed_label, "Nein · Mechanik nicht freigegeben", WARN)
         else:
             badge(self.homed_label, "Nein", WARN)
-        if status.laser_armed:
+        if status.laser_armed is None:
+            badge(self.laser_label, "Unbekannt", WARN)
+        elif status.laser_armed:
             badge(self.laser_label, "AKTIV", BAD)
         else:
             badge(self.laser_label, "Aus" + (" · Lüfter nachlaufend"
@@ -375,7 +445,8 @@ class MachinePanel(QWidget):
         self.error_label.setStyleSheet("color: %s;" % colour)
 
     def _update_enabled(self) -> None:
-        connected = self._state == ConnState.CONNECTED and self._client is not None
+        connected = (self._state == ConnState.CONNECTED and self._client is not None
+                     and not self._stale)
         idle = connected and not self._runner.busy
         s = self._status
         job_active = bool(s and s.job.active)
@@ -410,16 +481,28 @@ class MachinePanel(QWidget):
     @Slot(str)
     def _on_command_started(self, label: str) -> None:
         self._show_message(label + " …", INFO)
+        if label == ESTOP_LABEL:
+            self._estop_feedback("NOT-AUS gesendet – warte auf Bestätigung …", WARN)
+
+    def _estop_feedback(self, text: str, colour: str) -> None:
+        self.estop_label.setText("%s  %s" % (time.strftime("%H:%M:%S"), text))
+        self.estop_label.setStyleSheet("QLabel { color: %s; font-weight: bold; }" % colour)
+        self.estop_label.setVisible(True)
 
     @Slot(str, str)
     def _on_command_finished(self, label: str, message: str) -> None:
         self._show_message("%s: %s" % (label, message), OK)
+        if label == ESTOP_LABEL:
+            self._estop_feedback("NOT-AUS bestätigt: " + message, OK)
         if self._poller:
             self._poller.poll_now()
 
     @Slot(str, str, str)
     def _on_command_failed(self, label: str, kind: str, message: str) -> None:
         self._show_message("%s fehlgeschlagen: %s" % (label, message), BAD)
+        if label == ESTOP_LABEL:
+            hint = "" if "physischen Not-Aus" in message else " – physischen Not-Aus benutzen!"
+            self._estop_feedback("NOT-AUS NICHT bestätigt: " + message + hint, BAD)
         if kind == ConnState.AUTH_FAILED:
             self._apply_state(ConnState.AUTH_FAILED, message)
         if self._poller:
@@ -427,17 +510,23 @@ class MachinePanel(QWidget):
 
     @Slot()
     def emergency_stop(self) -> None:
-        """Always dispatched, even while another command is running."""
+        """Always dispatched at once: while another command runs, while the
+        status poll is stalled, and also when not connected (then the
+        address and key from the fields are used)."""
         client = self._client
         if client is None:
             try:
                 s = self._current_settings()
                 client = LumaCutClient(s.base_url, s.api_key)
             except ValueError as exc:
-                self._show_message("NOT-AUS nicht gesendet: %s – physischen Not-Aus "
-                                   "benutzen" % exc, BAD)
+                text = "NOT-AUS nicht gesendet: %s – physischen Not-Aus benutzen!" % exc
+                self._show_message(text, BAD)
+                self._estop_feedback(text, BAD)
                 return
-        self._runner.run_urgent("NOT-AUS", client.emergency_stop)
+        if not self._runner.run_urgent(ESTOP_LABEL, client.emergency_stop):
+            self._estop_feedback("NOT-AUS wird bereits gesendet …", WARN)
+        if self._poller:
+            self._poller.poll_now()
 
     @Slot()
     def home(self) -> None:
@@ -456,8 +545,17 @@ class MachinePanel(QWidget):
 
     @Slot()
     def reset_emergency(self) -> None:
-        if self._client:
-            self._run("Notstopp quittieren", self._client.reset_emergency)
+        """Release the Pi's M112 latch. The Pi only accepts it once the SKR
+        answers again (reset button or brief power cycle); the machine is
+        then unhomed and must be referenced again."""
+        if not self._client:
+            return
+        if not self._confirm("Notstopp quittieren",
+                             "Ursache beseitigt und SKR neu gestartet (Reset-Taste "
+                             "oder 24 V/USB kurz getrennt)? Danach muss neu "
+                             "referenziert werden."):
+            return
+        self._run("Notstopp quittieren", self._client.reset_emergency)
 
     def jog(self, axis: str, direction: int) -> None:
         if self._client is None:
