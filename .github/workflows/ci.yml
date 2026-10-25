@@ -1,9 +1,7 @@
 name: LumaCut Pi 400 + SKR USB CI
+# Archived manual fallback only; local tests are authoritative.
+# Uploading files to GitHub must never trigger a build.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
