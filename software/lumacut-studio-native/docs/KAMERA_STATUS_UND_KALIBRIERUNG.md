@@ -6,8 +6,9 @@ Zurück zur Übersicht: [SCAN_PROBE.md](SCAN_PROBE.md) · Kalibrierablauf: [KAME
 **Kurzfassung:** Die Kamera-Software (Kachel-Scan, Stitching, Objekterkennung, Kalibriermodell,
 Studio-Oberfläche) ist implementiert und mit **synthetischen Bildern** getestet. Mit einer
 echten Kamera ist bisher **nichts** gelaufen: Kameramodell und Anschluss sind unbekannt, alle
-Kalibrierwerte sind Platzhalter. Seit `2c61b8a` hat der Pi einen Snapshot-Endpunkt und `op=moveto`,
-das native Studio nutzt beides noch nicht. Die **Kalibrierung liegt seit 26.10. auf dem Pi**
+Kalibrierwerte sind Platzhalter. Seit `2c61b8a` hat der Pi einen Snapshot-Endpunkt und `op=moveto`;
+seit 26.10. scannt Studio im Maschinen-Modus darüber (Kamera „Pi (Snapshot)", XY per moveto,
+Rückfall auf Jog-Schritte und lokale Kamera bei altem Pi) – nur gegen einen Fake-Pi getestet. Die **Kalibrierung liegt seit 26.10. auf dem Pi**
 (`/etc/lumacut/camera_calibration.json`, `GET/PUT /api/camera/calibration`, Abschnitt 3a);
 `camera.json` ist nur noch Import/Export und Rückfall für Simulation/offline.
 
@@ -18,11 +19,11 @@ Legende: **erledigt** = im Code vorhanden und automatisch getestet · **offen** 
 
 | Teil | Stand | Quelle |
 |---|---|---|
-| Kamera-Zugriff in Studio | `OpenCvCamera`: `cv2.VideoCapture(Quelle)`; Quelle = USB-Index (`0`) oder Stream-URL. Setzt Auflösung und (optional) feste Belichtung aus `camera.json`, verwirft vor jeder Aufnahme 2 gepufferte Bilder. **ungeprüft** – nie mit echter Kamera gelaufen. | `src/scanprobe/adapters.py` |
-| Wo die Kamera hängt | Die Kamera wird **von Studio (PC/Tablet) direkt** geöffnet, nicht über den Pi. Eine Stream-URL wie `http://lumacut.local:8081/stream` steht nur als Beispiel im Tooltip – auf dem Pi läuft **kein** solcher Dienst. | `panel.py`, `adapters.py` |
-| Kamera auf dem Pi | `GET /api/camera/snapshot?w=&h=` liefert ein JPEG (`ffmpeg`, V4L2-Gerät `LUMACUT_CAMERA`, Standard `/dev/video0`), `/api/status` → `camera` meldet nur, ob das Gerät existiert (seit `2c61b8a`). **ungeprüft** mit echter Kamera; das native Studio nutzt den Endpunkt **noch nicht**. Die Kalibrierung liegt auf dem Pi (Abschnitt 3a). | `pi400/marlin/web.py`, `camera_calibration.py` |
-| Kopfbewegung für den Scan | `PiMachine.move_to` zerlegt jede Fahrt in die erlaubten Jog-Schritte ±10/±1/±0,1 mm (ein HTTP-Aufruf je Schritt, Pi wartet mit `M400`) – langsam. Der Pi kennt seit `2c61b8a` `op=moveto` (absolut, Laser aus, Z nur anheben); Studio nutzt es **noch nicht**. **ungeprüft** auf der Maschine. | `adapters.py`, `web.py` |
-| Z auf Scanhöhe | Der Scan fährt zuerst Z auf `scan_z` (Platzhalter 40 mm). Laut Pi-Code wird **jede** Z-Fahrt (auch Jog) abgelehnt, solange keine Werkstückoberfläche gemessen ist („Keine Werkstückhöhe bekannt …“). Im Pi-Modus muss also vor dem Scan ein G30/„Fokus“ gelaufen sein. Ob `scan_z` = 40 mm im Z-Hub erreichbar ist, ist **unbekannt**. | `pi400/marlin/transport.py` (`_z_move_guard_locked`) |
+| Kamera-Zugriff in Studio | Auswahl im Scan-Panel: **„Pi (Snapshot)"** (`PiSnapshotCamera`, Standard, wenn der Pi Snapshot und Kamera meldet) oder **„Lokal (USB/URL)"**. Lokal: `OpenCvCamera`: `cv2.VideoCapture(Quelle)`; Quelle = USB-Index (`0`) oder Stream-URL. Setzt Auflösung und (optional) feste Belichtung aus `camera.json`, verwirft vor jeder Aufnahme 2 gepufferte Bilder. **ungeprüft** – nie mit echter Kamera gelaufen. | `src/scanprobe/adapters.py` |
+| Wo die Kamera hängt | „Pi (Snapshot)": Kamera am Pi (V4L2), Studio holt je Kachel ein JPEG. „Lokal": Kamera wird **von Studio (PC/Tablet) direkt** geöffnet. Eine Stream-URL wie `http://lumacut.local:8081/stream` steht nur als Beispiel im Tooltip – auf dem Pi läuft **kein** solcher Dienst. | `panel.py`, `adapters.py` |
+| Kamera auf dem Pi | `GET /api/camera/snapshot?w=&h=` liefert ein JPEG (`ffmpeg`, V4L2-Gerät `LUMACUT_CAMERA`, Standard `/dev/video0`), `/api/status` → `camera` meldet nur, ob das Gerät existiert (seit `2c61b8a`). **ungeprüft** mit echter Kamera. Studio (`PiSnapshotCamera`) fragt die Bildgröße der Kalibrierung an (Pi erlaubt 160–4096 × 120–3072), wiederholt bei 503/Netzfehler/kaputtem JPEG zweimal, meldet 404 (alter Pi) und abweichende Bildgröße sofort. Belichtung aus der Kalibrierung wirkt hier **nicht** (der Pi stellt keine ein, er verwirft nur die ersten 5 Bilder). Die Kalibrierung liegt auf dem Pi (Abschnitt 3a). | `pi400/marlin/web.py`, `camera_calibration.py` |
+| Kopfbewegung für den Scan | `PiMachine.move_to`: XY per `op=moveto` (absolut, Laser aus, blockiert bis `M400`, hebt Z auf `z_clearance_mm` an, wenn tiefer; Studio prüft die gemeldete Position auf ±0,2 mm). Z weiter in Jog-Schritten ±10/±1/±0,1 mm (kein absoluter Z-Befehl auf dem Pi). `wait_idle` fragt `/api/status` ab. Rückfall auf Jog-Schritte für XY: alter Pi (kein `camera` im Status, „Unbekannte Marlin-Aktion: moveto") oder Scanhöhe unter der Rückzugshöhe; Hinweis im Panel. Rechnerisch (Standardplan, 12 Kacheln, Fake-Pi): 49 Pi-Anfragen statt 286 (≈ 4 statt ≈ 24 je Kachel); Zeit **nicht gemessen**. **ungeprüft** auf der Maschine. | `adapters.py`, `web.py` |
+| Z auf Scanhöhe | Der Scan fährt zuerst Z auf `scan_z` (Platzhalter 40 mm). Laut Pi-Code wird **jede** Z-Fahrt (auch Jog) abgelehnt, solange keine Werkstückoberfläche gemessen ist („Keine Werkstückhöhe bekannt …“). Im Pi-Modus muss also vor dem Scan ein G30/„Fokus“ gelaufen sein – Studio prüft das **vor dem Start** (`check_scan_height`: Oberfläche gemessen, Scanhöhe ≥ Oberfläche + 2 mm, im Fahrbereich Z0..`travels.z`) und meldet es deutsch, ohne zu fahren. Ob `scan_z` = 40 mm im Z-Hub der echten Maschine erreichbar ist, ist **unbekannt**. | `pi400/marlin/transport.py` (`_z_move_guard_locked`) |
 | Simulation | `simulated_setup()`: synthetisches Bett (Wabenmuster, Holzmaserung, ein geneigtes Rechteck, eine gewölbte Scheibe), Fake-Maschine mit Positionsfehler 0,3 mm, Fake-Kamera mit dem Platzhalter-Kalibriermodell. Damit laufen Oberfläche und alle Tests ohne Hardware. **erledigt**. | `scanprobe/fakes.py`, `adapters.py` |
 | Hardware | **Unbekannt:** Kameramodell, Objektiv/Sichtfeld, Anschluss (USB, CSI am Pi, Netzwerk-Stream), Auflösung, Montageort und Versatz am Kopf, Fokus fest/auto. Bekannt aus dem Code: der Taster hat den Versatz X −23 / Y +15 mm (rechnet der Pi); Fahrbereich 0–390 × 0–370 mm, Arbeitsfläche ab 30 mm (Homing-Sperrzone). | `docs/MASCHINE.md`, `scanprobe/geometry.py` |
 | Andere Kamera-Ansätze im Repo | Die ältere Web-/Electron-Studio-Version (`software/lumacut-studio`) hat eine Live-Ansicht mit 4-Punkt-Homographie, die Android-App nutzt die **Tablet**-Kamera als Hintergrund. Beides ist **keine** Kopfkamera und nicht in das native Studio übernommen. | `software/lumacut-studio/README.md`, `docs/ANDROID_APP.md` |
@@ -50,7 +51,8 @@ dunklem Wabenbett, Unschärfe, Rolling Shutter). Echte Messungen fehlen.
 
 Tests (alle offscreen, ohne Hardware): `test_scanprobe.py` (27), `test_scan_panel.py` (12),
 `test_scan_marking.py` (7), `test_focus_export.py` (23), `test_focus_multi_region.py` (4),
-`test_pi_calibration.py` (9, Fake-Pi); Pi-seitig `tests/test_camera_calibration.py` (Repo-Wurzel).
+`test_pi_calibration.py` (9, Fake-Pi), `test_pi_scan_endpoints.py` (22, Fake-Pi: Snapshot, moveto,
+Jog-Rückfall, Z-Vorabprüfung, Anfrage-Zählung, Panel); Pi-seitig `tests/test_camera_calibration.py` (Repo-Wurzel).
 
 ## 3. Kalibrierung
 
@@ -171,9 +173,10 @@ unter `/var/lib/lumacut/camera_calibration.json` (`storage.path` zeigt den Ort).
 | Kameramodell, Objektiv und Anschluss festlegen | **offen** (unbekannt) |
 | Echte Kalibrierung messen (alle Werte aus Abschnitt 3) und auf dem Pi speichern | **offen** |
 | Kalibrierung auf dem Pi speichern (Datei, GET/PUT, Revision, Studio-Anbindung) | **erledigt** (26.10., Abschnitt 3a); auf dem echten Pi **ungeprüft** |
-| Kamera-Endpunkt auf dem Pi (Snapshot) | Pi: vorhanden (`2c61b8a`), **ungeprüft**; Studio öffnet die Kamera weiter direkt (USB-Index/URL) – Anbindung an den Snapshot **offen** |
-| Absolutes Verfahren auf dem Pi | Pi: `op=moveto` vorhanden; Studio nutzt weiter Jog-Schritte – Umstellung **offen** |
-| Scan im Pi-Modus ohne vorheriges G30 (Z-Sperre des Pi) | **offen** – laut Pi-Code wird die Z-Fahrt auf `scan_z` sonst abgelehnt; Studio meldet das noch nicht vorab |
+| Kamera-Endpunkt auf dem Pi (Snapshot) | **erledigt** in Studio (26.10., „Pi (Snapshot)", Fake-Pi-Tests); mit echter Kamera **ungeprüft**; Belichtung am Pi nicht einstellbar |
+| Absolutes Verfahren auf dem Pi | **erledigt** für XY (`op=moveto`, Jog-Rückfall für alte Pis); Z weiter Jog-Schritte; auf der Maschine **ungeprüft**, Zeitgewinn nicht gemessen |
+| Scan im Pi-Modus ohne vorheriges G30 (Z-Sperre des Pi) | **erledigt** – Vorabprüfung vor dem Start mit Hinweis auf „Fokus (G30)" |
+| Scanhöhe unter der Pi-Rückzugshöhe (`z_clearance_mm`, Standard 20) | moveto würde Z je Kachel anheben → Studio fährt dann in Jog-Schritten (langsam, Hinweis); Scanhöhe ≥ Rückzugshöhe kalibrieren |
 | `scan_z` im Z-Hub erreichbar | **ungeprüft** |
 | Kachel-Scan, Stitching, Erkennung | **erledigt** (Code + synthetische Tests), mit echten Bildern **ungeprüft** |
 | Entzerrung (Linsenmodell) | **erledigt** (synthetisch), echte Kamera **ungeprüft** |

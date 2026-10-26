@@ -89,7 +89,9 @@ Rechte Spalte, Gruppe **„Scan & Probe"** (`src/scanprobe/panel.py`, eingebunde
 
 1. **Modus** wählen: „Simulation (ohne Hardware)" (eingebautes Testbett, keine Hardware – zum Ausprobieren
    und für Tests) oder „Maschine (Pi-API + Kamera)" (nutzt die Verbindung aus dem Maschinen-Panel).
-2. Nur Pi-Modus: **Kamera-Quelle** (USB-Index `0` oder Stream-URL) eintragen und
+2. Nur Pi-Modus: **Kamera** wählen – „Pi (Snapshot)" (Kopfkamera am Pi über
+   `GET /api/camera/snapshot`; Standard, sobald der Pi Snapshot und Kamera meldet) oder
+   „Lokal (USB/URL)" (USB-Index `0` oder Stream-URL eintragen) – und
    bei „Kalibrierung" den Stand vom Pi prüfen (wird automatisch geholt; sonst **„Importieren …"** →
    `camera.json` und **„Auf Pi speichern"**), siehe
    **[KAMERA_KALIBRIERUNG.md](KAMERA_KALIBRIERUNG.md)** (Werte, Format, Ablauf).
@@ -116,13 +118,26 @@ Rechte Spalte, Gruppe **„Scan & Probe"** (`src/scanprobe/panel.py`, eingebunde
 
 Hardware-Anbindung (`src/scanprobe/adapters.py`, Qt-frei):
 
-* `PiMachine` – `move_to` über die Pi-API. Da der Pi **keinen absoluten Fahrbefehl**
-  hat, wird mit erlaubten Jog-Schritten (10/1/0,1 mm) gefahren: langsam (ein HTTP-Aufruf
-  je Schritt), aber sicher; Z wird nie unter Oberfläche + 2 mm geschickt, Z nach unten
-  wird abgerundet. Vorher: verbunden, gehomt, kein Not-Aus, kein Job aktiv.
+* `PiMachine` – `move_to` über die Pi-API. XY per `op=moveto` (absolut, ein HTTP-Aufruf je
+  Kachel, Pi antwortet nach `M400` mit der Position; Studio prüft sie auf ±0,2 mm). Z hat auf
+  dem Pi keinen absoluten Befehl und läuft weiter in Jog-Schritten (10/1/0,1 mm): nie unter
+  Oberfläche + 2 mm, abwärts abgerundet, aufwärts vor XY. `wait_idle` fragt `/api/status`
+  ab, bis `busy` aus und der Zustand `Idle` ist. Alter Pi (kein `camera` im Status oder
+  „Unbekannte Marlin-Aktion: moveto") → Rückfall auf Jog-Schritte für XY mit Hinweis im Panel.
+  Vor dem Scan prüft `check_scan_height`: verbunden, gehomt, kein Not-Aus/Job, Scanhöhe im
+  Z-Fahrbereich, Oberfläche per „Fokus (G30)" gemessen (sonst lehnt der Pi die Z-Fahrt ab),
+  Scanhöhe ≥ Oberfläche + 2 mm. Liegt die Scanhöhe unter der Rückzugshöhe des Pi
+  (`z_clearance_mm`, Standard 20), würde moveto den Kopf bei jeder Kachel anheben – dann
+  fährt der Scan in Jog-Schritten (Hinweis im Panel).
 * `PiProbe` – `op=probe` an (x, y) des Laserpunkts; Z wird aus der Antwort gelesen.
+* `PiSnapshotCamera` – `GET /api/camera/snapshot?w=&h=` mit der Bildgröße aus der
+  Kalibrierung, JPEG → BGR. 503/Netzfehler/kaputtes JPEG: 2 Wiederholungen; 404 (alter Pi)
+  und falsche Bildgröße: sofort deutsche Fehlermeldung. Der Pi verwirft selbst die ersten
+  5 Bilder (Belichtung), setzt aber **keine** Belichtung aus der Kalibrierung.
 * `OpenCvCamera` – `cv2.VideoCapture` (USB/URL), feste Auflösung/Belichtung aus
   `camera.json`, verwirft gepufferte Bilder vor jeder Aufnahme.
+* Versatz, Drehung, Spiegelung und Entzerrung kommen bei beiden Kameras gleich aus der
+  Kalibrierung vom Pi (`TileScanner`/`stitch_mosaic`); getestet: gleiches Bild → gleiches Mosaik.
 * `simulated_setup()` – Fake-Maschine/Kamera/Taster mit zwei Werkstücken.
 
 ## Fokuskorrektur beim Export (Höhenmesh)
@@ -208,8 +223,12 @@ Details, Beispiel und Kalibrierablauf: [KAMERA_KALIBRIERUNG.md](KAMERA_KALIBRIER
   niedrige Zwischenhub (`hop_mm`) wirkt erst, wenn der Pi `safe_z` übernimmt.
 * Fokuskorrektur soll langfristig auf dem Pi laufen (Funktion ist dafür Qt-frei). Derzeit
   rechnet Studio den G-Code um, siehe „Fokuskorrektur beim Export".
-* Pi-API ohne absolutes Verfahren und ohne Kamera-Endpunkt → Jog-basierte Bewegung
-  (langsam). Ein `op=move`/Kamera-Endpunkt auf dem Pi würde den Scan stark beschleunigen.
+* Scan über `op=moveto` + Snapshot ist nur gegen einen Fake-Pi getestet. Rechnerisch
+  (Standardplan, 12 Kacheln, `test_pi_scan_endpoints.py`): 49 Pi-Anfragen statt 286 mit
+  Jog-Schritten (≈ 4 statt ≈ 24 je Kachel). Dauer je Anfrage ist **nicht gemessen**; der
+  Snapshot startet je Kachel `ffmpeg` und liest mindestens 6 Bilder, das kann pro Kachel länger
+  dauern als ein Bild einer lokal offenen Kamera.
+* Z hat keinen absoluten Pi-Befehl (weiter Jog-Schritte); Belichtung der Pi-Kamera nicht einstellbar.
 * Der Pi erlaubt Z-Bewegungen nur relativ zu *einer* gemessenen Oberfläche; bei mehreren
   unterschiedlich hohen Werkstücken gilt die zuletzt gemessene.
 
