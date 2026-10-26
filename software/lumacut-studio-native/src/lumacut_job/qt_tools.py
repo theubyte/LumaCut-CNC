@@ -110,6 +110,8 @@ class JobTools(QObject):
                                      "Konvexe Hülle statt Rechteck abfahren")
         self.test_action = self._add("Materialtest…", self.material_test, None,
                                      "Leistung × Geschwindigkeit-Testraster einfügen")
+        self.cut_action = self._add("Schnittoptionen…", self.cut_options, "Alt+K",
+                                    "Kerf-Versatz, Haltestege und An-/Abfahrt der aktiven Ebene")
         window.addToolBar(self.toolbar)
         if hasattr(machine_panel, "set_frame_provider"):
             machine_panel.set_frame_provider(self.frame_program)
@@ -186,6 +188,26 @@ class JobTools(QObject):
             return 0
         self._msg(f"Materialtest mit {n} Ebenen eingefügt")
         return n
+
+
+    def cut_options(self, values: dict | None = None) -> bool:
+        """Schnittoptionen der aktiven Ebene bearbeiten (ein Undo-Schritt)."""
+        from .cut_qt import CutOptionsDialog, apply_cut_options, summary
+        doc = self.editor.document
+        layer = doc.active_layer or (doc.layers[0] if doc.layers else None)
+        if layer is None:
+            self._msg("Schnittoptionen: keine Ebene vorhanden")
+            return False
+        if values is None:
+            dlg = CutOptionsDialog(layer, self.window)
+            if dlg.exec() != QDialog.Accepted:
+                return False
+            values = dlg.values()
+        changed = apply_cut_options(self.editor, layer.id, values)
+        text = summary(doc.layer(layer.id)) or "alle aus"
+        self._msg(f"Schnittoptionen „{layer.name}“: {text}" if changed
+                  else "Schnittoptionen unverändert")
+        return changed
 
 
 def install_job_tools(window) -> JobTools:
