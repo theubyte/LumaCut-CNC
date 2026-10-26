@@ -65,16 +65,16 @@ M 1–3 days, L > 3 days. Status after this pass in **bold**.
 | 6 | 3D / depth: sliced passes from height map, Z step per slice | LB 3D slice Galvo-only; XCS 3D | none | **done** for image objects (mode "3D" in the image dialog → `sliced_depth_gcode`, ≤3 mm total drop); combined with focus compensation it is refused safely (Z words) | medium-high (relief in wood/slate) | M for UI | Canvas/Materials + Review |
 | 7 | Zoom: anchor at event position, pinch, fit selection, trackpad | LB / XCS yes | wheel only, QCursor anchor | **done** (`canvas_view` + Ctrl+Shift+A) | high (daily use) | S | Canvas (minimal edit) |
 | 8 | Material library: presets by material + thickness, assign/link to layers, combo box wired | LB yes / XCS yes (xTool materials) | placeholder combo | **done** (Materials agent: `lumacut_materials`, material section in the layers panel) | very high | M | **Materials agent** |
-| 9 | Import SVG/DXF/PNG/JPG/PDF | LB / XCS yes | none in native | **done** for SVG/DXF/PNG/JPG/BMP (`lumacut_import`, Datei › Importieren Ctrl+I, drag-and-drop, mm conversion, one undo step, clamped to the 360×340 mm work area); **PDF done** (vector paths via `pypdf`, page picker, round 4) | very high | M | Canvas |
+| 9 | Import SVG/DXF/PNG/JPG/PDF | LB / XCS yes | none in native | **done** for SVG/DXF/PNG/JPG/BMP (`lumacut_import`, Datei › Importieren Ctrl+I, drag-and-drop, mm conversion, one undo step, clamped to the 360×340 mm work area); **PDF done** (vector paths via `pypdf`, page picker, round 4); **image trace done** (bitmap → vectors, Alt+T, round 5) | very high | M | Canvas |
 | 10 | Workflow wizard scan → detect → probe → focus → job → park, focus compensation applied on send | n/a (LB has camera overlay; XCS auto-focus + camera) | pieces exist separately; compensation not hooked into "Design senden" | **done** (`lumacut_workflow`: panel "Ablauf" Home → Scan → Markieren → Probe → Fokus → Rahmen → Auftrag → Parken; status per step, skip, precondition checks; uses the existing panel actions, focus compensation via `prepare_job_gcode`) | very high (USP) | M | Scan Probe + Machine; Review can wire the send path |
-| 11 | Fill / hatch for vectors (Fill mode, line interval, cross-hatch) | LB / XCS yes | none | open (hatch helper exists in material_test) | high | M | Canvas |
+| 11 | Fill / hatch for vectors (Fill mode, line interval, cross-hatch) | LB / XCS yes | none | **done** (Canvas: per-layer fill/cross-hatch, 1ddc258) | high | M | Canvas |
 | 12 | Kerf offset, tabs/bridges, lead-in/out | LB yes / XCS partial | none | **done** (`lumacut_job.cutpath`, per-layer fields, dialog „Schnittoptionen…“ Alt+K; leads checked for collisions since round 4) | medium (diodes have small kerf; tabs useful) | M | Review (planner) |
-| 13 | Boolean ops, node editing, offset, arrays | LB / XCS yes | polygon only | open | medium | L | Canvas |
-| 14 | Preview of G-code path (travel lines, order animation) | LB / XCS yes | none | open (estimate only) – not done in this pass | medium | M | Canvas overlay + Review |
+| 13 | Boolean ops, node editing, offset, arrays | LB / XCS yes | polygon only | **done** (Canvas: arrays/align 7174f7d, booleans/weld/offset/text-to-path 8993552, node editing 8090f1b) | medium | L | Canvas |
+| 14 | Preview of G-code path (travel lines, order animation) | LB / XCS yes | none | **done** (Canvas: path preview overlay with travel, order and time, d2f79dd) | medium | M | Canvas overlay + Review |
 | 15 | Air assist M8/M9 per layer | LB yes | none (Pi allows M7/M8/M9) | **not feasible on this machine** – see §8 | medium (if relay installed) | S | Materials/layer field + gcode |
-| 16 | Origin options (current position / user origin), job placement on camera | LB yes / XCS yes | absolute only | open | medium | M | Machine |
-| 17 | Job queue, autosave / crash recovery | LB autosave yes | none | **autosave/recovery done** (`lumacut_session`, every 60 s, crash recovery on start); **job history done** (`lumacut_job.history`, Ctrl+H: last 20 sent jobs, resend/save); multi-job queue on the Pi open | medium | S–M | Canvas (autosave), Machine (queue) |
-| 18 | Raster throughput to SKR (Pi-side streaming / line compression) | n/a | risk noted in plan | open | high for photos | L | Pi / Machine |
+| 16 | Origin options (current position / user origin), job placement on camera | LB yes / XCS yes | absolute only | **done** (Machine: absolute / current position / user origin, `op=place`, fd7601c + ed96c63); job placement on camera open | medium | M | Machine |
+| 17 | Job queue, autosave / crash recovery | LB autosave yes | none | **autosave/recovery done** (`lumacut_session`, every 60 s, crash recovery on start); **job history done** (`lumacut_job.history`, Ctrl+H: last 20 sent jobs, resend/save); **multi-job queue done** (Machine: Pi queue e7166c3, queue list in the machine panel 4418a54) | medium | S–M | Canvas (autosave), Machine (queue) |
+| 18 | Raster throughput to SKR (Pi-side streaming / line compression) | n/a | risk noted in plan | **done** (Machine/Pi: job streaming to the SKR, 22ece4f) | high for photos | L | Pi / Machine |
 
 ## 4. Focus areas
 
@@ -246,3 +246,51 @@ origin, `op=place`, fd7601c + ed96c63).
 Still open: unit toggle mm/inch, boolean/node/offset/array (#13) – Canvas; multi-job queue on the
 Pi (#17) – Machine; raster streaming (#18) – Pi; Windows hardware test of
 cut options, PDF import and the rebuilt exe – needs a Windows machine with the laser.
+
+## 11. Status update 2026-10-26 (review round 5)
+
+Verified on `main` (commits exist, features and tests present):
+
+- **#11 Fill / hatch** – Canvas, 1ddc258 (per-layer fill and cross-hatch).
+- **#13 Boolean / offset / arrays / node editing** – Canvas: 7174f7d (align, distribute, grid and
+  circular arrays), 8993552 (booleans, weld, offset, text to paths), df63635 (font, size, bold,
+  italic). Node editing was still in progress when this round started and landed during it
+  (8090f1b, tool „Knoten“, key N), so #13 is now done.
+- **#14 Path preview** – Canvas, d2f79dd (laser path, order, time overlay); touch polish ff638ef.
+- **#16 Origin options** – Machine, fd7601c + ed96c63 (absolute / current position / user origin,
+  placement check on the Pi).
+- **#17 Multi-job queue** – Machine, e7166c3 (Pi queue: run, skip, remove) + 4418a54 (queue list in
+  the machine panel). Autosave and job history were already done.
+- **#18 Raster throughput** – Pi/Machine, 22ece4f (job streaming to the SKR).
+
+Done in this round (review side, `lumacut_import` / `lumacut_job` only, no new dependencies):
+
+- **Image trace** (LightBurn „Trace Image“, part of #9): *Datei › Bild nachzeichnen…* (Alt+T) turns
+  the selected image into polygon outlines. `lumacut_import.trace` (Qt-free): threshold (default
+  from the image settings), invert, Gaussian smoothing, simplify tolerance (mm) and min area
+  (despeckle). Contours come from OpenCV on a 2×-upscaled mask and are grown by ¼ px, so outlines
+  sit exactly on pixel edges and 1-px lines survive; holes become `rings` (even-odd), several parts
+  are grouped, image rotation is respected. Dialog with live preview (debounced, downscaled);
+  one undo step incl. optional deletion of the image. Noisy images (too many contour points) are
+  refused quickly with a hint instead of hanging. G-code of traced parts passes `MarlinLaserGuard`.
+- **Serial numbers** (batch case of LightBurn „Variable Text“): „Seriennummern…“ (Alt+N, toolbar
+  „Auftrag“) replaces the selected text with a grouped grid of copies; template placeholders
+  `{n}`, `{n:3}` (zero-padded), `{date}`, `{{ }}`; start, step, count (≤ 500), columns, gaps; height,
+  font, rotation, layer and stretch kept, width follows the text; one undo step; grids that do not
+  fit the work area are refused without changes.
+
+Tests: `tests/test_trace.py` (12), `tests/test_serial_numbers.py` (7).
+
+Still open:
+
+- Unit toggle mm/inch – Canvas.
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Variable text evaluated at send time with an auto-incrementing counter (CSV/merge, counter
+  persisted per job) – the batch grid covers the common case; decide if the job-time variant is
+  wanted.
+- Min/max power with speed-dependent corner power (LightBurn) – needs a planner change and checking
+  what the SKR's Marlin build supports (`LASER_POWER_TRAP` / inline power); not started.
+- Trace: no centre-line trace and no curve fitting (outlines are polygons); photos need a manual
+  threshold.
+- Windows hardware test of cut options, PDF import, image trace and the rebuilt exe – needs a
+  Windows machine with the laser.
