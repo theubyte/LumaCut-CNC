@@ -29,6 +29,11 @@ GRID_SPACING_MM = 90.0      # about one point per 90 mm, 2..4 per side
 MAX_PER_SIDE = 4
 MAX_REGIONS = 12
 MAX_TOTAL_POINTS = 36
+# A grid point the switch cannot reach (it sits beside the laser, so a strip
+# along one edge of the bed is out of its reach) is probed at the nearest
+# reachable spot at most this far away; its height stands for the point.
+SUBSTITUTE_MAX_MM = 40.0
+SUBSTITUTE_STEP_MM = 1.0
 
 _WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 
@@ -73,10 +78,22 @@ class HeightGrid:
     rows: int
     z: list = field(default_factory=list)
     reachable: list = field(default_factory=list)
+    # Where each point is actually probed (None = at the point itself).
+    probe_at: list = field(default_factory=list)
 
     def point(self, index):
         r, c = divmod(index, self.cols)
         return (self.x0 + c * self.step_x, self.y0 + r * self.step_y)
+
+    def probe_point(self, index):
+        """Laser X/Y the switch probes for grid point ``index``."""
+        if index < len(self.probe_at) and self.probe_at[index] is not None:
+            return self.probe_at[index]
+        return self.point(index)
+
+    @property
+    def substituted(self):
+        return sum(1 for p in self.probe_at if p is not None)
 
     def order(self):
         """Point indices in serpentine order (short travel between points)."""
@@ -112,7 +129,7 @@ class HeightGrid:
         if any(v is None for v in values):
             raise ValueError("Höhenraster ohne Messpunkt")
         return HeightGrid(self.region, self.x0, self.y0, self.step_x, self.step_y,
-                          self.cols, self.rows, values, list(self.reachable))
+                          self.cols, self.rows, values, list(self.reachable), list(self.probe_at))
 
     def at(self, x, y):
         """Bilinear surface Z (clamped to the grid); grid must be filled."""
@@ -130,7 +147,8 @@ class HeightGrid:
         return {"region": self.region.as_dict(), "cols": self.cols, "rows": self.rows,
                 "points": [[round(p, 3) for p in self.point(i)] for i in range(len(self.z))],
                 "z": [None if v is None else round(v, 3) for v in self.z],
-                "reachable": list(self.reachable)}
+                "reachable": list(self.reachable),
+                "probe_at": [None if p is None else [round(v, 3) for v in p] for p in self.probe_at]}
 
 
 class HeightMapSet:
@@ -268,9 +286,34 @@ def single_point_plan(x, y, reachable):
     return _mark_reachable([grid], reachable)
 
 
+def nearest_reachable(x, y, reachable, max_mm=SUBSTITUTE_MAX_MM, step=SUBSTITUTE_STEP_MM):
+    """Closest point to (x, y) the switch can probe, within ``max_mm``; else None."""
+    n = int(max_mm / step)
+    best = None
+    for i in range(-n, n + 1):
+        for j in range(-n, n + 1):
+            d = math.hypot(i * step, j * step)
+            if d > max_mm or (best is not None and d >= best[0]):
+                continue
+            px, py = x + i * step, y + j * step
+            if reachable(px, py):
+                best = (d, (px, py))
+    return None if best is None else best[1]
+
+
 def _mark_reachable(grids, reachable):
     for g in grids:
-        g.reachable = [bool(reachable(*g.point(i))) for i in range(len(g.z))]
+        g.reachable, g.probe_at = [], []
+        for i in range(len(g.z)):
+            px, py = g.point(i)
+            if reachable(px, py):
+                g.reachable.append(True)
+                g.probe_at.append(None)
+                continue
+            # Edge strip out of the switch's reach: measure next to it instead.
+            near = nearest_reachable(px, py, reachable)
+            g.reachable.append(near is not None)
+            g.probe_at.append(near)
     grids = [g for g in grids if any(g.reachable)] or grids
     if not any(any(g.reachable) for g in grids):
         raise ValueError("Kein Abtastpunkt erreichbar: der Taster kommt an keine Stelle "

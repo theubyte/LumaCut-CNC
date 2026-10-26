@@ -902,7 +902,7 @@ def _auto_prepare(auto):
     order = [[i for i in g.order() if g.reachable[i]] for g in grids]
     job["probe"] = {"done": 0, "total": sum(len(o) for o in order) + 1}
     values = machine.probe_surface(
-        [[g.point(i) for i in o] for g, o in zip(grids, order)], owner="job",
+        [[g.probe_point(i) for i in o] for g, o in zip(grids, order)], owner="job",
         progress=lambda done, total: job["probe"].update(done=done, total=total),
         should_stop=stop_job.is_set)
     for g, o, measured in zip(grids, order, values):

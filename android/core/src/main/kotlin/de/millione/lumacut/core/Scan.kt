@@ -134,13 +134,18 @@ object Scan {
     }
 
     /**
-     * True when the head can reach probe point [p] (work mm): the Pi moves
+     * True when the switch can probe work point [p] directly: the Pi moves
      * the head by the switch offset ([probeOffset] = tip minus laser point)
-     * and keeps it in X30..390 / Y30..370. Unreachable points are skipped
-     * and filled from their neighbours ([HeightMap.filled]).
+     * and keeps it in X10..380 / Y10..360 (Marlin PROBING_MARGIN; the laser
+     * is off, so the head may enter the safezone). Points in the edge strip
+     * the switch never reaches are probed by the Pi up to 40 mm beside them.
      */
     fun reachable(p: Pt, probeOffset: Pt): Boolean {
         val head = Work.toMachine(p) - probeOffset
-        return head.x in Bed.SAFE..Bed.WIDTH && head.y in Bed.SAFE..Bed.HEIGHT
+        return head.x in PROBE_HEAD_MIN..PROBE_HEAD_MAX_X && head.y in PROBE_HEAD_MIN..PROBE_HEAD_MAX_Y
     }
+
+    private const val PROBE_HEAD_MIN = 10.0
+    private const val PROBE_HEAD_MAX_X = 380.0
+    private const val PROBE_HEAD_MAX_Y = 360.0
 }

@@ -119,5 +119,6 @@ class ScanPlanTest {
         val offset = Pt(-23.0, 15.0)
         assertTrue(Scan.reachable(Pt(100.0, 100.0), offset))
         assertTrue(!Scan.reachable(Pt(5.0, 100.0), offset), "head would need machine X > 390")
+        assertTrue(Scan.reachable(Pt(100.0, 2.0), offset), "upper edge: head may enter the safezone while probing")
     }
 }

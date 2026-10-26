@@ -89,6 +89,33 @@ class ProbePlanTests(unittest.TestCase):
         grids = hm.plan_probe(square(50, 50, 20) + square(300, 300, 20), BOUNDS, reach)
         self.assertEqual([g.region.xmin for g in grids], [48])
 
+    def test_motif_at_the_edge_is_probed_next_to_it(self):
+        # Real machine: switch 23 mm towards X-, 15 mm towards Y+. The head reaches
+        # X10..380 / Y10..360 while probing (laser off, safezone allowed).
+        from marlin.transport import MarlinTransport
+        m = MarlinTransport("/dev/null")
+        m.probe_xy_offset_mm = (-23.0, 15.0)
+        reach = m.probe_reachable
+        # Upper edge (small machine Y): head goes into the safezone, now reachable.
+        self.assertTrue(reach(200.0, 32.0))
+        self.assertFalse(reach(370.0, 200.0))            # head would need X393
+        # A motif entirely in the strip the switch never reaches (X > 357):
+        g = hm.plan_probe(square(362, 150, 25), BOUNDS, reach)[0]
+        self.assertTrue(all(g.reachable), g.as_dict())
+        self.assertEqual(g.substituted, len(g.z))
+        for i in range(len(g.z)):
+            px, py = g.point(i)
+            sx, sy = g.probe_point(i)
+            self.assertTrue(reach(sx, sy))
+            self.assertLessEqual(math.hypot(px - sx, py - sy), hm.SUBSTITUTE_MAX_MM)
+            self.assertAlmostEqual(sy, py)               # straight inwards in X
+            self.assertGreaterEqual(sx, 356.0)          # as close as possible
+        # Reachable points are probed where they are.
+        g = hm.plan_probe(square(100, 100, 50), BOUNDS, reach)[0]
+        self.assertEqual(g.substituted, 0)
+        self.assertEqual([g.probe_point(i) for i in range(len(g.z))],
+                         [g.point(i) for i in range(len(g.z))])
+
     def test_surface_is_bilinear_and_never_too_low_outside(self):
         g = hm.HeightGrid(hm.Box(100, 100, 200, 200), 100, 100, 100, 100, 2, 2,
                           [1.0, 2.0, 3.0, 4.0], [True] * 4)
@@ -340,8 +367,10 @@ c = web.app.test_client()
 before = len(sim.writes)
 r = c.post("/api/action", data={"op": "autorun", "name": "Bogen.gcode"})
 assert r.status_code == 400 and "Linien" in r.get_json()["error"], r.data
-# Head would need X > 380: Marlin refuses G30 there, the Pi says so first.
-m.probe_xy_offset_mm = (0.0, 0.0)
+# Near the edge the switch probes next to the motif (within 40 mm). Only when
+# nothing that close is reachable (here: switch 200 mm beside the laser) the
+# Pi refuses before anything moves.
+m.probe_xy_offset_mm = (-200.0, 0.0)
 r = c.post("/api/action", data={"op": "autorun", "name": "Rand.gcode"})
 assert r.status_code == 400 and "erreichbar" in r.get_json()["error"], r.data
 m.probe_xy_offset_mm = None

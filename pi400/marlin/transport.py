@@ -52,6 +52,10 @@ STREAMABLE = re.compile(r"^G0?[01]\s")
 # Marlin refuses G30 ("Z Probe Past Bounds") when the head is within
 # PROBING_MARGIN (10 mm in the BTT example config) of X_BED_SIZE/Y_BED_SIZE.
 PROBE_HEAD_MAX = (380.0, 360.0)
+# The same margin on the low side (X/Y_MIN_POS 0). The laser is off while
+# probing, so the head may enter the 30 mm safezone like it does to park;
+# the safezone only forbids burning there.
+PROBE_HEAD_MIN = (10.0, 10.0)
 # Fast multi-point probing: low hop between the points of one area.
 PROBE_HOP_MM = 3.0
 
@@ -989,8 +993,8 @@ class MarlinTransport:
             x, y = laser_x - dx, laser_y - dy
             if not self._probe_head_ok(x, y):
                 raise ValueError("Werkstück-Abtastpunkt außerhalb X%g..%g/Y%g..%g" % (
-                    self.safe_zone_xy_mm, PROBE_HEAD_MAX[0],
-                    self.safe_zone_xy_mm, PROBE_HEAD_MAX[1]))
+                    PROBE_HEAD_MIN[0], PROBE_HEAD_MAX[0],
+                    PROBE_HEAD_MIN[1], PROBE_HEAD_MAX[1]))
             if z < self.clearance_mm:
                 self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F600", timeout=45)
                 self._exchange_locked("M400", timeout=45)
@@ -1073,8 +1077,8 @@ class MarlinTransport:
         return stop_z
 
     def _probe_head_ok(self, x: float, y: float) -> bool:
-        return (self.safe_zone_xy_mm <= x <= PROBE_HEAD_MAX[0] and
-                self.safe_zone_xy_mm <= y <= PROBE_HEAD_MAX[1])
+        return (PROBE_HEAD_MIN[0] <= x <= PROBE_HEAD_MAX[0] and
+                PROBE_HEAD_MIN[1] <= y <= PROBE_HEAD_MAX[1])
 
     def probe_reachable(self, x: float, y: float) -> bool:
         """True when the switch can probe laser point X/Y (head = point - offset)."""
