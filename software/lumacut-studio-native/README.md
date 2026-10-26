@@ -46,6 +46,27 @@ Eigenständig testen: `python src/canvas_demo.py`.
   Auswahlmitte zu – sie bleibt stehen bzw. wird zentriert; 0,4–60 px/mm), mittlere Maustaste oder Leertaste+Ziehen = Verschieben,
   Strg+0 = Fläche einpassen, Raster und Fangen (1 mm) umschaltbar, Lineale in mm,
   Cursorposition in mm in der Statusleiste.
+- **Touch (z. B. Surface Pro):** „Touch-Modus“ in der Canvas-Aktionsleiste bzw. in der
+  Statusleiste. Er schaltet sich bei einem Touchscreen (oder beim ersten Fingertipp)
+  selbst ein; eine manuelle Wahl wird in QSettings (`canvas/touch_mode`) gespeichert und
+  hat dann Vorrang. Im Touch-Modus (Werte in `lumacut_canvas/touch.py`, `TouchMetrics`):
+  - Griffe 16 px gezeichnet, Trefferfläche 32 × 32 px, Dreh-Griff 44 px über dem Rahmen;
+    konstant in Bildschirm-Pixeln bei jedem Zoom (Maus-Modus unverändert 9 px).
+  - Fangbereich für Objekte 12 px statt 5 px. Liegen mehrere Objekte darin, gewinnt ein
+    Treffer auf dem Umriss (bzw. im Text/Bild) vor einem Treffer nur im Inneren, dann das
+    kleinere Objekt, dann das oberste – so bleibt eine dünne Linie auf/unter einer Fläche greifbar.
+  - Zwei Finger: Pinch-Zoom um die Fingermitte (0,4–60 px/mm) und gleichzeitig Verschieben;
+    Lineale und Raster laufen mit. Ein laufendes Verschieben/Skalieren wird beim zweiten
+    Finger abgebrochen (nichts verrutscht).
+  - Ein Finger: auf einem Objekt/Griff wie die Maus (verschieben, skalieren, drehen,
+    zeichnen); mit dem Auswahl-Werkzeug auf leerer Fläche = Ansicht verschieben. Tippen =
+    Klick (leere Fläche: Auswahl aufheben), Doppeltippen = Doppelklick.
+    Ein Gummiband-Rahmen geht nur mit Maus oder Stift.
+  - Zoom-Knöpfe unten rechts im Canvas (−, +, Einpassen, 100 %), 52 px.
+  - Werkzeugleisten mit 32-px-Icons in ≥ 48-px-Knöpfen; im Ebenen-Panel 56 px hohe Zeilen,
+    40-px-Knöpfe und 34 px hohe Eingabefelder.
+  - Vom System aus Touch erzeugte Maus-Ereignisse werden während und 0,6 s nach einer
+    Berührung ignoriert (keine doppelte Ausführung); Touchpad-Gesten bleiben beim System.
 - **Ebenen:** Farbe, Name, sichtbar, gesperrt, Reihenfolge; je Ebene
   Leistung (1–100 %), Geschwindigkeit (1–6000 mm/min) und Durchgänge (1–30),
   optional Material/Dicke/Tiefe je Durchgang (siehe „Material-Grundlage“).
