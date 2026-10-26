@@ -166,11 +166,14 @@ def _dp(line: Line, eps: float, closed: bool) -> Line:
     return out
 
 
-def skeleton_lines(skel: np.ndarray, dist: np.ndarray | None = None) -> list[tuple[Line, bool]]:
+def skeleton_lines(skel: np.ndarray, dist: np.ndarray | None = None,
+                   with_nodes: bool = False) -> list[tuple]:
     """Skeleton → ``(polyline, closed)`` in pixel-centre coordinates (x, y).
 
     ``dist`` (distance to the background per pixel) sets the spur length that
     is pruned at junctions; without it only one-pixel spurs are removed.
+    ``with_nodes`` adds a third item: the indices of the points that are
+    junction centres (used by the curve fit to straighten lines there).
     """
     import cv2
     sk = (np.asarray(skel) > 0).astype(np.uint8)
@@ -308,7 +311,10 @@ def skeleton_lines(skel: np.ndarray, dist: np.ndarray | None = None) -> list[tup
         if not pruned:
             break
 
-    return _stitch(edges, centre, dist, h, w)
+    lines = _stitch(edges, centre, dist, h, w)
+    if with_nodes:
+        return [(p, c, [(i, nd) for i, nd in nodes if 0 < nd < n_lab]) for p, c, nodes in lines]
+    return [(p, c) for p, c, _nodes in lines]
 
 
 def _direction(p: Line, reach: float) -> tuple[float, float]:
@@ -327,7 +333,7 @@ def _direction(p: Line, reach: float) -> tuple[float, float]:
 STRAIGHT_COS = -0.85     # branches within ~32° of a straight continuation are joined
 
 
-def _stitch(edges: list[list], centre: dict, dist, h: int, w: int) -> list[tuple[Line, bool]]:
+def _stitch(edges: list[list], centre: dict, dist, h: int, w: int) -> list[tuple[Line, bool, list]]:
     """Join chains through nodes: always where only two branches meet, and at
     crossings / T-junctions the pairs that continue (nearly) straight, so a
     crossing stroke stays one line instead of four pieces."""
@@ -360,13 +366,13 @@ def _stitch(edges: list[list], centre: dict, dist, h: int, w: int) -> list[tuple
                 continue
             partner[u], partner[v] = v, u
     used = [False] * len(edges)
-    out: list[tuple[Line, bool]] = []
+    out: list[tuple[Line, bool, list]] = []
     for i0, (a, _b, p) in enumerate(edges):
         if used[i0]:
             continue
         if a < 0:                                # pure loop
             used[i0] = True
-            out.append((p, True))
+            out.append((p, True, []))
             continue
         # walk backwards (through end 0) to the free start of the chain
         i, e = i0, 0
@@ -380,11 +386,15 @@ def _stitch(edges: list[list], centre: dict, dist, h: int, w: int) -> list[tuple
             i, e = j, 1 - f
         start = (i, e)
         pts: Line = []
+        nodes: list[tuple[int, int]] = []        # (point index, node id)
         closed = False
         while True:
             used[i] = True
             seg = edges[i][2] if e == 0 else edges[i][2][::-1]
+            if not pts:
+                nodes.append((0, edges[i][e]))
             pts = seg if not pts else pts + seg[1:]
+            nodes.append((len(pts) - 1, edges[i][1 - e]))
             nxt = partner.get((i, 1 - e))
             if nxt is None:
                 break
@@ -396,7 +406,7 @@ def _stitch(edges: list[list], centre: dict, dist, h: int, w: int) -> list[tuple
             closed = closed and len(pts) > 3
             if closed and pts[0] != pts[-1]:
                 pts = pts + [pts[0]]
-            out.append((pts, closed))
+            out.append((pts, closed, nodes))
     return out
 
 
@@ -448,8 +458,12 @@ def _extend_ends(pts: Line, skel: np.ndarray, fg: np.ndarray, dist: np.ndarray) 
 
 
 def trace_centerline(mask: np.ndarray, eps_px: float, min_area_px: float,
-                     deadline: float | None) -> tuple[list[Line], int]:
-    """Mask (uint8, 255 = stroke) → centre-line polylines and number of dropped specks."""
+                     deadline: float | None, smooth: bool = False,
+                     flat_px: float = 0.1) -> tuple[list[Line], int]:
+    """Mask (uint8, 255 = stroke) → centre-line polylines and number of dropped specks.
+
+    ``smooth`` fits curves (:mod:`.curvefit`) instead of Douglas-Peucker and
+    straightens the lines at junctions (see :func:`_smooth_lines`)."""
     import cv2
     fg = (mask > 0).astype(np.uint8)
     removed = 0
@@ -468,15 +482,142 @@ def trace_centerline(mask: np.ndarray, eps_px: float, min_area_px: float,
     except TimeoutError:
         raise ValueError("Mittellinie dauert zu lange – das Bild enthält große Flächen; für "
                          "Flächen „Kontur“ verwenden oder Schwellwert anpassen") from None
+    raw: list[tuple[Line, bool, list]] = []
+    for pts, closed, nodes in skeleton_lines(skel, dist, with_nodes=True):
+        if not closed:
+            ext = _extend_ends(pts, skel, fg, dist)
+            if ext[0] != pts[0]:
+                nodes = [(i + 1, nd) for i, nd in nodes]
+            pts = ext
+        raw.append((pts, closed, nodes))
+    if smooth:
+        return _smooth_lines(raw, dist, eps_px, flat_px, deadline), removed
     lines: list[Line] = []
     eps = max(float(eps_px), 0.5)
-    for pts, closed in skeleton_lines(skel, dist):
-        if not closed:
-            pts = _extend_ends(pts, skel, fg, dist)
+    for pts, closed, _nodes in raw:
         pts = _dp(pts, eps, closed)
         if len(pts) >= 2:
             lines.append(pts)
     return lines, removed
+
+
+JUNCTION_TRIM = 1.2       # × local half stroke width: skeleton bends into a junction there
+
+
+def _radius_at(dist: np.ndarray, x: float, y: float) -> float:
+    h, w = dist.shape
+    return float(dist[min(h - 1, max(0, int(y))), min(w - 1, max(0, int(x)))])
+
+
+def _turn_deg(pts: Line, j: int, reach: float) -> float:
+    a = _direction(pts[j::-1], reach)
+    b = _direction(pts[j:], reach)
+    c = -(a[0] * b[0] + a[1] * b[1])            # 1 = straight on
+    return float(np.degrees(np.arccos(np.clip(c, -1.0, 1.0))))
+
+
+def _trim(pts: Line, closed: bool, nodes: list, dist: np.ndarray):
+    """Drop the skeleton points that bend into junctions.
+
+    Thinning pulls every branch towards the junction's centre over about one
+    stroke width, which gives the kinks a thick stroke shows at a crossing.
+    Points closer than ``JUNCTION_TRIM`` × the half stroke width to a junction
+    are removed; a junction the line runs straight through is removed too (the
+    curve bridges it), a junction where it turns sharply stays as a corner.
+    Returns the trimmed points, pinned indices, and ``{end: node}`` for ends at a junction.
+    """
+    from .curvefit import CORNER_ANGLE_DEG
+    n = len(pts)
+    keep = np.ones(n, bool)
+    pin_old: set[int] = set()
+    end_nodes: dict[int, int] = {}
+    arr = np.asarray(pts, float)
+    for j, nd in nodes:
+        if closed and j in (0, n - 1):
+            continue
+        x, y = pts[j]
+        r = _radius_at(dist, x, y)
+        rt = max(1.0, JUNCTION_TRIM * r)
+        for step in (-1, 1):
+            k = j + step
+            while 0 <= k < n and np.hypot(*(arr[k] - arr[j])) < rt:
+                if k not in (0, n - 1):
+                    keep[k] = False
+                k += step
+        if j in (0, n - 1):
+            end_nodes[0 if j == 0 else -1] = nd
+            continue
+        if _turn_deg(pts, j, max(3.0, 2.5 * r)) > CORNER_ANGLE_DEG:
+            pin_old.add(j)
+        else:
+            keep[j] = False
+    idx = np.nonzero(keep)[0]
+    new_pts = [pts[i] for i in idx]
+    pinned = tuple(int(k) for k, i in enumerate(idx) if i in pin_old)
+    return new_pts, pinned, end_nodes
+
+
+def _nearest_on(line: np.ndarray, p: np.ndarray) -> tuple[float, np.ndarray]:
+    a, b = line[:-1], line[1:]
+    ab = b - a
+    den = (ab * ab).sum(1)
+    t = np.clip(((p - a) * ab).sum(1) / np.where(den > 0, den, 1.0), 0, 1)
+    q = a + ab * t[:, None]
+    d = np.hypot(*(q - p).T)
+    k = int(np.argmin(d))
+    return float(d[k]), q[k]
+
+
+def _smooth_lines(raw: list, dist: np.ndarray, eps_px: float, flat_px: float,
+                  deadline: float | None) -> list[Line]:
+    import time
+
+    from .curvefit import FIT_PX, smooth_polyline
+    fit = max(FIT_PX, float(eps_px))
+
+    def fit_line(pts: Line, closed: bool, pinned) -> Line:
+        if closed:
+            body = pts[:-1] if pts[0] == pts[-1] else pts
+            if len(body) < 3:
+                return pts
+            out = smooth_polyline(body, True, fit, flat_px, pinned=pinned)
+            return out + out[:1]
+        if len(pts) < 2:
+            return pts
+        return smooth_polyline(pts, False, fit, flat_px, pinned=pinned)
+
+    trimmed = []
+    through: dict[int, list[int]] = defaultdict(list)    # node → lines running through it
+    for k, (pts, closed, nodes) in enumerate(raw):
+        t_pts, pinned, end_nodes = _trim(pts, closed, nodes, dist)
+        trimmed.append((t_pts, closed, pinned, end_nodes))
+        n = len(pts)
+        for j, nd in nodes:
+            if 0 < j < n - 1:
+                through[nd].append(k)
+    fitted: list[Line] = []
+    for t_pts, closed, pinned, _e in trimmed:
+        if deadline is not None and time.monotonic() > deadline:
+            raise ValueError("Mittellinie dauert zu lange – Glätten ausschalten oder "
+                             "Mindestfläche erhöhen")
+        fitted.append(fit_line(t_pts, closed, pinned))
+    # ends of branches at a junction: meet the smoothed through-line there
+    for k, (t_pts, closed, pinned, end_nodes) in enumerate(trimmed):
+        moved = False
+        new = list(t_pts)
+        for end, nd in end_nodes.items():
+            others = [fitted[o] for o in through.get(nd, ()) if o != k and len(fitted[o]) >= 2]
+            if not others:
+                continue
+            p = np.asarray(new[end], float)
+            r = _radius_at(dist, *new[end])
+            best = min((_nearest_on(np.asarray(o, float), p) for o in others), key=lambda v: v[0])
+            if best[0] <= max(1.0, 1.5 * r) and best[0] > 1e-6:
+                new[end] = (float(best[1][0]), float(best[1][1]))
+                moved = True
+        if moved:
+            fitted[k] = fit_line(new, closed, pinned)
+    return [f for f in fitted if len(f) >= 2]
 
 
 __all__ = ["thin", "skeleton_lines", "trace_centerline"]

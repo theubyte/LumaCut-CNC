@@ -13,7 +13,7 @@ from _pi_guard import pi_check  # noqa: E402
 from lumacut_import.trace import (TraceSettings, to_canvas, trace_gray,  # noqa: E402
                                   traced_shapes)
 
-RAW = TraceSettings(smoothing_px=0, tolerance_mm=0, min_area_mm2=0)
+RAW = TraceSettings(smoothing_px=0, tolerance_mm=0, min_area_mm2=0, smooth_curves=False)
 
 
 def _blank(h=100, w=100):
@@ -64,15 +64,20 @@ def test_invert_threshold_and_border():
 
 def test_despeckle_and_tolerance():
     import cv2
+    # Toleranz wirkt auf das Vereinfachen der Pixelkontur (Glätten aus; mit Glätten
+    # bestimmt die feste Abflachung die Punktzahl, siehe test_trace_smooth.py)
     g = _blank(200, 200)
     cv2.circle(g, (100, 100), 60, 0, -1)
     g[10, 10] = 0
     g[11, 180] = 0
-    fine = trace_gray(g, TraceSettings(smoothing_px=0, tolerance_mm=0, min_area_mm2=0), (0.1, 0.1))
+    fine = trace_gray(g, TraceSettings(smoothing_px=0, tolerance_mm=0, min_area_mm2=0,
+                                       smooth_curves=False), (0.1, 0.1))
     assert len(fine.parts) == 3
-    clean = trace_gray(g, TraceSettings(smoothing_px=0, tolerance_mm=0, min_area_mm2=0.5), (0.1, 0.1))
+    clean = trace_gray(g, TraceSettings(smoothing_px=0, tolerance_mm=0, min_area_mm2=0.5,
+                                        smooth_curves=False), (0.1, 0.1))
     assert len(clean.parts) == 1 and clean.removed == 2
-    coarse = trace_gray(g, TraceSettings(smoothing_px=0, tolerance_mm=0.1, min_area_mm2=0.5), (0.1, 0.1))
+    coarse = trace_gray(g, TraceSettings(smoothing_px=0, tolerance_mm=0.1, min_area_mm2=0.5,
+                                         smooth_curves=False), (0.1, 0.1))
     assert coarse.point_count < clean.point_count / 3
     # Vereinfachte Kontur weicht höchstens um die Toleranz ab (1 px = 0,1 mm)
     from shapely.geometry import Polygon

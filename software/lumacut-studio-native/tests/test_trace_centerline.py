@@ -114,13 +114,13 @@ def test_specks_removed_and_tolerance_reduces_points():
     g[5, 5] = 0
     g[190:192, 190:192] = 0
     raw = trace_gray(g, TraceSettings(smoothing_px=0, tolerance_mm=0, min_area_mm2=0,
-                                      mode=MODE_CENTERLINE), MM)
+                                      mode=MODE_CENTERLINE, smooth_curves=False), MM)
     clean = trace_gray(g, TraceSettings(smoothing_px=0, tolerance_mm=0, min_area_mm2=0.1,
-                                        mode=MODE_CENTERLINE), MM)
+                                        mode=MODE_CENTERLINE, smooth_curves=False), MM)
     assert len(clean.lines) == 1 and clean.removed == 2
     assert len(raw.lines) == 1                       # single dots have no line
     coarse = trace_gray(g, TraceSettings(smoothing_px=0, tolerance_mm=0.2, min_area_mm2=0.1,
-                                         mode=MODE_CENTERLINE), MM)
+                                         mode=MODE_CENTERLINE, smooth_curves=False), MM)
     assert coarse.point_count < clean.point_count / 2
 
 

@@ -12,7 +12,10 @@ Ablauf je Bildobjekt (``Shape.kind == "image"``):
 4. Konturen mit Löchern (``cv2.RETR_CCOMP``: Außenkontur + Löcher, Inseln in
    Löchern werden wieder eigene Teile);
 5. Flecken entfernen (``min_area_mm2``) und vereinfachen
-   (Douglas-Peucker, ``tolerance_mm``);
+   (Douglas-Peucker, ``tolerance_mm``) – oder mit ``smooth_curves``
+   („Glätten“) Kurven einpassen: Ecken bleiben spitz, dazwischen kubische
+   Bézierkurven statt Pixeltreppe, fein abgeflacht (≤ ``FLAT_MM``), siehe
+   :mod:`.curvefit`;
 6. in Canvas-mm umrechnen – Bildbox inkl. Drehung des Bildobjekts.
 
 Jeder Teil (Außenkontur + seine Löcher) wird ein ``polygon`` mit ``rings``
@@ -53,6 +56,10 @@ THRESHOLD_RANGE = (1, 255)
 SMOOTHING_RANGE = (0.0, 10.0)      # Sigma in Bildpixeln
 TOLERANCE_RANGE = (0.0, 2.0)       # mm
 MIN_AREA_RANGE = (0.0, 100.0)      # mm²
+FLAT_MM = 0.02                     # Glätten: max. Sehnenabweichung der abgeflachten Kurven
+FLAT_PX_RANGE = (0.05, 0.25)       # … in Bildpixeln begrenzt (Punktzahl / Pixelraster)
+SMOOTH_MAX_RAW_POINTS = 150_000    # Glätten nur bis zu so vielen Randpunkten (~45 µs je Punkt)
+SMOOTH_SKIPPED_NOTE = "Glätten übersprungen – Bild sehr detailreich (nur vereinfacht)"
 # Trace modes: outline (filled parts with holes) or centre line (open strokes, line art)
 MODE_OUTLINE = "outline"
 MODE_CENTERLINE = "centerline"
@@ -72,6 +79,7 @@ class TraceSettings:
     min_area_mm2: float = 0.2       # kleinere Flecken/Löcher fallen weg
     auto_threshold: bool = False    # Schwellwert automatisch (Otsu) statt ``threshold``
     mode: str = MODE_OUTLINE        # MODE_OUTLINE or MODE_CENTERLINE (see .centerline)
+    smooth_curves: bool = True      # „Glätten“: Kurven statt Pixeltreppe, Ecken bleiben spitz
 
     def normalized(self) -> "TraceSettings":
         return TraceSettings(
@@ -81,7 +89,8 @@ class TraceSettings:
             tolerance_mm=round(_clamp(float(self.tolerance_mm), *TOLERANCE_RANGE), 3),
             min_area_mm2=round(_clamp(float(self.min_area_mm2), *MIN_AREA_RANGE), 3),
             auto_threshold=bool(self.auto_threshold),
-            mode=self.mode if self.mode in MODES else MODE_OUTLINE)
+            mode=self.mode if self.mode in MODES else MODE_OUTLINE,
+            smooth_curves=bool(self.smooth_curves))
 
     @staticmethod
     def for_image(shape: Shape) -> "TraceSettings":
@@ -108,6 +117,7 @@ class TraceResult:
     threshold: int | None = None     # verwendeter Schwellwert (bei „Auto“: Otsu)
     # centre-line mode: open polylines (closed loops repeat the first point at the end)
     lines: list[Ring] = field(default_factory=list)
+    note: str = ""                   # Hinweis für den Dialog (z. B. Glätten übersprungen)
 
     @property
     def point_count(self) -> int:
@@ -326,6 +336,33 @@ def _simplify(poly, eps: float):
     return Polygon(shell.exterior.coords, [g.exterior.coords for g in final[1:]])
 
 
+def _flat_px(mx: float, my: float) -> float:
+    return _clamp(FLAT_MM / min(mx, my), *FLAT_PX_RANGE)
+
+
+def _smooth_polygon(poly, eps_px: float, flat_px: float):
+    """Glätten: jeden Ring kurvengeglättet (Ecken spitz). ``None``, wenn das
+    Ergebnis ungültig wäre (Ringe würden sich schneiden) – dann bleibt es beim
+    Vereinfachen der Pixelkontur."""
+    from shapely.geometry import Polygon
+
+    from .curvefit import FIT_PX, smooth_polyline
+    fit = max(FIT_PX, eps_px)
+
+    def ring(coords) -> Ring:
+        pts = [(float(x), float(y)) for x, y in coords[:-1]]
+        return smooth_polyline(pts, True, fit, flat_px, edge_midpoints=True)
+
+    ext = ring(poly.exterior.coords)
+    if len(ext) < 3:
+        return None
+    holes = [h for h in (ring(i.coords) for i in poly.interiors) if len(h) >= 3]
+    out = Polygon(ext, holes)
+    if out.is_empty or not out.is_valid:
+        return None
+    return out
+
+
 def trace_gray(gray: np.ndarray, settings: TraceSettings,
                mm_per_px: tuple[float, float] = (1.0, 1.0),
                time_limit_s: float | None = TIME_LIMIT_S) -> TraceResult:
@@ -369,6 +406,11 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
     hier = hierarchy[0]
     min_area = max(st.min_area_mm2 / (mx * my), 0.25)   # in Bildpixeln²
     eps_px = st.tolerance_mm / min(mx, my)
+    flat_px = _flat_px(mx, my)
+    # Glätten kostet ein Vielfaches des Vereinfachens → bei sehr detailreichen
+    # Bildern (Rauschen, Fotos) nur vereinfachen und im Dialog darauf hinweisen
+    smooth_curves = st.smooth_curves and raw_points <= SMOOTH_MAX_RAW_POINTS
+    note = SMOOTH_SKIPPED_NOTE if st.smooth_curves and not smooth_curves else ""
     removed = 0
     points = 0
     parts: list[TracedPart] = []
@@ -414,7 +456,10 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
             if poly.area < min_area:
                 removed += 1
                 continue
-            if eps_px > 0:
+            smooth = _smooth_polygon(poly, eps_px, flat_px) if smooth_curves else None
+            if smooth is not None:
+                poly = smooth
+            elif eps_px > 0:
                 poly = _simplify(poly, eps_px)
             if poly.is_empty or poly.geom_type != "Polygon":
                 removed += 1
@@ -438,14 +483,15 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
             if len(parts) > MAX_PARTS:
                 raise ValueError(f"Zu viele Konturen (> {MAX_PARTS}) – Schwellwert, Glättung "
                                  f"oder Mindestfläche anpassen")
-    return TraceResult(parts, removed, thr)
+    return TraceResult(parts, removed, thr, note=note)
 
 
 def _trace_centerline(mask: np.ndarray, thr: int, st: TraceSettings, mx: float, my: float,
                       deadline: float | None) -> TraceResult:
     from .centerline import trace_centerline
     lines, removed = trace_centerline(mask, st.tolerance_mm / min(mx, my),
-                                      st.min_area_mm2 / (mx * my), deadline)
+                                      st.min_area_mm2 / (mx * my), deadline,
+                                      smooth=st.smooth_curves, flat_px=_flat_px(mx, my))
     points = sum(len(line) for line in lines)
     if points > MAX_POINTS:
         raise ValueError(f"Zu viele Punkte (> {MAX_POINTS}) – Toleranz oder "
@@ -511,4 +557,4 @@ def trace_to_shapes(shape: Shape, settings: TraceSettings, layer_id: str) -> lis
 __all__ = ["TraceSettings", "TraceResult", "TracedPart", "trace_gray", "trace_image",
            "traced_shapes", "trace_to_shapes", "decode_gray", "foreground_mask",
            "image_mm_per_px", "to_canvas", "otsu_threshold", "effective_threshold",
-           "MODE_OUTLINE", "MODE_CENTERLINE", "MODES"]
+           "MODE_OUTLINE", "MODE_CENTERLINE", "MODES", "FLAT_MM", "SMOOTH_MAX_RAW_POINTS"]
