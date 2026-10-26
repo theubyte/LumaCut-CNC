@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import arrange_ui, icons, pathops_ui, theme, touch
+from . import arrange_ui, icons, pathops_ui, text_ui, theme, touch
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip
@@ -128,6 +128,8 @@ class PropertyBar(QWidget):
         self.text.editingFinished.connect(self._text_edited)
         lay.addWidget(self.text_label)
         lay.addWidget(self.text)
+        self.text_style = text_ui.TextStyleControls(editor)  # Schriftart/Größe/Fett/Kursiv
+        lay.addWidget(self.text_style)
         lay.addStretch()
         self._updating = False
         self.refresh()
@@ -183,6 +185,7 @@ class PropertyBar(QWidget):
         self.text.setVisible(single_text)
         if single_text and not self.text.hasFocus():
             self.text.setText(doc.shape(sel[0]).text)
+        self.text_style.refresh()
         self._updating = False
 
     def _geometry_edited(self) -> None:
@@ -296,6 +299,8 @@ class CanvasEditor(QWidget):
         self.snap_enabled = True
         self.snap_step_mm = 1.0
         self.text_font_family = "Segoe UI"
+        self.text_font_bold = False
+        self.text_font_italic = False
         self.file_path: Path | None = None
         self._clipboard: list[Shape] = []
         self._paste_count = 0

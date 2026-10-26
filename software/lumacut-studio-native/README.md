@@ -255,6 +255,10 @@ Drehung, Ellipsen und Text werden berücksichtigt.
 - **Text in Pfade umwandeln** (Strg+Umschalt+O): Text wird ein Polygon mit allen
   Buchstaben-Ringen – Füllung und G-Code bleiben gleich, die Datei hängt nicht mehr von
   installierten Schriften ab.
+- **Schrift** (PropertyBar, sobald nur Text ausgewählt ist): Schriftart, Größe in pt
+  (Geviert; skaliert die Box gleichmäßig), **F**ett, *K*ursiv und „In Pfade“. Schriftart
+  und Schnitt behalten die Höhe und passen die Breite an; die letzte Wahl gilt für neue
+  Texte. Gespeichert als `"bold"`/`"italic"` (nur wenn gesetzt).
 - Polygone können dafür mehrere Ringe haben (`"rings"` in der Datei, nur wenn vorhanden).
 
 ### Schnittstellen für andere Module (Scan & Probe)

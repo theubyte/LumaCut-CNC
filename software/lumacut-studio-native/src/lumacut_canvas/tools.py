@@ -585,9 +585,11 @@ class ToolController:
     def add_text(self, text: str, pos: QPointF, height_mm: float = DEFAULT_TEXT_HEIGHT_MM) -> Shape:
         """Textobjekt mit natürlichem Seitenverhältnis anlegen (auch für Tests/Skripte)."""
         family = self.ed.text_font_family
-        w = height_mm * text_aspect(text, family)
+        bold = getattr(self.ed, "text_font_bold", False)
+        italic = getattr(self.ed, "text_font_italic", False)
+        w = height_mm * text_aspect(text, family, bold, italic)
         shape = Shape("text", Geometry(pos.x(), pos.y(), w, height_mm), self.doc.active_layer_id,  # type: ignore[arg-type]
-                      text=text, font_family=family)
+                      text=text, font_family=family, font_bold=bold, font_italic=italic)
         self.ed.undo_stack.push(AddShapesCommand(self.doc, [shape], "Text einfügen"))
         self.ed.set_selection([shape.id])
         return shape
