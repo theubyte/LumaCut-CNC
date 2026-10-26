@@ -277,6 +277,11 @@ Platzierung (Vektoren) und Bilder (Mosaik, Höhenkarte) sind getrennt zu behande
 
 **Machine:** Keine Codeänderung nötig. Anker `tr` = Nullpunkt-Ecke passt (§2.2).
 
+**Scan Probe: erledigt (`f00485e`, `3c3a801`; Scan Probe, 2026-10-26).** Canvas kann 23b8d56 pushen.
+- Punkte 1–4 umgesetzt. `scanprobe/panel.py` leitet die Spiegelung aus `to_machine` ab (`image_flip_x()`), ohne eigenen Schalter. Das gilt mit `ORIGIN_TOP_RIGHT` an und aus.
+- Doppelter „Kamera-Scan“-Knopf im Scan-Panel entfernt, `start_scan()` bleibt. Den Wechsel auf den Pi bei bestehender Verbindung macht nur `camera_scan()`. Die Hauptansicht sollte daher `camera_scan()` statt `start_scan()` aufrufen.
+- Tests: `tests/test_scan_origin_top_right.py` prüft den Hin- und Rückweg Maschine ↔ Bildschirm, die Rechtecke und Umrisse, ob Mosaik und Höhenkarte deckungsgleich liegen, und die Export-Abdeckung. Die Hilfen dazu liegen in `tests/scan_coords.py`. Die Studio-Suite ist grün ohne den Canvas-Patch und mit ihm (offscreen, Simulation, ohne Hardware).
+
 **Physische Prüfung (⚠ offen):** Nach dem Homing in der Studio-Ansicht prüfen:
 - **X+10 fährt den Kopf nach links**, **Y+10 nach vorne zur Tür**.
 - Ein Testrechteck **oben links** auf dem Bildschirm wird **vorne gesehen oben links** gelasert, und Text ist lesbar.
@@ -406,7 +411,7 @@ Offen:
 | Thema | Zuständig | Status |
 |---|---|---|
 | Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1); großer Start-Knopf der Hauptansicht ruft `one_click.start` (Canvas, §5.1); Maschinen-Panel erledigt (§1.2: „Datei-Auftrag starten“ → `op=autorun`, Service-Gruppe „Erweitert“, Phasenanzeige mit echten Pi-Feldern inkl. „Parken“, Hinweis ohne `autorun_mesh`, `autorun_task` für platzierte Ein-Klick-Aufträge); Lücken §1.3; Pi-Code fertig, auf dem Pi noch nicht installiert |
-| Nullpunkt oben rechts | Canvas + Machine + Scan Probe | Maschinenseite erledigt (`ce7da00`, §2.2; Ende-zu-Ende-Test Export → Pi-Platzierung → Rahmen, alter Pi: `tests/test_origin_end_to_end.py`); Canvas fertig und getestet, **Push gehalten**, bis Scan Probe Platzierung und Bilder spiegelt (§2.3); danach physische Prüfung am Gerät |
+| Nullpunkt oben rechts | Canvas + Machine + Scan Probe | Maschinenseite erledigt (`ce7da00`, §2.2; Ende-zu-Ende-Test Export → Pi-Platzierung → Rahmen, alter Pi: `tests/test_origin_end_to_end.py`); Canvas fertig und getestet; Scan Probe erledigt (`f00485e`, `3c3a801`, §2.3), Canvas kann pushen; danach physische Prüfung am Gerät |
 | Kamera-Scan als Button | Scan Probe | Studio erledigt (§3); Android: Vertrag vorbereitet, kein Code |
 | Probing immer im Auftrag (keine Auswahl) | Scan Probe | Studio erledigt (§1.1) |
 | Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | Pi-API fertig (Variante B, Revision); Studio gegen den echten Pi-Dienst geprüft (§4.1); Android angebunden; Pi-Web offen |
