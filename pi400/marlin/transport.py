@@ -843,7 +843,7 @@ class MarlinTransport:
             if pct is not None:
                 if not 1 <= pct <= 100:
                     raise ValueError("Helligkeit 1..100 %")
-                self.light_pct = float(pct)
+                self.light_pct = int(round(pct))   # whole percent: clients read an integer
             self.lights = bool(on)
             self._apply_light_locked()
             return self.lights, self.light_pct, self.light_pwm
@@ -1455,7 +1455,7 @@ class MarlinTransport:
                 "homing_verified": self.homing_verified,
                 "position": self.position, "fault": self.fault,
                 "lights": self.lights, "exhaust": self.exhaust,
-                "light_brightness": self.light_pct, "light_dimmable": self.light_pwm,
+                "light_brightness": int(round(self.light_pct)), "light_dimmable": self.light_pwm,
                 "light_effects": self.light_effects,
                 "laser_armed": self.laser_enabled,
                 "laser_cooling_fan_on": self.fan_power,

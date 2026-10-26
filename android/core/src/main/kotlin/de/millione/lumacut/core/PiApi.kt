@@ -68,7 +68,8 @@ data class MachineStatus(
     val fault: String = "",
     val lights: Boolean = false,
     /** 1..100 %; dimmable null = not yet known, false = old firmware without M355. */
-    val light_brightness: Int? = null,
+    // Number: older Pi versions sent 60.0, newer send 60 – both must be read.
+    val light_brightness: Double? = null,
     val light_dimmable: Boolean? = null,
     val light_effects: Boolean = true,
     val exhaust: Boolean = false,
@@ -104,6 +105,9 @@ data class JobFile(val name: String, val bytes: Long = 0, val modified: Long = 0
 private data class JobList(val files: List<JobFile> = emptyList())
 
 open class PiException(message: String) : IOException(message)
+
+/** The Pi answered, but the status could not be read (app and Pi versions do not match). */
+class PiStatusFormatException(message: String) : PiException(message)
 
 /**
  * HTTP client for the Pi 400 service on port 8080. All safety rules are
@@ -156,8 +160,14 @@ class PiClient(
         json.parseToJsonElement(body).jsonObject["message"]?.jsonPrimitive?.content
     }.getOrNull() ?: "Erledigt"
 
-    suspend fun status(): MachineStatus =
-        json.decodeFromString(MachineStatus.serializer(), call(Request.Builder().url(url("api", "status")).build(), callTimeoutSec = 5))
+    suspend fun status(): MachineStatus {
+        val body = call(Request.Builder().url(url("api", "status")).build(), callTimeoutSec = 5)
+        return try {
+            json.decodeFromString(MachineStatus.serializer(), body)
+        } catch (e: IllegalArgumentException) {   // kotlinx SerializationException
+            throw PiStatusFormatException("Antwort des Pi nicht lesbar – App und Pi auf denselben Stand bringen (${e.message?.take(80)})")
+        }
+    }
 
     suspend fun jobs(): List<JobFile> =
         json.decodeFromString(JobList.serializer(), call(Request.Builder().url(url("api", "jobs")).build())).files

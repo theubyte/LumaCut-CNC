@@ -69,7 +69,7 @@ class MaterialApiTest {
 
     @Test fun `light posts on, brightness and effects, status reports dimming`() = runBlocking {
         val srv = MockWebServer().apply {
-            enqueue(MockResponse().setBody("""{"message":"Licht EIN · 60 %","lights":true,"brightness":60,"dimmable":true}"""))
+            enqueue(MockResponse().setBody("""{"message":"Licht EIN Â· 60 %","lights":true,"brightness":60,"dimmable":true}"""))
             enqueue(MockResponse().setBody("""{"message":"ok"}"""))
             enqueue(MockResponse().setBody("""{"connected":true,"lights":true,"light_brightness":60,"light_dimmable":false,"light_effects":false}"""))
             start()
@@ -80,7 +80,7 @@ class MaterialApiTest {
         pi.light(effects = false)
         assertEquals("op=light&effects=0", srv.takeRequest().body.readUtf8())
         val s = pi.status()
-        assertEquals(60, s.light_brightness); assertEquals(false, s.light_dimmable); assertEquals(false, s.light_effects)
+        assertEquals(60.0, s.light_brightness); assertEquals(false, s.light_dimmable); assertEquals(false, s.light_effects)
         srv.shutdown()
     }
 
@@ -107,6 +107,19 @@ class MaterialApiTest {
         val s = PiClient("127.0.0.1", srv.port).status()
         assertTrue(s.job.active); assertEquals(3, s.job.probe.done); assertEquals(12, s.job.probe.total)
         assertTrue("autorun_mesh" in s.features)
+        srv.shutdown()
+    }
+
+    @Test fun `status with decimal brightness is read, unreadable status is named as such`() = runBlocking {
+        val srv = MockWebServer().apply {
+            enqueue(MockResponse().setBody("""{"connected":true,"lights":true,"light_brightness":100.0,"light_dimmable":true}"""))
+            enqueue(MockResponse().setBody("""{"connected":"vielleicht","job":[]}"""))
+            start()
+        }
+        val pi = PiClient("127.0.0.1", srv.port)
+        assertEquals(100.0, pi.status().light_brightness)   // the Pi sent 100.0 until 2026-10-27
+        val e = assertFailsWith<PiStatusFormatException> { pi.status() }
+        assertTrue("nicht lesbar" in (e.message ?: ""), e.message)
         srv.shutdown()
     }
 }

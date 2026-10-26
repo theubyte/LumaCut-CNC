@@ -6,9 +6,10 @@ import de.millione.lumacut.core.MachineStatus
 data class Headline(val tone: Tone, val title: String, val text: String)
 
 /** One sentence that tells the operator what the machine is doing and what comes next. */
-fun headline(s: MachineStatus?, online: Boolean?, host: String): Headline = when {
+fun headline(s: MachineStatus?, online: Boolean?, host: String, readError: String? = null): Headline = when {
     host.isBlank() -> Headline(Tone.OFF, "Nicht eingerichtet", "Pi-Adresse unter Einstellungen eintragen.")
     online == null -> Headline(Tone.BUSY, "Verbinde …", host)
+    online == false && readError != null -> Headline(Tone.BAD, "Pi-Antwort nicht lesbar", readError)
     online == false || s == null -> Headline(Tone.BAD, "Pi nicht erreichbar", "WLAN und Adresse $host prüfen.")
     !s.connected -> Headline(Tone.BAD, "Controller getrennt", s.fault.ifBlank { "USB-Verbindung zum SKR fehlt." })
     s.emergency_latched -> Headline(Tone.BAD, "Notstopp aktiv", "SKR zurücksetzen (Reset-Taste oder kurz stromlos), dann quittieren.")

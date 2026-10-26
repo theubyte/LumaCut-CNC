@@ -108,7 +108,8 @@ private fun TopBar(machine: MachineViewModel) {
     val status by machine.status.collectAsStateWithLifecycle()
     val online by machine.online.collectAsStateWithLifecycle()
     val host by machine.host.collectAsStateWithLifecycle()
-    val head = headline(status, online, host)
+    val readError by machine.readError.collectAsStateWithLifecycle()
+    val head = headline(status, online, host, readError)
     Row(
         Modifier
             .fillMaxWidth()

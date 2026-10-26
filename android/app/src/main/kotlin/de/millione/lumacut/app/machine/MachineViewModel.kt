@@ -60,6 +60,10 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
     private val _online = MutableStateFlow<Boolean?>(null)
     val online: StateFlow<Boolean?> = _online.asStateFlow()
 
+    /** Set when the Pi answers but its status cannot be read (version mismatch), else null. */
+    private val _readError = MutableStateFlow<String?>(null)
+    val readError: StateFlow<String?> = _readError.asStateFlow()
+
     private val _busy = MutableStateFlow<Set<String>>(emptySet())
     val busy: StateFlow<Set<String>> = _busy.asStateFlow()
 
@@ -129,6 +133,7 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
             if (c !== client) return          // the address was changed while the request ran
             _status.value = s
             _online.value = true
+            _readError.value = null
             failures = 0; calmNoticeShown = false
             if (!_materials.value.fromPi && System.currentTimeMillis() - materialsTriedAt > 15_000) refreshMaterials()
             if (s.job.state == "error" && s.job.error.isNotBlank() && s.job.error != lastJobError) {
@@ -138,6 +143,7 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
+            if (e is de.millione.lumacut.core.PiStatusFormatException) _readError.value = e.message
             // Offline only after 3 failed requests in a row (about 5 s); a running job is never touched by this.
             failures++
             if (failures >= 3) {

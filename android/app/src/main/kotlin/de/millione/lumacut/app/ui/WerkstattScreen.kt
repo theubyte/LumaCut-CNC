@@ -67,7 +67,8 @@ private fun StatusCard(machine: MachineViewModel) {
     val online by machine.online.collectAsStateWithLifecycle()
     val host by machine.host.collectAsStateWithLifecycle()
     val busy by machine.busy.collectAsStateWithLifecycle()
-    val h = headline(s, online, host)
+    val readError by machine.readError.collectAsStateWithLifecycle()
+    val h = headline(s, online, host, readError)
     LcCard(accent = h.tone.color) {
         Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
@@ -198,7 +199,7 @@ private fun ExtrasCard(machine: MachineViewModel) {
             }, Modifier.weight(1f), busy = "exhaust" in busy || !usable)
         }
         if (s?.light_dimmable != false) {
-            val pi = s?.light_brightness ?: 100
+            val pi = s?.light_brightness?.let { kotlin.math.round(it).toInt() } ?: 100
             var level by remember(pi) { mutableFloatStateOf(pi.toFloat()) }
             Spacer(Modifier.height(14.dp))
             SmallText("Helligkeit ${level.toInt()} %")

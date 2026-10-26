@@ -679,7 +679,8 @@ class USBProtocolTests(unittest.TestCase):
         bridge = MarlinTransport("/dev/null")
         bridge.serial = serial
         bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
-        self.assertEqual(bridge.set_light(True, 60), (True, 60.0, True))
+        self.assertEqual(bridge.set_light(True, 60), (True, 60, True))
+        self.assertIsInstance(bridge.status()["light_brightness"], int)   # the Android app reads an integer
         self.assertEqual(serial.writes, [b"M355 S1 P153\n"])
         bridge.set_light(False)
         self.assertEqual(serial.writes[-1], b"M355 S0 P0\n")

@@ -70,7 +70,7 @@ machine.homing_verified = bool(config["validated"])
 machine.clearance_mm = float(config["z_clearance_mm"])
 machine.probe_tip_offset_mm = float(config["z_switch_tip_offset_mm"])
 machine.focus_gap_mm = float(config["focus_gap_mm"])
-machine.light_pct = float(config["light_brightness"])
+machine.light_pct = int(round(float(config["light_brightness"])))
 machine.light_effects = bool(config["light_effects"])
 if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is not None:
     machine.probe_xy_offset_mm = (float(config["probe_offset_x_mm"]),
