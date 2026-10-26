@@ -1,6 +1,6 @@
 """Boole-Operationen, Verschweißen und Versatz für Vektorobjekte (shapely).
 
-Objekte werden über :func:`shape_paths.shape_path` (inkl. Drehung, Kurven,
+Objekte werden über :func:`shape_paths.shape_polygons` (inkl. Drehung, Kurven,
 Text) in Flächen umgewandelt – Teilpfade nach der Gerade-Ungerade-Regel, also
 genau so, wie sie gefüllt werden. Ergebnisse sind neue ``polygon``-Objekte mit
 mehreren Ringen (Außenkontur + Löcher), die Füllung, G-Code und Export ohne
@@ -9,15 +9,15 @@ Sonderfall verarbeiten. Benötigt QtGui (Text braucht eine QGuiApplication).
 
 from __future__ import annotations
 
+import math
 from typing import Iterable
 
-from PySide6.QtGui import QTransform
 from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from .model import FILLABLE_KINDS, Document, Shape
-from .shape_paths import shape_path
+from .shape_paths import FLATTEN_TOL_MM, shape_polygons
 
 OPS = ("union", "subtract", "intersect", "xor", "weld")
 OP_LABELS = {
@@ -34,17 +34,14 @@ class PathOpError(ValueError):
     pass
 
 
-# Qt flacht Kurven abhängig von der Größe in Geräteeinheiten ab; in mm wäre
-# das grob (Kreis Ø 20 mm ≈ 0,2 mm Sehnenfehler). Vergrößert abflachen, dann
-# zurückrechnen: Fehler ≈ 0,01 mm, gut unter der Strahlbreite.
-_FLATTEN_SCALE = 20.0
+# Kurven/Ellipsen mit 0,01 mm abflachen (shape_paths.shape_polygons); mit
+# SIMPLIFY_MM bleibt das Ergebnis unter 0,02 mm (Anforderungen §9.3).
+_FLATTEN_TOL_MM = 0.01
 
 
 def _rings(shape: Shape) -> list[list[tuple[float, float]]]:
     out = []
-    k = _FLATTEN_SCALE
-    for poly in shape_path(shape).toSubpathPolygons(QTransform.fromScale(k, k)):
-        pts = [(p.x() / k, p.y() / k) for p in poly]
+    for pts in shape_polygons(shape, _FLATTEN_TOL_MM):
         if len(pts) > 1 and pts[0] == pts[-1]:
             pts.pop()
         if len(pts) >= 2:
@@ -151,6 +148,14 @@ def boolean(shapes: list[Shape], op: str) -> list[Shape]:
     return [s] if s is not None else []
 
 
+def _round_quad_segs(radius_mm: float) -> int:
+    """Segmente je Viertelkreis für runde Ecken: Sehnenfehler + Abflachung + Vereinfachung ≤ 0,02 mm."""
+    tol = FLATTEN_TOL_MM - _FLATTEN_TOL_MM - SIMPLIFY_MM
+    if radius_mm <= tol:
+        return 16
+    return max(16, math.ceil((math.pi / 2) / math.acos(1.0 - tol / radius_mm)))
+
+
 def offset(shapes: Iterable[Shape], distance_mm: float, join: str = "round") -> list[Shape]:
     """Versatz: + nach außen, − nach innen. Offene Linien bekommen eine
     geschlossene Kontur im Abstand |d| (Umriss um die Linie)."""
@@ -161,10 +166,11 @@ def offset(shapes: Iterable[Shape], distance_mm: float, join: str = "round") -> 
     for s in shapes:
         if s.kind == "image":
             continue
+        q = _round_quad_segs(abs(distance_mm))
         if is_closed(s):
-            g = shape_area(s).buffer(distance_mm, join_style=js, mitre_limit=4.0)
+            g = shape_area(s).buffer(distance_mm, quad_segs=q, join_style=js, mitre_limit=4.0)
         else:
-            g = shape_lines(s).buffer(abs(distance_mm), join_style=js, mitre_limit=4.0)
+            g = shape_lines(s).buffer(abs(distance_mm), quad_segs=q, join_style=js, mitre_limit=4.0)
         r = area_to_shape(g, s)
         if r is not None:
             out.append(r)

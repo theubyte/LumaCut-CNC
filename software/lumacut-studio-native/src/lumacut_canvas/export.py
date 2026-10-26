@@ -17,7 +17,7 @@ from PySide6.QtSvg import QSvgGenerator
 from .hatch import fill_segments
 from .material import layer_pass_plan
 from .model import CUT_LAYER_FIELDS, FILLABLE_KINDS, Document, Layer, Shape
-from .shape_paths import shape_path
+from .shape_paths import shape_path, shape_polygons
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
 
 
@@ -59,7 +59,7 @@ def shape_fill_segments(shape: Shape, layer: Layer):
     """
     if layer.fill_mode == "none" or shape.kind not in FILLABLE_KINDS:
         return []
-    polys = [[(p.x(), p.y()) for p in poly] for poly in shape_path(shape).toSubpathPolygons()]
+    polys = shape_polygons(shape)
     return fill_segments(polys, layer.fill_mode, layer.line_interval_mm, layer.hatch_angle,
                          layer.hatch_bidirectional)
 
@@ -67,7 +67,8 @@ def shape_fill_segments(shape: Shape, layer: Layer):
 def job_layers(doc: Document) -> list[JobLayer]:
     """Ebenen in Ausführungsreihenfolge (unterste Ebene zuerst).
 
-    Ellipsen und Text werden in Polylinien zerlegt (Qt-Flattening).
+    Ellipsen, Kurven und Text werden in Polylinien zerlegt
+    (:func:`shape_paths.shape_polygons`, Sehnenfehler ≤ 0,02 mm).
     Ausgeblendete Ebenen werden nicht gelasert.
     """
     result: list[JobLayer] = []
@@ -84,13 +85,13 @@ def job_layers(doc: Document) -> list[JobLayer]:
                 fills.append([(to_machine(*a), to_machine(*b)) for a, b in segs])
             if s.kind in FILLABLE_KINDS and layer.fill_mode != "none" and not layer.hatch_outline:
                 continue  # nur Füllung, keine Kontur
-            path = shape_path(s)
             if s.kind == "line":
+                path = shape_path(s)
                 a, b = path.elementAt(0), path.elementAt(1)
                 polys.append([to_machine(a.x, a.y), to_machine(b.x, b.y)])
                 continue
-            for poly in path.toSubpathPolygons():
-                polys.append([to_machine(p.x(), p.y()) for p in poly])
+            for poly in shape_polygons(s):
+                polys.append([to_machine(x, y) for x, y in poly])
         if polys or fills:
             plan = layer_pass_plan(layer)
             result.append(JobLayer(layer.id, layer.name, layer.power, layer.speed,

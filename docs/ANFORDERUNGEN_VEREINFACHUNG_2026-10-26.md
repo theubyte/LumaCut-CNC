@@ -552,3 +552,39 @@ sind damit in der EXE.
 AI-Fehlertexts). Tests: `tests/test_import_formats.py` mit kleinen Fixtures in
 `tests/fixtures/import/` (`xtool_sample.xcs`, `rechteck.eps`; `.xs` und AI werden im Test gebaut,
 Ghostscript wird gemockt, echter Lauf nur wenn installiert).
+
+### 9.3 Glatte Kreise und Ovale (Canvas, 2026-10-26)
+
+**Befund vorher** (gemessen, Ellipse w × 0,6·w): G-Code und Schraffur nutzten Qts Abflachung
+in mm – Ø 5 mm = **8 Segmente**, Ø 100 mm = 36; Abweichung **≈ 0,17–0,21 mm** (sichtbar eckig).
+SVG-Export: 4 Bézierbögen (Formfehler 2,7·10⁻⁴·r, Ø 360 mm ≈ 0,05 mm). „In Pfad“: 8
+Catmull-Rom-Knoten, ≈ 0,85 % von r (Ø 100 mm ≈ 0,4 mm). SVG-/DXF-/PDF-Import: 0,05 mm.
+
+**Jetzt** – eine gemeinsame Abflachung `shape_paths.shape_polygons(shape, tol=0,02)`:
+
+| Stelle | Umsetzung | Abweichung (Test) |
+|---|---|---|
+| Werkzeuge Ellipse/Kreis, Anzeige | `add_ellipse`: 8 kubische Bögen à 45° statt 4 | ≤ 0,002 mm bei Ø 360 mm |
+| SVG-Export | dieselben 8 Bögen als echte `C`-Kurven (keine Polylinie) | wie Anzeige |
+| G-Code / Pfadvorschau (`export.job_layers`) | Ellipse analytisch, gleichmäßig im Parameter: n = ⌈π / acos(1 − 0,02/R)⌉, R = größere Halbachse, **min. 64**, Vielfaches von 4; sonst Qt-Abflachung bei 25-facher Auflösung | ≤ 0,02 mm (+ 0,001 Rundung) |
+| Schraffur-Beschnitt (`shape_fill_segments`) | dieselben Polylinien | Streckenenden ≤ 0,02 mm auf dem Kreis |
+| Boole / Versatz (`pathops`) | Eingabe 0,01 mm; runde Ecken beim Versatz: `quad_segs` adaptiv (Bogenfehler 0,005 mm); + Vereinfachung 0,005 mm | ≤ 0,02 mm (Versatz ±, Rechteck-Ecken r 40, Vereinigung) |
+| Gedreht / skaliert | Drehung um die Boxmitte in die Punkte gerechnet, Segmente aus der aktuellen Größe | geprüft 300×40 @37°, 7×55 @−120°, 250×90 @63° |
+| „In Pfad“ (Knoten) | 16–32 Knoten nach Größe (Fehler ≈ 36·r/n⁴) | ≤ 0,02 mm (Ø 360 mm → 24 Knoten) |
+| Import SVG/DXF/PDF/xTool | Standardtoleranz 0,02 mm (vorher 0,05), Bézierschritt 0,2 mm | Kreis r 80: ≤ 0,02 mm |
+
+**G2/G3:** bewusst **nicht**. `pi400/marlin/transport.py` ließe G2/G3 durch, aber
+`heightmap.py` und `focus_compensation.py` lehnen Bögen ab („in der App als Linien ausgeben“)
+und `smart_cam.py` kann sie nicht analysieren – Höhenausgleich und Platzierung brauchen Geraden.
+Darum nur G1-Segmente.
+
+**G-Code-Größe:** Ø 360 mm-Kreis 212 Segmente (< 10 kB), Ø 2 mm 64. Text wird jetzt ebenfalls
+fein abgeflacht (Beispiel „LumaCut Studio“ 120 × 30 mm: 388 → 1399 Zeilen, 11 → 42 kB) – noch
+klein gegenüber Bild-Gravuren; gerade Strecken (Rechteck, Polygon) bekommen keine Zusatzpunkte.
+
+**Code:** `lumacut_canvas/shape_paths.py` (`add_ellipse`, `ellipse_segments`, `ellipse_polygon`,
+`shape_polygons`, `FLATTEN_TOL_MM`), `export.py`, `pathops.py`, `nodes.py`
+(`ellipse_node_count`). **Fremde Dateien (minimal):** `lumacut_import/vector.py` (Import-Agent:
+Standardtoleranz 0,05 → 0,02 mm, Bézierschritt wie `pdf.py`), `tests/test_nodes.py`
+(erwartete Knotenzahl 8 → 16). Tests: `tests/test_smooth_ellipse.py` (misst Stützpunkte und
+Sehnenmitten gegen die echte Ellipse).

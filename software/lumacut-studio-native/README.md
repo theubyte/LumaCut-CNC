@@ -94,6 +94,11 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Feld „Winkel“ in der Eigenschaftsleiste, Strg+R / Strg+Umschalt+R = ±90°.
   Gedrehte Objekte lassen sich weiter verschieben und entlang ihrer Kanten skalieren;
   Drehung wirkt in Datei, SVG/PNG-Export und G-Code.
+- **Glatte Kreise/Ellipsen:** Anzeige und SVG-Export nutzen echte Kurven (8 Bézierbögen,
+  Formfehler ≤ 0,001 mm bei Ø 360 mm). G-Code, Schraffur-Beschnitt und Boole/Versatz zerlegen
+  über `shape_paths.shape_polygons` mit Sehnenfehler **≤ 0,02 mm** (Ellipse analytisch,
+  ≥ 64 Segmente, Ø 360 mm ≈ 212). Nur G1-Geraden, kein G2/G3 (Höhenausgleich und Analyse auf
+  dem Pi lehnen Bögen ab). Siehe Anforderungen §9.3.
 - **Gruppen:** Strg+G gruppiert, Strg+Umschalt+G löst eine Ebene der Gruppierung
   (verschachtelte Gruppen möglich). Ein Klick wählt immer die ganze Gruppe;
   Verschieben, Skalieren, Drehen, Löschen und Duplizieren wirken auf die Gruppe.
@@ -311,6 +316,7 @@ Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
   Knoten) und „In Pfad“ für Rechteck, Ellipse und Linie (auch per Doppelklick).
 - Gedrehte Objekte behalten ihre Drehung; Kurven landen gespeichert in `curves`
   und gehen wie alles andere über `shape_path` in Schraffur, Export und G-Code.
+  „In Pfad“ macht aus einer Ellipse 16–32 Kurvenknoten (Abweichung ≤ 0,02 mm).
 
 ### Pfad: Boole-Operationen, Verschweißen, Versatz, Text in Pfade
 

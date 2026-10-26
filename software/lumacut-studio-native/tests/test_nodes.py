@@ -121,8 +121,8 @@ def test_convert_rect_ellipse_line(doc):
     assert pathops.shape_area(pr).area == pytest.approx(200, rel=1e-6)
     e = doc.add_shape(Shape("ellipse", Geometry(0, 0, 40, 20), doc.active_layer_id))
     pe = nodes.to_editable(e)
-    assert len(pe.points) == 8 and len(pe.curves) == 8
-    assert pathops.shape_area(pe).area == pytest.approx(pathops.shape_area(e).area, rel=0.01)
+    assert len(pe.points) == 16 and len(pe.curves) == 16  # §9.3: mind. 16 Knoten
+    assert pathops.shape_area(pe).area == pytest.approx(pathops.shape_area(e).area, rel=1e-3)
     ln = doc.add_shape(Shape("line", Geometry(30, 20, -10, 5), doc.active_layer_id))
     pl = nodes.to_editable(ln)
     assert pl.kind == "path"

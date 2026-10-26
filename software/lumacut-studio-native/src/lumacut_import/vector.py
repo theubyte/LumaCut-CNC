@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from lumacut_canvas.workarea import WORK_HEIGHT_MM
 
-DEFAULT_TOLERANCE_MM = 0.05
+DEFAULT_TOLERANCE_MM = 0.02  # Sehnenfehler wie G-Code (Anforderungen §9.3), vorher 0,05
 MAX_SEGMENTS_PER_CURVE = 2000
 PX_PER_MM = 96.0 / 25.4  # svgelements rechnet in CSS-px (96 ppi)
 
@@ -44,9 +44,10 @@ def _segments_for(length_mm: float, radius_mm: float | None, tol: float) -> int:
     if radius_mm and radius_mm > tol:
         step = 2.0 * math.sqrt(max(tol * (2 * radius_mm - tol), 1e-12))
     else:
-        # Bézier ohne bekannten Radius: 0,5-mm-Schritte halten den Sehnenfehler
-        # ab ~0,6 mm Krümmungsradius unter 0,05 mm.
-        step = 0.5
+        # Bézier ohne bekannten Radius: Schritt s → Sehnenfehler ≈ s²/(8·R);
+        # 0,5 mm (tol ≥ 0,05) bzw. 10·tol (0,2 mm bei 0,02: ≤ 0,02 mm ab R ≈ 0,25 mm),
+        # wie pdf.py.
+        step = 0.5 if tol >= 0.05 else max(0.05, 10 * tol)
     return int(min(MAX_SEGMENTS_PER_CURVE, max(8, math.ceil(length_mm / step))))
 
 

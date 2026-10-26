@@ -23,7 +23,17 @@ from .shape_paths import curve_controls, geometry_transform
 
 EDITABLE_KINDS = ("polygon", "path")
 CONVERTIBLE_KINDS = ("rect", "ellipse", "line")
-ELLIPSE_NODES = 8            # Ellipse → 8 Kurvenknoten (Abweichung < 0,5 %)
+ELLIPSE_NODES = 16           # Ellipse → mind. 16 Kurvenknoten (Abweichung ≤ 0,055 % von r)
+MAX_ELLIPSE_NODES = 32
+# Catmull-Rom-Kreis aus n Knoten weicht um ≈ 36·r/n⁴ ab (gemessen); so viele
+# Knoten, dass ≤ 0,02 mm bleibt (Ø 360 mm → 24 Knoten), §9.3.
+_CATMULL_CIRCLE_ERR = 36.5
+
+
+def ellipse_node_count(w: float, h: float, tol: float = 0.02) -> int:
+    r = max(abs(w), abs(h)) / 2.0
+    n = math.ceil((_CATMULL_CIRCLE_ERR * r / tol) ** 0.25) if r > 0 else ELLIPSE_NODES
+    return min(MAX_ELLIPSE_NODES, max(ELLIPSE_NODES, -(-n // 4) * 4))
 CURVE_SAMPLES = 24           # Abtastung eines Kurvensegments für Treffer/Einfügen
 
 
@@ -272,7 +282,7 @@ def to_editable(shape: Shape) -> Shape:
         return replace(shape, kind="polygon", geom=g.copy(),
                        points=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), rings=(), curves=())
     if shape.kind == "ellipse":
-        n = ELLIPSE_NODES
+        n = ellipse_node_count(g.w, g.h)
         pts = tuple((0.5 + 0.5 * math.cos(2 * math.pi * i / n), 0.5 + 0.5 * math.sin(2 * math.pi * i / n))
                     for i in range(n))
         return replace(shape, kind="polygon", geom=g.copy(), points=pts, rings=(), curves=tuple(range(n)))
