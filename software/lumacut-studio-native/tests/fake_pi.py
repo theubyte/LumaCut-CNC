@@ -15,7 +15,9 @@ STATUS = {
     "exhaust": False, "laser_armed": False, "laser_cooling_fan_on": False,
     "emergency_latched": False, "workpiece_surface_z": None,
     "laser_focus_z": None, "probe_xy_offset_mm": [-23.0, 15.0],
-    "job": {"file": "", "state": "idle", "line": 0, "total": 0, "error": ""},
+    # Same keys as web.py ``job`` (no "phase": the real Pi sends none).
+    "job": {"file": "", "state": "idle", "line": 0, "total": 0, "error": "",
+            "probe": None},
     "frame": {"state": "idle", "mode": "", "line": 0, "total": 0, "error": ""},
     "activity": "idle",
     # Job origin support (#16); an older Pi has no "origin" key.
@@ -220,14 +222,30 @@ class FakePi:
         with self.lock:
             self.actions.discard("autorun")
 
+    def set_features(self, *names: str) -> None:
+        """``features`` like web.py FEATURES (e.g. "autorun_mesh",
+        "materials"); no names = drop the key like an older Pi. Opt-in so
+        tests of the Studio-side mesh path keep their behaviour."""
+        with self.lock:
+            if names:
+                self.status["features"] = list(names)
+            else:
+                self.status.pop("features", None)
+
     def set_job_phase(self, state: str, probe: tuple[int, int] | None = None,
-                      phase: str | None = None, file: str = "a.gcode") -> None:
-        """Mirror the one-click status of ZUSAMMENARBEIT §4: job.state
-        homing/probing/running/complete/error, job.probe while probing and an
-        optional finer job.phase (focusing/parking)."""
+                      phase: str | None = None, file: str = "a.gcode",
+                      line: int | None = None, total: int | None = None) -> None:
+        """Mirror the one-click status of web.py ``_execute_job``: job.state
+        homing/probing/running/complete/error/aborted and job.probe while
+        probing. The real Pi sends no job.phase (it parks while "running"
+        with line == total); ``phase`` simulates a finer future Pi."""
         with self.lock:
             job = dict(self.status.get("job") or {})
             job.update({"file": file, "state": state})
+            if line is not None:
+                job["line"] = line
+            if total is not None:
+                job["total"] = total
             job.pop("probe", None)
             job.pop("phase", None)
             if probe is not None:

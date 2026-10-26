@@ -78,6 +78,8 @@ def wire_anchor(anchor: str, convention: str | None) -> str:
     if convention == COORD_CONVENTION or anchor not in ("tl", "tr", "bl", "br"):
         return anchor
     return anchor[0] + ("r" if anchor[1] == "l" else "l")
+#: Pi feature: op=autorun probes a height map over the whole motif.
+FEATURE_AUTORUN_MESH = "autorun_mesh"
 #: Queue item states on the Pi (web.py job_queue, #17).
 QUEUE_ITEM_STATES = ("queued", "running", "done", "error", "skipped", "aborted")
 #: Queue states: idle, running, pausing (stops after the current job),
@@ -201,12 +203,19 @@ class JobState:
             return cls()
         state = str(data.get("state") or "idle")
         probe = data.get("probe") if isinstance(data.get("probe"), dict) else {}
+        line, total = _int(data.get("line")), _int(data.get("total"))
+        phase = str(data.get("phase") or "")
+        if not phase:
+            # The Pi (web.py _execute_job) sends no job.phase: it drains the
+            # last streamed moves and parks while still "running" with
+            # line == total, so that is shown as "parking".
+            phase = "parking" if state == "running" and 0 < total <= line else state
         return cls(file=str(data.get("file") or ""),
                    state=state,
-                   line=_int(data.get("line")),
-                   total=_int(data.get("total")),
+                   line=line,
+                   total=total,
                    error=str(data.get("error") or ""),
-                   phase=str(data.get("phase") or state),
+                   phase=phase,
                    probe_done=_int(probe.get("done")),
                    probe_total=_int(probe.get("total")))
 
@@ -345,7 +354,12 @@ class MachineStatus:
     stale_ms: int | None = 0
     #: Anchor/axis convention of the Pi (None = older Pi, see wire_anchor).
     coord_convention: str | None = None
+    #: Capability flags of the Pi (web.py FEATURES, e.g. "autorun_mesh").
+    features: tuple[str, ...] = ()
     raw: dict = field(default_factory=dict, repr=False)
+
+    def has_feature(self, name: str) -> bool:
+        return name in self.features
 
     @property
     def framing(self) -> bool:
@@ -409,8 +423,18 @@ class MachineStatus:
             stale_ms=_stale_ms(data.get("stale_ms"), data),
             coord_convention=(data.get("coord_convention")
                               if isinstance(data.get("coord_convention"), str) else None),
+            features=_features(data.get("features")),
             raw=data,
         )
+
+
+def _features(value: Any) -> tuple[str, ...]:
+    """``features`` as list (current Pi) or {name: bool} map; else none."""
+    if isinstance(value, dict):
+        return tuple(str(k) for k, v in value.items() if v)
+    if isinstance(value, (list, tuple)):
+        return tuple(str(v) for v in value if isinstance(v, str))
+    return ()
 
 
 _CORE_FIELDS = ("connected", "homed", "position", "owner", "emergency_latched")
@@ -794,7 +818,14 @@ class LumaCutClient:
 
     def autorun_job(self, name: str, x: float | None = None,
                     y: float | None = None, placement: bool = False) -> str:
-        """One-click: home → probe under motif centre → focus → job → park."""
+        """One-click op=autorun: the Pi homes if needed, probes, lets the
+        focus follow the surface, runs the job and parks.
+
+        A Pi with feature ``autorun_mesh`` probes a grid over the motif
+        (status ``job.probe`` = done/total); an older autorun Pi probes one
+        point (the motif centre or ``x``/``y``). ``placement`` runs the job
+        as placed by ``place_job`` (origin "current"/"user").
+        """
         _check_job_name(name)
         if (x is None) != (y is None):
             raise ValueError("Abtastpunkt: X und Y gemeinsam angeben")

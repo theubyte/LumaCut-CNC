@@ -4,7 +4,8 @@ Public integration points for the main window (and other panels):
     MachinePanel.connection_changed(state, text)  – for a toolbar badge
     MachinePanel.emergency_stop()                 – toolbar / shortcut
     MachinePanel.start_job()                      – toolbar "Start Job"
-    MachinePanel.autorun_job()                    – "Auftrag starten" (one click)
+    MachinePanel.autorun_job()                    – "Datei-Auftrag starten" (one click)
+    MachinePanel.autorun_task(name)               – placed op=autorun for the main Start
     MachinePanel.set_job_file(path)               – select a G-code file
     MachinePanel.send_gcode(name, text, start, autorun) – export from the canvas
     MachinePanel.frame_gcode(text, mode)          – laser-off outline (op=frame)
@@ -31,7 +32,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
 
 from . import settings as settings_store
 from .client import (ANCHORS, DEFAULT_ANCHOR, wire_anchor, FRAME_MODES, JOB_SUFFIXES, JOG_STEPS, ORIGIN_MODES,
-                     TRANSIENT_OWNERS, ApiError, LumaCutClient,
+                     FEATURE_AUTORUN_MESH, TRANSIENT_OWNERS, ApiError, LumaCutClient,
                      MachineStatus, normalize_base_url)
 from .worker import CommandRunner, ConnState, StatusPoller
 
@@ -63,6 +64,12 @@ PHASE_NAMES = {"idle": "Bereit", "homing": "Referenzfahrt", "probing": "Abtasten
                "focusing": "Fokus einstellen", "running": "Läuft", "parking": "Parken",
                "complete": "Fertig", "aborted": "Abgebrochen", "error": "Fehler"}
 
+AUTORUN_LABEL = "Datei-Auftrag starten"
+AUTORUN_TIP = ("Gewählte/gesendete Datei automatisch: Referenzfahrt (nur wenn nötig) → "
+               "Abtasten → Fokus → Auftrag → Parken. Für Entwürfe aus der Zeichenfläche "
+               "den großen „Start“ der Hauptansicht benutzen.")
+OLD_PI_MESH = ("Pi-Dienst ohne Höhenkarte (autorun_mesh): er tastet nur einen Punkt "
+               "in der Motivmitte ab – Pi aktualisieren")
 POSITION_HINT = ("Maschinenkoordinaten in mm: X0/Y0 = Endschalter-Ecke oben rechts, "
                  "X wächst nach links, Y nach vorne (Tür). Arbeitsfläche = X30–390 / Y30–370.")
 OLD_PI_ORIGIN = "Pi-Dienst zu alt: nur absolute Aufträge – Pi aktualisieren"
@@ -269,11 +276,10 @@ class MachinePanel(QWidget):
                                      "Referenzfahrt und Abtasten (op=start)")
         # Main path: one button, the Pi does home (if needed) → probe → focus
         # → job → park (op=autorun, ZUSAMMENARBEIT §4).
-        self.autorun_button = QPushButton("Auftrag starten")
-        self.autorun_button.setObjectName("primary")
-        self.autorun_button.setToolTip("Referenzfahrt (nur wenn nötig) → Abtasten → Fokus "
-                                       "→ Auftrag → Parken. Sendet die gewählte Datei "
-                                       "vorher, falls nötig.")
+        # The main window's big "Start" (main view, one-click controller) is
+        # the start for canvas designs; this one runs the chosen/sent file.
+        self.autorun_button = QPushButton(AUTORUN_LABEL)
+        self.autorun_button.setToolTip(AUTORUN_TIP)
         self.abort_button = QPushButton("Abbrechen")
         self.send_button.clicked.connect(self.send_job)
         self.start_button.clicked.connect(self.start_job)
@@ -664,6 +670,9 @@ class MachinePanel(QWidget):
         foreign = bool(s and s.foreign_owner)
         for b in self._control_buttons:
             b.setEnabled(idle)
+        self.autorun_button.setToolTip(
+            AUTORUN_TIP if s is None or s.has_feature(FEATURE_AUTORUN_MESH)
+            else AUTORUN_TIP + "\n" + OLD_PI_MESH)
         if idle and s is not None:
             self.reset_button.setEnabled(s.emergency_latched)
             self.abort_button.setEnabled(job_active or framing)
@@ -971,13 +980,17 @@ class MachinePanel(QWidget):
             self._show_message("Nicht mit dem Pi verbunden", WARN)
             return
         client = self._client
+        # One-click follows the chosen job origin like the panel button.
+        origin, anchor = self.job_origin() if autorun else ("absolute", "")
+        if origin != "absolute" and not self._origin_ready():
+            return
 
         def task(gen: int) -> str:
             message = client.upload_job(name, gcode)
             if not self._mark_uploaded(gen, name):
                 return message + " (inzwischen anderer Auftrag gewählt)"
             if autorun:
-                return client.autorun_job(name)
+                return self._autorun_call(client, name, origin, anchor)
             if start:
                 message = client.start_job(name)
             return message
@@ -1177,10 +1190,13 @@ class MachinePanel(QWidget):
         if origin != "absolute" and not self._origin_ready():
             return
         label = self._job_path.name if upload else self._uploaded
+        s = self._status
+        mesh_note = ("" if s is None or s.has_feature(FEATURE_AUTORUN_MESH)
+                     else "\n\nHinweis: " + OLD_PI_MESH + ".")
         if not self._confirm("Auftrag starten",
                              "Die Maschine referenziert bei Bedarf, tastet ab, stellt den "
                              "Fokus ein, lasert %s und parkt danach. Bereich frei, Material "
-                             "eingelegt, Schutzbrille?" % label):
+                             "eingelegt, Schutzbrille?%s" % (label, mesh_note)):
             return
         client = self._client
         if upload:
@@ -1196,6 +1212,21 @@ class MachinePanel(QWidget):
         name = self._uploaded
         self._run("Auftrag starten",
                   lambda: self._autorun_call(client, name, origin, anchor))
+
+    def autorun_task(self, name: str) -> Callable[[], str]:
+        """For the one-click controller (Scan Probe): call in the GUI thread
+        after uploading ``name``; returns the worker-thread call that places
+        the job at the chosen origin/anchor (unless "Absolut") and starts
+        op=autorun with ``placement=1``. Raises RuntimeError when the Pi
+        cannot place jobs (old Pi) or nothing is connected."""
+        client = self._client
+        if client is None:
+            raise RuntimeError("Nicht mit dem Pi verbunden")
+        origin, anchor = self.job_origin()
+        s = self._status
+        if origin != "absolute" and (s is None or not s.origin.supported):
+            raise RuntimeError(OLD_PI_ORIGIN)
+        return lambda: self._autorun_call(client, name, origin, anchor)
 
     def _autorun_call(self, client: LumaCutClient, name: str, origin: str,
                       anchor: str) -> str:
