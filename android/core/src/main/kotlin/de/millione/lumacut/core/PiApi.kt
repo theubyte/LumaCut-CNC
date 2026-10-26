@@ -120,8 +120,12 @@ class PiClient(
     private fun url(vararg segments: String): HttpUrl =
         HttpUrl.Builder().scheme("http").host(host).port(port).apply { segments.forEach { addPathSegment(it) } }.build()
 
-    private suspend fun call(request: Request, longRunning: Boolean = false): String = withContext(Dispatchers.IO) {
-        val client = if (longRunning) http.newBuilder().readTimeout(300, TimeUnit.SECONDS).build() else http
+    private suspend fun call(request: Request, longRunning: Boolean = false, callTimeoutSec: Long = 0): String = withContext(Dispatchers.IO) {
+        val client = when {
+            longRunning -> http.newBuilder().readTimeout(300, TimeUnit.SECONDS).build()
+            callTimeoutSec > 0 -> http.newBuilder().callTimeout(callTimeoutSec, TimeUnit.SECONDS).build()
+            else -> http
+        }
         try {
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
@@ -149,7 +153,7 @@ class PiClient(
     }.getOrNull() ?: "Erledigt"
 
     suspend fun status(): MachineStatus =
-        json.decodeFromString(MachineStatus.serializer(), call(Request.Builder().url(url("api", "status")).build()))
+        json.decodeFromString(MachineStatus.serializer(), call(Request.Builder().url(url("api", "status")).build(), callTimeoutSec = 5))
 
     suspend fun jobs(): List<JobFile> =
         json.decodeFromString(JobList.serializer(), call(Request.Builder().url(url("api", "jobs")).build())).files

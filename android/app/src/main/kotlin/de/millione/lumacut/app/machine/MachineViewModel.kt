@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
@@ -80,17 +81,15 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
     private val _discovery = MutableStateFlow(DiscoveryState())
     val discovery: StateFlow<DiscoveryState> = _discovery.asStateFlow()
     private var scanJob: Job? = null
-    private var offlineSince = 0L
-    private var outagePrompted = false
-    private var everOnline = false
+    private val pollLock = Mutex()
+    private var failures = 0
+    private var calmNoticeShown = false
 
     private val _materials = MutableStateFlow(MaterialState(0, loadCachedMaterials()))
     val materials: StateFlow<MaterialState> = _materials.asStateFlow()
 
-    init {
-        connect(_host.value, quiet = true)
-        if (_host.value.isBlank()) openDiscovery()
-    }
+    // The saved address is simply used; nothing is searched or switched automatically.
+    init { connect(_host.value, quiet = true) }
 
     fun notify(text: String, error: Boolean = false) { _notices.tryEmit(Notice(text, error)) }
 
@@ -105,7 +104,7 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
         poller = viewModelScope.launch {
             while (isActive) {
                 poll()
-                delay(1000)
+                delay(1500)
             }
         }
         refreshJobs()
@@ -115,32 +114,43 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
     fun clientOrNotify(): PiClient? = client ?: run { notify("Erst die Pi-Adresse unter Einstellungen eintragen", true); null }
 
     /** Fresh status right now (scan and probe runs wait on it). */
-    suspend fun refreshStatus(): MachineStatus? { poll(); return _status.value }
+    suspend fun refreshStatus(): MachineStatus? { poll(wait = true); return _status.value }
 
-    private suspend fun poll() {
+    /** One status request at a time: [wait] = wait for a running one (fresh data needed), otherwise skip when one is running. */
+    private suspend fun poll(wait: Boolean = false) {
+        if (wait) pollLock.lock() else if (!pollLock.tryLock()) return
+        try { pollOnce() } finally { pollLock.unlock() }
+    }
+
+    private suspend fun pollOnce() {
         val c = client ?: return
         try {
             val s = c.status()
+            if (c !== client) return          // the address was changed while the request ran
             _status.value = s
             _online.value = true
-            everOnline = true; offlineSince = 0L; outagePrompted = false
+            failures = 0; calmNoticeShown = false
             if (!_materials.value.fromPi && System.currentTimeMillis() - materialsTriedAt > 15_000) refreshMaterials()
             if (s.job.state == "error" && s.job.error.isNotBlank() && s.job.error != lastJobError) {
                 lastJobError = s.job.error
                 notify("Auftrag abgebrochen: ${s.job.error}", true)
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
-            _online.value = false
-            // First failure after start, or the link has been gone for 10 s: offer the search once per outage.
-            val now = System.currentTimeMillis()
-            if (offlineSince == 0L) offlineSince = now
-            if (!outagePrompted && (!everOnline || now - offlineSince > 10_000)) { outagePrompted = true; openDiscovery() }
+            // Offline only after 3 failed requests in a row (about 5 s); a running job is never touched by this.
+            failures++
+            if (failures >= 3) {
+                _online.value = false
+                if (_status.value?.job?.active == true && !calmNoticeShown) {
+                    calmNoticeShown = true
+                    notify("Verbindung zum Pi kurz weg – der Auftrag läuft auf dem Pi weiter.")
+                }
+            }
         }
     }
 
     /* ---------- find the laser in the Wi-Fi ---------- */
-
-    fun openDiscovery() { scanNetwork() }
 
     fun scanNetwork() {
         scanJob?.cancel()

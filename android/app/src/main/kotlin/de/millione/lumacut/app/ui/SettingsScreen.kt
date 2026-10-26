@@ -59,26 +59,7 @@ fun SettingsScreen(machine: MachineViewModel) {
 
     Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            LcCard {
-                CardTitle("Verbindung")
-                androidx.compose.material3.OutlinedTextField(
-                    ip, { ip = it.filter { c -> c.isDigit() || c == '.' } }, label = { Text("IP-Adresse des Pi") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    textStyle = LcTypography.bodyLarge.merge(NumberStyle),
-                )
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    LcButton("Verbinden", { machine.connect(ip) }, kind = BtnKind.PRIMARY)
-                    LcButton("Laser suchen", { machine.openDiscovery() }, icon = LcIcons.refresh)
-                }
-                Spacer(Modifier.height(10.dp))
-                SmallText(when {
-                    host.isBlank() -> "Noch nicht verbunden. Die Adresse steht in der Fritzbox / im Router (z. B. 192.168.2.89)."
-                    online == true -> "Verbunden mit $host · Controller ${if (status?.connected == true) "bereit" else "nicht verbunden"}"
-                    online == false -> "Keine Antwort von $host"
-                    else -> "Verbinde …"
-                })
-            }
+            LaserCard(machine)
             LcCard {
                 CardTitle("Arbeitsbereich")
                 SmallText("360 × 340 mm, Nullpunkt oben links. Der 30-mm-Rand der Maschine ist für den Laser reserviert (Parken, Referenzieren) und wird nicht angezeigt – dort wird nie gelasert, auch kein Überlauf.")
