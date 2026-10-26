@@ -294,3 +294,45 @@ Still open:
   threshold.
 - Windows hardware test of cut options, PDF import, image trace and the rebuilt exe – needs a
   Windows machine with the laser.
+
+## 12. Status update 2026-10-26 (review round 6)
+
+Done in this round (review side, `lumacut_import` only, no new dependencies):
+
+- **Image trace hang fixed** (`lumacut_import.trace`): the slow cases were GEOS' hole handling and
+  topology-preserving simplify, which grow roughly quadratically with the number of holes in one
+  part. Parts with more than 64 holes now take a ring-by-ring path: shell and holes are grown /
+  shrunk separately, touching holes are merged via an STRtree, properly contained holes are
+  inserted directly (only the rest go through one difference), and each ring is simplified on its
+  own with an STRtree conflict check (conflicting rings fall back to the raw outline). Parts with
+  ≤ 64 holes keep the old code path, so the output of all existing cases is unchanged. A
+  1000×1000 dot grid with ~15 000 holes now takes ~0.9 s instead of ~15 s, and the 2000×2000
+  smooth-noise benchmark dropped from ~11.5 s worst case to ~2.8 s.
+- **Time budget**: cheap pre-pass (part count) before any shapely work, image size cap
+  (`MAX_PIXELS`, 40 MP) and a deadline (`time_limit_s`, 60 s default) that stops with a clear
+  message instead of hanging. The live preview runs on ≤ 420 px with a 2 s limit, so the dialog
+  cannot freeze; the final trace shows a wait cursor.
+- **Auto threshold** (Otsu): `TraceSettings.auto_threshold` (default off, so behaviour is unchanged)
+  picks the threshold after smoothing; the dialog has an „Auto“ checkbox next to „Schwellwert“
+  that disables the spin box and shows the detected value in the preview text.
+- Centre-line trace was **not** started: it needs skeletonisation plus graph-to-polyline conversion,
+  which is not a small change.
+
+Tests: `tests/test_trace.py` now has 18 (6 new: many-holes speed and exactness, smooth noise
+finishes or is refused within the time limit, time limit and size cap, preview responsiveness on a
+9 MP noisy image, Otsu engine, dialog „Auto“ checkbox).
+
+Still open:
+
+- Unit toggle mm/inch – Canvas.
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Variable text evaluated at send time with an auto-incrementing counter (CSV/merge, counter
+  persisted per job) – the batch grid covers the common case; decide if the job-time variant is
+  wanted.
+- Min/max power with speed-dependent corner power (LightBurn) – needs a planner change and checking
+  what the SKR's Marlin build supports (`LASER_POWER_TRAP` / inline power); not started.
+- Trace: no centre-line trace and no curve fitting (outlines are polygons). Masks with more than
+  400 000 raw edge points (very detailed or noisy images) are still refused with a hint; raising
+  that limit is possible now but costs memory and time.
+- Windows hardware test of cut options, PDF import, image trace and the rebuilt exe – needs a
+  Windows machine with the laser.
