@@ -25,6 +25,10 @@ Die Konturen liegen auf den Pixelkanten: die Maske wird 2× hochgerechnet
 Randpixel-Mitten, shapely legt sie ¼ Bildpixel nach außen (Gehrung). Der Bildrand wird mit
 Weiß aufgefüllt, damit Flächen am Rand geschlossene Konturen ergeben.
 
+Mode ``centerline`` (``TraceSettings.mode``) returns open centre lines for line
+art instead of outlines (``TraceResult.lines`` → ``path`` objects), see
+:mod:`.centerline`.
+
 Laufzeit: Bilder über ``MAX_PIXELS`` und Masken mit zu vielen Randpunkten oder
 Teilen werden vor jeder shapely-Arbeit abgelehnt. Teile mit vielen Löchern
 (> ``MANY_HOLES``) werden Ring für Ring verbreitert und vereinfacht (STRtree
@@ -49,6 +53,10 @@ THRESHOLD_RANGE = (1, 255)
 SMOOTHING_RANGE = (0.0, 10.0)      # Sigma in Bildpixeln
 TOLERANCE_RANGE = (0.0, 2.0)       # mm
 MIN_AREA_RANGE = (0.0, 100.0)      # mm²
+# Trace modes: outline (filled parts with holes) or centre line (open strokes, line art)
+MODE_OUTLINE = "outline"
+MODE_CENTERLINE = "centerline"
+MODES = (MODE_OUTLINE, MODE_CENTERLINE)
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -63,6 +71,7 @@ class TraceSettings:
     tolerance_mm: float = 0.05      # Vereinfachung (0 = jeder Randpixel)
     min_area_mm2: float = 0.2       # kleinere Flecken/Löcher fallen weg
     auto_threshold: bool = False    # Schwellwert automatisch (Otsu) statt ``threshold``
+    mode: str = MODE_OUTLINE        # MODE_OUTLINE or MODE_CENTERLINE (see .centerline)
 
     def normalized(self) -> "TraceSettings":
         return TraceSettings(
@@ -71,7 +80,8 @@ class TraceSettings:
             smoothing_px=round(_clamp(float(self.smoothing_px), *SMOOTHING_RANGE), 2),
             tolerance_mm=round(_clamp(float(self.tolerance_mm), *TOLERANCE_RANGE), 3),
             min_area_mm2=round(_clamp(float(self.min_area_mm2), *MIN_AREA_RANGE), 3),
-            auto_threshold=bool(self.auto_threshold))
+            auto_threshold=bool(self.auto_threshold),
+            mode=self.mode if self.mode in MODES else MODE_OUTLINE)
 
     @staticmethod
     def for_image(shape: Shape) -> "TraceSettings":
@@ -96,10 +106,18 @@ class TraceResult:
     parts: list[TracedPart]          # in Bildpixeln (x nach rechts, y nach unten)
     removed: int = 0                 # entfernte Flecken/Löcher
     threshold: int | None = None     # verwendeter Schwellwert (bei „Auto“: Otsu)
+    # centre-line mode: open polylines (closed loops repeat the first point at the end)
+    lines: list[Ring] = field(default_factory=list)
 
     @property
     def point_count(self) -> int:
-        return sum(len(p.outer) + sum(len(h) for h in p.holes) for p in self.parts)
+        return (sum(len(p.outer) + sum(len(h) for h in p.holes) for p in self.parts)
+                + sum(len(line) for line in self.lines))
+
+    @property
+    def count(self) -> int:
+        """Number of traced objects (parts or centre lines)."""
+        return len(self.parts) + len(self.lines)
 
 
 def decode_gray(png: bytes) -> np.ndarray:
@@ -333,6 +351,8 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
     # dann eine Fläche zwischen den Randpixel-Mitten; ¼ Pixel nach außen ergibt
     # die echte Pixelkante. Rand mit Hintergrund auffüllen (geschlossene Konturen).
     mask, thr = _mask_and_threshold(gray, st)
+    if st.mode == MODE_CENTERLINE:
+        return _trace_centerline(mask, thr, st, mx, my, deadline)
     mask = np.repeat(np.repeat(mask, 2, axis=0), 2, axis=1)
     mask = cv2.copyMakeBorder(mask, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
     found = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
@@ -421,6 +441,21 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
     return TraceResult(parts, removed, thr)
 
 
+def _trace_centerline(mask: np.ndarray, thr: int, st: TraceSettings, mx: float, my: float,
+                      deadline: float | None) -> TraceResult:
+    from .centerline import trace_centerline
+    lines, removed = trace_centerline(mask, st.tolerance_mm / min(mx, my),
+                                      st.min_area_mm2 / (mx * my), deadline)
+    points = sum(len(line) for line in lines)
+    if points > MAX_POINTS:
+        raise ValueError(f"Zu viele Punkte (> {MAX_POINTS}) – Toleranz oder "
+                         f"Mindestfläche erhöhen")
+    if len(lines) > MAX_PARTS:
+        raise ValueError(f"Zu viele Linien (> {MAX_PARTS}) – Schwellwert, Glättung "
+                         f"oder Mindestfläche anpassen")
+    return TraceResult([], removed, thr, lines)
+
+
 def image_mm_per_px(shape: Shape) -> tuple[float, float]:
     img = shape.image
     return (abs(shape.geom.w) / img.px_width, abs(shape.geom.h) / img.px_height)
@@ -454,6 +489,15 @@ def traced_shapes(shape: Shape, result: TraceResult, layer_id: str) -> list[Shap
         if max(xs) - min(xs) < 1e-6 or max(ys) - min(ys) < 1e-6:
             continue
         out.append(Shape.from_points("polygon", pts, layer_id, rings=rings))
+    for line in result.lines:
+        # centre lines stay open ``path`` objects (a closed loop repeats its first point),
+        # so a fill layer does not fill them
+        pts = to_canvas(shape, line)
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        if len(pts) < 2 or (max(xs) - min(xs) < 1e-6 and max(ys) - min(ys) < 1e-6):
+            continue
+        out.append(Shape.from_points("path", pts, layer_id))
     if len(out) > 1:
         gid = new_id()
         out = [replace(s, groups=(gid,)) for s in out]
@@ -466,4 +510,5 @@ def trace_to_shapes(shape: Shape, settings: TraceSettings, layer_id: str) -> lis
 
 __all__ = ["TraceSettings", "TraceResult", "TracedPart", "trace_gray", "trace_image",
            "traced_shapes", "trace_to_shapes", "decode_gray", "foreground_mask",
-           "image_mm_per_px", "to_canvas", "otsu_threshold", "effective_threshold"]
+           "image_mm_per_px", "to_canvas", "otsu_threshold", "effective_threshold",
+           "MODE_OUTLINE", "MODE_CENTERLINE", "MODES"]

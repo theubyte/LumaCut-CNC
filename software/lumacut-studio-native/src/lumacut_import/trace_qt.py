@@ -1,7 +1,8 @@
 """Dialog „Bild nachzeichnen“ (Alt+T, wie LightBurn „Trace Image“).
 
-Schwellwert (fest oder „Auto“ nach Otsu), Invertieren, Glättung, Toleranz
-und Mindestfläche mit Live-Vorschau (verkleinertes Bild, Konturen rot). Die
+Modus „Kontur“ (Flächen mit Löchern) oder „Mittellinie“ (Strichzeichnungen
+als offene Linien, :mod:`.centerline`), Schwellwert (fest oder „Auto“ nach
+Otsu), Invertieren, Glättung, Toleranz und Mindestfläche mit Live-Vorschau (verkleinertes Bild, Konturen rot). Die
 Vorschau rechnet auf höchstens ``PREVIEW_PX`` Pixeln mit kurzer Zeitgrenze,
 damit der Dialog auch bei großen, unruhigen Bildern nicht hängt. Übernehmen legt die
 Konturen als Polygone (Löcher als Ringe, mehrere Teile gruppiert) deckungsgleich
@@ -16,10 +17,10 @@ from dataclasses import replace
 import numpy as np
 from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygonF
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
                                QHBoxLayout, QLabel, QSpinBox, QVBoxLayout)
 
-from .trace import (MIN_AREA_RANGE, SMOOTHING_RANGE, THRESHOLD_RANGE, TOLERANCE_RANGE,
+from .trace import (MIN_AREA_RANGE, MODE_CENTERLINE, MODE_OUTLINE, SMOOTHING_RANGE, THRESHOLD_RANGE, TOLERANCE_RANGE,
                     TraceSettings, decode_gray, image_mm_per_px, trace_gray)
 
 PREVIEW_PX = 420
@@ -45,6 +46,14 @@ class TraceDialog(QDialog):
         self._mm_per_px = (mx * w / pw, my * h / ph)
 
         form = QFormLayout()
+        self.mode = QComboBox()
+        self.mode.setObjectName("trace_mode")
+        self.mode.addItem("Kontur", MODE_OUTLINE)
+        self.mode.addItem("Mittellinie", MODE_CENTERLINE)
+        self.mode.setToolTip("Kontur: Umriss jeder Fläche (Füllen/Schneiden)\n"
+                             "Mittellinie: Strichzeichnungen als einfache Linie – "
+                             "jeder Strich wird nur einmal gelasert")
+        self.mode.setCurrentIndex(max(0, self.mode.findData(st.mode)))
         self.threshold = QSpinBox()
         self.threshold.setRange(*THRESHOLD_RANGE)
         self.threshold.setValue(st.threshold)
@@ -66,6 +75,7 @@ class TraceDialog(QDialog):
         self.min_area = self._dspin(MIN_AREA_RANGE, st.min_area_mm2, 0.1, 2, " mm²")
         self.min_area.setToolTip("Flecken und Löcher kleiner als diese Fläche ignorieren")
         self.delete_image = QCheckBox("Bild danach löschen")
+        form.addRow("Modus", self.mode)
         form.addRow("Schwellwert", thr_row)
         form.addRow("", self.invert)
         form.addRow("Glättung", self.smoothing)
@@ -100,6 +110,7 @@ class TraceDialog(QDialog):
                     self.tolerance.valueChanged, self.min_area.valueChanged):
             sig.connect(lambda _v: self._timer.start())
         self.invert.toggled.connect(lambda _v: self._timer.start())
+        self.mode.currentIndexChanged.connect(lambda _v: self._timer.start())
         self.auto_threshold.toggled.connect(self._auto_toggled)
         self.update_preview()
 
@@ -121,7 +132,8 @@ class TraceDialog(QDialog):
         return TraceSettings(threshold=self.threshold.value(), invert=self.invert.isChecked(),
                              smoothing_px=self.smoothing.value(), tolerance_mm=self.tolerance.value(),
                              min_area_mm2=self.min_area.value(),
-                             auto_threshold=self.auto_threshold.isChecked()).normalized()
+                             auto_threshold=self.auto_threshold.isChecked(),
+                             mode=self.mode.currentData() or MODE_OUTLINE).normalized()
 
     def update_preview(self) -> None:
         gray = self._gray
@@ -152,6 +164,8 @@ class TraceDialog(QDialog):
             for part in res.parts:
                 for ring in [part.outer, *part.holes]:
                     p.drawPolygon(QPolygonF([QPointF(x, y) for x, y in ring]))
+            for line in res.lines:
+                p.drawPolyline(QPolygonF([QPointF(x, y) for x, y in line]))
         p.end()
         pix = QPixmap.fromImage(qimg)
         if max(pw, ph) < 240:
@@ -161,9 +175,13 @@ class TraceDialog(QDialog):
                 if res is not None and self.auto_threshold.isChecked() else "")
         if err:
             self.info.setText(err)
-        elif not res.parts:
-            self.info.setText(auto + "Keine Konturen – Schwellwert oder Invertieren ändern.")
+        elif not res.count:
+            self.info.setText(auto + "Keine Konturen – Schwellwert oder Invertieren ändern."
+                              + (" Mittellinie ist für Striche gedacht, nicht für Flächen."
+                                 if self.settings().mode == MODE_CENTERLINE else ""))
         else:
-            self.info.setText(auto + f"Vorschau: {len(res.parts)} Kontur(en), {res.point_count} Punkte"
+            what = (f"{len(res.lines)} Linie(n)" if res.lines and not res.parts
+                    else f"{len(res.parts)} Kontur(en)")
+            self.info.setText(auto + f"Vorschau: {what}, {res.point_count} Punkte"
                               + (f", {res.removed} Fleck(en) ignoriert" if res.removed else ""))
-        self.ok_button.setEnabled(err is None and res is not None and bool(res.parts))
+        self.ok_button.setEnabled(err is None and res is not None and bool(res.count))
