@@ -47,6 +47,14 @@ jobs:
           echo "LUMACUT_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
       - name: Core unit tests
         run: gradle :core:test --no-daemon --stacktrace
+      - name: Compile app (Fehler als Annotationen)
+        shell: bash
+        run: |
+          set +e
+          gradle :app:compileReleaseKotlin --no-daemon -q 2>&1 | tee "$RUNNER_TEMP/compile.log"
+          code=${PIPESTATUS[0]}
+          grep -E '^e: ' "$RUNNER_TEMP/compile.log" | head -40 | while IFS= read -r l; do echo "::error::${l#*lumacut/app/}"; done
+          exit $code
       - name: Build release APK
         run: gradle :app:assembleRelease --no-daemon --stacktrace
       - name: Name the APK

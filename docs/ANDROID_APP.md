@@ -2,16 +2,17 @@
 
 Native App (Kotlin, Jetpack Compose, Material 3), von Grund auf neu geschrieben. Sie steuert die Maschine über die Pi-API (Port 8080) und ersetzt LightBurn am Tablet. Alle Sicherheitsregeln bleiben auf dem Pi.
 
-## Bereiche
+## Bedienung: drei Schritte
 
-| Bereich | Inhalt |
+Die Leiste links führt durch den Hauptweg, mehr braucht ein Neuling nicht:
+
+| Schritt | Inhalt |
 |---|---|
-| **Werkstatt** | Live-Status (1 s), kontextabhängige Hauptaktion (Referenzieren → Abtasten → Parken), Steuerkreuz X/Y/Z mit 0,1/1/10 mm, Parken, Licht/Abluft, Notstopp quittieren, Controller-Meldungen. NOT-AUS ist immer oben rechts. |
-| **Aufträge** | Liste vom Pi, Hochladen von `.gcode`, Bahnvorschau (Laser nach Leistung abgestuft, Leerfahrten, erledigter Teil live), Dauer, Laser-/Leerweg, Abtastpunkt per Antippen, Ein-Klick-Start, Fortschritt mit Restzeit, Abbrechen, Löschen. |
-| **Editor** | Rechteck, Ellipse, Vieleck, Linie, Freihand, Text (Systemschriften), SVG- und DXF-Import, Bild-Import mit DPI aus der Datei (Graustufen/Dither/SW), Mehrfachauswahl (Antippen oder Rahmen), Gruppen, Drehgriff und Eckgriff zum Skalieren, Verschieben in 0,1/1/10 mm, Ebenen sichtbar/gesperrt/lasern, Leistung, Tempo, Durchgänge, Zeilenabstand, Überlauf, Materialstärke mit Tiefe pro Durchgang und Z-Absenkung je Durchgang (max. 3 mm), Material übernehmen, Rückgängig/Wiederholen, Zentrieren, Projekte speichern/öffnen (Autosave), Kamera-Hintergrund per Tablet-Foto, „An Laser senden“ mit Höhenkorrektur. |
-| **Arbeitsplatz** | Kopfkamera kalibrieren, Arbeitsfläche scannen (Kachelbilder → maßstäbliches Mosaik), Werkstücke markieren (aus dem Motiv oder Rahmen ziehen), Höhenmesh abtasten, geführter Ablauf Referenzieren → Scannen → Markieren → Abtasten → Fokus → Rahmen → Auftrag → Parken. |
-| **Material** | Bibliothek mit Startwerten, eigene Profile mit Tiefe pro Durchgang und Z-Absenkung anlegen/ändern/löschen. |
-| **Einstellungen** | Pi-Adresse, Fokus & Taster, SKR-Firmware flashen, Versionsinfo. |
+| **1 · Material** | Liste aus der Pi-Datenbank (`/api/materials`, gleiche Liste wie Windows-App und Web-Oberfläche), mit Suche. Antippen setzt Leistung, Tempo, Durchgänge und Z-Absenkung der Ebenen Gravieren / Markieren / Schneiden. Ohne Verbindung gilt die zuletzt gespeicherte Liste (nur lesbar). Unter „Erweitert“ lassen sich Materialwerte ändern, anlegen und löschen (`base_revision`, bei 409 wird neu geladen). |
+| **2 · Motiv** | Bild, SVG/DXF importieren, Text und Formen; verschieben, drehen, skalieren. Eine einzige Laserwahl: Gravieren, Markieren oder Schneiden (Werte kommen vom Material). Bilder landen automatisch auf Gravieren. „Arbeitsplatz scannen“ ist ein einzelner optionaler Knopf; „Mehr“ enthält Gruppen, Mehrfachauswahl, Materialtest und Projekte. Ebenen und Laserwerte je Ebene stehen unter „Erweitert“. |
+| **3 · Starten** | Vorschau, Material, Laserzeit und Größe; „Rahmen zeigen“ (Laser aus, referenziert vorher selbst) und ein Knopf **Starten**. Die App baut den Auftrag ohne Höhenmesh, lädt ihn hoch und startet `op=autorun`. Der Pi referenziert bei Bedarf, tastet ab, korrigiert die Höhe, lasert und parkt. Fortschritt aus `/api/status`: `job.state` (homing, probing, running, complete, error) und `job.probe {done,total}`. Fehler erscheinen in einem Satz mit nächstem Schritt. Starten sperrt, bis der Pi `autorun_mesh` meldet. |
+
+Unter **Maschine** liegt alles Übrige: Steuerung (Status, Steuerkreuz, Referenzieren, Abtasten, Parken, Licht/Abluft, Notstopp quittieren), Arbeitsplatz scannen (Kopfkamera kalibrieren, Mosaik, Werkstücke markieren, Höhenmesh, geführter Ablauf – nur für Fachleute) und die Auftragsliste des Pi. **Einstellungen**: Pi-Adresse, Fokus & Taster, SKR-Firmware, Version. NOT-AUS ist immer oben rechts.
 
 ## Aufbau
 
@@ -24,9 +25,9 @@ android/
 ```
 
 Prinzipien:
-- **Arbeitsbereich 360 × 340 mm, Nullpunkt oben links, Y nach unten** – wie in der Windows-App. Der 30-mm-Rand der Maschine (Safezone) gehört dem Laser (Referenzieren, Parken) und ist in der App unsichtbar. Maschine = Arbeitsbereich + 30 mm; umgerechnet wird nur in `Work.toMachine`/`Work.fromMachine`.
+- **Arbeitsbereich 360 × 340 mm, Nullpunkt oben links, Y nach unten – so, wie man die Maschine von der Tür aus sieht.** Die Endschalter-Ecke (Maschine 0/0) liegt von dort hinten rechts: X+ fährt nach links, Y+ zur Tür. Umrechnung nur in `Work.toMachine`/`Work.fromMachine`: `maschine_x = 390 − x`, `maschine_y = 30 + y` (Drehung um 180°, keine Spiegelung, Text wird lesbar gelasert; `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 2). Der 30-mm-Rand der Maschine (Safezone, oben und rechts auf dem Bildschirm) gehört dem Laser (Referenzieren, Parken) und ist unsichtbar. Rasterbilder: Spalte 0 liegt links auf dem Bildschirm, also bei großem Maschinen-X. Steuerkreuz: links = X+, unten = Y+.
 - Der `MarlinWriter` erzeugt genau, was der Pi annimmt: ein `M3 I`, S in jedem G1, Überlauf mit `G1 … S0`. Jeder Punkt, auch der Überlauf, bleibt im Arbeitsbereich – nie in der Safezone. Elemente lassen sich nicht über den Rand schieben. Homing, Abtasten, Fokus und Parken macht der Pi. `core` prüft jede erzeugte Zeile in den Tests gegen die Regeln des Pi.
-- **Höhenkorrektur:** Mit Höhenmesh bekommt jedes höchstens 2 mm lange Laserstück sein eigenes Z (Oberfläche + Fokusabstand − Schalter→Spitze, nie näher als 2 mm). Der tiefste Punkt wird zuletzt angetastet, damit die Z-Sperre des Pi (Oberfläche + 2 mm) für alle Höhen passt. Aufträge mit eigenem Z überspringen den automatischen Einzelfokus des Pi; der Pi prüft absolute Z-Ziele ohne den Planer anzuhalten.
+- **Höhenkorrektur im Hauptweg macht der Pi** (Abtastraster je Motivbereich, tiefster Punkt zuletzt, Fokus folgt der Oberfläche). Die App schickt den Auftrag ohne absolutes Z; nur die relativen Fokus-Absenkungen je Durchgang (`G91 / G0 Z-… / G90`) bleiben darin. Die Mesh-Abtastung und `FocusCompensation` in der App bleiben unter Maschine → Arbeitsplatz für Fachleute (Start mit `op=start`).
 
 ## Bauen und installieren
 
@@ -43,15 +44,16 @@ Lokal: `core` testen geht mit JDK 17+ und Gradle (`gradle :core:test` im Ordner 
 ## Erste Schritte am Tablet
 
 1. Einstellungen → IP des Pi (z. B. `192.168.2.89`) → Verbinden.
-2. Werkstatt → Referenzieren. Dann im Editor gestalten → An Laser senden → Aufträge → Ein-Klick-Start.
-3. Oder Arbeitsplatz → geführter Ablauf: Scannen, Werkstücke markieren, Höhenmesh, Rahmen, Starten, Parken.
-4. Kopfkamera einmalig: Arbeitsplatz → Kalibrieren → Rechteck lasern → Kopf darüber → Kamerabild → vier Marker auf die Ecken → Speichern. Die Kamera hängt per USB am Pi (`LUMACUT_CAMERA`, Standard `/dev/video0`).
+2. Material wählen → Motiv gestalten → Starten. Mehr nicht.
+3. Optional: „Arbeitsplatz scannen“ (Motiv-Seite) legt ein Foto der Arbeitsfläche als Hintergrund.
+4. Kopfkamera einmalig: Maschine → Arbeitsplatz scannen → Kalibrieren → Rechteck lasern → Kopf darüber → Kamerabild → vier Marker auf die Ecken → Speichern. Die Kamera hängt per USB am Pi (`LUMACUT_CAMERA`, Standard `/dev/video0`).
 5. Ohne Kopfkamera: Editor → Kamera → Kalibrier-Rechteck lasern, mit dem Tablet fotografieren, Marker setzen.
 
 ## Grenzen der ersten Version
 
 - Bilder lassen sich nicht drehen (Position und Größe schon) – die Rastergravur läuft zeilenweise.
 - Projekte aus der ersten App-Version (Maschinenkoordinaten) erscheinen um 30 mm verschoben; einmal zurechtrücken.
+- Seit der Drehung um 180° (2026-10-26) sind frühere Kopfkamera-Kalibrierungen ungültig (gespiegeltes X) und werden verworfen: einmal neu kalibrieren. Projekte bleiben in Bildschirmkoordinaten, erscheinen also unverändert; nur der erzeugte G-Code liegt jetzt spiegelverkehrt zu früher (richtig herum).
 - Texte werden beim Einfügen in Konturen umgewandelt. Zum Ändern neu einfügen.
 - Der Kachel-Scan braucht eine USB-Kamera am Kopf, die der Pi als v4l2-Gerät sieht. Bis eine angeschlossen ist, ist der Scan nur in Tests geprüft.
 - Rastergravur: Der Pi schickt eine Zeile pro `ok`. Wie schnell feine Graustufen damit laufen, muss an der Maschine gemessen werden.
