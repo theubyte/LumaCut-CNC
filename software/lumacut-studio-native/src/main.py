@@ -41,7 +41,10 @@ class LumaCutStudio(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LumaCut Studio")
-        self.resize(1400, 900)
+        # Mindestgröße für Surface Pro / kleinere Laptops
+        self.setMinimumSize(900, 600)
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.resize(min(1400, screen.width() - 40), min(900, screen.height() - 60))
         self._apply_dark_theme()
         self._build_ui()
 
@@ -105,13 +108,14 @@ class LumaCutStudio(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
 
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(True)
         layout.addWidget(splitter)
 
         # --- canvas integration (canvas agent) ---
         # Left: Ebenen-Panel, Center: Canvas-Editor (Paket lumacut_canvas).
         self.canvas = CanvasEditor()
         self.layers_panel = LayersPanel(self.canvas.document, self.canvas.undo_stack)
-        self.layers_panel.setMinimumWidth(295)
+        self.layers_panel.setMinimumWidth(180)
         splitter.addWidget(self.layers_panel)
         splitter.addWidget(self.canvas)
         send_btn = QPushButton("Design senden")
@@ -122,9 +126,10 @@ class LumaCutStudio(QMainWindow):
         toolbar.insertWidget(start_action, QLabel(" "))
         # --- end canvas integration ---
 
-        # Right: Controls
+        # Right: Controls (scrollable)
         right = QWidget()
         right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(6, 6, 6, 6)
 
         # Design group
         design = QGroupBox("Design")
@@ -150,20 +155,25 @@ class LumaCutStudio(QMainWindow):
         # --- end machine integration ---
 
         right_layout.addStretch()
-        # --- machine integration (machine agent) ---
-        # The machine panel is tall; keep the right column scrollable.
+
         right_scroll = QScrollArea()
         right_scroll.setWidgetResizable(True)
         right_scroll.setFrameShape(QFrame.NoFrame)
+        right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        right_scroll.setMinimumWidth(220)
         right_scroll.setWidget(right)
         splitter.addWidget(right_scroll)
         # --- end machine integration ---
 
-        splitter.setSizes([220, 760, 380])
-        # --- canvas integration (canvas agent) ---
-        splitter.setSizes([290, 760, 380])
+        # Proportionale Startgrößen je nach Fensterbreite
+        total = max(900, self.width())
+        left = min(260, int(total * 0.20))
+        right_w = min(340, int(total * 0.26))
+        center = total - left - right_w
+        splitter.setSizes([left, max(300, center), right_w])
         splitter.setStretchFactor(1, 1)
-        # --- end canvas integration ---
+        splitter.setCollapsible(0, True)
+        splitter.setCollapsible(2, True)
 
         # Status bar
         status = QStatusBar()
@@ -172,7 +182,7 @@ class LumaCutStudio(QMainWindow):
         # --- canvas integration (canvas agent) ---
         status.showMessage("Arbeitsfläche 360 × 340 mm · Werkzeuge: V R E L T · Mittlere Maustaste/Leertaste = Verschieben")
         self.cursor_label = QLabel("X —  Y —")
-        self.cursor_label.setMinimumWidth(190)
+        self.cursor_label.setMinimumWidth(160)
         status.addPermanentWidget(self.cursor_label)
         self.canvas.cursorMoved.connect(
             lambda x, y: self.cursor_label.setText(f"X {x:7.1f} mm   Y {y:7.1f} mm"))
