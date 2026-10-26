@@ -268,3 +268,79 @@ def test_zoom_buttons_large_and_only_in_touch_mode(ed):
     assert vp.contains(zb.geometry())
     ed.set_touch_mode(False)
     assert not zb.isVisible()
+
+
+# --- 3: Touch-Scrollen -------------------------------------------------------
+def test_one_finger_on_empty_background_pans(ed):
+    from lumacut_canvas.tools import Tool
+    sid = _rect(ed, 60, 60, 40, 40)
+    ed.set_selection([sid])
+    v = ed.view
+    a = _vp(ed, QPointF(250, 250))  # leer
+    probe = QPointF(250, 250)
+    _drag1(ed, a, a + QPointF(-80, 50))
+    after = v.mapFromScene(probe).toPointF()
+    assert abs(after.x() - (a.x() - 80)) <= 1.5 and abs(after.y() - (a.y() + 50)) <= 1.5
+    assert ed.selection == [sid]  # Verschieben hebt die Auswahl nicht auf
+    assert ed.document.shape(sid).geom.x == pytest.approx(60)
+    assert not ed.tools._rubber.isVisible()
+    # Mit einem Zeichenwerkzeug zeichnet derselbe Zug ein Rechteck.
+    ed.set_tool(Tool.RECT)
+    n = len(ed.document.shapes)
+    b = _vp(ed, QPointF(250, 250))
+    _drag1(ed, b, b + QPointF(80, 60))
+    assert len(ed.document.shapes) == n + 1
+
+
+def test_tap_on_empty_background_clears_selection(ed):
+    sid = _rect(ed, 60, 60, 40, 40)
+    ed.set_selection([sid])
+    p = _vp(ed, QPointF(250, 250))
+    _touch(ed, QEvent.TouchBegin, [(0, p, "p")])
+    _touch(ed, QEvent.TouchEnd, [(0, p, "r")])
+    assert ed.selection == []
+
+
+def test_mouse_drag_on_empty_space_still_rubber_bands(ed, qapp):
+    from PySide6.QtTest import QTest
+    a = _rect(ed, 60, 60, 10, 10)
+    b = _rect(ed, 80, 60, 10, 10)
+    vp = ed.view.viewport()
+    p0 = _vp(ed, QPointF(50, 50)).toPoint()
+    p1 = _vp(ed, QPointF(95, 75)).toPoint()
+    QTest.mousePress(vp, Qt.LeftButton, Qt.NoModifier, p0)
+    QTest.mouseMove(vp, p1)
+    QTest.mouseRelease(vp, Qt.LeftButton, Qt.NoModifier, p1)
+    assert set(ed.selection) == {a, b}
+
+
+def test_synthesized_mouse_after_touch_is_not_handled_twice(ed, qapp):
+    from PySide6.QtGui import QMouseEvent, QPointingDevice
+    from PySide6.QtWidgets import QApplication
+    sid = _rect(ed, 60, 60, 40, 40)
+    p = _vp(ed, QPointF(80, 80))
+    _drag1(ed, p, p + QPointF(40, 0))  # per Touch verschoben (ein Undo-Schritt)
+    count = ed.undo_stack.count()
+    x = ed.document.shape(sid).geom.x
+    vp = ed.view.viewport()
+    # Das System liefert dieselbe Geste noch einmal als "Maus" nach.
+    def mouse(t, pos, buttons):
+        ev = QMouseEvent(t, QPointF(pos), vp.mapToGlobal(QPointF(pos)), Qt.LeftButton, buttons,
+                         Qt.NoModifier, _device())
+        QApplication.sendEvent(vp, ev)
+    mouse(QEvent.MouseButtonPress, p + QPointF(40, 0), Qt.LeftButton)
+    mouse(QEvent.MouseMove, p + QPointF(120, 0), Qt.LeftButton)
+    mouse(QEvent.MouseButtonRelease, p + QPointF(120, 0), Qt.NoButton)
+    assert ed.document.shape(sid).geom.x == pytest.approx(x)
+    assert ed.undo_stack.count() == count
+    assert QPointingDevice.primaryPointingDevice().type() != _device().type()
+
+
+def test_double_tap_acts_as_double_click(ed, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ed.tools, "double_click", lambda pos: calls.append(pos))
+    p = _vp(ed, QPointF(250, 250))
+    for _ in range(2):
+        _touch(ed, QEvent.TouchBegin, [(0, p, "p")])
+        _touch(ed, QEvent.TouchEnd, [(0, p, "r")])
+    assert len(calls) == 1

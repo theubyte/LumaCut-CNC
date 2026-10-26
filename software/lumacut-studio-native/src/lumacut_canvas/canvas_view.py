@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (QColor, QEventPoint, QFont, QImage, QMouseEvent, QPainter, QPaintEvent,
                            QPen, QWheelEvent)
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QHBoxLayout, QToolButton, QWidget
+from PySide6.QtWidgets import (QApplication, QGraphicsScene, QGraphicsView, QHBoxLayout, QToolButton,
+                               QWidget)
 
 from . import icons, theme, touch
 from .items import SelectionOverlay, ShapeItem
@@ -28,6 +30,8 @@ MAX_SCALE = 60.0   # px/mm
 NICE_STEPS = (0.5, 1, 2, 5, 10, 20, 50, 100, 200)
 PX_PER_MM_100 = 96 / 25.4  # 100 % = physische Größe bei logischen 96 dpi
 TAP_SLOP_PX = 10.0         # so weit darf ein Finger wandern, bevor aus Tippen Ziehen wird
+DOUBLE_TAP_PX = 24.0       # zwei Taps so nah beieinander = Doppeltipp
+TOUCH_MOUSE_GUARD_S = 0.6  # so lange nach Touch werden "Maus"-Ereignisse aus Touch ignoriert
 
 
 def nice_step(px_per_mm: float, min_px: float) -> float:
@@ -167,6 +171,8 @@ class CanvasView(QGraphicsView):
         self.metrics: touch.TouchMetrics = touch.MOUSE
         self._touch_seen = False
         self._touch: dict | None = None  # laufende Touch-Folge (siehe _touch_event)
+        self._touch_end_t = -1e9           # Zeitpunkt der letzten Touch-Folge (monotonic)
+        self._last_tap: tuple[float, QPointF] | None = None
         self.viewport().setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.zoom_buttons = ZoomButtons(self)
         self.zoom_buttons.setVisible(False)  # nur im Touch-Modus; mit Maus gibt es die Aktionsleiste
@@ -348,7 +354,10 @@ class CanvasView(QGraphicsView):
     def _touch_event(self, event) -> bool:
         """Touchscreen-Folge auswerten.
 
-        * Ein Finger: tippen/ziehen wie mit der linken Maustaste. Der Druck
+        * Ein Finger auf leerem Hintergrund mit dem Auswahl-Werkzeug (kein
+          Objekt, kein Griff): Ansicht verschieben. Tippen bleibt ein Klick
+          (Auswahl aufheben); Rahmenauswahl geht weiter mit Maus/Stift.
+        * Ein Finger sonst: tippen/ziehen wie mit der linken Maustaste. Der Druck
           wird erst weitergegeben, wenn der Finger ``TAP_SLOP_PX`` wandert
           oder abhebt – kommt vorher ein zweiter Finger dazu, passiert am
           Objekt gar nichts.
@@ -357,8 +366,12 @@ class CanvasView(QGraphicsView):
           (:meth:`ToolController.abort_drag`), damit nichts versehentlich
           verschoben wird. Bis alle Finger oben sind, bleibt es beim Zoomen.
 
+        * Doppeltipp = Doppelklick (Text bearbeiten, Polygon schließen …).
+
         Touchpad-Ereignisse und aus Mausereignissen synthetisierte Touch-Events
-        werden nicht ausgewertet (False -> Qt-Standardbehandlung).
+        werden nicht ausgewertet (False -> Qt-Standardbehandlung). Weil die
+        Touch-Events angenommen werden, erzeugt Qt keine Ersatz-Mausereignisse;
+        solche vom System werden zusätzlich verworfen (:meth:`_ignore_mouse`).
         """
         if not touch.is_touchscreen_event(event):
             return False
@@ -372,12 +385,15 @@ class CanvasView(QGraphicsView):
             if st and st["mode"] == "tool" and self.tool_handler is not None:
                 self.tool_handler.abort_drag()
             self._touch = None
+            self._touch_end_t = time.monotonic()
             return True
         pts = self._touch_points(event)
         if st is None:
             if not pts:
                 return True
-            st = self._touch = {"mode": "pending", "start": QPointF(pts[0][1]), "last": QPointF(pts[0][1])}
+            start = QPointF(pts[0][1])
+            mode = "pan" if self._empty_background(start) else "pending"
+            st = self._touch = {"mode": mode, "start": start, "last": QPointF(start), "moved": False}
         if len(pts) >= 2 and st["mode"] != "pinch":
             if st["mode"] == "tool" and self.tool_handler is not None:
                 self.tool_handler.abort_drag()
@@ -391,7 +407,29 @@ class CanvasView(QGraphicsView):
         if et == QEvent.TouchEnd or not pts:
             self._touch_end(st)
             self._touch = None
+            self._touch_end_t = time.monotonic()
         return True
+
+    def _empty_background(self, vp_pos: QPointF) -> bool:
+        """Startet ein Finger hier, verschiebt er die Ansicht statt aufzuziehen."""
+        th = self.tool_handler
+        if th is None or getattr(th, "roi_pending", False) or getattr(th, "_mode", None) is not None:
+            return False
+        from .tools import Tool  # zirkulären Import beim Laden vermeiden
+        if th.tool != Tool.SELECT:
+            return False
+        pos = self.mapToScene(vp_pos.toPoint())
+        scene: CanvasScene = self.scene()  # type: ignore[assignment]
+        if scene.overlay.isVisible() and scene.overlay.handle_at(pos) is not None:
+            return False
+        return scene.editable_shape_at(pos) is None
+
+    def _ignore_mouse(self, event: QMouseEvent) -> bool:
+        """Mausereignis aus einer Touch-Eingabe, die schon als Touch behandelt
+        wurde (oder gerade läuft) -> nicht ein zweites Mal auswerten."""
+        if not touch.is_mouse_from_touch(event):
+            return False
+        return self._touch is not None or time.monotonic() - self._touch_end_t < TOUCH_MOUSE_GUARD_S
 
     def _start_pinch(self, st: dict, pts: list[tuple[int, QPointF]]) -> None:
         (i0, a), (i1, b) = pts[0], pts[1]
@@ -412,6 +450,21 @@ class CanvasView(QGraphicsView):
         self.pinch_to(st["scale0"] * d / st["dist0"], (a + b) / 2, st["scene0"])
 
     def _touch_single_move(self, st: dict, pos: QPointF) -> None:
+        if st["mode"] == "pan":
+            d0 = pos - st["start"]
+            if not st["moved"] and math.hypot(d0.x(), d0.y()) < TAP_SLOP_PX:
+                return
+            prev = st.get("pan_last", st["start"])
+            d = pos - prev
+            st["moved"] = True
+            hb, vb = self.horizontalScrollBar(), self.verticalScrollBar()
+            # Ganzzahlige Scrollwerte: Rest mitnehmen, damit langsames Ziehen nicht hängen bleibt.
+            dx, dy = round(d.x()), round(d.y())
+            if dx or dy:
+                hb.setValue(hb.value() - dx)
+                vb.setValue(vb.value() - dy)
+                st["pan_last"] = prev + QPointF(dx, dy)
+            return
         if st["mode"] == "pending":
             d = pos - st["start"]
             if math.hypot(d.x(), d.y()) < TAP_SLOP_PX:
@@ -425,17 +478,34 @@ class CanvasView(QGraphicsView):
             self.tool_handler.move(scene_pos, Qt.NoModifier, True)
 
     def _touch_end(self, st: dict) -> None:
-        if self.tool_handler is None or st["mode"] not in ("pending", "tool"):
+        th = self.tool_handler
+        tap = st["mode"] == "pending" or (st["mode"] == "pan" and not st["moved"])
+        if th is None or not (tap or st["mode"] == "tool"):
             return
-        if st["mode"] == "pending":  # Tippen = Klick an der Startposition
-            self.tool_handler.press(self.mapToScene(st["start"].toPoint()), Qt.NoModifier)
-        self.tool_handler.release(self.mapToScene(st["last"].toPoint()), Qt.NoModifier)
+        start = self.mapToScene(st["start"].toPoint())
+        if tap:  # Tippen = Klick an der Startposition
+            th.press(start, Qt.NoModifier)
+            th.release(start, Qt.NoModifier)
+            now, last = time.monotonic(), self._last_tap
+            gap = (st["start"] - last[1]) if last else QPointF()
+            if last and now - last[0] <= QApplication.doubleClickInterval() / 1000.0 and \
+                    math.hypot(gap.x(), gap.y()) <= DOUBLE_TAP_PX:
+                self._last_tap = None
+                th.double_click(start)
+            else:
+                self._last_tap = (now, QPointF(st["start"]))
+            return
+        self._last_tap = None
+        th.release(self.mapToScene(st["last"].toPoint()), Qt.NoModifier)
 
     # --- Maus -------------------------------------------------------------
     def _scene_pos(self, event: QMouseEvent) -> QPointF:
         return self.mapToScene(event.position().toPoint())
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._ignore_mouse(event):
+            event.accept()
+            return
         if event.button() == Qt.MiddleButton or (event.button() == Qt.LeftButton and self._space_down):
             self._pan_start = event.position()
             self.viewport().setCursor(Qt.ClosedHandCursor)
@@ -446,6 +516,9 @@ class CanvasView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._ignore_mouse(event):
+            event.accept()
+            return
         pos = self._scene_pos(event)
         self.cursorMoved.emit(pos.x(), pos.y())
         if self._pan_start is not None:
@@ -460,6 +533,9 @@ class CanvasView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._ignore_mouse(event):
+            event.accept()
+            return
         if self._pan_start is not None and event.button() in (Qt.MiddleButton, Qt.LeftButton):
             self._pan_start = None
             self.viewport().unsetCursor()
@@ -472,6 +548,9 @@ class CanvasView(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._ignore_mouse(event):
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self.tool_handler is not None:
             self.tool_handler.double_click(self._scene_pos(event))
             return
