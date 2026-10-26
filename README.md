@@ -50,6 +50,7 @@ Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrec
 - [docs/FIRMWARE.md](docs/FIRMWARE.md) – Marlin-Build, Flashen über den Pi, Marlin-Besonderheiten
 - [docs/ANDROID_APP.md](docs/ANDROID_APP.md) – Tablet-App: Bereiche, Aufbau, APK bauen und installieren
 - [docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md) – Tests, CI, Arbeitsweise, Stolperfallen
+- [docs/ZUSAMMENARBEIT_CLAUDE_GROK.md](docs/ZUSAMMENARBEIT_CLAUDE_GROK.md) – Absprache Claude/Grok: Zuständigkeiten, Koordinaten (0/0 hinten rechts), Material-API, automatischer Auftrag, Bedienkonzept
 - [docs/LUMACUT_STUDIO_PLAN_2026-10-25.md](docs/LUMACUT_STUDIO_PLAN_2026-10-25.md) – Ziel und Fahrplan für Studio
 - [docs/GROK_ANALYSE_2026-10-25.md](docs/GROK_ANALYSE_2026-10-25.md) – Grok-Analyse (Sicherheit, Firmware, Pi) mit aktuellem Stand je Punkt; offen: Not-Aus/Interlock, PWM-Messprotokoll, Z-Schritte/mm
 - [CHANGELOG.md](CHANGELOG.md) – Was wann warum geändert wurde
