@@ -60,7 +60,7 @@ MODE_PI = "pi"
 PHASES = {"scan": "Scan", "stitch": "Stitching", "probe": "Proben", "reuse": "Kontrollmessung",
           "detect": "Erkennung"}
 KINDS = {"rectangle": "Rechteck", "circle": "Kreis", "polygon": "Polygon"}
-Z_OVERLAY = 5_000_000.0     # über allen Ebenen (Ebenen nutzen Rang × 1e6)
+Z_OVERLAY = 5e8  # über allen Ebenen (Rang × 1e6, auch bei vielen Ebenen z. B. Materialtest), unter Auswahlrahmen (1e9)
 
 
 def work_rect_machine() -> Rect:
@@ -803,11 +803,18 @@ class ScanPanel(QWidget):
                      + (f", {len(res.warnings)} Warnung(en)" if res.warnings else ""))
         return res.gcode
 
+    def _job_gcode(self) -> str:
+        """Gleicher G-Code wie „An Pi senden“ (mit Schnittplaner, falls vorhanden)."""
+        try:
+            from lumacut_job.planner import optimized_document_gcode
+        except ImportError:  # pragma: no cover - ältere Studio-Version ohne Planer
+            from lumacut_canvas.gcode import document_to_gcode as optimized_document_gcode
+        return optimized_document_gcode(self.canvas.document)
+
     def export_gcode(self, path: str | Path) -> bool:
         """Canvas → Marlin-G-Code (ggf. fokuskorrigiert) → Datei."""
-        from lumacut_canvas.gcode import document_to_gcode
         try:
-            gcode = document_to_gcode(self.canvas.document)
+            gcode = self._job_gcode()
         except ValueError as exc:
             self._error(f"Export nicht möglich: {exc}")
             return False
