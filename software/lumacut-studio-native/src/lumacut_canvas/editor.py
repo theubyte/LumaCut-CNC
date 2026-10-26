@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
 
 from . import icons, theme, touch
 from .fill_preview import FillPreview
+from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip
 from .canvas_view import PX_PER_MM_100, CanvasScene, CanvasView, Ruler
 from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand, SetGroupsCommand,
@@ -397,6 +398,8 @@ class CanvasEditor(QWidget):
         g.setChecked(True)
         s = self._act("snap", "Am Raster fangen (1 mm)", self._set_snap, "Ctrl+Shift+'", "snap", checkable=True)
         s.setChecked(True)
+        self._act("path_preview", "Pfadvorschau (Laserbahn, Reihenfolge, Zeit)",
+                  lambda on: self.set_path_preview(on), "Ctrl+Shift+P", "path", checkable=True)
         self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
                   lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
 
@@ -415,7 +418,7 @@ class CanvasEditor(QWidget):
         self.action_bar = bar
         for name in ("open", "save", "export", None, "undo", "redo", None, "duplicate", "delete",
                      "rotate_ccw", "rotate_cw", "group", "ungroup", None,
-                     "zoom_out", "zoom_in", "fit", None, "grid", "snap", "touch_mode"):
+                     "zoom_out", "zoom_in", "fit", None, "grid", "snap", "path_preview", "touch_mode"):
             bar.addSeparator() if name is None else bar.addAction(a[name])
         self.zoom_label = QLabel("100 %")
         self.zoom_label.setStyleSheet(f"color: {theme.TEXT_DIM}; padding: 0 8px;")
@@ -457,6 +460,14 @@ class CanvasEditor(QWidget):
         # Auf schmalen Fenstern waagerecht scrollbar statt abgeschnitten.
         self.property_scroll = HScrollStrip(self.property_bar)
         root.addWidget(self.property_scroll)
+        # Pfadvorschau: Werte/Filter/Abspielen, nur sichtbar solange eingeschaltet.
+        self.path_preview = PathPreview(self)
+        self.path_preview_bar = PathPreviewBar(self.path_preview)
+        self.path_preview_scroll = HScrollStrip(self.path_preview_bar)
+        self.path_preview_scroll.setVisible(False)
+        self.path_preview.changed.connect(
+            lambda: self.path_preview_scroll.setVisible(self.path_preview.visible))
+        root.addWidget(self.path_preview_scroll)
         root.addLayout(body, 1)
 
     # --- Zustand ----------------------------------------------------------
@@ -464,6 +475,17 @@ class CanvasEditor(QWidget):
         self.tools.set_tool(tool)
         self.actions_by_name[f"tool_{tool.value}"].setChecked(True)
         self.notify(f"Werkzeug: {TOOL_LABELS[tool]}")
+
+    def set_path_preview(self, on: bool) -> None:
+        """Pfadvorschau ein/aus (zeigt den G-Code des Sendepfads, ändert nichts)."""
+        on = bool(on)
+        act = self.actions_by_name["path_preview"]
+        if act.isChecked() != on:
+            act.blockSignals(True)
+            act.setChecked(on)
+            act.blockSignals(False)
+        self.path_preview.set_visible(on)
+        self.notify("Pfadvorschau an" if on else "Pfadvorschau aus")
 
     def set_touch_mode(self, on: bool, persist: bool = True) -> None:
         """Touch-Modus ein/aus. ``persist``: Wahl in QSettings merken (eine

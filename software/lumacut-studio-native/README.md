@@ -177,6 +177,30 @@ Undo-Schritt.
 - Grenzen: kein Overscan; Schnittfuge (Kerf) wirkt nur auf Konturen; mehr als
   20 000 Linien je Richtung werden abgelehnt (Linienabstand vergrößern).
 
+### Pfadvorschau (Laserbahn, Reihenfolge, Zeit)
+
+Knopf „Pfadvorschau“ in der oberen Leiste (Strg+Umschalt+P) zeichnet die
+Laserbahn über die Objekte – erzeugt mit **demselben Generator wie das
+Senden** (`lumacut_job.planner.optimized_document_gcode`: Planer-Reihenfolge,
+Schraffur/Kreuzschraffur, Bild-Gravuren) und aus dem G-Code zurückgelesen
+(`lumacut_canvas/toolpath.py`). Die Vorschau ändert weder Dokument noch
+G-Code.
+
+- Schnitte in der Ebenenfarbe, Leerfahrten grau gestrichelt
+  (Zeilenwechsel innerhalb von Rastergravuren werden nicht gezeichnet).
+- Jeder Lauf hat einen Startpunkt mit Reihenfolgenummer und einen Pfeil für
+  die Richtung (Nummern ausgedünnt, wenn sie sich überdecken).
+- Leiste: Schnitt- und Leerfahrtlänge, Zeit (`lumacut_job.estimate`), Zahl der
+  Läufe; Ebenenfilter; Schieberegler zum Abspielen (erste *n* Bewegungen,
+  Spitze markiert, Teillängen in der Anzeige).
+- Neu gerechnet wird erst 250 ms nach der letzten Änderung und nur, solange
+  die Vorschau an ist.
+
+Bekannt: Die Startposition vor der ersten Fahrt ist unbekannt (der Pi
+referenziert/parkt selbst), die erste Positionierfahrt zählt wie in der
+Zeitschätzung mit 0 mm. Sehr große Rasterjobs werden vollständig gelesen;
+bei vielen tausend Zeilen kann das Neuberechnen spürbar dauern.
+
 ### Schnittstellen für andere Module (Scan & Probe)
 
 Alle Koordinaten in Arbeitsflächen-mm (0,0 links oben). Getestet in

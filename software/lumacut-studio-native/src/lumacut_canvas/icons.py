@@ -193,6 +193,19 @@ def _touch(p, c):
     path.arcTo(QRectF(15, 13, 4, 4), 90, -90); path.lineTo(19, 21); p.drawPath(path)
 
 
+def _path(p, c):
+    """Laserbahn: Start-Punkt, gestrichelte Leerfahrt, Schnitt mit Pfeil."""
+    _pen(p, c, 1.4)
+    pen = p.pen(); pen.setStyle(Qt.DashLine); p.setPen(pen)
+    p.drawLine(QPointF(4.5, 19.5), QPointF(9, 12))
+    _pen(p, c, 1.9)
+    path = QPainterPath(); path.moveTo(9, 12); path.lineTo(9, 5); path.lineTo(19, 5); path.lineTo(19, 15)
+    p.drawPath(path)
+    p.setBrush(QColor(c))
+    p.drawPolygon(QPolygonF([QPointF(19, 19.5), QPointF(16, 14.5), QPointF(22, 14.5)]))
+    p.drawEllipse(QPointF(4.5, 19.5), 1.8, 1.8)
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "polygon": _polygon, "freehand": _freehand,
@@ -205,7 +218,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "duplicate": _duplicate, "link": _link,
     "group": _group, "ungroup": lambda p, c: _group(p, c, True),
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
-    "touch": _touch,
+    "touch": _touch, "path": _path,
 }
 
 

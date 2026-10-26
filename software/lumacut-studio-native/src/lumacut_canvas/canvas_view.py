@@ -175,6 +175,8 @@ class CanvasView(QGraphicsView):
         self.backdrop: QImage | None = None
         self._overlays: dict[str, tuple[float, int, object]] = {}  # key -> (z, Reihenfolge, Overlay)
         self._overlay_seq = 0
+        # Vordergrund-Ebenen über den Objekten (z. B. Pfadvorschau): key -> Objekt
+        self._foreground: dict[str, object] = {}
         self.tool_handler = None  # wird vom Editor gesetzt (tools.ToolController)
         # Liefert die Zoom-Mitte für das Mausrad (Auswahl-Mitte in mm) oder None
         # (= am Mauszeiger zoomen). Wird vom Editor gesetzt.
@@ -674,6 +676,42 @@ class CanvasView(QGraphicsView):
                 ov.paint(p, QRectF(work))
             except Exception:  # fremder Code darf das Zeichnen des Canvas nie abbrechen
                 _log.exception("Overlay %r konnte nicht gezeichnet werden", key)
+            finally:
+                p.restore()
+
+    # --- Vordergrund (über den Objekten, ungecacht) -------------------------
+    def add_foreground(self, key: str, layer) -> None:
+        """Wie :meth:`add_overlay`, aber über den Objekten gezeichnet.
+
+        ``layer.paint(painter, work_rect)`` bekommt die Szenen-Transformation
+        (mm); für Text/Marker in Pixeln ``painter.transform()`` verwenden.
+        """
+        if not callable(getattr(layer, "paint", None)):
+            raise TypeError("Vordergrund braucht eine Methode paint(painter, work_rect)")
+        self._foreground[key] = layer
+        self.viewport().update()
+
+    def remove_foreground(self, key: str) -> bool:
+        found = self._foreground.pop(key, None) is not None
+        if found:
+            self.viewport().update()
+        return found
+
+    def foreground(self, key: str):
+        return self._foreground.get(key)
+
+    def drawForeground(self, p: QPainter, rect: QRectF) -> None:  # noqa: N802
+        work = QRectF(0, 0, WORK_WIDTH_MM, WORK_HEIGHT_MM)
+        for key, layer in list(self._foreground.items()):
+            if not getattr(layer, "visible", True):
+                continue
+            p.save()
+            p.setClipRect(work)
+            p.setOpacity(max(0.0, min(1.0, float(getattr(layer, "opacity", 1.0)))))
+            try:
+                layer.paint(p, QRectF(work))
+            except Exception:  # fremder Code darf das Zeichnen nie abbrechen
+                _log.exception("Vordergrund %r konnte nicht gezeichnet werden", key)
             finally:
                 p.restore()
 

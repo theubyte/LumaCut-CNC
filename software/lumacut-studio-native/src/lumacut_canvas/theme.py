@@ -43,6 +43,7 @@ CANVAS_QSS = f"""
 #CanvasEditor QToolButton:checked {{ background: #173a33; border-color: {ACCENT}; }}
 #CanvasEditor QToolButton:disabled {{ color: #4a5566; }}
 #PropertyBar {{ background: {PANEL}; border-bottom: 1px solid {BORDER}; }}
+#PathPreviewBar {{ background: {PANEL}; border-bottom: 1px solid {BORDER}; }}
 #PropertyBar QLabel {{ color: {TEXT_DIM}; padding: 0 2px 0 8px; }}
 #PropertyBar QLabel#PropTitle {{ color: {TEXT}; font-weight: 600; padding-left: 4px; }}
 #CanvasEditor QDoubleSpinBox, #CanvasEditor QLineEdit, #CanvasEditor QComboBox,
@@ -60,7 +61,7 @@ CANVAS_QSS = f"""
 #CanvasEditor QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {BORDER}; }}
 #Ruler {{ background: {PANEL}; }}
 CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
-#PropertyBarScroll, #LayersScroll {{ background: transparent; border: none; }}
+#PropertyBarScroll, #LayersScroll, #PathPreviewBarScroll {{ background: transparent; border: none; }}
 #LayersContent {{ background: {BG}; }}
 #PropertyBarScroll QScrollBar:horizontal, #LayersScroll QScrollBar:horizontal {{
     background: {PANEL}; height: 10px; margin: 0; border: none;
