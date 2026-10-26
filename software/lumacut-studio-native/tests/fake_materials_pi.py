@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import threading
 import urllib.parse
 import uuid
@@ -18,6 +19,49 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 def _tag(obj) -> str:
     return '"%s"' % hashlib.sha1(json.dumps(obj, sort_keys=True).encode()).hexdigest()[:12]
+
+
+LIST_FIELDS = ("id", "name", "thickness_mm", "process", "mode", "power_pct", "speed_mm_min",
+               "passes", "interval_mm", "depth_per_pass_mm", "z_step_mm", "builtin", "updated")
+
+
+def validate_list_material(data: dict, mid: str, builtin: bool = False) -> dict:
+    """Gekürzte Fassung von ``pi400/marlin/materials.validate`` (gleiche Grenzen)."""
+    def num(key, low, high, default=None):
+        raw = data.get(key, default)
+        if raw is None or isinstance(raw, bool):
+            raise ValueError("%s fehlt" % key)
+        value = float(raw)
+        if not low <= value <= high:
+            raise ValueError("%s muss zwischen %g und %g liegen" % (key, low, high))
+        return value
+    name = data.get("name")
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 80:
+        raise ValueError("name: 1 bis 80 Zeichen")
+    if data.get("process") not in ("Schneiden", "Gravieren", "Markieren"):
+        raise ValueError("process muss Schneiden, Gravieren oder Markieren sein")
+    if data.get("mode") not in ("line", "fill"):
+        raise ValueError("mode muss line oder fill sein")
+    passes = data.get("passes", 1)
+    if isinstance(passes, bool) or not isinstance(passes, (int, float)) or passes != int(passes) \
+            or not 1 <= int(passes) <= 30:
+        raise ValueError("passes muss eine ganze Zahl zwischen 1 und 30 sein")
+    item = {"id": mid, "name": name.strip(), "thickness_mm": num("thickness_mm", 0, 50),
+            "process": data["process"], "mode": data["mode"],
+            "power_pct": num("power_pct", 0, 100), "speed_mm_min": num("speed_mm_min", 1, 6000),
+            "passes": int(passes), "interval_mm": num("interval_mm", 0.01, 5, 0.1),
+            "depth_per_pass_mm": num("depth_per_pass_mm", 0, 50, 0.0),
+            "z_step_mm": num("z_step_mm", 0, 2, 0.0), "builtin": bool(builtin),
+            "updated": "2026-10-26T12:00:00Z"}
+    item.update({k: v for k, v in data.items() if k not in LIST_FIELDS and k != "base_revision"})
+    passes = item["passes"]
+    if item["depth_per_pass_mm"] > 0 and item["thickness_mm"] > 0:
+        passes = max(1, math.ceil(item["thickness_mm"] / item["depth_per_pass_mm"] - 1e-9))
+        if passes > 30:
+            raise ValueError("Dicke / Tiefe je Durchgang ergibt mehr als 30 Durchgänge")
+    if (passes - 1) * item["z_step_mm"] > 3.0 + 1e-9:
+        raise ValueError("Z-Absenkung über alle Durchgänge höchstens 3 mm")
+    return item
 
 
 class FakeMaterialsPi:
@@ -108,33 +152,41 @@ class FakeMaterialsPi:
                 return self._send(405, {"ok": False, "error": "method"})
 
             def _list(self, method, url, body):
+                """Wie pi400/marlin/materials.py + web.py (geprüft gegen den echten Pi,
+                tests/test_materials_pi_real.py): erst Revision (400 fehlt / 409),
+                dann ID (404), dann Prüfung (400); PUT ergänzt fehlende Felder."""
                 path = url.path
                 q = urllib.parse.parse_qs(url.query)
                 if path == "/api/materials" and method == "GET":
                     return self._send(200, {"revision": fake.revision, "materials": list(fake.items.values())})
-                base = (body or {}).get("base_revision") if body else \
-                    int(q["base_revision"][0]) if "base_revision" in q else None
-                if base != fake.revision:
-                    return self._send(409, {"error": "veraltet", "revision": fake.revision})
+                if method in ("POST", "PUT") and not isinstance(body, dict):
+                    return self._send(400, {"error": "JSON-Objekt erwartet (Content-Type: application/json)"})
+                raw = body.get("base_revision") if body else q.get("base_revision", [None])[0]
+                if raw is None or isinstance(raw, bool):
+                    return self._send(400, {"error": "base_revision fehlt"})
+                if int(raw) != fake.revision:
+                    return self._send(409, {"error": "Materialliste wurde inzwischen geändert (Revision %d)"
+                                                     % fake.revision, "revision": fake.revision})
                 if path == "/api/materials" and method == "POST":
-                    mid = str(uuid.uuid4())
-                    fake.items[mid] = dict({k: v for k, v in body.items() if k != "base_revision"},
-                                           id=mid, updated="now")
-                    fake.revision += 1
-                    return self._send(200, {"revision": fake.revision, "material": fake.items[mid]})
-                mid = urllib.parse.unquote(path.rsplit("/", 1)[1])
-                if mid not in fake.items:
-                    return self._send(404, {"error": "unbekannt"})
-                if method == "PUT":
-                    fake.items[mid] = dict({k: v for k, v in body.items() if k != "base_revision"},
-                                           id=mid, updated="now")
-                    fake.revision += 1
-                    return self._send(200, {"revision": fake.revision, "material": fake.items[mid]})
+                    mid, old = str(uuid.uuid4()), {}
+                elif path.startswith("/api/materials/") and method in ("PUT", "DELETE"):
+                    mid = urllib.parse.unquote(path.rsplit("/", 1)[1])
+                    if mid not in fake.items:
+                        return self._send(404, {"error": "Material nicht gefunden"})
+                    old = fake.items[mid]
+                else:
+                    return self._send(405, {"error": "method"})
                 if method == "DELETE":
                     del fake.items[mid]
                     fake.revision += 1
                     return self._send(200, {"revision": fake.revision})
-                return self._send(405, {"error": "method"})
+                try:
+                    item = validate_list_material({**old, **body}, mid, old.get("builtin", False))
+                except ValueError as exc:
+                    return self._send(400, {"error": str(exc)})
+                fake.items[mid] = item
+                fake.revision += 1
+                return self._send(200, {"revision": fake.revision, "material": item})
 
             def do_GET(self):
                 self._route("GET")

@@ -273,3 +273,26 @@ def test_studio_material_tools_follow_pi(qapp, tmp_path, pi):
     assert {p["name"] for p in pi.presets.values()} == {"Aus dem Dialog", "Offline-Dialog"}
     dlg.close()
     win.close()
+
+
+def test_mapping_fits_pi_ranges():
+    p = Preset(name="x" * 90, material_id="m", op="engrave_medium", laser_id="l",
+               thickness_mm=None, power_pct=120.0, speed_mm_min=12000.0, passes=40,
+               line_interval_mm=None, depth_per_pass_mm=None, z_step_mm=5.0)
+    m = preset_to_material(p.to_dict())
+    assert "interval_mm" not in m and None not in m.values()
+    assert (len(m["name"]), m["power_pct"], m["speed_mm_min"], m["passes"], m["z_step_mm"],
+            m["thickness_mm"]) == (80, 100.0, 6000.0, 30, 2.0, 0.0)
+    assert m["material_id"] == "m" and m["op"] == "engrave_medium"
+
+
+def test_list_variant_rejects_like_pi(tmp_path, list_pi):
+    sync = MaterialSync(tmp_path)
+    t = http(list_pi)
+    sync.refresh(t)
+    bad = preset("Zu dick")
+    bad.thickness_mm, bad.depth_per_pass_mm, bad.z_step_mm = 40.0, 0.5, 0.0
+    assert sync.save_preset(bad, t) == "rejected" and "30 Durchgänge" in sync.last_message
+    assert sync.pending and not list_pi.items
+    assert sync.save_preset(preset("Gut"), http(list_pi)) == "pi"  # frischer Transport
+    assert [m["name"] for m in list_pi.items.values()] == ["Gut"]
