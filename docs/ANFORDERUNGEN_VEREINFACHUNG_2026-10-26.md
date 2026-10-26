@@ -269,40 +269,70 @@ Platzierung (Vektoren) und Bilder (Mosaik, Höhenkarte) sind getrennt zu behande
 - Windows-App, Android-App und Pi-Web-UI nutzen dieselbe Quelle.
 - Änderung in einer App gilt für alle.
 
-### 4.1 Umsetzung Windows-Studio (Materials-Agent, 2026-10-26) – Client fertig
+### 4.1 Umsetzung Windows-Studio (Materials-Agent) – gegen den echten Pi geprüft (2026-10-26)
 
-Server-Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3 (Pi-Teil: Claude,
-pi-automatik). Studio spricht ihn **und** die ursprünglich mit dem Machine-Agent
-besprochene Variante; welche der Pi liefert, erkennt Studio an `GET /api/materials`:
+Pi-Dienst: `pi400/marlin/materials.py` + Routen in `web.py` (Claude, pi-automatik;
+`docs/PI_API_REFERENZ.md` §4.14, Vertrag `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` §3).
+Der Pi spricht **Variante B – eine flache Materialliste mit Revision**, gespeichert in
+`/var/lib/lumacut/materials.json` (atomar):
 
-| Variante | Erkennung | Lesen | Schreiben | Gegen gleichzeitiges Ändern |
-|---|---|---|---|---|
-| B – Materialliste (Vertrag §3) | `{"revision", "materials": [...]}` | `GET /api/materials` | `POST /api/materials`, `PUT/DELETE /api/materials/<id>` | `base_revision`, 409 |
-| A – Datenbank + Presets | `{"db": {format: lumacut-materials …}}` | `GET /api/materials` (ETag, 304), `GET /api/materials/presets` | `PUT/DELETE /api/materials/presets/<id>` | `If-Match`, 409/412 mit `current` |
-| alter Pi | 404/405 | – | – | Studio arbeitet lokal weiter |
+| Anfrage | Antwort |
+|---|---|
+| `GET /api/materials` | `{"revision": n, "materials": [Material]}` (beim ersten Start 7 Startwerte, `builtin: true`, Revision 1) |
+| `POST /api/materials` (Material ohne `id` + `base_revision`) | `{"revision": n+1, "material": …}`, `id` = UUID vom Pi |
+| `PUT /api/materials/<id>` (geänderte Felder + `base_revision`) | `{"revision": n+1, "material": …}`; fehlende Felder bleiben |
+| `DELETE /api/materials/<id>?base_revision=n` | `{"revision": n+1}` |
+| Fehler | 409 `{"error", "revision"}` (veraltete Revision, wird *vor* 404/400 geprüft), 404 `{"error": "Material nicht gefunden"}`, 400 `{"error": …}` (Bereich, `null`, `base_revision` fehlt) |
 
-Ablauf in Studio (`src/lumacut_materials/remote.py`, `sync.py`, Anbindung in `dialog.py`):
+Kein ETag/304, keine vollständige Datenbank auf dem Pi. **Unbekannte Felder bleiben
+erhalten** (≤ 32 Felder, ≤ 16 KB), auch wenn Android per PUT nur die Pi-Felder schickt.
+Bereiche: Leistung 0–100 %, Tempo 1–6000 mm/min, Durchgänge 1–30, Zeilenabstand
+0,01–5 mm (Standard 0,1), Z-Schritt 0–2 mm, Dicke/Tiefe ergibt höchstens 30 Durchgänge,
+gesamte Z-Absenkung höchstens 3 mm, Name 1–80 Zeichen.
+
+Studio (`src/lumacut_materials/remote.py`, `sync.py`, Anbindung in `dialog.py`):
 - **Beim Verbinden** gleicht Studio im Hintergrund ab (auch Menü *Material → Materialdatenbank
-  vom Pi laden*): Einträge vom Pi erscheinen unter „Eigene Presets“ und im Ebenen-Panel;
-  liefert der Pi eine ganze Datenbank (A), füllen Material-Feld und Dialog sich daraus neu.
+  vom Pi laden*). Jeder Pi-Eintrag ist ein Preset unter „Eigene Presets“ und im Ebenen-Panel;
+  gleiche Namen (z. B. Pappelsperrholz schneiden/gravieren) bekommen die Operation angehängt.
+  Planungswerte (Laser, Modell, Material-Auswahl) kommen weiter aus der mitgelieferten Datenbank.
 - **Speichern** (Preset, Testzelle) geht bei Verbindung sofort auf den Pi, sonst lokal und
-  beim nächsten Verbinden automatisch hoch. Löschen genauso.
-- **Ohne Pi**: zuletzt geladene Pi-Daten (`materials_pi_cache.json` im App-Datenordner),
-  sonst die mitgelieferte `materials.json`. Die Planungswerte (Laser, Modell) kommen bei
-  Variante B immer aus der mitgelieferten Datenbank.
-- **Konflikte**: Wurde ein Eintrag auf dem Pi inzwischen geändert, fragt Studio
-  „meine Fassung / Fassung vom Pi“. Offline geändert *und* auf dem Pi geändert: Pi-Fassung
-  gilt, die eigene bleibt als „<Name> (lokal)“ zusätzlich erhalten. Eine veraltete
-  Revision durch Änderungen an *anderen* Einträgen wird still wiederholt.
-- Abbildung Studio-Preset ↔ Pi-Material (B): `op=cut` ↔ `process=Schneiden, mode=line`,
-  `engrave_surface` ↔ `Markieren`, übrige Gravuren ↔ `Gravieren, fill`;
-  `line_interval_mm` ↔ `interval_mm`. Studio schickt zusätzlich `material_id`, `op`,
-  `laser_id`, `air_assist`, `focus_start_mm`, `notes`, `warnings`, `source` mit
-  (Wunsch an den Pi: unbekannte Felder unverändert speichern).
-- Details und Dateiformate: `software/lumacut-studio-native/docs/MATERIALS.md` („Materialdatenbank auf dem Pi“).
+  beim nächsten Verbinden automatisch hoch; Löschen genauso.
+- **Abbildung** Preset ↔ Material: `op=cut` ↔ `Schneiden/line`, `engrave_surface` ↔
+  `Markieren/fill`, andere Gravuren ↔ `Gravieren/fill`, `line_interval_mm` ↔ `interval_mm`.
+  Studio schickt `material_id`, `op`, `laser_id`, `air_assist`, `focus_start_mm`, `notes`,
+  `warnings`, `source` mit. Ändert Android/Pi-Web `process`, gilt `process` (nicht das alte `op`).
+  Werte werden auf die Pi-Bereiche begrenzt (z. B. 12000 → 6000 mm/min, wie die Ebene ohnehin fährt),
+  leere Werte weggelassen.
+- **Konflikte**: veraltete Revision durch Änderungen an *anderen* Einträgen → still mit neuer
+  Revision wiederholt. Derselbe Eintrag auf dem Pi geändert/gelöscht → Frage „meine Fassung /
+  Fassung vom Pi“. Offline geändert *und* auf dem Pi geändert → Pi gewinnt, eigene Fassung
+  bleibt als „<Name> (lokal)“.
+- **Vom Pi abgelehnt** (400, z. B. > 30 Durchgänge): Preset bleibt lokal und ausstehend,
+  Studio zeigt den Grund, der übrige Abgleich läuft weiter.
+- **Ohne Pi / alter Pi (404)**: lokale Presets + mitgelieferte `materials.json`, Warteschlange
+  wird beim nächsten Verbinden abgearbeitet.
 
-Offen: Pi-Endpunkte selbst (Claude, pi-automatik); Android und Pi-Web binden dieselbe
-API an; die eingebaute Datenbank ist in Studio nur lesbar (bearbeitet werden Presets/Einträge).
+**Geprüft** (`software/lumacut-studio-native/tests/test_materials_pi_real.py`): der echte
+`web.py`-Dienst läuft im Testprozess (Temp-Daten über `LUMACUT_DATA`, ohne Hardware), zwei
+Studio-Geräte dagegen: Erstabgleich der 7 Startwerte (zweiter Abgleich ohne Änderung),
+Speichern mit Studio-Zusatzfeldern und Unicode, Ändern (PUT, gleiche ID), Änderung wie von
+Android, Löschen, Revisionskonflikte (still / meine / Pi / gelöscht), Offline-Warteschlange
+(neu, geändert, gelöscht) inkl. „(lokal)“-Kopie, Werte außerhalb der Bereiche, 400-Ablehnung,
+alter Pi (echte Flask-404), 300 Einträge mit Umlauten/€ (< 10 s). Ergebnis: alle grün
+(Studio 766 + neue, Wurzel 166). Dabei gefunden und behoben: Schreiben vor dem ersten Abgleich
+ging an die falsche URL (nur lokal gespeichert); `interval_mm = 0`/`null` und Tempo > 6000
+wurden abgelehnt und brachen den ganzen Abgleich ab; doppelte Namen der Startwerte.
+`tests/fake_materials_pi.py` (Variante „list“) prüft jetzt wie der Pi.
+
+Offen:
+- Die eingebaute Studio-Datenbank (Materialien, Laser, Planungsmodell) bleibt lokal und nur
+  lesbar; geteilt werden die Einstellungs-Einträge. Die Pi-Startwerte (`builtin`) sind
+  wie eigene Einträge änderbar/löschbar.
+- Android legt Einträge ohne Studio-Felder an → Studio ordnet sie über `process` zu
+  (`material_id`/`laser_id` leer, Planung im Dialog dann manuell).
+- Pi-Web-UI (`index.html`) nutzt `/api/materials` noch nicht.
+- Studio liest neu nur beim Verbinden/Menü, nicht laufend (kein Push vom Pi).
+- Variante A (`/api/materials/presets`, ETag) bleibt im Client als Rückfall, der Pi bietet sie nicht.
 
 ## 5. UI-Aufräumen (Windows + Android)
 
@@ -347,7 +377,7 @@ API an; die eingebaute Datenbank ist in Studio nur lesbar (bearbeitet werden Pre
 | Nullpunkt oben rechts | Canvas + Machine + Scan Probe | Maschinenseite erledigt (`ce7da00`, §2.2); Canvas fertig und getestet, **Push gehalten**, bis Scan Probe Platzierung und Bilder spiegelt (§2.3); danach physische Prüfung am Gerät |
 | Kamera-Scan als Button | Scan Probe | Studio erledigt (§3); Android: Vertrag vorbereitet, kein Code |
 | Probing immer im Auftrag (keine Auswahl) | Scan Probe | Studio erledigt (§1.1) |
-| Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | Studio-Client fertig (beide API-Varianten, offline, Konflikte; §4.1), Pi-Endpunkte in Arbeit |
+| Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | Pi-API fertig (Variante B, Revision); Studio gegen den echten Pi-Dienst geprüft (§4.1); Android angebunden; Pi-Web offen |
 | Cleaner UI Windows | Canvas | erledigt (`bc8092b` + Start → `one_click.start`, §5.1) |
 | Cleaner UI Android | Claude, Session android | in Arbeit |
 

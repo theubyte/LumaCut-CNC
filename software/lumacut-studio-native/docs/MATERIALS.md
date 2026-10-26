@@ -167,16 +167,19 @@ Der Pi ist die gemeinsame Quelle für Studio, Android und Pi-Web (Anforderungen
 `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` §3). Studio-Seite:
 
 - `remote.HttpMaterialsTransport` – urllib, kein Proxy, keine Umleitungen,
-  `X-LumaCut-Key` falls gesetzt. Erkennt die Server-Variante an `GET /api/materials`:
-  **Liste** (`{"revision", "materials"}`, Schreiben mit `base_revision`, 409) oder
-  **Datenbank + Presets** (`{"db"}` mit ETag/304, `/api/materials/presets/<id>` mit
-  `If-Match`, 409/412 + `current`). 404/405 = Pi ohne Material-API.
+  `X-LumaCut-Key` falls gesetzt. Erkennt die Server-Variante an `GET /api/materials`
+  (auch vor dem ersten Schreiben): **Liste** (`{"revision", "materials"}`, Schreiben mit
+  `base_revision`, 409) – das ist der echte Pi (`pi400/marlin/materials.py`,
+  `PI_API_REFERENZ.md` §4.14) – oder, als Rückfall, **Datenbank + Presets** (`{"db"}` mit
+  ETag/304, `/api/materials/presets/<id>` mit `If-Match`). 404/405 = Pi ohne Material-API;
+  PUT-404 in der Liste = inzwischen gelöscht (Konflikt).
   Fehler: `MaterialsOffline`, `MaterialsUnsupported` (`MaterialsNoDatabase`),
-  `MaterialsConflict`, `MaterialsError`.
+  `MaterialsConflict`, `MaterialsError` (400 mit Grund aus `{"error"}`).
 - `sync.MaterialSync(ordner, preset_pfad)` – Qt-frei, thread-sicher:
   `db()` (Pi-Kopie oder mitgeliefert), `refresh(transport)` → `SyncResult`
   (`source` pi/cache/bundled, `online`, `db_changed`, `presets_changed`, `uploaded`,
-  `conflicts`, `message`), `save_preset(p, transport|None)` → `"pi"`/`"pending"`,
+  `conflicts`, `rejected`, `message`), `save_preset(p, transport|None)` →
+  `"pi"`/`"pending"`/`"rejected"` (Pi lehnt ab, Grund in `last_message`, bleibt ausstehend),
   `delete_preset(name, transport|None)`, `resolve_conflict(conflict, "mine"|"pi", t)`.
 - Dateien im App-Datenordner (`LUMACUT_MATERIALS_DIR` überschreibt):
   `material_presets.json` (wie bisher, Presets jetzt mit `id`),
@@ -193,9 +196,14 @@ Der Pi ist die gemeinsame Quelle für Studio, Android und Pi-Web (Anforderungen
   Datenbank an Ort und Stelle, Schnellfeld/Dialog/Ebenen-Panel laden neu.
 - Abbildung Preset ↔ Pi-Material (Liste): `remote.preset_to_material` /
   `material_to_preset` (`cut` ↔ `Schneiden/line`, `engrave_surface` ↔ `Markieren`,
-  andere Gravuren ↔ `Gravieren/fill`, `line_interval_mm` ↔ `interval_mm`;
-  Studio-Zusatzfelder werden mitgeschickt).
-- Tests: `tests/test_materials_sync.py` mit `tests/fake_materials_pi.py` (beide Varianten).
+  andere Gravuren ↔ `Gravieren/fill`, `line_interval_mm` ↔ `interval_mm`). Studio-Zusatzfelder
+  (`material_id`, `op`, `laser_id`, …) speichert der Pi unverändert; passt `op` nicht mehr zu
+  `process` (von Android/Pi-Web geändert), gilt `process`. Zahlen werden auf die Pi-Bereiche
+  begrenzt (`remote.PI_LIMITS`), leere Werte weggelassen; gleiche Namen vom Pi bekommen die
+  Operation angehängt.
+- Tests: `tests/test_materials_sync.py` mit `tests/fake_materials_pi.py` (beide Varianten,
+  „list“ prüft wie der Pi) und `tests/test_materials_pi_real.py` gegen den echten
+  `pi400/marlin/web.py` im Testprozess (ohne Flask übersprungen).
 
 ## API (ohne Qt)
 
