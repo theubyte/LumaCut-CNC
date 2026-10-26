@@ -81,8 +81,9 @@ def test_main_window_has_material_menu(qapp, tmp_path):
     QSettings.setDefaultFormat(QSettings.IniFormat)
     main = pytest.importorskip("main")
     win = main.LumaCutStudio()
+    # Editor nur noch unter „Mehr › Materialwerte bearbeiten“ (Anforderungen §9.1)
     titles = [a.text() for a in win.menuBar().actions()]
-    assert "&Material" in titles
+    assert "&Material" not in titles and win.material_tools.action in win.actions()
     dlg = win.material_tools.open()
     qapp.processEvents()
     assert dlg.isVisible() and dlg.editor is win.canvas

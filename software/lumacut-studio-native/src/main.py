@@ -22,6 +22,7 @@ from lumacut_canvas.fit import install_screen_fit
 from lumacut_canvas.unit_ui import display_units
 from lumacut_canvas.units import format_position
 from lumacut_canvas.main_view import MainActions, MoreToggle, install_main_view
+from lumacut_canvas.material_picker import install_material_picker
 # --- end canvas integration ---
 # --- scan integration (scan agent) ---
 from scanprobe.job_flow_qt import install_one_click
@@ -172,12 +173,11 @@ class LumaCutStudio(QMainWindow):
         # --- canvas integration (canvas agent): Hauptansicht Material · Design · Start ---
         self.main_actions = MainActions()
         outer_layout.addWidget(self.main_actions)
-        # Schnelle Materialwahl bleibt sichtbar (Materials-Modul füllt die Zeile;
-        # es sucht die Gruppe „Design“, danach heißt sie „Material“).
-        self.material_group = design = QGroupBox("Design")
-        design_form = QFormLayout(design)
-        design_form.addRow("Material", QComboBox())
-        outer_layout.addWidget(design)
+        # Die eine Materialwahl (Material · Dicke, wie Android) – gefüllt von
+        # install_material_picker (lumacut_canvas.material_picker).
+        self.material_group = QGroupBox("Material")
+        QVBoxLayout(self.material_group)
+        outer_layout.addWidget(self.material_group)
         self.more_toggle = MoreToggle()
         outer_layout.addWidget(self.more_toggle)
         # Alles Erweiterte hinter „Mehr“ (Ablauf, Scan & Probe, Maschine).
@@ -261,6 +261,9 @@ class LumaCutStudio(QMainWindow):
         # --- materials integration (materials agent) ---
         install_materials(self)
         # --- end materials integration ---
+        # --- canvas integration (canvas agent): eine Materialwahl in der Hauptansicht ---
+        install_material_picker(self)
+        # --- end canvas integration ---
         # --- import integration (review agent) ---
         install_import(self)
         # --- end import integration ---
@@ -272,7 +275,6 @@ class LumaCutStudio(QMainWindow):
         # --- end autosave integration ---
         # --- canvas integration (canvas agent): Hauptansicht, „Mehr“ standardmäßig zu ---
         install_main_view(self)
-        self.material_group.setTitle("Material")
         # --- canvas integration (canvas agent): small screens / touch ---
         install_screen_fit(self)  # Fenster in Bildschirm, Seitenleiste nicht abgeschnitten, Touch-Modus
         # --- end canvas integration ---

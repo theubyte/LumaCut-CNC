@@ -463,3 +463,40 @@ Offen:
 2. Studio: Hauptansicht aufräumen, Start-Button macht den kompletten Ablauf.
 3. Nullpunkt-Korrektur in Canvas und G-Code.
 4. Android: gleiche Vereinfachung und Anbindung an die Pi-Materialdatenbank.
+
+## 9. Weitere Punkte Windows-App (Besitzer, 2026-10-26)
+
+Reihenfolge wie vorgegeben; jeder Punkt eigener Commit auf `main`.
+
+### 9.1 Eine Materialwahl wie in Android (Canvas, 2026-10-26)
+
+Vorbild: Android `MaterialScreen.kt` / `PiMaterials.grouped` / `EditorViewModel.selectMaterial`
+(Kacheln „Name · Dicke“, Suche, Offline-Hinweis, Tipp setzt alle Ebenen).
+
+**Bestandsaufnahme vorher** (fünf Stellen, an denen Material gewählt werden konnte):
+
+| Stelle | vorher | jetzt |
+|---|---|---|
+| Hauptansicht „1 Material“ | öffnete den Bibliotheksdialog | springt zur einen Materialwahl darunter (Suche fokussiert) |
+| Gruppe „Material“ (Schnellwahl `MaterialQuickPanel`: Material, Dicke, Operation, verknüpfen, „Auf aktive Ebene“) | aktive Ebene | **ersetzt** durch `lumacut_canvas/material_picker.py`: große Liste „Material · Dicke“ (Zeilen 56 px, Suche 44 px, Touch-Scrollen), Quelle/Offline-Hinweis, „Gewählt: …“ |
+| Ebenen-Panel „Material der Ebene“ (Combobox Startwerte/Presets, Dicke, Zieltiefe, Tiefe/Durchg.) | eigene Auswahl | nur Anzeige (Material · Dicke, Leistung · Tempo · Durchgänge); Dicke/Zieltiefe/Tiefe je Durchgang von Hand nur unter „Mehr“ |
+| Menüleiste „Material“ (Bibliothek, Testzelle, Pi laden) | eigenes Menü | entfällt; dieselben Aktionen als Knöpfe in „Mehr › Materialwerte bearbeiten“, Strg+Umschalt+M bleibt |
+| Bibliotheksdialog `MaterialLibraryDialog` | Wahl + Editor | nur Editor (über „Mehr“) |
+
+Maschinen-, Scan-Panel und Auftrags-Werkzeuge haben keine Materialwahl (nur Materialtest-
+Raster = Werkzeug, kein Wahlort).
+
+**Verhalten:** Liste = jedes verträgliche Material der Datenbank × seine Standarddicken,
+ergänzt um Pi-Einträge (Presets vom Pi, auch zusätzliche Dicken). Quelle: Materials-Modul
+(`window.material_tools`): Pi-Datenbank beim Verbinden, sonst Cache bzw. mitgelieferte
+Datenbank (Hinweis „Kein Kontakt zum Pi – …“). Ein Tipp setzt **alle Ebenen** in einem
+Undo-Schritt; Operation je Ebene: Bild, Füllung oder Name mit „Grav/Bild/Foto/Linie/Mark“ →
+Gravur, sonst Schneiden; kann das Material nicht schneiden → Gravur. Pi-Eintrag für
+Material + Dicke + Operation hat Vorrang, sonst Bibliotheksplanung (verknüpft). Die Wahl wird
+gemerkt (`QSettings material/choice`).
+
+**Fremde Dateien (minimal):** `tests/test_materials_testgrid.py` (Materials-Agent): der
+Hauptfenster-Test prüfte die entfernte Schnellwahl, jetzt dieselbe Bibliotheksverknüpfung über
+die neue Wahl. `lumacut_materials/dialog.py` unverändert (`MaterialQuickPanel` bleibt im Code,
+wird mangels „Design“-Gruppe nicht mehr angelegt – kann der Materials-Agent entfernen).
+Tests: `tests/test_material_picker.py`, `tests/test_main_view.py`.

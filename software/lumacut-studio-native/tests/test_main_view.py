@@ -65,10 +65,11 @@ def test_main_view_three_big_actions_and_more_closed(make_win):
     assert [b.text().split()[-1] for b in (a.material_button, a.design_button, a.start_button)] == \
         ["Material", "Design", "Start"]
     assert a.scan_button.height() >= 48 and win.more_toggle.height() >= 48
-    # Material-Schnellwahl (Material + Dicke) bleibt sichtbar
+    # Die eine Materialwahl (Material · Dicke, wie Android) ist sichtbar
     assert win.material_group.title() == "Material" and _visible_in(win, win.material_group)
-    quick = win.material_tools.quick
-    assert quick is not None and _visible_in(win, quick.thickness) and _visible_in(win, quick.combo)
+    picker = win.material_picker
+    assert _visible_in(win, picker.list) and _visible_in(win, picker.search)
+    assert win.material_tools.quick is None   # keine zweite Schnellwahl
     # Erweitertes zu
     assert not win.more_toggle.isChecked() and not _visible_in(win, win.more_panel)
     assert not _visible_in(win, win.job_tools.toolbar)
@@ -132,12 +133,23 @@ def test_design_menu_offers_import_text_shapes(make_win):
     assert win.canvas.tools.tool.value == "rect"
 
 
-def test_material_button_opens_library(make_win, monkeypatch):
+def test_material_button_focuses_picker_library_only_under_more(make_win, monkeypatch):
     win = make_win()
     calls = []
     monkeypatch.setattr(win.material_tools, "open", lambda *a, **k: calls.append(1))
+    win.activateWindow()
     win.main_actions.material_button.click()
+    assert calls == []                       # kein Dialog: zur Materialliste
+    assert win.material_picker.search.hasFocus() or not win.isActiveWindow()
+    # Editor (Bibliotheksdialog) nur unter „Mehr“, kein Menü „Material“ mehr
+    assert "&Material" not in [a.text() for a in win.menuBar().actions()]
+    box = win.material_editor.box
+    assert not _visible_in(win, box)
+    win.main_view.set_more(True)
+    assert _visible_in(win, box)
+    win.material_editor.editor_button.click()
     assert calls == [1]
+    assert win.material_tools.action in win.actions()   # Strg+Umschalt+M bleibt
 
 
 def test_camera_scan_button_calls_scan_entry_point(make_win, monkeypatch):

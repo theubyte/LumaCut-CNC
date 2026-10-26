@@ -111,15 +111,15 @@ def test_main_window_menu_and_design_material_field(qapp, tmp_path):
     win = main.LumaCutStudio()
     tools = win.material_tools
     assert tools.test_action.text().startswith("Testzelle")
-    quick = tools.quick
-    assert quick is not None and quick.combo.count() > 10
-    quick.combo.setCurrentIndex(quick.combo.findData("mdf"))
-    quick.operation.setCurrentIndex(quick.operation.findData("cut"))
-    quick.thickness.setValue(3.0)
-    lid = quick.apply()
+    # Die Schnellwahl im Design-Bereich ersetzt die eine Materialwahl der
+    # Hauptansicht (lumacut_canvas.material_picker, Anforderungen §9.1).
+    assert tools.quick is None
+    picker = win.material_picker
+    assert picker.list.count() > 10
+    assert picker.select("mdf|3")
+    lid = win.canvas.document.active_layer_id
     layer = win.canvas.document.layer(lid)
     assert layer.material_link and layer.material_ref.startswith("lib:mdf/cut/")
-    assert "verknüpft" in quick.status.text()
     win.canvas.undo_stack.undo()
     assert not win.canvas.document.layer(lid).material_ref
     win.canvas.undo_stack.setClean()

@@ -283,6 +283,9 @@ class LayersPanel(QWidget):
         box = QGroupBox("Material der Ebene")
         self.material_box = box
         form = QFormLayout(box)
+        self._material_form = form
+        self._material_external = False
+        self._advanced = True
         form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         form.setHorizontalSpacing(10)
@@ -308,14 +311,51 @@ class LayersPanel(QWidget):
         note = QLabel(START_VALUES_HINT)
         note.setObjectName("Hint")
         note.setWordWrap(True)
+        self.material_note = note
         form.addRow(note)
+        # Nur Anzeige, wenn die Hauptansicht die Materialwahl übernimmt
+        # (material_picker, Anforderungen 2026-10-26 §9.1).
+        self.material_summary = QLabel()
+        self.material_summary.setObjectName("MaterialSummary")
+        self.material_summary.setWordWrap(True)
+        self.material_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        form.insertRow(0, self.material_summary)
+        form.setRowVisible(self.material_summary, False)
         return box
+
+    def set_material_choice_external(self, on: bool) -> None:
+        """Materialwahl liegt in der Hauptansicht (eine Stelle wie in Android):
+        hier nur noch die resultierenden Werte zeigen; Dicke/Zieltiefe/Tiefe je
+        Durchgang von Hand nur hinter „Mehr“."""
+        self._material_external = bool(on)
+        self._sync_material_rows()
+        if self.doc.active_layer is not None:
+            self._show_summary(self.doc.active_layer)
+
+    def _sync_material_rows(self) -> None:
+        form, ext = self._material_form, self._material_external
+        form.setRowVisible(self.material_summary, ext)
+        form.setRowVisible(self.material, not ext)
+        form.setRowVisible(self.material_note, not ext)
+        for w in (self.thickness, self.target_depth, self.depth_per_pass):
+            form.setRowVisible(w, not ext or self._advanced)
+
+    def _show_summary(self, layer: Layer) -> None:
+        if not layer.material:
+            text = "Kein Material – oben unter „1 Material“ wählen."
+        else:
+            t = f" · {layer.thickness_mm:g} mm".replace(".", ",") if layer.thickness_mm else ""
+            text = (f"{layer.material}{t}\n{layer.power:.0f} % · {layer.speed:.0f} mm/min · "
+                    f"{layer.passes}× Durchgang")
+        self.material_summary.setText(text)
 
     def set_advanced_visible(self, on: bool) -> None:
         """Feineinstellungen der Ebene (Leistung/Tempo/Durchgänge, Füllung) nur
         hinter „Mehr“ zeigen (Vereinfachung 2026-10-26, §1). Material/Dicke bleibt."""
         self.params.setVisible(on)
         self.fill_box.setVisible(on)
+        self._advanced = bool(on)
+        self._sync_material_rows()
 
     def _build_fill_box(self) -> QGroupBox:
         """Vektor-Füllung der Ebene (Schraffur/Kreuzschraffur, hatch.py)."""
@@ -525,6 +565,7 @@ class LayersPanel(QWidget):
                 combo.insertItem(1, f"{layer.material} (eigene Werte)", ("current", layer.material))
                 idx = 1
         combo.setCurrentIndex(idx)
+        self._show_summary(layer)
         self.thickness.setValue(layer.thickness_mm)
         self.target_depth.setValue(layer.target_depth_mm)
         self.depth_per_pass.setValue(layer.depth_per_pass_mm)

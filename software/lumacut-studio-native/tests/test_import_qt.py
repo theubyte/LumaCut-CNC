@@ -33,7 +33,8 @@ def _png(tmp_path):
 
 def test_file_menu_and_shortcut(win):
     menus = [a.text() for a in win.menuBar().actions()]
-    assert menus[0] == "&Datei" and "&Material" in menus
+    # Menü „Material“ entfällt (eine Materialwahl in der Hauptansicht, Anforderungen §9.1)
+    assert menus[0] == "&Datei" and "&Material" not in menus
     texts = [a.text() for a in win.import_tools.menu.actions() if a.text()]
     assert texts[:4] == ["Neu", "Öffnen …", "Speichern", "Speichern unter …"]
     assert "Importieren …" in texts and "Bildeinstellungen …" in texts

@@ -3,9 +3,10 @@ optionaler Kamera-Scan und alle erweiterten Optionen hinter „Mehr“.
 
 Siehe docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md (§1, §3, §5).
 
-- **Material**: öffnet die Materialbibliothek; die schnelle Wahl (Material,
-  Dicke) bleibt direkt darunter sichtbar (Gruppe „Material“, belegt vom
-  Materials-Modul).
+- **Material**: springt zur einen Materialwahl direkt darunter (Liste
+  „Material · Dicke“ mit Suche, :mod:`.material_picker`, wie die Android-App);
+  ein Tipp setzt die Werte aller Ebenen. Der Bibliotheksdialog ist nur noch
+  Editor unter „Mehr › Materialwerte bearbeiten“.
 - **Design**: Menü zum Hinzufügen (Importieren, Text, Formen).
 - **Start**: Ein-Klick-Auftrag ``window.one_click.start`` (Scan Probe,
   ``scanprobe.job_flow_qt.OneClickController``): Bestätigung → Referenzfahrt →
@@ -287,6 +288,12 @@ class MainView(QObject):
 
     # ------------------------------------------------------------ Aktionen
     def open_material(self) -> None:
+        """„1 Material“: zur einen Materialwahl (Liste Material · Dicke) springen.
+        Der Bibliotheksdialog ist nur noch Editor unter „Mehr“."""
+        picker = getattr(self.window, "material_picker", None)
+        if picker is not None:
+            picker.focus()
+            return
         tools = getattr(self.window, "material_tools", None)
         if tools is not None:
             tools.open()

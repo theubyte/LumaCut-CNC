@@ -29,8 +29,13 @@ Materialdaten im Ergebnis `dist/LumaCutStudio/` fehlen (`python build_exe.py --c
 Siehe `docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` §1/§3. Rechts stehen drei
 große Knöpfe (≥ 48 px, touchtauglich) – das reicht für den normalen Auftrag:
 
-1. **Material** – öffnet die Materialbibliothek; darunter bleibt die schnelle
-   Wahl (Material, Dicke, „Auf aktive Ebene“) immer sichtbar.
+1. **Material** – die *eine* Materialwahl wie in der Android-App: große Liste
+   „Material · Dicke“ mit Suche direkt darunter (Pi-Datenbank, ohne Pi die
+   zuletzt gespeicherte/mitgelieferte Liste). Ein Tipp setzt Leistung, Tempo und
+   Durchgänge aller Ebenen (Schneiden bzw. Gravieren je Ebene, ein Undo-Schritt).
+   Die Ebenenliste zeigt nur das Ergebnis; Materialwerte bearbeiten
+   (Bibliotheksdialog, Testzelle, Pi-Abgleich) liegt unter „Mehr“
+   (Anforderungen §9.1, `lumacut_canvas/material_picker.py`).
 2. **Design** – Menü: Importieren …, Text, Rechteck, Ellipse, Polygon, Freihand, Linie.
 3. **Start** – Ein-Klick-Auftrag: baut den G-Code wie „Design senden“
    (inkl. „Nur Auswahl“ und Fokuskorrektur), lädt ihn hoch und startet den
@@ -432,7 +437,8 @@ Fokuskorrektur: siehe [docs/SCAN_PROBE.md](../../docs/SCAN_PROBE.md) (`src/scanp
 
 ## Materialbibliothek
 
-*Material → Materialbibliothek …*: Startwerte (Leistung, mm/min, Durchgänge,
+*Mehr › Materialwerte bearbeiten › Materialbibliothek …* (Strg+Umschalt+M) – Editor;
+gewählt wird oben unter „1 Material“. Startwerte (Leistung, mm/min, Durchgänge,
 Fokus-Absenkung je Durchgang) für 25 Materialien und LaserTree LT-80W
 (10 W optisch) bzw. 5/10/20/40-W-Dioden auf die aktive Ebene anwenden,
 Presets speichern, 3D-Relief aus Graustufenbild. Warnliste für nicht
