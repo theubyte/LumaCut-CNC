@@ -57,6 +57,13 @@ ESTOP_TIMEOUT_S = 3.0
 #: Extra attempts after a network failure (never after a Pi answer).
 ESTOP_RETRIES = 2
 ESTOP_RETRY_PAUSE_S = 0.2
+#: Upper bound for all attempts together, so the operator learns quickly
+#: that the physical E-Stop is needed. Windows does not refuse a closed
+#: port at once (it retries the SYN for ~2 s), and an unreachable LAN host
+#: only fails by timeout; without this bound 3 attempts took 6–10 s.
+ESTOP_DEADLINE_S = 4.0
+#: Never shorten an attempt below this (a slow but healthy Pi must fit).
+ESTOP_MIN_ATTEMPT_S = 0.5
 _LONG_OPS = ("home", "probe", "park")
 
 
@@ -287,7 +294,11 @@ class LumaCutClient:
     def __init__(self, base_url: str = DEFAULT_BASE_URL, api_key: str = ""):
         self.base_url = normalize_base_url(base_url)
         self._api_key = (api_key or "").strip()
-        self._opener = urllib.request.build_opener(_NoRedirect())
+        # No system proxy: the Pi is on the LAN, and a proxy from the
+        # environment or the Windows registry would swallow or delay
+        # requests (also the E-Stop).
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                                   _NoRedirect())
 
     def __repr__(self) -> str:  # never expose the key in logs/tracebacks
         return "LumaCutClient(%r, key=%s)" % (
@@ -436,19 +447,33 @@ class LumaCutClient:
         return self.action("probe", **point)
 
     def emergency_stop(self, retries: int = ESTOP_RETRIES,
-                       timeout: float = ESTOP_TIMEOUT_S) -> str:
+                       timeout: float = ESTOP_TIMEOUT_S,
+                       deadline: float = ESTOP_DEADLINE_S) -> str:
         """Software E-Stop (M112). Retries only network failures.
 
         Every attempt is a fresh HTTP connection with a short timeout. A Pi
         answer (also an error such as "USB getrennt") is final and never
         retried: it is the Pi's verdict. Sending M112 twice is harmless.
+        No new attempt starts after ``deadline`` seconds in total, and a
+        later attempt's timeout is shortened to the time left (but never
+        below ESTOP_MIN_ATTEMPT_S), so failure is reported within about
+        ``deadline`` seconds on every platform.
         """
         last: ConnectionFailed | None = None
+        end = time.monotonic() + max(0.0, deadline)
+        attempts = 0
         for attempt in range(1 + max(0, retries)):
             if attempt:
+                if time.monotonic() + ESTOP_RETRY_PAUSE_S >= end:
+                    break
                 time.sleep(ESTOP_RETRY_PAUSE_S)
+                left = end - time.monotonic()
+                attempt_timeout = min(timeout, max(ESTOP_MIN_ATTEMPT_S, left))
+            else:
+                attempt_timeout = timeout
+            attempts += 1
             try:
-                message = self.action("estop", timeout=timeout)
+                message = self.action("estop", timeout=attempt_timeout)
             except ConnectionFailed as exc:
                 last = exc
                 continue
@@ -456,8 +481,9 @@ class LumaCutClient:
                 message += " (Versuch %d)" % (attempt + 1)
             return message
         raise ConnectionFailed(
-            "NOT-AUS nicht bestätigt nach %d Versuchen – physischen Not-Aus "
-            "benutzen! (%s)" % (1 + max(0, retries), last))
+            "NOT-AUS nicht bestätigt nach %d %s – physischen Not-Aus "
+            "benutzen! (%s)" % (attempts, "Versuch" if attempts == 1 else "Versuchen",
+                                last))
 
     def reset_emergency(self) -> str:
         return self.action("estop_reset")
