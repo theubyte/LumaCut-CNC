@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import arrange_ui, icons, node_ui, pathops_ui, text_ui, theme, touch
+from . import arrange_ui, icons, node_ui, pathops_ui, text_ui, theme, touch, units
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip
@@ -41,6 +41,7 @@ from .document_io import FILE_SUFFIX, load_into, save_document
 from .export import export_png, export_svg
 from .material import Material, material_layer_attrs
 from .model import Document, Geometry, Shape, keep_inside_together, new_id, normalize_angle
+from .unit_ui import LengthSpin, display_units
 from .tools import TOOL_LABELS, TOOL_SHORTCUTS, Tool, ToolController
 from .workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, axis_tooltips, clamp_offset,
                        screen_left_for_user_x, user_x_of)
@@ -63,20 +64,13 @@ def _angle_spin() -> QDoubleSpinBox:
     return s
 
 
-def _mm_spin(minimum: float, maximum: float) -> QDoubleSpinBox:
-    s = QDoubleSpinBox()
-    s.setRange(minimum, maximum)
-    s.setDecimals(2)
-    s.setSingleStep(0.5)
-    s.setSuffix(" mm")
-    s.setKeyboardTracking(False)  # erst bei Enter/Fokuswechsel übernehmen
-    s.setAlignment(Qt.AlignRight)
-    s.setFixedWidth(104)
-    return s
+def _mm_spin(minimum: float, maximum: float) -> LengthSpin:
+    """Längenfeld: Wert immer mm, Anzeige in mm oder Zoll (unit_ui)."""
+    return LengthSpin(minimum, maximum)
 
 
 class PropertyBar(QWidget):
-    """Kontextleiste über dem Canvas: Position/Größe in mm, Ebene, Text."""
+    """Kontextleiste über dem Canvas: Position/Größe (mm oder Zoll), Ebene, Text."""
 
     def __init__(self, editor: "CanvasEditor") -> None:
         super().__init__()
@@ -425,6 +419,11 @@ class CanvasEditor(QWidget):
         self.node_editor = node_ui.install(self)  # Knotenwerkzeug (Tool.NODE)
         self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
                   lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
+        # Anzeige-Einheit mm/Zoll; Text zeigt die aktuelle Einheit (kein Symbol).
+        u = self._act("unit_toggle", "mm", display_units().toggle, "Ctrl+Shift+U")
+        u.setToolTip("Einheit der Anzeige umschalten: mm ↔ Zoll  (Strg+Umschalt+U)")
+        display_units().changed.connect(self._unit_changed)
+        self._unit_changed(display_units().unit)
 
     def _toolbar(self, name: str, orientation: Qt.Orientation) -> QToolBar:
         tb = QToolBar()
@@ -442,7 +441,7 @@ class CanvasEditor(QWidget):
         for name in ("open", "save", "export", None, "undo", "redo", None, "duplicate", "delete",
                      "rotate_ccw", "rotate_cw", "group", "ungroup", None,
                      "zoom_out", "zoom_in", "fit", "zoom_100", None, "grid", "snap", "path_preview",
-                     "touch_mode"):
+                     "touch_mode", "unit_toggle"):
             bar.addSeparator() if name is None else bar.addAction(a[name])
             if name == "ungroup":
                 self.arrange_button = arrange_ui.add_to_bar(self, bar)
@@ -475,7 +474,8 @@ class CanvasEditor(QWidget):
         grid = QGridLayout(canvas)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(0)
-        corner = QLabel("mm")
+        corner = QLabel(display_units().unit)  # Einheit der Lineale, folgt _unit_changed
+        self.ruler_corner = corner
         corner.setObjectName("Ruler")
         corner.setAlignment(Qt.AlignCenter)
         corner.setFixedSize(Ruler.THICKNESS, Ruler.THICKNESS)
@@ -613,6 +613,18 @@ class CanvasEditor(QWidget):
 
     def _set_snap(self, on: bool) -> None:
         self.snap_enabled = on
+
+    def _unit_changed(self, unit: str) -> None:
+        a = self.actions_by_name.get("unit_toggle")
+        if a is not None:
+            a.setText("Zoll" if unit == units.INCH else "mm")
+        corner = getattr(self, "ruler_corner", None)
+        if corner is not None:
+            corner.setText(unit)
+
+    def set_display_unit(self, unit: str) -> None:
+        """Anzeige-Einheit für Lineale, Statusleiste und Maßfelder ("mm"/"in")."""
+        display_units().set_unit(unit)
 
     def set_zoom_percent(self, pct: float) -> None:
         """Zoom in Prozent der physischen Größe (100 % = :data:`PX_PER_MM_100`)."""

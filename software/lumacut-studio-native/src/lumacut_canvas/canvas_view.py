@@ -17,9 +17,10 @@ from PySide6.QtGui import (QColor, QEventPoint, QFont, QImage, QMouseEvent, QPai
 from PySide6.QtWidgets import (QApplication, QGraphicsScene, QGraphicsView, QHBoxLayout, QToolButton,
                                QWidget)
 
-from . import icons, theme, touch
+from . import icons, theme, touch, units
 from .items import SelectionOverlay, ShapeItem
 from .model import Document
+from .unit_ui import display_units
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, screen_to_user
 
 _log = logging.getLogger(__name__)
@@ -36,12 +37,13 @@ TOUCH_MOUSE_GUARD_S = 0.6  # so lange nach Touch werden "Maus"-Ereignisse aus To
 LONG_PRESS_MS = 550        # Finger so lange still = Kontextmenü (wie Rechtsklick)
 
 
-def nice_step(px_per_mm: float, min_px: float) -> float:
-    """Kleinster "runder" mm-Abstand, der mindestens ``min_px`` Pixel breit ist."""
-    for s in NICE_STEPS:
+def nice_step(px_per_mm: float, min_px: float, steps: tuple[float, ...] = NICE_STEPS) -> float:
+    """Kleinster "runder" Abstand (in der Einheit von ``steps``; ``px_per_mm``
+    dann px je Einheit), der mindestens ``min_px`` Pixel breit ist."""
+    for s in steps:
         if s * px_per_mm >= min_px:
             return s
-    return NICE_STEPS[-1]
+    return steps[-1]
 
 
 class CanvasScene(QGraphicsScene):
@@ -774,10 +776,10 @@ class CanvasView(QGraphicsView):
 
 
 class Ruler(QWidget):
-    """mm-Lineal oben oder links, folgt Zoom und Pan der View.
+    """Lineal oben oder links, folgt Zoom und Pan der View.
 
-    Beschriftung in Anzeige-mm (workarea.screen_to_user): oben läuft X vom
-    Nullpunkt oben rechts nach links."""
+    Beschriftung in Anzeige-Koordinaten (workarea.screen_to_user) und in der
+    gewählten Einheit mm/Zoll (units, unit_ui.display_units)."""
 
     THICKNESS = 22
 
@@ -794,6 +796,7 @@ class Ruler(QWidget):
         view.viewChanged.connect(self.update)
         view.cursorMoved.connect(self._on_cursor)
         view.leftCanvas.connect(self._on_leave)
+        display_units().changed.connect(self.update)
 
     def _on_cursor(self, x: float, y: float) -> None:
         self.cursor_mm = x if self.orientation == Qt.Horizontal else y
@@ -808,15 +811,38 @@ class Ruler(QWidget):
             return float(self.view.mapFromScene(QPointF(mm, 0)).x())
         return float(self.view.mapFromScene(QPointF(0, mm)).y())
 
+    def ticks(self) -> list[tuple[float, float, bool]]:
+        """Sichtbare Teilstriche: (Anzeigewert in Einheit, px, Hauptstrich)."""
+        horiz = self.orientation == Qt.Horizontal
+        length = self.width() if horiz else self.height()
+        limit = WORK_WIDTH_MM if horiz else WORK_HEIGHT_MM
+        unit = display_units().unit
+        f = units.factor(unit)  # mm je Anzeige-Einheit
+        scale = self.view.px_per_mm * f  # px je Anzeige-Einheit
+        major = nice_step(scale, 60, units.RULER_STEPS[unit])
+        if unit == units.INCH:
+            minor = major / (5 if major in (5, 10) else 4)
+        else:
+            minor = major / (5 if major not in (2, 20, 200) else 4)
+        out = []
+        # v läuft in Anzeige-Einheiten; ganzzahliger Zähler statt Aufsummieren,
+        # damit Zoll-Achtel nicht durch Rundung verrutschen.
+        i = math.floor(-SCENE_MARGIN_MM / f / minor)
+        while (v := i * minor) * f <= limit + SCENE_MARGIN_MM:
+            i += 1
+            mm = v * f
+            # angezeigter Wert → Bildschirm (Nullpunkt aus workarea).
+            px = self._to_px(screen_to_user(mm, 0)[0] if horiz else mm)
+            if 0 <= px <= length:
+                out.append((round(v, 6), px, abs((v / major) - round(v / major)) < 1e-6))
+        return out
+
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(theme.PANEL))
         horiz = self.orientation == Qt.Horizontal
-        length = self.width() if horiz else self.height()
         limit = WORK_WIDTH_MM if horiz else WORK_HEIGHT_MM
-        scale = self.view.px_per_mm
-        major = nice_step(scale, 60)
-        minor = major / (5 if major not in (2, 20, 200) else 4)
+        f = units.factor(display_units().unit)
         # Bereich der Arbeitsfläche dezent hervorheben.
         a, b = self._to_px(0), self._to_px(limit)
         band = QColor(theme.SURFACE_2)
@@ -828,29 +854,22 @@ class Ruler(QWidget):
         font.setPointSizeF(7.5)
         p.setFont(font)
         t = self.THICKNESS
-        start = math.floor(-SCENE_MARGIN_MM / minor) * minor
-        v = start
-        while v <= limit + SCENE_MARGIN_MM:
-            # v = angezeigter Wert (Nullpunkt oben rechts: X wächst nach links).
-            px = self._to_px(screen_to_user(v, 0)[0] if horiz else v)
-            if 0 <= px <= length:
-                is_major = abs((v / major) - round(v / major)) < 1e-6
-                inside = 0 <= v <= limit
-                p.setPen(QColor(theme.TEXT_DIM if inside else "#3c4656"))
-                tick = t * (0.45 if is_major else 0.2)
-                if horiz:
-                    p.drawLine(QPointF(px, t - tick), QPointF(px, t))
-                    if is_major:
-                        p.drawText(QPointF(px + 2, 9), f"{v:g}")
-                else:
-                    p.drawLine(QPointF(t - tick, px), QPointF(t, px))
-                    if is_major:
-                        p.save()
-                        p.translate(9, px + 2)
-                        p.rotate(-90)
-                        p.drawText(QPointF(-24, 0), f"{v:g}")
-                        p.restore()
-            v += minor
+        for v, px, is_major in self.ticks():
+            inside = -1e-6 <= v * f <= limit + 1e-6
+            p.setPen(QColor(theme.TEXT_DIM if inside else "#3c4656"))
+            tick = t * (0.45 if is_major else 0.2)
+            if horiz:
+                p.drawLine(QPointF(px, t - tick), QPointF(px, t))
+                if is_major:
+                    p.drawText(QPointF(px + 2, 9), f"{v:g}")
+            else:
+                p.drawLine(QPointF(t - tick, px), QPointF(t, px))
+                if is_major:
+                    p.save()
+                    p.translate(9, px + 2)
+                    p.rotate(-90)
+                    p.drawText(QPointF(-24, 0), f"{v:g}")
+                    p.restore()
         if self.cursor_mm is not None:
             px = self._to_px(self.cursor_mm)
             p.setPen(QPen(QColor(theme.ACCENT), 1))

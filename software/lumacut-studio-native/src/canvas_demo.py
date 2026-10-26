@@ -14,7 +14,8 @@ from PySide6.QtWidgets import QApplication, QDockWidget, QLabel, QMainWindow
 from lumacut_canvas.editor import CanvasEditor
 from lumacut_canvas.layers_panel import LayersPanel
 from lumacut_canvas.theme import CANVAS_QSS
-from lumacut_canvas.workarea import screen_to_user
+from lumacut_canvas.unit_ui import display_units
+from lumacut_canvas.units import format_position
 
 
 class CanvasDemoWindow(QMainWindow):
@@ -35,7 +36,7 @@ class CanvasDemoWindow(QMainWindow):
         self.pos_label = QLabel("X —  Y —")
         self.statusBar().addPermanentWidget(self.pos_label)
         self.editor.cursorMoved.connect(lambda x, y: self.pos_label.setText(
-            "X {:7.1f} mm   Y {:7.1f} mm".format(*screen_to_user(x, y))))
+            format_position(x, y, display_units().unit, width=7)))
         self.editor.statusMessage.connect(lambda t: self.statusBar().showMessage(t, 4000))
         self.editor.fileChanged.connect(lambda t: self.setWindowTitle(f"{t} – LumaCut Studio Canvas"))
         self.setWindowTitle(f"{self.editor.title()} – LumaCut Studio Canvas")
