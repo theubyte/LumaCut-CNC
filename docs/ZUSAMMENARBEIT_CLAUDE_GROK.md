@@ -311,6 +311,10 @@ Hauptweg, drei Schritte, immer sichtbar:
   mit Vorschau, Bild anpassen (Jarvis/Stucki, Helligkeit/Kontrast/Schärfe/Invertieren), QR-Code, Text im Bogen,
   Raster-Kopien, Formen, Umriss für Vektoren. Alles in `core` mit Tests. Offen/ehrlich: `.xcs` und QR nicht gegen
   echte Dateien/Scanner geprüft; Boxgenerator nicht gebaut. Nicht am Gerät erprobt.
+- (Claude, Android) **Fertig: Import als Gruppe aus Einzelteilen und Laser-Suche im WLAN**, siehe Commit unten
+  im Log (CI-Link in der Antwort an die Sitzung). `PartSplitter` (Even-Odd, Löcher bleiben im Teil, >500 Teile = ein
+  Element), `LaserDiscovery` (/24 parallel, `GET /api/status`, erkennt nur LumaCut-Pis), Popup „Laser auswählen“ beim
+  Start, bei leerer/nicht erreichbarer Adresse, nach 10 s Ausfall (einmal je Ausfall) und über „Laser suchen“.
 
 ## Änderungslog
 

@@ -2,9 +2,12 @@ package de.millione.lumacut.app.machine
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import de.millione.lumacut.core.DiscoveredLaser
 import de.millione.lumacut.core.Document
+import de.millione.lumacut.core.LaserDiscovery
 import de.millione.lumacut.core.JobFile
 import de.millione.lumacut.core.Material
 import de.millione.lumacut.core.MachineStatus
@@ -29,11 +32,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
+import java.net.Inet4Address
 
 data class Notice(val text: String, val error: Boolean = false)
 
 /** Materials of the Pi database; [fromPi] false = offline copy that cannot be changed. */
 data class MaterialState(val revision: Int = 0, val items: List<Material> = emptyList(), val fromPi: Boolean = false)
+
+/** The "Laser auswählen" popup: [found] are LumaCut Pis in the Wi-Fi subnet. */
+data class DiscoveryState(val open: Boolean = false, val scanning: Boolean = false,
+                          val found: List<DiscoveredLaser> = emptyList(), val note: String? = null)
 
 /** Selected job with its parsed toolpath and the probe point (work-area mm) for one-click runs. */
 data class JobView(val name: String, val toolpath: Toolpath?, val probe: Pt?, val probeChosen: Boolean, val error: String? = null)
@@ -69,10 +77,20 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
     private val materialFile = File(app.filesDir, "materials.json")
     private var materialsTriedAt = 0L
 
+    private val _discovery = MutableStateFlow(DiscoveryState())
+    val discovery: StateFlow<DiscoveryState> = _discovery.asStateFlow()
+    private var scanJob: Job? = null
+    private var offlineSince = 0L
+    private var outagePrompted = false
+    private var everOnline = false
+
     private val _materials = MutableStateFlow(MaterialState(0, loadCachedMaterials()))
     val materials: StateFlow<MaterialState> = _materials.asStateFlow()
 
-    init { connect(_host.value, quiet = true) }
+    init {
+        connect(_host.value, quiet = true)
+        if (_host.value.isBlank()) openDiscovery()
+    }
 
     fun notify(text: String, error: Boolean = false) { _notices.tryEmit(Notice(text, error)) }
 
@@ -105,6 +123,7 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
             val s = c.status()
             _status.value = s
             _online.value = true
+            everOnline = true; offlineSince = 0L; outagePrompted = false
             if (!_materials.value.fromPi && System.currentTimeMillis() - materialsTriedAt > 15_000) refreshMaterials()
             if (s.job.state == "error" && s.job.error.isNotBlank() && s.job.error != lastJobError) {
                 lastJobError = s.job.error
@@ -112,7 +131,45 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
             }
         } catch (e: Exception) {
             _online.value = false
+            // First failure after start, or the link has been gone for 10 s: offer the search once per outage.
+            val now = System.currentTimeMillis()
+            if (offlineSince == 0L) offlineSince = now
+            if (!outagePrompted && (!everOnline || now - offlineSince > 10_000)) { outagePrompted = true; openDiscovery() }
         }
+    }
+
+    /* ---------- find the laser in the Wi-Fi ---------- */
+
+    fun openDiscovery() { scanNetwork() }
+
+    fun scanNetwork() {
+        scanJob?.cancel()
+        _discovery.update { it.copy(open = true, scanning = true, note = null) }
+        scanJob = viewModelScope.launch {
+            val ip = withContext(Dispatchers.IO) { localIpv4() }
+            if (ip == null) {
+                _discovery.update { it.copy(scanning = false, found = emptyList(), note = "Das Tablet ist mit keinem WLAN verbunden – WLAN einschalten oder die Adresse von Hand eintragen.") }
+                return@launch
+            }
+            val found = try { LaserDiscovery.scan(ip) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { emptyList() }
+            _discovery.update {
+                it.copy(scanning = false, found = found,
+                    note = if (found.isEmpty()) "Kein Laser gefunden. Ist er eingeschaltet und im selben WLAN? Dann erneut suchen oder die Adresse eintragen." else null)
+            }
+        }
+    }
+
+    fun dismissDiscovery() { scanJob?.cancel(); _discovery.value = DiscoveryState() }
+
+    fun chooseLaser(l: DiscoveredLaser) { dismissDiscovery(); connect(l.host) }
+
+    /** IPv4 address of the active Wi-Fi/LAN connection (private ranges only), or null. */
+    private fun localIpv4(): String? {
+        val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return null
+        val net = cm.activeNetwork ?: return null
+        val props = cm.getLinkProperties(net) ?: return null
+        return props.linkAddresses.map { it.address }.filterIsInstance<Inet4Address>()
+            .mapNotNull { it.hostAddress }.firstOrNull { PiClient.isLocalIpv4(it) }
     }
 
     /** Runs [block] against the Pi with a busy flag for [key] and a notice for the result. */

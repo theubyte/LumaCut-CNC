@@ -67,7 +67,10 @@ fun SettingsScreen(machine: MachineViewModel) {
                     textStyle = LcTypography.bodyLarge.merge(NumberStyle),
                 )
                 Spacer(Modifier.height(12.dp))
-                LcButton("Verbinden", { machine.connect(ip) }, kind = BtnKind.PRIMARY)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LcButton("Verbinden", { machine.connect(ip) }, kind = BtnKind.PRIMARY)
+                    LcButton("Laser suchen", { machine.openDiscovery() }, icon = LcIcons.refresh)
+                }
                 Spacer(Modifier.height(10.dp))
                 SmallText(when {
                     host.isBlank() -> "Noch nicht verbunden. Die Adresse steht in der Fritzbox / im Router (z. B. 192.168.2.89)."

@@ -21,6 +21,7 @@ import de.millione.lumacut.core.LayerMode
 import de.millione.lumacut.core.MarlinWriter
 import de.millione.lumacut.core.Material
 import de.millione.lumacut.core.MaterialGroup
+import de.millione.lumacut.core.PartSplitter
 import de.millione.lumacut.core.Poly
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Transform
@@ -204,6 +205,26 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         change { it.copy(elements = it.elements + e) }
         _selected.value = setOf(e.id)
         return e
+    }
+
+    /**
+     * Imported geometry as single parts in one group (outer contour with its holes = one part, open path = one part),
+     * so the pieces move together first and can be picked one by one after "Gruppe auflösen". Returns the number of parts.
+     */
+    fun addParts(kind: String, worldPaths: List<Poly>): Int {
+        val split = PartSplitter.split(worldPaths)
+        val layer = writableLayer()
+        val gid = if (split.parts.size > 1) UUID.randomUUID().toString() else null
+        val elements = split.parts.mapNotNull { part ->
+            val box = boundsOf(part) ?: return@mapNotNull null
+            Element(layerId = layer, kind = kind, transform = Transform(box.minX, box.minY),
+                paths = part.map { poly -> poly.map { Pt(it.x - box.minX, it.y - box.minY) } }, groupId = gid)
+        }
+        if (elements.isEmpty()) return 0
+        change { it.copy(elements = it.elements + elements) }
+        _selected.value = elements.map { it.id }.toSet()
+        if (split.tooMany) notify("Sehr viele Einzelteile – als ein Element übernommen", false)
+        return elements.size
     }
 
     /** Vector content on the layer named [layerName] (Gravieren, Linie, Schneiden), moved to the middle of the work area. */

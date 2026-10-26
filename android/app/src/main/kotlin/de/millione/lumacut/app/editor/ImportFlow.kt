@@ -84,7 +84,8 @@ private suspend fun importVector(kind: FileKind, bytes: ByteArray, editor: Edito
     val k = minOf(1.0, (Work.WIDTH - 10) / max(box.width, 1e-9), (Work.HEIGHT - 10) / max(box.height, 1e-9))
     val cx = Work.center.x; val cy = Work.center.y
     fun map(p: Pt) = Pt(cx + (p.x - box.center.x) * k, cy + (p.y - box.center.y) * k)
-    if (result.polys.isNotEmpty()) editor.addVector(kind.label, result.polys.map { poly -> poly.map(::map) })
+    var parts = 0
+    if (result.polys.isNotEmpty()) parts = editor.addParts(kind.label, result.polys.map { poly -> poly.map(::map) })
     var pictures = 0
     for (img in result.images) {
         val bmp = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(img.bytes, 0, img.bytes.size) } ?: continue
@@ -95,7 +96,7 @@ private suspend fun importVector(kind: FileKind, bytes: ByteArray, editor: Edito
         pictures++
     }
     val parts = buildList {
-        if (result.polys.isNotEmpty()) add("${result.polys.size} Pfade")
+        if (result.polys.isNotEmpty()) add(if (parts > 1) "$parts Teile (als Gruppe, mit „Gruppe auflösen“ einzeln wählbar)" else "${result.polys.size} Pfade")
         if (pictures > 0) add("$pictures Bild" + if (pictures > 1) "er" else "")
     }
     val shrink = if (k < 1.0) " · verkleinert, damit es in den Arbeitsbereich passt" else ""
