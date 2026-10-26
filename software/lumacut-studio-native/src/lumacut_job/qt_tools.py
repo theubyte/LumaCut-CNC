@@ -110,6 +110,10 @@ class JobTools(QObject):
                                      "Konvexe Hülle statt Rechteck abfahren")
         self.test_action = self._add("Materialtest…", self.material_test, None,
                                      "Leistung × Geschwindigkeit-Testraster einfügen")
+        self.serial_action = self._add("Seriennummern…", self.serial_numbers, "Alt+N",
+                                       "Ausgewählten Text als Raster fortlaufend nummerierter Kopien "
+                                       "(Platzhalter {n}, {n:3}, {date})")
+        self.serial_action.setObjectName("serial_numbers_action")
         self.cut_action = self._add("Schnittoptionen…", self.cut_options, "Alt+K",
                                     "Kerf-Versatz, Haltestege und An-/Abfahrt der aktiven Ebene")
         self.selection_action = self._add("Nur Auswahl", self._selection_toggled, None,
@@ -242,6 +246,29 @@ class JobTools(QObject):
         self._msg(f"Materialtest mit {n} Ebenen eingefügt")
         return n
 
+
+    def serial_numbers(self, spec=None) -> list[str]:
+        """Ausgewählten Text durch nummerierte Kopien ersetzen (ein Undo-Schritt)."""
+        from .serial_qt import SerialDialog, insert_serials
+        doc = self.editor.document
+        sel = [i for i in self.editor.selection if doc.has_shape(i)]
+        if len(sel) != 1 or doc.shape(sel[0]).kind != "text":
+            self._msg("Seriennummern: bitte genau ein Textobjekt auswählen")
+            return []
+        src = doc.shape(sel[0])
+        if spec is None:
+            dlg = SerialDialog(src.text, self.window)
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec = dlg.spec()
+        try:
+            ids = insert_serials(self.editor, src.id, spec)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "Seriennummern", str(exc))
+            self._msg(f"Seriennummern: {exc}")
+            return []
+        self._msg(f"{len(ids)} nummerierte Texte erzeugt (gruppiert)")
+        return ids
 
     def cut_options(self, values: dict | None = None) -> bool:
         """Schnittoptionen der aktiven Ebene bearbeiten (ein Undo-Schritt)."""

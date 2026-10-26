@@ -121,6 +121,13 @@ Eigenständig testen: `python src/canvas_demo.py`.
     weggelassene Anfahrten meldet ein Hinweis nach Senden, Schätzung und Speichern.
   Code: `src/lumacut_job/cutpath.py`; die Art jedes Teilpfads (`cut`, `lead_in`, `lead_out`,
   `tab`) steht in `JobLayer.poly_kinds` (z. B. für eine Pfadvorschau).
+- **Seriennummern** („Seriennummern…“, *Alt+N*, Toolbar „Auftrag“; Stapel-Fall von LightBurns
+  „Variable Text“): ersetzt das ausgewählte Textobjekt durch ein Raster nummerierter Kopien.
+  Vorlage mit Platzhaltern `{n}` (Nummer), `{n:3}` (mit Nullen, `007`), `{date}` (TT.MM.JJJJ),
+  `{{`/`}}` für Klammern; Start, Schritt (auch negativ), Anzahl (≤ 500), Spalten, Abstand X/Y,
+  Vorschau der ersten Werte. Höhe, Schrift, Drehung, Ebene und Streckung bleiben, die Breite folgt
+  dem Text; die Kopien sind gruppiert, alles ist **ein** Rückgängig-Schritt. Passt das Raster
+  nicht auf die Arbeitsfläche, wird nichts geändert. Code: `src/lumacut_job/serial.py`.
 - **Nur Auswahl** (Toolbar, umschaltbar): Senden, Schätzen, Rahmen und „G-Code speichern“
   verwenden nur die ausgewählten Objekte (Ebenen-Einstellungen bleiben); ohne Auswahl gibt es
   eine Fehlermeldung statt eines Auftrags. Die Pfadvorschau zeigt weiter das ganze Design.
