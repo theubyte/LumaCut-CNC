@@ -185,3 +185,74 @@ def test_layer_colour_mapping(qapp):
 def test_icon_exists(qapp):
     from lumacut_canvas import icons
     assert "path" in icons.available() and not icons.icon("path").isNull()
+
+
+def test_document_source_follows_selection(qapp):
+    """Vorschau = Auftrag: mit „Nur Auswahl“ rechnet die Vorschau nur die Auswahl."""
+    from lumacut_job.planner import optimized_document_gcode
+    from lumacut_job.selection import selection_document
+    seen = []
+
+    def gen(d):
+        seen.append(len(d.shapes))
+        return optimized_document_gcode(d)
+
+    doc = _doc()
+    ed = _editor(doc, gen)
+    pv = ed.path_preview
+    only = {"on": False}
+
+    def provider():
+        if not only["on"]:
+            return ed.document
+        return selection_document(ed.document, ed.selection)
+
+    pv.set_document_source(provider, lambda: only["on"])
+    ed.set_path_preview(True)
+    assert seen[-1] == 2 and "Nur Auswahl" not in pv.readout()
+    full_cut = pv.toolpath.cut_length_mm
+    ed.set_selection([])                       # ganzes Design: Auswahl egal
+    assert not pv.pending()
+    only["on"] = True
+    first = ed.document.shapes[0].id
+    ed.set_selection([first])
+    assert pv.pending()
+    pv.rebuild()
+    assert seen[-1] == 1 and pv.readout().startswith("Nur Auswahl · ")
+    assert 0 < pv.toolpath.cut_length_mm < full_cut
+    ed.set_selection([])                       # leer -> Meldung statt Absturz
+    pv.rebuild()
+    assert pv.error and not pv.toolpath.moves
+    pv.set_document_source(None)               # zurück zum ganzen Design
+    pv.rebuild()
+    assert seen[-1] == 2 and not pv.error
+
+
+def test_main_window_preview_uses_job_selection(qapp, tmp_path):
+    import pytest
+    from PySide6.QtCore import QSettings
+    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(tmp_path))
+    QSettings.setDefaultFormat(QSettings.IniFormat)
+    main = pytest.importorskip("main")
+    win = main.LumaCutStudio()
+    ed = win.canvas
+    from lumacut_canvas.model import Geometry, Shape
+    lid = ed.document.active_layer_id
+    a = Shape("rect", Geometry(0, 0, 10, 10), lid)
+    b = Shape("rect", Geometry(50, 0, 40, 40), lid)
+    ed.document.add_shape(a)
+    ed.document.add_shape(b)
+    pv = ed.path_preview
+    ed.set_path_preview(True)
+    full = pv.toolpath.cut_length_mm
+    ed.set_selection([a.id])
+    win.job_tools.set_selection_only(True)
+    assert pv.pending()
+    pv.rebuild()
+    assert pv.readout().startswith("Nur Auswahl")
+    assert 0 < pv.toolpath.cut_length_mm < full
+    win.job_tools.set_selection_only(False)
+    pv.rebuild()
+    assert abs(pv.toolpath.cut_length_mm - full) < 1e-6
+    ed.undo_stack.setClean()
+    win.close()

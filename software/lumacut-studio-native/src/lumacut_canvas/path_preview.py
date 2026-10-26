@@ -104,7 +104,15 @@ class PathPreview(QObject):
         self._timer.setInterval(DEBOUNCE_MS)
         self._timer.timeout.connect(self.rebuild)
         self._dirty = True
+        # Quelle des Vorschau-Dokuments: Standard ganzes Design; main.py hängt
+        # JobTools.job_document ein, damit „Nur Auswahl“ hier genauso wirkt wie
+        # beim Senden (REVIEW_GAP_ANALYSIS §9, Vorschau = Auftrag).
+        self._document_provider: Callable[[], object] | None = None
+        self._selection_only: Callable[[], bool] | None = None
         editor.document.add_listener(self.schedule)
+        sig = getattr(editor, "selectionChanged", None)
+        if sig is not None:
+            sig.connect(self._selection_changed)
 
     # --- Steuerung -------------------------------------------------------
     @property
@@ -118,6 +126,28 @@ class PathPreview(QObject):
         self._dirty = True
         if self.visible:
             self.rebuild()
+
+    def set_document_source(self, provider: Callable[[], object] | None,
+                            selection_only: Callable[[], bool] | None = None) -> None:
+        """Dokument-Quelle setzen (``None`` = ganzes Design).
+
+        ``selection_only`` meldet, ob die Quelle von der Auswahl abhängt; dann
+        wird bei jeder Auswahländerung neu gerechnet.
+        """
+        self._document_provider = provider
+        self._selection_only = selection_only
+        self.schedule()
+
+    @property
+    def selection_only(self) -> bool:
+        try:
+            return bool(self._selection_only and self._selection_only())
+        except Exception:
+            return False
+
+    def _selection_changed(self, *_args) -> None:
+        if self.selection_only:
+            self.schedule()
 
     def set_visible(self, on: bool) -> None:
         on = bool(on)
@@ -155,9 +185,10 @@ class PathPreview(QObject):
     def rebuild(self) -> None:
         self._timer.stop()
         self._dirty = False
-        doc = self.editor.document
         self.error = ""
         try:
+            doc = (self._document_provider() if self._document_provider is not None
+                   else self.editor.document)
             self.gcode = self.generator(doc)
         except ValueError as exc:            # z. B. „Keine sichtbaren Objekte“
             self.gcode, self.error = "", str(exc)
@@ -251,6 +282,8 @@ class PathPreview(QObject):
         if self.estimate is not None:
             text += f" · ca. {format_time(self.estimate.total_time_s)}"
         text += f" · {len(tp.runs)} Läufe"
+        if self.selection_only:
+            text = "Nur Auswahl · " + text
         if self.limit is not None:
             c, r = tp.lengths_until(self.limit)
             text += f"  |  bis Schritt {self.limit}: {format_mm(c)} / {format_mm(r)}"

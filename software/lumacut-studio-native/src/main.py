@@ -251,6 +251,13 @@ class LumaCutStudio(QMainWindow):
         # --- job tools integration (review agent) ---
         install_job_tools(self)
         # --- end job tools integration ---
+        # --- canvas: Pfadvorschau folgt „Nur Auswahl“ (Vorschau = Auftrag) ---
+        tools = getattr(self, "job_tools", None)
+        if tools is not None:
+            self.canvas.path_preview.set_document_source(
+                tools.job_document, lambda: tools.selection_only)
+            tools.selection_action.toggled.connect(lambda _on: self.canvas.path_preview.schedule())
+        # --- end canvas path preview ---
         # --- materials integration (materials agent) ---
         install_materials(self)
         # --- end materials integration ---
