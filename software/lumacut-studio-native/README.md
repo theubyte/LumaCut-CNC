@@ -428,7 +428,7 @@ Zustandsautomat, NOT-AUS-Verhalten und Einstellungen:
 ## Kamera-Scan und Höhenmesh
 
 Kachel-Scan, Objekterkennung, Mehrbereichs-Proben, Höhenmeshes und
-Fokuskorrektur: siehe [docs/SCAN_PROBE.md](docs/SCAN_PROBE.md) (`src/scanprobe/`).
+Fokuskorrektur: siehe [docs/SCAN_PROBE.md](../../docs/SCAN_PROBE.md) (`src/scanprobe/`).
 
 ## Materialbibliothek
 
