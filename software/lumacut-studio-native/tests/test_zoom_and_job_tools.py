@@ -121,8 +121,26 @@ def test_main_window_job_tools(qapp, monkeypatch, tmp_path):
     sent = []
     monkeypatch.setattr(win.machine_panel, "send_gcode",
                         lambda n, g, start=False: sent.append((n, g, start)))
+    framed = []
+    monkeypatch.setattr(win.machine_panel, "frame_gcode",
+                        lambda g, mode="box": framed.append((g, mode)) or True)
     g = tools.frame_job(confirm=False)
-    assert sent == [("lumacut-frame.gcode", g, True)] and "M3 I" not in g
+    # Framing uses op=frame: no upload, so the sent job is not replaced.
+    assert sent == [] and framed == [(g, "box")] and "M3 I" not in g
+    assert win.machine_panel._frame_provider("hull") == tools.frame_program("hull")
+    # Shortcuts are wired to the new API (enabled once the panel allows it).
+    assert tools.frame_action.shortcut().toString() == "Ctrl+Shift+F"
+    assert tools.hull_action.shortcut().toString() == "Alt+Shift+F"
+    assert not tools.frame_action.isEnabled()      # not connected / not homed
+    import lumacut_job.qt_tools as qt_tools
+    monkeypatch.setattr(qt_tools.QMessageBox, "question",
+                        staticmethod(lambda *a, **k: qt_tools.QMessageBox.Yes))
+    win.machine_panel.frame_available_changed.emit(True)
+    assert tools.frame_action.isEnabled() and tools.hull_action.isEnabled()
+    tools.frame_action.trigger()
+    tools.hull_action.trigger()
+    assert [m for _, m in framed] == ["box", "box", "hull"], framed
+    assert sent == []
     win._send_canvas_job()
     assert sent[-1][0] == "canvas.gcode" and sent[-1][2] is False
     assert "Gesendet" in win.statusBar().currentMessage()

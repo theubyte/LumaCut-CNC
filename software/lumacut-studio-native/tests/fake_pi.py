@@ -16,11 +16,13 @@ STATUS = {
     "emergency_latched": False, "workpiece_surface_z": None,
     "laser_focus_z": None, "probe_xy_offset_mm": [-23.0, 15.0],
     "job": {"file": "", "state": "idle", "line": 0, "total": 0, "error": ""},
+    "frame": {"state": "idle", "mode": "", "line": 0, "total": 0, "error": ""},
+    "activity": "idle",
     "firmware": "marlin", "config": {"focus_gap_mm": 7.0},
 }
 
 ACTIONS = ("home", "jog", "probe", "light", "exhaust", "start", "autorun",
-           "abort", "estop", "estop_reset", "connect", "park")
+           "abort", "estop", "estop_reset", "connect", "park", "frame")
 
 
 class FakePi:
@@ -38,6 +40,8 @@ class FakePi:
         self.drop: dict[str, int] = {}
         #: raw bytes to send instead of the status JSON (malformed answers)
         self.raw_status: bytes | None = None
+        #: names of uploaded jobs, in order (framing must never add one)
+        self.uploads: list[str] = []
         self.lock = threading.Lock()
         fake = self
 
@@ -128,11 +132,27 @@ class FakePi:
                         return self._reply(code, data)
                     if op not in fake.actions:
                         return self._reply(400, {"error": "Unbekannte Marlin-Aktion: " + op})
+                    if op == "frame":
+                        # Like web.py start_frame: own state, job untouched.
+                        moves = [l for l in form.get("gcode", "").splitlines()
+                                 if l.strip().upper().startswith(("G0", "G1"))]
+                        with fake.lock:
+                            fake.status["frame"] = {"state": "running",
+                                                    "mode": form.get("mode", "box"),
+                                                    "line": 0, "total": len(moves),
+                                                    "error": ""}
+                            fake.status["owner"] = "frame"
+                            fake.status["activity"] = "framing"
+                        return self._reply(200, {"message": "Rahmenfahrt gestartet",
+                                                 "frame": fake.status["frame"]})
                     return self._reply(200, {"message": "ok " + op})
                 if self.path == "/api/upload":
                     if "upload" in fake.fail:
                         code, data = fake.fail["upload"]
                         return self._reply(code, data)
+                    name = entry["body"].split(b'filename="', 1)[-1].split(b'"', 1)[0]
+                    with fake.lock:
+                        fake.uploads.append(name.decode("utf-8", "replace"))
                     return self._reply(200, {"message": "Marlin-Auftrag geprüft und gespeichert"})
                 self._reply(404, {"error": "nicht gefunden"})
 
@@ -149,6 +169,15 @@ class FakePi:
     def __exit__(self, *exc):
         self.server.shutdown()
         self.server.server_close()
+
+    def finish_frame(self, state: str = "complete", error: str = "") -> None:
+        """End the simulated frame run (complete/aborted/error)."""
+        with self.lock:
+            frame = dict(self.status["frame"], state=state, error=error)
+            frame["line"] = frame["total"] if state == "complete" else frame["line"]
+            self.status["frame"] = frame
+            self.status["owner"] = "Frei"
+            self.status["activity"] = "idle"
 
     def last(self, path: str | None = None) -> dict:
         with self.lock:
