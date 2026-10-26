@@ -15,7 +15,7 @@ from PySide6.QtGui import (QColor, QFont, QImage, QMouseEvent, QPainter, QPaintE
                            QWheelEvent)
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QWidget
 
-from . import theme
+from . import theme, touch
 from .items import SelectionOverlay, ShapeItem
 from .model import Document
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
@@ -92,6 +92,7 @@ class CanvasView(QGraphicsView):
     cursorMoved = Signal(float, float)  # mm  # noqa: N815
     viewChanged = Signal()  # noqa: N815
     leftCanvas = Signal()  # noqa: N815
+    touchDetected = Signal()  # erste echte Touchscreen-Eingabe  # noqa: N815
 
     def __init__(self, scene: CanvasScene, parent: QWidget | None = None) -> None:
         super().__init__(scene, parent)
@@ -115,8 +116,19 @@ class CanvasView(QGraphicsView):
         self._pan_start: QPointF | None = None
         self._space_down = False
         self._fitted_once = False
+        self.touch_mode = False
+        self.metrics: touch.TouchMetrics = touch.MOUSE
         self.horizontalScrollBar().valueChanged.connect(self.viewChanged)
         self.verticalScrollBar().valueChanged.connect(self.viewChanged)
+
+    # --- Touch-Modus ------------------------------------------------------
+    def set_touch_mode(self, on: bool) -> None:
+        """Anfasser, Fangbereiche und Zoom-Knöpfe auf Finger- bzw. Mausgröße."""
+        self.touch_mode = bool(on)
+        self.metrics = touch.metrics(self.touch_mode)
+        scene: CanvasScene = self.scene()  # type: ignore[assignment]
+        scene.overlay.set_metrics(self.metrics)
+        self._after_zoom()
 
     # --- Zoom -------------------------------------------------------------
     @property

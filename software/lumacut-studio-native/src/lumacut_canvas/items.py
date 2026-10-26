@@ -14,6 +14,7 @@ from PySide6.QtGui import (QBrush, QColor, QPainter, QPainterPath, QPainterPathS
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 
 from . import theme
+from .touch import MOUSE, TouchMetrics
 from .model import Geometry, Layer, Shape, rotate_point
 from .shape_paths import geometry_transform, shape_path
 from .workarea import Rect
@@ -23,9 +24,9 @@ from .workarea import Rect
 #   7   3
 #   6 5 4
 HANDLE_FRACTIONS = ((0, 0), (0.5, 0), (1, 0), (1, 0.5), (1, 1), (0.5, 1), (0, 1), (0, 0.5))
-HANDLE_PX = 9.0
+HANDLE_PX = MOUSE.handle_px  # Mausmodus; Touch-Modus siehe touch.TOUCH
 ROTATE_HANDLE = 8          # Index des Dreh-Griffs
-ROTATE_HANDLE_OFFSET_PX = 24.0  # Abstand über der oberen Kante
+ROTATE_HANDLE_OFFSET_PX = MOUSE.rotate_offset_px  # Abstand über der oberen Kante
 
 
 class ShapeItem(QGraphicsItem):
@@ -130,7 +131,22 @@ class SelectionOverlay(QGraphicsItem):
         self._rect: Rect | None = None
         self._angle = 0.0
         self._px = 1.0  # mm pro Bildschirmpixel, von der View gesetzt
+        self.metrics: TouchMetrics = MOUSE  # Griffgrößen in Bildschirmpixeln
         self.setAcceptedMouseButtons(Qt.NoButton)
+
+    def set_metrics(self, m: TouchMetrics) -> None:
+        """Griffgrößen (Maus/Touch) umschalten; Pixelmaße, also zoomunabhängig."""
+        self.prepareGeometryChange()
+        self.metrics = m
+        self.update()
+
+    def handle_size_mm(self) -> float:
+        """Gezeichnete Griffgröße in Szenen-mm (konstant in Bildschirmpixeln)."""
+        return self.metrics.handle_px * self._px
+
+    def handle_hit_mm(self) -> float:
+        """Halbe Kantenlänge des Fangquadrats eines Griffs in Szenen-mm."""
+        return max(self.metrics.handle_hit_px, self.metrics.handle_px / 2) * self._px
 
     def set_scale(self, mm_per_px: float) -> None:
         self.prepareGeometryChange()
@@ -176,7 +192,7 @@ class SelectionOverlay(QGraphicsItem):
             return []
         r = self._rect
         pts = [QPointF(r.x + fx * r.w, r.y + fy * r.h) for fx, fy in HANDLE_FRACTIONS]
-        pts.append(QPointF(r.x + r.w / 2, r.y - ROTATE_HANDLE_OFFSET_PX * self._px))
+        pts.append(QPointF(r.x + r.w / 2, r.y - self.metrics.rotate_offset_px * self._px))
         return pts
 
     def handle_points(self) -> list[QPointF]:
@@ -189,7 +205,7 @@ class SelectionOverlay(QGraphicsItem):
         Bei kleinen Objekten überlappen sich die Fangbereiche; dann gewinnt
         der nächste Griff, Ecken vor Kanten. Der Dreh-Griff hat Vorrang.
         """
-        tol = HANDLE_PX * self._px
+        tol = self.handle_hit_mm()
         lp = self.to_local(pos)
         best: tuple[float, int, int] | None = None
         for i, hp in enumerate(self._local_handles()):
@@ -204,7 +220,7 @@ class SelectionOverlay(QGraphicsItem):
     def boundingRect(self) -> QRectF:  # noqa: N802
         if self._rect is None:
             return QRectF()
-        m = HANDLE_PX * self._px * 1.5 + ROTATE_HANDLE_OFFSET_PX * self._px
+        m = (self.metrics.handle_px * 1.5 + self.metrics.rotate_offset_px) * self._px
         r = self._rect
         local = QRectF(r.x, r.y, r.w, r.h).adjusted(-m, -m, m, m)
         return self._transform().mapRect(local)
@@ -228,8 +244,8 @@ class SelectionOverlay(QGraphicsItem):
         handles = self._local_handles()
         rot = handles.pop()
         p.drawLine(QPointF(r.x + r.w / 2, r.y), rot)
-        s = HANDLE_PX * self._px
-        pen = QPen(QColor(theme.SELECTION), 1.2)
+        s = self.handle_size_mm()
+        pen = QPen(QColor(theme.SELECTION), 1.6 if self.metrics.handle_px > HANDLE_PX else 1.2)
         pen.setCosmetic(True)
         p.setPen(pen)
         p.setBrush(QColor(theme.BG))

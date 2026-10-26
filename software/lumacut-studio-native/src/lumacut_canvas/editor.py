@@ -14,6 +14,7 @@ Schnittstelle für die Hauptanwendung und andere Module::
     editor.add_overlay(key, overlay, z)   # weitere Bilder/Zeichnungen unter den Objekten
     editor.request_roi()       # Bereich aufziehen -> roiSelected(x, y, w, h) in mm
     editor.add_toolbar_action(action)     # eigene Aktion in die Aktionsleiste
+    editor.set_touch_mode(on)  # Finger-Bedienung; touchModeChanged(bool), Aktion "touch_mode"
     export.job_layers(editor.document)  # Laserparameter + Polylinien in Maschinen-mm
 """
 
@@ -22,14 +23,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QKeySequence, QPen, QUndoStack
 from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphicsRectItem,
                                QGridLayout, QHBoxLayout,
                                QLabel, QLineEdit, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import icons, theme
+from . import icons, theme, touch
 from .canvas_view import CanvasScene, CanvasView, Ruler
 from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand, SetGroupsCommand,
                        SetLayerAttrsCommand, SetShapeLayerCommand, SetTextCommand)
@@ -276,8 +277,12 @@ class CanvasEditor(QWidget):
     fileChanged = Signal(str)  # noqa: N815
     roiSelected = Signal(float, float, float, float)  # x, y, w, h in Arbeitsflächen-mm  # noqa: N815
     roiCancelled = Signal()  # noqa: N815
+    touchModeChanged = Signal(bool)  # noqa: N815
 
-    def __init__(self, document: Document | None = None, parent: QWidget | None = None) -> None:
+    def __init__(self, document: Document | None = None, parent: QWidget | None = None, *,
+                 settings: QSettings | None = None) -> None:
+        """``settings``: wo die Touch-Modus-Wahl gespeichert wird (Standard:
+        Anwendungs-QSettings, falls die App eine Organisation gesetzt hat)."""
         super().__init__(parent)
         self.setObjectName("CanvasEditor")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -317,6 +322,13 @@ class CanvasEditor(QWidget):
         self.document.add_listener(self._on_document_changed)
         self.undo_stack.cleanChanged.connect(self._clean_changed)
         self.set_tool(Tool.SELECT)
+
+        # Touch-Modus: gespeicherte Wahl, sonst automatisch (Touchscreen vorhanden).
+        self.touch_mode = False
+        self._settings = settings if settings is not None else touch.default_settings()
+        saved = touch.load_setting(self._settings)
+        self.set_touch_mode(touch.has_touchscreen() if saved is None else saved, persist=False)
+        self.view.touchDetected.connect(self._on_touch_detected)
 
     # --- Aufbau -----------------------------------------------------------
     def _act(self, name: str, text: str, slot, shortcut: str | QKeySequence | None = None,
@@ -382,6 +394,8 @@ class CanvasEditor(QWidget):
         g.setChecked(True)
         s = self._act("snap", "Am Raster fangen (1 mm)", self._set_snap, "Ctrl+Shift+'", "snap", checkable=True)
         s.setChecked(True)
+        self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
+                  lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
 
     def _toolbar(self, name: str, orientation: Qt.Orientation) -> QToolBar:
         tb = QToolBar()
@@ -398,7 +412,7 @@ class CanvasEditor(QWidget):
         self.action_bar = bar
         for name in ("open", "save", "export", None, "undo", "redo", None, "duplicate", "delete",
                      "rotate_ccw", "rotate_cw", "group", "ungroup", None,
-                     "zoom_out", "zoom_in", "fit", None, "grid", "snap"):
+                     "zoom_out", "zoom_in", "fit", None, "grid", "snap", "touch_mode"):
             bar.addSeparator() if name is None else bar.addAction(a[name])
         self.zoom_label = QLabel("100 %")
         self.zoom_label.setStyleSheet(f"color: {theme.TEXT_DIM}; padding: 0 8px;")
@@ -443,6 +457,28 @@ class CanvasEditor(QWidget):
         self.tools.set_tool(tool)
         self.actions_by_name[f"tool_{tool.value}"].setChecked(True)
         self.notify(f"Werkzeug: {TOOL_LABELS[tool]}")
+
+    def set_touch_mode(self, on: bool, persist: bool = True) -> None:
+        """Touch-Modus ein/aus. ``persist``: Wahl in QSettings merken (eine
+        gespeicherte Wahl schaltet die automatische Erkennung ab)."""
+        on = bool(on)
+        if persist:
+            touch.save_setting(self._settings, on)
+        act = self.actions_by_name["touch_mode"]
+        if act.isChecked() != on:
+            act.blockSignals(True)
+            act.setChecked(on)
+            act.blockSignals(False)
+        if on == self.touch_mode and self.view.touch_mode == on:
+            return
+        self.touch_mode = on
+        self.view.set_touch_mode(on)
+        self.touchModeChanged.emit(on)
+
+    def _on_touch_detected(self) -> None:
+        if not self.touch_mode and touch.load_setting(self._settings) is None:
+            self.set_touch_mode(True, persist=False)
+            self.notify("Touch-Eingabe erkannt: Touch-Modus aktiv (abschaltbar in der Aktionsleiste).")
 
     def _set_snap(self, on: bool) -> None:
         self.snap_enabled = on

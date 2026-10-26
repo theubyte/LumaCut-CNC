@@ -205,6 +205,13 @@ class LumaCutStudio(QMainWindow):
         status.addPermanentWidget(self.cursor_label)
         self.canvas.cursorMoved.connect(
             lambda x, y: self.cursor_label.setText(f"X {x:7.1f} mm   Y {y:7.1f} mm"))
+        from PySide6.QtWidgets import QCheckBox
+        self.touch_mode_box = QCheckBox("Touch-Modus")  # gespeichert in QSettings (canvas/touch_mode)
+        self.touch_mode_box.setToolTip("Große Anfasser, Knöpfe und Fangbereiche für Finger und Stift")
+        self.touch_mode_box.setChecked(self.canvas.touch_mode)
+        self.touch_mode_box.toggled.connect(self.canvas.set_touch_mode)
+        self.canvas.touchModeChanged.connect(self.touch_mode_box.setChecked)
+        status.addPermanentWidget(self.touch_mode_box)
         self.canvas.statusMessage.connect(lambda text: status.showMessage(text, 5000))
         # --- scan integration (scan agent) ---
         self.scan_panel.statusMessage.connect(lambda text: status.showMessage(text, 6000))
