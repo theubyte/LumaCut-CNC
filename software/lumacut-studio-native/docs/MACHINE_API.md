@@ -301,10 +301,15 @@ die Zeitlimits für Bewegungen lang.
   Punkte + 1) → `running` → `complete`, sonst `aborted`/`error` mit
   `job.error`. Fokus ist Teil von Abtasten/Laufen; nach der letzten Zeile
   leert der Pi den Puffer und parkt, noch mit `state=running` und
-  `line == total`. Das Panel zeigt das als **„Parken“**
-  (`JobState.phase`), „Abtasten 3 / 13“ samt Balken während `probing`.
-  Ein künftiges explizites `job.phase` (`focusing`, `parking`) hat
-  Vorrang. `JobState.active` zählt `homing/probing/focusing/running/parking`.
+  `line == total`. Studio leitet daraus die Phase `finishing` ab und das
+  Panel zeigt **„Letzte Bahnen, dann Parken“** (`JobState.phase`): Die
+  gepufferten Bahnen können noch brennen, Studio behauptet nie „Laser
+  aus“, bevor `complete` kommt. „Abtasten 3 / 13“ samt Balken während
+  `probing`. Ein künftiges explizites `job.phase` (`focusing`, `parking`)
+  hat Vorrang. `JobState.active` zählt
+  `homing/probing/focusing/running/finishing/parking`. Hinweis: Der Pi
+  setzt beim Autorun zuerst kurz `running` mit `line = 0`, dann erst
+  `homing`/`probing` (Wunsch an Claude, ZUSAMMENARBEIT §6).
   Abbrechen und NOT-AUS sind in jeder Phase bedienbar.
 - **Merkmal `autorun_mesh`** (`/api/status` `features`, `MachineStatus.features`,
   `has_feature`): Der Pi tastet ein Raster über dem Motiv ab und
@@ -390,7 +395,10 @@ gewählt ist. Das ist der Standard und genau das bisherige Verhalten.
   späteres Tippen verschiebt eingereihte Aufträge nicht, eine geänderte
   Datei wird beim Abarbeiten abgelehnt („neu einreihen“).
 - Abarbeiten: ein Auftrag nach dem anderen, je wie `op=start` (Parken
-  danach). Fehler, Abbrechen oder NOT-AUS stoppen die Warteschlange; der
+  danach) – **ohne** Abtasten und ohne Fokuskorrektur, und nur referenziert
+  („Vor der Warteschlange referenzieren“). Panel-Tooltip und Rückfrage von
+  „Warteschlange starten“ sagen das (`panel.QUEUE_NOTE`). Relative
+  Fokus-Absenkungen (`G91`/`G0 Z-…`) gehen dabei roh an Marlin. Fehler, Abbrechen oder NOT-AUS stoppen die Warteschlange; der
   Rest bleibt „wartet“. Während sie läuft, sind Start/Home/Rahmen/Tippen
   gesperrt, „Abbrechen“ bleibt aktiv (auch zwischen zwei Aufträgen).
 - **Status:** `queue` = `{items: [{id, file, origin, anchor, dx, dy,

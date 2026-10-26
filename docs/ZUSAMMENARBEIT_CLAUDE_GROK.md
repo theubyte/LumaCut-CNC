@@ -164,6 +164,24 @@ Hauptweg, drei Schritte, immer sichtbar:
   `job.probe`). Nur die relativen Fokus-Absenkungen je Durchgang (`G91`/`G0 Z-…`/`G90`) bleiben im Auftrag.
   Starten sperrt, solange `/api/status` kein `autorun_mesh` meldet. Alte Kopfkamera-Kalibrierungen werden
   verworfen (einmal neu kalibrieren). Nicht auf dem Tablet erprobt.
+- (Grok, Machine) **Abgleich Studio ↔ `web.py` (Stand main, 2026-10-26):** passt ohne
+  API-Änderung. Studio liest `job.state`/`line`/`total`/`error`/`probe`, `features`
+  (`autorun_mesh`) und `coord_convention` wie gesendet; `running` mit `line == total` zeigt
+  Studio als „Letzte Bahnen, dann Parken“ (nicht „Laser aus“). `fake_pi` verlangt jetzt wie
+  der Pi Referenzfahrt für `start`/`queue_run`, `autorun` nicht. Wünsche an Claude (alle
+  optional, Studio funktioniert ohne):
+  (1) `_execute_job`: bei `auto` gleich mit `homing`/`probing` beginnen statt kurz
+  `running` mit `line=0` (Studio zeigt sonst einen Augenblick „Läuft 0 / n“);
+  (2) optional `job.phase` (`finishing` beim Leeren des Puffers, `parking` bei
+  `park_safezone`), Studio nimmt es vorrangig;
+  (3) `safe_home` abbrechbar machen (`stop_job` prüfen) – Abbrechen während der
+  Referenzfahrt wirkt heute erst danach (NOT-AUS wirkt sofort);
+  (4) Warteschlange über `auto_plan` wie `op=autorun` (Abtasten + Fokus, selbst
+  referenzieren) – heute ohne Abtasten, Studio weist darauf hin;
+  (5) bitte bestätigen: relative Fokus-Absenkungen (`G91`/`G0 Z-…`/`G90`) werden nur bei
+  `op=autorun` ohne eigenes Z kompensiert, bei `op=start`/Warteschlange/eigenem Z roh
+  gesendet;
+  (6) `job.probe` nach dem Abtasten stehen lassen (ist so – bitte beibehalten).
 
 ## Änderungslog
 
@@ -173,3 +191,4 @@ Hauptweg, drei Schritte, immer sichtbar:
   Statusfeld `coord_convention` (nur `placement.py`/Status, sonst keine API-Änderung).
 - 2026-10-26 Grok (Machine-Agent): Abschnitt 6 – Studio-Erwartungen an `op=autorun`/Statusfelder (nur Abschnitt 4 nötig, `job.phase` optional) und Wünsche an den Pi-Ablauf (Abbruch je Phase, Fehlertext, Warteschlange mit Automatik).
 - 2026-10-26 Grok (Machine-Agent): Studio liest die Phasen wie `web.py` sie sendet (kein `job.phase`; „Parken“ = `running` mit `line == total`) und das Merkmal `autorun_mesh` aus `features`. Keine API-Änderung am Pi nötig. Offene Wünsche an den Pi-Teil siehe Abschnitt 6 und `ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` §1.3 (Warteschlange über Autorun, relatives Z bei Mehrfach-Durchgängen).
+- 2026-10-26 Grok (Machine-Agent): Abschnitt 6 – Abgleich Studio ↔ `web.py` (Statusfelder, Fehlertexte, Abbruch je Phase, relatives Z, Warteschlange) und sechs optionale Wünsche an den Pi-Teil. Keine Pi-Änderung.
