@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import arrange_ui, icons, theme, touch
+from . import arrange_ui, icons, pathops_ui, theme, touch
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip
@@ -403,6 +403,7 @@ class CanvasEditor(QWidget):
         self._act("path_preview", "Pfadvorschau (Laserbahn, Reihenfolge, Zeit)",
                   lambda on: self.set_path_preview(on), "Ctrl+Shift+P", "path", checkable=True)
         self.arranger = arrange_ui.install(self)  # Ausrichten/Verteilen/Array
+        self.path_ops = pathops_ui.install(self)  # Boole/Verschweißen/Versatz/Text in Pfade
         self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
                   lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
 
@@ -425,6 +426,7 @@ class CanvasEditor(QWidget):
             bar.addSeparator() if name is None else bar.addAction(a[name])
             if name == "ungroup":
                 self.arrange_button = arrange_ui.add_to_bar(self, bar)
+                self.path_ops_button = pathops_ui.add_to_bar(self, bar)
         self.zoom_label = QLabel("100 %")
         self.zoom_label.setStyleSheet(f"color: {theme.TEXT_DIM}; padding: 0 8px;")
         self._zoom_label_action = bar.addWidget(self.zoom_label)
@@ -507,9 +509,10 @@ class CanvasEditor(QWidget):
                     continue
                 menu.addAction(a[name])
             if g and g[0] == "rotate_ccw":
-                sub = arrange_ui.build_menu(self, menu)
-                sub.setStyleSheet(menu.styleSheet())
-                menu.addMenu(sub)
+                for build in (arrange_ui.build_menu, pathops_ui.build_menu):
+                    sub = build(self, menu)
+                    sub.setStyleSheet(menu.styleSheet())
+                    menu.addMenu(sub)
         return menu
 
     def _show_context_menu(self, scene_pt: QPointF, global_pos) -> None:

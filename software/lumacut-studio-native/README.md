@@ -238,6 +238,25 @@ Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
 - Kopien bekommen neue IDs und eigene Gruppen; läge eine Kopie außerhalb der
   Arbeitsfläche oder wären es mehr als 500, passiert nichts (Meldung in der Statuszeile).
 
+### Pfad: Boole-Operationen, Verschweißen, Versatz, Text in Pfade
+
+Knopf „Pfad“ in der Aktionsleiste (und Untermenü im Kontextmenü), Rechnen in
+`lumacut_canvas/pathops.py` (shapely), Oberfläche in `pathops_ui.py`. Jede Aktion ist ein
+Undo-Schritt. Objekte zählen als Fläche nach der Gerade-Ungerade-Regel (wie die Füllung),
+Drehung, Ellipsen und Text werden berücksichtigt.
+
+- **Vereinigen** (Strg+Alt+U), **Abziehen** (Strg+Alt+S: unterstes Objekt minus alle
+  darüber), **Schnittmenge** (Strg+Alt+I), **Ausschluss**: nur geschlossene Formen;
+  Ergebnis ist *ein* Polygon mit Löchern an der Stelle des untersten Objekts.
+- **Verschweißen** (Strg+Alt+W): wie Vereinigen, aber jede zusammenhängende Fläche wird
+  ein eigenes Objekt.
+- **Versatz …** (Strg+Alt+O): Abstand in mm (+ außen, − innen), Ecken rund/spitz/abgeschrägt,
+  optional Original ersetzen. Offene Linien bekommen eine geschlossene Kontur im Abstand.
+- **Text in Pfade umwandeln** (Strg+Umschalt+O): Text wird ein Polygon mit allen
+  Buchstaben-Ringen – Füllung und G-Code bleiben gleich, die Datei hängt nicht mehr von
+  installierten Schriften ab.
+- Polygone können dafür mehrere Ringe haben (`"rings"` in der Datei, nur wenn vorhanden).
+
 ### Schnittstellen für andere Module (Scan & Probe)
 
 Alle Koordinaten in Arbeitsflächen-mm (0,0 links oben). Getestet in

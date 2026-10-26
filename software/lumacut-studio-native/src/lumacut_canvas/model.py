@@ -380,6 +380,17 @@ class Shape:
     points: tuple[tuple[float, float], ...] = ()
     # Nur für kind == "image": eingebettete Bitmap + Gravur-Einstellungen.
     image: RasterImage | None = None
+    # Weitere Ringe für polygon/path (Löcher, Inseln – z. B. aus Boole-Operationen
+    # oder Text in Pfade): Startindizes in ``points`` ab dem zweiten Ring. Leer =
+    # ein einziger Ring. Gefüllt wird nach der Gerade-Ungerade-Regel.
+    rings: tuple[int, ...] = ()
+    # Kurvensegmente (Knotenbearbeitung): Index i = Segment von Punkt i zum
+    # nächsten Punkt desselben Rings, gezeichnet als Catmull-Rom-Kurve durch die
+    # Nachbarpunkte. Leer = nur gerade Linien (bisheriges Verhalten).
+    curves: tuple[int, ...] = ()
+    # Schriftschnitt für kind == "text" (Größe = Objektbox).
+    font_bold: bool = False
+    font_italic: bool = False
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -389,8 +400,13 @@ class Shape:
         g = self.geom
         return [(g.x + u * g.w, g.y + v * g.h) for u, v in self.points]
 
+    def ring_ranges(self) -> list[tuple[int, int]]:
+        """(Start, Ende) je Ring in ``points`` (Ende exklusiv)."""
+        return ring_ranges(len(self.points), self.rings)
+
     @staticmethod
-    def from_points(kind: str, pts: list[tuple[float, float]], layer_id: str) -> "Shape":
+    def from_points(kind: str, pts: list[tuple[float, float]], layer_id: str,
+                    rings: Iterable[int] = (), curves: Iterable[int] = ()) -> "Shape":
         """Polygon/Freihand aus Punkten in Arbeitsflächen-mm anlegen."""
         if kind not in POINT_KINDS:
             raise ValueError(f"{kind} hat keine Stützpunkte")
@@ -400,7 +416,8 @@ class Shape:
         x, y = min(xs), min(ys)
         w, h = max(xs) - x, max(ys) - y
         norm = tuple(((px - x) / w if w > 0 else 0.0, (py - y) / h if h > 0 else 0.0) for px, py in pts)
-        return Shape(kind, Geometry(x, y, w, h), layer_id, points=norm)
+        return Shape(kind, Geometry(x, y, w, h), layer_id, points=norm,
+                     rings=clean_rings(len(norm), rings), curves=clean_curves(len(norm), curves))
 
     def copy(self, new_identity: bool = False) -> "Shape":
         return replace(self, geom=self.geom.copy(),
@@ -416,8 +433,16 @@ class Shape:
         if self.kind == "text":
             d["text"] = self.text
             d["font"] = self.font_family
+            if self.font_bold:
+                d["bold"] = True
+            if self.font_italic:
+                d["italic"] = True
         if self.kind in POINT_KINDS:
             d["points"] = [[round(u, 6), round(v, 6)] for u, v in self.points]
+            if self.rings:
+                d["rings"] = list(self.rings)
+            if self.curves:
+                d["curves"] = list(self.curves)
         if self.kind == "image" and self.image is not None:
             d["image"] = self.image.to_dict()
         return d
@@ -436,7 +461,31 @@ class Shape:
                                    normalize_angle(float(d.get("rot", 0.0)))),
                      text=str(d.get("text", "")), font_family=str(d.get("font", "Segoe UI")),
                      id=str(d.get("id") or new_id()),
-                     groups=tuple(str(g) for g in d.get("groups", ()) if g))
+                     groups=tuple(str(g) for g in d.get("groups", ()) if g),
+                     rings=clean_rings(len(points), d.get("rings", ())),
+                     curves=clean_curves(len(points), d.get("curves", ())),
+                     font_bold=bool(d.get("bold", False)), font_italic=bool(d.get("italic", False)))
+
+
+def clean_rings(n_points: int, rings: Iterable[int]) -> tuple[int, ...]:
+    """Gültige, sortierte Ring-Startindizes (jeder Ring ≥ 2 Punkte)."""
+    out: list[int] = []
+    prev = 0
+    for r in sorted({int(r) for r in rings}):
+        if r - prev >= 2 and n_points - r >= 2:
+            out.append(r)
+            prev = r
+    return tuple(out)
+
+
+def clean_curves(n_points: int, curves: Iterable[int]) -> tuple[int, ...]:
+    return tuple(sorted({int(c) for c in curves if 0 <= int(c) < n_points}))
+
+
+def ring_ranges(n_points: int, rings: Iterable[int]) -> list[tuple[int, int]]:
+    starts = [0, *rings]
+    ends = [*rings, n_points]
+    return [(a, b) for a, b in zip(starts, ends) if b > a]
 
 
 def simplify_polyline(pts: list[tuple[float, float]], tolerance_mm: float) -> list[tuple[float, float]]:

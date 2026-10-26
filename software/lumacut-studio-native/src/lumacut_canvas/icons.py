@@ -216,6 +216,24 @@ def _arrange(p, c):
     p.drawRect(QRectF(7, 15.5, 11, 3.5))
 
 
+def _pathops(p, c):
+    """Pfad-Operationen: zwei überlappende Formen, Schnittfläche gefüllt."""
+    a = QPainterPath(); a.addEllipse(QRectF(3, 6, 12, 12))
+    b = QPainterPath(); b.addRoundedRect(QRectF(9, 4, 12, 12), 1.5, 1.5)
+    fill = QColor(c); fill.setAlpha(150)
+    p.setPen(Qt.NoPen); p.setBrush(fill); p.drawPath(a.intersected(b))
+    _pen(p, c, 1.7); p.drawPath(a); p.drawPath(b)
+
+
+def _node(p, c):
+    """Knoten bearbeiten: Kurve mit quadratischen Knoten."""
+    path = QPainterPath(); path.moveTo(4, 18); path.cubicTo(7, 4, 15, 22, 20, 6)
+    _pen(p, c, 1.7); p.drawPath(path)
+    p.setBrush(QColor(c))
+    for x, y in ((4, 18), (12, 13), (20, 6)):
+        p.drawRect(QRectF(x - 2, y - 2, 4, 4))
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "polygon": _polygon, "freehand": _freehand,
@@ -229,6 +247,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "group": _group, "ungroup": lambda p, c: _group(p, c, True),
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
     "touch": _touch, "path": _path, "arrange": _arrange,
+    "pathops": _pathops, "node": _node,
 }
 
 
