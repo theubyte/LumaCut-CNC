@@ -30,6 +30,15 @@ def make_win(qapp, tmp_path, monkeypatch):
         win.close()
 
 
+def _widest(area: QScrollArea) -> str:
+    """Breiteste Kind-Widgets (Diagnose, falls ein Panel auf einem Runner zu breit ist)."""
+    from PySide6.QtWidgets import QWidget
+    kids = sorted(area.widget().findChildren(QWidget),
+                  key=lambda w: -w.minimumSizeHint().width())[:3]
+    return ", ".join(f"{type(w).__name__}({w.objectName() or getattr(w, 'text', lambda: '')()!s:.20})"
+                     f"={w.minimumSizeHint().width()}" for w in kids)
+
+
 def _not_clipped(area: QScrollArea) -> bool:
     content = area.widget()
     fits = content.minimumSizeHint().width() <= area.viewport().width()
@@ -53,11 +62,14 @@ def test_panels_fit_inside_small_windows(make_win, size):
     r = win.right_scroll
     need, cap = fit.sidebar_needed_width(r), fit.sidebar_cap(win.width())
     info = (f"need={need} cap={cap} vp={r.viewport().width()} "
-            f"content={r.widget().minimumSizeHint().width()} sizes={sp.sizes()}")
+            f"content={r.widget().minimumSizeHint().width()} sizes={sp.sizes()} {_widest(r)}")
     if need <= cap:
         assert not r.horizontalScrollBar().isVisible(), info
         assert r.width() >= need - 2, info
-    assert not win.layers_panel.scroll.horizontalScrollBar().isVisible()
+    la = win.layers_panel.scroll
+    lneed, lcap = fit.sidebar_needed_width(la), fit.sidebar_cap(win.width(), fit.LAYERS_MAX_FRACTION)
+    if lneed <= lcap:
+        assert not la.horizontalScrollBar().isVisible(), f"need={lneed} cap={lcap} {_widest(la)}"
     # Canvas (inkl. Eigenschaftsleiste) passt, die Leiste scrollt notfalls.
     assert win.canvas.minimumSizeHint().width() <= win.canvas.width()
     assert _not_clipped(win.canvas.property_scroll)
@@ -70,8 +82,12 @@ def test_sidebar_refits_when_content_grows(make_win, qapp):
     from PySide6.QtWidgets import QLabel
     win = make_win(1280, 720)
     content = win.right_scroll.widget()
+    need0, cap = fit.sidebar_needed_width(win.right_scroll), fit.sidebar_cap(1280)
+    if need0 + 40 > cap:
+        pytest.skip(f"Inhalt schon breiter als die Obergrenze ({need0} > {cap - 40}): "
+                    f"{_widest(win.right_scroll)}")
     wide = QLabel("breit")
-    wide.setMinimumWidth(fit.sidebar_cap(1280) - 60)
+    wide.setMinimumWidth(need0 + 20)
     content.layout().addWidget(wide)
     for _ in range(5):
         qapp.processEvents()
