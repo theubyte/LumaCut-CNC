@@ -331,9 +331,9 @@ Still open:
 - Variable text evaluated at send time with an auto-incrementing counter (CSV/merge, counter
   persisted per job) – the batch grid covers the common case; decide if the job-time variant is
   wanted.
-- Min/max power with speed-dependent corner power (LightBurn) – needs a planner change and checking
-  what the SKR's Marlin build supports (`LASER_POWER_TRAP` / inline power); not started.
-- Trace: no centre-line trace and no curve fitting (outlines are polygons). Masks with more than
+- Min/max power with speed-dependent corner power (LightBurn) – firmware checked in round 7 (§14):
+  needs a user decision (`LASER_POWER_TRAP` in the SKR build).
+- Trace: ~~no centre-line trace~~ (done, §14) and no curve fitting (outlines are polygons). Masks with more than
   400 000 raw edge points (very detailed or noisy images) are still refused with a hint; raising
   that limit is possible now but costs memory and time.
 - Windows hardware test of cut options, PDF import, image trace and the rebuilt exe – needs a
@@ -371,3 +371,57 @@ Still open / for others:
   that block (Machine).
 - Physical check on the machine after homing (X+10 moves left, Y+10 towards the door, test rectangle
   position) – user at the machine.
+
+## 14. Status update 2026-10-26 (review round 7)
+
+Done in this round (review side, `lumacut_import` only, no new dependencies):
+
+- **Centre-line trace** (`lumacut_import/centerline.py`, `TraceSettings.mode = "centerline"`):
+  for sketches, handwriting and technical drawings every stroke becomes one open line instead of
+  two outlines, so the laser burns it once. Pipeline: same threshold / smoothing / Otsu as the
+  outline trace → specks below „Mindestfläche“ dropped → thinning (Zhang-Suen through 256-entry
+  lookup tables on one `filter2D` neighbour code, then a checkerboard pass that deletes the
+  remaining staircase pixels with a simple-point test, so the skeleton is one pixel wide and keeps
+  the topology) → skeleton graph (junction pixels merged into clusters, chains between clusters /
+  end points, pure loops closed) → spurs shorter than ~1.5× the local half stroke width pruned →
+  chains joined where only two branches meet and, at crossings / T-junctions, the pairs that
+  continue within ~32° of straight (a „+“ stays two lines) → free ends extended along their
+  direction to the stroke tip (thinning eats about half a stroke width) → Douglas-Peucker with
+  „Toleranz“ (at least ½ pixel against the pixel staircase).
+- Result: `TraceResult.lines`; `traced_shapes` creates open `path` objects (closed loops repeat
+  their first point, so a fill layer does not fill them), several are grouped as before. The
+  default mode stays „Kontur“, so all existing results are unchanged.
+- Dialog „Bild nachzeichnen“: new „Modus“ selector (Kontur / Mittellinie) with tooltip; preview
+  draws the lines, the info text counts „Linie(n)“, and for filled areas in centre-line mode it
+  hints that the mode is meant for strokes.
+- Runtime: thinning works on the foreground's bounding box and checks the trace deadline every
+  iteration; large filled areas stop with „Mittellinie dauert zu lange – … für Flächen „Kontur“
+  verwenden“ instead of hanging. 1500×1500 px with 150 random strokes ≈ 2–3 s.
+
+Corner power (open item, checked, **not** implemented – user decision needed): the SKR Marlin
+build (`firmware/marlin/build.py`) enables `LASER_FEATURE` with `CUTTER_POWER_UNIT PWM255`, the
+gateway uses `M3 I` (inline continuous). `LASER_POWER_TRAP` (Marlin scales inline power with the
+real speed during acceleration / deceleration, the clean equivalent of LightBurn's min power) is
+**not** enabled. Marlin's `M4` dynamic mode scales with the commanded feed rate `F`, not with the
+real speed at corners, so it does not help. A G-code-side emulation (splitting segments near
+corners into short pieces with ramped `S`) would multiply the line count over serial (`BUFSIZE 8`)
+and can starve the planner, which causes stops and more burn – not done. Options: (1) enable
+`LASER_POWER_TRAP` in the firmware build, re-flash, then the Studio gets a per-layer „Min. Leistung“
+field mapped to it; (2) leave as is.
+
+Tests: new `tests/test_trace_centerline.py` (12): mode normalisation, one-pixel skeleton with the
+same topology, thick stroke → one straight centre line, crossing stays two lines, Y/T junction keeps
+all branches with ends at the stroke tips, ring → closed line on the circle, despeckle and
+tolerance, raw pixel graph, canvas `path` objects + G-code through the Pi guard, speed / blob time
+limit, dialog mode switch + trace into the document, filled-area hint. Existing `test_trace.py`
+unchanged and green.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see above).
+- Trace: curve fitting (Bézier output) for outlines and centre lines; centre lines of very thick
+  strokes have small kinks at junctions.
+- Variable text evaluated at send time with an auto-incrementing counter – decide if wanted.
+- Windows hardware test of cut options, PDF import, image trace (incl. centre line) and the rebuilt
+  exe – needs a Windows machine with the laser.
