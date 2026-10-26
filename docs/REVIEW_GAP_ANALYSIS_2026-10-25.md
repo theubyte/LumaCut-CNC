@@ -58,17 +58,17 @@ M 1–3 days, L > 3 days. Status after this pass in **bold**.
 | # | Feature | LightBurn / xTool | LumaCut before | LumaCut now | Diode fit | Effort | Owner |
 |---|---|---|---|---|---|---|---|
 | 1 | Cut order: inside-first, reduce travel, best start | LB yes (default) / XCS yes | none | **done** (`lumacut_job.planner`, used by "Design senden") | very high (parts drop before holes otherwise) | S | Review (new module) |
-| 2 | Job time + distance estimate | LB Preview / XCS yes | none | **done** (`lumacut_job.estimate`, accel + junction model, Alt+P) | high | S | Review |
+| 2 | Job time + distance estimate | LB Preview / XCS yes | none | **done** (`lumacut_job.estimate`, accel + junction model, Alt+P; per layer since round 4) | high | S | Review |
 | 3 | Framing (box + rubber band, laser off) | LB / XCS yes | none | **done** (toolbar "Rahmen", Ctrl+Shift+F / Alt+Shift+F) | very high (no red-dot pointer; camera only) | S | Review → Machine for a dedicated frame API |
 | 4 | Material test grid (power × speed) | LB / XCS yes | none | **done** (`lumacut_job.material_test`, one undo step) | very high (every new material) | S | Review; Materials to consume results |
 | 5 | Raster engraving (image object, dithers, line interval, bidirectional, overscan, scan offset) | LB / XCS yes | none | **done** (engine `lumacut_job.raster` + image object on the canvas with settings dialog; images are engraved before vectors in the same job) | very high | M (canvas object + UI) | Canvas (image item) + Review (engine) |
 | 6 | 3D / depth: sliced passes from height map, Z step per slice | LB 3D slice Galvo-only; XCS 3D | none | **done** for image objects (mode "3D" in the image dialog → `sliced_depth_gcode`, ≤3 mm total drop); combined with focus compensation it is refused safely (Z words) | medium-high (relief in wood/slate) | M for UI | Canvas/Materials + Review |
 | 7 | Zoom: anchor at event position, pinch, fit selection, trackpad | LB / XCS yes | wheel only, QCursor anchor | **done** (`canvas_view` + Ctrl+Shift+A) | high (daily use) | S | Canvas (minimal edit) |
 | 8 | Material library: presets by material + thickness, assign/link to layers, combo box wired | LB yes / XCS yes (xTool materials) | placeholder combo | **done** (Materials agent: `lumacut_materials`, material section in the layers panel) | very high | M | **Materials agent** |
-| 9 | Import SVG/DXF/PNG/JPG/PDF | LB / XCS yes | none in native | **done** for SVG/DXF/PNG/JPG/BMP (`lumacut_import`, Datei › Importieren Ctrl+I, drag-and-drop, mm conversion, one undo step, clamped to the 360×340 mm work area); PDF open | very high | M | Canvas |
+| 9 | Import SVG/DXF/PNG/JPG/PDF | LB / XCS yes | none in native | **done** for SVG/DXF/PNG/JPG/BMP (`lumacut_import`, Datei › Importieren Ctrl+I, drag-and-drop, mm conversion, one undo step, clamped to the 360×340 mm work area); **PDF done** (vector paths via `pypdf`, page picker, round 4) | very high | M | Canvas |
 | 10 | Workflow wizard scan → detect → probe → focus → job → park, focus compensation applied on send | n/a (LB has camera overlay; XCS auto-focus + camera) | pieces exist separately; compensation not hooked into "Design senden" | **done** (`lumacut_workflow`: panel "Ablauf" Home → Scan → Markieren → Probe → Fokus → Rahmen → Auftrag → Parken; status per step, skip, precondition checks; uses the existing panel actions, focus compensation via `prepare_job_gcode`) | very high (USP) | M | Scan Probe + Machine; Review can wire the send path |
 | 11 | Fill / hatch for vectors (Fill mode, line interval, cross-hatch) | LB / XCS yes | none | open (hatch helper exists in material_test) | high | M | Canvas |
-| 12 | Kerf offset, tabs/bridges, lead-in/out | LB yes / XCS partial | none | **done** (`lumacut_job.cutpath`, per-layer fields, dialog „Schnittoptionen…“ Alt+K) | medium (diodes have small kerf; tabs useful) | M | Review (planner) |
+| 12 | Kerf offset, tabs/bridges, lead-in/out | LB yes / XCS partial | none | **done** (`lumacut_job.cutpath`, per-layer fields, dialog „Schnittoptionen…“ Alt+K; leads checked for collisions since round 4) | medium (diodes have small kerf; tabs useful) | M | Review (planner) |
 | 13 | Boolean ops, node editing, offset, arrays | LB / XCS yes | polygon only | open | medium | L | Canvas |
 | 14 | Preview of G-code path (travel lines, order animation) | LB / XCS yes | none | open (estimate only) – not done in this pass | medium | M | Canvas overlay + Review |
 | 15 | Air assist M8/M9 per layer | LB yes | none (Pi allows M7/M8/M9) | **not feasible on this machine** – see §8 | medium (if relay installed) | S | Materials/layer field + gcode |
@@ -206,3 +206,40 @@ permissively licensed vector-PDF reader; PyMuPDF is AGPL), multi-job queue on th
 boolean/node/offset/array tools (#13, Canvas), origin options (#16, Machine), raster streaming
 (#18, Pi), lead collision check against neighbouring parts, Windows hardware test of the new
 cut options.
+
+## 10. Status update 2026-10-26 (review round 4)
+
+Done (review side, pushed to `main`, G-code checked against `MarlinLaserGuard` where relevant):
+
+- **PDF import** (#9): `lumacut_import.pdf` reads vector paths from PDF pages with `pypdf`
+  (BSD, pure Python; PyMuPDF rejected for its AGPL licence). Own small content-stream
+  interpreter: `m l c v y h re`, `cm`, `q/Q`, page `/Rotate` and `/UserUnit`, form XObjects; fill and
+  stroke paths become polygons/polylines in mm (pt × 25.4/72) and go through the same placement as
+  SVG/DXF (one undo step, clamped to the work area). Multi-page PDFs ask for the page. Strokes that
+  writers store as thin filled rings (Qt, Word) are reduced to one contour ("doppelte Strichkante").
+  Not imported: text (unless converted to outlines), embedded images, clipping, dash patterns,
+  encrypted files. New dependency `pypdf>=4.0`.
+- **Lead collision check** (rest of #12): with lead-in/out active, `optimize_layers` builds a
+  shapely STRtree of all post-kerf contours of all layers. A lead that crosses its own contour or
+  any other part is first retried at other start points (long edge midpoints, then evenly spaced
+  points), reversed, then shortened; only then dropped. `PlanReport` counts moved/dropped leads; the
+  note („Anfahrt bei N Kontur(en) weggelassen … – Ebene X“) is shown after Senden, in the estimate
+  and when saving G-code (main window and workflow panel).
+- **Estimate per layer** (#2): `JobEstimate.layers` from the planner's `; LAYER` / `; IMAGE`
+  comments; the estimate dialog lists time per layer when there are two or more.
+- **„Nur Auswahl“** (LightBurn "Cut selected graphics"): checkable toolbar action; Senden,
+  Schätzung, Rahmen and G-Code speichern then use only the selected objects (layer settings kept);
+  nothing selected → clear error, no job.
+- **Windows build**: `build_exe.py` holds the PyInstaller options for `build-windows.bat` *and* CI
+  (all own packages, ezdxf, svgelements, pypdf, shapely, `materials.json`) and fails if the material
+  data is missing from the bundle. Before, `--collect-data` silently skipped our own packages
+  (not on `sys.path` at build time), so the shipped exe had no material library. The CI build step
+  now runs `python build_exe.py`; a test keeps `OWN_PACKAGES` in sync with `src/`.
+
+Caveats: the path preview overlay (Canvas) and the scan/probe panel still show the whole design,
+not the selection; the thin-ring merge is a heuristic (≤0.5 mm ring width) and can merge a real
+very thin outline frame.
+
+Still open: unit toggle mm/inch, boolean/node/offset/array (#13) – Canvas; origin options (#16) and
+multi-job queue on the Pi (#17) – Machine; raster streaming (#18) – Pi; Windows hardware test of
+cut options, PDF import and the rebuilt exe – needs a Windows machine with the laser.

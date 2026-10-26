@@ -15,10 +15,14 @@ python src/main.py
 ```
 
 ## Bauen (Windows)
+`build-windows.bat` (installiert Abhängigkeiten und baut) oder:
 ```bash
-pip install pyinstaller
-pyinstaller --windowed --name LumaCutStudio src/main.py
+pip install -r requirements.txt pyinstaller
+python build_exe.py
 ```
+`build_exe.py` enthält die PyInstaller-Optionen (alle eigenen Pakete, `materials.json`,
+ezdxf/svgelements/pypdf/shapely) – dieselben nutzt die CI – und bricht ab, wenn die
+Materialdaten im Ergebnis `dist/LumaCutStudio/` fehlen (`python build_exe.py --check` prüft nur).
 
 ## Arbeitsfläche (Canvas)
 
@@ -112,9 +116,15 @@ Eigenständig testen: `python src/canvas_demo.py`.
     Abfallseite (außen bei Teilen, innen bei Löchern), 45°-Gerade oder tangentialer Viertelkreis;
     der Konturstart wird dafür von einer Ecke in die Kantenmitte verlegt. Passt die Anfahrt nicht
     (Arbeitsfläche, kleines Loch), wird sie gekürzt, senkrecht gesetzt oder weggelassen.
-    Kollisionen mit benachbarten Teilen werden nicht geprüft.
+    Kreuzt eine An-/Abfahrt die eigene Kontur oder ein anderes Teil (alle Ebenen), wird ein
+    anderer Startpunkt bzw. die Gegenrichtung versucht, dann gekürzt, erst zuletzt weggelassen;
+    weggelassene Anfahrten meldet ein Hinweis nach Senden, Schätzung und Speichern.
   Code: `src/lumacut_job/cutpath.py`; die Art jedes Teilpfads (`cut`, `lead_in`, `lead_out`,
   `tab`) steht in `JobLayer.poly_kinds` (z. B. für eine Pfadvorschau).
+- **Nur Auswahl** (Toolbar, umschaltbar): Senden, Schätzen, Rahmen und „G-Code speichern“
+  verwenden nur die ausgewählten Objekte (Ebenen-Einstellungen bleiben); ohne Auswahl gibt es
+  eine Fehlermeldung statt eines Auftrags. Die Pfadvorschau zeigt weiter das ganze Design.
+- **Schätzung** (*Alt+P*): Zeit und Wege; bei mehreren Ebenen/Bildern zusätzlich die Zeit je Ebene.
 - **G-Code speichern…** (*Alt+G*): optimierter G-Code des Designs als Datei (ohne
   Scan-Fokuskorrektur, die nur beim Senden über das Scan-Panel dazukommt).
 - **Verlauf…** (*Strg+H*): die letzten 20 gesendeten Aufträge (alle Sendewege) mit Zeit und
@@ -336,12 +346,16 @@ Presets speichern, 3D-Relief aus Graustufenbild. Warnliste für nicht
 laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
 (`src/lumacut_materials/`).
 
-## Import (SVG, DXF, Bilder)
+## Import (SVG, DXF, PDF, Bilder)
 
 *Datei › Importieren…* (Strg+I) oder Datei per Drag-and-drop auf die Arbeitsfläche ziehen.
 
 - **SVG**: Pfade, Grundformen, Transformationen; Einheiten über `viewBox`/`width`/`height` in mm.
 - **DXF** (über `ezdxf`, inkl. Blöcke/INSERT); Einheit aus `$INSUNITS`, ohne Angabe mm.
+- **PDF** (über `pypdf`): Vektorpfade einer Seite (bei mehreren Seiten wird gefragt), in mm
+  (1 pt = 25,4/72 mm), Seitendrehung berücksichtigt. Als dünne Ringe gespeicherte Linien
+  (Qt, Word) werden zu einer Kontur zusammengefasst. Text nur, wenn in Pfade umgewandelt;
+  eingebettete Bilder, Beschneidungspfade und verschlüsselte PDFs werden nicht übernommen.
 - **PNG/JPG/BMP**: wird als **Bildobjekt** eingefügt (Größe aus der DPI-Angabe, sonst 96 dpi).
   *Datei › Bildeinstellungen…* (Strg+Umschalt+I) öffnet den Dialog (Modus Schwellwert / Floyd-Steinberg /
   Atkinson / Bayer / Graustufen / 3D-Tiefe, Linienabstand, Leistung max./min., Geschwindigkeit,
