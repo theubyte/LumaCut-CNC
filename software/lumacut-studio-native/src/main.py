@@ -33,6 +33,7 @@ from lumacut_materials.dialog import install_materials
 # --- import integration (review agent) ---
 from lumacut_import.qt import install_import
 from lumacut_workflow.qt import install_workflow
+from lumacut_session import install_autosave
 # --- end import integration ---
 
 
@@ -194,6 +195,9 @@ class LumaCutStudio(QMainWindow):
         # --- workflow integration (review agent) ---
         install_workflow(self)  # Ablauf: Home → Scan → Markieren → Probe → Fokus → Rahmen → Auftrag → Parken
         # --- end workflow integration ---
+        # --- autosave integration (review agent) ---
+        install_autosave(self)  # alle 60 s sichern, nach Absturz Wiederherstellung anbieten
+        # --- end autosave integration ---
 
 
     # --- machine integration (machine agent) ---
@@ -214,6 +218,9 @@ class LumaCutStudio(QMainWindow):
         # --- end scan integration ---
         self.machine_panel.shutdown()
         super().closeEvent(event)
+        # --- autosave integration (review agent) ---
+        self.autosave.shutdown()  # normales Beenden: Sicherung löschen
+        # --- end autosave integration ---
     # --- end machine integration ---
 
     # --- canvas integration (canvas agent) ---
