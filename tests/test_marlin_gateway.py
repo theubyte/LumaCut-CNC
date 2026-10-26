@@ -993,6 +993,8 @@ def command(cmd, **k):
         raise ValueError("rejected")
     calls.append(cmd)
 m.command = command
+m.stream_command = command  # job lines use the streaming path (#18)
+m.drain = lambda **k: None
 web.job_lock.acquire()
 web._job_worker("a.gcode", ["G0 X40 Y40", "M3 I", "G1 X60 S10", "M5 I"], (50.0, 50.0))
 assert calls == ["home", "G0 X50.000 Y50.000", "probe", "M5 I",

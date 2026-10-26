@@ -94,4 +94,5 @@ sudo bash /opt/lumacut/pi400/update.sh diagnose               # Updater-Sicht
 
 - „Steuerung belegt durch lightburn“: LightBurn trennen.
 - „M112-Notstopp verriegelt“: SKR zurücksetzen, dann „Notstopp quittieren“.
+- Raster ruckelt oder Marlin meldet Fehler mitten im Raster: Job-Streaming testweise abschalten mit `LUMACUT_STREAM_WINDOW=1` in `/etc/lumacut/lumacut.env`, dann `sudo systemctl restart lumacut-marlin.service`. Standard sind 4 Zeilen ohne `ok` unterwegs; `/api/status` → `stream_window` zeigt den Wert.
 - Plötzliche USB-Abbrüche („USB disconnect“ im Kernel-Log) mitten im Betrieb deuten auf Kabel oder Versorgung hin. Mitten im Job ist das kritisch.

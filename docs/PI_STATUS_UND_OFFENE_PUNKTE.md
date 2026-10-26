@@ -83,7 +83,8 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
 - **LightBurn:** `serve_client` übernimmt nur, wenn kein Besitzer da ist und
   das SKR identifiziert ist. Sonst schließt es die Verbindung kommentarlos.
 - **Laser-Guard** (`MarlinLaserGuard`): prüft jede Zeile beim Upload
-  (Preflight) und beim Senden. Nur `M3 I`, kein `M4`, kein GRBL.
+  (Preflight) und beim Senden, auch gestreamte Zeilen (siehe
+  „Job-Streaming“). Nur `M3 I`, kein `M4`, kein GRBL.
 - **30-mm-Safezone:** Motive mit Laserleistung müssen in X30..390 / Y30..370
   liegen. Das prüft der Preflight vor dem Start.
 - **Mechanik-Freigabe:** Upload, Rahmen und Aufträge verlangen
@@ -170,6 +171,42 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
   unverändert.
 - ⚠ Hardware.
 
+### Job-Streaming zum SKR (Raster-Durchsatz)
+
+- Früher wartete der Pi nach **jeder** Auftragszeile auf Marlins `ok`. Bei
+  Rastern (viele kurze `G1 … S…`-Zeilen) lief der Planer dadurch leer,
+  der Kopf ruckelte und brannte an Zeilenenden nach.
+- Jetzt schickt der Auftragsablauf (`op=start`/`autorun`, Warteschlange)
+  einfache Fahrzeilen über `MarlinTransport.stream_command()`: höchstens
+  4 Zeilen und 200 Byte ohne `ok` unterwegs (Marlin: BUFSIZE 8, 256 Byte
+  Empfangspuffer – also je die Hälfte). Jedes `ok` (auch ADVANCED_OK
+  `ok P… B…`) gibt einen Platz frei.
+- Gestreamt werden nur absolute `G0`/`G1` ohne Zusatzaustausch. Die
+  `G1`-Zeilen dürfen auch ein Z-Wort tragen (fokuskompensiert). Alles
+  andere läuft wie bisher einzeln (`M3 I`, `M5 I`, `G91`, Bögen, erste
+  Schnittfahrt mit Fokus, unbekannter Startpunkt): Vorher wartet der Pi,
+  bis alle offenen Zeilen bestätigt sind.
+- Jede gestreamte Zeile durchläuft vor dem Senden Laser-Guard, Z-Sperre
+  und 30-mm-Safezone. Eine abgelehnte Zeile wird nie gesendet.
+- Meldet Marlin `Error:`, sendet der Pi nichts mehr nach, wartet die
+  offenen `ok` ab und bricht den Auftrag kontrolliert ab (`M5 I`, Parken).
+  Ohne `ok` innerhalb der Frist trennt er die USB-Verbindung (wie bisher).
+- `job.line` zählt gesendete Zeilen. Marlin hängt höchstens 4 Zeilen
+  hinterher.
+- Rückfall: `LUMACUT_STREAM_WINDOW=1` in `/etc/lumacut/lumacut.env`
+  schaltet auf strikt eine Zeile pro `ok` zurück. Werte 2..8 sind möglich.
+- LightBurn (TCP 23) bleibt bei einer Zeile pro `ok`, denn LightBurn
+  regelt seinen Fluss selbst.
+- Status: `stream_window`, `streamed_count`.
+- Zeilen-Kompression (Leerzeichen streichen, kollineare Segmente
+  zusammenfassen) ist bewusst **nicht** eingebaut. Marlins Parser ohne
+  Leerzeichen ist am SKR nicht geprüft, und das Fenster beseitigt die
+  eigentliche Bremse (Warten auf `ok`).
+- Tests: `tests/test_marlin_streaming.py` gegen ein simuliertes Marlin
+  (256-Byte-Empfangspuffer, 8 Befehlsplätze, langsamer Planer, Fehler,
+  Zeitüberschreitung, NOT-AUS).
+- ⚠ Hardware: Durchsatz und Brennbild am echten SKR nicht gemessen.
+
 ### Parken (`op=park`)
 
 - Dieselbe Routine wie LightBurn `M2` und das Auftragsende: Laser aus,
@@ -235,6 +272,7 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
 | `op=moveto`, `/api/camera/snapshot`, `camera` im Status | `2c61b8a` (Kamera-Scan) | `pi400/marlin/web.py`, `pi400/marlin/transport.py` |
 | Auftrags-Ursprung (`op=place`, `origin_set`, `origin_clear`, `place_clear`, `placement=1`, Status `origin`) | „feat(pi400): Auftrags-Ursprung …“ (`git log --grep="Auftrags-Ursprung"`) | `pi400/marlin/placement.py`, `pi400/marlin/web.py`, `tests/test_job_placement.py` |
 | Auftrags-Warteschlange (`op=queue_add/run/pause/skip/remove/clear`, Status `queue`) | „feat(pi400): Auftrags-Warteschlange …“ (`git log --grep="Auftrags-Warteschlange"`) | `pi400/marlin/web.py`, `tests/test_job_queue.py` |
+| Job-Streaming zum SKR (Status `stream_window`, `streamed_count`) | „feat(pi400): Job-Streaming …“ (`git log --grep="Job-Streaming"`) | `pi400/marlin/transport.py`, `pi400/marlin/web.py`, `tests/test_marlin_streaming.py` |
 
 Es reicht, den Pi-Dienst zu aktualisieren (Python-Code). SKR-Firmware,
 `/etc/lumacut` und die Daten bleiben gleich.
@@ -359,6 +397,8 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
      Ursprung.
    - Warteschlange: mehrere Aufträge nacheinander, Parken dazwischen,
      Abbruch mitten in der Warteschlange.
+   - Job-Streaming: Raster-Durchsatz, gleichmäßiges Brennbild, Abbruch
+     und NOT-AUS mit vollem Fenster.
 7. **Prüfergebnisse (Audit, kein akuter Fehler):**
    - `/api/settings` nimmt `machine.lock` und wartet daher hinter einer
      laufenden Fahrt. Die Antwort kommt erst danach; das ist harmlos, aber

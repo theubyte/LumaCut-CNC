@@ -1,7 +1,11 @@
 """Native Marlin USB transport and exclusive LightBurn/TCP gateway.
 
 No GRBL identity spoofing, no '?'/$-commands, no blind line flooding.
-One acknowledged Marlin G-code command is in flight at a time.
+One acknowledged Marlin G-code command is in flight at a time, except for
+plain job moves sent with stream_command(): there a small, ok-counted
+window (STREAM_MAX_LINES / STREAM_MAX_BYTES, below Marlin's BUFSIZE 8 and
+256-byte RX buffer) keeps the planner fed. Every streamed line passes the
+same MarlinLaserGuard and XY/Z guards first.
 Live cutting requires validated homing, PWM isolation and hard interlock.
 """
 from __future__ import annotations
@@ -23,6 +27,20 @@ PROBE_RESULT_RE = re.compile(
 WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 COMMENT = re.compile(r"\([^()]*\)")
 READ_ONLY = frozenset({"M105", "M114", "M115", "M119", "M503", "M400"})
+ERROR_PREFIXES = ("Error:", "echo:Error:", "Resend:", "rs ")
+# Streaming window (#18). Marlin BUFSIZE 8 / RX_BUFFER_SIZE 256 on the SKR:
+# stay at half of both so a slow ok can never overflow the serial buffer.
+# LUMACUT_STREAM_WINDOW=1 restores strict one-line-at-a-time sending.
+def _stream_window_setting(raw) -> int:
+    try:
+        return max(1, min(8, int(raw)))
+    except (TypeError, ValueError):
+        return 4
+
+
+STREAM_MAX_LINES = _stream_window_setting(os.environ.get("LUMACUT_STREAM_WINDOW", "4"))
+STREAM_MAX_BYTES = 200
+STREAMABLE = re.compile(r"^G0?[01]\s")
 
 
 class MarlinCommandError(RuntimeError):
@@ -184,6 +202,12 @@ class MarlinTransport:
         self.client = None
         self.guard = MarlinLaserGuard()
         self.last_seen = 0.0
+        # Streamed lines written but not yet acknowledged (#18).
+        self.inflight = deque()
+        self.stream_window = STREAM_MAX_LINES
+        self.stream_bytes = STREAM_MAX_BYTES
+        self.stream_error = ""
+        self.streamed = 0
 
     def _open(self):
         if self.serial_factory:
@@ -199,6 +223,7 @@ class MarlinTransport:
             except Exception:
                 pass
         self.serial = None
+        self.inflight.clear()
         self.state = "Disconnected"
         self.homed = False
         self.z_homed = False
@@ -234,9 +259,44 @@ class MarlinTransport:
                 return line
         raise TimeoutError("Keine Marlin-Bestätigung vor Fristablauf")
 
+    def _await_stream_ack_locked(self, timeout: float):
+        """Read until one streamed line is acknowledged.
+
+        Marlin answers strictly in order, one ok per received line
+        (ADVANCED_OK "ok N.. P.. B.." counts the same). An error line
+        belongs to one of the lines in flight and is followed by its ok;
+        it is remembered and raised once the window is drained.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            line = self._read_line_locked(deadline)
+            if line.startswith(ERROR_PREFIXES):
+                self.serial_errors += 1
+                self.fault = "Marlin: " + line[:150]
+                if not self.stream_error:
+                    self.stream_error = self.fault
+                continue
+            if line.lower().startswith("ok"):
+                self.inflight.popleft()
+                self.commands += 1
+                return
+
+    def _drain_locked(self, timeout: float = 150.0):
+        """Wait for every streamed line; raise a remembered Marlin error."""
+        while self.inflight:
+            self._await_stream_ack_locked(timeout)
+        if self.stream_error:
+            message, self.stream_error = self.stream_error, ""
+            self.state = "Idle"
+            raise MarlinCommandError(message)
+
     def _exchange_locked(self, cmd: str, timeout: float = 15.0):
         if self.serial is None:
             raise ConnectionError("SKR USB nicht verbunden")
+        if self.inflight or self.stream_error:
+            # Any normal exchange (M114, M5, G30, ...) must not read the
+            # ok of a streamed line as its own answer.
+            self._drain_locked(max(timeout, 150.0))
         self.state = "Busy"
         responses = []
         self.serial.write((cmd + "\n").encode("ascii"))
@@ -245,7 +305,7 @@ class MarlinTransport:
             line = self._read_line_locked(deadline)
             responses.append(line)
             lower = line.lower()
-            if line.startswith(("Error:", "echo:Error:", "Resend:", "rs ")):
+            if line.startswith(ERROR_PREFIXES):
                 self.serial_errors += 1
                 self.fault = "Marlin: " + line[:150]
                 # A Marlin error is usually followed by a normal "ok".
@@ -440,120 +500,204 @@ class MarlinTransport:
     def command(self, cmd: str, owner: str = "web",
                 timeout: float = 20.0, use_guard=True):
         with self.lock:
-            if self.owner not in (None, owner):
-                raise RuntimeError("Steuerung belegt: " + self.owner)
-            if self.serial is None or not self.identity:
-                raise ConnectionError("Marlin USB nicht bereit")
-            if self.emergency_latched:
-                raise RuntimeError("M112-Notstopp aktiv; keine weiteren Bewegungen")
-            normalized = normalize(cmd)
-            # A bare G0/G1 from LightBurn changes only the modal motion
-            # type; there is no destination and thus no motion to authorize.
-            # In particular this must not erase a confirmed homing state.
-            if normalized in ("G0", "G00", "G1", "G01"):
-                if owner == "lightburn":
-                    return self._exchange_locked(normalized, timeout)
-            # LightBurn's Move arrows may issue a G1 X/Y ... S... jog,
-            # even though no M3 I laser mode has been enabled. A Move
-            # command must NEVER activate the laser: convert XY-only jogging
-            # to a rapid without any S word, while laser mode is off.
-            if (owner == "lightburn" and not self.laser_enabled
-                    and re.match(r"^G0?1(?:\s|$)", normalized)
-                    and re.search(r"\b[XY]\s*[-+]?\d", normalized)
-                    and not re.search(r"\bZ\s*[-+]?\d", normalized)
-                    and any(k == "S" for k, _ in WORD.findall(normalized))):
-                normalized = re.sub(r"^G0?1", "G0", normalized)
-                normalized = re.sub(r"\s*S\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)", "", normalized)
-            # LightBurn often emits G0 X... Y... without an F word.
-            # Marlin's modal feedrate might still be the slow Z feedrate;
-            # give XY-only rapids their own travel speed every time.
-            if (re.match(r"^G0?0(?:\s|$)", normalized)
-                    and re.search(r"\b[XY]\s*[-+]?\d", normalized)
-                    and not re.search(r"\bZ\s*[-+]?\d", normalized)
-                    and not re.search(r"\bF\s*[-+]?\d", normalized)):
-                normalized += " F9000"
-            # LightBurn treats S as modal, Marlin does not: after G0 the
-            # inline power is 0, so a following G1 without S cuts at 0 and
-            # the guard rejected it (which latched M112 mid-job). Re-send
-            # the last cut power, exactly what LightBurn intended.
-            if (owner == "lightburn" and self.laser_enabled and self.guard.last_rapid
-                    and self.last_cut_s is not None
-                    and re.match(r"^G0?[123](?:\s|$)", normalized)
-                    and not any(k == "S" for k, _ in WORD.findall(normalized))):
-                normalized += f" S{self.last_cut_s:g}"
-            if use_guard:
-                normalized = self.guard.check(normalized, self.homing_verified)
+            normalized, passthrough = self._prepare_locked(cmd, owner, use_guard)
             if not normalized:
                 return []
-            if normalized.startswith(("G0 ", "G1 ")) and "Z" in normalized and self.surface_z is None:
-                raise RuntimeError("Keine Werkstückhöhe bekannt; keine Z-Fahrt über LightBurn freigeben")
-            if normalized == "M3 I" and self.surface_z is None:
-                raise RuntimeError("Werkstückkontakt fehlt: Z-Taster auf Material referenzieren")
-            motion = re.match(r"^G0?[0123](?:\s|$)", normalized) is not None
-            if (motion or normalized == "M3 I") and not self.homed:
-                raise RuntimeError("Maschine nicht referenziert: in LightBurn zuerst Home (G28) ausfuehren; danach G30 fuer Werkstueckfokus")
+            if passthrough:
+                return self._exchange_locked(normalized, timeout)
+            return self._send_locked(normalized, timeout)
+
+    def stream_command(self, cmd: str, owner: str = "job", timeout: float = 150.0):
+        """Send a job line, keeping plain moves in a small ok-counted window.
+
+        Same normalization and guards as command(). Only absolute G0/G1
+        lines whose guards need no extra Marlin exchange (known start XY,
+        focus done, no relative mode) are streamed; everything else first
+        drains the window and then runs exactly like command(). A Marlin
+        error on any streamed line stops further sending and raises after
+        the window is drained.
+        """
+        with self.lock:
+            normalized, passthrough = self._prepare_locked(cmd, owner, True)
+            if not normalized:
+                return []
+            if passthrough:
+                return self._exchange_locked(normalized, timeout)
+            if not self._streamable_locked(normalized):
+                return self._send_locked(normalized, timeout)
+            return self._send_locked(normalized, timeout, stream=True)
+
+    def drain(self, owner: str = "job", timeout: float = 150.0):
+        """Wait until every streamed line is acknowledged by Marlin."""
+        with self.lock:
+            if self.serial is None:
+                self.inflight.clear()
+                return
             try:
-                self._z_move_guard_locked(normalized)
-                self._xy_cut_guard_locked(normalized)
-                if normalized == "M3 I":
-                    # Independently power cooling fan before laser PWM mode.
-                    # PC6 is FAN0/M106, not laser-enable.
-                    if not self.fan_power:
-                        self._exchange_locked("M106 P0 S255", timeout=8)
-                        # PC6 also switches the laser module's 24 V rail.
-                        # A diode module needs a moment after power-up;
-                        # otherwise the first line of a job burns weak.
-                        self._exchange_locked(
-                            f"G4 P{int(self.laser_supply_settle_ms)}", timeout=10)
-                    self.fan_power = True
-                    self.fan_off_at = None
-                # Focus on first powered G1, not while traversing XY.
-                if (re.match(r"^G0?1(?:\s|$)",normalized) and
-                    any(k == "S" and float(v) > 0 for k,v in WORD.findall(normalized)) and
-                    self.laser_enabled and not self.focused_this_job):
-                    self._focus_before_cut_locked()
-                reply = self._exchange_locked(normalized, timeout)
-                # Remember the workpiece target sent by LightBurn even if
-                # asynchronous Marlin M114 reports arrive out of order.
-                # Relative moves are tracked too: the cut guard uses this
-                # record as the start point of the next segment.
-                if re.match(r"^G0?[0123](?:\s|$)", normalized):
-                    coords = {k: float(v) for k, v in WORD.findall(normalized)}
-                    if "S" in coords and not normalized.startswith(("G0 ", "G00 ")):
-                        self.last_cut_s = coords["S"]
-                    if "X" in coords or "Y" in coords:
-                        if self.absolute_mode and "X" in coords and "Y" in coords:
-                            self.last_xy_commanded = (coords["X"], coords["Y"])
-                        elif self.last_xy_commanded is not None:
-                            self.last_xy_commanded = self._xy_target(
-                                coords, *self.last_xy_commanded)
-                if normalized == "G90":
-                    self.absolute_mode = True
-                elif normalized == "G91":
-                    self.absolute_mode = False
-                if normalized.startswith("M3 I"):
-                    self.laser_enabled = True  # PWM stays at zero until G1 S
-                if normalized.startswith("M5"):
-                    self.laser_enabled = False
-                    if self.fan_power:
-                        self.fan_off_at = time.monotonic() + self.fan_cooldown_s
-                if normalized == "M7":
-                    self.lights = True
-                if normalized == "M8":
-                    self.exhaust = True
-                if normalized == "M9":
-                    self.lights = self.exhaust = False
-                return reply
-            except (ValueError, MarlinCommandError) as exc:
-                # Rejected G-code is not the same as a disconnected USB cable.
-                # The laser state is handled by the LightBurn session on errors.
-                self.fault = str(exc)[:200]
-                self.state = "Idle"
+                self._drain_locked(timeout)
+            except MarlinCommandError:
                 raise
             except Exception as exc:
                 self.serial_errors += 1
                 self._close_locked(str(exc))
                 raise
+
+    def _streamable_locked(self, normalized: str) -> bool:
+        if self.stream_window <= 1 or not STREAMABLE.match(normalized):
+            return False
+        if not self.absolute_mode:
+            return False
+        words = WORD.findall(normalized)
+        powered = any(k == "S" and float(v) > 0 for k, v in words)
+        if (normalized.startswith(("G1", "G01")) and powered
+                and self.laser_enabled and not self.focused_this_job):
+            return False  # focus first (M400 + Z move)
+        if self.laser_enabled and self.last_xy_commanded is None:
+            return False  # cut guard would ask M114 for the start point
+        return True
+
+    def _stream_write_locked(self, normalized: str, timeout: float):
+        if self.stream_error:
+            self._drain_locked(timeout)
+        size = len(normalized) + 1
+        while self.inflight and (len(self.inflight) >= self.stream_window
+                                 or sum(self.inflight) + size > self.stream_bytes):
+            self._await_stream_ack_locked(timeout)
+        if self.stream_error:
+            self._drain_locked(timeout)
+        self.state = "Busy"
+        self.serial.write((normalized + "\n").encode("ascii"))
+        self.inflight.append(size)
+        self.streamed += 1
+        return []
+
+    def _prepare_locked(self, cmd: str, owner: str, use_guard=True):
+        """Owner/state checks, LightBurn rewrites and the laser guard.
+
+        Returns (normalized, passthrough): passthrough lines (empty or a
+        bare LightBurn G0/G1 mode switch) skip the motion guards.
+        """
+        if self.owner not in (None, owner):
+            raise RuntimeError("Steuerung belegt: " + self.owner)
+        if self.serial is None or not self.identity:
+            raise ConnectionError("Marlin USB nicht bereit")
+        if self.emergency_latched:
+            raise RuntimeError("M112-Notstopp aktiv; keine weiteren Bewegungen")
+        normalized = normalize(cmd)
+        # A bare G0/G1 from LightBurn changes only the modal motion
+        # type; there is no destination and thus no motion to authorize.
+        # In particular this must not erase a confirmed homing state.
+        if normalized in ("G0", "G00", "G1", "G01"):
+            if owner == "lightburn":
+                return normalized, True
+        # LightBurn's Move arrows may issue a G1 X/Y ... S... jog,
+        # even though no M3 I laser mode has been enabled. A Move
+        # command must NEVER activate the laser: convert XY-only jogging
+        # to a rapid without any S word, while laser mode is off.
+        if (owner == "lightburn" and not self.laser_enabled
+                and re.match(r"^G0?1(?:\s|$)", normalized)
+                and re.search(r"\b[XY]\s*[-+]?\d", normalized)
+                and not re.search(r"\bZ\s*[-+]?\d", normalized)
+                and any(k == "S" for k, _ in WORD.findall(normalized))):
+            normalized = re.sub(r"^G0?1", "G0", normalized)
+            normalized = re.sub(r"\s*S\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)", "", normalized)
+        # LightBurn often emits G0 X... Y... without an F word.
+        # Marlin's modal feedrate might still be the slow Z feedrate;
+        # give XY-only rapids their own travel speed every time.
+        if (re.match(r"^G0?0(?:\s|$)", normalized)
+                and re.search(r"\b[XY]\s*[-+]?\d", normalized)
+                and not re.search(r"\bZ\s*[-+]?\d", normalized)
+                and not re.search(r"\bF\s*[-+]?\d", normalized)):
+            normalized += " F9000"
+        # LightBurn treats S as modal, Marlin does not: after G0 the
+        # inline power is 0, so a following G1 without S cuts at 0 and
+        # the guard rejected it (which latched M112 mid-job). Re-send
+        # the last cut power, exactly what LightBurn intended.
+        if (owner == "lightburn" and self.laser_enabled and self.guard.last_rapid
+                and self.last_cut_s is not None
+                and re.match(r"^G0?[123](?:\s|$)", normalized)
+                and not any(k == "S" for k, _ in WORD.findall(normalized))):
+            normalized += f" S{self.last_cut_s:g}"
+        if use_guard:
+            normalized = self.guard.check(normalized, self.homing_verified)
+        if not normalized:
+            return "", True
+        if normalized.startswith(("G0 ", "G1 ")) and "Z" in normalized and self.surface_z is None:
+            raise RuntimeError("Keine Werkstückhöhe bekannt; keine Z-Fahrt über LightBurn freigeben")
+        if normalized == "M3 I" and self.surface_z is None:
+            raise RuntimeError("Werkstückkontakt fehlt: Z-Taster auf Material referenzieren")
+        motion = re.match(r"^G0?[0123](?:\s|$)", normalized) is not None
+        if (motion or normalized == "M3 I") and not self.homed:
+            raise RuntimeError("Maschine nicht referenziert: in LightBurn zuerst Home (G28) ausfuehren; danach G30 fuer Werkstueckfokus")
+        return normalized, False
+
+    def _send_locked(self, normalized: str, timeout: float, stream: bool = False):
+        """Guards needing the machine state, the exchange and bookkeeping."""
+        try:
+            self._z_move_guard_locked(normalized)
+            self._xy_cut_guard_locked(normalized)
+            if normalized == "M3 I":
+                # Independently power cooling fan before laser PWM mode.
+                # PC6 is FAN0/M106, not laser-enable.
+                if not self.fan_power:
+                    self._exchange_locked("M106 P0 S255", timeout=8)
+                    # PC6 also switches the laser module's 24 V rail.
+                    # A diode module needs a moment after power-up;
+                    # otherwise the first line of a job burns weak.
+                    self._exchange_locked(
+                        f"G4 P{int(self.laser_supply_settle_ms)}", timeout=10)
+                self.fan_power = True
+                self.fan_off_at = None
+            # Focus on first powered G1, not while traversing XY.
+            if (re.match(r"^G0?1(?:\s|$)",normalized) and
+                any(k == "S" and float(v) > 0 for k,v in WORD.findall(normalized)) and
+                self.laser_enabled and not self.focused_this_job):
+                self._focus_before_cut_locked()
+            if stream:
+                reply = self._stream_write_locked(normalized, timeout)
+            else:
+                reply = self._exchange_locked(normalized, timeout)
+            # Remember the workpiece target sent by LightBurn even if
+            # asynchronous Marlin M114 reports arrive out of order.
+            # Relative moves are tracked too: the cut guard uses this
+            # record as the start point of the next segment.
+            if re.match(r"^G0?[0123](?:\s|$)", normalized):
+                coords = {k: float(v) for k, v in WORD.findall(normalized)}
+                if "S" in coords and not normalized.startswith(("G0 ", "G00 ")):
+                    self.last_cut_s = coords["S"]
+                if "X" in coords or "Y" in coords:
+                    if self.absolute_mode and "X" in coords and "Y" in coords:
+                        self.last_xy_commanded = (coords["X"], coords["Y"])
+                    elif self.last_xy_commanded is not None:
+                        self.last_xy_commanded = self._xy_target(
+                            coords, *self.last_xy_commanded)
+            if normalized == "G90":
+                self.absolute_mode = True
+            elif normalized == "G91":
+                self.absolute_mode = False
+            if normalized.startswith("M3 I"):
+                self.laser_enabled = True  # PWM stays at zero until G1 S
+            if normalized.startswith("M5"):
+                self.laser_enabled = False
+                if self.fan_power:
+                    self.fan_off_at = time.monotonic() + self.fan_cooldown_s
+            if normalized == "M7":
+                self.lights = True
+            if normalized == "M8":
+                self.exhaust = True
+            if normalized == "M9":
+                self.lights = self.exhaust = False
+            return reply
+        except (ValueError, MarlinCommandError) as exc:
+            # Rejected G-code is not the same as a disconnected USB cable.
+            # The laser state is handled by the LightBurn session on errors.
+            self.fault = str(exc)[:200]
+            self.state = "Idle"
+            raise
+        except Exception as exc:
+            self.serial_errors += 1
+            self._close_locked(str(exc))
+            raise
 
     def service_cooldown(self):
         """Release PC6 only after cooldown and confirmed safe laser-off.
@@ -1073,6 +1217,8 @@ class MarlinTransport:
                     max(0, round(self.fan_off_at - time.monotonic()))),
                 "serial_errors": self.serial_errors,
                 "command_count": self.commands,
+                "stream_window": self.stream_window,
+                "streamed_count": self.streamed,
                 "lightburn_clients": self.lightburn_clients,
                 "recent": list(self.lines)[-25:]
             }

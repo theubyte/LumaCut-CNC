@@ -830,8 +830,11 @@ def _execute_job(filename, commands, probe_point=None):
         elif normalized == "M2":
             pass  # the worker always parks once at the end
         elif normalized:
-            machine.command(command, owner="job", timeout=150)
+            # Plain moves go out in a small ok-counted window (#18); all
+            # other lines drain it and run one at a time as before.
+            machine.stream_command(command, owner="job", timeout=150)
         job["line"]=i
+    machine.drain(owner="job")
     machine.park_safezone(owner="job")
     job["state"]="complete"
 
