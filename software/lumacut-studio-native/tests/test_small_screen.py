@@ -40,12 +40,22 @@ def make_win(qapp, tmp_path, monkeypatch):
 
 
 def _widest(area: QScrollArea) -> str:
-    """Breiteste Kind-Widgets (Diagnose, falls ein Panel auf einem Runner zu breit ist)."""
-    from PySide6.QtWidgets import QWidget
-    kids = sorted(area.widget().findChildren(QWidget),
-                  key=lambda w: -w.minimumSizeHint().width())[:3]
-    return ", ".join(f"{type(w).__name__}({w.objectName() or getattr(w, 'text', lambda: '')()!s:.20})"
-                     f"={w.minimumSizeHint().width()}" for w in kids)
+    """Breiteste Kind-Widgets (Diagnose, falls ein Panel auf einem Runner zu breit ist).
+    Effektives Layout-Minimum (minimumWidth hat Vorrang vor minimumSizeHint)."""
+    from PySide6.QtWidgets import QApplication, QCheckBox, QWidget
+
+    def eff(w):
+        return w.minimumWidth() or w.minimumSizeHint().width()
+    kids = [w for w in area.widget().findChildren(QWidget) if w.isVisibleTo(area.widget())]
+    leaves = sorted((w for w in kids if not w.findChildren(QWidget)), key=lambda w: -eff(w))[:4]
+    out = [f"{type(w).__name__}({w.objectName() or getattr(w, 'text', lambda: '')()!s:.20})"
+           f"={eff(w)}/{w.minimumSizeHint().width()}" for w in leaves]
+    for box in sorted(area.widget().findChildren(QCheckBox), key=lambda b: -b.minimumSizeHint().width())[:1]:
+        f = box.font()
+        out.append(f"check:min={box.minimumWidth()} adv={box.fontMetrics().horizontalAdvance(box.text())} "
+                   f"pt={f.pointSizeF()} px={f.pixelSize()} fam={f.family()} "
+                   f"style={QApplication.style().name()} mark={box.property(fit._COMPACT_MARK)}")
+    return ", ".join(out)
 
 
 def _not_clipped(area: QScrollArea) -> bool:

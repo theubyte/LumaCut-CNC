@@ -204,6 +204,9 @@ class _WrapCheck(QObject):
         t = event.type()
         if t == QEvent.Resize:
             self._sync_height()
+        elif t in (QEvent.Polish, QEvent.StyleChange, QEvent.FontChange):
+            if self.box.minimumWidth() != COMPACT_CHECK_PX:  # Stylesheet-Repolish setzt zurück
+                self.box.setMinimumWidth(COMPACT_CHECK_PX)
         elif t == QEvent.Paint and not self._fits():
             b = self.box
             opt = self._option()
@@ -218,7 +221,12 @@ class _WrapCheck(QObject):
 
 
 def _wrap_check(box: QCheckBox) -> bool:
-    if box.property(_COMPACT_MARK) or box.minimumSizeHint().width() <= COMPACT_CHECK_PX:
+    if box.property(_COMPACT_MARK):
+        if box.minimumWidth() != COMPACT_CHECK_PX:
+            box.setMinimumWidth(COMPACT_CHECK_PX)
+            return True
+        return False
+    if box.minimumSizeHint().width() <= COMPACT_CHECK_PX:
         return False
     box.setProperty(_COMPACT_MARK, True)
     box._lumacut_wrap = _WrapCheck(box)
