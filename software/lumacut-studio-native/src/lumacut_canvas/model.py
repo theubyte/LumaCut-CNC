@@ -291,6 +291,37 @@ class Shape:
                      groups=tuple(str(g) for g in d.get("groups", ()) if g))
 
 
+def simplify_polyline(pts: list[tuple[float, float]], tolerance_mm: float) -> list[tuple[float, float]]:
+    """Ramer-Douglas-Peucker: Punkte entfernen, die weniger als ``tolerance_mm``
+    von der vereinfachten Linie abweichen. Erster und letzter Punkt bleiben;
+    direkt doppelte Punkte fallen weg. Iterativ (keine Rekursionsgrenze)."""
+    out: list[tuple[float, float]] = []
+    for p in pts:
+        if not out or math.hypot(p[0] - out[-1][0], p[1] - out[-1][1]) > 1e-9:
+            out.append((float(p[0]), float(p[1])))
+    if len(out) < 3 or tolerance_mm <= 0:
+        return out
+    keep = [False] * len(out)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(out) - 1)]
+    while stack:
+        i, j = stack.pop()
+        (ax, ay), (bx, by) = out[i], out[j]
+        dx, dy = bx - ax, by - ay
+        seg = math.hypot(dx, dy)
+        best, idx = -1.0, -1
+        for k in range(i + 1, j):
+            px, py = out[k]
+            d = (abs(dy * (px - ax) - dx * (py - ay)) / seg if seg > 1e-12
+                 else math.hypot(px - ax, py - ay))
+            if d > best:
+                best, idx = d, k
+        if idx >= 0 and best > tolerance_mm:
+            keep[idx] = True
+            stack += [(i, idx), (idx, j)]
+    return [p for p, k in zip(out, keep) if k]
+
+
 def constrain_geometry(g: Geometry) -> Geometry:
     """Hält eine Geometrie still und leise innerhalb der Arbeitsfläche.
 

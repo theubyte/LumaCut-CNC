@@ -1,5 +1,5 @@
 """Werkzeuge: Auswahl (Verschieben/Skalieren/Drehen/Rahmenauswahl), Rechteck,
-Ellipse, Linie, Text.
+Ellipse, Linie, Polygon, Freihand, Text.
 
 Der :class:`ToolController` bekommt Mausereignisse in Szene-mm von der
 :class:`~canvas_view.CanvasView`. Während eines Zugs wird das Modell live
@@ -20,7 +20,8 @@ from PySide6.QtWidgets import QGraphicsRectItem, QInputDialog
 from . import theme
 from .commands import AddShapesCommand, SetGeometryCommand, SetTextCommand
 from .items import ROTATE_HANDLE
-from .model import Geometry, Shape, keep_inside_together, normalize_angle, rotate_point
+from .model import (Geometry, Shape, keep_inside_together, normalize_angle, rotate_point,
+                    simplify_polyline)
 from .shape_paths import text_aspect
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, clamp_offset
 
@@ -39,14 +40,20 @@ class Tool(str, Enum):
     ELLIPSE = "ellipse"
     LINE = "line"
     POLYGON = "polygon"
+    FREEHAND = "freehand"
     TEXT = "text"
 
 
 TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
-               Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.TEXT: "Text"}
+               Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.FREEHAND: "Freihand",
+               Tool.TEXT: "Text"}
 TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
-                  Tool.POLYGON: "P", Tool.TEXT: "T"}
+                  Tool.POLYGON: "P", Tool.FREEHAND: "F", Tool.TEXT: "T"}
 CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
+# Freihand: Ramer-Douglas-Peucker-Toleranz in mm (Abweichung von der gezeichneten
+# Linie) und Mindestabstand roher Mauspunkte.
+FREEHAND_TOLERANCE_MM = 0.2
+FREEHAND_MIN_STEP_MM = 0.05
 
 
 def _clamp_point(p: QPointF) -> QPointF:
@@ -127,6 +134,7 @@ class ToolController:
         self.roi_pending = False  # Editor.request_roi(): nächster Zug zieht einen Bereich auf
         self._poly: list[tuple[float, float]] = []  # gesetzte Polygonpunkte (mm)
         self._hover: tuple[float, float] | None = None
+        self._free: list[tuple[float, float]] = []  # rohe Freihand-Punkte (mm)
         self._rubber = QGraphicsRectItem()
         pen = QPen(QColor(theme.ACCENT), 1, Qt.DashLine)
         pen.setCosmetic(True)
@@ -167,9 +175,10 @@ class ToolController:
         """Laufenden Zug abbrechen und Ausgangszustand wiederherstellen."""
         if self._mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
-        if self._mode in ("draw", "poly") and self._preview_id and self.doc.has_shape(self._preview_id):
+        if self._mode in ("draw", "poly", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
             self.doc.remove_shape(self._preview_id)
         self._poly = []
+        self._free = []
         self._hover = None
         self._rubber.setVisible(False)
         self._mode = None
@@ -210,6 +219,11 @@ class ToolController:
             self._create_text(pos)
         elif self.tool == Tool.POLYGON:
             self._press_polygon(pos, mods)
+        elif self.tool == Tool.FREEHAND:
+            if self._active_layer_ok():
+                self._mode = "free"
+                p = _clamp_point(pos)  # ohne Raster: Freihand soll der Hand folgen
+                self._free = [(p.x(), p.y())]
         elif self._active_layer_ok():
             self._mode = "draw"
 
@@ -256,6 +270,10 @@ class ToolController:
         if self._mode == "poly":
             self._hover = self._poly_point(pos, bool(mods & Qt.ShiftModifier))
             self._update_poly_preview()
+            return
+        if self._mode == "free":
+            if dragging:
+                self._add_free_point(pos)
             return
         if self._mode is None or not dragging:
             if self.tool == Tool.SELECT and self._mode is None and not self.roi_pending:
@@ -449,8 +467,46 @@ class ToolController:
         self.ed.set_selection([shape.id])
         return shape
 
+    # --- Freihand ------------------------------------------------------------
+    def _add_free_point(self, pos: QPointF) -> None:
+        p = _clamp_point(pos)
+        lx, ly = self._free[-1]
+        if math.hypot(p.x() - lx, p.y() - ly) < FREEHAND_MIN_STEP_MM:
+            return
+        self._free.append((p.x(), p.y()))
+        shape = Shape.from_points("path", self._free, self.doc.active_layer_id)
+        if self._preview_id and self.doc.has_shape(self._preview_id):
+            prev = self.doc.shape(self._preview_id)
+            self.doc.begin_batch()
+            prev.points, prev.geom = shape.points, shape.geom
+            self.doc.changed()
+            self.doc.end_batch()
+        else:
+            self.doc.add_shape(shape)
+            self._preview_id = shape.id
+
+    def finish_freehand(self, pos: QPointF | None = None) -> Shape | None:
+        """Strich vereinfachen (RDP) und als offenen Pfad in einem Undo-Schritt anlegen."""
+        if pos is not None and self._free:
+            self._add_free_point(pos)
+        raw = list(self._free)
+        self._mode = "free"
+        self.cancel()  # Vorschau entfernen
+        pts = simplify_polyline(raw, FREEHAND_TOLERANCE_MM)
+        if len(pts) < 2:
+            return None
+        shape = Shape.from_points("path", pts, self.doc.active_layer_id)
+        if max(shape.geom.w, shape.geom.h) < MIN_SIZE_MM:
+            return None
+        self.ed.undo_stack.push(AddShapesCommand(self.doc, [shape], "Freihand zeichnen"))
+        self.ed.set_selection([shape.id])
+        return shape
+
     def release(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
         mode, self._mode = self._mode, None
+        if mode == "free":
+            self.finish_freehand(pos)
+            return
         if mode == "poly":
             self._mode = mode  # Polygon bleibt über mehrere Klicks aktiv
             return
