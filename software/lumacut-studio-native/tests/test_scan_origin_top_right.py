@@ -151,3 +151,32 @@ def test_flipped_canvas_export_matches_mesh(panel, editor):
     res = compensate_for_export(optimized_document_gcode(d), maps)
     assert res.ok, res.errors
     assert res.coverage.outside_mm == 0
+
+
+def test_contract_formulas_like_android():
+    """Vertrag ZUSAMMENARBEIT §2: maschine = (390 − x, 30 + y), zurück (390 − mx, my − 30)."""
+    to_m, from_m = CONVENTIONS["flipped"]
+    for x, y in [(0, 0), (360, 340), (10, 20), (123.4, 56.7)]:
+        mx, my = to_m(x, y)
+        assert (mx, my) == pytest.approx((390 - x, 30 + y))
+        assert from_m(mx, my) == pytest.approx((390 - mx, my - 30))
+        assert from_m(mx, my) == pytest.approx((x, y))
+    # Ecken: oben links = Maschine (390, 30), oben rechts = Endschalter-Ecke (30, 30)
+    assert to_m(0, 0) == (390, 30) and to_m(360, 0) == (30, 30) and to_m(360, 340) == (30, 370)
+
+
+def test_contract_image_column_zero_is_large_machine_x(monkeypatch):
+    """Mosaik (Maschinen-Raster) auf dem Bildschirm: Bildschirmspalte 0 = Maschine X 390,
+    Zeile 0 = Maschine Y 30; ein asymmetrisches Muster bleibt lesbar (nur Lage, kein Motiv gespiegelt)."""
+    import scanprobe.panel as P
+    to_m, from_m = CONVENTIONS["flipped"]
+    monkeypatch.setattr(P, "to_machine", to_m)
+    monkeypatch.setattr(P, "from_machine", from_m)
+    img = np.zeros((370, 390, 3), np.uint8)
+    img[30:40, 380:390] = 255            # Maschine X380–390 / Y30–40 (nahe X 390)
+    img[300:310, 30:40, 0] = 255         # Maschine X30–40 / Y300–310, nur Rot
+    out = P.mosaic_to_work_image(Mosaic(img, 1.0, (0.0, 0.0), np.ones(img.shape[:2], bool)), mm_per_px=1.0)
+    assert out.shape[:2] == (340, 360)
+    assert out[5, 5].min() > 200                         # links oben auf dem Bildschirm
+    assert out[275, 355, 0] > 200 and out[275, 355, 1] == 0   # rechts unten (X 35 -> x 355, Y 305 -> y 275)
+    assert out[5, 355].max() == 0 and out[275, 5].max() == 0

@@ -50,8 +50,12 @@ from .stitch import Mosaic
 from .workflow import ScanProbeWorkflow
 
 # Arbeitsfläche (Canvas) = Maschine X30–390 / Y30–370 (siehe lumacut_canvas.workarea)
-# Bildschirm-mm (Canvas, oben links) <-> Maschinen-mm. Bei Nullpunkt oben rechts
-# (Anforderungen 2026-10-26 §2.3) ist X gespiegelt: Maschine = (390 − x, 30 + y).
+# Bildschirm-mm (Canvas, oben links) <-> Maschinen-mm. Vertrag (ZUSAMMENARBEIT_CLAUDE_GROK.md §2,
+# Anforderungen 2026-10-26 §2.3, wie Android Work.toMachine/fromMachine):
+#   maschine_x = 390 − x, maschine_y = 30 + y;  x = 390 − maschine_x, y = maschine_y − 30.
+# Ansicht von der Tür (Drehung, keine Spiegelung des Motivs). Mosaik und Höhenkarte liegen
+# als Maschinen-Raster vor; ihre Spalten werden für den Bildschirm umgekehrt (Spalte 0 = links
+# = großes Maschinen-X).
 # Umgerechnet wird nur über to_machine/from_machine; Rechtecke aus zwei Ecken
 # deshalb immer mit min/max bilden (siehe :func:`machine_rect`).
 try:
