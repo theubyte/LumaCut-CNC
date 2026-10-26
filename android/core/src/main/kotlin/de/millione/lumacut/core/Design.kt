@@ -4,11 +4,27 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.util.Base64
 import java.util.UUID
+import kotlin.math.ceil
 
 @Serializable
 enum class LayerMode { LINE, FILL }
 
-/** Laser settings shared by all elements on the layer. Power in percent of S255. */
+/** Limits shared with the Windows app (lumacut_canvas/model.py). */
+object Limits {
+    val POWER = 0.0..100.0
+    val SPEED = 1.0..6000.0
+    val PASSES = 1..30
+    val Z_STEP = 0.0..2.0
+    /** Total focus drop over all passes; the Pi keeps Z >= surface + 2 mm, focus sits at surface + 5.5 mm. */
+    const val MAX_FOCUS_DROP_MM = 3.0
+    val THICKNESS = 0.0..50.0
+    val DEPTH_PER_PASS = 0.0..10.0
+}
+
+/**
+ * Laser settings shared by all elements on the layer. Power in percent of
+ * S255. [zStepMm] lowers the focus between passes (cutting thick material).
+ */
 @Serializable
 data class Layer(
     val id: String = UUID.randomUUID().toString(),
@@ -21,8 +37,16 @@ data class Layer(
     val passes: Int = 1,
     val intervalMm: Double = 0.1,
     val overscanMm: Double = 2.5,
+    val zStepMm: Double = 0.0,
     val output: Boolean = true,
-)
+    val visible: Boolean = true,
+    val locked: Boolean = false,
+    val materialName: String? = null,
+    val thicknessMm: Double = 0.0,
+    val depthPerPassMm: Double = 0.0,
+) {
+    val focusDropMm get() = zStepMm * (passes - 1)
+}
 
 /** Grayscale raster: 0 = black (full power), 255 = white (laser off). */
 @Serializable
@@ -41,9 +65,10 @@ data class Raster(val width: Int, val height: Int, val grayBase64: String) {
 enum class ImageMode { GRAYSCALE, DITHER, THRESHOLD }
 
 /**
- * Something on the bed. Vector content lives in [paths] (local mm, before
- * [transform]); text keeps its source so it stays editable; images carry a
- * [raster] stretched over [imageWidthMm] x [imageHeightMm].
+ * Something on the work area (coordinates in [Work] mm). Vector content
+ * lives in [paths] (local mm, before [transform]); text keeps its source;
+ * images carry a [raster] stretched over [imageWidthMm] x [imageHeightMm].
+ * Elements with the same [groupId] are selected and moved together.
  */
 @Serializable
 data class Element(
@@ -60,16 +85,18 @@ data class Element(
     val imageWidthMm: Double = 0.0,
     val imageHeightMm: Double = 0.0,
     val imageMode: ImageMode = ImageMode.GRAYSCALE,
+    val groupId: String? = null,
 ) {
     val isImage get() = raster != null
 
-    /** Paths in machine coordinates. */
+    /** Paths in work-area coordinates. */
     fun worldPaths(): List<Poly> = paths.map { poly -> poly.map(transform::apply) }
 
-    fun worldBounds(): Box? = if (isImage) {
-        val corners = listOf(Pt(0.0, 0.0), Pt(imageWidthMm, 0.0), Pt(imageWidthMm, imageHeightMm), Pt(0.0, imageHeightMm))
-        boundsOf(listOf(corners.map(transform::apply)))
-    } else boundsOf(worldPaths())
+    /** Image corners in work-area coordinates (rotation applies to images too). */
+    fun imageCorners(): List<Pt> = listOf(Pt(0.0, 0.0), Pt(imageWidthMm, 0.0), Pt(imageWidthMm, imageHeightMm), Pt(0.0, imageHeightMm))
+        .map(transform::apply)
+
+    fun worldBounds(): Box? = if (isImage) boundsOf(listOf(imageCorners())) else boundsOf(worldPaths())
 }
 
 @Serializable
@@ -92,6 +119,11 @@ data class Document(
             Layer(name = "Linie", color = 0xFF6CB6FF, mode = LayerMode.LINE, powerPct = 40.0, speed = 1500.0),
             Layer(name = "Schneiden", color = 0xFFFF6B70, mode = LayerMode.LINE, powerPct = 85.0, speed = 400.0, passes = 2),
         )
+
+        /** Passes needed to reach [depthMm] with [depthPerPassMm] per pass (Windows: material.py). */
+        fun passesFor(depthMm: Double, depthPerPassMm: Double): Int =
+            if (depthPerPassMm <= 0.0 || depthMm <= 0.0) 1
+            else ceil(depthMm / depthPerPassMm - 1e-9).toInt().coerceIn(Limits.PASSES)
     }
 }
 
@@ -107,16 +139,29 @@ data class Material(
     val speed: Double,
     val passes: Int = 1,
     val intervalMm: Double = 0.1,
+    val depthPerPassMm: Double = 0.0,
+    val zStepMm: Double = 0.0,
 ) {
-    fun applyTo(layer: Layer) = layer.copy(mode = mode, powerPct = powerPct, speed = speed, passes = passes, intervalMm = intervalMm)
+    /** Passes derived from thickness / depth per pass when set, otherwise the stored passes. */
+    val effectivePasses get() = if (depthPerPassMm > 0) Document.passesFor(thicknessMm, depthPerPassMm) else passes
+
+    fun applyTo(layer: Layer): Layer {
+        val p = effectivePasses
+        val z = if (p > 1) zStepMm.coerceAtMost(Limits.MAX_FOCUS_DROP_MM / (p - 1)) else 0.0
+        return layer.copy(mode = mode, powerPct = powerPct, speed = speed, passes = p, intervalMm = intervalMm,
+            zStepMm = z, materialName = name, thicknessMm = thicknessMm, depthPerPassMm = depthPerPassMm)
+    }
 
     companion object {
         /** Starting points only; every material must be tested on the machine. */
         fun defaults() = listOf(
-            Material(name = "Pappelsperrholz", thicknessMm = 3.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 90.0, speed = 350.0, passes = 2),
+            Material(name = "Pappelsperrholz", thicknessMm = 3.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 90.0, speed = 350.0,
+                     depthPerPassMm = 1.5, zStepMm = 0.5),
             Material(name = "Pappelsperrholz", thicknessMm = 3.0, process = "Gravieren", mode = LayerMode.FILL, powerPct = 25.0, speed = 3000.0),
-            Material(name = "MDF", thicknessMm = 3.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 95.0, speed = 300.0, passes = 2),
-            Material(name = "Acryl schwarz", thicknessMm = 3.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 100.0, speed = 200.0, passes = 3),
+            Material(name = "MDF", thicknessMm = 3.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 95.0, speed = 300.0,
+                     depthPerPassMm = 1.5, zStepMm = 0.5),
+            Material(name = "Acryl schwarz", thicknessMm = 3.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 100.0, speed = 200.0,
+                     depthPerPassMm = 1.0, zStepMm = 0.5),
             Material(name = "Leder", thicknessMm = 2.0, process = "Gravieren", mode = LayerMode.FILL, powerPct = 18.0, speed = 3000.0),
             Material(name = "Karton", thicknessMm = 1.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 45.0, speed = 1200.0),
             Material(name = "Schiefer", thicknessMm = 5.0, process = "Gravieren", mode = LayerMode.FILL, powerPct = 40.0, speed = 2500.0, intervalMm = 0.08),

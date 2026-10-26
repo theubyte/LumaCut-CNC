@@ -905,6 +905,52 @@ with web.app.test_client() as c:
     assert r.status_code == 200 and calls == ["web"], (r.data, calls)
 """)
 
+    def test_move_to_is_laser_off_and_only_raises_z(self):
+        from marlin.transport import MarlinTransport
+        serial = FakeSerial(["ok\n", "ok\n", "X:10.00 Y:10.00 Z:5.00\n", "ok\n",
+                             "ok\n", "ok\n", "ok\n", "X:200.00 Y:150.00 Z:20.00\n", "ok\n"])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.move_to(200.0, 150.0)
+        self.assertEqual(serial.writes, [b"M5 I\n", b"M400\n", b"M114\n", b"G0 Z20.000 F600\n",
+                                         b"G0 X200.000 Y150.000 F9000\n", b"M400\n", b"M114\n"])
+        self.assertEqual(bridge.last_xy_commanded, (200.0, 150.0))
+        with self.assertRaisesRegex(ValueError, "außerhalb"):
+            bridge.move_to(400.0, 10.0)
+        bridge.laser_enabled = True
+        with self.assertRaisesRegex(RuntimeError, "Laser"):
+            bridge.move_to(100.0, 100.0)
+
+    def test_camera_snapshot_and_moveto_endpoints(self):
+        self._run_web_script(r"""
+import subprocess, types
+from marlin import web
+web.CAMERA = __file__ if False else web.CONFIG.parent.as_posix()   # an existing path stands in for /dev/video0
+calls = []
+def fake_run(cmd, **k):
+    calls.append(cmd)
+    return types.SimpleNamespace(returncode=0, stdout=bytes([0xFF, 0xD8, 0xFF, 0xE0]) + b"jpegdata", stderr=b"")
+subprocess.run = fake_run
+moves = []
+web.machine.move_to = lambda x, y, owner: moves.append((x, y, owner))
+web.local_owner = lambda: None
+with web.app.test_client() as c:
+    r = c.get("/api/camera/snapshot?w=640&h=480")
+    assert r.status_code == 200 and r.headers["Content-Type"] == "image/jpeg", r.data
+    assert "640x480" in calls[0] and "v4l2" in calls[0]
+    assert c.get("/api/camera/snapshot?w=10&h=10").status_code == 400
+    assert c.get("/api/status").get_json()["camera"]["available"] is True
+    r = c.post("/api/action", data={"op": "moveto", "x": "120.5", "y": "80"})
+    assert r.status_code == 200 and moves == [(120.5, 80.0, "web")], (r.data, moves)
+web.CAMERA = "/dev/does-not-exist"
+with web.app.test_client() as c:
+    r = c.get("/api/camera/snapshot")
+    assert r.status_code == 503 and "Keine Kamera" in r.get_json()["error"], r.data
+""")
+
     def test_one_click_order_and_controlled_stop_without_m112(self):
         self._run_web_script(r"""
 from marlin import web

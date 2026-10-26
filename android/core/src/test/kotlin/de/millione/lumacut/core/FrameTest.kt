@@ -44,7 +44,7 @@ class MaterialTestTest {
         assertEquals(6, doc.elements.count { it.kind == "Testfeld" })
         assertEquals(5, doc.elements.count { it.kind == "Beschriftung" })
         val b = doc.bounds()!!
-        assertTrue(b.minX >= Bed.SAFE && b.minY >= Bed.SAFE)
+        assertTrue(Work.contains(b))
     }
 
     @Test fun `test document produces Pi compatible G-code`() {

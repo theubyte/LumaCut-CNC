@@ -99,7 +99,7 @@ class MarlinWriterTest {
 
     /** Every line must be acceptable for the Pi's MarlinLaserGuard. */
     private fun assertPiCompatible(gcode: String) {
-        val allowed = Regex("^(G21|G90|M5 I|M3 I|M400|G0 X[-\\d.]+ Y[-\\d.]+|G1 X[-\\d.]+ Y[-\\d.]+ F\\d+ S\\d+)$")
+        val allowed = Regex("""^(G21|G90|G91|M5 I|M3 I|M400|G0 X[\d.]+ Y[\d.]+|G0 Z-?[\d.]+ F600|G1 X[\d.]+ Y[\d.]+ F\d+ S\d+)$""")
         for (line in gcode.lines().filter { it.isNotBlank() && !it.startsWith(";") }) {
             assertTrue(allowed.matches(line), "Pi würde ablehnen: $line")
             assertTrue(line.length <= 96)
@@ -107,41 +107,53 @@ class MarlinWriterTest {
         assertEquals(1, gcode.lines().count { it == "M3 I" }, "genau ein M3 I")
     }
 
-    @Test fun `line layer cuts the rectangle with the layer power and passes`() {
+    /** No XY position of the job — burning or not — may lie in the 30 mm safe zone. */
+    private fun assertNeverInSafeZone(gcode: String) {
+        for (m in Regex("""X([\d.]+) Y([\d.]+)""").findAll(gcode)) {
+            val x = m.groupValues[1].toDouble(); val y = m.groupValues[2].toDouble()
+            assertTrue(x >= Bed.SAFE - 1e-9 && y >= Bed.SAFE - 1e-9 && x <= Bed.WIDTH && y <= Bed.HEIGHT, "Safezone berührt: ${m.value}")
+        }
+    }
+
+    @Test fun `work area is shifted by the safe zone into machine coordinates`() {
         val layers = Document.defaultLayers()
         val cut = layers[2]
         val g = MarlinWriter("t").write(doc(rect(cut, 100.0, 100.0), layers = layers))
         assertPiCompatible(g)
         val t = Toolpath.parse(g)
         assertEquals(2 * 60.0, t.stats.cutMm, 1e-6)       // 2 passes
-        assertEquals((85.0 / 100 * 255).toInt() + 1, t.stats.maxPower)
-        assertEquals(Box(100.0, 100.0, 120.0, 110.0), t.bounds)
+        assertEquals(217, t.stats.maxPower)                // 85 % of 255
+        assertEquals(Box(130.0, 130.0, 150.0, 140.0), t.bounds)
     }
 
-    @Test fun `fill hatches with laser-off overscan`() {
+    @Test fun `fill overscan stays inside the work area`() {
         val layers = Document.defaultLayers()
-        val fill = layers[0].copy(intervalMm = 1.0, overscanMm = 3.0)
-        val g = MarlinWriter().write(doc(rect(fill, 50.0, 50.0), layers = listOf(fill)))
+        val fill = layers[0].copy(intervalMm = 1.0, overscanMm = 5.0)
+        val g = MarlinWriter().write(doc(rect(fill, 0.0, 0.0, 20.0, 10.0), rect(fill, 340.0, 330.0, 20.0, 10.0), layers = listOf(fill)))
         assertPiCompatible(g)
+        assertNeverInSafeZone(g)
         val t = Toolpath.parse(g)
-        assertEquals(10 * 20.0, t.stats.cutMm, 1e-6)       // 10 rows of 20 mm
-        assertEquals(Box(50.0, 50.5, 70.0, 59.5), t.bounds)
-        assertTrue("G1 X47.000 Y50.500 F3000 S0" in g || "G0 X47.000 Y50.500" in g, "run-up before the row")
+        assertEquals(2 * 10 * 20.0, t.stats.cutMm, 1e-6)
+        assertTrue("G0 X30.000 Y30.500" in g, "run-up clipped at the work area edge")
     }
 
-    @Test fun `overscan never goes beyond the bed, cuts stay out of the safe zone`() {
+    @Test fun `focus drops between passes and returns afterwards`() {
         val layers = Document.defaultLayers()
-        val fill = layers[0].copy(intervalMm = 2.0, overscanMm = 10.0)
-        val g = MarlinWriter().write(doc(rect(fill, 30.0, 30.0, 5.0, 4.0), layers = listOf(fill)))
-        assertTrue(g.lines().none { it.startsWith("G") && Regex("X-").containsMatchIn(it) })
-        val t = Toolpath.parse(g)
-        assertTrue(t.bounds!!.minX >= 30.0 && t.bounds!!.minY >= 30.0)
+        val cut = layers[2].copy(passes = 3, zStepMm = 0.8)
+        val g = MarlinWriter().write(doc(rect(cut, 50.0, 50.0), layers = listOf(cut)))
+        assertPiCompatible(g)
+        assertEquals(2, g.lines().count { it == "G0 Z-0.800 F600" })
+        assertTrue("G0 Z1.600 F600" in g)
+        val tooDeep = cut.copy(passes = 5, zStepMm = 1.0)
+        assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rect(tooDeep, 50.0, 50.0), layers = listOf(tooDeep))) }
     }
 
-    @Test fun `elements in the safe zone are refused with a clear message`() {
+    @Test fun `elements outside the work area and hidden layers`() {
         val layers = Document.defaultLayers()
-        val e = assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rect(layers[1], 20.0, 100.0), layers = layers)) }
-        assertTrue(e.message!!.contains("30 mm"))
+        val e = assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rect(layers[1], 350.0, 100.0), layers = layers)) }
+        assertTrue(e.message!!.contains("Arbeitsfläche"))
+        val hidden = layers.map { it.copy(visible = false) }
+        assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rect(hidden[1], 10.0, 10.0), layers = hidden)) }
         assertFailsWith<JobBuildException> { MarlinWriter().write(Document()) }
     }
 
@@ -150,30 +162,31 @@ class MarlinWriterTest {
         val img = layers[0].copy(intervalMm = 1.0, powerPct = 100.0, minPowerPct = 0.0, overscanMm = 0.0)
         // 4x2 image: black black white gray / all white
         val raster = Raster.of(4, 2, byteArrayOf(0, 0, 255.toByte(), 128.toByte(), -1, -1, -1, -1))
-        val e = Element(layerId = img.id, kind = "Bild", transform = Transform(100.0, 100.0), raster = raster,
+        val e = Element(layerId = img.id, kind = "Bild", transform = Transform(70.0, 70.0), raster = raster,
                         imageWidthMm = 4.0, imageHeightMm = 2.0)
         val g = MarlinWriter().write(doc(e, layers = listOf(img)))
         assertPiCompatible(g)
         assertTrue("G1 X102.000 Y100.500 F3000 S255" in g, g)   // two black pixels merged
         assertTrue("G1 X104.000 Y100.500 F3000 S127" in g, g)   // gray pixel at half power
         assertTrue(g.lines().none { it.contains("Y101.500") && Regex("S[1-9]").containsMatchIn(it) }, "white row is skipped")
+        val rotated = e.copy(transform = e.transform.copy(rotation = 10.0))
+        assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rotated, layers = listOf(img))) }
     }
 
-    @Test fun `image rows follow the screen orientation`() {
-        val layers = Document.defaultLayers()
-        val img = layers[0].copy(intervalMm = 1.0, powerPct = 100.0, overscanMm = 0.0)
-        // top row black, bottom row white
-        val e = Element(layerId = img.id, kind = "Bild", transform = Transform(100.0, 100.0),
-                        raster = Raster.of(1, 2, byteArrayOf(0, -1)), imageWidthMm = 1.0, imageHeightMm = 2.0)
-        val down = MarlinWriter().write(doc(e, layers = listOf(img)))
-        val up = MarlinWriter(imageTopAtMaxY = true).write(doc(e, layers = listOf(img)))
-        assertTrue("Y100.500 F3000 S255" in down && "Y101.500 F3000 S255" !in down)
-        assertTrue("Y101.500 F3000 S255" in up && "Y100.500 F3000 S255" !in up)
+    @Test fun `material depth per pass derives passes`() {
+        assertEquals(2, Document.passesFor(3.0, 1.5))
+        assertEquals(3, Document.passesFor(3.0, 1.2))
+        assertEquals(1, Document.passesFor(3.0, 0.0))
+        val m = Material(name = "Sperrholz", thicknessMm = 4.0, process = "Schneiden", mode = LayerMode.LINE,
+                         powerPct = 90.0, speed = 300.0, depthPerPassMm = 1.0, zStepMm = 2.0)
+        val layer = m.applyTo(Document.defaultLayers()[2])
+        assertEquals(4, layer.passes)
+        assertTrue(layer.focusDropMm <= Limits.MAX_FOCUS_DROP_MM + 1e-9, "z step capped to 3 mm total")
     }
 
     @Test fun `document survives JSON round trip`() {
         val layers = Document.defaultLayers()
-        val d = doc(rect(layers[1], 50.0, 50.0), layers = layers)
+        val d = doc(rect(layers[1], 50.0, 50.0).copy(groupId = "g1"), layers = layers)
         assertEquals(d, Document.fromJson(d.toJson()))
     }
 }
@@ -235,7 +248,7 @@ class GeometryTest {
         for (i in 0 until 4) { val p = h.map(photo[i]); assertEquals(bed[i].x, p.x, 1e-6); assertEquals(bed[i].y, p.y, 1e-6) }
         val back = Homography.fit(bed, photo)
         val (img, w, ht) = Homography.rectify(IntArray(4) { -1 }, 2, 2, back, 0.1)
-        assertEquals(39 * 37, img.size); assertEquals(39, w); assertEquals(37, ht)
+        assertEquals(36 * 34, img.size); assertEquals(36, w); assertEquals(34, ht)
         assertFailsWith<IllegalArgumentException> { Homography.fit(List(4) { Pt(it.toDouble(), it.toDouble()) }, bed) }
     }
 }

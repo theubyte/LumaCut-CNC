@@ -17,6 +17,25 @@ object Bed {
     fun inWorkArea(x: Double, y: Double) = x >= SAFE && y >= SAFE && x <= WIDTH && y <= HEIGHT
 }
 
+/**
+ * The area the operator works with: 0..360 x 0..340 mm, origin top-left,
+ * Y down. The 30 mm safe zone is not part of it and never shown; the only
+ * conversion to machine millimetres is here (same as the Windows app,
+ * software/lumacut-studio-native/src/lumacut_canvas/workarea.py).
+ */
+object Work {
+    const val WIDTH = 360.0
+    const val HEIGHT = 340.0
+    private const val EPS = 1e-6
+
+    fun toMachine(p: Pt) = Pt(p.x + Bed.SAFE, p.y + Bed.SAFE)
+    fun fromMachine(p: Pt) = Pt(p.x - Bed.SAFE, p.y - Bed.SAFE)
+    fun fromMachine(x: Double, y: Double) = Pt(x - Bed.SAFE, y - Bed.SAFE)
+    fun contains(p: Pt) = p.x >= -EPS && p.y >= -EPS && p.x <= WIDTH + EPS && p.y <= HEIGHT + EPS
+    fun contains(b: Box) = b.minX >= -EPS && b.minY >= -EPS && b.maxX <= WIDTH + EPS && b.maxY <= HEIGHT + EPS
+    val center get() = Pt(WIDTH / 2, HEIGHT / 2)
+}
+
 @Serializable
 data class Pt(val x: Double, val y: Double) {
     operator fun plus(o: Pt) = Pt(x + o.x, y + o.y)

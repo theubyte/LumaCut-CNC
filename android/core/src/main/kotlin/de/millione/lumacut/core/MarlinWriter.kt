@@ -1,5 +1,7 @@
 package de.millione.lumacut.core
 
+import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -7,40 +9,47 @@ import kotlin.math.roundToInt
 class JobBuildException(message: String) : IllegalArgumentException(message)
 
 /**
- * Turns a [Document] into G-code for the LumaCut Pi / Marlin 2.1:
- * - one `M3 I` for the whole job (M3/M5 make Marlin drain its planner);
- * - every G1 carries S0..255 (Marlin resets inline power on G0);
- * - fills and images run bidirectionally with laser-off overscan (G1 S0)
- *   so the head is at speed when burning starts; overscan may enter the
- *   safe zone because S0 never burns, cuts never do;
- * - homing, probing, focus and parking are done by the Pi, not here.
+ * Turns a [Document] (work-area mm) into G-code for the LumaCut Pi / Marlin 2.1.
+ * Same rules as the Windows app (lumacut_canvas/gcode.py):
+ * - one `M3 I` for the whole job, every G1 carries F and S0..255;
+ * - output coordinates are machine mm = work mm + 30; nothing, not even a
+ *   laser-off overscan, ever leaves the work area (the safe zone is never entered);
+ * - layers with zStep lower the focus between passes with
+ *   `G91 / G0 Z-… F600 / G90` and return to focus height afterwards;
+ * - fills and images run bidirectionally with laser-off run-up (G1 S0);
+ * - homing, probing, focus and parking are done by the Pi.
  */
-class MarlinWriter(
-    private val appVersion: String = "dev",
-    /** True when the app shows X0/Y0 bottom-left: the image's top row is then at the largest Y. */
-    private val imageTopAtMaxY: Boolean = false,
-) {
+class MarlinWriter(private val appVersion: String = "dev") {
 
     private val out = StringBuilder()
-    private var at = Pt(0.0, 0.0)
+    private var at = Pt(0.0, 0.0)          // work coordinates
 
     fun write(doc: Document): String {
         out.setLength(0)
         at = Pt(0.0, 0.0)
-        val content = doc.elements.filter { doc.layer(it.layerId)?.output == true }
-        if (content.isEmpty()) throw JobBuildException("Nichts zu lasern: keine Elemente auf aktiven Ebenen")
+        val active = doc.layers.filter { it.output && it.visible }.map { it.id }.toSet()
+        val content = doc.elements.filter { it.layerId in active }
+        if (content.isEmpty()) throw JobBuildException("Nichts zu lasern: keine Elemente auf sichtbaren Ebenen")
         for (element in content) {
             val box = element.worldBounds() ?: continue
-            if (box.minX < Bed.SAFE - 1e-6 || box.minY < Bed.SAFE - 1e-6 || box.maxX > Bed.WIDTH + 1e-6 || box.maxY > Bed.HEIGHT + 1e-6)
-                throw JobBuildException("„${element.text ?: element.kind}“ liegt nicht vollständig in der Arbeitsfläche (X/Y ab 30 mm)")
+            if (!Work.contains(box)) throw JobBuildException("„${element.text ?: element.kind}“ ragt über die Arbeitsfläche hinaus")
+            if (element.isImage && abs(element.transform.rotation) > 1e-6)
+                throw JobBuildException("Gedrehte Bilder werden noch nicht unterstützt – Drehung auf 0° setzen")
+        }
+        for (layer in doc.layers.filter { it.id in active }) {
+            if (layer.powerPct !in Limits.POWER || layer.speed !in Limits.SPEED || layer.passes !in Limits.PASSES)
+                throw JobBuildException("Ungültige Werte auf Ebene „${layer.name}“")
+            if (layer.zStepMm !in Limits.Z_STEP || layer.focusDropMm > Limits.MAX_FOCUS_DROP_MM + 1e-6)
+                throw JobBuildException("Fokus-Absenkung zu groß auf „${layer.name}“ (%.2f mm > %.0f mm)".format(Locale.GERMANY, layer.focusDropMm, Limits.MAX_FOCUS_DROP_MM))
         }
         line("; LumaCut App $appVersion – ${doc.title.replace(Regex("[\\r\\n]"), " ")}")
         line("G21"); line("G90"); line("M5 I"); line("M3 I")
-        for (layer in doc.layers.filter { it.output }) {
+        for (layer in doc.layers.filter { it.id in active }) {
             val items = content.filter { it.layerId == layer.id }
             if (items.isEmpty()) continue
             line("; Ebene ${layer.name}")
-            repeat(layer.passes.coerceIn(1, 50)) { pass ->
+            for (pass in 0 until layer.passes) {
+                if (pass > 0 && layer.zStepMm > 0) { line("G91"); line("G0 Z%.3f F600".format(Locale.ROOT, -layer.zStepMm)); line("G90") }
                 if (layer.passes > 1) line("; Durchgang ${pass + 1}/${layer.passes}")
                 for (image in items.filter { it.isImage }) raster(image, layer)
                 val vector = items.filter { !it.isImage }.flatMap { it.worldPaths() }
@@ -49,24 +58,30 @@ class MarlinWriter(
                     LayerMode.FILL -> fill(vector, layer)
                 }
             }
+            if (layer.zStepMm > 0 && layer.focusDropMm > 0) {   // back to focus height
+                line("G91"); line("G0 Z%.3f F600".format(Locale.ROOT, layer.focusDropMm)); line("G90")
+            }
         }
         line("M5 I"); line("M400")
         return out.toString()
     }
 
     private fun line(text: String) { out.append(text).append('\n') }
-    private fun f(v: Double) = "%.3f".format(java.util.Locale.ROOT, v)
+    private fun xy(p: Pt): String {
+        val m = Work.toMachine(Pt(p.x.coerceIn(0.0, Work.WIDTH), p.y.coerceIn(0.0, Work.HEIGHT)))
+        return "X%.3f Y%.3f".format(Locale.ROOT, m.x, m.y)
+    }
     private fun s(pct: Double) = (pct.coerceIn(0.0, 100.0) / 100.0 * 255).roundToInt()
-    private fun feed(layer: Layer) = layer.speed.coerceIn(10.0, 9000.0).roundToInt()
-    private fun clampX(x: Double) = x.coerceIn(0.0, Bed.WIDTH)
+    private fun feed(layer: Layer) = layer.speed.coerceIn(Limits.SPEED).roundToInt()
+    private fun clampX(x: Double) = x.coerceIn(0.0, Work.WIDTH)
 
     private fun rapid(p: Pt) {
-        if (p.dist(at) > 1e-6) line("G0 X${f(p.x)} Y${f(p.y)}")
+        if (p.dist(at) > 1e-6) line("G0 ${xy(p)}")
         at = p
     }
 
     private fun burn(p: Pt, power: Int, layer: Layer) {
-        line("G1 X${f(p.x)} Y${f(p.y)} F${feed(layer)} S$power")
+        line("G1 ${xy(p)} F${feed(layer)} S$power")
         at = p
     }
 
@@ -89,7 +104,7 @@ class MarlinWriter(
 
     private class Run(val x0: Double, val x1: Double, val power: Int)
 
-    /** One horizontal pass with laser-off run-up and run-out. Runs share direction. */
+    /** One horizontal pass with laser-off run-up and run-out, kept inside the work area. */
     private fun scanLine(y: Double, runs: List<Run>, layer: Layer) {
         if (runs.isEmpty()) return
         val forward = runs.first().x1 >= runs.first().x0
@@ -100,7 +115,7 @@ class MarlinWriter(
         rapid(Pt(start, y))
         if (start != runs.first().x0) burn(Pt(runs.first().x0, y), 0, layer)
         for (run in runs) {
-            if (kotlin.math.abs(at.x - run.x0) > 1e-6) burn(Pt(run.x0, y), 0, layer)
+            if (abs(at.x - run.x0) > 1e-6) burn(Pt(run.x0, y), 0, layer)
             burn(Pt(run.x1, y), run.power, layer)
         }
         if (end != at.x) burn(Pt(end, y), 0, layer)
@@ -108,8 +123,8 @@ class MarlinWriter(
 
     /**
      * Images: one row per interval, power from gray (dither/threshold give
-     * on/off), equal neighbouring pixels merged into one G1. Rotation of
-     * images is not supported; only position and size apply.
+     * on/off), equal neighbouring pixels merged into one G1. Row 0 of the
+     * picture is the top as seen on screen (smallest Y).
      */
     private fun raster(element: Element, layer: Layer) {
         val raster = element.raster ?: return
@@ -133,7 +148,7 @@ class MarlinWriter(
         val minS = s(layer.minPowerPct)
         val cell = box.width / cols
         for (r in 0 until rows) {
-            val y = if (imageTopAtMaxY) box.maxY - (r + 0.5) * box.height / rows else box.minY + (r + 0.5) * box.height / rows
+            val y = box.minY + (r + 0.5) * box.height / rows
             val runs = ArrayList<Run>()
             var c = 0
             while (c < cols) {

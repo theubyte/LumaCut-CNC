@@ -6,7 +6,11 @@ import java.util.Locale
 object Frame {
     enum class Mode(val api: String, val label: String) { BOX("box", "Rechteck"), HULL("hull", "Gummiband") }
 
-    /** Laser-off program accepted by the Pi's frame_program(): only G21/G90/M5 I and absolute G0 moves. */
+    /**
+     * Laser-off program accepted by the Pi's frame_program(): only G21/G90/M5 I and
+     * absolute G0 moves. [points] are machine mm (e.g. from [cutPoints]); the outline is
+     * kept inside the work area, never in the safe zone.
+     */
     fun program(points: List<Pt>, mode: Mode, feed: Int = 3000): String {
         require(points.isNotEmpty()) { "Kein Motiv für den Rahmen" }
         val outline = when (mode) {
@@ -18,13 +22,13 @@ object Frame {
         val f = feed.coerceIn(300, 9000)
         val out = StringBuilder("G21\nG90\nM5 I\n")
         for (p in outline + outline.first()) {
-            val x = p.x.coerceIn(0.0, Bed.WIDTH); val y = p.y.coerceIn(0.0, Bed.HEIGHT)
+            val x = p.x.coerceIn(Bed.SAFE, Bed.WIDTH); val y = p.y.coerceIn(Bed.SAFE, Bed.HEIGHT)
             out.append(String.format(Locale.ROOT, "G0 X%.3f Y%.3f F%d\n", x, y, f))
         }
         return out.toString()
     }
 
-    /** Points the laser actually burns in a toolpath. */
+    /** Points the laser actually burns in a toolpath (machine mm). */
     fun cutPoints(tp: Toolpath): List<Pt> = tp.segments.filter { it.cut }.flatMap {
         listOf(Pt(it.x0.toDouble(), it.y0.toDouble()), Pt(it.x1.toDouble(), it.y1.toDouble()))
     }
@@ -53,7 +57,7 @@ object MaterialTest {
         val speedFrom: Double = 300.0, val speedTo: Double = 3000.0, val speedSteps: Int = 5,
         val mode: LayerMode = LayerMode.FILL, val cellMm: Double = 10.0, val gapMm: Double = 4.0,
         val passes: Int = 1, val intervalMm: Double = 0.1,
-        val originX: Double = Bed.SAFE + 10, val originY: Double = Bed.SAFE + 10,
+        val originX: Double = 10.0, val originY: Double = 10.0,
     )
 
     private val palette = listOf(0xFF4FD8B4, 0xFF6CB6FF, 0xFFFFB45C, 0xFFB98CFF, 0xFFFF8AD8, 0xFF9BE15D)
@@ -64,7 +68,7 @@ object MaterialTest {
     fun build(spec: Spec, label: (String, Double) -> List<Poly>): Document {
         require(spec.powerSteps in 1..10 && spec.speedSteps in 1..10) { "Höchstens 10 × 10 Felder" }
         require(spec.powerFrom in 0.0..100.0 && spec.powerTo in 0.0..100.0) { "Leistung 0–100 %" }
-        require(spec.speedFrom in 10.0..9000.0 && spec.speedTo in 10.0..9000.0) { "Tempo 10–9000 mm/min" }
+        require(spec.speedFrom in 10.0..6000.0 && spec.speedTo in 10.0..6000.0) { "Tempo 10–6000 mm/min" }
         val powers = steps(spec.powerFrom, spec.powerTo, spec.powerSteps)
         val speeds = steps(spec.speedFrom, spec.speedTo, spec.speedSteps)
         val labelH = 3.0

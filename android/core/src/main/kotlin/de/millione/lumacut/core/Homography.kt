@@ -39,12 +39,12 @@ class Homography private constructor(private val h: DoubleArray) {
         }
 
         /**
-         * Rectifies an ARGB photo into a bed image: output pixel (i, j) shows
-         * machine point (i + .5, j + .5) / [pxPerMm]. [machineToPhoto] maps mm
+         * Rectifies an ARGB photo into a work-area image: output pixel (i, j) shows
+         * work point (i + .5, j + .5) / [pxPerMm]. [machineToPhoto] maps work mm
          * to photo pixels. Pixels outside the photo stay transparent.
          */
         fun rectify(photo: IntArray, photoW: Int, photoH: Int, machineToPhoto: Homography,
-                    pxPerMm: Double = 2.0, bedW: Double = Bed.WIDTH, bedH: Double = Bed.HEIGHT): Triple<IntArray, Int, Int> {
+                    pxPerMm: Double = 2.0, bedW: Double = Work.WIDTH, bedH: Double = Work.HEIGHT): Triple<IntArray, Int, Int> {
             val w = (bedW * pxPerMm).toInt(); val ht = (bedH * pxPerMm).toInt()
             require(photo.size == photoW * photoH) { "Ungültige Bilddaten" }
             val out = IntArray(w * ht)

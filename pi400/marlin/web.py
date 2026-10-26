@@ -22,6 +22,9 @@ ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "marlin"
 JOBS = DATA / "jobs"
 USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
+# Head camera (USB/UVC or CSI via V4L2) for the workspace scan.
+CAMERA = os.environ.get("LUMACUT_CAMERA", "/dev/video0")
+JPEG_MAGIC = bytes([0xFF, 0xD8])
 HTTP = int(os.environ.get("LUMACUT_HTTP", "8080"))
 TCP = int(os.environ.get("LUMACUT_TCP", "23"))
 machine = MarlinTransport(USB)
@@ -126,7 +129,8 @@ def status():
                       "exhaust":"BED PC9 M8",
                       "lights":"HE0 PC8 M7",
                       "aux":"FAN2 PC7 unused"},
-                  config=dict(config))
+                  config=dict(config),
+                  camera={"device": CAMERA, "available": os.path.exists(CAMERA)})
     return jsonify(result)
 
 
@@ -323,6 +327,12 @@ def action():
         local_owner()
         machine.park_safezone(owner="web")
         return jsonify(message="Geparkt: Laser aus, Z-Rückzug, X0/Y0")
+    if op == "moveto":
+        # Laser-off absolute move for the camera scan (machine mm).
+        local_owner()
+        x = float(request.form.get("x", "nan")); y = float(request.form.get("y", "nan"))
+        machine.move_to(x, y, owner="web")
+        return jsonify(message="Kopf auf X%.1f Y%.1f" % (x, y), position=machine.position)
     if op == "frame":
         return start_frame()
     if op == "start":
@@ -353,6 +363,28 @@ def _optional_point(form):
             machine.safe_zone_xy_mm <= y <= travels["y"]):
         raise ValueError("Abtastpunkt außerhalb X30..390 / Y30..370")
     return x, y
+
+
+@app.get("/api/camera/snapshot")
+def camera_snapshot():
+    """One JPEG from the head camera. Safe at any time: never moves or lasers."""
+    import subprocess
+    if not os.path.exists(CAMERA):
+        raise ConnectionError("Keine Kamera an " + CAMERA + " (LUMACUT_CAMERA in /etc/lumacut/lumacut.env)")
+    width = int(request.args.get("w", "1280")); height = int(request.args.get("h", "960"))
+    if not (160 <= width <= 4096 and 120 <= height <= 3072):
+        raise ValueError("Bildgröße unzulässig")
+    # Several frames are read so auto exposure settles; only the last one is kept.
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "v4l2",
+           "-video_size", "%dx%d" % (width, height), "-i", CAMERA,
+           "-vf", r"select=gte(n\,5)", "-frames:v", "1", "-q:v", "3", "-f", "image2", "pipe:1"]
+    try:
+        done = subprocess.run(cmd, capture_output=True, timeout=15, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ConnectionError("Kamera antwortet nicht: " + str(exc)[:120])
+    if done.returncode != 0 or not done.stdout.startswith(JPEG_MAGIC):
+        raise ConnectionError("Kamera lieferte kein Bild: " + done.stderr.decode("utf-8", "replace")[:160])
+    return done.stdout, 200, {"Content-Type": "image/jpeg", "Cache-Control": "no-store"}
 
 
 @app.get("/api/jobs")

@@ -701,6 +701,42 @@ class MarlinTransport:
             finally:
                 self.owner = previous_owner
 
+    def move_to(self, x: float, y: float, owner: str = "web"):
+        """Laser-off absolute XY move (camera scan, positioning).
+
+        Never burns: M5 I first, refused while the laser is armed. Z is only
+        ever raised (to the clearance height when lower), never lowered, so a
+        move cannot collide with the workpiece. XY may cross the safe zone
+        like parking does; the laser is off.
+        """
+        import math
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise RuntimeError("SKR nicht bereit / Notstopp aktiv")
+            if not self.homed:
+                raise RuntimeError("Fahren erst nach gültiger XYZ-Referenzfahrt")
+            if self.laser_enabled:
+                raise RuntimeError("Fahren bei aktivem Laser unzulässig")
+            if not (math.isfinite(x) and math.isfinite(y) and 0.0 <= x <= 390.0 and 0.0 <= y <= 370.0):
+                raise ValueError("Ziel außerhalb X0..390 / Y0..370")
+            self._exchange_locked("M5 I", timeout=8)
+            self._exchange_locked("M400", timeout=30)
+            self._exchange_locked("M114", timeout=8)
+            if self.position is None:
+                raise RuntimeError("Position unbekannt: keine Fahrt")
+            if not self.absolute_mode:
+                self._exchange_locked("G90", timeout=8)
+                self.absolute_mode = True
+            if self.position[2] < self.clearance_mm:
+                self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F600", timeout=45)
+            self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=90)
+            self._exchange_locked("M400", timeout=90)
+            result = self._exchange_locked("M114", timeout=8)
+            self.last_xy_commanded = (x, y)
+            return result
+
     def park_safezone(self, owner: str = "web"):
         """LightBurn M2: laser-off, Z retract, then XY park inside keep-out.
 

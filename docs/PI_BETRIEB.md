@@ -70,11 +70,12 @@ Bis LumaCut Studio alles kann, funktioniert LightBurn weiter:
 | Methode | Pfad | Zweck |
 |---|---|---|
 | GET | `/api/status` | Zustand: Verbindung, Besitzer, Position, homed, Werkstück-Z, Fokus-Z, Job, Rahmen (`frame`), Tätigkeit (`activity`: `idle`/`job`/`framing`), Firmware-Update, Konfiguration |
-| POST | `/api/action` `op=…` | `home`, `park`, `jog` (`axis`, `distance` ∈ ±0,1/1/10), `probe` (optional `x`,`y`), `light`/`exhaust` (`on`), `start`/`autorun` (`name`, optional `x`,`y` als Abtastpunkt), `frame` (`gcode`, `mode`=`box`/`hull`), `abort`, `estop`, `estop_reset`, `connect`, `info`/`position`/`endstops` |
+| POST | `/api/action` `op=…` | `home`, `park`, `jog` (`axis`, `distance` ∈ ±0,1/1/10), `probe` (optional `x`,`y`), `light`/`exhaust` (`on`), `start`/`autorun` (`name`, optional `x`,`y` als Abtastpunkt), `frame` (`gcode`, `mode`=`box`/`hull`), `moveto` (`x`,`y` Maschinen-mm; Laser aus, hebt Z nur an – für den Kamera-Scan), `abort`, `estop`, `estop_reset`, `connect`, `info`/`position`/`endstops` |
 | POST | `/api/upload` | Auftrag (`file`, `.gcode`/`.gc`/`.nc`), wird vorab geprüft |
 | GET | `/api/jobs`, `/api/jobs/<name>/geometry` | Aufträge, Motivgrenzen |
 | POST | `/api/settings` | Fokus, Rückzug, Schalter→Spitze, Tasterversatz |
 | POST | `/api/commission` | Mechanik-Freigabe (einmalig nach Inbetriebnahme) |
+| GET | `/api/camera/snapshot?w=&h=` | JPEG von der Kopfkamera (`LUMACUT_CAMERA`, Standard `/dev/video0`); ohne Kamera 503. Verfügbarkeit in `/api/status` → `camera` |
 | POST | `/api/firmware` | SKR-Firmware (`file`), Fortschritt in `/api/status` → `firmware_update` |
 
 Fehler kommen als HTTP 4xx/5xx mit `{"error": "…"}` in Klartext zurück.
