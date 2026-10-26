@@ -385,7 +385,10 @@ class MaterialLibraryDialog(QDialog):
             where = self.sync.resolve_conflict(conflict, "mine" if keep_mine else "pi", transport)
         self.sync_note = {"pi": "auf dem Pi gespeichert",
                           "pending": "lokal gespeichert, wird beim nächsten Verbinden auf den Pi "
-                                     "übertragen"}.get(where, "lokal gespeichert")
+                                     "übertragen",
+                          "rejected": "lokal gespeichert – der Pi lehnt ab: "
+                                      + (self.sync.last_message or "ungültiger Wert")}.get(
+                              where, "lokal gespeichert")
         return where
 
     def save_preset(self, name: str | None = None) -> Preset | None:

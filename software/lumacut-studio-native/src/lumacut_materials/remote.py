@@ -2,8 +2,11 @@
 
 Zwei Server-Varianten werden erkannt (an der Antwort von ``GET /api/materials``):
 
-**A – Datenbank + Presets** (mit dem Machine-Agent abgestimmt, Server in
-``pi400/marlin/web.py``, Details in ``docs/MATERIAL_DB_PI.md``)::
+Der echte Pi-Dienst (``pi400/marlin/materials.py``, ``docs/PI_API_REFERENZ.md``
+§4.14) spricht **Variante B**; Variante A war die ursprünglich besprochene Form
+und bleibt als Rückfall unterstützt.
+
+**A – Datenbank + Presets** (nicht umgesetzt auf dem Pi)::
 
     GET    /api/materials                 Datenbank + version/etag (If-None-Match → 304)
     GET    /api/materials/presets         eigene Presets + etag der Liste
@@ -149,15 +152,50 @@ STUDIO_FIELDS = ("material_id", "op", "laser_id", "focus_start_mm", "air_assist"
                  "notes", "warnings", "source")
 
 
+#: Wertebereiche des Pi (pi400/marlin/materials.py ``validate``); Studio-Werte
+#: außerhalb würden mit HTTP 400 abgelehnt. Gleiche Grenzen wie
+#: ``Preset.layer_values`` (das, was die Maschine tatsächlich fährt).
+PI_LIMITS = {"power_pct": (0.0, 100.0), "speed_mm_min": (1.0, 6000.0),
+             "thickness_mm": (0.0, 50.0), "interval_mm": (0.01, 5.0),
+             "depth_per_pass_mm": (0.0, 50.0), "z_step_mm": (0.0, 2.0)}
+PI_MAX_PASSES = 30
+PI_MAX_NAME = 80
+
+
+def _num(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    return out if out == out and out not in (float("inf"), float("-inf")) else default
+
+
+def _clamp(key: str, value: Any) -> float:
+    low, high = PI_LIMITS[key]
+    return min(high, max(low, _num(value, low)))
+
+
 def preset_to_material(data: dict) -> dict:
+    """Studio-Preset → Material des Pi (Variante B).
+
+    Fehlende/leere Werte werden weggelassen (der Pi setzt Standardwerte; ``null``
+    lehnt er ab), Zahlen auf die Bereiche des Pi begrenzt."""
     process, mode = PROCESS_BY_OP.get(str(data.get("op", "")), ("Gravieren", "fill"))
-    out = {"name": data.get("name", ""), "thickness_mm": data.get("thickness_mm") or 0.0,
+    try:
+        passes = int(round(_num(data.get("passes"), 1.0)))
+    except (OverflowError, ValueError):
+        passes = 1
+    out = {"name": str(data.get("name") or "").strip()[:PI_MAX_NAME],
+           "thickness_mm": _clamp("thickness_mm", data.get("thickness_mm") or 0.0),
            "process": process, "mode": mode,
-           "power_pct": data.get("power_pct", 0.0), "speed_mm_min": data.get("speed_mm_min", 0.0),
-           "passes": data.get("passes", 1), "interval_mm": data.get("line_interval_mm") or 0.0,
-           "depth_per_pass_mm": data.get("depth_per_pass_mm", 0.0),
-           "z_step_mm": data.get("z_step_mm", 0.0), "builtin": False}
-    out.update({k: data[k] for k in STUDIO_FIELDS if k in data})
+           "power_pct": _clamp("power_pct", data.get("power_pct")),
+           "speed_mm_min": _clamp("speed_mm_min", data.get("speed_mm_min")),
+           "passes": min(PI_MAX_PASSES, max(1, passes)),
+           "depth_per_pass_mm": _clamp("depth_per_pass_mm", data.get("depth_per_pass_mm") or 0.0),
+           "z_step_mm": _clamp("z_step_mm", data.get("z_step_mm") or 0.0)}
+    if data.get("line_interval_mm"):
+        out["interval_mm"] = _clamp("interval_mm", data["line_interval_mm"])
+    out.update({k: data[k] for k in STUDIO_FIELDS if k in data and data[k] is not None})
     if data.get("id"):
         out["id"] = data["id"]
     return out
@@ -336,6 +374,12 @@ class HttpMaterialsTransport:
                 payload = None
             try:
                 _s, resp, _h = self._request(method, path, body=payload)
+            except MaterialsUnsupported as exc:
+                if method == "PUT" and exc.status == 404:  # inzwischen gelöscht
+                    self._listing.pop(preset_id, None)
+                    raise MaterialsConflict("Eintrag wurde inzwischen auf dem Pi gelöscht",
+                                            None, 404) from None
+                raise
             except MaterialsConflict:
                 if attempt:
                     raise
@@ -362,12 +406,17 @@ class HttpMaterialsTransport:
         return None
 
     # -- gemeinsame Schnittstelle --------------------------------------------
-    def get_presets(self) -> tuple[list[dict], str]:
+    def _ensure_mode(self) -> None:
+        """Variante erkennen, bevor geschrieben wird (frischer Transport, z. B.
+        Speichern im Dialog vor dem ersten Abgleich)."""
         if self.mode is None:
             try:
                 self.get_materials()
             except MaterialsNoDatabase:
                 pass
+
+    def get_presets(self) -> tuple[list[dict], str]:
+        self._ensure_mode()
         if self.mode == "list":
             items = self._list()
             tag = self._rev_tag()
@@ -376,6 +425,7 @@ class HttpMaterialsTransport:
         return unwrap_presets(body), _etag(hdrs, body)
 
     def put_preset(self, preset_id: str, data: dict, if_match: str | None = None) -> dict:
+        self._ensure_mode()
         if self.mode == "list":
             check_preset_id(preset_id)
             method = "PUT" if preset_id in self._listing else "POST"
@@ -389,6 +439,7 @@ class HttpMaterialsTransport:
         return stored or dict(data, id=preset_id)
 
     def delete_preset(self, preset_id: str, if_match: str | None = None) -> None:
+        self._ensure_mode()
         if self.mode == "list":
             check_preset_id(preset_id)
             if preset_id in self._listing:

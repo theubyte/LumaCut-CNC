@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .db import DATA_PATH, MaterialDB
+from .db import DATA_PATH, OPERATION_LABELS, MaterialDB
 from .presets import Preset, PresetStore, preset_id
 from .remote import (MaterialsConflict, MaterialsError, MaterialsNoDatabase, MaterialsOffline,
                      MaterialsTransport, MaterialsUnsupported)
@@ -69,6 +69,9 @@ class SyncResult:
     presets_changed: bool = False
     uploaded: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
+    #: vom Pi abgelehnt (HTTP 400, z. B. Wert außerhalb des Bereichs): „Name: Grund“;
+    #: bleiben lokal und ausstehend.
+    rejected: list[str] = field(default_factory=list)
     message: str = ""
 
 
@@ -85,6 +88,13 @@ def atomic_write_json(path: Path, data: Any) -> None:
         except OSError:
             pass
         raise
+
+
+def _reason(exc: Exception) -> str:
+    payload = getattr(exc, "payload", None)
+    if isinstance(payload, dict) and payload.get("error"):
+        return str(payload["error"])
+    return str(exc)
 
 
 def preset_from_remote(item: dict) -> Preset:
@@ -204,6 +214,8 @@ class MaterialSync:
             if result.online and not result.message:
                 result.message = self.describe() + (
                     f", {len(result.uploaded)} Preset(s) hochgeladen" if result.uploaded else "")
+            if result.rejected:
+                result.message += "; vom Pi abgelehnt (bleibt lokal): " + "; ".join(result.rejected)
             self.last_message = result.message
             return result
 
@@ -237,6 +249,11 @@ class MaterialSync:
                 transport.delete_preset(pid, tag or None)
             except MaterialsConflict:
                 result.conflicts.append(pid)  # auf dem Pi geändert: Pi-Fassung bleibt
+            except (MaterialsOffline, MaterialsUnsupported):
+                raise
+            except MaterialsError as exc:
+                result.rejected.append(f"{pid}: {_reason(exc)}")
+                continue  # bleibt in der Warteschlange
             st["deleted"].pop(pid, None)
             st["etags"].pop(pid, None)
             st["base"].pop(pid, None)
@@ -279,11 +296,14 @@ class MaterialSync:
             else:
                 merged.append(p)
                 st["pending"].append(p.id)
-        # Namen eindeutig halten (PresetStore arbeitet mit Namen).
+        # Namen eindeutig halten (PresetStore arbeitet mit Namen). Der Pi erlaubt
+        # gleiche Namen (z. B. „Pappelsperrholz“ zum Schneiden und Gravieren).
         seen: set[str] = set()
         for p in merged:
             if p.name in seen:
-                p.name = f"{p.name} ({p.id[-6:]})"
+                label = OPERATION_LABELS.get(p.op, p.op)
+                name = f"{p.name} – {label}" if label else p.name
+                p.name = name if name not in seen else f"{p.name} ({p.id[-6:]})"
             seen.add(p.name)
         self.store.presets = merged
         # 3. Ausstehende hochladen.
@@ -299,6 +319,11 @@ class MaterialSync:
                 if exc.current:
                     self._adopt_remote(pid, exc.current)
                 st["pending"].remove(pid)
+                continue
+            except (MaterialsOffline, MaterialsUnsupported):
+                raise
+            except MaterialsError as exc:  # z. B. HTTP 400: lokal behalten, später erneut
+                result.rejected.append(f"{p.name}: {_reason(exc)}")
                 continue
             st["pending"].remove(pid)
             result.uploaded.append(self._record_stored(pid, stored))
@@ -369,6 +394,12 @@ class MaterialSync:
                     st["pending"].append(preset.id)
                 self._save_state()
                 return "pending"
+            except MaterialsError as exc:  # Pi lehnt ab (400): lokal behalten
+                if preset.id not in st["pending"]:
+                    st["pending"].append(preset.id)
+                self._save_state()
+                self.last_message = _reason(exc)
+                return "rejected"
             if preset.id in st["pending"]:
                 st["pending"].remove(preset.id)
             self._record_stored(preset.id, stored)
@@ -424,8 +455,8 @@ class MaterialSync:
                     return "pi"
                 except MaterialsConflict as exc:
                     raise PresetConflict(p, exc.current) from None
-                except (MaterialsOffline, MaterialsUnsupported):
-                    pass
+                except MaterialsError:
+                    pass  # offline, alter Pi oder abgelehnt: später erneut
             st["deleted"][p.id] = tag or ""
             st["etags"].pop(p.id, None)
             st["base"].pop(p.id, None)
