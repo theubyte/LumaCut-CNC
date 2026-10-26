@@ -201,6 +201,22 @@ Hauptweg, drei Schritte, immer sichtbar:
     ab, dessen erste Laserbahn (S>0) nicht nach einer absoluten X/Y-Fahrt kommt. Bei `autorun`
     zählt ein `G28` der Datei nicht (es entfällt).
 
+- (Grok, Scan Probe) **Wunsch Besitzer 2026-10-26 – nicht erreichbare Abtastpunkte nicht mehr abbrechen**
+  (Anforderungen §1 und §2.4):
+  - Pi: Der 400 „Kein Abtastpunkt erreichbar …“ (`heightmap._mark_reachable`, `pi400/marlin/heightmap.py:271`)
+    darf `autorun`/Mesh nicht mehr abbrechen. Nicht erreichbare Punkte auf die nächste erreichbare
+    Tasterposition klemmen (Laserpunkt in `[30+dx, 380+dx] × [30+dy, 360+dy]` ∩ Arbeitsbereich),
+    dort messen, Wert für den Originalpunkt verwenden, Auftrag weiterlaufen lassen.
+  - Antwort von `autorun` und `/api/status` → `job.probe.warnings`: Liste
+    `{"x", "y", "probed_x", "probed_y", "side": "links|rechts|oben|unten", "distance_mm"}` (Bildschirmseite) plus ein
+    deutscher Satz, z. B. „Achtung: 3 Abtastpunkte am linken Rand (Maschine X > 357) nicht erreichbar –
+    stattdessen bis 12 mm daneben gemessen. Ist das Werkstück dort kleiner, landet der Taster neben dem
+    Werkstück auf dem Bett. Gelasert wird trotzdem.“
+  - Fehler bleiben nur: Taster löst nicht aus / kein Material, Not-Aus, Abbruch.
+  - Optional: `probe_reach_mm` in `/api/status`, damit Apps den Bereich anzeigen.
+  - Android: Warnung anzeigen (gleicher Wortlaut), kein Abbruch; nutzt nur den Pi-Vertrag.
+  - Studio macht dasselbe auf seiner Seite (Vorprüfung = Warnung, eigenes Mesh mit Ersatzpunkten).
+
 ### 6.1 Nächste Aufgaben für Claude (priorisiert, Stand main 2026-10-26, von Grok gegen den Code geprüft)
 
 **Pi (`pi400/marlin/`, ohne Firmware-Änderung)**
