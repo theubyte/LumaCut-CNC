@@ -2,7 +2,8 @@
 
 Modus „Kontur“ (Flächen mit Löchern) oder „Mittellinie“ (Strichzeichnungen
 als offene Linien, :mod:`.centerline`), Schwellwert (fest oder „Auto“ nach
-Otsu), Invertieren, Glättung, Toleranz und Mindestfläche mit Live-Vorschau (verkleinertes Bild, Konturen rot). Die
+Otsu), Invertieren, Glättung, „Glätten“ (Kurven statt Treppenstufen, Ecken
+bleiben scharf), Toleranz und Mindestfläche mit Live-Vorschau (verkleinertes Bild, Konturen rot). Die
 Vorschau rechnet auf höchstens ``PREVIEW_PX`` Pixeln mit kurzer Zeitgrenze,
 damit der Dialog auch bei großen, unruhigen Bildern nicht hängt. Übernehmen legt die
 Konturen als Polygone (Löcher als Ringe, mehrere Teile gruppiert) deckungsgleich
@@ -70,6 +71,12 @@ class TraceDialog(QDialog):
         self.invert.setChecked(st.invert)
         self.smoothing = self._dspin(SMOOTHING_RANGE, st.smoothing_px, 0.5, 1, " px")
         self.smoothing.setToolTip("Weichzeichnen vor dem Schwellwert – glättet Treppenstufen und Rauschen")
+        self.smooth_curves = QCheckBox("Glätten (Kurven anpassen, Ecken bleiben scharf)")
+        self.smooth_curves.setObjectName("trace_smooth")
+        self.smooth_curves.setToolTip("Konturen und Mittellinien als glatte Kurven anpassen – "
+                                      "Kreise werden rund statt eckig, scharfe Ecken bleiben "
+                                      "erhalten.\nAus: Pixelkanten nur vereinfachen (Toleranz)")
+        self.smooth_curves.setChecked(st.smooth_curves)
         self.tolerance = self._dspin(TOLERANCE_RANGE, st.tolerance_mm, 0.01, 3, " mm")
         self.tolerance.setToolTip("Vereinfachen: Punkte mit weniger Abweichung fallen weg")
         self.min_area = self._dspin(MIN_AREA_RANGE, st.min_area_mm2, 0.1, 2, " mm²")
@@ -79,6 +86,7 @@ class TraceDialog(QDialog):
         form.addRow("Schwellwert", thr_row)
         form.addRow("", self.invert)
         form.addRow("Glättung", self.smoothing)
+        form.addRow("", self.smooth_curves)
         form.addRow("Toleranz", self.tolerance)
         form.addRow("Mindestfläche", self.min_area)
         form.addRow("", self.delete_image)
@@ -110,6 +118,7 @@ class TraceDialog(QDialog):
                     self.tolerance.valueChanged, self.min_area.valueChanged):
             sig.connect(lambda _v: self._timer.start())
         self.invert.toggled.connect(lambda _v: self._timer.start())
+        self.smooth_curves.toggled.connect(lambda _v: self._timer.start())
         self.mode.currentIndexChanged.connect(lambda _v: self._timer.start())
         self.auto_threshold.toggled.connect(self._auto_toggled)
         self.update_preview()
@@ -133,6 +142,7 @@ class TraceDialog(QDialog):
                              smoothing_px=self.smoothing.value(), tolerance_mm=self.tolerance.value(),
                              min_area_mm2=self.min_area.value(),
                              auto_threshold=self.auto_threshold.isChecked(),
+                             smooth_curves=self.smooth_curves.isChecked(),
                              mode=self.mode.currentData() or MODE_OUTLINE).normalized()
 
     def update_preview(self) -> None:
@@ -183,5 +193,6 @@ class TraceDialog(QDialog):
             what = (f"{len(res.lines)} Linie(n)" if res.lines and not res.parts
                     else f"{len(res.parts)} Kontur(en)")
             self.info.setText(auto + f"Vorschau: {what}, {res.point_count} Punkte"
-                              + (f", {res.removed} Fleck(en) ignoriert" if res.removed else ""))
+                              + (f", {res.removed} Fleck(en) ignoriert" if res.removed else "")
+                              + (f". {res.note}" if res.note else ""))
         self.ok_button.setEnabled(err is None and res is not None and bool(res.count))
