@@ -47,7 +47,8 @@ def _check_ready(client) -> Any:
     if st.emergency_latched:
         raise HardwareNotReady("Notstopp aktiv – erst quittieren")
     if not st.homed:
-        raise HardwareNotReady("Maschine ist nicht referenziert – zuerst „Home“")
+        raise HardwareNotReady("Maschine ist nicht referenziert – zuerst „Home“ (Maschinen-Panel, "
+                               "„Erweitert: Bewegung, Taster, Jog“)")
     if st.job.active:
         raise HardwareNotReady("Es läuft ein Auftrag")
     return st
@@ -181,7 +182,8 @@ class PiMachine:
         if surface is None and abs(scan_z - z_now) >= 0.05:
             raise HardwareNotReady(
                 "Werkstückhöhe unbekannt: Der Pi gibt Z-Fahrten erst nach einer Messung der "
-                "Oberfläche frei. Vor dem Scan einmal „Fokus (G30)“ im Maschinen-Panel ausführen "
+                "Oberfläche frei. Vor dem Scan einmal „Fokus (G30)“ ausführen (Maschinen-Panel, "
+                "„Erweitert: Bewegung, Taster, Jog“; Kopf über Werkstück oder leerem Bett) "
                 f"(Kopf steht auf Z{z_now:.1f}, Scanhöhe Z{scan_z:.1f}).")
         if surface is not None and scan_z < surface + SURFACE_CLEARANCE_MM - 1e-6:
             raise HardwareNotReady(
