@@ -256,7 +256,7 @@ def test_pause_blocks_between_steps():
     flow.pause()
     t = threading.Thread(target=flow.run, args=(GCODE,))
     t.start()
-    time.sleep(0.2)
+    assert flow.control.wait_parked(30)       # Quittung statt fester Wartezeit
     assert t.is_alive() and port.calls in ([], ["home"])
     assert any(e.get("paused") for e in events)
     flow.resume()

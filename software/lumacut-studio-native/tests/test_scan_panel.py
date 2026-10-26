@@ -145,43 +145,134 @@ def test_full_run_from_ui(panel):
     assert "wiederverwendet" in panel.phase_label.text()
 
 
-def test_pause_resume_cancel(qapp, editor):
+def _wait_until(cond, timeout_ms=30000):
+    """Ereignisse verarbeiten, bis ``cond()`` gilt – Zustand statt fester Wartezeit."""
+    from PySide6.QtCore import QCoreApplication, QElapsedTimer
+    from PySide6.QtTest import QTest
+    t = QElapsedTimer()
+    t.start()
+    while not cond():
+        if t.elapsed() > timeout_ms:
+            return False
+        QTest.qWait(5)
+    QCoreApplication.processEvents()
+    return True
+
+
+class _MoveGate:
+    """Lässt XY-Fahrten des Simulators nur nach ``release()`` durch (eine Kachel je Freigabe)."""
+
+    def __init__(self):
+        import threading
+        self.permits = threading.Semaphore(0)
+        self.waiting = threading.Event()        # Worker steht in einer Fahrt und wartet
+        self.open = False
+
+    def wrap(self, hw):
+        move = hw.machine.move_to
+
+        def gated(x, y, z=None, feed=None):
+            if x is not None and not self.open:
+                self.waiting.set()
+                assert self.permits.acquire(timeout=60), "Gate nie freigegeben"
+                self.waiting.clear()
+            return move(x, y, z, feed)
+        hw.machine.move_to = gated
+        return hw
+
+    def release(self, n=1):
+        self.waiting.clear()
+        for _ in range(n):
+            self.permits.release()
+
+    def open_all(self):
+        self.open = True
+        self.permits.release(100)
+
+
+def test_pause_resume_cancel(qapp, editor, monkeypatch):
+    """Deterministisch: ein Gate hält den Simulator an bekannter Stelle fest, die Pause
+    gilt erst, wenn der Worker sie quittiert (``RunControl.parked``).
+
+    Früher: feste Wartezeiten + „Fortschritt 150 ms stabil“ – unter Last meldete der
+    laufende Schritt (Fahrt + Bild) seinen Fortschritt erst danach (CI: assert 2 == 1).
+    """
     from PySide6.QtCore import QCoreApplication
     from PySide6.QtTest import QTest
     from scanprobe.panel import ScanPanel
-    panel = ScanPanel(editor, ask=False, sim_delay_s=0.03)
+    gate = _MoveGate()
+    real = adapters.simulated_setup
+    monkeypatch.setattr(adapters, "simulated_setup", lambda *a, **kw: gate.wrap(real(*a, **kw)))
+    panel = ScanPanel(editor, ask=False)
     try:
         assert panel.start_scan()
         assert panel.busy and not panel.full_button.isEnabled() and panel.cancel_button.isEnabled()
-        QTest.qWait(200)
+        ctl = panel.workflow.control
+        gate.release()                                     # Kachel 1
+        assert _wait_until(lambda: panel.progress.value() == 1 and gate.waiting.is_set())
+        # Pause mitten in der Fahrt zu Kachel 2: nur angefordert, Schritt läuft zu Ende
         panel.pause()
-        assert panel.pause_button.text() == "Fortsetzen" and panel.workflow.control.paused
-        # laufender Schritt + bereits eingereihte Signale dürfen noch ankommen (unter Last langsamer)
-        before = -1
-        for _ in range(20):
-            QTest.qWait(150)
-            if panel.progress.value() == before:
-                break
-            before = panel.progress.value()
+        assert panel.pause_button.text() == "Fortsetzen" and ctl.paused and not ctl.parked
+        gate.release()                                     # Kachel 2 endet, dann Checkpoint
+        assert _wait_until(lambda: ctl.parked), "Pause nicht quittiert"
+        QCoreApplication.processEvents()                   # schon eingereihte Signale abholen
+        assert panel.progress.value() == 2                 # laufender Schritt zählt genau einmal
+        gate.release()                                     # Freigabe da – Pause muss trotzdem halten
         QTest.qWait(300)
-        assert panel.progress.value() == before          # pausiert -> kein Fortschritt
+        assert ctl.parked and panel.busy and panel.progress.value() == 2
         panel.resume()
-        assert not panel.workflow.control.paused
-        QTest.qWait(150)
+        assert not ctl.paused
+        assert _wait_until(lambda: panel.progress.value() == 3 and gate.waiting.is_set())
+        # Abbruch im Stillstand (nach quittierter Pause) -> sicher „Abgebrochen.“
+        panel.pause()
+        gate.release()
+        assert _wait_until(lambda: ctl.parked), "zweite Pause nicht quittiert"
+        QCoreApplication.processEvents()
+        assert panel.progress.value() == 4
         panel.cancel()
-        assert panel.wait(20000)
+        assert panel.wait(30000)
         QCoreApplication.processEvents()
         assert panel.phase_label.text() == "Abgebrochen."
         assert panel.full_button.isEnabled() and not panel.cancel_button.isEnabled()
         assert panel.pause_button.text() == "Pause"
         assert panel.mosaic is None
         # nach Abbruch geht ein neuer Lauf
-        panel.sim_delay_s = 0.0
+        gate.open_all()
         panel._mode_changed()
         _scan(panel)
         assert len(panel.objects) == 2
     finally:
+        gate.open_all()
         panel.shutdown()
+
+
+def test_run_control_parks_only_between_steps():
+    import threading
+    from scanprobe.control import Cancelled, RunControl
+    ctl = RunControl()
+    step_running, step_go = threading.Event(), threading.Event()
+    log = []
+
+    def worker():
+        try:
+            for i in range(3):
+                ctl.checkpoint()
+                step_running.set()
+                step_go.wait(10)
+                log.append(i)
+        except Cancelled:
+            log.append("cancelled")
+
+    t = threading.Thread(target=worker)
+    t.start()
+    assert step_running.wait(10)
+    ctl.pause()
+    assert not ctl.parked                       # Schritt läuft noch -> nur angefordert
+    step_go.set()                               # Schritt 0 endet, Worker parkt
+    assert ctl.wait_parked(10) and log == [0]
+    ctl.cancel()                                # weckt den geparkten Worker
+    t.join(10)
+    assert not t.is_alive() and log == [0, "cancelled"] and not ctl.parked
 
 
 def test_pi_mode_requires_connection_and_calibration(panel, tmp_path):

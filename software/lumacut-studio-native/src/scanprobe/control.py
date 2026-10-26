@@ -38,6 +38,7 @@ class RunControl:
         self._run = threading.Event()
         self._run.set()
         self._cancel = threading.Event()
+        self._parked = threading.Event()   # Worker steht wirklich im Checkpoint
         self.on_progress = on_progress
 
     # --- UI-Seite -----------------------------------------------------
@@ -59,11 +60,30 @@ class RunControl:
     def cancelled(self) -> bool:
         return self._cancel.is_set()
 
+    @property
+    def parked(self) -> bool:
+        """True, sobald der Worker die Pause quittiert hat (steht im Checkpoint).
+
+        ``pause()`` ist nur eine Anforderung: der laufende Schritt (Fahrt, Bild,
+        G30) wird noch beendet und darf noch Fortschritt melden. Erst wenn
+        ``parked`` gilt, kommt bis ``resume()``/``cancel()`` nichts mehr.
+        """
+        return self._parked.is_set()
+
+    def wait_parked(self, timeout_s: Optional[float] = None) -> bool:
+        """Blockiert, bis der Worker die Pause quittiert hat (oder Zeit um)."""
+        return self._parked.wait(timeout_s)
+
     # --- Worker-Seite -------------------------------------------------
     def checkpoint(self, poll_s: float = 0.05) -> None:
         """Blockiert während Pause, wirft ``Cancelled`` bei Abbruch."""
-        while not self._run.wait(poll_s):
-            pass
+        if not self._run.is_set():
+            self._parked.set()
+            try:
+                while not self._run.wait(poll_s):
+                    pass
+            finally:
+                self._parked.clear()
         if self._cancel.is_set():
             raise Cancelled()
 
