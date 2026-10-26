@@ -78,4 +78,27 @@ CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
 }}
 #LayersPanel QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; color: {TEXT}; }}
 #LayersPanel QPushButton#ColorButton {{ border: 1px solid {BORDER}; border-radius: 5px; min-height: 20px; max-height: 20px; padding: 2px; }}
+#LayersPanel QComboBox {{
+    background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 5px;
+    padding: 3px 6px; color: {TEXT}; min-height: 20px;
+}}
+#LayersPanel QComboBox:focus {{ border-color: {ACCENT}; }}
+#LayersPanel QComboBox QAbstractItemView {{
+    background: {SURFACE}; border: 1px solid {BORDER}; color: {TEXT};
+    selection-background-color: #173a33;
+}}
+#LayersPanel QGroupBox QLabel {{ color: {TEXT_DIM}; background: transparent; }}
+#LayersPanel QLabel#PassBadge {{
+    border-radius: 4px; padding: 1px 6px; font-size: 11px; font-weight: 600;
+}}
+#LayersPanel QLabel#PassBadge[auto="true"] {{ background: #173a33; color: {ACCENT}; }}
+#LayersPanel QLabel#PassBadge[auto="false"] {{ background: #3a2f17; color: #f2c46d; }}
+#LayersPanel QLabel#PassPlan {{ color: {TEXT_DIM}; font-size: 11px; }}
+#LayersPanel QLabel#PassPlan[warn="true"] {{ color: {DANGER}; }}
+#LayersPanel QPushButton#AutoPasses {{
+    background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 5px; color: {TEXT};
+    padding: 2px 8px;
+}}
+#LayersPanel QPushButton#AutoPasses:hover {{ border-color: {ACCENT}; }}
+#LayersPanel QPushButton#AutoPasses:disabled {{ color: #4a5566; }}
 """

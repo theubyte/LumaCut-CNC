@@ -92,7 +92,15 @@ layer_pass_plan(layer)           # mit den eingestellten layer.passes (Override)
   Ebene `f(job_layer, index, depth_mm, cumulative_mm)` und fügt die Zeilen nach
   `; PASS i OF n` ein (`gcode.depth_comment_hook` = nur Kommentare). Ohne Hook ist die
   Ausgabe unverändert; die Fokus-Absenkung bleibt `z_step`.
-- UI: derzeit nur API (kein Dialog im Ebenen-Panel).
+- **UI im Ebenen-Panel** („Material der Ebene“, Tests: `tests/test_material_panel.py`):
+  Auswahl „— ohne Material —“, eingebaute Startwerte und – falls `lumacut_materials`
+  eigene Presets gespeichert hat – „… (Preset)“ (nur gelesen; `LayersPanel(..., presets=f)`
+  liefert eine eigene Quelle, `reload_presets()` liest neu). Felder Dicke, Zieltiefe
+  („= Dicke“ bei 0) und Tiefe/Durchgang („aus“ bei 0). Durchgänge folgen automatisch
+  (Abzeichen **auto**); von Hand geändert zeigt es **manuell**, „Auto“ setzt zurück.
+  Darunter der Tiefenplan je Durchgang, rot mit ⚠, wenn die Zieltiefe nicht erreicht
+  wird. Jede Änderung ist ein Undo-Schritt (`SetLayerAttrsCommand`). „manuell“ wird aus
+  `passes ≠ ceil(Tiefe/Tiefe je Durchgang)` erkannt (kein eigenes Override-Feld).
 
 ### Schnittstellen für andere Module (Scan & Probe)
 
