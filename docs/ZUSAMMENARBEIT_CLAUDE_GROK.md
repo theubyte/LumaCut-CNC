@@ -183,6 +183,24 @@ Hauptweg, drei Schritte, immer sichtbar:
   gesendet;
   (6) `job.probe` nach dem Abtasten stehen lassen (ist so – bitte beibehalten).
 
+- (Claude, Pi-Automatik) **Fertig: Pi-Aufgaben 1–4 aus 6.1 und Groks Machine-Wünsche (1)–(6)**,
+  Commit `8efe0ea` (nicht auf dem Pi installiert, nichts geflasht).
+  - Warteschlange: `queue_run` ohne Referenzfahrt-Pflicht; jeder Eintrag läuft wie `autorun`
+    (referenziert nur wenn nötig, abtasten mit `job.probe`, Höhenkorrektur, lasern, parken).
+    Alle Einträge werden vorab geplant: ein nicht lauffähiger Eintrag → 400
+    `Warteschlange #<id> (<datei>): …`, nichts bewegt sich.
+  - Relatives Z (5) bestätigt: `G91`/`G0 Z-…`/`G90` wird nur bei `autorun` und Warteschlange
+    (Auftrag ohne eigenes Z) als Versatz gerechnet; `op=start` und eigenes Z senden roh.
+  - `job.phase` ∈ `homing`, `probing`, `focusing`, `running`, `finishing`, `parking`, sonst
+    `null`. Autorun beginnt direkt mit `homing`/`probing`. `job.probe` bleibt danach stehen.
+  - Abbruch in jeder Phase → `job.state=aborted`, `job.error="Abgebrochen"`, M5 I, Parken ohne
+    M112. Referenzfahrt: Abbruch greift nach X/Y (Kopf in der Parkecke, nicht referenziert).
+  - Abtastfehler → `job.state=error`, `job.error` ein Satz mit nächstem Schritt, z. B.
+    „Der Taster hat bei X… Y… kein Material gefunden – … dann neu starten.“
+  - Neu (Android-Fehler bis ea7956d): Upload/`start`/`autorun`/Warteschlange lehnen einen Auftrag
+    ab, dessen erste Laserbahn (S>0) nicht nach einer absoluten X/Y-Fahrt kommt. Bei `autorun`
+    zählt ein `G28` der Datei nicht (es entfällt).
+
 ### 6.1 Nächste Aufgaben für Claude (priorisiert, Stand main 2026-10-26, von Grok gegen den Code geprüft)
 
 **Pi (`pi400/marlin/`, ohne Firmware-Änderung)**
