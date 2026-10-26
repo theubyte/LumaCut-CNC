@@ -61,7 +61,8 @@ ANCHOR_LABELS = {"tl": "Oben links", "tr": "Oben rechts", "bl": "Unten links",
                  "br": "Unten rechts", "center": "Mitte"}
 #: Job state/phase names (ZUSAMMENARBEIT §4; focusing/parking tolerated).
 PHASE_NAMES = {"idle": "Bereit", "homing": "Referenzfahrt", "probing": "Abtasten",
-               "focusing": "Fokus einstellen", "running": "Läuft", "parking": "Parken",
+               "focusing": "Fokus einstellen", "running": "Läuft",
+               "finishing": "Letzte Bahnen, dann Parken", "parking": "Parken",
                "complete": "Fertig", "aborted": "Abgebrochen", "error": "Fehler"}
 
 AUTORUN_LABEL = "Datei-Auftrag starten"
@@ -74,6 +75,11 @@ POSITION_HINT = ("Maschinenkoordinaten in mm: X0/Y0 = Endschalter-Ecke oben rech
                  "X wächst nach links, Y nach vorne (Tür). Arbeitsfläche = X30–390 / Y30–370.")
 OLD_PI_ORIGIN = "Pi-Dienst zu alt: nur absolute Aufträge – Pi aktualisieren"
 OLD_PI_QUEUE = "Pi-Dienst zu alt: keine Warteschlange – Pi aktualisieren"
+#: web.py _queue_worker runs every item like op=start (no auto plan): the Pi
+#: neither probes nor corrects the focus, and queue_run needs a homed machine.
+QUEUE_NOTE = ("Die Warteschlange lasert jede Datei wie „Senden & Starten“: der Pi "
+              "tastet nicht ab und korrigiert den Fokus nicht (Dateien mit eigener "
+              "Höhenkorrektur aus Studio einreihen).")
 QUEUE_ITEM_LABELS = {"queued": "wartet", "running": "läuft", "done": "fertig",
                      "error": "Fehler", "skipped": "übersprungen",
                      "aborted": "abgebrochen"}
@@ -365,6 +371,7 @@ class MachinePanel(QWidget):
         self.queue_add_button.setToolTip("Gesendeten Auftrag mit dem gewählten Ursprung "
                                          "einreihen (Platzierung wird jetzt festgelegt)")
         self.queue_run_button = QPushButton("Abarbeiten")
+        self.queue_run_button.setToolTip("Referenziert nötig. " + QUEUE_NOTE)
         self.queue_pause_button = QPushButton("Anhalten")
         self.queue_pause_button.setToolTip("Nach dem laufenden Auftrag anhalten")
         self.queue_skip_button = QPushButton("Überspringen")
@@ -839,7 +846,8 @@ class MachinePanel(QWidget):
         names = ", ".join(i.file for i in s.queue.items if i.state == "queued")
         if not self._confirm("Warteschlange abarbeiten",
                              "Wartende Aufträge nacheinander lasern: %s? Bereich frei, "
-                             "Material eingelegt, Schutzbrille?" % (names or "–")):
+                             "Material eingelegt, Schutzbrille?\n\nHinweis: %s"
+                             % (names or "–", QUEUE_NOTE)):
             return False
         client = self._client
         return self._run("Warteschlange", lambda: client.queue_run())

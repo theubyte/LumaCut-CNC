@@ -42,8 +42,9 @@ MAX_JOB_BYTES = 32 * 1024 * 1024
 #: Job states reported by the Pi job worker.
 #: Pi job states while the machine works. "focusing"/"parking" are tolerated
 #: for a Pi that reports these one-click phases separately (ZUSAMMENARBEIT §4
-#: only promises homing/probing/running).
-JOB_ACTIVE_STATES = ("homing", "probing", "focusing", "running", "parking")
+#: only promises homing/probing/running). "finishing" is derived by Studio
+#: (see JobState.from_json), the Pi never sends it.
+JOB_ACTIVE_STATES = ("homing", "probing", "focusing", "running", "finishing", "parking")
 
 #: Shown when the Pi does not know op=autorun (Pi service too old).
 OLD_PI_AUTORUN = ("Dieser Pi kennt den automatischen Auftrag noch nicht – Pi-Dienst "
@@ -206,10 +207,11 @@ class JobState:
         line, total = _int(data.get("line")), _int(data.get("total"))
         phase = str(data.get("phase") or "")
         if not phase:
-            # The Pi (web.py _execute_job) sends no job.phase: it drains the
-            # last streamed moves and parks while still "running" with
-            # line == total, so that is shown as "parking".
-            phase = "parking" if state == "running" and 0 < total <= line else state
+            # The Pi (web.py _execute_job) sends no job.phase: after the last
+            # line it drains the buffered moves (the laser may still burn
+            # them) and then parks, all while "running" with line == total.
+            # That is "finishing", not "parking": never claim the laser is off.
+            phase = "finishing" if state == "running" and 0 < total <= line else state
         return cls(file=str(data.get("file") or ""),
                    state=state,
                    line=line,

@@ -622,7 +622,7 @@ class OneClickJob:
                     self._enter("job", f"{name} läuft")
                 if job.total and job.line >= job.total:
                     if self.state != "parken":
-                        self._enter("parken", "Brennen fertig – Pi parkt (Laser aus, Z hoch, X0/Y0)")
+                        self._enter("parken", "Letzte Bahnen, dann parkt der Pi (Laser aus, Z hoch, X0/Y0)")
                 else:
                     self._emit(f"Zeile {job.line}/{job.total}", job.progress)
                 continue
