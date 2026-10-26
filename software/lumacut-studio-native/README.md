@@ -202,6 +202,43 @@ Presets speichern, 3D-Relief aus Graustufenbild. Warnliste für nicht
 laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
 (`src/lumacut_materials/`).
 
+## Import (SVG, DXF, Bilder)
+
+*Datei › Importieren…* (Strg+I) oder Datei per Drag-and-drop auf die Arbeitsfläche ziehen.
+
+- **SVG**: Pfade, Grundformen, Transformationen; Einheiten über `viewBox`/`width`/`height` in mm.
+- **DXF** (über `ezdxf`, inkl. Blöcke/INSERT); Einheit aus `$INSUNITS`, ohne Angabe mm.
+- **PNG/JPG/BMP**: wird als **Bildobjekt** eingefügt (Größe aus der DPI-Angabe, sonst 96 dpi).
+  *Datei › Bildeinstellungen…* (Strg+Umschalt+I) öffnet den Dialog (Modus Schwellwert / Floyd-Steinberg /
+  Atkinson / Bayer / Graustufen / 3D-Tiefe, Linienabstand, Leistung max./min., Geschwindigkeit,
+  Durchgänge, bidirektional, Negativ). Bilder werden im
+  Auftrag vor den Vektor-Ebenen graviert.
+- Jeder Import ist **ein** Rückgängig-Schritt und wird in die Arbeitsfläche (360×340 mm) eingepasst.
+- Code: `src/lumacut_import/` (Qt-frei) und `src/lumacut_import/qt.py` (Menü, Drop).
+
+## Geführter Ablauf
+
+Rechts oben zeigt das Panel **Ablauf** die Schritte
+Home → Scan → Markieren → Probe → Fokus → Rahmen → Auftrag → Parken.
+Jeder Schritt hat einen Status (Erledigt / Bereit / Gesperrt / Übersprungen / Läuft) und zeigt bei
+„Gesperrt“ den Grund (nicht verbunden, nicht referenziert, Notstopp verriegelt, Maschine
+beschäftigt, keine markierten Bereiche, kein Design …). *Ausführen* ruft die vorhandenen Aktionen
+des Maschinen- bzw. Scan-Panels auf (alle Sicherheitsprüfungen bleiben dort und auf dem Pi),
+*Überspringen* gilt für alle Schritte außer Home und Auftrag. Eine Änderung am Design öffnet Rahmen
+und Auftrag wieder. Logik: `src/lumacut_workflow/steps.py` (Qt-frei), UI: `src/lumacut_workflow/qt.py`.
+
+## Automatisches Sichern und Wiederherstellung
+
+Solange das Projekt ungespeicherte Änderungen hat, sichert das Studio es alle 60 s atomar nach
+`%APPDATA%\LumaCut\LumaCut Studio\autosave` (Ordner per `LUMACUT_AUTOSAVE_DIR` änderbar). Nach einem
+Absturz bietet der nächste Start **„Projekt wiederherstellen?“** an; das wiederhergestellte Projekt
+gilt als ungespeichert. Beim Speichern, beim Rückgängigmachen bis zum gespeicherten Stand und beim
+normalen Beenden wird die Sicherung gelöscht. Mehrere gleichzeitig laufende Studios stören sich
+nicht (Sperrdatei je Sitzung). Code: `src/lumacut_session/`.
+
+**Air-Assist:** nicht umgesetzt – auf dieser Maschine sind M7 (Licht), M8 (Absaugung) und M9
+(beides aus) bereits belegt; siehe `docs/REVIEW_GAP_ANALYSIS_2026-10-25.md` §8.
+
 ## Tests
 
 ```bash

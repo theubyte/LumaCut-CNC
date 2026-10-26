@@ -61,19 +61,19 @@ M 1–3 days, L > 3 days. Status after this pass in **bold**.
 | 2 | Job time + distance estimate | LB Preview / XCS yes | none | **done** (`lumacut_job.estimate`, accel + junction model, Alt+P) | high | S | Review |
 | 3 | Framing (box + rubber band, laser off) | LB / XCS yes | none | **done** (toolbar "Rahmen", Ctrl+Shift+F / Alt+Shift+F) | very high (no red-dot pointer; camera only) | S | Review → Machine for a dedicated frame API |
 | 4 | Material test grid (power × speed) | LB / XCS yes | none | **done** (`lumacut_job.material_test`, one undo step) | very high (every new material) | S | Review; Materials to consume results |
-| 5 | Raster engraving (image object, dithers, line interval, bidirectional, overscan, scan offset) | LB / XCS yes | none | **engine done** (`lumacut_job.raster`: threshold/Floyd/Atkinson/Bayer/grayscale); no image object in canvas yet | very high | M (canvas object + UI) | Canvas (image item) + Review (engine) |
-| 6 | 3D / depth: sliced passes from height map, Z step per slice | LB 3D slice Galvo-only; XCS 3D | none | **engine done** (`sliced_depth_gcode`, ≤3 mm total drop) | medium-high (relief in wood/slate) | M for UI | Canvas/Materials + Review |
+| 5 | Raster engraving (image object, dithers, line interval, bidirectional, overscan, scan offset) | LB / XCS yes | none | **done** (engine `lumacut_job.raster` + image object on the canvas with settings dialog; images are engraved before vectors in the same job) | very high | M (canvas object + UI) | Canvas (image item) + Review (engine) |
+| 6 | 3D / depth: sliced passes from height map, Z step per slice | LB 3D slice Galvo-only; XCS 3D | none | **done** for image objects (mode "3D" in the image dialog → `sliced_depth_gcode`, ≤3 mm total drop); combined with focus compensation it is refused safely (Z words) | medium-high (relief in wood/slate) | M for UI | Canvas/Materials + Review |
 | 7 | Zoom: anchor at event position, pinch, fit selection, trackpad | LB / XCS yes | wheel only, QCursor anchor | **done** (`canvas_view` + Ctrl+Shift+A) | high (daily use) | S | Canvas (minimal edit) |
-| 8 | Material library: presets by material + thickness, assign/link to layers, combo box wired | LB yes / XCS yes (xTool materials) | placeholder combo | open | very high | M | **Materials agent** |
-| 9 | Import SVG/DXF/PNG/JPG/PDF | LB / XCS yes | none in native | open | very high | M | Canvas |
-| 10 | Workflow wizard scan → detect → probe → focus → job → park, focus compensation applied on send | n/a (LB has camera overlay; XCS auto-focus + camera) | pieces exist separately; compensation not hooked into "Design senden" | open | very high (USP) | M | Scan Probe + Machine; Review can wire the send path |
+| 8 | Material library: presets by material + thickness, assign/link to layers, combo box wired | LB yes / XCS yes (xTool materials) | placeholder combo | **done** (Materials agent: `lumacut_materials`, material section in the layers panel) | very high | M | **Materials agent** |
+| 9 | Import SVG/DXF/PNG/JPG/PDF | LB / XCS yes | none in native | **done** for SVG/DXF/PNG/JPG/BMP (`lumacut_import`, Datei › Importieren Ctrl+I, drag-and-drop, mm conversion, one undo step, clamped to the 360×340 mm work area); PDF open | very high | M | Canvas |
+| 10 | Workflow wizard scan → detect → probe → focus → job → park, focus compensation applied on send | n/a (LB has camera overlay; XCS auto-focus + camera) | pieces exist separately; compensation not hooked into "Design senden" | **done** (`lumacut_workflow`: panel "Ablauf" Home → Scan → Markieren → Probe → Fokus → Rahmen → Auftrag → Parken; status per step, skip, precondition checks; uses the existing panel actions, focus compensation via `prepare_job_gcode`) | very high (USP) | M | Scan Probe + Machine; Review can wire the send path |
 | 11 | Fill / hatch for vectors (Fill mode, line interval, cross-hatch) | LB / XCS yes | none | open (hatch helper exists in material_test) | high | M | Canvas |
 | 12 | Kerf offset, tabs/bridges, lead-in/out | LB yes / XCS partial | none | open | medium (diodes have small kerf; tabs useful) | M | Review (planner) |
 | 13 | Boolean ops, node editing, offset, arrays | LB / XCS yes | polygon only | open | medium | L | Canvas |
-| 14 | Preview of G-code path (travel lines, order animation) | LB / XCS yes | none | open (estimate only) | medium | M | Canvas overlay + Review |
-| 15 | Air assist M8/M9 per layer | LB yes | none (Pi allows M7/M8/M9) | open | medium (if relay installed) | S | Materials/layer field + gcode |
+| 14 | Preview of G-code path (travel lines, order animation) | LB / XCS yes | none | open (estimate only) – not done in this pass | medium | M | Canvas overlay + Review |
+| 15 | Air assist M8/M9 per layer | LB yes | none (Pi allows M7/M8/M9) | **not feasible on this machine** – see §8 | medium (if relay installed) | S | Materials/layer field + gcode |
 | 16 | Origin options (current position / user origin), job placement on camera | LB yes / XCS yes | absolute only | open | medium | M | Machine |
-| 17 | Job queue, autosave / crash recovery | LB autosave yes | none | open | medium | S–M | Canvas (autosave), Machine (queue) |
+| 17 | Job queue, autosave / crash recovery | LB autosave yes | none | **autosave/recovery done** (`lumacut_session`, every 60 s, crash recovery on start); queue open | medium | S–M | Canvas (autosave), Machine (queue) |
 | 18 | Raster throughput to SKR (Pi-side streaming / line compression) | n/a | risk noted in plan | open | high for photos | L | Pi / Machine |
 
 ## 4. Focus areas
@@ -141,3 +141,39 @@ This is the biggest UX differentiator over LightBurn/XCS and should be the next 
 - Y axis direction on the real machine not verified against canvas Y-down (affects raster order
   and framing corners only cosmetically, not safety).
 - Long-term: Pi generating motion (raster streaming) vs. Studio-side G-code.
+
+## 8. Status update 2026-10-26 (review round 2)
+
+Done and pushed to `main` (all G-code still checked against `MarlinLaserGuard`):
+
+- **Import** (#9): `src/lumacut_import/` – SVG (paths, basic shapes, transforms, viewBox → mm),
+  DXF (via `ezdxf`, incl. blocks/INSERT, `$INSUNITS`), raster PNG/JPG/BMP as
+  image objects (DPI → mm). Menu *Datei › Importieren…* (Ctrl+I), drag-and-drop onto the canvas,
+  one undo step, result scaled/moved into the 360×340 mm work area. New dependencies in
+  `requirements.txt` (`svgelements`, `ezdxf`; raster via Qt `QImage` + `numpy`); `build-windows.bat` updated.
+- **Image objects** (#5/#6): settings dialog *Bildeinstellungen* (Ctrl+Shift+I: mode, line interval,
+  max/min power, speed, passes, bidirectional, negative); engraved before the vector layers in one program.
+- **Guided workflow** (#10): `src/lumacut_workflow/` – Qt-free step engine (`steps.py`) plus panel
+  *Ablauf* (`qt.py`). Every step shows Erledigt/Bereit/Gesperrt/Übersprungen/Läuft, a reason when
+  blocked (not connected, not homed, E-stop latched, machine busy, no marked areas, no design, …),
+  and can be skipped except Home and Auftrag. Frame/job count as done only on a real
+  running → complete transition; editing the design reopens frame and job.
+- **Autosave / crash recovery** (#17): `src/lumacut_session/` – atomic save every 60 s to
+  AppData/autosave while the project has unsaved changes; per-session `QLockFile`, so a second
+  running Studio is never offered as "crashed". On start, a backup of a crashed session is offered
+  ("Projekt wiederherstellen?"); the restored project is marked unsaved. Backups are deleted on
+  save, on undo back to the saved state and on normal exit.
+- **Materials** (#8) was completed by the Materials agent (`lumacut_materials`).
+- **Dedicated frame op** (Top-10 #6) was completed by the Machine side (`op=frame`).
+
+**Air assist (#15) – not feasible as specified.** The Pi guard does allow M7/M8/M9, but on this
+machine those codes are already wired to other outputs: **M7 = lights, M8 = exhaust (Absaugung),
+M9 = both off**. Emitting M8/M9 per layer would toggle the exhaust mid-job (M9 would even switch
+off the extraction during cutting). Air assist needs its own output (e.g. a free SKR fan/heater
+pin with a dedicated M-code such as `M106 P<n>`) plus a matching guard rule on the Pi before a
+layer field makes sense.
+
+Still open: path preview overlay (#14), kerf/tabs/lead-in (#12), vector fill/hatch (#11), PDF
+import, job queue, raster streaming (#18). Error diffusion on very large images is slow
+(pure-Python inner loop).
+
