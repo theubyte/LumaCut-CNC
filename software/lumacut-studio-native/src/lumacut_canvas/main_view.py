@@ -7,12 +7,13 @@ Siehe docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md (§1, §3, §5).
   Dicke) bleibt direkt darunter sichtbar (Gruppe „Material“, belegt vom
   Materials-Modul).
 - **Design**: Menü zum Hinzufügen (Importieren, Text, Formen).
-- **Start**: Ein-Klick-Auftrag. Baut denselben G-Code wie „Design senden“
-  (Planer, „Nur Auswahl“, Fokuskorrektur), lädt ihn hoch und startet danach
-  den Ein-Klick-Ablauf des Machine-Panels (Pi ``op=autorun``: Referenzfahrt →
-  Abtasten → Fokus → Auftrag → Parken). Siehe :data:`START_HOOK`.
+- **Start**: Ein-Klick-Auftrag ``window.one_click.start`` (Scan Probe,
+  ``scanprobe.job_flow_qt.OneClickController``): Bestätigung → Referenzfahrt →
+  Höhenmesh → Fokus → Lasern → Parken. Während des Ablaufs wird „Start“ zu
+  „Abbrechen“. Siehe :data:`START_HOOK`.
 - **Kamera-Scan**: optional, ruft ``ScanPanel.start_scan`` auf; kein Pflicht-
-  Schritt im Auftrag.
+  Schritt im Auftrag. Das ist *der* Kamera-Scan-Knopf; der gleichnamige im
+  Scan-Panel kann entfallen (Scan-Probe-Agent).
 - **Mehr**: blendet Ablauf, Scan & Probe, Maschine (Verbinden, Joggen,
   Homing, Abtasten …), die Werkzeugleiste „Auftrag“ (Kerf/Haltestege/Anfahrt,
   Rahmen, Schätzung, Materialtest …) und die Ebenen-Feineinstellungen
@@ -35,14 +36,16 @@ from . import theme
 BIG_BUTTON_PX = 56
 SMALL_BUTTON_PX = 48
 
-#: HOOK (Machine + Scan Probe): Der vollständige automatische Ablauf aus der
-#: Anforderung (Referenzfahrt XY→Z, *schnelles Höhenmesh immer*, Fokus, Job,
-#: Parken) ist auf dem Pi noch nicht als eine Operation verfügbar. „Start“
-#: nutzt bis dahin ``MachinePanel.autorun_job`` (Pi ``op=autorun``: Homing →
-#: Abtasten unter der Motivmitte (ein Punkt) → Fokus → Auftrag → Park).
-#: Sobald es eine Mesh-Variante gibt, nur :meth:`OneClickStart._run_machine`
-#: umstellen.
-START_HOOK = "machine_panel.autorun_job"
+#: HOOK: „Start“ ruft den Ein-Klick-Ablauf des Scan-Probe-Agents
+#: (``window.one_click.start``, Anforderungen 2026-10-26 §1.1: Referenzfahrt
+#: falls nötig → Höhenmesh immer → Fokus → Job → Parken; Bestätigung, Fehler-
+#: und Abbruchmeldungen kommen vom Controller). Nur wenn der Controller fehlt
+#: (Studio ohne scanprobe), fällt „Start“ auf ``START_FALLBACK`` zurück:
+#: hochladen + ``MachinePanel.autorun_job`` (Pi ``op=autorun``, ein Punkt).
+START_HOOK = "one_click.start"
+START_FALLBACK = "machine_panel.autorun_job"
+START_TEXT = "3  Start"
+CANCEL_TEXT = "■  Abbrechen"
 
 _BIG_QSS = f"""
 QPushButton#MainAction {{
@@ -89,7 +92,7 @@ class MainActions(QWidget):
         self.material_button = big("1  Material", "Material und Dicke wählen – Leistung, Tempo und "
                                    "Durchgänge kommen aus der Materialbibliothek")
         self.design_button = big("2  Design", "Motiv hinzufügen: Datei importieren, Text oder Form zeichnen")
-        self.start_button = big("3  Start", "Auftrag starten: senden, Referenzfahrt, Abtasten, Fokus, "
+        self.start_button = big(START_TEXT, "Auftrag starten: Referenzfahrt, Höhenmesh, Fokus, "
                                 "Lasern, Parken – alles automatisch", "MainActionStart")
         self.hint = QLabel("Material wählen, Motiv platzieren, Start drücken.")
         self.hint.setObjectName("MainHint")
@@ -131,9 +134,15 @@ class MoreToggle(QToolButton):
 
 
 class OneClickStart(QObject):
-    """Start: G-Code bauen → hochladen → Ein-Klick-Ablauf der Maschine."""
+    """Start-Knopf → ``window.one_click`` (Ein-Klick-Auftrag, siehe START_HOOK).
+
+    Zustände: bereit → (Bestätigung im Controller) → läuft (Knopf = Abbrechen)
+    → fertig / abgebrochen / Fehler (Meldung in der Statusleiste, Fehlerdialog
+    vom Controller) → bereit.
+    """
 
     message = Signal(str)
+    running_changed = Signal(bool)
 
     def __init__(self, window: Any) -> None:
         super().__init__(window)
@@ -142,6 +151,32 @@ class OneClickStart(QObject):
         mp = getattr(window, "machine_panel", None)
         if mp is not None and hasattr(mp, "command_finished"):
             mp.command_finished.connect(self._finished)
+        ctrl = self.controller
+        if ctrl is not None and hasattr(ctrl, "finished"):
+            ctrl.finished.connect(self._flow_done)
+
+    @property
+    def controller(self) -> Any:
+        return getattr(self.window, "one_click", None)
+
+    @property
+    def running(self) -> bool:
+        ctrl = self.controller
+        return bool(ctrl is not None and getattr(ctrl, "busy", False))
+
+    def clicked(self) -> bool:
+        """Start, oder während des Ablaufs: Abbrechen."""
+        if self.running:
+            return self.cancel()
+        return self.start()
+
+    def cancel(self) -> bool:
+        ctrl = self.controller
+        if ctrl is None or not self.running:
+            return False
+        ctrl.cancel()
+        self.message.emit("Abbruch angefordert – der Kopf wird sicher angehalten und geparkt.")
+        return True
 
     def start(self) -> bool:
         w = self.window
@@ -150,9 +185,17 @@ class OneClickStart(QObject):
             self.message.emit("Nicht mit der Maschine verbunden – „Verbinden“ drücken "
                               "(Adresse unter „Mehr › Maschine“).")
             return False
-        if self.pending is not None or getattr(mp, "command_running", ""):
+        if self.pending is not None or getattr(mp, "command_running", "") or self.running:
             self.message.emit("Die Maschine ist noch beschäftigt – bitte kurz warten.")
             return False
+        ctrl = self.controller
+        if ctrl is not None:
+            ok = bool(ctrl.start())  # Bestätigung, Prüfungen, Fehlermeldung: Controller
+            if ok:
+                self.running_changed.emit(True)
+            elif getattr(ctrl, "last_message", ""):
+                self.message.emit(ctrl.last_message)
+            return ok
         job = w._build_canvas_job()
         if job is None:
             return False
@@ -176,8 +219,15 @@ class OneClickStart(QObject):
         self._run_machine()
 
     def _run_machine(self) -> None:
-        # HOOK (siehe START_HOOK): heute Pi op=autorun (Ein-Punkt-Abtastung).
+        # Nur ohne Ein-Klick-Controller (START_FALLBACK): Pi op=autorun.
         self.window.machine_panel.autorun_job()
+
+    def _flow_done(self, res: Any) -> None:
+        self.running_changed.emit(False)
+        ctrl = self.controller
+        text = getattr(ctrl, "last_message", "")
+        if text:
+            self.message.emit(text)
 
 
 class MainView(QObject):
@@ -196,7 +246,8 @@ class MainView(QObject):
         actions.material_button.clicked.connect(self.open_material)
         self.design_menu = self._build_design_menu()
         actions.design_button.clicked.connect(self._show_design_menu)
-        actions.start_button.clicked.connect(self.starter.start)
+        actions.start_button.clicked.connect(self.starter.clicked)
+        self.starter.running_changed.connect(self._sync_start)
         actions.scan_button.clicked.connect(self.camera_scan)
         actions.connect_button.clicked.connect(self.connect_machine)
         mp = getattr(window, "machine_panel", None)
@@ -274,6 +325,13 @@ class MainView(QObject):
         mp = getattr(self.window, "machine_panel", None)
         if mp is not None:
             mp.connect_to_pi()
+
+    def _sync_start(self, running: bool) -> None:
+        b = self.actions.start_button
+        b.setText(CANCEL_TEXT if running else START_TEXT)
+        b.setToolTip("Laufenden Auftrag abbrechen (Kopf wird geparkt)" if running else
+                     "Auftrag starten: Referenzfahrt, Höhenmesh, Fokus, Lasern, Parken – "
+                     "alles automatisch")
 
     def _sync_connection(self, state: str) -> None:
         self.actions.connect_button.setVisible(state != "connected")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pathlib
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -34,6 +35,7 @@ def make_win(qapp, tmp_path, monkeypatch):
 
     def make(w=1280, h=720):
         win = main.LumaCutStudio()
+        win.one_click.ask = False
         win.import_tools.interactive = False
         win.machine_panel._confirm = lambda *_: True
         win.scan_panel.ask = False
@@ -106,9 +108,11 @@ def test_main_view_not_clipped_small_screens(make_win, size, more):
         QApplication.processEvents()
     sc = win.right_scroll
     content = sc.widget()
-    if size[0] >= 1024 or not more:
+    if not more:
         assert not sc.horizontalScrollBar().isVisible()
-    else:  # sehr schmal + „Mehr“ offen: scrollen statt abschneiden
+    else:
+        # „Mehr“ offen: Maschinen-/Scan-Panels sind breit (unter Windows mit
+        # breiteren Schriften schon bei 1024 px) → scrollen statt abschneiden.
         assert (content.minimumSizeHint().width() <= sc.viewport().width()
                 or sc.horizontalScrollBar().isVisible())
         return
@@ -150,10 +154,105 @@ def test_start_without_connection_explains(make_win):
     assert "Nicht mit der Maschine verbunden" in win.statusBar().currentMessage()
 
 
-def test_one_click_start_uploads_then_autoruns(make_win):
+class _FakeCtrl:
+    """Ersatz für scanprobe.job_flow_qt.OneClickController (start/busy/cancel/finished)."""
+
+    def __init__(self, result=True, message=""):
+        from PySide6.QtCore import QObject, Signal
+
+        class _Sig(QObject):
+            finished = Signal(object)
+        self._sig = _Sig()
+        self.finished = self._sig.finished
+        self.result, self.last_message = result, message
+        self.busy = False
+        self.calls: list[str] = []
+
+    def start(self):
+        self.calls.append("start")
+        self.busy = bool(self.result)
+        return self.result
+
+    def cancel(self):
+        self.calls.append("cancel")
+
+    def done(self, state="fertig", message="Auftrag fertig, Kopf geparkt"):
+        self.busy, self.last_message = False, message
+        self.finished.emit(SimpleNamespace(ok=state == "fertig", state=state))
+
+
+def _starter(qapp, ctrl, connected=True, running=""):
+    from lumacut_canvas.main_view import OneClickStart
+    mp = SimpleNamespace(connection_state="connected" if connected else "", command_running=running)
+    win = SimpleNamespace(machine_panel=mp, one_click=ctrl,
+                          _build_canvas_job=lambda: pytest.fail("Fallback darf nicht laufen"))
+    st = OneClickStart.__new__(OneClickStart)
+    OneClickStart.__init__(st, None)
+    st.window = win
+    if ctrl is not None:
+        ctrl.finished.connect(st._flow_done)
+    msgs, run = [], []
+    st.message.connect(msgs.append)
+    st.running_changed.connect(run.append)
+    return st, msgs, run
+
+
+def test_start_hook_is_one_click_controller(make_win):
+    from lumacut_canvas.main_view import START_HOOK
+    win = make_win()
+    assert START_HOOK == "one_click.start"
+    assert win.main_view.starter.controller is win.one_click
+
+
+def test_start_runs_controller_then_turns_into_cancel(qapp):
+    ctrl = _FakeCtrl()
+    st, msgs, run = _starter(qapp, ctrl)
+    assert st.clicked() is True and ctrl.calls == ["start"] and run == [True]
+    assert st.clicked() is True and ctrl.calls == ["start", "cancel"]   # läuft → Abbrechen
+    assert any("Abbruch" in m for m in msgs)
+    ctrl.done("abgebrochen", "Auftrag abgebrochen")
+    assert run == [True, False] and msgs[-1] == "Auftrag abgebrochen"
+    assert st.clicked() is True and ctrl.calls[-1] == "start"           # wieder bereit
+
+
+def test_start_refused_or_declined_shows_controller_message(qapp):
+    ctrl = _FakeCtrl(result=False, message="Ein-Klick-Auftrag: Nicht mit dem Pi verbunden.")
+    st, msgs, run = _starter(qapp, ctrl)
+    assert st.clicked() is False and run == []
+    assert msgs == ["Ein-Klick-Auftrag: Nicht mit dem Pi verbunden."]
+
+
+def test_start_error_result_reported(qapp):
+    ctrl = _FakeCtrl()
+    st, msgs, run = _starter(qapp, ctrl)
+    st.clicked()
+    ctrl.done("fehler", "Auftrag fehlgeschlagen: Notstopp")
+    assert run == [True, False] and msgs[-1] == "Auftrag fehlgeschlagen: Notstopp"
+
+
+def test_start_blocked_while_machine_busy_or_disconnected(qapp):
+    ctrl = _FakeCtrl()
+    st, msgs, _ = _starter(qapp, ctrl, running="Homing")
+    assert st.start() is False and "beschäftigt" in msgs[-1] and ctrl.calls == []
+    st, msgs, _ = _starter(qapp, ctrl, connected=False)
+    assert st.start() is False and "Nicht mit der Maschine verbunden" in msgs[-1]
+
+
+def test_start_button_label_follows_flow(make_win, monkeypatch):
+    from lumacut_canvas.main_view import CANCEL_TEXT, START_TEXT
+    win = make_win()
+    b = win.main_actions.start_button
+    win.main_view.starter.running_changed.emit(True)
+    assert b.text() == CANCEL_TEXT
+    win.one_click.finished.emit(SimpleNamespace(ok=True, state="fertig"))
+    assert b.text() == START_TEXT
+
+
+def test_one_click_fallback_without_controller_uploads_then_autoruns(make_win):
     from fake_pi import FakePi
     from lumacut_canvas import Geometry, Shape
     win = make_win()
+    win.one_click = None   # Studio ohne Scan-Probe-Controller → START_FALLBACK
     mp = win.machine_panel
     doc = win.canvas.document
     doc.add_shape(Shape("rect", Geometry(60, 60, 80, 40), doc.active_layer_id))

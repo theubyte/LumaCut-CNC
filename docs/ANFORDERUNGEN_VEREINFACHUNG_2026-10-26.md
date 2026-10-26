@@ -164,6 +164,8 @@ Die Apps bilden einfach die echte Maschine ab.
 - Bei verbundenem Pi scannt der Knopf automatisch mit der Maschine.
 - **Android:** Es gibt keinen Code. Vorbereitet ist ein Qt-freier JSON-Vertrag (`scanprobe/contract.py`, `lumacut-scanprobe/1`) mit vorgeschlagenen HTTP-Endpunkten, siehe `docs/SCAN_PROBE.md`.
 
+**Ein Knopf statt zwei (Canvas, 2026-10-26):** Die Studio-Hauptansicht hat oben rechts den Knopf **„Kamera-Scan“** (`lumacut_canvas/main_view.py`, ruft `ScanPanel.start_scan()`). Er ist der eine sichtbare Kamera-Scan-Knopf. **Der gleichnamige Knopf im Scan-&-Probe-Panel kann vom Scan-Probe-Agent entfernt werden.** Pause, Abbrechen und Fortschritt im Panel bleiben (unter „Mehr“). `start_scan()` muss dabei als öffentlicher Einstieg erhalten bleiben.
+
 ## 4. Materialdatenbank auf dem Pi
 
 - Materialliste und Einstellungen (Leistung, Geschwindigkeit, Durchgänge, Z-Schritt) liegen auf dem Pi.
@@ -212,6 +214,27 @@ API an; die eingebaute Datenbank ist in Studio nur lesbar (bearbeitet werden Pre
 - Erweiterte Optionen (Kerf, Haltestege, Füllung etc.) hinter „Mehr“ oder in einem eigenen Bereich.
 - Touch-freundlich, responsiv, für Neulinge verständlich.
 
+### 5.1 Umsetzung Canvas (Studio Windows, 2026-10-26)
+
+**Erledigt:**
+- `bc8092b`: Rechte Spalte oben mit drei großen Aktionen (≥ 56 px, dunkles Theme, deutsch):
+  - **1 Material** öffnet die Materialbibliothek. Die Schnellwahl Material/Dicke bleibt direkt darunter sichtbar.
+  - **2 Design** ist ein Menü mit Importieren, Text, Rechteck, Ellipse, Polygon, Freihand und Linie.
+  - **3 Start** startet den Ein-Klick-Auftrag.
+- Darunter stehen **Kamera-Scan** (optional) und **Verbinden** (verschwindet, wenn verbunden).
+- **„Mehr“** ist standardmäßig zu. Dahinter liegen Ablauf, Manuell senden, Scan & Probe, Maschine, die Werkzeugleiste „Auftrag“ (Kerf, Haltestege, Anfahrt, Rahmen, Schätzung, Materialtest) und die Ebenen-Feineinstellungen (Leistung, Tempo, Füllung).
+- Alles bleibt erreichbar: Menü „Auftrag“, Tastenkürzel, Notstopp immer sichtbar in der Werkzeugleiste.
+- Getestet offscreen bei 1024×600, 1280×720, 1368×912 und 800×560, ohne abgeschnittene Elemente.
+- **Start → `window.one_click.start`** (Scan Probe, `OneClickController`, §1.1):
+  - Die Bestätigung, alle Prüfungen und Fehlerdialoge kommen vom Controller.
+  - Während des Ablaufs wird „Start“ zu **„Abbrechen“** (`one_click.cancel`). Ergebnis und Fehler stehen in der Statusleiste.
+  - Ohne Controller (Studio ohne `scanprobe`) gilt der Rückfall: hochladen und `MachinePanel.autorun_job`.
+  - Offene Frage 1 aus §1.1 („Start-Knopf umstellen“) ist damit für den großen Start-Knopf erledigt. Der kleine Knopf „Hochgeladenen Auftrag starten“ unter „Mehr › Manuell senden“ bleibt der reine Pi-Start.
+
+**Für andere:**
+- **Scan Probe:** Den eigenen Knopf „Kamera-Scan“ im Panel entfernen (§3). `start_scan()`, `cancel()`, `busy` und `last_message`/`finished` des Controllers stabil halten.
+- **Machine:** Keine Änderung nötig. `connection_state`, `command_running`, `send_gcode`, `autorun_job` und `estop_button` bleiben die genutzten Einstiege.
+
 ## 6. Zusammenarbeit
 
 - **Kommunikation über GitHub** (Commits, dieses Dokument, Issues/PRs falls nötig).
@@ -223,12 +246,12 @@ API an; die eingebaute Datenbank ist in Studio nur lesbar (bearbeitet werden Pre
 
 | Thema | Zuständig | Status |
 |---|---|---|
-| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1), Start-Knopf offen (Machine), Pi in Arbeit |
+| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1); großer Start-Knopf der Hauptansicht ruft `one_click.start` (Canvas, §5.1); Pi in Arbeit |
 | Nullpunkt oben rechts | Canvas + Machine | Maschinenseite erledigt (`ce7da00`: Anker = sichtbare Ecke, `coord_convention`, Jog-Kreuz gespiegelt, siehe §2.2); Canvas (`workarea.py`, Absprache §2) offen |
 | Kamera-Scan als Button | Scan Probe | Studio erledigt (§3); Android: Vertrag vorbereitet, kein Code |
 | Probing immer im Auftrag (keine Auswahl) | Scan Probe | Studio erledigt (§1.1) |
 | Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | Studio-Client fertig (beide API-Varianten, offline, Konflikte; §4.1), Pi-Endpunkte in Arbeit |
-| Cleaner UI Windows | Canvas | offen |
+| Cleaner UI Windows | Canvas | erledigt (`bc8092b` + Start → `one_click.start`, §5.1) |
 | Cleaner UI Android | Claude, Session android | in Arbeit |
 
 ## 8. Nächste Schritte
