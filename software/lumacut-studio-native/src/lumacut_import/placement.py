@@ -20,7 +20,7 @@ from pathlib import Path
 from lumacut_canvas.model import Geometry, Shape, new_id
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
-VECTOR_SUFFIXES = (".svg", ".dxf")
+VECTOR_SUFFIXES = (".svg", ".dxf", ".pdf")
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp")
 ALL_SUFFIXES = VECTOR_SUFFIXES + IMAGE_SUFFIXES
 MAX_OBJECTS = 20000
@@ -95,8 +95,12 @@ def image_shape(image, w_mm: float, h_mm: float, layer_id: str, drop=None) -> Im
     return ImportResult([shape], s, kind="image")
 
 
-def import_file(path, layer_id: str, drop: tuple[float, float] | None = None) -> ImportResult:
-    """Datei nach Endung importieren; ValueError mit deutscher Meldung."""
+def import_file(path, layer_id: str, drop: tuple[float, float] | None = None,
+                page: int = 0) -> ImportResult:
+    """Datei nach Endung importieren; ValueError mit deutscher Meldung.
+
+    ``page``: Seite bei PDF (0-basiert, Standard: erste Seite).
+    """
     p = Path(path)
     suffix = p.suffix.lower()
     if suffix == ".svg":
@@ -121,9 +125,20 @@ def import_file(path, layer_id: str, drop: tuple[float, float] | None = None) ->
         res = vector_shapes(vi.polylines, layer_id, drop)
         res.notes = vi.notes()
         return res
+    if suffix == ".pdf":
+        from .pdf import load_pdf
+        try:
+            vi = load_pdf(p, page)
+        except ValueError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"PDF nicht lesbar: {exc}") from exc
+        res = vector_shapes(vi.polylines, layer_id, drop)
+        res.notes = vi.notes()
+        return res
     if suffix in IMAGE_SUFFIXES:
         from .image import load_image
         img, w, h = load_image(p)
         return image_shape(img, w, h, layer_id, drop)
     raise ValueError(f"Dateityp {suffix or '?'} wird nicht unterstützt "
-                     f"(SVG, DXF, PNG, JPG, BMP)")
+                     f"(SVG, DXF, PDF, PNG, JPG, BMP)")

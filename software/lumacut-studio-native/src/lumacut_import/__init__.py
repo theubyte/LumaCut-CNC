@@ -1,7 +1,8 @@
-"""Import von Vektor- und Bilddateien in den Canvas (SVG, DXF, PNG/JPG/BMP).
+"""Import von Vektor- und Bilddateien in den Canvas (SVG, DXF, PDF, PNG/JPG/BMP).
 
 * :mod:`.vector` – SVG (svgelements) und DXF (ezdxf) → Polylinien in mm,
   Qt-frei.
+* :mod:`.pdf` – PDF-Vektorpfade (pypdf + eigene Pfad-Interpretation), Qt-frei.
 * :mod:`.placement` – Polylinien → ``polygon``/``path``-Objekte, gemeinsam
   in die Arbeitsfläche eingepasst und gruppiert.
 * :mod:`.image` – Bitmap → Bildobjekt (``kind == "image"``) mit Größe in mm

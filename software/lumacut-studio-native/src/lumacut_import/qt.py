@@ -13,7 +13,7 @@ from pathlib import Path
 from PySide6.QtCore import QEvent, QObject, QPointF
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-                               QFileDialog, QFormLayout, QLabel, QMessageBox, QSpinBox,
+                               QFileDialog, QFormLayout, QInputDialog, QLabel, QMessageBox, QSpinBox,
                                QVBoxLayout)
 
 from lumacut_canvas.commands import AddShapesCommand, SetImageSettingsCommand
@@ -32,7 +32,8 @@ MODE_LABELS = {
 }
 
 FILTER = ("Alle unterstützten (" + " ".join(f"*{s}" for s in ALL_SUFFIXES) + ");;"
-          "Vektor (*.svg *.dxf);;"
+          "Vektor (*.svg *.dxf *.pdf);;"
+          "PDF (*.pdf);;"
           "Bild (" + " ".join(f"*{s}" for s in IMAGE_SUFFIXES) + ")")
 
 
@@ -152,7 +153,7 @@ class ImportTools(QObject):
         self.import_action = QAction("Importieren …", window)
         self.import_action.setObjectName("import_action")
         self.import_action.setShortcut(QKeySequence("Ctrl+I"))
-        self.import_action.setToolTip("SVG, DXF oder Bild (PNG/JPG/BMP) importieren  (Strg+I)")
+        self.import_action.setToolTip("SVG, DXF, PDF oder Bild (PNG/JPG/BMP) importieren  (Strg+I)")
         self.import_action.triggered.connect(lambda _=False: self.import_dialog())
         self.image_action = QAction("Bildeinstellungen …", window)
         self.image_action.setObjectName("image_settings_action")
@@ -208,8 +209,30 @@ class ImportTools(QObject):
         if path:
             self.import_path(path)
 
-    def import_path(self, path, drop: tuple[float, float] | None = None) -> list[str]:
-        """Datei importieren; gibt die neuen Objekt-IDs zurück (leer bei Fehler)."""
+    def ask_pdf_page(self, path) -> int | None:
+        """Seite eines mehrseitigen PDFs wählen (0-basiert); None = Abbruch.
+
+        Ohne Dialog (``interactive=False``) oder bei einer Seite: erste Seite.
+        """
+        if not self.interactive:
+            return 0
+        from .pdf import page_count
+        try:
+            n = page_count(path)
+        except ValueError:
+            return 0  # Fehler meldet der eigentliche Import
+        if n <= 1:
+            return 0
+        page, ok = QInputDialog.getInt(self.window, "PDF-Seite",
+                                       f"Welche Seite importieren? (1–{n})", 1, 1, n)
+        return page - 1 if ok else None
+
+    def import_path(self, path, drop: tuple[float, float] | None = None,
+                    page: int | None = None) -> list[str]:
+        """Datei importieren; gibt die neuen Objekt-IDs zurück (leer bei Fehler).
+
+        ``page``: PDF-Seite (0-basiert); ``None`` = bei mehrseitigen PDFs fragen.
+        """
         doc = self.editor.document
         layer = doc.active_layer
         if layer is None:
@@ -218,8 +241,12 @@ class ImportTools(QObject):
         if layer.locked:
             self._error("Import nicht möglich", f"Ebene „{layer.name}“ ist gesperrt")
             return []
+        if Path(path).suffix.lower() == ".pdf" and page is None:
+            page = self.ask_pdf_page(path)
+            if page is None:
+                return []
         try:
-            res = import_file(path, layer.id, drop)
+            res = import_file(path, layer.id, drop, page or 0)
         except (OSError, ValueError) as exc:
             self._error("Import fehlgeschlagen", str(exc))
             return []
