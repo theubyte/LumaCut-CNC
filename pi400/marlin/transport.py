@@ -354,11 +354,17 @@ class MarlinTransport:
             return
         if self.surface_z is None:
             raise ValueError("Z-Fahrten nur mit vermessener Werkstückoberfläche erlaubt")
-        self._exchange_locked("M400", timeout=20)
-        self._exchange_locked("M114", timeout=10)
-        if self.position is None:
-            raise RuntimeError("Keine gültige aktuelle Z-Position")
-        target = coords["Z"] if self.absolute_mode else self.position[2] + coords["Z"]
+        if self.absolute_mode:
+            # The target is known without asking Marlin. Draining the
+            # planner here would stop the head on every focus-compensated
+            # segment (a Z word on each 2 mm piece) and burn dots.
+            target = coords["Z"]
+        else:
+            self._exchange_locked("M400", timeout=20)
+            self._exchange_locked("M114", timeout=10)
+            if self.position is None:
+                raise RuntimeError("Keine gültige aktuelle Z-Position")
+            target = self.position[2] + coords["Z"]
         minimum = max(0.0, self.surface_z + self.probe_clearance_mm)
         if target < minimum - 0.0001:
             raise ValueError(

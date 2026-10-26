@@ -533,6 +533,22 @@ class USBProtocolTests(unittest.TestCase):
         self.assertTrue(bridge.status()["connected"])
         self.assertFalse(serial.closed)
 
+    def test_absolute_z_moves_do_not_drain_the_planner(self):
+        # Focus compensation puts a Z word on every short segment; an M400
+        # per segment would stop the head and burn dots.
+        serial=FakeSerial(["ok\n", "ok\n"])
+        bridge=MarlinTransport("/dev/null")
+        bridge.serial=serial
+        bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed=True
+        bridge.homing_verified=True
+        bridge.surface_z=3.0
+        bridge.command("G0 Z8.5 F600")
+        bridge.command("G0 Z5.2")
+        self.assertEqual(serial.writes,[b"G0 Z8.5 F600\n", b"G0 Z5.2\n"])
+        with self.assertRaisesRegex(ValueError,"Z-Sperre"):
+            bridge.command("G0 Z4.9")
+
     def test_no_laser_before_probing_workpiece(self):
         serial=FakeSerial([])
         bridge=MarlinTransport("/dev/null")
@@ -949,6 +965,17 @@ web.CAMERA = "/dev/does-not-exist"
 with web.app.test_client() as c:
     r = c.get("/api/camera/snapshot")
     assert r.status_code == 503 and "Keine Kamera" in r.get_json()["error"], r.data
+""")
+
+    def test_job_with_own_z_skips_single_surface_focus(self):
+        self._run_web_script(r"""
+from marlin import web
+compensated = ["G90", "M3 I S0", "G0 X50 Y50", "G0 Z9.5 F600", "G1 X52 Y50 Z9.6 F1500 S200"]
+plain = ["G90", "M3 I S0", "G0 X50 Y50", "G1 X52 Y50 F1500 S200", "G0 Z20"]
+relative_only = ["G91", "G0 Z-1 F600", "G90", "G1 X52 Y50 F1500 S200"]
+assert web._job_sets_focus(compensated)
+assert not web._job_sets_focus(plain)
+assert not web._job_sets_focus(relative_only)
 """)
 
     def test_one_click_order_and_controlled_stop_without_m112(self):

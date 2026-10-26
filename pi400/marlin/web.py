@@ -517,6 +517,31 @@ def _stop_after_job_error():
             pass
 
 
+def _job_sets_focus(commands):
+    """True when the job moves Z to an absolute height before its first cut.
+
+    Focus-compensated jobs (height mesh) carry their own Z per segment.
+    The automatic focus to the single probed surface would then put the
+    head at the wrong height over taller workpieces, so it is skipped.
+    The Z floor guard still checks every one of those Z targets.
+    """
+    absolute = True
+    z_set = False
+    for raw in commands:
+        cmd = normalize(raw)
+        if cmd == "G90":
+            absolute = True
+        elif cmd == "G91":
+            absolute = False
+        elif re.match(r"^G0?[01](?:\s|$)", cmd):
+            words = dict(re.findall(r"([A-Z])\s*([-+]?[0-9.]+)", cmd))
+            if "Z" in words and absolute:
+                z_set = True
+            if re.match(r"^G0?1(?:\s|$)", cmd) and float(words.get("S") or 0) > 0:
+                return z_set
+    return False
+
+
 def _job_worker(filename, commands, probe_point=None):
     job.update(file=filename, state="running", line=0, total=len(commands), error="")
     try:
@@ -531,6 +556,8 @@ def _job_worker(filename, commands, probe_point=None):
             machine.command("G0 X%.3f Y%.3f" % probe_point, owner="job", timeout=60)
             machine.probe_workpiece(owner="job")
             job["state"] = "running"
+        if _job_sets_focus(commands):
+            machine.focused_this_job = True
         machine.command("M5 I", owner="job")
         for i, command in enumerate(commands, 1):
             if stop_job.is_set():
