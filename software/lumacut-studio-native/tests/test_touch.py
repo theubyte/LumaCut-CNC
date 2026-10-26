@@ -57,8 +57,8 @@ def test_handle_sizes_by_mode_are_screen_pixels(ed):
     ed.set_touch_mode(True)
     assert ov.metrics is touch.TOUCH
     px = ed.view.px_per_mm
-    # Touch: ≥ 28 px Trefferfläche (2 × halbe Kante), Trefferfläche ≥ gezeichneter Griff.
-    assert 28 <= 2 * ov.handle_hit_mm() * px <= 40
+    # Touch: ≥ 44 px Trefferfläche (2 × halbe Kante), Trefferfläche ≥ gezeichneter Griff.
+    assert 44 <= 2 * ov.handle_hit_mm() * px <= 52
     assert ov.handle_hit_mm() * 2 >= ov.handle_size_mm()
     assert ov.handle_size_mm() > mouse_draw and ov.handle_hit_mm() > mouse_hit
     # Konstante Bildschirmgröße bei jedem Zoom.
@@ -432,3 +432,75 @@ def test_hit_priority_topmost_wins_for_equal_objects(ed):
     b = _rect(ed, 12, 12, 30, 30)  # gleich groß, oben
     assert ed.scene.editable_shape_at(QPointF(25, 25)) == b
     assert ed.scene.editable_shape_at(QPointF(10, 25)) == a  # nur a im Umriss-Fangbereich (b: 8 px weg)
+
+
+# --- Kontextmenü: Rechtsklick und langes Drücken -----------------------------
+def _close_menu(ed):
+    if ed.context_menu is not None:
+        ed.context_menu.close()
+
+
+def test_right_click_opens_context_menu_and_selects_hit(ed, qapp):
+    from PySide6.QtGui import QContextMenuEvent
+    sid = _rect(ed, 60, 60, 40, 40)
+    p = _vp(ed, QPointF(80, 80)).toPoint()
+    vp = ed.view.viewport()
+    QApplication.sendEvent(vp, QContextMenuEvent(QContextMenuEvent.Mouse, p, vp.mapToGlobal(p)))
+    m = ed.context_menu
+    assert m is not None and m.isVisible() and ed.selection == [sid]
+    names = {a.text() for a in m.actions() if not a.isSeparator()}
+    assert {"Löschen", "Duplizieren", "Gruppieren"} <= names
+    _close_menu(ed)
+    # leerer Hintergrund: nur allgemeine Einträge, Auswahl bleibt
+    p2 = _vp(ed, QPointF(200, 200)).toPoint()
+    QApplication.sendEvent(vp, QContextMenuEvent(QContextMenuEvent.Mouse, p2, vp.mapToGlobal(p2)))
+    names = {a.text() for a in ed.context_menu.actions() if not a.isSeparator()}
+    assert "Alles auswählen" in names
+    _close_menu(ed)
+
+
+def test_long_press_opens_menu_without_click_or_move(ed, qapp):
+    from PySide6.QtTest import QTest
+    from lumacut_canvas.canvas_view import LONG_PRESS_MS
+    sid = _rect(ed, 60, 60, 40, 40)
+    ed.set_touch_mode(True)
+    p = _vp(ed, QPointF(80, 80))
+    _touch(ed, QEvent.TouchBegin, [(0, p, "p")])
+    QTest.qWait(LONG_PRESS_MS + 150)
+    m = ed.context_menu
+    assert m is not None and m.isVisible() and ed.selection == [sid]
+    assert "padding" in m.styleSheet()          # große Zeilen im Touch-Modus
+    _touch(ed, QEvent.TouchUpdate, [(0, p + QPointF(30, 0), "m")])
+    _touch(ed, QEvent.TouchEnd, [(0, p + QPointF(30, 0), "r")])
+    assert ed.document.shape(sid).geom.x == pytest.approx(60)   # nichts verschoben
+    assert ed.undo_stack.count() == 0
+    # Windows-Rechtsklick aus "Drücken und Halten" öffnet kein zweites Menü
+    from PySide6.QtGui import QContextMenuEvent
+    _close_menu(ed)
+    first = ed.context_menu
+    vp = ed.view.viewport()
+    QApplication.sendEvent(vp, QContextMenuEvent(QContextMenuEvent.Mouse, p.toPoint(),
+                                                 vp.mapToGlobal(p.toPoint())))
+    assert ed.context_menu is first and not first.isVisible()
+
+
+def test_moving_finger_cancels_long_press(ed, qapp):
+    from PySide6.QtTest import QTest
+    from lumacut_canvas.canvas_view import LONG_PRESS_MS
+    sid = _rect(ed, 60, 60, 40, 40)
+    p = _vp(ed, QPointF(80, 80))
+    _touch(ed, QEvent.TouchBegin, [(0, p, "p")])
+    _touch(ed, QEvent.TouchUpdate, [(0, p + QPointF(25, 0), "m")])
+    QTest.qWait(LONG_PRESS_MS + 150)
+    _touch(ed, QEvent.TouchEnd, [(0, p + QPointF(25, 0), "r")])
+    assert ed.context_menu is None
+    assert ed.document.shape(sid).geom.x > 60      # normaler Zug
+
+
+def test_small_object_center_still_moves_with_big_touch_handles(ed):
+    sid = _rect(ed, 60, 60, 8, 8)                  # 32 px bei Zoom 4
+    ed.set_selection([sid])
+    ed.set_touch_mode(True)
+    ov = ed.scene.overlay
+    assert ov.handle_at(QPointF(64, 64)) is None    # Mitte = Objekt verschieben
+    assert ov.handle_at(QPointF(68 + 4 / ed.view.px_per_mm * 4, 68)) is not None  # außen: Griff

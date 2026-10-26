@@ -27,7 +27,7 @@ from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, Signal
 from PySide6.QtGui import QAction, QActionGroup, QColor, QImage, QKeySequence, QPen, QUndoStack
 from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphicsRectItem,
                                QGridLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
+                               QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
 from . import icons, theme, touch
@@ -333,6 +333,8 @@ class CanvasEditor(QWidget):
         saved = touch.load_setting(self._settings)
         self.set_touch_mode(touch.has_touchscreen() if saved is None else saved, persist=False)
         self.view.touchDetected.connect(self._on_touch_detected)
+        self.context_menu: QMenu | None = None
+        self.view.contextMenuRequested.connect(self._show_context_menu)
 
     # --- Aufbau -----------------------------------------------------------
     def _act(self, name: str, text: str, slot, shortcut: str | QKeySequence | None = None,
@@ -475,6 +477,40 @@ class CanvasEditor(QWidget):
         self.tools.set_tool(tool)
         self.actions_by_name[f"tool_{tool.value}"].setChecked(True)
         self.notify(f"Werkzeug: {TOOL_LABELS[tool]}")
+
+    # --- Kontextmenü (Rechtsklick / langes Drücken) -------------------------
+    def build_context_menu(self, scene_pt: QPointF) -> QMenu:
+        """Menü für ``scene_pt`` (mm). Ein Objekt unter dem Punkt, das noch
+        nicht ausgewählt ist, wird vorher ausgewählt (wie in Zeichenprogrammen)."""
+        hit = self.scene.editable_shape_at(scene_pt)
+        if hit is not None and hit not in self.selection:
+            self.set_selection([hit])
+        menu = QMenu(self)
+        menu.setObjectName("CanvasContextMenu")
+        if self.touch_mode:  # Zeilen ≥ 44 px für Finger
+            menu.setStyleSheet("QMenu::item { padding: 13px 28px 13px 20px; min-height: 18px; }")
+        a = self.actions_by_name
+        groups: list[tuple[str, ...]] = []
+        if self.selection:
+            groups.append(("copy", "duplicate", "delete"))
+            groups.append(("rotate_ccw", "rotate_cw", "group", "ungroup"))
+            groups.append(("fit_selection",))
+        groups.append(("paste", "select_all", "path_preview"))
+        for g in groups:
+            if menu.actions():
+                menu.addSeparator()
+            for name in g:
+                if name == "paste" and not self._clipboard:
+                    continue
+                menu.addAction(a[name])
+        return menu
+
+    def _show_context_menu(self, scene_pt: QPointF, global_pos) -> None:
+        if self.context_menu is not None:
+            self.context_menu.close()
+            self.context_menu.deleteLater()
+        self.context_menu = self.build_context_menu(scene_pt)
+        self.context_menu.popup(global_pos)
 
     def set_path_preview(self, on: bool) -> None:
         """Pfadvorschau ein/aus (zeigt den G-Code des Sendepfads, ändert nichts)."""

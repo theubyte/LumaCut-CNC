@@ -11,7 +11,7 @@ import logging
 import math
 import time
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QEventPoint, QFont, QImage, QMouseEvent, QPainter, QPaintEvent,
                            QPen, QWheelEvent)
 from PySide6.QtWidgets import (QApplication, QGraphicsScene, QGraphicsView, QHBoxLayout, QToolButton,
@@ -32,6 +32,7 @@ PX_PER_MM_100 = 96 / 25.4  # 100 % = physische Größe bei logischen 96 dpi
 TAP_SLOP_PX = 10.0         # so weit darf ein Finger wandern, bevor aus Tippen Ziehen wird
 DOUBLE_TAP_PX = 24.0       # zwei Taps so nah beieinander = Doppeltipp
 TOUCH_MOUSE_GUARD_S = 0.6  # so lange nach Touch werden "Maus"-Ereignisse aus Touch ignoriert
+LONG_PRESS_MS = 550        # Finger so lange still = Kontextmenü (wie Rechtsklick)
 
 
 def nice_step(px_per_mm: float, min_px: float) -> float:
@@ -160,6 +161,8 @@ class CanvasView(QGraphicsView):
     viewChanged = Signal()  # noqa: N815
     leftCanvas = Signal()  # noqa: N815
     touchDetected = Signal()  # erste echte Touchscreen-Eingabe  # noqa: N815
+    # Rechtsklick, Menütaste oder langes Drücken: (Szene-mm, globale Pixel)
+    contextMenuRequested = Signal(QPointF, QPoint)  # noqa: N815
 
     def __init__(self, scene: CanvasScene, parent: QWidget | None = None) -> None:
         super().__init__(scene, parent)
@@ -190,6 +193,10 @@ class CanvasView(QGraphicsView):
         self._touch_seen = False
         self._touch: dict | None = None  # laufende Touch-Folge (siehe _touch_event)
         self._touch_end_t = -1e9           # Zeitpunkt der letzten Touch-Folge (monotonic)
+        self._long_press = QTimer(self)
+        self._long_press.setSingleShot(True)
+        self._long_press.setInterval(LONG_PRESS_MS)
+        self._long_press.timeout.connect(self._on_long_press)
         self._last_tap: tuple[float, QPointF] | None = None
         self.viewport().setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.zoom_buttons = ZoomButtons(self)
@@ -400,6 +407,7 @@ class CanvasView(QGraphicsView):
         et = event.type()
         st = self._touch
         if et == QEvent.TouchCancel:
+            self._long_press.stop()
             if st and st["mode"] == "tool" and self.tool_handler is not None:
                 self.tool_handler.abort_drag()
             self._touch = None
@@ -412,6 +420,14 @@ class CanvasView(QGraphicsView):
             start = QPointF(pts[0][1])
             mode = "pan" if self._empty_background(start) else "pending"
             st = self._touch = {"mode": mode, "start": start, "last": QPointF(start), "moved": False}
+            if len(pts) == 1:
+                self._long_press.start()
+        if len(pts) >= 2 or st["mode"] not in ("pan", "pending") or st["moved"]:
+            self._long_press.stop()
+        elif pts:
+            d = pts[0][1] - st["start"]
+            if math.hypot(d.x(), d.y()) >= TAP_SLOP_PX:
+                self._long_press.stop()
         if len(pts) >= 2 and st["mode"] != "pinch":
             if st["mode"] == "tool" and self.tool_handler is not None:
                 self.tool_handler.abort_drag()
@@ -423,10 +439,31 @@ class CanvasView(QGraphicsView):
             st["last"] = QPointF(pos)
             self._touch_single_move(st, pos)
         if et == QEvent.TouchEnd or not pts:
+            self._long_press.stop()
             self._touch_end(st)
             self._touch = None
             self._touch_end_t = time.monotonic()
         return True
+
+    def _on_long_press(self) -> None:
+        """Finger lange still: Kontextmenü statt Klick/Pan (Rest der Folge ruht)."""
+        st = self._touch
+        if st is None or st["mode"] not in ("pan", "pending") or st["moved"]:
+            return
+        st["mode"] = "menu"
+        self._last_tap = None
+        start = st["start"]
+        self.contextMenuRequested.emit(self.mapToScene(start.toPoint()),
+                                       self.viewport().mapToGlobal(start.toPoint()))
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802
+        # Windows erzeugt aus "Drücken und Halten" zusätzlich einen Rechtsklick –
+        # das Menü kam dann schon über das lange Drücken.
+        if self._touch is not None or time.monotonic() - self._touch_end_t < TOUCH_MOUSE_GUARD_S:
+            event.accept()
+            return
+        event.accept()
+        self.contextMenuRequested.emit(self.mapToScene(event.pos()), event.globalPos())
 
     def _empty_background(self, vp_pos: QPointF) -> bool:
         """Startet ein Finger hier, verschiebt er die Ansicht statt aufzuziehen."""

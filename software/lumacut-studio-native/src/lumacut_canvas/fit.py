@@ -7,12 +7,17 @@
   Canvas-Block): Standardgröße aus der verfügbaren Bildschirmfläche, rechte
   Seitenleiste breit genug für ihren Inhalt und senkrecht scrollbar, Touch-Modus
   auf kleinen/Touch-Bildschirmen standardmäßig an.
+* :func:`compact_sidebar` – schmale Spalte statt Seitwärts-Scrollen: kompaktere
+  Knöpfe (Höhe bleibt touch-tauglich), Formularzeilen brechen um, lange
+  Knopfreihen werden zweispaltig, breite Auswahllisten werden schmal (die
+  aufgeklappte Liste bleibt breit). Generisch – die Panels selbst bleiben unberührt.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
-from PySide6.QtWidgets import (QAbstractScrollArea, QApplication, QFrame, QScrollArea,
+from PySide6.QtWidgets import (QAbstractButton, QAbstractScrollArea, QApplication, QComboBox,
+                               QFormLayout, QFrame, QGridLayout, QHBoxLayout, QScrollArea,
                                QScroller, QSizePolicy, QStyle, QWidget)
 
 from . import touch
@@ -24,6 +29,12 @@ SMALL_SCREEN_H = 950
 SIDEBAR_MAX_FRACTION = 0.42  # rechte Seitenleiste höchstens so viel der Fensterbreite
 LAYERS_MAX_FRACTION = 0.26   # Ebenen-Panel (links)
 SIDEBAR_HARD_MIN = 180       # px; darunter klappt der Splitter die Leiste ein
+COMPACT_ROW_PX = 340         # breitere Knopfreihen (≥ 3 Knöpfe) werden zweispaltig
+COMPACT_COMBO_PX = 240       # breitere Auswahllisten werden schmal (Popup bleibt breit)
+COMPACT_COMBO_CHARS = 14
+# Nur das Polster – Schrift und Mindesthöhe 40 px (Touch) aus dem Fenster-Stil bleiben.
+COMPACT_QSS = "QPushButton { padding: 6px 10px; }"
+_COMPACT_MARK = "_lumacut_compact"
 
 
 def is_small_screen(screen=None) -> bool:
@@ -100,6 +111,71 @@ def sidebar_needed_width(area: QScrollArea) -> int:
     return content.minimumSizeHint().width() + bar + 2 * area.frameWidth() + 2
 
 
+def _wrap_button_row(row: QHBoxLayout) -> bool:
+    """Lange Knopfreihe in ein 2-spaltiges Raster umbauen. Die Reihe selbst bleibt
+    an ihrem Platz im Panel (nur ihr Inhalt wandert in ein inneres Raster)."""
+    if row.property(_COMPACT_MARK) or row.count() < 3:
+        return False
+    buttons = []
+    for i in range(row.count()):
+        item = row.itemAt(i)
+        w = item.widget()
+        if w is not None and isinstance(w, QAbstractButton):
+            buttons.append(w)
+        elif w is not None or item.layout() is not None:
+            return False  # gemischte Reihe (Felder, Beschriftungen): nicht anfassen
+    if len(buttons) < 3 or row.minimumSize().width() <= COMPACT_ROW_PX:
+        return False
+    while row.count():
+        row.takeAt(0)  # Abstandshalter verwerfen, Knöpfe behalten ihr Eltern-Widget
+    grid = QGridLayout()
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setSpacing(max(0, row.spacing()))
+    for n, b in enumerate(buttons):
+        grid.addWidget(b, n // 2, n % 2)
+    grid.setColumnStretch(0, 1)
+    grid.setColumnStretch(1, 1)
+    row.addLayout(grid)
+    row.setProperty(_COMPACT_MARK, True)
+    return True
+
+
+def _narrow_combo(combo: QComboBox) -> bool:
+    if combo.property(_COMPACT_MARK) or combo.minimumSizeHint().width() <= COMPACT_COMBO_PX:
+        return False
+    combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(COMPACT_COMBO_CHARS)
+    # QComboBox merkt sich minimumSizeHint; erst ein StyleChange verwirft den Cache.
+    QApplication.sendEvent(combo, QEvent(QEvent.StyleChange))
+    combo.updateGeometry()
+    view = combo.view()
+    if view is not None:  # aufgeklappt weiterhin ganze Einträge lesbar
+        view.setMinimumWidth(view.sizeHintForColumn(0) + 2 * view.frameWidth() + 24)
+    combo.setProperty(_COMPACT_MARK, True)
+    return True
+
+
+def compact_sidebar(content: QWidget | None) -> bool:
+    """Inhalt einer schmalen Seitenleiste kompakt machen (idempotent; auch für
+    später hinzugekommene Widgets erneut aufrufbar). True, wenn sich etwas änderte."""
+    if content is None:
+        return False
+    changed = False
+    if not content.property(_COMPACT_MARK):
+        content.setStyleSheet((content.styleSheet() + " " + COMPACT_QSS).strip())
+        content.setProperty(_COMPACT_MARK, True)
+        changed = True
+    for form in content.findChildren(QFormLayout):
+        if form.rowWrapPolicy() != QFormLayout.WrapLongRows:
+            form.setRowWrapPolicy(QFormLayout.WrapLongRows)  # Beschriftung über das Feld
+            changed = True
+    for row in content.findChildren(QHBoxLayout):
+        changed |= _wrap_button_row(row)
+    for combo in content.findChildren(QComboBox):
+        changed |= _narrow_combo(combo)
+    return changed
+
+
 class _ScreenFit(QObject):
     """Hält die rechte Seitenleiste breit genug und das Fenster auf dem Bildschirm."""
 
@@ -147,6 +223,8 @@ class _ScreenFit(QObject):
             area = self._area(panel)
             if area is None:
                 continue
+            if name == "right_scroll":
+                compact_sidebar(area.widget())  # neu hinzugekommene Panels ebenfalls
             want = min(sidebar_needed_width(area), sidebar_cap(win.width(), fraction))
             # Hartes Minimum klein halten (das Fenster darf nie breiter als der
             # Bildschirm erzwungen werden); in sehr schmalen Fenstern scrollt die
@@ -194,6 +272,7 @@ def install_screen_fit(win) -> None:
     right = getattr(win, "right_scroll", None)
     if isinstance(right, QScrollArea):
         enable_touch_scroll(right)
+        compact_sidebar(right.widget())
 
     canvas = getattr(win, "canvas", None)
     panel = getattr(win, "layers_panel", None)

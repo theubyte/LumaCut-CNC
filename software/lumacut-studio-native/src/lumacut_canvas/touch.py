@@ -34,8 +34,11 @@ class TouchMetrics:
 
 MOUSE = TouchMetrics(handle_px=9.0, handle_hit_px=9.0, rotate_offset_px=24.0,
                      hit_tolerance_px=5.0, icon_px=22, zoom_button_px=44)
-# 16 px sichtbar, 2 × 16 = 32 px Trefferfläche, Dreh-Griff deutlich abgesetzt.
-TOUCH = TouchMetrics(handle_px=16.0, handle_hit_px=16.0, rotate_offset_px=44.0,
+# 18 px sichtbar, 2 × 22 = 44 px Trefferfläche (Fingerziel nach Windows-/Apple-
+# Richtlinien), Dreh-Griff deutlich abgesetzt. Innen bei kleinen Objekten
+# schrumpft der Fangbereich (SelectionOverlay.handle_at), damit die Mitte
+# zum Verschieben frei bleibt.
+TOUCH = TouchMetrics(handle_px=18.0, handle_hit_px=22.0, rotate_offset_px=48.0,
                      hit_tolerance_px=12.0, icon_px=32, zoom_button_px=52)
 
 

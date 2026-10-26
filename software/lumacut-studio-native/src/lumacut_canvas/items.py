@@ -229,10 +229,17 @@ class SelectionOverlay(QGraphicsItem):
         """
         tol = self.handle_hit_mm()
         lp = self.to_local(pos)
+        # Innerhalb des Rahmens höchstens ein Viertel der kürzeren Seite: die
+        # Mitte kleiner Objekte bleibt zum Verschieben frei (große Touch-Griffe).
+        inner = tol
+        r = self._rect
+        if r is not None and r.x < lp.x() < r.x + r.w and r.y < lp.y() < r.y + r.h:
+            inner = min(tol, max(min(r.w, r.h) / 4.0, self.metrics.handle_px / 2 * self._px))
         best: tuple[float, int, int] | None = None
         for i, hp in enumerate(self._local_handles()):
             dx, dy = abs(hp.x() - lp.x()), abs(hp.y() - lp.y())
-            if dx <= tol and dy <= tol:
+            t = tol if i == ROTATE_HANDLE else inner
+            if dx <= t and dy <= t:
                 rank = -1 if i == ROTATE_HANDLE else i % 2  # gerade Indizes = Ecken
                 cand = (max(dx, dy), rank, i)
                 if best is None or (cand[1], cand[0]) < (best[1], best[0]):

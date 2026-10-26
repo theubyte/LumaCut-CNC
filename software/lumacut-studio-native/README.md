@@ -50,8 +50,10 @@ Eigenständig testen: `python src/canvas_demo.py`.
   sich bei einem Touchscreen, auf kleinen Bildschirmen (< 1500 × 950 logische px, z. B.
   Surface Pro mit 150–200 % Skalierung) oder beim ersten Fingertipp selbst ein; eine manuelle Wahl wird in QSettings (`canvas/touch_mode`) gespeichert und
   hat dann Vorrang. Im Touch-Modus (Werte in `lumacut_canvas/touch.py`, `TouchMetrics`):
-  - Griffe 16 px gezeichnet, Trefferfläche 32 × 32 px, Dreh-Griff 44 px über dem Rahmen;
-    konstant in Bildschirm-Pixeln bei jedem Zoom (Maus-Modus unverändert 9 px).
+  - Griffe 18 px gezeichnet, Trefferfläche 44 × 44 px, Dreh-Griff 48 px über dem Rahmen;
+    konstant in Bildschirm-Pixeln bei jedem Zoom (Maus-Modus unverändert 9 px). Bei kleinen
+    Objekten bleibt die Mitte frei zum Verschieben (die Griff-Fläche reicht innen nur bis
+    ¼ der kürzeren Seite).
   - Fangbereich für Objekte 12 px statt 5 px. Liegen mehrere Objekte darin, gewinnt ein
     Treffer auf dem Umriss (bzw. im Text/Bild) vor einem Treffer nur im Inneren, dann das
     kleinere Objekt, dann das oberste – so bleibt eine dünne Linie auf/unter einer Fläche greifbar.
@@ -62,6 +64,10 @@ Eigenständig testen: `python src/canvas_demo.py`.
     zeichnen); mit dem Auswahl-Werkzeug auf leerer Fläche = Ansicht verschieben. Tippen =
     Klick (leere Fläche: Auswahl aufheben), Doppeltippen = Doppelklick.
     Ein Gummiband-Rahmen geht nur mit Maus oder Stift.
+  - Langes Drücken (0,55 s, ohne Bewegen) öffnet das Kontextmenü (wie Rechtsklick):
+    Kopieren, Duplizieren, Löschen, Drehen, Gruppieren, Auswahl einpassen, Einfügen,
+    Alles auswählen, Pfadvorschau – im Touch-Modus mit ≥ 44 px hohen Zeilen. Das
+    Windows-„Gedrückt halten = Rechtsklick“ öffnet es nicht ein zweites Mal.
   - Zoom-Knöpfe unten rechts im Canvas (−, +, Einpassen, 100 %), 52 px.
   - Werkzeugleisten mit 32-px-Icons in ≥ 48-px-Knöpfen; im Ebenen-Panel 56 px hohe Zeilen,
     ≥ 40-px-Knöpfe und 34 px hohe Eingabefelder.
@@ -72,7 +78,12 @@ Eigenständig testen: `python src/canvas_demo.py`.
   abzuschneiden; Ebenen-Panel und rechte Seitenleiste scrollen senkrecht (auch per Finger)
   und bekommen beim Öffnen die Breite, die ihr Inhalt braucht (höchstens 26 % bzw. 42 % der
   Fensterbreite, sonst zusätzlich waagerechter Bildlauf). Formulare im Ebenen-Panel brechen
-  bei schmaler Breite unter die Beschriftung um.
+  bei schmaler Breite unter die Beschriftung um. Die rechte Seitenleiste wird generisch
+  kompakt gemacht (`compact_sidebar`, ohne die Panels selbst zu ändern): schmaleres
+  Knopf-Polster (Höhe bleibt 40 px), Formularzeilen brechen um, Knopfreihen mit ≥ 3
+  Knöpfen über 340 px werden zweispaltig, breite Auswahllisten schmal (aufgeklappt
+  weiterhin volle Breite). So passt sie bei 1024 × 600, 1280 × 720 und 1368 × 912 ohne
+  Seitwärts-Scrollen (Test `test_small_screen.py`, auch auf Windows-CI).
   - Vom System aus Touch erzeugte Maus-Ereignisse werden während und 0,6 s nach einer
     Berührung ignoriert (keine doppelte Ausführung); Touchpad-Gesten bleiben beim System.
 - **Ebenen:** Farbe, Name, sichtbar, gesperrt, Reihenfolge; je Ebene

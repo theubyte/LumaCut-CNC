@@ -57,15 +57,16 @@ def test_panels_fit_inside_small_windows(make_win, size):
     for area in (win.right_scroll, win.layers_panel.scroll):
         assert isinstance(area, QScrollArea) and area.widgetResizable()
         assert _not_clipped(area)
-    # Die rechte Leiste wird so breit wie ihr Inhalt (bis zur Obergrenze);
-    # nur wenn der Inhalt breiter ist, scrollt sie waagerecht (nie abgeschnitten).
+    # Die rechte Leiste ist kompakt (compact_sidebar) und passt in ihre
+    # Obergrenze: kein Seitwärts-Scrollen bei typischen Surface-/Laptop-Größen
+    # (auch unter Windows-Schrift/DPI – Windows-CI läuft dieselben Tests).
     r = win.right_scroll
     need, cap = fit.sidebar_needed_width(r), fit.sidebar_cap(win.width())
     info = (f"need={need} cap={cap} vp={r.viewport().width()} "
             f"content={r.widget().minimumSizeHint().width()} sizes={sp.sizes()} {_widest(r)}")
-    if need <= cap:
-        assert not r.horizontalScrollBar().isVisible(), info
-        assert r.width() >= need - 2, info
+    assert need <= cap, info
+    assert not r.horizontalScrollBar().isVisible(), info
+    assert r.width() >= need - 2, info
     la = win.layers_panel.scroll
     lneed, lcap = fit.sidebar_needed_width(la), fit.sidebar_cap(win.width(), fit.LAYERS_MAX_FRACTION)
     if lneed <= lcap:
@@ -74,6 +75,43 @@ def test_panels_fit_inside_small_windows(make_win, size):
     assert win.canvas.minimumSizeHint().width() <= win.canvas.width()
     assert _not_clipped(win.canvas.property_scroll)
     assert win.canvas.view.width() >= 200
+
+
+def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
+    from PySide6.QtWidgets import (QComboBox, QFormLayout, QHBoxLayout, QLabel,
+                                   QPushButton, QVBoxLayout, QWidget)
+    root = QWidget()
+    lay = QVBoxLayout(root)
+    form = QFormLayout()
+    combo = QComboBox()
+    combo.addItem("Ein sehr langer Materialname mit Dicke und Status (geprüft)")
+    form.addRow("Material", combo)
+    lay.addLayout(form)
+    row = QHBoxLayout()
+    btns = [QPushButton(t) for t in ("Vom Pi laden", "Auf Pi speichern", "Importieren …", "Exportieren …")]
+    for b in btns:
+        row.addWidget(b)
+    row.addStretch(1)
+    lay.addLayout(row)
+    mixed = QHBoxLayout()  # Feld + Knöpfe: bleibt unverändert
+    mixed.addWidget(QLabel("Schritt"))
+    for t in ("Links", "Rechts", "Oben", "Unten"):
+        mixed.addWidget(QPushButton(t))
+    lay.addLayout(mixed)
+    before = root.minimumSizeHint().width()
+    combo_before = combo.minimumSizeHint().width()
+    assert fit.compact_sidebar(root)
+    assert not fit.compact_sidebar(root)  # idempotent
+    assert form.rowWrapPolicy() == QFormLayout.WrapLongRows
+    assert combo.minimumSizeHint().width() < combo_before
+    assert combo.view().minimumWidth() >= combo.view().sizeHintForColumn(0)  # Popup bleibt lesbar
+    assert all(b.parentWidget() is root for b in btns)
+    root.show()
+    qapp.processEvents()
+    assert len({b.y() for b in btns}) == 2  # 2×2 statt einer Reihe
+    assert mixed.count() == 5
+    assert root.minimumSizeHint().width() < before
+    root.close()
 
 
 def test_sidebar_refits_when_content_grows(make_win, qapp):
