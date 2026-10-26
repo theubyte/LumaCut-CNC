@@ -7,8 +7,10 @@
   in die Arbeitsfläche eingepasst und gruppiert.
 * :mod:`.image` – Bitmap → Bildobjekt (``kind == "image"``) mit Größe in mm
   aus der Datei-DPI.
-* :mod:`.qt` – Menü Datei → Importieren (Strg+I), Drag & Drop und der
-  Bildeinstellungs-Dialog.
+* :mod:`.trace` – Bild nachzeichnen (Bitmap → Polygone mit Löchern), Qt-frei
+  (OpenCV + shapely); :mod:`.trace_qt` – Dialog mit Vorschau.
+* :mod:`.qt` – Menü Datei → Importieren (Strg+I), Drag & Drop, der
+  Bildeinstellungs-Dialog und „Bild nachzeichnen …“ (Alt+T).
 """
 
 from .placement import ImportResult, import_file, VECTOR_SUFFIXES, IMAGE_SUFFIXES, ALL_SUFFIXES

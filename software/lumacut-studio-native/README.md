@@ -399,6 +399,15 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   Atkinson / Bayer / Graustufen / 3D-Tiefe, Linienabstand, Leistung max./min., Geschwindigkeit,
   Durchgänge, bidirektional, Negativ). Bilder werden im
   Auftrag vor den Vektor-Ebenen graviert.
+- **Bild nachzeichnen** (*Datei › Bild nachzeichnen…*, *Alt+T*, wie LightBurn „Trace Image“):
+  wandelt das ausgewählte Bild in Vektorkonturen. Schwellwert (dunkler = Kontur; Startwert aus den
+  Bildeinstellungen), Invertieren, Glättung (Weichzeichnen vor dem Schwellwert), Toleranz
+  (Vereinfachung in mm) und Mindestfläche (Flecken/kleine Löcher ignorieren), mit Live-Vorschau.
+  Ergebnis: Polygone auf den Pixelkanten, Löcher als Ringe (Schraffur, Kerf und „innen zuerst“
+  behandeln sie richtig), mehrere Teile gruppiert, deckungsgleich über dem Bild in der aktiven
+  Ebene; **ein** Rückgängig-Schritt, auf Wunsch inkl. Löschen des Bildes. Sehr verrauschte Bilder
+  werden mit Hinweis abgelehnt (Glättung/Mindestfläche erhöhen). Code:
+  `src/lumacut_import/trace.py` (Qt-frei, OpenCV + shapely), Dialog `trace_qt.py`.
 - Jeder Import ist **ein** Rückgängig-Schritt und wird in die Arbeitsfläche (360×340 mm) eingepasst.
 - Code: `src/lumacut_import/` (Qt-frei) und `src/lumacut_import/qt.py` (Menü, Drop).
 

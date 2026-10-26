@@ -1,5 +1,7 @@
 """Qt-Anbindung: Menü „Datei“, Importieren (Strg+I), Drag & Drop, Bildeinstellungen.
 
+Außerdem „Bild nachzeichnen …“ (Alt+T, :mod:`.trace` / :mod:`.trace_qt`).
+
 ``install_import(window)`` erwartet ein Hauptfenster mit ``window.canvas``
 (:class:`lumacut_canvas.editor.CanvasEditor`). Alle Importe laufen über einen
 einzigen ``AddShapesCommand`` („Importieren“) und sind damit in einem Schritt
@@ -16,7 +18,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QFileDialog, QFormLayout, QInputDialog, QLabel, QMessageBox, QSpinBox,
                                QVBoxLayout)
 
-from lumacut_canvas.commands import AddShapesCommand, SetImageSettingsCommand
+from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand, SetImageSettingsCommand
 from lumacut_canvas.document_io import FILE_SUFFIX
 from lumacut_canvas.model import ImageSettings
 
@@ -161,6 +163,12 @@ class ImportTools(QObject):
         self.image_action.setToolTip("Modus, Linienabstand, Leistung des ausgewählten Bildes  (Strg+Umschalt+I)")
         self.image_action.triggered.connect(lambda _=False: self.edit_image_settings())
         self.image_action.setEnabled(False)
+        self.trace_action = QAction("Bild nachzeichnen …", window)
+        self.trace_action.setObjectName("trace_image_action")
+        self.trace_action.setShortcut(QKeySequence("Alt+T"))
+        self.trace_action.setToolTip("Ausgewähltes Bild in Vektorkonturen umwandeln  (Alt+T)")
+        self.trace_action.triggered.connect(lambda _=False: self.trace_image())
+        self.trace_action.setEnabled(False)
         ed.selectionChanged.connect(lambda _ids: self._update_image_action())
         ed.documentChanged.connect(self._update_image_action)
         ed.image_settings_handler = self.edit_image_settings
@@ -178,6 +186,7 @@ class ImportTools(QObject):
         menu.addSeparator()
         menu.addAction(self.import_action)
         menu.addAction(self.image_action)
+        menu.addAction(self.trace_action)
         if "export" in by:
             menu.addAction(by["export"])
         menu.addSeparator()
@@ -187,6 +196,7 @@ class ImportTools(QObject):
         menu.addAction(quit_action)
         window.addAction(self.import_action)
         window.addAction(self.image_action)
+        window.addAction(self.trace_action)
         try:
             ed.add_toolbar_action(self.import_action, "import")
         except Exception:  # noqa: BLE001 - Toolbar optional
@@ -308,7 +318,9 @@ class ImportTools(QObject):
         return imgs[0] if len(imgs) == 1 else None
 
     def _update_image_action(self) -> None:
-        self.image_action.setEnabled(self._selected_image() is not None)
+        has_image = self._selected_image() is not None
+        self.image_action.setEnabled(has_image)
+        self.trace_action.setEnabled(has_image)
 
     def edit_image_settings(self, shape_id: str | None = None,
                             settings: ImageSettings | None = None) -> bool:
@@ -331,6 +343,60 @@ class ImportTools(QObject):
         self.editor.undo_stack.push(SetImageSettingsCommand(doc, shape_id, old, settings))
         self.editor.notify("Bildeinstellungen übernommen")
         return True
+
+    # ---------------------------------------------------------------- Nachzeichnen
+    def trace_image(self, shape_id: str | None = None, settings=None,
+                    delete_image: bool | None = None) -> list[str]:
+        """Bild → Vektorkonturen (Dialog, oder direkt mit ``settings``).
+
+        Die Konturen landen deckungsgleich in der aktiven Ebene; ein
+        Rückgängig-Schritt (inkl. Löschen des Bildes, falls gewählt).
+        Gibt die neuen Objekt-IDs zurück.
+        """
+        from .trace import trace_to_shapes
+
+        shape_id = shape_id or self._selected_image()
+        doc = self.editor.document
+        if not shape_id or not doc.has_shape(shape_id) or doc.shape(shape_id).kind != "image":
+            self.editor.notify("Bitte genau ein Bild auswählen")
+            return []
+        layer = doc.active_layer
+        if layer is None or layer.locked:
+            self._error("Nachzeichnen nicht möglich",
+                        "Keine aktive Ebene" if layer is None else f"Ebene „{layer.name}“ ist gesperrt")
+            return []
+        sh = doc.shape(shape_id)
+        if settings is None:
+            from .trace_qt import TraceDialog
+            try:
+                dlg = TraceDialog(sh, parent=self.window)
+            except ValueError as exc:
+                self._error("Nachzeichnen fehlgeschlagen", str(exc))
+                return []
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            settings = dlg.settings()
+            if delete_image is None:
+                delete_image = dlg.delete_image.isChecked()
+        try:
+            shapes = trace_to_shapes(sh, settings, layer.id)
+        except ValueError as exc:
+            self._error("Nachzeichnen fehlgeschlagen", str(exc))
+            return []
+        if not shapes:
+            self._error("Nachzeichnen", "Keine Konturen gefunden – Schwellwert oder Invertieren ändern")
+            return []
+        self.last_error = None
+        stack = self.editor.undo_stack
+        stack.beginMacro("Bild nachzeichnen")
+        stack.push(AddShapesCommand(doc, shapes, "Bild nachzeichnen"))
+        if delete_image and doc.has_shape(shape_id):
+            stack.push(DeleteShapesCommand(doc, [shape_id]))
+        stack.endMacro()
+        ids = [s.id for s in shapes]
+        self.editor.set_selection(ids)
+        self.editor.notify(f"Nachgezeichnet: {len(ids)} Kontur(en) in Ebene „{layer.name}“")
+        return ids
 
 
 def install_import(window, interactive: bool = True) -> ImportTools:
