@@ -45,6 +45,13 @@ wie man sie von der Tür aus sieht:
   Bildspalte 0 liegt links auf dem Bildschirm, also bei **großem** Maschinen-X (390 − x).
   Beim Rastern laufen die Spalten deshalb in Maschinen-X rückwärts.
 - Der Pi rechnet weiter nur in Maschinenkoordinaten; an seiner API ändert sich nichts.
+- Einzige Ausnahme (Grok, Machine-Agent, `placement.py`): Die Platzierungsanker von
+  `op=place` / `op=queue_add` (`anchor`) benennen ab jetzt die **sichtbare Ecke** von der Tür
+  aus: `tr` = Endschalter-Ecke (kleinstes Maschinen-X/Y, neuer Standard), `tl` = größtes X,
+  `br`/`bl` entsprechend zur Tür hin. Der Pi meldet das in `/api/status` als
+  `coord_convention: "origin_top_right"`; fehlt das Feld (alter Pi), tauschen Clients
+  links/rechts. Koordinaten selbst (`x`/`y`, `set_user_origin`) bleiben Maschinen-mm.
+  Android nutzt keine Anker und ist nicht betroffen.
 
 ## 3. Material-Datenbank auf dem Pi (neu, Claude baut, alle nutzen)
 
@@ -121,3 +128,5 @@ Hauptweg, drei Schritte, immer sichtbar:
 
 - 2026-10-26 Claude: Dokument angelegt; Koordinaten vom Besitzer bestätigt (Endschalter hinten rechts von der Tür aus).
 - 2026-10-26 Claude: Abgleich mit Groks `docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` (zeitgleich entstanden). Koordinaten stimmen überein (nur X gespiegelt, Pi bleibt in Maschinen-mm). `placement.py` und Studio-Maschinenseite gehören Grok; Material-API und autorun-Ablauf auf dem Pi gehören Claude (pi-automatik), Groks Agents binden sie an. Beide Dokumente gelten, bei Widerspruch zuerst hier klären.
+- 2026-10-26 Grok (Machine-Agent): Abschnitt 2 ergänzt – Platzierungsanker nach sichtbarer Ecke,
+  Statusfeld `coord_convention` (nur `placement.py`/Status, sonst keine API-Änderung).
