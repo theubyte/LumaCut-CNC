@@ -98,10 +98,19 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
             if use_hook:
                 acc += depths[p]
                 out += _hook_lines(pass_hook, layer, p, round(acc, 6))
-            for line in layer.polylines:
+            kinds = getattr(layer, "poly_kinds", ()) or ()
+            prev_end = None
+            for i, line in enumerate(layer.polylines):
                 if len(line) < 2:
                     continue
-                out.append(f"G0 {_xy(*line[0])}")
+                # An-/Abfahrt schließt direkt an die Kontur an: kein G0 dazwischen.
+                joined = (len(kinds) == len(layer.polylines) and i > 0 and prev_end is not None
+                          and (kinds[i] == "lead_out" or kinds[i - 1] == "lead_in")
+                          and abs(prev_end[0] - line[0][0]) < 1e-6
+                          and abs(prev_end[1] - line[0][1]) < 1e-6)
+                prev_end = line[-1]
+                if not joined:
+                    out.append(f"G0 {_xy(*line[0])}")
                 out.extend(f"G1 {_xy(*pt)} F{f} S{s}" for pt in line[1:])
         if z_step > 0 and drop > 0:
             out += ["G91", f"G0 Z{drop:.3f} F600", "G90"]  # zurück auf Fokushöhe
