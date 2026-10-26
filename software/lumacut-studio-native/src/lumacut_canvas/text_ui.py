@@ -24,7 +24,9 @@ SIZE_RANGE_PT = (2.0, 2000.0)
 def _em_ratio(s: Shape) -> float:
     """Boxhöhe / Geviert für Text und Schrift von ``s`` (aus dem Umriss)."""
     font = text_font(s.font_family, s.font_bold, s.font_italic)
-    em = QFontInfo(font).pixelSize() or 1
+    em = QFontInfo(font).pixelSize()
+    if em <= 0:  # ohne Schriftdatenbank (z. B. Windows offscreen) meldet Qt -1
+        em = font.pointSizeF() * 96.0 / 72.0
     h = text_path(s.text, s.font_family, s.font_bold, s.font_italic).boundingRect().height()
     return h / em if h > 0 else 1.0
 

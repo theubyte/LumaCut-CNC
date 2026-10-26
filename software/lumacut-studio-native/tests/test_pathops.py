@@ -101,7 +101,10 @@ def test_offset_outwards_and_inwards(doc):
 def test_text_to_outline_keeps_shape_and_holes(doc):
     t = doc.add_shape(Shape("text", Geometry(10, 10, 40, 15), doc.active_layer_id, text="Bob"))
     out = pathops.text_to_outline(t)
-    assert out.kind == "polygon" and len(out.rings) >= 4   # B (2 Löcher), o (1), b (1)
+    # Jeder Teilpfad des Schriftumrisses wird ein Ring (bei echten Schriften:
+    # B mit 2 Löchern, o und b mit je einem; ohne Schriften nur Ersatzkästen).
+    assert out.kind == "polygon"
+    assert len(out.rings) + 1 == len(shape_path(t).toSubpathPolygons())
     assert area(out) == pytest.approx(area(t), rel=0.01)
     ob, tb = out.bounds(), t.bounds()
     assert (ob.x, ob.y) == pytest.approx((tb.x, tb.y), abs=0.05)
