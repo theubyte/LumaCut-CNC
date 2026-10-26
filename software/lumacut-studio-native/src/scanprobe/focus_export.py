@@ -217,8 +217,8 @@ def compensate_for_export(gcode: str, maps: Optional[HeightMapSet], *,
     """Prüft und kompensiert. Der unkorrigierte ``gcode`` bleibt unverändert."""
     res = FocusExport()
     if maps is None or not maps.maps:
-        res.errors.append("Kein Höhenmesh vorhanden – erst „Auto-Probe“ ausführen oder ein "
-                          "Höhenmesh laden.")
+        res.errors.append("Kein Höhenmesh vorhanden – Höhenmesh messen (macht der Auftrag "
+                          "automatisch) oder laden.")
         return res
     res.errors += precheck_gcode(gcode)
     errs, warns = check_maps(maps, mosaic, now, max_age_h)

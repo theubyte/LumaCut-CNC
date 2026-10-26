@@ -154,7 +154,6 @@ def test_send_paths_with_two_heights(qapp, tmp_path, monkeypatch):
         sp = win.scan_panel
         sp.ask = False
         sp.set_maps(two_heights())
-        sp.focus_check.setChecked(True)
         pi_z = {"v": 2.0}
         monkeypatch.setattr(sp, "_pi_surface_z", lambda: pi_z["v"])
         win._send_canvas_job()

@@ -1,10 +1,15 @@
 """Scan-&-Probe-Panel für LumaCut Studio (PySide6).
 
-Bedienung (rechte Spalte im Hauptfenster):
+Hauptansicht (Anforderungen 2026-10-26 §3/§5): nur **Kamera-Scan** (optional),
+Pause/Abbrechen, Fortschritt und eine Statuszeile. Höhenmesh und
+Fokuskorrektur laufen automatisch im Auftrag (``job_flow.OneClickJob``); es
+gibt keinen Haken „Fokuskorrektur anwenden“ mehr. Alles Weitere steckt unter
+**„Mehr …“**:
 
 1. Quelle wählen: *Simulation* (ohne Hardware) oder *Maschine (Pi-API)*
    mit Kamera „Pi (Snapshot)“ oder „Lokal (USB/URL)“ und der Kalibrierung vom Pi.
-2. **Scan starten** – Kachel-Scan bei fester Höhe, Stitching, Objekterkennung.
+   „Kamera-Scan“ wechselt bei verbundenem Pi selbst auf *Maschine*.
+2. **Kamera-Scan** – Kachel-Scan bei fester Höhe, Stitching, Objekterkennung.
    Das Mosaik wird Hintergrund der Arbeitsfläche, erkannte Werkstücke
    erscheinen als gestrichelte Hilfsformen und in der Liste.
 3. **Auto-Probe** – probt die angehakten Werkstücke (optional nur die unter
@@ -28,7 +33,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QGraphicsItem,
     QGraphicsPathItem, QGraphicsPixmapItem, QGraphicsSimpleTextItem, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
-    QVBoxLayout, QWidget,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import adapters
@@ -285,6 +290,11 @@ class ScanPanel(QWidget):
         # Fähigkeiten des Pi (moveto/Snapshot); None = noch nicht gelesen
         self.pi_features: Optional[adapters.PiFeatures] = None
         self._camera_kind_chosen = False    # Nutzer hat Pi/Lokal selbst gewählt
+        self._mode_chosen = False           # Nutzer hat Simulation/Maschine selbst gewählt
+        # Nur für Tests/Fehlersuche, nie in der Oberfläche: Auftrag ohne Fokuskorrektur
+        self.skip_focus_correction = False
+        # Laufender Ein-Klick-Auftrag (pause/resume/cancel), steuert Pause/Abbrechen mit
+        self.external_run: Any = None
         self.hardware: Optional[adapters.Hardware] = None
         self.workflow: Optional[ScanProbeWorkflow] = None
         self.worker: Optional[ScanProbeWorker] = None
@@ -306,13 +316,58 @@ class ScanPanel(QWidget):
 
     # ------------------------------------------------------------------ UI
     def _build(self) -> None:
-        lay = QVBoxLayout(self)
+        main = QVBoxLayout(self)
+        main.setContentsMargins(0, 0, 0, 0)
+        # --- Hauptansicht: ein Knopf + Fortschritt ---
+        self.scan_button = QPushButton("Kamera-Scan")
+        self.scan_button.setObjectName("primary")
+        self.scan_button.setMinimumHeight(36)
+        self.scan_button.setToolTip("Optional: Arbeitsfläche fotografieren und als Hintergrund "
+                                    "zum genauen Platzieren legen")
+        self.scan_button.clicked.connect(self.camera_scan)
+        main.addWidget(self.scan_button)
+        row = QHBoxLayout()
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.setCheckable(True)
+        self.pause_button.toggled.connect(self._pause_toggled)
+        self.cancel_button = QPushButton("Abbrechen")
+        self.cancel_button.setObjectName("danger")
+        self.cancel_button.clicked.connect(self.cancel)
+        row.addWidget(self.pause_button)
+        row.addWidget(self.cancel_button)
+        main.addLayout(row)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        self.progress.setFormat("%v / %m")
+        main.addWidget(self.progress)
+        self.phase_label = QLabel("Bereit")
+        self.phase_label.setWordWrap(True)
+        main.addWidget(self.phase_label)
+        self.preview = QLabel()
+        self.preview.setFixedHeight(90)
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setVisible(False)
+        main.addWidget(self.preview)
+        self.more_button = QToolButton()
+        self.more_button.setText("Mehr …")
+        self.more_button.setCheckable(True)
+        self.more_button.setToolTip("Quelle, Kalibrierung, Werkstücke, Höhenmesh, Export")
+        main.addWidget(self.more_button)
+
+        # --- „Mehr …“: alles für Fachleute, standardmäßig verborgen ---
+        self.advanced = QWidget()
+        self.advanced.setVisible(False)
+        self.more_button.toggled.connect(self.show_advanced)
+        main.addWidget(self.advanced)
+        lay = QVBoxLayout(self.advanced)
         lay.setContentsMargins(0, 0, 0, 0)
         form = QFormLayout()
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("Simulation (ohne Hardware)", MODE_SIM)
         self.mode_combo.addItem("Maschine (Pi-API + Kamera)", MODE_PI)
         self.mode_combo.currentIndexChanged.connect(self._mode_changed)
+        self.mode_combo.activated.connect(self._mode_activated)
         form.addRow("Quelle", self.mode_combo)
         self.camera_kind_combo = QComboBox()
         self.camera_kind_combo.addItem("Pi (Snapshot)", adapters.CAMERA_PI)
@@ -364,45 +419,17 @@ class ScanPanel(QWidget):
         lay.addWidget(self.design_only)
 
         row = QHBoxLayout()
-        self.scan_button = QPushButton("Scan starten")
-        self.scan_button.setObjectName("primary")
-        self.scan_button.clicked.connect(self.start_scan)
-        self.probe_button = QPushButton("Auto-Probe")
+        self.probe_button = QPushButton("Nur Höhenmesh messen")
+        self.probe_button.setToolTip("Für Fachleute – der Auftrag misst ohnehin automatisch")
         self.probe_button.clicked.connect(self.start_probe)
-        row.addWidget(self.scan_button)
-        row.addWidget(self.probe_button)
-        lay.addLayout(row)
-        self.full_button = QPushButton("Scan + Probe (komplett)")
+        self.full_button = QPushButton("Scan + Höhenmesh")
         self.full_button.clicked.connect(self.start_full)
-        lay.addWidget(self.full_button)
-
-        row = QHBoxLayout()
-        self.pause_button = QPushButton("Pause")
-        self.pause_button.setCheckable(True)
-        self.pause_button.toggled.connect(self._pause_toggled)
-        self.cancel_button = QPushButton("Abbrechen")
-        self.cancel_button.setObjectName("danger")
-        self.cancel_button.clicked.connect(self.cancel)
-        row.addWidget(self.pause_button)
-        row.addWidget(self.cancel_button)
+        row.addWidget(self.probe_button)
+        row.addWidget(self.full_button)
         lay.addLayout(row)
-
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
-        self.progress.setFormat("%v / %m")
-        lay.addWidget(self.progress)
-        self.phase_label = QLabel("Bereit")
-        self.phase_label.setWordWrap(True)
-        lay.addWidget(self.phase_label)
         self.estimate_label = QLabel("")
         self.estimate_label.setWordWrap(True)
         lay.addWidget(self.estimate_label)
-        self.preview = QLabel()
-        self.preview.setFixedHeight(90)
-        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setVisible(False)
-        lay.addWidget(self.preview)
 
         lay.addWidget(QLabel("Erkannte Werkstücke"))
         self.objects_list = QListWidget()
@@ -455,19 +482,9 @@ class ScanPanel(QWidget):
         self.reuse_check = QCheckBox("Geladenes Mesh nach Kontrollmessung wiederverwenden")
         self.reuse_check.setChecked(True)
         lay.addWidget(self.reuse_check)
-        # Export mit Fokuskorrektur (unkorrigierter Export bleibt Standard)
-        self.focus_check = QCheckBox("Fokuskorrektur anwenden (Höhenmesh)")
-        self.focus_check.setChecked(False)
-        self.focus_check.setToolTip(
-            "Z je Segment aus dem Höhenmesh – gilt für „An Pi senden“ und „G-Code exportieren“.")
-        lay.addWidget(self.focus_check)
-        self.focus_hint = QLabel("")
-        self.focus_hint.setWordWrap(True)
-        self.focus_hint.setStyleSheet("color: #93a1b5;")
-        lay.addWidget(self.focus_hint)
         self.export_button = QPushButton("G-Code exportieren …")
         self.export_button.setToolTip("Sichtbare Ebenen als Marlin-G-Code speichern "
-                                      "(mit Fokuskorrektur, falls angehakt)")
+                                      "(fokuskorrigiert, sobald ein Höhenmesh vorliegt)")
         self.export_button.clicked.connect(self._export_dialog)
         lay.addWidget(self.export_button)
         self.clear_button = QPushButton("Scan-Anzeige leeren")
@@ -483,9 +500,60 @@ class ScanPanel(QWidget):
     def set_mode(self, mode: str) -> None:
         self.mode_combo.setCurrentIndex(self.mode_combo.findData(mode))
 
+    def _mode_activated(self, *_):
+        self._mode_chosen = True
+
     @property
     def busy(self) -> bool:
-        return self.worker is not None
+        return self.worker is not None or self.external_run is not None
+
+    def show_advanced(self, visible: bool = True) -> None:
+        """„Mehr …“ auf-/zuklappen."""
+        if self.more_button.isChecked() != visible:
+            self.more_button.setChecked(visible)   # ruft show_advanced erneut
+            return
+        self.advanced.setVisible(visible)
+        self.more_button.setText("Weniger" if visible else "Mehr …")
+
+    def attach_external_run(self, run: Any, text: str = "Auftrag läuft …") -> None:
+        """Ein-Klick-Auftrag übernimmt Pause/Abbrechen/Fortschritt dieses Panels."""
+        self.external_run = run
+        self.progress.setRange(0, 0)
+        self._notify(text)
+        self.busyChanged.emit(True)
+        self._update_enabled()
+
+    def detach_external_run(self) -> None:
+        self.external_run = None
+        self.busyChanged.emit(self.busy)
+        self._update_enabled()
+
+    def show_job_event(self, ev: dict) -> None:
+        """``job_state``-Ereignis (``scanprobe.contract``) in Fortschritt/Status zeigen."""
+        if ev.get("type") != "job_state":
+            return
+        step, steps, prog = ev.get("step"), ev.get("steps") or 5, ev.get("progress")
+        if step:
+            frac = (step - 1 + (prog if prog is not None else 0.0)) / steps
+            self.progress.setRange(0, 100)
+            self.progress.setValue(int(round(100 * frac)))
+            self.progress.setFormat(f"Schritt {step}/{steps} · {ev.get('label', '')}")
+        elif ev.get("state") in ("fertig", "fehler", "abgebrochen"):
+            self.progress.setRange(0, 100)
+            self.progress.setValue(100 if ev["state"] == "fertig" else 0)
+            self.progress.setFormat(ev.get("label", ""))
+        text = f"{ev.get('label', '')}: {ev.get('message', '')}".strip(": ")
+        if ev.get("state") == "fehler":
+            self.last_error = ev.get("message", "")
+            text = f"Fehler: {ev.get('message', '')}"
+        self._notify(text)
+
+    def camera_scan(self) -> bool:
+        """Der eine Knopf der Hauptansicht: Kamera-Scan als Canvas-Hintergrund.
+        Bei verbundenem Pi wird automatisch die Maschine benutzt."""
+        if not self._mode_chosen and self.mode == MODE_SIM and self._client() is not None:
+            self.set_mode(MODE_PI)
+        return self.start_scan()
 
     @property
     def camera_kind(self) -> str:
@@ -554,13 +622,8 @@ class ScanPanel(QWidget):
             w.setEnabled(not busy and self.canvas is not None)
         self.clear_marks_button.setEnabled(not busy and bool(self.manual_areas))
         self.save_button.setEnabled(not busy and self.maps is not None)
-        has_maps = self.maps is not None and bool(self.maps.maps)
-        if not has_maps:
-            self.focus_check.setChecked(False)
-        self.focus_check.setEnabled(not busy and has_maps)
-        self.focus_hint.setText("" if has_maps else
-                                "Fokuskorrektur: erst „Auto-Probe“ ausführen oder Höhenmesh laden.")
         self.export_button.setEnabled(not busy)
+        self.more_button.setEnabled(True)
         self.pause_button.setEnabled(busy)
         self.cancel_button.setEnabled(busy)
         if not busy and self.pause_button.isChecked():
@@ -993,14 +1056,15 @@ class ScanPanel(QWidget):
 
     @Slot(bool)
     def _pause_toggled(self, paused: bool) -> None:
-        if self.worker is None:
+        target = self.worker if self.worker is not None else self.external_run
+        if target is None:
             return
         if paused:
-            self.worker.pause()
+            target.pause()
             self.pause_button.setText("Fortsetzen")
             self._notify("Pausiert – nach dem aktuellen Schritt angehalten")
         else:
-            self.worker.resume()
+            target.resume()
             self.pause_button.setText("Pause")
             self._notify("Fortgesetzt")
 
@@ -1011,8 +1075,9 @@ class ScanPanel(QWidget):
         self.pause_button.setChecked(False)
 
     def cancel(self) -> None:
-        if self.worker is not None:
-            self.worker.cancel()
+        target = self.worker if self.worker is not None else self.external_run
+        if target is not None:
+            target.cancel()
             self._notify("Abbruch angefordert …")
 
     def shutdown(self, timeout_ms: int = 5000) -> None:
@@ -1190,33 +1255,39 @@ class ScanPanel(QWidget):
         self.last_focus_export = res
         return res
 
-    def prepare_job_gcode(self, gcode: str) -> Optional[str]:
-        """Hook für jeden G-Code-Export/Versand.
+    @property
+    def has_maps(self) -> bool:
+        return self.maps is not None and bool(self.maps.maps)
 
-        Ohne Haken bei „Fokuskorrektur anwenden“ kommt ``gcode`` unverändert
-        zurück. Mit Haken: korrigierter G-Code, oder ``None`` bei Fehler bzw.
-        wenn Warnungen nicht bestätigt wurden.
+    def prepare_job_gcode(self, gcode: str) -> Optional[str]:
+        """Hook für jeden G-Code-Export/Versand (Anforderungen 2026-10-26 §1).
+
+        Liegt ein Höhenmesh vor, wird **immer** fokuskorrigiert – es gibt keine
+        Auswahl mehr. Ohne Mesh kommt ``gcode`` unverändert zurück (der
+        Ein-Klick-Auftrag misst dann selbst). ``None`` bei Fehlern; ein zu altes
+        Mesh ist ein Fehler („neu messen“). Übrige Warnungen werden automatisch
+        behandelt und nur als Hinweis gemeldet. ``skip_focus_correction`` ist
+        ein verstecktes Experten-/Test-Schalterchen ohne Oberfläche.
         """
         self.last_focus_export = None
-        if not self.focus_check.isChecked():
+        if self.skip_focus_correction or not self.has_maps:
             return gcode
         res = self.compensate(gcode)
-        if not res.ok:
-            self._error(" ".join(res.errors))
+        errors = list(res.errors)
+        if res.ok:
+            stale = [w for w in res.warnings if " h alt (> " in w]
+            if stale:
+                errors = stale + ["Höhenmesh neu messen – der Auftrag tut das automatisch."]
+        if errors:
+            self._error(" ".join(errors))
             if self.ask:
-                QMessageBox.critical(self, "Fokuskorrektur nicht möglich", res.summary())
+                QMessageBox.critical(self, "Fokuskorrektur nicht möglich",
+                                     "\n".join(errors))
             return None
-        if res.warnings and self.ask:
-            answer = QMessageBox.warning(
-                self, "Fokuskorrektur – bitte prüfen", res.summary() + "\n\nTrotzdem fortfahren?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No)
-            if answer != QMessageBox.StandardButton.Yes:
-                self._notify("Export abgebrochen (Fokuskorrektur).")
-                return None
         r = res.report
+        self.last_notes = list(res.warnings)
         self._notify(f"Fokuskorrektur: Z {r.z_min:.2f} … {r.z_max:.2f} mm"
-                     + (f", {len(res.warnings)} Warnung(en)" if res.warnings else ""))
+                     + (f" ({len(res.warnings)} Hinweis(e))" if res.warnings else ""))
         return res.gcode
 
     def _job_gcode_with_note(self) -> tuple[str, str]:
@@ -1254,7 +1325,8 @@ class ScanPanel(QWidget):
         return True
 
     def _export_dialog(self) -> None:
-        name = "auftrag_fokus.gcode" if self.focus_check.isChecked() else "auftrag.gcode"
+        name = "auftrag_fokus.gcode" if self.has_maps and not self.skip_focus_correction \
+            else "auftrag.gcode"
         path, _ = QFileDialog.getSaveFileName(self, "G-Code exportieren", name, "G-Code (*.gcode *.nc)")
         if path:
             self.export_gcode(path)

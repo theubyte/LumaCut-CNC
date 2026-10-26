@@ -171,7 +171,7 @@ def test_job_completely_outside_is_error():
 
 def test_no_maps_is_error():
     res = compensate_for_export(job([(110, 110), (150, 110)]), None)
-    assert not res.ok and "Auto-Probe" in res.errors[0]
+    assert not res.ok and "Höhenmesh messen" in res.errors[0]
 
 
 def test_old_mesh_warns():
@@ -240,33 +240,42 @@ def _add_rect(editor, x, y, w, h):
     editor.document.add_shape(Shape("rect", Geometry(x, y, w, h), editor.document.active_layer_id))
 
 
-def test_focus_option_disabled_without_mesh(panel, editor, tmp_path):
+def test_focus_correction_is_automatic_with_mesh(panel, editor, tmp_path):
+    """Anforderungen 2026-10-26 §1: keine Auswahl mit/ohne Höhenmesh mehr."""
     from lumacut_job.planner import optimized_document_gcode as document_to_gcode
-    assert not panel.focus_check.isEnabled() and not panel.focus_check.isChecked()
-    assert "Auto-Probe" in panel.focus_hint.text()
+    assert not hasattr(panel, "focus_check") and not hasattr(panel, "focus_hint")
     _add_rect(editor, 80, 80, 40, 30)   # Maschine 110..150 / 110..140
     plain = document_to_gcode(editor.document)
-    assert panel.prepare_job_gcode(plain) == plain          # Standard: unverändert
+    assert panel.prepare_job_gcode(plain) == plain          # ohne Mesh: der Auftrag misst selbst
     p = tmp_path / "a.gcode"
     assert panel.export_gcode(p) and p.read_text() == plain
-    # Mesh laden -> Option verfügbar, Export korrigiert
+    # Mesh vorhanden -> immer korrigiert, ohne Haken
     panel.set_maps(fake_maps())
-    assert panel.focus_check.isEnabled() and panel.focus_hint.text() == ""
-    panel.focus_check.setChecked(True)
     assert panel.export_gcode(p)
     out = p.read_text()
     assert out != plain and "Fokuskorrektur" in out and zs(out)
     assert panel.last_focus_export.ok
-    # Mesh weg -> Haken fällt weg, wieder unkorrigiert
+    # Verstecktes Experten-/Test-Schalterchen
+    panel.skip_focus_correction = True
+    assert panel.prepare_job_gcode(plain) == plain
+    panel.skip_focus_correction = False
+    # Mesh weg -> wieder unkorrigiert
     panel.clear()
-    assert not panel.focus_check.isChecked() and not panel.focus_check.isEnabled()
     assert panel.export_gcode(p) and p.read_text() == plain
+
+
+def test_stale_mesh_is_an_error_not_a_question(panel, editor):
+    import time
+    from lumacut_job.planner import optimized_document_gcode as document_to_gcode
+    _add_rect(editor, 80, 80, 40, 30)
+    panel.set_maps(fake_maps(created=time.time() - 48 * 3600))
+    assert panel.prepare_job_gcode(document_to_gcode(editor.document)) is None
+    assert "alt" in panel.last_error and "neu messen" in panel.last_error
 
 
 def test_focus_export_error_blocks_export(panel, editor, tmp_path):
     _add_rect(editor, 300, 300, 20, 20)   # weit außerhalb des Meshes
     panel.set_maps(fake_maps())
-    panel.focus_check.setChecked(True)
     p = tmp_path / "b.gcode"
     assert not panel.export_gcode(p) and not p.exists()
     assert "Keine Brennstrecke" in panel.last_error
@@ -279,7 +288,6 @@ def test_end_to_end_scan_probe_export(panel, editor, tmp_path):
     assert panel.maps.fingerprints            # beim Proben angelegt
     # Design auf dem schrägen Rechteck-Werkstück (Maschine 70..190 / 80..170)
     _add_rect(editor, 60, 70, 60, 40)
-    panel.focus_check.setChecked(True)
     p = tmp_path / "c.gcode"
     assert panel.export_gcode(p), panel.last_error
     res = panel.last_focus_export
@@ -303,14 +311,12 @@ def test_main_window_send_uses_focus_option(qapp, tmp_path, monkeypatch):
     _add_rect(win.canvas, 80, 80, 40, 30)
     plain = document_to_gcode(win.canvas.document)
     win._send_canvas_job()
-    assert sent[-1] == plain                            # Standard unverändert
+    assert sent[-1] == plain                            # ohne Mesh unverändert
     win.scan_panel.ask = False
     win.scan_panel.set_maps(fake_maps())
-    win.scan_panel.focus_check.setChecked(True)
     win._send_canvas_job()
     assert sent[-1] != plain and "Fokuskorrektur" in sent[-1]
     win.scan_panel.set_maps(fake_maps(rect=Rect(300, 300, 350, 350)))   # passt nicht
-    win.scan_panel.focus_check.setChecked(True)
     win._send_canvas_job()
     assert len(sent) == 2                               # Fehler -> nichts gesendet
     win.canvas.undo_stack.setClean()
@@ -477,7 +483,6 @@ def test_scan_export_matches_send_with_selection_only(qapp, monkeypatch, tmp_pat
     assert sent and sent[-1] == out.read_text()          # Datei == gesendeter Auftrag
     # Mit Fokuskorrektur: ebenfalls nur die Auswahl, identisch zum Senden
     panel.set_maps(fake_maps())
-    panel.focus_check.setChecked(True)
     assert panel.export_gcode(out)
     corrected = out.read_text()
     assert "Fokuskorrektur" in corrected and zs(corrected)
