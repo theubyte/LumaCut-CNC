@@ -23,6 +23,13 @@ data class JobProgress(val file: String = "", val state: String = "idle", val li
     val fraction get() = if (total > 0) line.toDouble() / total else 0.0
 }
 
+/** Laser-off outline run (op=frame). */
+@Serializable
+data class FrameProgress(val state: String = "idle", val mode: String = "", val line: Int = 0,
+                         val total: Int = 0, val error: String = "") {
+    val active get() = state == "running"
+}
+
 @Serializable
 data class FirmwareUpdate(val state: String = "idle", val progress: Int = 0, val message: String = "")
 
@@ -57,6 +64,7 @@ data class MachineStatus(
     val firmware_upload_supported: Boolean = false,
     val firmware_update: FirmwareUpdate = FirmwareUpdate(),
     val job: JobProgress = JobProgress(),
+    val frame: FrameProgress = FrameProgress(),
     val config: PiConfig = PiConfig(),
     val recent: List<String> = emptyList(),
 ) {
@@ -133,6 +141,9 @@ class PiClient(
         return message(call(Request.Builder().url(url("api", "action")).post(form).build(), longRunning = long))
     }
 
+    /** Traces [program] (from [Frame.program]) with the laser off. */
+    suspend fun frame(program: String, mode: Frame.Mode): String = action("frame", mapOf("gcode" to program, "mode" to mode.api))
+
     suspend fun settings(values: Map<String, String>): String {
         val form = FormBody.Builder().apply { values.forEach { (k, v) -> add(k, v) } }.build()
         return message(call(Request.Builder().url(url("api", "settings")).post(form).build()))
@@ -153,7 +164,7 @@ class PiClient(
     }
 
     companion object {
-        val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun",
+        val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame",
                             "abort", "estop", "estop_reset")
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

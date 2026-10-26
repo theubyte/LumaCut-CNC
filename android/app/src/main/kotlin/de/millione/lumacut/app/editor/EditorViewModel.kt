@@ -265,6 +265,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ---------- documents & output ---------- */
 
+    /** Replaces the project (e.g. by a generated material test); undo brings the old one back. */
+    fun replaceDocument(d: Document) {
+        change { d }
+        _selected.value = null
+        _activeLayer.value = d.layers.first().id
+    }
+
     fun newDocument() { change { Document(layers = it.layers) }; _selected.value = null }
 
     fun openJson(text: String) = runCatching { Document.fromJson(text) }

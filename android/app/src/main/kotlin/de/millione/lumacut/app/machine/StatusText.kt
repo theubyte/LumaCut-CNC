@@ -13,6 +13,7 @@ fun headline(s: MachineStatus?, online: Boolean?, host: String): Headline = when
     !s.connected -> Headline(Tone.BAD, "Controller getrennt", s.fault.ifBlank { "USB-Verbindung zum SKR fehlt." })
     s.emergency_latched -> Headline(Tone.BAD, "Notstopp aktiv", "SKR zurücksetzen (Reset-Taste oder kurz stromlos), dann quittieren.")
     s.firmware_update.state in setOf("uploading", "rebooting") -> Headline(Tone.BUSY, "Firmware-Update", s.firmware_update.message)
+    s.frame.active -> Headline(Tone.BUSY, "Rahmenfahrt", "Laser aus · ${s.frame.line}/${s.frame.total}")
     s.job.state == "homing" -> Headline(Tone.BUSY, "Referenzfahrt", s.job.file)
     s.job.state == "probing" -> Headline(Tone.BUSY, "Werkstück wird abgetastet", s.job.file)
     s.job.state == "running" -> Headline(Tone.BUSY, "Auftrag läuft", s.job.file)
@@ -25,4 +26,4 @@ fun headline(s: MachineStatus?, online: Boolean?, host: String): Headline = when
 }
 
 fun MachineStatus?.canControl(online: Boolean?) =
-    this != null && online == true && connected && !emergency_latched && ownerFree && !job.active
+    this != null && online == true && connected && !emergency_latched && ownerFree && !job.active && !frame.active

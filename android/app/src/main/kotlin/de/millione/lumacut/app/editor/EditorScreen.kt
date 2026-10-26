@@ -89,6 +89,13 @@ import de.millione.lumacut.app.ui.TextInput
 import de.millione.lumacut.app.ui.drawBed
 import de.millione.lumacut.app.ui.rememberConfirm
 import de.millione.lumacut.core.Bed
+import de.millione.lumacut.core.Frame
+import de.millione.lumacut.core.MaterialTest
+import de.millione.lumacut.core.Toolpath
+import de.millione.lumacut.core.formatDuration
+import de.millione.lumacut.app.machine.canControl
+import de.millione.lumacut.app.ui.Banner
+import de.millione.lumacut.app.ui.Tile
 import de.millione.lumacut.core.Element
 import de.millione.lumacut.core.ImageMode
 import de.millione.lumacut.core.JobBuildException
@@ -122,6 +129,9 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
     var textAt by remember { mutableStateOf<Pt?>(null) }
     var sending by remember { mutableStateOf(false) }
     var cameraOpen by remember { mutableStateOf(false) }
+    var materialTest by remember { mutableStateOf(false) }
+    val machineStatus by machine.status.collectAsStateWithLifecycle()
+    val machineOnline by machine.online.collectAsStateWithLifecycle()
 
     val svgPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
@@ -178,6 +188,9 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
             IconBtn(LcIcons.svg, "SVG importieren", { svgPicker.launch(arrayOf("image/svg+xml", "*/*")) })
             IconBtn(LcIcons.image, "Bild importieren", { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
             IconBtn(LcIcons.camera, "Kamera-Hintergrund", { cameraOpen = true })
+            IconBtn(LcIcons.material, "Materialtest", {
+                confirm = Confirm("Materialtest erstellen?", "Das aktuelle Projekt wird durch ein Testraster ersetzt (Rückgängig holt es zurück).", "Weiter") { materialTest = true }
+            })
             Box(Modifier.width(1.dp).height(36.dp).background(Lc.line))
             IconBtn(LcIcons.plus, "Neues Projekt", { confirm = Confirm("Neues Projekt?", "Alle Elemente werden entfernt. Ebenen bleiben.", "Neu", danger = true) { editor.newDocument() } })
             IconBtn(LcIcons.folder, "Projekt öffnen", { projectOpener.launch(arrayOf("application/json", "*/*")) })
@@ -213,16 +226,22 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
         editor.addVector("Text", oriented.map { p -> p.map { Pt(it.x - b.minX + at.x, it.y - b.minY + at.y) } }, text, size, bold, family)
     } }
 
-    if (sending) SendDialog(doc.title, onDismiss = { sending = false }) { name ->
+    if (sending) SendDialog(
+        title = doc.title,
+        build = { editor.buildGcode(imageTopAtMaxY = originBottom) },
+        onFrame = { tp, mode -> machine.frame(Frame.cutPoints(tp), mode) },
+        canFrame = machineStatus.canControl(machineOnline) && machineStatus?.homed == true,
+        onDismiss = { sending = false },
+    ) { name, gcode ->
         sending = false
-        scope.launch {
-            try {
-                val gcode = editor.buildGcode(imageTopAtMaxY = originBottom)
-                machine.uploadJob(name, gcode)
-                editor.jobSent()
-            } catch (e: JobBuildException) { editor.notify(e.message ?: "Auftrag nicht erzeugbar", true) }
-            catch (e: Exception) { editor.notify(e.message ?: "Fehler", true) }
-        }
+        machine.uploadJob(name, gcode)
+        editor.jobSent()
+    }
+    if (materialTest) MaterialTestDialog(onDismiss = { materialTest = false }) { spec ->
+        materialTest = false
+        val generated = MaterialTest.build(spec) { t, h -> orientForScreen(TextPaths.build(t, h, true, "sans-serif"), originBottom) }
+        editor.replaceDocument(generated)
+        editor.notify("Materialtest mit ${spec.powerSteps * spec.speedSteps} Feldern erstellt")
     }
 
     if (cameraOpen) CameraBackgroundDialog(editor, machine, originBottom) { cameraOpen = false }
@@ -576,18 +595,107 @@ private fun TextDialog(onDismiss: () -> Unit, onOk: (String, Double, Boolean, St
 }
 
 @Composable
-private fun SendDialog(title: String, onDismiss: () -> Unit, onSend: (String) -> Unit) {
+private fun SendDialog(
+    title: String,
+    build: suspend () -> String,
+    onFrame: (Toolpath, Frame.Mode) -> Unit,
+    canFrame: Boolean,
+    onDismiss: () -> Unit,
+    onSend: (String, String) -> Unit,
+) {
     var name by remember { mutableStateOf(PiClient.jobNameFrom(title).removeSuffix(".gcode")) }
+    var gcode by remember { mutableStateOf<String?>(null) }
+    var toolpath by remember { mutableStateOf<Toolpath?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    // Build and check the job before it leaves the tablet: time, size, warnings.
+    LaunchedEffect(Unit) {
+        try {
+            val g = build()
+            toolpath = withContext(Dispatchers.Default) { Toolpath.parse(g) }
+            gcode = g
+        } catch (e: Exception) { error = e.message ?: "Auftrag nicht erzeugbar" }
+    }
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
         title = { Text("An Laser senden", style = LcTypography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 TextInput("Auftragsname", name, { name = it }, Modifier.fillMaxWidth())
-                SmallText("Der Auftrag wird erzeugt, auf dem Pi geprüft und gespeichert. Gestartet wird danach unter Aufträge.")
+                val tp = toolpath
+                val failure = error
+                when {
+                    failure != null -> Banner(failure, Lc.bad)
+                    tp == null -> SmallText("Auftrag wird erzeugt …")
+                    else -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Tile("Dauer (ca.)", formatDuration(tp.stats.seconds), Modifier.weight(1f))
+                            Tile("Laserweg", "%.2f m".format(tp.stats.cutMm / 1000), Modifier.weight(1f))
+                        }
+                        Tile("Größe", tp.bounds?.let { "%.1f × %.1f mm".format(it.width, it.height) } ?: "—", Modifier.fillMaxWidth())
+                        tp.stats.warnings.forEach { Banner(it) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            LcButton("Rahmen", { onFrame(tp, Frame.Mode.BOX) }, Modifier.weight(1f), LcIcons.rect, enabled = canFrame)
+                            LcButton("Gummiband", { onFrame(tp, Frame.Mode.HULL) }, Modifier.weight(1f), LcIcons.polygon, enabled = canFrame)
+                        }
+                        SmallText(if (canFrame) "Rahmen fährt den Umriss mit ausgeschaltetem Laser ab." else "Rahmen fahren: Maschine erst referenzieren.")
+                    }
+                }
             }
         },
-        confirmButton = { LcButton("Senden", { onSend(PiClient.jobNameFrom(name)) }, icon = LcIcons.send, kind = BtnKind.PRIMARY, enabled = name.isNotBlank()) },
+        confirmButton = {
+            LcButton("Senden", { gcode?.let { onSend(PiClient.jobNameFrom(name), it) } }, icon = LcIcons.send, kind = BtnKind.PRIMARY,
+                enabled = name.isNotBlank() && gcode != null)
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) } },
+    )
+}
+
+@Composable
+private fun MaterialTestDialog(onDismiss: () -> Unit, onCreate: (MaterialTest.Spec) -> Unit) {
+    var pFrom by remember { mutableStateOf("20") }
+    var pTo by remember { mutableStateOf("100") }
+    var pSteps by remember { mutableStateOf("5") }
+    var sFrom by remember { mutableStateOf("300") }
+    var sTo by remember { mutableStateOf("3000") }
+    var sSteps by remember { mutableStateOf("5") }
+    var mode by remember { mutableStateOf(LayerMode.FILL) }
+    var cell by remember { mutableStateOf("10") }
+    var interval by remember { mutableStateOf("0.1") }
+    val spec = runCatching {
+        MaterialTest.Spec(
+            powerFrom = pFrom.toDouble(), powerTo = pTo.toDouble(), powerSteps = pSteps.toInt(),
+            speedFrom = sFrom.toDouble(), speedTo = sTo.toDouble(), speedSteps = sSteps.toInt(),
+            mode = mode, cellMm = cell.toDouble().coerceIn(3.0, 40.0), intervalMm = interval.toDouble().coerceIn(0.03, 2.0),
+        )
+    }.getOrNull()
+    val valid = spec != null && spec.powerSteps in 1..10 && spec.speedSteps in 1..10 &&
+        spec.powerFrom in 0.0..100.0 && spec.powerTo in 0.0..100.0 && spec.speedFrom in 10.0..9000.0 && spec.speedTo in 10.0..9000.0
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
+        title = { Text("Materialtest", style = LcTypography.titleLarge) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SmallText("Raster aus Leistung (Spalten) × Tempo (Zeilen). Jedes Feld bekommt eine eigene Ebene, die Beschriftung wird leicht graviert.")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NumberField("Leistung von", pFrom, { pFrom = it }, Modifier.weight(1f), "%")
+                    NumberField("bis", pTo, { pTo = it }, Modifier.weight(1f), "%")
+                    NumberField("Stufen", pSteps, { pSteps = it }, Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NumberField("Tempo von", sFrom, { sFrom = it }, Modifier.weight(1f))
+                    NumberField("bis", sTo, { sTo = it }, Modifier.weight(1f))
+                    NumberField("Stufen", sSteps, { sSteps = it }, Modifier.weight(1f))
+                }
+                Segmented(listOf(LayerMode.FILL to "Gravieren", LayerMode.LINE to "Schneiden"), mode, { mode = it })
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NumberField("Feldgröße", cell, { cell = it }, Modifier.weight(1f), "mm")
+                    NumberField("Zeilenabstand", interval, { interval = it }, Modifier.weight(1f), "mm")
+                }
+            }
+        },
+        confirmButton = {
+            LcButton("Erstellen", { if (valid) spec?.let(onCreate) }, kind = BtnKind.PRIMARY, enabled = valid)
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) } },
     )
 }

@@ -189,6 +189,12 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
 
     fun uploadFirmware(name: String, bytes: ByteArray) = request("firmware") { it.uploadFirmware(name, bytes) }
 
+    /** Laser-off outline of the burned points ([Frame.cutPoints] or document geometry). */
+    fun frame(points: List<Pt>, mode: de.millione.lumacut.core.Frame.Mode) {
+        if (points.isEmpty()) { notify("Kein Motiv für den Rahmen", true); return }
+        request("frame") { it.frame(de.millione.lumacut.core.Frame.program(points, mode), mode) }
+    }
+
     fun saveSettings(values: Map<String, String>) = request("settings") { it.settings(values) }
 
     /** Head position the Pi would need for probing at [p] (probe tip lands on p). */

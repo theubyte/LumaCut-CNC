@@ -53,6 +53,7 @@ import de.millione.lumacut.app.machine.JobView
 import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.app.machine.canControl
 import de.millione.lumacut.core.Bed
+import de.millione.lumacut.core.Frame
 import de.millione.lumacut.core.PiClient
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Toolpath
@@ -184,6 +185,18 @@ private fun JobDetail(machine: MachineViewModel, view: JobView, busy: Set<String
                 }
             } else {
                 val ready = status.canControl(online) && tp?.bounds != null
+                if (status?.frame?.active == true) {
+                    Banner("Rahmenfahrt läuft (Laser aus) · ${status?.frame?.line}/${status?.frame?.total}", Lc.info)
+                    LcButton("Rahmen abbrechen", { machine.action("abort") }, Modifier.fillMaxWidth(), kind = BtnKind.DANGER, busy = "abort" in busy)
+                }
+                // Laser-off outline first: shows where the job will burn before anything is lasered.
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    val canFrame = ready && status?.homed == true
+                    LcButton("Rahmen", { tp?.let { machine.frame(Frame.cutPoints(it), Frame.Mode.BOX) } },
+                        Modifier.weight(1f), LcIcons.rect, busy = "frame" in busy, enabled = canFrame)
+                    LcButton("Gummiband", { tp?.let { machine.frame(Frame.cutPoints(it), Frame.Mode.HULL) } },
+                        Modifier.weight(1f), LcIcons.polygon, busy = "frame" in busy, enabled = canFrame)
+                }
                 LcButton("Ein-Klick-Start", {
                     val p = view.probe
                     confirm = Confirm("Ein-Klick-Start",
