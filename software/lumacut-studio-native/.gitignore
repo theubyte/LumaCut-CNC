@@ -1,0 +1,4 @@
+# PyInstaller-Ausgabe (build_exe.py / build-windows.bat)
+build/
+dist/
+*.spec

@@ -38,9 +38,11 @@ jobs:
           PYTHONUTF8: '1'
         run: python -m pytest -q
 
+      # Dieselben PyInstaller-Optionen wie build-windows.bat (build_exe.py):
+      # alle eigenen Pakete, materials.json, SVG/DXF/PDF-Import. build_exe.py
+      # prüft danach, dass die Materialdaten im Build liegen.
       - name: Build executable
-        run: |
-          pyinstaller --windowed --name LumaCutStudio --clean --noconfirm src/main.py
+        run: python build_exe.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
