@@ -11,15 +11,22 @@ von :class:`MaterialQuickPanel` belegt.
 
 Eingebunden von ``main.py`` mit :func:`install_materials`; nutzt nur die
 öffentlichen APIs von Editor (``document``, ``undo_stack``) und
-Maschinenpanel (``send_gcode``).
+Maschinenpanel (``send_gcode``, ``connection_changed``, ``client``).
+
+Materialdatenbank und eigene Presets liegen auf dem Pi (:mod:`.sync`): beim
+Verbinden holt :class:`MaterialTools` sie im Hintergrund, Speichern geht bei
+bestehender Verbindung direkt auf den Pi, sonst später. Ohne Pi arbeitet
+Studio mit der zuletzt geladenen bzw. der mitgelieferten Datenbank.
 """
 
 from __future__ import annotations
 
+import os
+import threading
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QStandardPaths, Qt, Signal
+from PySide6.QtCore import QObject, QStandardPaths, Qt, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout, QInputDialog, QLabel,
@@ -33,6 +40,8 @@ from .link import install_link_hook, link_status, parse_ref, plan_layer_attrs, p
 from .depth3d import apply_to_image_settings, depth3d_image_settings
 from .process import process_defaults
 from .presets import Preset, PresetStore, make_preset
+from .remote import HttpMaterialsTransport
+from .sync import MaterialSync, PresetConflict, SyncResult
 from .relief import job_from_plan, relief_to_gcode
 from .planner import plan_relief
 from .testgrid import is_test_cell, preset_from_test_cell, find_test_cells
@@ -43,6 +52,12 @@ STATUS_LABELS = {"ok": "", "caution": " ⚠", "engrave_only": " (nur Gravur)"}
 def default_preset_path() -> Path:
     base = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation) or str(Path.home())
     return Path(base) / "material_presets.json"
+
+
+def default_sync_dir() -> Path:
+    """Ordner für Pi-Kopie und Abgleichzustand (``LUMACUT_MATERIALS_DIR`` überschreibt)."""
+    env = os.environ.get("LUMACUT_MATERIALS_DIR")
+    return Path(env) if env else default_preset_path().parent
 
 
 def apply_preset(editor, preset: Preset, layer_id: str | None = None, link: bool = False,
@@ -110,24 +125,27 @@ class MaterialLibraryDialog(QDialog):
     presetsChanged = Signal()  # eigene Presets gespeichert
 
     def __init__(self, editor, parent: QWidget | None = None, db: MaterialDB | None = None,
-                 store: PresetStore | None = None, machine=None) -> None:
+                 store: PresetStore | None = None, machine=None,
+                 sync: MaterialSync | None = None, transport=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Materialbibliothek")
         self.setMinimumWidth(520)
         self.editor = editor
-        self.db = db or load_db()
-        self.store = store if store is not None else PresetStore(default_preset_path())
+        self.sync = sync
+        #: ``() -> Transport | None``: Verbindung zum Pi, falls gerade verbunden
+        self.transport = transport or (lambda: None)
+        self.db = db or (sync.db() if sync is not None else load_db())
+        if store is None:
+            store = sync.store if sync is not None else PresetStore(default_preset_path())
+        self.store = store
         self.machine = machine
+        self.sync_note = ""
         self.preset: Preset | None = None
         self.preset_from_library = False
         install_link_hook(self.db)
 
         self.material = QComboBox()
-        for m in self.db.compatible():
-            self.material.addItem(m.name_de + STATUS_LABELS.get(m.status, ""), m.id)
-        self.material.insertSeparator(self.material.count())
-        for m in self.db.incompatible():
-            self.material.addItem("✕ " + m.name_de, m.id)
+        self._fill_materials()
         self.thickness = QComboBox()
         self.thickness.setEditable(True)
         self.operation = QComboBox()
@@ -327,6 +345,49 @@ class MaterialLibraryDialog(QDialog):
             return []
         return apply_depth3d(self.editor, fields, shape_ids)
 
+    def _fill_materials(self) -> None:
+        current = self.material.currentData()
+        self.material.blockSignals(True)
+        self.material.clear()
+        for m in self.db.compatible():
+            self.material.addItem(m.name_de + STATUS_LABELS.get(m.status, ""), m.id)
+        self.material.insertSeparator(self.material.count())
+        for m in self.db.incompatible():
+            self.material.addItem("✕ " + m.name_de, m.id)
+        idx = self.material.findData(current) if current is not None else -1
+        self.material.setCurrentIndex(max(0, idx))
+        self.material.blockSignals(False)
+
+    def reload_db(self) -> None:
+        """Nach neuer Datenbank vom Pi: Auswahllisten neu füllen, Auswahl behalten."""
+        self._fill_materials()
+        if hasattr(self, "result"):
+            self._material_changed()
+
+    def _store_preset(self, p: Preset) -> str:
+        """Lokal speichern und – wenn verbunden – auf den Pi schreiben.
+
+        Gibt ``pi``/``pending``/``local`` zurück; Konflikte fragt der Dialog nach."""
+        if self.sync is None:
+            self.store.put(p)
+            self.store.save()
+            return "local"
+        transport = self.transport()
+        try:
+            where = self.sync.save_preset(p, transport)
+        except PresetConflict as conflict:
+            other = "gelöscht" if conflict.remote is None else "geändert"
+            keep_mine = QMessageBox.question(
+                self, "Preset auf dem Pi geändert",
+                f"„{p.name}“ wurde inzwischen auf dem Pi {other}.\n\n"
+                "Ja: meine Fassung speichern (überschreibt den Pi).\n"
+                "Nein: Fassung vom Pi übernehmen.") == QMessageBox.Yes
+            where = self.sync.resolve_conflict(conflict, "mine" if keep_mine else "pi", transport)
+        self.sync_note = {"pi": "auf dem Pi gespeichert",
+                          "pending": "lokal gespeichert, wird beim nächsten Verbinden auf den Pi "
+                                     "übertragen"}.get(where, "lokal gespeichert")
+        return where
+
     def save_preset(self, name: str | None = None) -> Preset | None:
         if self.preset is None:
             return None
@@ -334,9 +395,8 @@ class MaterialLibraryDialog(QDialog):
             name, ok = QInputDialog.getText(self, "Preset speichern", "Name:", text=self.preset.name)
             if not ok or not name.strip():
                 return None
-        p = Preset.from_dict({**self.preset.to_dict(), "name": name.strip()})
-        self.store.put(p)
-        self.store.save()
+        p = Preset.from_dict({**self.preset.to_dict(), "name": name.strip(), "id": ""})
+        self._store_preset(p)
         self._reload_saved()
         self.presetsChanged.emit()
         return p
@@ -381,9 +441,8 @@ class MaterialLibraryDialog(QDialog):
             name, ok = QInputDialog.getText(self, "Testzelle als Preset", "Name:", text=p.name)
             if not ok or not name.strip():
                 return None
-        p = Preset.from_dict({**p.to_dict(), "name": name.strip()})
-        self.store.put(p)
-        self.store.save()
+        p = Preset.from_dict({**p.to_dict(), "name": name.strip(), "id": ""})
+        self._store_preset(p)
         self._reload_saved()
         self.saved.setCurrentIndex(self.saved.findData(p.name))
         self.preset = p
@@ -455,9 +514,7 @@ class MaterialQuickPanel(QObject):
         self.db = db
         self.combo = combo
         combo.setObjectName("design_material_combo")
-        combo.addItem("—", None)
-        for m in db.compatible():
-            combo.addItem(m.name_de + STATUS_LABELS.get(m.status, ""), m.id)
+        self._fill()
         self.thickness = _dspin(0.1, 50, 3.0, 0.5)
         self.thickness.setObjectName("design_material_thickness")
         self.operation = QComboBox()
@@ -489,6 +546,23 @@ class MaterialQuickPanel(QObject):
     @property
     def editor(self):
         return getattr(self.window, "canvas", None)
+
+    def _fill(self) -> None:
+        current = self.combo.currentData()
+        self.combo.blockSignals(True)
+        self.combo.clear()
+        self.combo.addItem("—", None)
+        for m in self.db.compatible():
+            self.combo.addItem(m.name_de + STATUS_LABELS.get(m.status, ""), m.id)
+        idx = self.combo.findData(current) if current is not None else 0
+        self.combo.setCurrentIndex(max(0, idx))
+        self.combo.blockSignals(False)
+
+    def reload(self) -> None:
+        """Nach neuer Datenbank vom Pi neu füllen (Auswahl bleibt, wenn vorhanden)."""
+        self._fill()
+        self._material_changed()
+        self.sync()
 
     def _material_changed(self) -> None:
         mid = self.combo.currentData()
@@ -557,7 +631,10 @@ def _design_material_slot(window) -> tuple[QComboBox, QFormLayout] | None:
 
 
 class MaterialTools(QObject):
-    def __init__(self, window) -> None:
+    #: Ergebnis eines Abgleichs, nachdem es im GUI-Thread angewendet wurde
+    syncFinished = Signal(object)
+
+    def __init__(self, window, sync: MaterialSync | None = None) -> None:
         super().__init__(window)
         self.window = window
         menu = window.menuBar().addMenu("&Material")
@@ -574,17 +651,105 @@ class MaterialTools(QObject):
                                     "Preset für Material/Dicke/Operation speichern")
         self.test_action.triggered.connect(lambda _=False: self.save_test_cell())
         menu.addAction(self.test_action)
+        self.pi_action = QAction("Materialdatenbank vom Pi laden", window)
+        self.pi_action.setObjectName("materials_pi_sync_action")
+        self.pi_action.setToolTip("Materialdatenbank und eigene Presets mit dem Pi abgleichen "
+                                  "(passiert beim Verbinden automatisch)")
+        self.pi_action.triggered.connect(lambda _=False: self.refresh_from_pi())
+        menu.addAction(self.pi_action)
         self.dialog: MaterialLibraryDialog | None = None
-        self.db = load_db()
+        self.sync = sync or MaterialSync(default_sync_dir(), default_preset_path())
+        self.db = self.sync.db()
         install_link_hook(self.db)
         slot = _design_material_slot(window)
         self.quick = MaterialQuickPanel(window, *slot, self.db) if slot else None
+        self._thread: threading.Thread | None = None
+        self._transport = None
+        self._transport_key = None
+        self.last_result: SyncResult | None = None
+        self._results: list[SyncResult] = []
+        # Der Hintergrund-Thread fasst keine Qt-Objekte an (sicher beim Aufräumen);
+        # das Ergebnis holt dieser Timer im GUI-Thread ab.
+        self._poll = QTimer(self)
+        self._poll.setInterval(100)
+        self._poll.timeout.connect(self._collect)
+        machine = getattr(window, "machine_panel", None)
+        if machine is not None and hasattr(machine, "connection_changed"):
+            machine.connection_changed.connect(self._connection_changed)
+        self.pi_action.setEnabled(self.transport() is not None)
+
+    # -- Pi-Abgleich -----------------------------------------------------------
+    def transport(self):
+        """Transport zum verbundenen Pi oder ``None``. Je Verbindung derselbe
+        (er merkt sich die erkannte Server-Variante)."""
+        machine = getattr(self.window, "machine_panel", None)
+        client = getattr(machine, "client", None) if machine is not None else None
+        if client is None or getattr(machine, "connection_state", "") != "connected":
+            return None
+        key = (client.base_url, getattr(client, "_api_key", ""))
+        if self._transport is None or self._transport_key != key:
+            self._transport, self._transport_key = HttpMaterialsTransport.from_client(client), key
+        return self._transport
+
+    def _connection_changed(self, state: str, _text: str = "") -> None:
+        online = state == "connected"
+        self.pi_action.setEnabled(online)
+        if online:
+            self.refresh_from_pi()
+
+    def refresh_from_pi(self, wait: bool = False) -> bool:
+        """Abgleich im Hintergrund starten (``wait``: blockierend, für Tests)."""
+        transport = self.transport()
+        if transport is None or (self._thread is not None and self._thread.is_alive()):
+            return False
+
+        if wait:
+            self._apply_result(self.sync.refresh(transport))
+            return True
+        sync, results = self.sync, self._results
+
+        def work() -> None:  # nur Qt-freie Objekte
+            results.append(sync.refresh(transport))
+
+        self._thread = threading.Thread(target=work, name="material-sync", daemon=True)
+        self._thread.start()
+        self._poll.start()
+        return True
+
+    def _collect(self) -> None:
+        while self._results:
+            self._apply_result(self._results.pop(0))
+        if self._thread is None or not self._thread.is_alive():
+            if not self._results:
+                self._poll.stop()
+
+    def _apply_result(self, result: SyncResult) -> None:
+        self.last_result = result
+        if result.db_changed or result.source in ("pi", "cache"):
+            try:
+                self.db.replace(self.sync.db_data())
+            except MaterialError:
+                pass
+            else:
+                if self.quick is not None:
+                    self.quick.reload()
+                if self.dialog is not None:
+                    self.dialog.reload_db()
+        if result.presets_changed or result.uploaded:
+            if self.dialog is not None:
+                self.dialog._reload_saved()
+            self._presets_changed()
+        bar = getattr(self.window, "statusBar", None)
+        if callable(bar) and result.message:
+            bar().showMessage(result.message, 8000)
+        self.syncFinished.emit(result)
 
     def open(self, modal: bool = False) -> MaterialLibraryDialog:
         if self.dialog is None:
             self.dialog = MaterialLibraryDialog(getattr(self.window, "canvas", None), self.window,
                                                 db=self.db,
-                                                machine=getattr(self.window, "machine_panel", None))
+                                                machine=getattr(self.window, "machine_panel", None),
+                                                sync=self.sync, transport=self.transport)
             self.dialog.presetsChanged.connect(self._presets_changed)
             self.dialog.presetApplied.connect(
                 lambda _lid: self.window.statusBar().showMessage("Material-Startwerte übernommen", 5000))
