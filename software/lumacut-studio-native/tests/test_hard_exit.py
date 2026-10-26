@@ -25,18 +25,19 @@ def calls(monkeypatch):
         log["os_exit"].append(code)
         raise _Exited
 
-    class Kernel32:
-        def GetCurrentProcess(self):
-            return "HANDLE"
+    def get_current_process():
+        return "HANDLE"
 
-        def TerminateProcess(self, handle, code):
-            log["faulthandler_enabled"].append(faulthandler.is_enabled())
-            log["terminate"].append((handle, code))
-            raise _Exited       # the real call never returns
+    def terminate_process(handle, code):
+        log["faulthandler_enabled"].append(faulthandler.is_enabled())
+        log["terminate"].append((handle, code))
+        raise _Exited       # the real call never returns
 
-    fake_ctypes = types.SimpleNamespace(windll=types.SimpleNamespace(kernel32=Kernel32()))
+    kernel32 = types.SimpleNamespace(GetCurrentProcess=get_current_process,
+                                     TerminateProcess=terminate_process)
+    log["kernel32"] = kernel32
     monkeypatch.setattr(_hard_exit.os, "_exit", fake_os_exit)
-    monkeypatch.setitem(sys.modules, "ctypes", fake_ctypes)
+    monkeypatch.setattr(_hard_exit, "_kernel32", lambda: kernel32)
     was_enabled = faulthandler.is_enabled()
     faulthandler.enable()
     yield log
@@ -55,13 +56,19 @@ def test_windows_uses_terminate_process_with_status(calls, status):
     assert calls["faulthandler_enabled"] == [False]
 
 
-def test_windows_falls_back_to_os_exit_if_terminate_fails(calls, monkeypatch):
-    def broken():
-        raise OSError("kein kernel32")
-    sys.modules["ctypes"].windll.kernel32.GetCurrentProcess = broken
-    with pytest.raises(_Exited):
-        _hard_exit.hard_exit(1, platform="win32")
-    assert calls["os_exit"] == [1]
+@pytest.mark.parametrize("result", ["fails", "raises"])
+def test_windows_returns_normally_if_terminate_fails(calls, result, capsys):
+    """Nie os._exit unter Windows – das war genau die Access-Violation."""
+    if result == "fails":
+        calls["kernel32"].TerminateProcess = lambda handle, code: 0
+    else:
+        def broken():
+            raise OSError("kein kernel32")
+        calls["kernel32"].GetCurrentProcess = broken
+    _hard_exit.hard_exit(1, platform="win32")
+    assert calls["os_exit"] == []
+    assert not faulthandler.is_enabled()
+    assert "normaler pytest-Exit" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("platform", ["linux", "darwin"])
