@@ -32,9 +32,10 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
 from . import icons, theme
 from .canvas_view import CanvasScene, CanvasView, Ruler
 from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand, SetGroupsCommand,
-                       SetShapeLayerCommand, SetTextCommand)
+                       SetLayerAttrsCommand, SetShapeLayerCommand, SetTextCommand)
 from .document_io import FILE_SUFFIX, load_into, save_document
 from .export import export_png, export_svg
+from .material import Material, material_layer_attrs
 from .model import Document, Geometry, Shape, keep_inside_together, new_id, normalize_angle
 from .tools import TOOL_LABELS, TOOL_SHORTCUTS, Tool, ToolController
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, clamp_offset
@@ -585,6 +586,18 @@ class CanvasEditor(QWidget):
         ids = [i for i in self.selection if self.document.has_shape(i)]
         r = self.document.selection_bounds(ids) if ids else None
         return None if r is None else QPointF(r.x + r.w / 2.0, r.y + r.h / 2.0)
+
+    def apply_material(self, material: Material, layer_id: str | None = None,
+                       target_depth_mm: float = 0.0, apply_settings: bool = True) -> None:
+        """Material auf eine Ebene anwenden (ein Undo-Schritt).
+
+        Setzt Dicke/Tiefe je Durchgang und die abgeleiteten Durchgänge, die der
+        Nutzer danach im Ebenen-Panel überschreiben kann.
+        """
+        lid = layer_id or self.document.active_layer_id
+        attrs = material_layer_attrs(material, target_depth_mm, apply_settings)
+        self.undo_stack.push(SetLayerAttrsCommand(self.document, lid, attrs,
+                                                  f"Material: {material.name}"))
 
     def fit_selection(self) -> None:
         """Zoom to the selection (Ctrl+Shift+A), or to all objects, or the work area."""

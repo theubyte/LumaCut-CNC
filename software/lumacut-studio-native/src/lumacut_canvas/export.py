@@ -14,6 +14,7 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen
 from PySide6.QtSvg import QSvgGenerator
 
+from .material import layer_pass_plan
 from .model import Document
 from .shape_paths import shape_path
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
@@ -28,6 +29,9 @@ class JobLayer:
     passes: int
     polylines: list[list[tuple[float, float]]]  # Maschinen-mm
     z_step_mm: float = 0.0  # Fokus-Absenkung je Durchgang
+    # Tiefe je Durchgang aus der Material-Planung (material.layer_pass_plan),
+    # leer ohne Planung. Nur für den optionalen G-Code-Hook (gcode.pass_hook).
+    pass_depths_mm: tuple[float, ...] = ()
 
 
 def job_layers(doc: Document) -> list[JobLayer]:
@@ -50,8 +54,10 @@ def job_layers(doc: Document) -> list[JobLayer]:
             for poly in path.toSubpathPolygons():
                 polys.append([to_machine(p.x(), p.y()) for p in poly])
         if polys:
+            plan = layer_pass_plan(layer)
             result.append(JobLayer(layer.id, layer.name, layer.power, layer.speed,
-                                   layer.passes, polys, layer.z_step))
+                                   layer.passes, polys, layer.z_step,
+                                   plan.pass_depths if plan else ()))
     return result
 
 

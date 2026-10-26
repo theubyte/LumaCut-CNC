@@ -220,7 +220,9 @@ class SetLayerAttrCommand(QUndoCommand):
 
     LABELS = {"name": "Ebene umbenennen", "color": "Ebenenfarbe", "power": "Leistung",
               "speed": "Geschwindigkeit", "passes": "Durchgänge",
-              "visible": "Sichtbarkeit", "locked": "Sperre", "z_step": "Fokus-Absenkung"}
+              "visible": "Sichtbarkeit", "locked": "Sperre", "z_step": "Fokus-Absenkung",
+              "material": "Material", "thickness_mm": "Materialdicke",
+              "target_depth_mm": "Zieltiefe", "depth_per_pass_mm": "Tiefe je Durchgang"}
 
     def __init__(self, doc: Document, layer_id: str, attr: str, value) -> None:
         super().__init__(self.LABELS.get(attr, attr))
@@ -245,3 +247,21 @@ class SetLayerAttrCommand(QUndoCommand):
             self.new = other.new
             return True
         return False
+
+
+class SetLayerAttrsCommand(QUndoCommand):
+    """Mehrere Ebenen-Attribute in einem Undo-Schritt (z. B. Material anwenden)."""
+
+    def __init__(self, doc: Document, layer_id: str, attrs: dict, text: str = "Material anwenden") -> None:
+        super().__init__(text)
+        self.doc = doc
+        self.layer_id = layer_id
+        layer = doc.layer(layer_id)
+        self.old = {k: getattr(layer, k) for k in attrs}
+        self.new = dict(attrs)
+
+    def redo(self) -> None:
+        self.doc.update_layer(self.layer_id, **self.new)
+
+    def undo(self) -> None:
+        self.doc.update_layer(self.layer_id, **self.old)

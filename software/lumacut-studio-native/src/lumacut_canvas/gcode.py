@@ -10,17 +10,31 @@ Fokus zwischen den Durchgängen relativ ab (``G91`` / ``G0 Z-… F600`` /
 fokussiert vor der ersten Leistungsfahrt absolut, daher erst ab Durchgang 2. Referenzfahrt, Fokus und Parken
 übernimmt der Pi – deshalb kein G28 hier.
 
+Tiefen-Hook (optional, Standard aus): ``layers_to_gcode(..., pass_hook=f)``
+ruft vor jedem Durchgang einer Ebene mit Tiefenplanung
+(``JobLayer.pass_depths_mm``, siehe ``material.py``)
+``f(layer, index, depth_mm, cumulative_mm)`` auf und fügt die
+zurückgegebenen Zeilen direkt nach ``; PASS i OF n`` ein. Ohne Hook (oder
+für Ebenen ohne Planung) bleibt die Ausgabe Byte für Byte unverändert.
+Hook-Zeilen dürfen keine Zeilenumbrüche enthalten und müssen ASCII sein;
+Bewegungen in Z sind Sache des Aufrufers (``MAX_FOCUS_DROP_MM`` beachten).
+:func:`depth_comment_hook` ist ein harmloses Beispiel (nur Kommentare).
+
 Die Funktion erzeugt nur Text; sie startet nie eine Maschine.
 """
 
 from __future__ import annotations
 
 import re
+from typing import Callable, Iterable
 
 from .export import JobLayer, job_layers
 from .model import (MAX_FOCUS_DROP_MM, PASSES_RANGE, POWER_RANGE, SPEED_RANGE,
                     Z_STEP_RANGE, Document)
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
+
+#: ``(layer, pass_index, depth_mm, cumulative_mm) -> Zeilen``
+PassHook = Callable[[JobLayer, int, float, float], Iterable[str]]
 
 PWM_MAX = 255
 _MIN_X, _MIN_Y = to_machine(0.0, 0.0)
@@ -40,7 +54,21 @@ def _comment(text: str) -> str:
     return re.sub(r"[^\x20-\x7E]", "?", text)[:72]
 
 
-def layers_to_gcode(layers: list[JobLayer]) -> str:
+def depth_comment_hook(layer: JobLayer, index: int, depth_mm: float,
+                       cumulative_mm: float) -> list[str]:
+    """Beispiel-Hook: dokumentiert die geplante Tiefe als Kommentar."""
+    return [f"; DEPTH {depth_mm:.3f} TOTAL {cumulative_mm:.3f}"]
+
+
+def _hook_lines(hook: PassHook, layer: JobLayer, p: int, acc: float) -> list[str]:
+    lines = [str(x) for x in hook(layer, p, layer.pass_depths_mm[p], acc)]
+    for x in lines:
+        if "\n" in x or "\r" in x or not x.isascii():
+            raise ValueError("pass_hook: nur einzeilige ASCII-Zeilen erlaubt")
+    return lines
+
+
+def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -> str:
     if not any(l.polylines for l in layers):
         raise ValueError("Keine sichtbaren Objekte zum Lasern")
     out = ["; LUMACUT STUDIO NATIVE CANVAS JOB (homing, focus and park run on the Pi)",
@@ -60,10 +88,16 @@ def layers_to_gcode(layers: list[JobLayer]) -> str:
         s = round(layer.power_percent / 100 * PWM_MAX)
         f = f"{layer.speed_mm_min:g}"
         out.append("; LAYER " + _comment(layer.name))
+        depths = getattr(layer, "pass_depths_mm", ()) or ()
+        use_hook = pass_hook is not None and len(depths) == layer.passes
+        acc = 0.0
         for p in range(layer.passes):
             if p and z_step > 0:
                 out += ["G91", f"G0 Z{-z_step:.3f} F600", "G90"]
             out.append(f"; PASS {p + 1} OF {layer.passes}")
+            if use_hook:
+                acc += depths[p]
+                out += _hook_lines(pass_hook, layer, p, round(acc, 6))
             for line in layer.polylines:
                 if len(line) < 2:
                     continue
@@ -75,6 +109,6 @@ def layers_to_gcode(layers: list[JobLayer]) -> str:
     return "\n".join(out) + "\n"
 
 
-def document_to_gcode(doc: Document) -> str:
+def document_to_gcode(doc: Document, pass_hook: PassHook | None = None) -> str:
     """G-Code für alle sichtbaren Ebenen (unterste zuerst)."""
-    return layers_to_gcode(job_layers(doc))
+    return layers_to_gcode(job_layers(doc), pass_hook)

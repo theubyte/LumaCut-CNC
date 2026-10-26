@@ -18,6 +18,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Callable, Iterable
 
+from .material import DEPTH_PER_PASS_RANGE, THICKNESS_RANGE
 from .workarea import Rect, clamp_offset, fit_scale, is_inside_work_area
 
 # Gültige Parameterbereiche, abgestimmt mit software/lumacut-studio (studio.js).
@@ -30,6 +31,8 @@ PASSES_RANGE = (1, 30)
 # auf Oberfläche + 5,5 mm und sperrt Z unter Oberfläche + 2 mm.
 Z_STEP_RANGE = (0.0, 2.0)
 MAX_FOCUS_DROP_MM = 3.0
+# Material-Felder der Ebene (material.py); nur gespeichert, wenn gesetzt.
+MATERIAL_LAYER_FIELDS = ("material", "thickness_mm", "target_depth_mm", "depth_per_pass_mm")
 
 SHAPE_KINDS = ("rect", "ellipse", "line", "text", "polygon", "path")
 # Objekte mit Stützpunkten: "polygon" geschlossen, "path" (Freihand) offen.
@@ -61,6 +64,11 @@ class Layer:
     locked: bool = False
     id: str = field(default_factory=new_id)
     z_step: float = 0.0             # mm Fokus-Absenkung je Durchgang (0 = aus)
+    # Material-Grundlage (siehe material.py); alle optional, 0/"" = aus.
+    material: str = ""              # Materialname (frei, z. B. aus BUILTIN_MATERIALS)
+    thickness_mm: float = 0.0       # Materialdicke
+    target_depth_mm: float = 0.0    # Zieltiefe; 0 = Materialdicke (Durchschnitt)
+    depth_per_pass_mm: float = 0.0  # Tiefe je Durchgang; 0 = keine Tiefenplanung
 
     def normalized(self) -> "Layer":
         """Kopie mit Parametern im gültigen Bereich."""
@@ -70,12 +78,18 @@ class Layer:
             speed=_clamp(float(self.speed), *SPEED_RANGE),
             passes=int(_clamp(int(self.passes), *PASSES_RANGE)),
             z_step=round(_clamp(float(self.z_step), *Z_STEP_RANGE), 3),
+            material=str(self.material or "").strip()[:80],
+            thickness_mm=round(_clamp(float(self.thickness_mm), *THICKNESS_RANGE), 3),
+            target_depth_mm=round(_clamp(float(self.target_depth_mm), *THICKNESS_RANGE), 3),
+            depth_per_pass_mm=round(_clamp(float(self.depth_per_pass_mm),
+                                           *DEPTH_PER_PASS_RANGE), 3),
         )
 
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "color": self.color,
                 "power": self.power, "speed": self.speed, "passes": self.passes,
-                "visible": self.visible, "locked": self.locked, "z_step": self.z_step}
+                "visible": self.visible, "locked": self.locked, "z_step": self.z_step,
+                **{k: getattr(self, k) for k in MATERIAL_LAYER_FIELDS if getattr(self, k)}}
 
     @staticmethod
     def from_dict(d: dict) -> "Layer":
@@ -85,6 +99,10 @@ class Layer:
             power=float(d.get("power", 50.0)), speed=float(d.get("speed", 1500.0)),
             passes=int(d.get("passes", 1)), visible=bool(d.get("visible", True)),
             locked=bool(d.get("locked", False)), z_step=float(d.get("z_step", 0.0)),
+            material=str(d.get("material", "")),
+            thickness_mm=float(d.get("thickness_mm", 0.0)),
+            target_depth_mm=float(d.get("target_depth_mm", 0.0)),
+            depth_per_pass_mm=float(d.get("depth_per_pass_mm", 0.0)),
         ).normalized()
 
 
@@ -322,7 +340,7 @@ class Document:
     FORMAT = "lumacut-canvas"
     # Version 2: Drehung ("rot") und Gruppen ("groups"). Ältere Dateien (v1) werden weiter gelesen;
     # ältere Programmversionen lehnen v2 ab, statt die Drehung still zu verlieren.
-    VERSION = 2
+    VERSION = 3  # 3: optionale Material-Felder je Ebene (v1/v2 laden weiter)
 
     def __init__(self, with_default_layer: bool = True) -> None:
         self.layers: list[Layer] = []
@@ -433,8 +451,8 @@ class Document:
                 raise AttributeError(k)
             setattr(layer, k, v)
         normalized = layer.normalized()
-        layer.power, layer.speed, layer.passes = normalized.power, normalized.speed, normalized.passes
-        layer.z_step = normalized.z_step
+        for k in ("power", "speed", "passes", "z_step") + MATERIAL_LAYER_FIELDS:
+            setattr(layer, k, getattr(normalized, k))
         self.changed()
 
     # --- Objekte ----------------------------------------------------------
