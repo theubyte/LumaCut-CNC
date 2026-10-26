@@ -203,8 +203,11 @@ def preset_to_material(data: dict) -> dict:
 
 def material_to_preset(m: dict) -> dict:
     process = str(m.get("process", ""))
-    op = m.get("op") or {"Schneiden": "cut", "Markieren": "engrave_surface"}.get(
-        process, "engrave_medium")
+    op = m.get("op")
+    # ``op`` ist ein Studio-Zusatzfeld; ändert Android/Pi-Web nur ``process`` (PUT
+    # behält Zusatzfelder), gilt ``process``.
+    if not op or PROCESS_BY_OP.get(str(op), ("Gravieren", "fill"))[0] != process:
+        op = {"Schneiden": "cut", "Markieren": "engrave_surface"}.get(process, "engrave_medium")
     out = {"id": str(m.get("id", "")), "name": m.get("name") or str(m.get("id", "")),
            "material_id": m.get("material_id", ""), "op": op, "laser_id": m.get("laser_id", ""),
            "thickness_mm": (m.get("thickness_mm") or None),
