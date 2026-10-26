@@ -130,6 +130,41 @@ Die Apps bilden einfach die echte Maschine ab.
 - Windows-App, Android-App und Pi-Web-UI nutzen dieselbe Quelle.
 - Änderung in einer App gilt für alle.
 
+### 4.1 Umsetzung Windows-Studio (Materials-Agent, 2026-10-26) – Client fertig
+
+Server-Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3 (Pi-Teil: Claude,
+pi-automatik). Studio spricht ihn **und** die ursprünglich mit dem Machine-Agent
+besprochene Variante; welche der Pi liefert, erkennt Studio an `GET /api/materials`:
+
+| Variante | Erkennung | Lesen | Schreiben | Gegen gleichzeitiges Ändern |
+|---|---|---|---|---|
+| B – Materialliste (Vertrag §3) | `{"revision", "materials": [...]}` | `GET /api/materials` | `POST /api/materials`, `PUT/DELETE /api/materials/<id>` | `base_revision`, 409 |
+| A – Datenbank + Presets | `{"db": {format: lumacut-materials …}}` | `GET /api/materials` (ETag, 304), `GET /api/materials/presets` | `PUT/DELETE /api/materials/presets/<id>` | `If-Match`, 409/412 mit `current` |
+| alter Pi | 404/405 | – | – | Studio arbeitet lokal weiter |
+
+Ablauf in Studio (`src/lumacut_materials/remote.py`, `sync.py`, Anbindung in `dialog.py`):
+- **Beim Verbinden** gleicht Studio im Hintergrund ab (auch Menü *Material → Materialdatenbank
+  vom Pi laden*): Einträge vom Pi erscheinen unter „Eigene Presets“ und im Ebenen-Panel;
+  liefert der Pi eine ganze Datenbank (A), füllen Material-Feld und Dialog sich daraus neu.
+- **Speichern** (Preset, Testzelle) geht bei Verbindung sofort auf den Pi, sonst lokal und
+  beim nächsten Verbinden automatisch hoch. Löschen genauso.
+- **Ohne Pi**: zuletzt geladene Pi-Daten (`materials_pi_cache.json` im App-Datenordner),
+  sonst die mitgelieferte `materials.json`. Die Planungswerte (Laser, Modell) kommen bei
+  Variante B immer aus der mitgelieferten Datenbank.
+- **Konflikte**: Wurde ein Eintrag auf dem Pi inzwischen geändert, fragt Studio
+  „meine Fassung / Fassung vom Pi“. Offline geändert *und* auf dem Pi geändert: Pi-Fassung
+  gilt, die eigene bleibt als „<Name> (lokal)“ zusätzlich erhalten. Eine veraltete
+  Revision durch Änderungen an *anderen* Einträgen wird still wiederholt.
+- Abbildung Studio-Preset ↔ Pi-Material (B): `op=cut` ↔ `process=Schneiden, mode=line`,
+  `engrave_surface` ↔ `Markieren`, übrige Gravuren ↔ `Gravieren, fill`;
+  `line_interval_mm` ↔ `interval_mm`. Studio schickt zusätzlich `material_id`, `op`,
+  `laser_id`, `air_assist`, `focus_start_mm`, `notes`, `warnings`, `source` mit
+  (Wunsch an den Pi: unbekannte Felder unverändert speichern).
+- Details und Dateiformate: `software/lumacut-studio-native/docs/MATERIALS.md` („Materialdatenbank auf dem Pi“).
+
+Offen: Pi-Endpunkte selbst (Claude, pi-automatik); Android und Pi-Web binden dieselbe
+API an; die eingebaute Datenbank ist in Studio nur lesbar (bearbeitet werden Presets/Einträge).
+
 ## 5. UI-Aufräumen (Windows + Android)
 
 - Weniger Einstellungen und Buttons auf der Hauptansicht.
@@ -151,7 +186,7 @@ Die Apps bilden einfach die echte Maschine ab.
 | Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Start-Knopf in Studio: Machine | in Arbeit (Pi) |
 | Nullpunkt oben rechts | Canvas + Machine | Maschinenseite erledigt (`ce7da00`: Anker = sichtbare Ecke, `coord_convention`, Jog-Kreuz gespiegelt, siehe §2.2); Canvas (`workarea.py`, Absprache §2) offen |
 | Kamera-Scan als Button | Scan Probe | offen |
-| Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | in Arbeit (Pi) |
+| Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | Studio-Client fertig (beide API-Varianten, offline, Konflikte; §4.1), Pi-Endpunkte in Arbeit |
 | Cleaner UI Windows | Canvas | offen |
 | Cleaner UI Android | Claude, Session android | in Arbeit |
 

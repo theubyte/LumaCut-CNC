@@ -160,6 +160,43 @@ Maschinen.
 Höhenkarte (`heightmap.py`): Alpha → weiß, Invertieren, Helligkeit, Kontrast,
 Gamma, Flächen-/linear-Resampling auf den Zeilenabstand, Gauß-Glättung.
 
+## Materialdatenbank auf dem Pi
+
+Der Pi ist die gemeinsame Quelle für Studio, Android und Pi-Web (Anforderungen
+`docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` §4, Vertrag
+`docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` §3). Studio-Seite:
+
+- `remote.HttpMaterialsTransport` – urllib, kein Proxy, keine Umleitungen,
+  `X-LumaCut-Key` falls gesetzt. Erkennt die Server-Variante an `GET /api/materials`:
+  **Liste** (`{"revision", "materials"}`, Schreiben mit `base_revision`, 409) oder
+  **Datenbank + Presets** (`{"db"}` mit ETag/304, `/api/materials/presets/<id>` mit
+  `If-Match`, 409/412 + `current`). 404/405 = Pi ohne Material-API.
+  Fehler: `MaterialsOffline`, `MaterialsUnsupported` (`MaterialsNoDatabase`),
+  `MaterialsConflict`, `MaterialsError`.
+- `sync.MaterialSync(ordner, preset_pfad)` – Qt-frei, thread-sicher:
+  `db()` (Pi-Kopie oder mitgeliefert), `refresh(transport)` → `SyncResult`
+  (`source` pi/cache/bundled, `online`, `db_changed`, `presets_changed`, `uploaded`,
+  `conflicts`, `message`), `save_preset(p, transport|None)` → `"pi"`/`"pending"`,
+  `delete_preset(name, transport|None)`, `resolve_conflict(conflict, "mine"|"pi", t)`.
+- Dateien im App-Datenordner (`LUMACUT_MATERIALS_DIR` überschreibt):
+  `material_presets.json` (wie bisher, Presets jetzt mit `id`),
+  `materials_pi_cache.json` (`format: lumacut-materials-cache`, `etag`, `version`,
+  `fetched_at`, `db`), `material_sync.json` (`etags`, `base` = Inhalts-Fingerabdruck
+  je ID, `pending`, `deleted`).
+- Preset-ID: `preset_id(name)` = `<slug>-<6 hex sha1>` – gleicher Name, gleiche ID auf
+  allen Geräten; vergibt der Pi eigene IDs (POST), übernimmt Studio sie.
+- Abgleichregeln: Pi gewinnt; offline Geändertes wird hochgeladen, wenn der Eintrag auf
+  dem Pi unverändert ist, sonst bleibt die eigene Fassung als „<Name> (lokal)“; auf dem
+  Pi Gelöschtes verschwindet lokal; alte Presets ohne ID werden hochgeladen.
+- Studio (`dialog.MaterialTools`): Abgleich beim Verbinden im Hintergrund-Thread (ohne
+  Qt-Objekte, Ergebnis per Timer im GUI-Thread), `MaterialDB.replace()` tauscht die
+  Datenbank an Ort und Stelle, Schnellfeld/Dialog/Ebenen-Panel laden neu.
+- Abbildung Preset ↔ Pi-Material (Liste): `remote.preset_to_material` /
+  `material_to_preset` (`cut` ↔ `Schneiden/line`, `engrave_surface` ↔ `Markieren`,
+  andere Gravuren ↔ `Gravieren/fill`, `line_interval_mm` ↔ `interval_mm`;
+  Studio-Zusatzfelder werden mitgeschickt).
+- Tests: `tests/test_materials_sync.py` mit `tests/fake_materials_pi.py` (beide Varianten).
+
 ## API (ohne Qt)
 
 ```python
