@@ -7,6 +7,9 @@ und **nur dort** ein eigenes Höhenmesh pro Werkstück mit adaptiver Fokuskorrek
 Der Kern ist Qt-frei (numpy + OpenCV) und läuft in Studio wie auf dem Pi.
 Nur `qt_bridge.py` importiert PySide6.
 
+**Ist-Stand Kamera und Kalibrierung** (was echt läuft, was nur simuliert ist, was offen ist):
+[KAMERA_STATUS_UND_KALIBRIERUNG.md](KAMERA_STATUS_UND_KALIBRIERUNG.md).
+
 ## Ablauf
 
 1. **Kachel-Scan** (`plan_tiles`, `TileScanner`)
