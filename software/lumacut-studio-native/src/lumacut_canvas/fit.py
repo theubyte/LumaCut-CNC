@@ -10,15 +10,17 @@
 * :func:`compact_sidebar` – schmale Spalte statt Seitwärts-Scrollen: kompaktere
   Knöpfe (Höhe bleibt touch-tauglich), Formularzeilen brechen um, lange
   Knopfreihen werden zweispaltig, breite Auswahllisten werden schmal (die
-  aufgeklappte Liste bleibt breit). Generisch – die Panels selbst bleiben unberührt.
+  aufgeklappte Liste bleibt breit), lange Häkchen-Texte brechen um. Generisch – die Panels selbst bleiben unberührt.
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
-from PySide6.QtWidgets import (QAbstractButton, QAbstractScrollArea, QApplication, QComboBox,
-                               QFormLayout, QFrame, QGridLayout, QHBoxLayout, QScrollArea,
-                               QScroller, QSizePolicy, QStyle, QWidget)
+from PySide6.QtGui import QPainter
+from PySide6.QtWidgets import (QAbstractButton, QAbstractScrollArea, QApplication, QCheckBox,
+                               QComboBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout,
+                               QScrollArea, QScroller, QSizePolicy, QStyle, QStyleOptionButton,
+                               QWidget)
 
 from . import touch
 
@@ -32,6 +34,8 @@ SIDEBAR_HARD_MIN = 180       # px; darunter klappt der Splitter die Leiste ein
 COMPACT_ROW_PX = 340         # breitere Knopfreihen (≥ 3 Knöpfe) werden zweispaltig
 COMPACT_COMBO_PX = 240       # breitere Auswahllisten werden schmal (Popup bleibt breit)
 COMPACT_COMBO_CHARS = 14
+COMPACT_CHECK_PX = 220       # längere Häkchen-Texte brechen um (max. 3 Zeilen)
+COMPACT_CHECK_LINES = 3
 # Nur das Polster – Schrift und Mindesthöhe 40 px (Touch) aus dem Fenster-Stil bleiben.
 COMPACT_QSS = "QPushButton { padding: 6px 10px; }"
 _COMPACT_MARK = "_lumacut_compact"
@@ -155,6 +159,72 @@ def _narrow_combo(combo: QComboBox) -> bool:
     return True
 
 
+class _WrapCheck(QObject):
+    """Häkchen mit langem Text: schmal im Minimum, Text bricht um statt die
+    Leiste zu verbreitern. ``text()`` bleibt unverändert (Panels/Tests lesen ihn)."""
+
+    def __init__(self, box: QCheckBox) -> None:
+        super().__init__(box)
+        self.box = box
+        if not box.toolTip():
+            box.setToolTip(box.text())
+        box.setMinimumWidth(COMPACT_CHECK_PX)
+        box.installEventFilter(self)
+        self._sync_height()
+
+    def _text_rect(self, opt: QStyleOptionButton):
+        return self.box.style().subElementRect(QStyle.SE_CheckBoxContents, opt, self.box)
+
+    def _option(self) -> QStyleOptionButton:
+        b = self.box
+        opt = QStyleOptionButton()
+        opt.initFrom(b)
+        opt.state |= QStyle.State_On if b.isChecked() else QStyle.State_Off
+        if b.isDown():
+            opt.state |= QStyle.State_Sunken
+        opt.icon = b.icon()
+        opt.iconSize = b.iconSize()
+        return opt
+
+    def _fits(self) -> bool:
+        return self.box.width() >= self.box.sizeHint().width()
+
+    def _sync_height(self) -> None:
+        b = self.box
+        h = 0
+        if not self._fits():
+            r = self._text_rect(self._option())
+            fm = b.fontMetrics()
+            lines = fm.boundingRect(0, 0, max(20, r.width()), 10000, Qt.TextWordWrap, b.text()).height()
+            h = min(lines, COMPACT_CHECK_LINES * fm.lineSpacing()) + 6
+        if b.minimumHeight() != h:
+            b.setMinimumHeight(h)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        t = event.type()
+        if t == QEvent.Resize:
+            self._sync_height()
+        elif t == QEvent.Paint and not self._fits():
+            b = self.box
+            opt = self._option()
+            p = QPainter(b)
+            b.style().drawControl(QStyle.CE_CheckBox, opt, p, b)  # Kästchen ohne Text
+            r = self._text_rect(opt)
+            p.setPen(b.palette().color(b.foregroundRole()))
+            p.drawText(r, int(Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap), b.text())
+            p.end()
+            return True
+        return False
+
+
+def _wrap_check(box: QCheckBox) -> bool:
+    if box.property(_COMPACT_MARK) or box.minimumSizeHint().width() <= COMPACT_CHECK_PX:
+        return False
+    box.setProperty(_COMPACT_MARK, True)
+    box._lumacut_wrap = _WrapCheck(box)
+    return True
+
+
 def compact_sidebar(content: QWidget | None) -> bool:
     """Inhalt einer schmalen Seitenleiste kompakt machen (idempotent; auch für
     später hinzugekommene Widgets erneut aufrufbar). True, wenn sich etwas änderte."""
@@ -173,6 +243,8 @@ def compact_sidebar(content: QWidget | None) -> bool:
         changed |= _wrap_button_row(row)
     for combo in content.findChildren(QComboBox):
         changed |= _narrow_combo(combo)
+    for box in content.findChildren(QCheckBox):
+        changed |= _wrap_check(box)
     return changed
 
 

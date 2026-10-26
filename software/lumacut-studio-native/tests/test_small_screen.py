@@ -4,9 +4,19 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import QRect, QSettings
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QScrollArea, QToolButton
 
 from lumacut_canvas import fit, touch
+
+
+def settle(qapp, rounds: int = 3) -> None:
+    """Ereignisse abarbeiten *und* 0-ms-Timer feuern lassen: unter Windows
+    laufen diese nicht zuverlässig in einem processEvents()-Durchgang."""
+    for _ in range(rounds):
+        qapp.processEvents()
+        QTest.qWait(20)
+    qapp.processEvents()
 
 
 @pytest.fixture
@@ -20,8 +30,7 @@ def make_win(qapp, tmp_path, monkeypatch):
         win = main.LumaCutStudio()
         win.resize(w, h)
         win.show()
-        for _ in range(3):
-            qapp.processEvents()
+        settle(qapp)
         wins.append(win)
         return win
     yield make
@@ -78,7 +87,7 @@ def test_panels_fit_inside_small_windows(make_win, size):
 
 
 def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
-    from PySide6.QtWidgets import (QComboBox, QFormLayout, QHBoxLayout, QLabel,
+    from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel,
                                    QPushButton, QVBoxLayout, QWidget)
     root = QWidget()
     lay = QVBoxLayout(root)
@@ -98,6 +107,9 @@ def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
     for t in ("Links", "Rechts", "Oben", "Unten"):
         mixed.addWidget(QPushButton(t))
     lay.addLayout(mixed)
+    text = "Geladenes Mesh nach Kontrollmessung wiederverwenden (lang)"
+    check = QCheckBox(text)
+    lay.addWidget(check)
     before = root.minimumSizeHint().width()
     combo_before = combo.minimumSizeHint().width()
     assert fit.compact_sidebar(root)
@@ -111,6 +123,15 @@ def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
     assert len({b.y() for b in btns}) == 2  # 2×2 statt einer Reihe
     assert mixed.count() == 5
     assert root.minimumSizeHint().width() < before
+    # Langes Häkchen: schmal im Minimum, Text unverändert, bricht um.
+    assert check.text() == text and check.toolTip() == text
+    assert check.minimumWidth() == fit.COMPACT_CHECK_PX  # Layout-Minimum (qSmartMinSize)
+    root.resize(fit.COMPACT_CHECK_PX + 30, root.height())
+    settle(qapp)
+    assert check.height() > check.fontMetrics().lineSpacing() * 1.5
+    check.click()
+    assert check.isChecked()
+    root.grab()  # eigener Paint-Pfad läuft ohne Fehler
     root.close()
 
 
@@ -127,8 +148,7 @@ def test_sidebar_refits_when_content_grows(make_win, qapp):
     wide = QLabel("breit")
     wide.setMinimumWidth(need0 + 20)
     content.layout().addWidget(wide)
-    for _ in range(5):
-        qapp.processEvents()
+    settle(qapp, 5)
     assert fit.sidebar_needed_width(win.right_scroll) <= fit.sidebar_cap(1280)
     assert not win.right_scroll.horizontalScrollBar().isVisible()
     assert win.right_scroll.viewport().width() >= wide.minimumWidth()
