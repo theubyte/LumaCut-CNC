@@ -201,7 +201,10 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _update.update { it.copy(checking = false, error = if (quiet) null else (e.message ?: "Update-Prüfung fehlgeschlagen")) }
+                // The Pi answering "no release yet" (503) is information, not an alarm; only a missing connection is shown as an error.
+                val calm = e is de.millione.lumacut.core.PiException && e.message?.startsWith("Pi nicht erreichbar") != true
+                _update.update { it.copy(checking = false, error = if (quiet || calm) null else (e.message ?: "Update-Prüfung fehlgeschlagen")) }
+                if (!quiet && calm) notify(e.message ?: "Kein Update gefunden.")
             }
         }
     }
