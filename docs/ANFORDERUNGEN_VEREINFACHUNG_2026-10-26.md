@@ -58,14 +58,25 @@ Details und JSON-Nachrichten: `docs/SCAN_PROBE.md`. Getestet nur mit Simulation 
 Der Pi-Ablauf gehört Claude (pi-automatik, ZUSAMMENARBEIT §4). Studio schickt nur den
 Auftrag und `op=autorun`:
 
-- Maschinen-Panel: ein Hauptknopf **„Auftrag starten“** (sendet eine gewählte Datei im
-  selben Klick, dann `op=autorun`, mit Platzierung `placement=1` falls gewählt). Kein
-  Probing-Schalter, keine Referenzfahrt aus Studio.
+- Ein Startknopf: der große **„Start“** der Hauptansicht (`one_click.start`). Der
+  Panel-Knopf unter „Mehr › Maschine“ heißt seit 2026-10-26 **„Datei-Auftrag starten“**
+  (nicht mehr hervorgehoben; sendet eine gewählte Datei im selben Klick, dann
+  `op=autorun`, mit Platzierung `placement=1` falls gewählt). Kein Probing-Schalter,
+  keine Referenzfahrt aus Studio.
 - Home, Park, Fokus (G30), Jog, Notstopp quittieren und „Ohne Automatik starten“
   (`op=start`) liegen in der eingeklappten Gruppe **„Erweitert: Bewegung, Taster, Jog“**.
-- Phasenanzeige aus `/api/status`: `job.state` homing/probing/running/complete/error,
-  `job.probe` = „Abtasten 3 / 12“; ein optionales `job.phase` (focusing/parking) wird
-  angezeigt, wenn der Pi es sendet. Abbrechen und NOT-AUS in jeder Phase.
+- Phasenanzeige aus `/api/status`, abgeglichen mit `web.py`: `job.state`
+  homing/probing/running/complete/aborted/error, `job.probe` = „Abtasten 3 / 13“. Der Pi
+  sendet kein `job.phase`; „Parken“ zeigt das Panel, wenn `state=running` und
+  `line == total` (Pi leert den Puffer und parkt). Fokus ist Teil von Abtasten/Laufen.
+  Ein künftiges `job.phase` hat Vorrang. Abbrechen und NOT-AUS in jeder Phase.
+- Pi ohne Merkmal `autorun_mesh` (`features`): Tooltip und Rückfrage sagen „tastet nur
+  einen Punkt ab – Pi aktualisieren“.
+- `MachinePanel.autorun_task(name)` (GUI-Thread aufrufen, Ergebnis im Worker ausführen):
+  platziert nach gewähltem Ursprung/Bezugspunkt und startet `op=autorun placement=1`.
+  Damit kann `OneClickController` mit `autorun_mesh` auch platzierte Aufträge starten
+  (heute lehnt er Ursprung ≠ „Absolut“ ab; Übergabe an Scan Probe, §1.3).
+  `send_gcode(..., autorun=True)` folgt jetzt ebenfalls dem gewählten Ursprung.
 - Älterer Pi ohne `op=autorun`: klare Meldung „Pi-Dienst aktualisieren … oder unter
   „Erweitert“ ohne Automatik starten“.
 - Canvas/Workflow: `MachinePanel.send_gcode(name, gcode, autorun=True)` startet den
@@ -91,6 +102,27 @@ Auftrag und `op=autorun`:
   Bögen, bei mehreren Durchgängen aber relative Z-Schritte (`G91`/`G0 Z…`). Ob der Pi diese
   korrigiert oder nur abtastet, klärt der Pi-Teil (`PI_API_REFERENZ.md`). Eine Pi-Ablehnung
   erscheint als Satz im Panel.
+
+### 1.3 Lückenprüfung Ein-Klick-Ablauf (Machine-Agent, 2026-10-26)
+
+Ablauf Material → Design → Start → Referenzfahrt → Abtasten → Fokus → Auftrag → Parken.
+Geprüft gegen `pi400/marlin/web.py`, `scanprobe/job_flow*.py`, `main_view.py`, `main.py`.
+
+| Punkt | Stand | Offen bei |
+|---|---|---|
+| Ein Startknopf | Hauptansicht „Start“ → `one_click.start`; Panel-Knopf umbenannt („Datei-Auftrag starten“). Unter „Mehr“ bleiben „Hochgeladenen Auftrag starten“ (`op=start`) und „Ohne Automatik starten“ für Fachleute | – |
+| Eine Phasenanzeige | Während des Ein-Klick-Ablaufs sperrt `set_external_operation` die Panel-Knöpfe (auch Panel-„Abbrechen“); Abbruch über „■ Abbrechen“ der Hauptansicht, NOT-AUS (Toolbar + Panel) bleibt aktiv. Panel-Phasenzeile und Scan-Probe-Anzeige lesen dieselben `job.*`-Felder | Scan Probe: Phasentext der Hauptansicht auf „Parken“ bei `line == total` prüfen (wie Panel) |
+| Platzierung + Mesh | Pi kann `autorun placement=1` (Raster über dem platzierten Auftrag). `OneClickController.start()` lehnt Ursprung ≠ „Absolut“ ab | Scan Probe: mit `autorun_mesh` statt Ablehnung `machine_panel.autorun_task(name)` benutzen |
+| Alter Pi | ohne `autorun`: klare Meldung; ohne `autorun_mesh`: Hinweis „ein Punkt“; ohne `coord_convention`: `wire_anchor` tauscht links/rechts (Test `test_origin_end_to_end.py`) | Studio und Pi gemeinsam aktualisieren |
+| Warteschlange | `_queue_worker` startet ohne `auto` → kein Abtasten/Fokus, verlangt Referenzfahrt | Claude: Warteschlange über den Autorun-Ablauf (ZUSAMMENARBEIT §6) |
+| Parken | Pi parkt nach jedem Auftrag selbst (`park_safezone`) | – |
+| Fehler/Abbruch je Phase | Pi setzt `aborted`/`error` + `job.error`, Panel zeigt den Satz; Abbruch in homing/probing über `stop_job` | ⚠ am Gerät: Abbruch während Abtasten |
+| Veralteter Status | `stale_ms`/`pi_busy` sperren Knöpfe, NOT-AUS bleibt | – |
+| Schließen während Auftrag | `confirm_close` fragt nach | – |
+| Workflow-Senden | `lumacut_workflow/qt.py:166` ruft `send_gcode(..., start=True)` (ohne Automatik) | Workflow-Besitzer: `autorun=True` |
+| Mehrfach-Durchgänge mit relativem Z | Canvas schreibt `G91`/`G0 Z…`; Pi tastet dann nur ab | Claude: klären, ob kompensiert wird |
+| Nullpunkt §2.3 | Studio-Maschinenseite + Pi fertig; Canvas-Spiegelung noch nicht auf main | Canvas/Scan Probe: §2.3 pushen; danach greift `test_visible_top_right_is_near_switch_corner` (jetzt übersprungen) |
+| ⚠ Hardware | Jog-Richtungen (X+ links, Y+ zur Tür), Lage des Testrechtecks, Abtastraster am Gerät | Nutzer am Gerät |
 
 ## 2. Nullpunkt und Achsen
 
@@ -373,8 +405,8 @@ Offen:
 
 | Thema | Zuständig | Status |
 |---|---|---|
-| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1); großer Start-Knopf der Hauptansicht ruft `one_click.start` (Canvas, §5.1); Maschinen-Panel erledigt (§1.2: „Auftrag starten“ → `op=autorun`, Service-Gruppe „Erweitert“, Phasenanzeige, alter Pi); Pi-Code fertig, auf dem Pi noch nicht installiert |
-| Nullpunkt oben rechts | Canvas + Machine + Scan Probe | Maschinenseite erledigt (`ce7da00`, §2.2); Canvas fertig und getestet, **Push gehalten**, bis Scan Probe Platzierung und Bilder spiegelt (§2.3); danach physische Prüfung am Gerät |
+| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1); großer Start-Knopf der Hauptansicht ruft `one_click.start` (Canvas, §5.1); Maschinen-Panel erledigt (§1.2: „Datei-Auftrag starten“ → `op=autorun`, Service-Gruppe „Erweitert“, Phasenanzeige mit echten Pi-Feldern inkl. „Parken“, Hinweis ohne `autorun_mesh`, `autorun_task` für platzierte Ein-Klick-Aufträge); Lücken §1.3; Pi-Code fertig, auf dem Pi noch nicht installiert |
+| Nullpunkt oben rechts | Canvas + Machine + Scan Probe | Maschinenseite erledigt (`ce7da00`, §2.2; Ende-zu-Ende-Test Export → Pi-Platzierung → Rahmen, alter Pi: `tests/test_origin_end_to_end.py`); Canvas fertig und getestet, **Push gehalten**, bis Scan Probe Platzierung und Bilder spiegelt (§2.3); danach physische Prüfung am Gerät |
 | Kamera-Scan als Button | Scan Probe | Studio erledigt (§3); Android: Vertrag vorbereitet, kein Code |
 | Probing immer im Auftrag (keine Auswahl) | Scan Probe | Studio erledigt (§1.1) |
 | Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | Pi-API fertig (Variante B, Revision); Studio gegen den echten Pi-Dienst geprüft (§4.1); Android angebunden; Pi-Web offen |

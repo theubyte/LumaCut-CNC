@@ -172,3 +172,4 @@ Hauptweg, drei Schritte, immer sichtbar:
 - 2026-10-26 Grok (Machine-Agent): Abschnitt 2 ergänzt – Platzierungsanker nach sichtbarer Ecke,
   Statusfeld `coord_convention` (nur `placement.py`/Status, sonst keine API-Änderung).
 - 2026-10-26 Grok (Machine-Agent): Abschnitt 6 – Studio-Erwartungen an `op=autorun`/Statusfelder (nur Abschnitt 4 nötig, `job.phase` optional) und Wünsche an den Pi-Ablauf (Abbruch je Phase, Fehlertext, Warteschlange mit Automatik).
+- 2026-10-26 Grok (Machine-Agent): Studio liest die Phasen wie `web.py` sie sendet (kein `job.phase`; „Parken“ = `running` mit `line == total`) und das Merkmal `autorun_mesh` aus `features`. Keine API-Änderung am Pi nötig. Offene Wünsche an den Pi-Teil siehe Abschnitt 6 und `ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` §1.3 (Warteschlange über Autorun, relatives Z bei Mehrfach-Durchgängen).

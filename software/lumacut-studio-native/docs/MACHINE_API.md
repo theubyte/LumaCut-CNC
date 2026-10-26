@@ -272,15 +272,21 @@ die Zeitlimits für Bewegungen lang.
 
 ### `POST /api/action op=start` / `op=autorun`: Auftrag starten
 
-- **Auslöser:** Hauptknopf **„Auftrag starten“** (`autorun`, mit Rückfrage;
-  sendet eine gewählte, noch nicht gesendete Datei im selben Klick vorher)
-  und `send_gcode(autorun=True)`. `op=start` nur noch über „Ohne Automatik
+- **Auslöser:** Für Entwürfe der große **„Start“** der Hauptansicht
+  (`one_click.start`, Scan Probe). Im Panel heißt der Knopf
+  **„Datei-Auftrag starten“** (`autorun` für die gewählte/gesendete Datei,
+  mit Rückfrage; sendet eine noch nicht gesendete Datei im selben Klick
+  vorher). Dazu `send_gcode(autorun=True)` (folgt dem gewählten Ursprung)
+  und `MachinePanel.autorun_task(name)` (Platzierung + `op=autorun` für
+  den Ein-Klick-Controller). `op=start` nur noch über „Ohne Automatik
   starten“ in der eingeklappten Gruppe **„Erweitert: Bewegung, Taster,
   Jog“** (dort auch Home, Park, Fokus/G30, Jog, Notstopp quittieren), den
-  Start-Knopf der Toolbar (`main.py`) und `send_gcode(start=True)`.
+  Knopf „Hochgeladenen Auftrag starten“ unter „Mehr“ (`main.py`) und
+  `send_gcode(start=True)`.
 - **Payload:** `op=start name=<datei>` bzw. `op=autorun name=<datei>`
-  (optional `x`, `y`; die App sendet keinen Punkt, der Pi nimmt die
-  Motivmitte). **Zeitlimit:** 60 s (der Pi startet einen Hintergrund-Thread
+  (optional `x`, `y` = ein einzelner Abtastpunkt; die App sendet keinen,
+  der Pi plant das Raster bzw. nimmt auf altem Pi die Motivmitte;
+  `placement=1` nach `op=place`). **Zeitlimit:** 60 s (der Pi startet einen Hintergrund-Thread
   und antwortet sofort).
 - **Antwort:** `message` „Job gestartet: …“ bzw. „Ein-Klick-Ablauf
   gestartet: Homing → Abtasten bei … → Fokus → … → Park“.
@@ -288,14 +294,23 @@ die Zeitlimits für Bewegungen lang.
   Auftragsdatei“, „X/Y-Tasterversatz zuerst unter Fokus & Taster
   eintragen“, „Motivmitte nicht bestimmbar …“, „Ein Auftrag läuft bereits“,
   „LightBurn hat inzwischen die Steuerung“, Belegt-/USB-Fehler.
-- Fortschritt danach über `job.*` in `/api/status`. Anzeige der Phasen
-  (ZUSAMMENARBEIT §4): `job.state` `homing` → `probing` → `running` →
-  `complete`/`error`; während `probing` zeigt das Panel `job.probe`
-  (`{"done": 3, "total": 12}`) als „Abtasten 3 / 12“ und im
-  Fortschrittsbalken. Ein optionales feineres `job.phase`
-  (`focusing`, `parking`) wird angezeigt, falls der Pi es sendet;
-  `JobState.active` zählt `homing/probing/focusing/running/parking`.
+- Fortschritt danach über `job.*` in `/api/status`. Der echte Pi
+  (`web.py _execute_job`) sendet `job = {file, state, line, total, error,
+  probe}`, **kein** `job.phase`: `state` `homing` (nur wenn nicht
+  referenziert) → `probing` (`job.probe = {"done", "total"}`, total =
+  Punkte + 1) → `running` → `complete`, sonst `aborted`/`error` mit
+  `job.error`. Fokus ist Teil von Abtasten/Laufen; nach der letzten Zeile
+  leert der Pi den Puffer und parkt, noch mit `state=running` und
+  `line == total`. Das Panel zeigt das als **„Parken“**
+  (`JobState.phase`), „Abtasten 3 / 13“ samt Balken während `probing`.
+  Ein künftiges explizites `job.phase` (`focusing`, `parking`) hat
+  Vorrang. `JobState.active` zählt `homing/probing/focusing/running/parking`.
   Abbrechen und NOT-AUS sind in jeder Phase bedienbar.
+- **Merkmal `autorun_mesh`** (`/api/status` `features`, `MachineStatus.features`,
+  `has_feature`): Der Pi tastet ein Raster über dem Motiv ab und
+  korrigiert die Höhe. Fehlt es (älterer Pi), tastet `autorun` nur einen
+  Punkt in der Motivmitte; Panel-Tooltip und Rückfrage nennen das
+  (`OLD_PI_MESH`, „Pi aktualisieren“).
 - **Älterer Pi ohne `op=autorun`:** Der Client ersetzt „Unbekannte
   Marlin-Aktion: autorun“ durch `client.OLD_PI_AUTORUN` („Pi-Dienst
   aktualisieren … oder unter „Erweitert“ ohne Automatik starten“).
