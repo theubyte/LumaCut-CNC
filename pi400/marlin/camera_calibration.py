@@ -124,7 +124,9 @@ def validate(data) -> dict:
     _number(merged, "px_per_mm", 0.5, 100.0, errors)
     _number(merged, "scan_z", 0.0, 90.0, errors)
     _number(merged, "rotation_deg", -180.0, 180.0, errors)
-    _number(merged, "crop_fraction", 0.0, 0.39, errors)
+    _number(merged, "crop_fraction", 0.0, 0.4, errors)
+    if merged["crop_fraction"] == 0.4:  # wie Studio: 0 <= crop_fraction < 0.4
+        errors.append("crop_fraction: muss kleiner als 0.4 sein")
     for key in ("flip_x", "flip_y"):
         if merged[key] not in (1, -1) or isinstance(merged[key], bool):
             errors.append("%s: +1 oder -1 erwartet" % key)

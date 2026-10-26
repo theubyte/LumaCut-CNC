@@ -140,6 +140,8 @@ class ValidationTests(unittest.TestCase):
         self.assertRejected("offset_mm", offset_mm=[1])
         self.assertRejected("flip_y: \\+1 oder -1", flip_y=0)
         self.assertRejected("crop_fraction", crop_fraction=0.5)
+        self.assertRejected("crop_fraction: muss kleiner als 0.4", crop_fraction=0.4)
+        self.assertEqual(cc.validate(measured(crop_fraction=0.395))["crop_fraction"], 0.395)
         self.assertRejected("homography: invertierbare", homography=[[0, 0, 0]] * 3)
         self.assertRejected("camera_matrix: 3×3", camera_matrix=[[1, 2], [3, 4]])
         self.assertRejected("dist_coeffs", dist_coeffs=[0.1, 0.2, 0.3])
