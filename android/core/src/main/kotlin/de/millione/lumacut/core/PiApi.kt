@@ -25,7 +25,12 @@ data class ProbeProgress(val done: Int = 0, val total: Int = 0)
 
 @Serializable
 data class JobProgress(val file: String = "", val state: String = "idle", val line: Int = 0,
-                       val total: Int = 0, val error: String = "", val probe: ProbeProgress = ProbeProgress()) {
+                       val total: Int = 0, val error: String = "", val probe: ProbeProgress = ProbeProgress(),
+                       val phase: String? = null) {
+    /** Finer step while active (homing, probing, focusing, running, finishing, parking); falls back to [state]. */
+    val step get() = phase?.takeIf { it.isNotBlank() } ?: state
+    /** All lines are sent, the Pi is draining its buffer and parks next; the laser is not off yet. */
+    val lastPaths get() = state == "running" && total > 0 && line >= total
     val active get() = state in setOf("homing", "probing", "running")
     val fraction get() = if (total > 0) line.toDouble() / total else 0.0
 }
@@ -77,7 +82,10 @@ data class MachineStatus(
     val recent: List<String> = emptyList(),
     /** Pi capabilities: "autorun_mesh" (op=autorun probes and corrects itself), "materials" (/api/materials). */
     val features: List<String> = emptyList(),
+    /** "origin_top_right" = Pi uses the 2026-10-26 axis convention; missing = old Pi. */
+    val coord_convention: String? = null,
 ) {
+    val coordOk get() = coord_convention == PiClient.COORD_CONVENTION
     val ownerFree get() = owner == "Frei" || owner.isBlank()
     val probeOffset: Pt? get() = probe_xy_offset_mm?.takeIf { it.size == 2 }?.let { Pt(it[0], it[1]) }
 }
@@ -240,6 +248,8 @@ class PiClient(
     }
 
     companion object {
+        const val COORD_CONVENTION = "origin_top_right"
+
         val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame", "moveto",
                             "abort", "estop", "estop_reset")
 

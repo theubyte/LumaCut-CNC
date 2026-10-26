@@ -67,6 +67,23 @@ class MaterialApiTest {
         srv.shutdown()
     }
 
+    @Test fun `phase and coordinate convention are read, missing means old Pi`() = runBlocking {
+        val srv = MockWebServer().apply {
+            enqueue(MockResponse().setBody("""{"connected":true,"coord_convention":"origin_top_right","job":{"state":"running","line":50,"total":50,"phase":"finishing"}}"""))
+            enqueue(MockResponse().setBody("""{"connected":true,"job":{"state":"running","line":10,"total":50}}"""))
+            enqueue(MockResponse().setBody("""{"connected":true,"coord_convention":"origin_bottom_left","job":{"state":"probing","phase":null}}"""))
+            start()
+        }
+        val pi = PiClient("127.0.0.1", srv.port)
+        val a = pi.status()
+        assertTrue(a.coordOk); assertEquals("finishing", a.job.step); assertTrue(a.job.lastPaths)
+        val b = pi.status()
+        assertTrue(!b.coordOk); assertEquals("running", b.job.step); assertTrue(!b.job.lastPaths)
+        val c = pi.status()
+        assertTrue(!c.coordOk); assertEquals("probing", c.job.step)
+        srv.shutdown()
+    }
+
     @Test fun `job progress carries probe done and total`() = runBlocking {
         val body = """{"connected":true,"job":{"file":"a.gcode","state":"probing","line":0,"total":200,"probe":{"done":3,"total":12}},"features":["autorun_mesh","materials"]}"""
         val srv = MockWebServer().apply { enqueue(MockResponse().setBody(body)); start() }

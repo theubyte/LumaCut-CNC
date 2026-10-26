@@ -52,6 +52,7 @@ private fun blocker(s: MachineStatus?, online: Boolean?, host: String): String? 
     !s.connected -> "Der Laser-Controller ist nicht verbunden – USB-Kabel am Pi prüfen."
     s.emergency_latched -> "Not-Aus ist aktiv – SKR zurücksetzen, dann unter Maschine quittieren."
     !s.ownerFree -> "Der Laser wird gerade von ${s.owner} benutzt – dort zuerst trennen."
+    !s.coordOk -> "Der Pi-Dienst kennt die neue Achsenrichtung noch nicht – Pi-Dienst aktualisieren."
     "autorun_mesh" !in s.features -> "Der Pi kennt den automatischen Ablauf noch nicht – Pi-Dienst aktualisieren."
     else -> null
 }
@@ -115,10 +116,11 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
             Spacer(Modifier.height(4.dp))
 
             if (running && job != null) {
-                RunCard(machine, job.state, job.probe.done, job.probe.total, job.fraction, ok?.toolpath?.remainingSeconds(job.line), busy)
+                RunCard(machine, job.step, job.lastPaths, job.probe.done, job.probe.total, job.fraction, ok?.toolpath?.remainingSeconds(job.line), busy)
             } else {
+                if (job?.state == "aborted") Banner("Abgebrochen – der Laser ist aus. Zum Wiederholen erneut Starten.", Lc.info)
                 if (job?.state == "complete") Banner("Fertig – der Auftrag ist abgeschlossen, der Kopf steht geparkt.", Lc.ok)
-                if (job?.state == "error" && job.error.isNotBlank()) Banner("Abgebrochen: ${job.error} – Material und Maschine prüfen, dann erneut starten.", Lc.bad)
+                if (job?.state == "error" && job.error.isNotBlank()) Banner(job.error, Lc.bad)
                 if (why != null) Banner(why, Lc.info)
                 if (framing) {
                     Banner("Rahmen wird gefahren (Laser aus).", Lc.info)
@@ -148,7 +150,7 @@ private fun materialSummary(doc: de.millione.lumacut.core.Document): String? {
 }
 
 @Composable
-private fun RunCard(machine: MachineViewModel, state: String, probeDone: Int, probeTotal: Int, fraction: Double, remaining: Double?, busy: Set<String>) {
+private fun RunCard(machine: MachineViewModel, state: String, lastPaths: Boolean, probeDone: Int, probeTotal: Int, fraction: Double, remaining: Double?, busy: Set<String>) {
     var confirm by rememberConfirm()
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Lc.accentSoft)
@@ -158,14 +160,16 @@ private fun RunCard(machine: MachineViewModel, state: String, probeDone: Int, pr
         Text(when (state) {
             "homing" -> "Maschine referenziert …"
             "probing" -> "Höhe wird gemessen …"
-            else -> "Der Laser arbeitet"
+            "focusing" -> "Höhenkorrektur wird berechnet …"
+            "finishing", "parking" -> "Letzte Bahnen, dann Parken"
+            else -> if (lastPaths) "Letzte Bahnen, dann Parken" else "Der Laser arbeitet"
         }, style = LcTypography.titleMedium)
         when (state) {
             "probing" -> {
                 SmallText(if (probeTotal > 0) "Messpunkt $probeDone von $probeTotal" else "Messpunkte werden vorbereitet")
                 Progress(if (probeTotal > 0) probeDone.toFloat() / probeTotal else 0f, Modifier.fillMaxWidth(), thick = true)
             }
-            "running" -> {
+            "running", "finishing" -> {
                 SmallText("${(fraction * 100).toInt()} %" + (remaining?.let { " · noch ca. ${formatDuration(it)}" } ?: ""))
                 Progress(fraction.toFloat(), Modifier.fillMaxWidth(), thick = true)
             }
