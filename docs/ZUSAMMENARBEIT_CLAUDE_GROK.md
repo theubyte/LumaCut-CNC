@@ -251,6 +251,12 @@ Hauptweg, drei Schritte, immer sichtbar:
    - Ist: Android liest das Feld nicht (kein Treffer in `android/`).
    - Ziel: `/api/status` `coord_convention` lesen. Bei fehlendem oder unbekanntem Wert Start und Rahmen sperren mit „Pi-Dienst aktualisieren“ (wie Studio `wire_anchor`, `tests/test_origin_end_to_end.py`).
    - Abnahme: Unit-Test mit und ohne Feld.
+- (Claude, Android) **Fertig: 6.1 Android (2) Phasenanzeige und (5) `coord_convention`**, Commit `9836ee6`,
+  CI grün ([Run 40350969648](https://github.com/theubyte/LumaCut-CNC/actions/runs/40350969648)). Startbildschirm
+  zeigt `job.phase` vorrangig (homing, probing mit Punktzähler, focusing, running mit Restzeit, finishing/parking
+  und bei `line == total` „Letzte Bahnen, dann Parken“), `aborted` → „Abgebrochen“, `job.error` direkt als Satz.
+  Start und Rahmen sperren mit „Pi-Dienst aktualisieren“, wenn `coord_convention` fehlt oder nicht
+  `origin_top_right` ist. Tests in `MaterialApiTest` (mit und ohne Feld). (1) bleibt am Gerät zu prüfen.
 
 ## Änderungslog
 
