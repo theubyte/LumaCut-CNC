@@ -149,8 +149,13 @@ def test_pause_resume_cancel(qapp, editor):
         QTest.qWait(200)
         panel.pause()
         assert panel.pause_button.text() == "Fortsetzen" and panel.workflow.control.paused
-        QTest.qWait(150)
-        before = panel.progress.value()
+        # laufender Schritt + bereits eingereihte Signale dürfen noch ankommen (unter Last langsamer)
+        before = -1
+        for _ in range(20):
+            QTest.qWait(150)
+            if panel.progress.value() == before:
+                break
+            before = panel.progress.value()
         QTest.qWait(300)
         assert panel.progress.value() == before          # pausiert -> kein Fortschritt
         panel.resume()
