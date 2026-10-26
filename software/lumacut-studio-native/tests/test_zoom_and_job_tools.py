@@ -147,3 +147,58 @@ def test_main_window_job_tools(qapp, monkeypatch, tmp_path):
     assert tools.material_test(MaterialTestSpec(columns=2, rows=2, x=100, y=100)) == 5
     win.canvas.undo_stack.setClean()
     win.close()
+
+
+def _wheel_mod(view, pos, angle=QPoint(0, 0), pixel=QPoint(0, 0), mods=Qt.NoModifier):
+    vp = view.viewport()
+    ev = QWheelEvent(QPointF(pos), QPointF(vp.mapToGlobal(pos)), pixel, angle,
+                     Qt.NoButton, mods, Qt.NoScrollPhase, False)
+    QApplication.sendEvent(vp, ev)
+
+
+def test_shift_wheel_pans_horizontally_without_zoom(editor):
+    from lumacut_canvas.canvas_view import WHEEL_PAN_PX
+    view = editor.view
+    view.set_zoom(4.0)
+    view.centerOn(180, 170)
+    hb, vb = view.horizontalScrollBar(), view.verticalScrollBar()
+    h0, v0 = hb.value(), vb.value()
+    _wheel_mod(view, QPoint(100, 100), angle=QPoint(0, -120), mods=Qt.ShiftModifier)
+    assert view.px_per_mm == pytest.approx(4.0)
+    assert hb.value() == h0 + WHEEL_PAN_PX and vb.value() == v0
+    # Plattform liefert Umschalt+Rad als x-Delta: gleiche Richtung
+    _wheel_mod(view, QPoint(100, 100), angle=QPoint(120, 0), mods=Qt.ShiftModifier)
+    assert hb.value() == h0
+
+
+def test_sideways_scroll_pans_and_ctrl_shift_still_zooms(editor):
+    view = editor.view
+    view.set_zoom(4.0)
+    view.centerOn(180, 170)
+    hb = view.horizontalScrollBar()
+    h0 = hb.value()
+    _wheel_mod(view, QPoint(100, 100), pixel=QPoint(-30, 0))  # Trackpad quer
+    assert hb.value() == h0 + 30 and view.px_per_mm == pytest.approx(4.0)
+    _wheel_mod(view, QPoint(100, 100), angle=QPoint(0, 120), mods=Qt.ShiftModifier | Qt.ControlModifier)
+    assert view.px_per_mm == pytest.approx(4.0 * 1.15, rel=1e-6)
+
+
+def test_zoom_100_action_in_mouse_bar_and_percent_presets(editor):
+    from lumacut_canvas.canvas_view import PX_PER_MM_100
+    from lumacut_canvas.editor import ZOOM_PRESETS_PCT
+    a = editor.actions_by_name
+    bar = editor.action_bar.actions()
+    assert a["fit"] in bar and a["zoom_100"] in bar
+    assert bar.index(a["zoom_100"]) == bar.index(a["fit"]) + 1
+    editor.view.set_zoom(7.0)
+    a["zoom_100"].trigger()
+    assert editor.view.px_per_mm == pytest.approx(PX_PER_MM_100)
+    assert editor.zoom_label.text() == "100 %"
+    menu = editor.zoom_label.menu()
+    texts = [m.text() for m in menu.actions() if not m.isSeparator()]
+    assert texts[:len(ZOOM_PRESETS_PCT)] == [f"{p} %" for p in ZOOM_PRESETS_PCT]
+    assert a["fit"] in menu.actions() and a["fit_selection"] in menu.actions()
+    menu.actions()[ZOOM_PRESETS_PCT.index(200)].trigger()
+    assert editor.zoom_label.text() == "200 %"
+    a["fit"].trigger()
+    assert editor.zoom_label.text() != "200 %"

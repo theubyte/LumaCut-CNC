@@ -46,6 +46,7 @@ from .workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, axis_tooltips, clamp
                        screen_left_for_user_x, user_x_of)
 
 PASTE_OFFSET_MM = 5.0
+ZOOM_PRESETS_PCT = (25, 50, 100, 200, 400, 800)
 ROTATE_STEP_DEG = 15.0
 
 
@@ -409,6 +410,8 @@ class CanvasEditor(QWidget):
         self._act("zoom_in", "Vergrößern", lambda: self.view.zoom_by(1.25), QKeySequence.ZoomIn, "zoom_in")
         self._act("zoom_out", "Verkleinern", lambda: self.view.zoom_by(0.8), QKeySequence.ZoomOut, "zoom_out")
         self._act("fit", "Arbeitsfläche einpassen", self.view.fit_work_area, QKeySequence("Ctrl+0"), "fit")
+        z100 = self._act("zoom_100", "100 %", lambda: self.view.set_zoom(PX_PER_MM_100), QKeySequence("Ctrl+1"))
+        z100.setToolTip("100 % – physische Größe  (Strg+1)")
         self._act("fit_selection", "Auswahl einpassen", self.fit_selection, QKeySequence("Ctrl+Shift+A"))
         g = self._act("grid", "Raster anzeigen", lambda on: self.view.set_grid_visible(on), "Ctrl+'",
                       "grid", checkable=True)
@@ -438,13 +441,27 @@ class CanvasEditor(QWidget):
         self.action_bar = bar
         for name in ("open", "save", "export", None, "undo", "redo", None, "duplicate", "delete",
                      "rotate_ccw", "rotate_cw", "group", "ungroup", None,
-                     "zoom_out", "zoom_in", "fit", None, "grid", "snap", "path_preview", "touch_mode"):
+                     "zoom_out", "zoom_in", "fit", "zoom_100", None, "grid", "snap", "path_preview",
+                     "touch_mode"):
             bar.addSeparator() if name is None else bar.addAction(a[name])
             if name == "ungroup":
                 self.arrange_button = arrange_ui.add_to_bar(self, bar)
                 self.path_ops_button = pathops_ui.add_to_bar(self, bar)
-        self.zoom_label = QLabel("100 %")
+        # Zoomanzeige als Knopf mit festen Stufen (Gap-Analyse §4: Zoom-%-Feld).
+        self.zoom_label = QToolButton()
+        self.zoom_label.setObjectName("ZoomPercent")
+        self.zoom_label.setText("100 %")
+        self.zoom_label.setToolTip("Zoomstufe – klicken für feste Stufen")
+        self.zoom_label.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.zoom_label.setPopupMode(QToolButton.InstantPopup)
         self.zoom_label.setStyleSheet(f"color: {theme.TEXT_DIM}; padding: 0 8px;")
+        zm = QMenu(self.zoom_label)
+        for pct in ZOOM_PRESETS_PCT:
+            zm.addAction(f"{pct} %", lambda pct=pct: self.set_zoom_percent(pct))
+        zm.addSeparator()
+        zm.addAction(a["fit"])
+        zm.addAction(a["fit_selection"])
+        self.zoom_label.setMenu(zm)
         self._zoom_label_action = bar.addWidget(self.zoom_label)
         self._extension_separator = None
 
@@ -596,6 +613,10 @@ class CanvasEditor(QWidget):
 
     def _set_snap(self, on: bool) -> None:
         self.snap_enabled = on
+
+    def set_zoom_percent(self, pct: float) -> None:
+        """Zoom in Prozent der physischen Größe (100 % = :data:`PX_PER_MM_100`)."""
+        self.view.set_zoom(PX_PER_MM_100 * pct / 100.0)
 
     def _emit_zoom(self) -> None:
         # 100 % = Arbeitsfläche in physischer Größe (logische 96 dpi).
