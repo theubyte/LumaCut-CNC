@@ -12,6 +12,17 @@ Die Leiste links führt durch den Hauptweg, mehr braucht ein Neuling nicht:
 | **2 · Motiv** | Bild, SVG/DXF importieren, Text und Formen; verschieben, drehen, skalieren. Eine einzige Laserwahl: Gravieren, Markieren oder Schneiden (Werte kommen vom Material). Bilder landen automatisch auf Gravieren. „Arbeitsplatz scannen“ ist ein einzelner optionaler Knopf; „Mehr“ enthält Gruppen, Mehrfachauswahl, Materialtest und Projekte. Ebenen und Laserwerte je Ebene stehen unter „Erweitert“. |
 | **3 · Starten** | Vorschau, Material, Laserzeit und Größe; „Rahmen zeigen“ (Laser aus, referenziert vorher selbst) und ein Knopf **Starten**. Die App baut den Auftrag ohne Höhenmesh, lädt ihn hoch und startet `op=autorun`. Der Pi referenziert bei Bedarf, tastet ab, korrigiert die Höhe, lasert und parkt. Fortschritt aus `/api/status`: `job.state` (homing, probing, running, complete, error) und `job.probe {done,total}`. Fehler erscheinen in einem Satz mit nächstem Schritt. Starten sperrt, bis der Pi `autorun_mesh` meldet. |
 
+**Neu im Motiv-Schritt (2026-10-26):**
+
+| Knopf | Was er tut |
+|---|---|
+| **Importieren** | Ein Knopf für alles, das Format wird am Inhalt erkannt: SVG, DXF, xTool `.xcs`, LightBurn `.lbrn`/`.lbrn2`, HPGL `.plt`/`.hpgl` (40 Einheiten/mm), PDF und Illustrator `.ai` (erste Seite über `PdfRenderer` als Bild), Bilder (PNG, JPG, WebP, BMP, GIF, HEIC soweit Android sie liest), LumaCut-Projekt. Unbekanntes Format: ein Satz mit der Liste der unterstützten. Nicht lesbare Elemente (z. B. Text in `.xcs`/`.lbrn`) werden übersprungen und in einem Satz genannt. `.xcs` ist nach bestem Wissen gebaut (Position = obere linke Ecke bzw. `graphicX/graphicY`) und nur mit selbst erzeugten Dateien geprüft; Pfade, Rechtecke, Kreise und eingebettete Bilder, keine Schrift. |
+| **Kontur** | Bild: Hintergrund erkennen (Transparenz, sonst Randfarbe per Flood-Fill, Toleranz einstellbar), nur Außenkontur, Teile je eine Kontur oder verbunden; „Sticker“ (Rand 1–10 mm nach außen, runde Ecken, kleine Lücken geschlossen) oder „Am Rand entlang“ (optional 0,2 mm Einzug). Vorschau, dann Übernehmen: Bild auf Gravieren, Kontur auf Schneiden, gruppiert; oder „Nur Kontur“. Vektoren und Text: Umriss −10…+10 mm. Rechnung: Rastermaske (6 px/mm), Distanzfeld, Marching Squares, Glätten, Vereinfachen auf 0,05 mm, nur Linien (keine G2/G3). |
+| **Bild anpassen** (in der Auswahl) | Dithering Floyd-Steinberg, Jarvis, Stucki, S/W, Graustufen; Helligkeit, Kontrast, Schärfe, Invertieren mit Vorschau dessen, was gelasert wird. |
+| **QR-Code** | Text/URL, Stufe M, Version 1–10 (bis 213 Byte), gefüllte Rechtecke auf Gravieren; Warnung unter 0,8 mm Punktgröße. Intern gegen Reed-Solomon-Beispiel, Format-BCH und Rücklesen der Codewörter geprüft, aber noch nicht mit einem echten Scanner. |
+| **Formen** | Herz, Stern, abgerundetes Rechteck, Anhänger mit Loch. |
+| **Mehr** | Vervielfältigen als Raster (Anzahl, Abstand; Kopien außerhalb des Arbeitsbereichs entfallen), Mehrfachauswahl, Gruppen, Materialtest, Projekte. Text-Dialog: „Auf dem Bogen“ (Radius, minus = unten). |
+
 Unter **Maschine** liegt alles Übrige: Steuerung (Status, Steuerkreuz, Referenzieren, Abtasten, Parken, Licht/Abluft, Notstopp quittieren), Arbeitsplatz scannen (Kopfkamera kalibrieren, Mosaik, Werkstücke markieren, Höhenmesh, geführter Ablauf – nur für Fachleute) und die Auftragsliste des Pi. **Einstellungen**: Pi-Adresse, Fokus & Taster, SKR-Firmware, Version. NOT-AUS ist immer oben rechts.
 
 ## Aufbau

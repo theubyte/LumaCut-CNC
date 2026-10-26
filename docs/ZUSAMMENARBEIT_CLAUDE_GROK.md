@@ -300,6 +300,12 @@ Hauptweg, drei Schritte, immer sichtbar:
   und bei `line == total` „Letzte Bahnen, dann Parken“), `aborted` → „Abgebrochen“, `job.error` direkt als Satz.
   Start und Rahmen sperren mit „Pi-Dienst aktualisieren“, wenn `coord_convention` fehlt oder nicht
   `origin_top_right` ist. Tests in `MaterialApiTest` (mit und ohne Feld). (1) bleibt am Gerät zu prüfen.
+- (Claude, Android) **Fertig: Auftrag „Laser attraktiver“ (Importe, Kontur, Extras)**, Commit `5329cbd`, CI grün
+  ([Run 40375500748](https://github.com/theubyte/LumaCut-CNC/actions/runs/40375500748), APK als Artifact
+  `LumaCut-Android-APK`). Importieren (xcs, lbrn, HPGL, PDF/AI, Bildformate, Erkennung am Inhalt), Kontur/Sticker
+  mit Vorschau, Bild anpassen (Jarvis/Stucki, Helligkeit/Kontrast/Schärfe/Invertieren), QR-Code, Text im Bogen,
+  Raster-Kopien, Formen, Umriss für Vektoren. Alles in `core` mit Tests. Offen/ehrlich: `.xcs` und QR nicht gegen
+  echte Dateien/Scanner geprüft; Boxgenerator nicht gebaut. Nicht am Gerät erprobt.
 
 ## Änderungslog
 
