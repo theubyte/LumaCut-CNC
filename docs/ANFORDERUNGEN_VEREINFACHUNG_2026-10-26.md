@@ -117,12 +117,12 @@ Die Apps bilden einfach die echte Maschine ab.
 
 | Thema | Zuständig | Status |
 |---|---|---|
-| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Machine + Scan Probe | offen |
+| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Start-Knopf in Studio: Machine | in Arbeit (Pi) |
 | Nullpunkt oben rechts | Canvas + Machine | offen |
 | Kamera-Scan als Button | Scan Probe | offen |
-| Materialdatenbank auf dem Pi | Materials + Machine | offen |
+| Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | in Arbeit (Pi) |
 | Cleaner UI Windows | Canvas | offen |
-| Cleaner UI Android | (Claude / Android-Agent) | offen |
+| Cleaner UI Android | Claude, Session android | in Arbeit |
 
 ## 8. Nächste Schritte
 

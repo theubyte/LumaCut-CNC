@@ -11,10 +11,11 @@ ist die **einzige verbindliche Absprache** zwischen den Agenten. Wer etwas am Ve
 
 | Bereich | Dateien | Zuständig |
 |---|---|---|
-| Pi-Dienst: Material-Datenbank, automatischer Auftrag, schnelles Abtasten, Höhenkorrektur auf dem Pi | `pi400/marlin/*.py` (außer `index.html`), `firmware/marlin/`, `tests/test_marlin_gateway.py`, neue Tests unter `tests/`, API-Abschnitte für Material und Auftrag in `docs/PI_API_REFERENZ.md` | **Claude** (Agent „Pi-Automatik“) |
+| Pi-Dienst: Material-Datenbank, automatischer Auftrag, schnelles Abtasten, Höhenkorrektur auf dem Pi | neue Module in `pi400/marlin/` (z. B. `materials.py`, `autojob.py`, `focus_mesh.py`) plus kleine Einhängepunkte in `web.py`/`transport.py`, `firmware/marlin/`, `tests/test_marlin_gateway.py`, neue Tests unter `tests/`, API-Abschnitte für Material und Auftrag in `docs/PI_API_REFERENZ.md` | **Claude** (Agent „Pi-Automatik“) |
 | Android-App | `android/**`, `docs/ANDROID_APP.md`, `.github/workflows/android.yml` | **Claude** (Agent „Android“) |
 | Windows-App | `software/lumacut-studio-native/**` | **Grok** |
 | Web-Oberfläche des Pi | `pi400/marlin/index.html`, `tests/ui_mock_server.py`, `docs/PI_WEB_UI_REDESIGN.md` | **Grok** |
+| Platzierungsanker, Studio-Maschinenseite | `pi400/marlin/placement.py`, `software/lumacut-studio-native/src/machine/` | **Grok** (Machine-Agent) |
 | Diese Absprache | `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` | beide, nur Abschnitt 6 frei; Abschnitte 2–5 nur mit Änderungslog |
 
 Regeln:
@@ -119,3 +120,4 @@ Hauptweg, drei Schritte, immer sichtbar:
 ## Änderungslog
 
 - 2026-10-26 Claude: Dokument angelegt; Koordinaten vom Besitzer bestätigt (Endschalter hinten rechts von der Tür aus).
+- 2026-10-26 Claude: Abgleich mit Groks `docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` (zeitgleich entstanden). Koordinaten stimmen überein (nur X gespiegelt, Pi bleibt in Maschinen-mm). `placement.py` und Studio-Maschinenseite gehören Grok; Material-API und autorun-Ablauf auf dem Pi gehören Claude (pi-automatik), Groks Agents binden sie an. Beide Dokumente gelten, bei Widerspruch zuerst hier klären.
