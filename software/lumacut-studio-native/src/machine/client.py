@@ -9,7 +9,7 @@ asks for actions and reports the Pi's German explanation back to the UI.
 
 Endpoints (see docs/PI_BETRIEB.md, derived from pi400/marlin/web.py):
     GET  /api/status                 machine + job state
-    POST /api/action  op=...         form-encoded actions
+    POST /api/action  op=...         form-encoded actions (op=frame: outline)
     POST /api/upload  file=...       multipart G-code upload (preflighted)
     GET  /api/jobs                   stored jobs
     GET  /api/jobs/<name>/geometry   powered toolpath bounds
@@ -39,6 +39,11 @@ JOB_SUFFIXES = (".gcode", ".gc", ".nc")
 MAX_JOB_BYTES = 32 * 1024 * 1024
 #: Job states reported by the Pi job worker.
 JOB_ACTIVE_STATES = ("homing", "probing", "running")
+#: Frame outlines accepted by the Pi op=frame (box = bounding box,
+#: hull = convex hull / rubber band).
+FRAME_MODES = ("box", "hull")
+#: Pi limit for one frame program (web.py FRAME_MAX_BYTES).
+MAX_FRAME_BYTES = 64 * 1024
 
 # The Pi holds the HTTP request open until the SKR has finished, so motion
 # requests need long timeouts (mirrors the Tauri studio bridge).
@@ -136,6 +141,31 @@ class JobState:
 
 
 @dataclass
+class FrameState:
+    """Laser-off outline run (Pi ``frame`` status, op=frame)."""
+
+    state: str = "idle"              # idle/running/complete/aborted/error
+    mode: str = ""
+    line: int = 0
+    total: int = 0
+    error: str = ""
+
+    @property
+    def active(self) -> bool:
+        return self.state == "running"
+
+    @classmethod
+    def from_json(cls, data: Any) -> "FrameState":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(state=str(data.get("state") or "idle"),
+                   mode=str(data.get("mode") or ""),
+                   line=_int(data.get("line")),
+                   total=_int(data.get("total")),
+                   error=str(data.get("error") or ""))
+
+
+@dataclass
 class MachineStatus:
     """Subset of GET /api/status the Studio displays."""
 
@@ -156,11 +186,17 @@ class MachineStatus:
     laser_focus_z: float | None = None
     probe_offset_set: bool = False
     job: JobState = field(default_factory=JobState)
+    frame: FrameState = field(default_factory=FrameState)
     raw: dict = field(default_factory=dict, repr=False)
 
     @property
+    def framing(self) -> bool:
+        """A laser-off frame run is in progress (owner "frame" on the Pi)."""
+        return self.frame.active or self.owner == "frame"
+
+    @property
     def busy(self) -> bool:
-        return self.owner not in ("Frei", "") or self.job.active
+        return self.owner not in ("Frei", "") or self.job.active or self.frame.active
 
     @classmethod
     def from_json(cls, data: Any) -> "MachineStatus":
@@ -199,6 +235,7 @@ class MachineStatus:
             laser_focus_z=_float(data.get("laser_focus_z")),
             probe_offset_set=data.get("probe_xy_offset_mm") is not None,
             job=JobState.from_json(data.get("job")),
+            frame=FrameState.from_json(data.get("frame")),
             raw=data,
         )
 
@@ -355,6 +392,31 @@ class LumaCutClient:
             if "Unbekannte Marlin-Aktion" in str(exc):
                 raise ApiError("Pi-Dienst bietet noch kein Parken über die API "
                                "(op=park fehlt in pi400/marlin/web.py)",
+                               exc.status) from None
+            raise
+
+    def frame(self, gcode: str, mode: str = "box") -> str:
+        """Trace the design outline with the laser off (Pi ``op=frame``).
+
+        The Pi checks the program (only G0/G1 X/Y with S0, no M3, no Z),
+        needs a homed, idle machine, and runs it in the background without
+        touching the uploaded job, so "start" can follow without a new
+        upload. Progress is in ``status().frame``; ``abort_job`` stops it at
+        the next corner. Older Pi services answer "Unbekannte
+        Marlin-Aktion: frame".
+        """
+        if mode not in FRAME_MODES:
+            raise ValueError("Rahmenart muss box oder hull sein")
+        if not gcode or not gcode.strip():
+            raise ValueError("Kein Rahmen: Design ist leer")
+        if len(gcode.encode("utf-8")) > MAX_FRAME_BYTES:
+            raise ValueError("Rahmenprogramm zu groß (max. 64 KB)")
+        try:
+            return self.action("frame", gcode=gcode, mode=mode)
+        except ApiError as exc:
+            if "Unbekannte Marlin-Aktion" in str(exc):
+                raise ApiError("Pi-Dienst bietet noch keine Rahmenfahrt über die API "
+                               "(op=frame fehlt in pi400/marlin/web.py – Pi aktualisieren)",
                                exc.status) from None
             raise
 

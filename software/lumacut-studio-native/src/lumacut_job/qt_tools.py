@@ -2,7 +2,9 @@
 
 Installed by ``main.py`` with :func:`install_job_tools`; it only *uses* the
 public APIs of the canvas editor (``document``, ``undo_stack``) and the
-machine panel (``send_gcode``) and owns no state of theirs.
+machine panel (``frame_gcode``, ``set_frame_provider``) and owns no state of
+theirs. Framing runs on the Pi as ``op=frame`` and never replaces the job
+that was sent before.
 """
 
 from __future__ import annotations
@@ -109,6 +111,19 @@ class JobTools(QObject):
         self.test_action = self._add("Materialtest…", self.material_test, None,
                                      "Leistung × Geschwindigkeit-Testraster einfügen")
         window.addToolBar(self.toolbar)
+        if hasattr(machine_panel, "set_frame_provider"):
+            machine_panel.set_frame_provider(self.frame_program)
+        signal = getattr(machine_panel, "frame_available_changed", None)
+        if signal is not None:
+            signal.connect(self._sync_frame_actions)
+            self._sync_frame_actions(bool(getattr(machine_panel, "frame_available", False)))
+
+    def _sync_frame_actions(self, available: bool) -> None:
+        tip = "" if available else " (erst verbinden und referenzieren; nicht während Auftrag)"
+        for action, text in ((self.frame_action, "Umriss des Auftrags mit ausgeschaltetem Laser abfahren"),
+                             (self.hull_action, "Konvexe Hülle statt Rechteck abfahren")):
+            action.setEnabled(available)
+            action.setToolTip(text + tip)
 
     def _add(self, text, slot, shortcut, tip):
         a = QAction(text, self.window)
@@ -134,19 +149,26 @@ class JobTools(QObject):
         self._msg(f"Auftrag {est.summary()} (ohne Referenzfahrt/Fokus/Parken)", 15000)
         return est
 
+    def frame_program(self, mode: str = "box") -> str:
+        """Frame G-code (laser off) of the current design; ValueError if empty."""
+        return frame_gcode(optimize_layers(job_layers(self.editor.document)), mode=mode)
+
     def frame_job(self, mode: str = "box", confirm: bool = True):
         try:
-            g = frame_gcode(optimize_layers(job_layers(self.editor.document)), mode=mode)
+            g = self.frame_program(mode)
         except ValueError as exc:
             self._msg(f"Rahmen nicht möglich: {exc}")
             return None
         if confirm and QMessageBox.question(
                 self.window, "Rahmen",
                 "Umriss mit ausgeschaltetem Laser abfahren?\n"
-                "Danach vor 'Start Job' erneut 'Design senden'.") != QMessageBox.Yes:
+                "Der gesendete Auftrag bleibt geladen und kann danach direkt "
+                "gestartet werden.") != QMessageBox.Yes:
             return None
-        self.machine.send_gcode("lumacut-frame.gcode", g, start=True)
-        self._msg("Rahmen gesendet – danach 'Design senden' vor 'Start Job'")
+        if not self.machine.frame_gcode(g, mode):
+            self._msg("Rahmen nicht gestartet – siehe Maschinen-Panel")
+            return None
+        self._msg("Rahmenfahrt angefordert (Laser aus) – gesendeter Auftrag bleibt geladen")
         return g
 
     def material_test(self, spec: MaterialTestSpec | None = None):

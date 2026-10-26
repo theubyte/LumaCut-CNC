@@ -6,6 +6,9 @@ Public integration points for the main window (and other panels):
     MachinePanel.start_job()                      – toolbar "Start Job"
     MachinePanel.set_job_file(path)               – select a G-code file
     MachinePanel.send_gcode(name, text, start)    – export from the canvas
+    MachinePanel.frame_gcode(text, mode)          – laser-off outline (op=frame)
+    MachinePanel.set_frame_provider(fn)           – mode -> frame G-code for the button
+    MachinePanel.frame_available_changed(bool)    – frame shortcuts enabled state
     MachinePanel.shutdown()                       – call from closeEvent
 """
 from __future__ import annotations
@@ -21,8 +24,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 from . import settings as settings_store
-from .client import (JOB_SUFFIXES, JOG_STEPS, LumaCutClient, MachineStatus,
-                     normalize_base_url)
+from .client import (FRAME_MODES, JOB_SUFFIXES, JOG_STEPS, LumaCutClient,
+                     MachineStatus, normalize_base_url)
 from .worker import CommandRunner, ConnState, StatusPoller
 
 # Colours match the app's dark theme (main.py).
@@ -43,6 +46,7 @@ STATE_TEXT = {
 #: Status older than this is shown as stale and motion controls are locked.
 STALE_AFTER_S = 3.0
 ESTOP_LABEL = "NOT-AUS"
+FRAME_LABELS = {"box": "Rechteck", "hull": "Gummiband"}
 
 ESTOP_STYLE = ("QPushButton { background: #d7263d; color: white; font-weight: bold;"
                " font-size: 15px; border: 2px solid #ff9b96; border-radius: 8px;"
@@ -62,6 +66,7 @@ def _mm(value: float | None) -> str:
 
 class MachinePanel(QWidget):
     connection_changed = Signal(str, str)   # ConnState, display text
+    frame_available_changed = Signal(bool)  # a frame run may be requested now
 
     def __init__(self, parent: QWidget | None = None, *,
                  store=None, confirm: Callable[[str, str], bool] | None = None):
@@ -77,6 +82,9 @@ class MachinePanel(QWidget):
         self._stale = False
         self._job_path: Path | None = None
         self._uploaded: str = ""
+        self._frame_provider: Callable[[str], str] | None = None
+        self._frame_available = False
+        self._last_frame_state = ""
         self._runner = CommandRunner(self)
         self._runner.started.connect(self._on_command_started)
         self._runner.finished.connect(self._on_command_finished)
@@ -231,6 +239,20 @@ class MachinePanel(QWidget):
         jb.addWidget(self.autorun_button, 1, 0)
         jb.addWidget(self.abort_button, 1, 1)
         jl.addLayout(jb)
+        frame_row = QHBoxLayout()
+        self.frame_button = QPushButton("Rahmen")
+        self.frame_button.setToolTip(
+            "Umriss des Designs mit ausgeschaltetem Laser abfahren (Strg+Umschalt+F / "
+            "Alt+Umschalt+F). Der gesendete Auftrag bleibt geladen.")
+        self.frame_button.clicked.connect(lambda _=False: self.frame())
+        self.frame_mode_combo = QComboBox()
+        for mode in FRAME_MODES:
+            self.frame_mode_combo.addItem(FRAME_LABELS[mode], mode)
+        self.frame_mode_combo.setToolTip("Rechteck = Begrenzungsrahmen, "
+                                         "Gummiband = konvexe Hülle")
+        frame_row.addWidget(self.frame_button, 1)
+        frame_row.addWidget(self.frame_mode_combo)
+        jl.addLayout(frame_row)
         self.job_label = QLabel("Kein Auftrag")
         self.job_label.setWordWrap(True)
         self.job_progress = QProgressBar()
@@ -246,7 +268,7 @@ class MachinePanel(QWidget):
                                  self.focus_button, self.reset_button,
                                  *self.jog_buttons, self.send_button,
                                  self.start_button, self.autorun_button,
-                                 self.abort_button]
+                                 self.abort_button, self.frame_button]
 
     # ------------------------------------------------------ connection
     def _current_settings(self) -> settings_store.ConnectionSettings:
@@ -417,6 +439,22 @@ class MachinePanel(QWidget):
         self._update_enabled()
 
     def _apply_job(self, status: MachineStatus) -> None:
+        self._note_frame_result(status)
+        if status.framing:
+            frame = status.frame
+            text = "Rahmenfahrt läuft (%s) · Laser aus" % FRAME_LABELS.get(
+                frame.mode, frame.mode or "Rahmen")
+            if self._uploaded:
+                text += " · %s bleibt geladen" % self._uploaded
+            self.job_label.setText(text)
+            self.job_label.setStyleSheet("color: %s;" % INFO)
+            if frame.total > 0:
+                self.job_progress.setValue(int(1000 * min(1.0, frame.line / frame.total)))
+                self.job_progress.setFormat("Rahmen %d / %d" % (frame.line, frame.total))
+            else:
+                self.job_progress.setValue(0)
+                self.job_progress.setFormat("Rahmen …")
+            return
         job = status.job
         names = {"idle": "Bereit", "homing": "Referenzfahrt", "probing": "Abtasten",
                  "running": "Läuft", "complete": "Fertig", "aborted": "Abgebrochen",
@@ -439,6 +477,19 @@ class MachinePanel(QWidget):
             self.job_progress.setFormat("%d / %d Zeilen (%.0f %%)" % (
                 job.line, job.total, progress * 100))
 
+    def _note_frame_result(self, status: MachineStatus) -> None:
+        state = status.frame.state
+        if self._last_frame_state == "running" and state != "running":
+            if state == "complete":
+                self._show_message("Rahmenfahrt fertig – Auftrag unverändert, "
+                                   "Starten ohne erneutes Senden möglich", OK)
+            elif state == "aborted":
+                self._show_message("Rahmenfahrt abgebrochen (Laser aus)", WARN)
+            elif state == "error":
+                self._show_message("Rahmenfahrt fehlgeschlagen: " +
+                                   (status.frame.error or "ohne Begründung"), BAD)
+        self._last_frame_state = state
+
     def _show_message(self, text: str, colour: str) -> None:
         stamp = time.strftime("%H:%M:%S")
         self.error_label.setText("%s  %s" % (stamp, text))
@@ -450,16 +501,33 @@ class MachinePanel(QWidget):
         idle = connected and not self._runner.busy
         s = self._status
         job_active = bool(s and s.job.active)
+        framing = bool(s and s.framing)
         for b in self._control_buttons:
             b.setEnabled(idle)
         if idle and s is not None:
             self.reset_button.setEnabled(s.emergency_latched)
-            self.abort_button.setEnabled(job_active)
+            self.abort_button.setEnabled(job_active or framing)
             for b in (self.home_button, self.park_button, self.focus_button,
-                      self.start_button, self.autorun_button, *self.jog_buttons):
-                b.setEnabled(not job_active and not s.emergency_latched)
-            for b in (self.park_button, self.focus_button, *self.jog_buttons):
+                      self.start_button, self.autorun_button, self.frame_button,
+                      *self.jog_buttons):
+                b.setEnabled(not job_active and not framing and not s.emergency_latched)
+            for b in (self.park_button, self.focus_button, self.frame_button,
+                      *self.jog_buttons):
                 b.setEnabled(b.isEnabled() and s.homed)
+        elif s is None:
+            self.frame_button.setEnabled(False)
+        elif (self._stale and self._state == ConnState.CONNECTED and
+              self._client is not None and not self._runner.busy and
+              (job_active or framing)):
+            # During a frame the Pi holds machine.lock for each edge (M400),
+            # so status can go stale. Aborting only stops, so keep it usable.
+            self.abort_button.setEnabled(True)
+        frame_ok = self.frame_button.isEnabled()
+        if frame_ok != self._frame_available:
+            self._frame_available = frame_ok
+            self.frame_available_changed.emit(frame_ok)
+        if self._frame_provider is None:
+            self.frame_button.setEnabled(False)
         if not self._job_path:
             self.send_button.setEnabled(False)
         if not self._uploaded:
@@ -608,6 +676,58 @@ class MachinePanel(QWidget):
             return message
         self.file_label.setText(name)
         self._run("Senden & Starten" if start else "Senden", task)
+
+    # ---------------------------------------------------------- frame
+    @property
+    def frame_available(self) -> bool:
+        """Connected, fresh status, homed, idle, no job/frame running."""
+        return self._frame_available
+
+    def set_frame_provider(self, provider: Callable[[str], str] | None) -> None:
+        """``provider(mode)`` returns the frame G-code of the current design
+        (or raises ValueError); used by the "Rahmen" button."""
+        self._frame_provider = provider
+        self._update_enabled()
+
+    def frame(self, mode: str | None = None) -> bool:
+        """Button: build the frame for the chosen mode, confirm, run it."""
+        mode = mode or self.frame_mode_combo.currentData() or "box"
+        if self._frame_provider is None:
+            self._show_message("Rahmen: kein Design verfügbar", WARN)
+            return False
+        try:
+            gcode = self._frame_provider(mode)
+        except ValueError as exc:
+            self._show_message("Rahmen nicht möglich: %s" % exc, WARN)
+            return False
+        if not self._confirm("Rahmen",
+                             "Umriss (%s) mit ausgeschaltetem Laser abfahren? Bereich "
+                             "frei? Der gesendete Auftrag bleibt geladen."
+                             % FRAME_LABELS.get(mode, mode)):
+            return False
+        return self.frame_gcode(gcode, mode)
+
+    def frame_gcode(self, gcode: str, mode: str = "box") -> bool:
+        """Run a laser-off outline on the Pi (op=frame) without uploading:
+        the job that was sent before stays loaded and can be started next.
+        Returns True if the request was dispatched."""
+        if self._client is None or self._state != ConnState.CONNECTED:
+            self._show_message("Nicht mit dem Pi verbunden", WARN)
+            return False
+        s = self._status
+        if s is not None and (s.job.active or s.framing):
+            self._show_message("Rahmen erst, wenn %s beendet ist" % (
+                "die Rahmenfahrt" if s.framing else "der Auftrag"), WARN)
+            return False
+        if s is not None and s.emergency_latched:
+            self._show_message("Rahmen gesperrt: Notstopp zuerst quittieren", WARN)
+            return False
+        if s is not None and not s.homed:
+            self._show_message("Vor dem Rahmen referenzieren (Home)", WARN)
+            return False
+        client = self._client
+        return self._run("Rahmen (%s)" % FRAME_LABELS.get(mode, mode),
+                         lambda: client.frame(gcode, mode))
 
     @Slot()
     def start_job(self) -> None:
