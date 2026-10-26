@@ -73,3 +73,35 @@ def test_unknown_convention_is_rejected():
     data["coords"] = "irgendwas-v9"
     with pytest.raises(ValueError):
         Document().load_dict(data)
+
+
+def test_raster_column_0_lands_at_large_machine_x(qapp):
+    """Vertrag (ZUSAMMENARBEIT §2, Anforderungen §2.3): Bildspalte 0 (linke Bildkante
+    auf dem Bildschirm) liegt bei 390 − x, also beim großen Maschinen-X.
+
+    Linke Bildhälfte schwarz, rechte weiß: gebrannt wird nur zwischen
+    Maschinen-X 390 − 70 und 390 − 60, nicht in der rechten Hälfte (310…320).
+    """
+    from PySide6.QtGui import QColor, QImage
+    from lumacut_canvas.model import Document, Geometry, ImageSettings, RasterImage, Shape
+    from lumacut_canvas.toolpath import CUT, parse_gcode
+    from lumacut_import.image import grayscale_png
+    from lumacut_job.planner import optimized_document_gcode
+
+    img = QImage(40, 8, QImage.Format_RGB32)
+    for x in range(40):
+        for y in range(8):
+            v = 0 if x < 20 else 255
+            img.setPixelColor(x, y, QColor(v, v, v))
+    png, pw, ph = grayscale_png(img)
+    doc = Document()
+    doc.add_shape(Shape("image", Geometry(60, 60, 20, 4, 0), doc.active_layer_id,
+                        image=RasterImage(png, pw, ph,
+                                          ImageSettings(mode="threshold", overscan_mm=0.0))))
+    cuts = [m for m in parse_gcode(optimized_document_gcode(doc)).moves
+            if m.kind == CUT and m.power > 0]
+    assert cuts
+    xs = [x for m in cuts for x in (m.x0, m.x1)]
+    assert min(xs) >= 390 - 70 - 0.3
+    assert max(xs) <= 390 - 60 + 0.3
+    assert max(xs) > 325          # schwarze Spalte 0 sitzt am großen X-Rand

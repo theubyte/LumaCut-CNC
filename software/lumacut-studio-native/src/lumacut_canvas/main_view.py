@@ -11,7 +11,8 @@ Siehe docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md (§1, §3, §5).
   ``scanprobe.job_flow_qt.OneClickController``): Bestätigung → Referenzfahrt →
   Höhenmesh → Fokus → Lasern → Parken. Während des Ablaufs wird „Start“ zu
   „Abbrechen“. Siehe :data:`START_HOOK`.
-- **Kamera-Scan**: optional, ruft ``ScanPanel.start_scan`` auf; kein Pflicht-
+- **Kamera-Scan**: optional, ruft ``ScanPanel.camera_scan`` auf (nimmt bei
+  verbundenem Pi automatisch die Maschinenkamera; Rückfall ``start_scan``); kein Pflicht-
   Schritt im Auftrag. Das ist *der* Kamera-Scan-Knopf; der gleichnamige im
   Scan-Panel kann entfallen (Scan-Probe-Agent).
 - **Mehr**: blendet Ablauf, Scan & Probe, Maschine (Verbinden, Joggen,
@@ -311,12 +312,18 @@ class MainView(QObject):
         self.design_menu.popup(b.mapToGlobal(b.rect().bottomLeft()))
 
     def camera_scan(self) -> bool:
-        """Optionaler Kamera-Scan (ScanPanel.start_scan); ändert den Auftrag nicht."""
+        """Optionaler Kamera-Scan; ändert den Auftrag nicht.
+
+        Ruft ``ScanPanel.camera_scan`` – nur dieser Einstieg wechselt bei
+        verbundenem Pi selbst auf die Maschinenkamera (Anforderungen §2.3/§3).
+        Ältere Panels ohne ``camera_scan`` fallen auf ``start_scan`` zurück.
+        """
         sp = getattr(self.window, "scan_panel", None)
-        if sp is None or not hasattr(sp, "start_scan"):
+        entry = getattr(sp, "camera_scan", None) or getattr(sp, "start_scan", None)
+        if entry is None:
             self._status("Kamera-Scan nicht verfügbar")
             return False
-        ok = bool(sp.start_scan())
+        ok = bool(entry())
         self._status("Kamera-Scan läuft …" if ok else
                      "Kamera-Scan nicht möglich – " + (getattr(sp, "last_error", "") or "siehe „Mehr › Scan“"))
         return ok

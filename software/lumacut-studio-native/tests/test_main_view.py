@@ -143,6 +143,27 @@ def test_material_button_opens_library(make_win, monkeypatch):
 def test_camera_scan_button_calls_scan_entry_point(make_win, monkeypatch):
     win = make_win()
     calls = []
+    monkeypatch.setattr(win.scan_panel, "camera_scan", lambda: calls.append("camera") or True)
+    monkeypatch.setattr(win.scan_panel, "start_scan", lambda: calls.append("start") or True)
+    win.main_actions.scan_button.click()
+    assert calls == ["camera"]   # nur camera_scan wechselt bei Verbindung auf den Pi
+
+
+def test_camera_scan_switches_to_pi_when_connected(make_win, monkeypatch):
+    win = make_win()
+    sp = win.scan_panel
+    started = []
+    monkeypatch.setattr(sp, "_client", lambda: object())
+    monkeypatch.setattr(sp, "start_scan", lambda: started.append(sp.mode) or True)
+    win.main_actions.scan_button.click()
+    from scanprobe.panel import MODE_PI
+    assert started == [MODE_PI]
+
+
+def test_camera_scan_falls_back_to_start_scan(make_win, monkeypatch):
+    win = make_win()
+    calls = []
+    monkeypatch.setattr(win.scan_panel, "camera_scan", None)   # älteres Panel
     monkeypatch.setattr(win.scan_panel, "start_scan", lambda: calls.append(1) or True)
     win.main_actions.scan_button.click()
     assert calls == [1]
