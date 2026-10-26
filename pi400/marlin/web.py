@@ -56,6 +56,16 @@ if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is no
 job = {"file": "", "state": "idle", "line": 0, "total": 0, "error": ""}
 job_lock = threading.Lock()
 stop_job = threading.Event()
+# Framing (op=frame) runs laser-off outline moves from a request payload. It
+# shares job_lock/stop_job with jobs (never both at once, abort/estop stop
+# it) but has its own state so the uploaded job and its status stay intact.
+frame = {"state": "idle", "mode": "", "line": 0, "total": 0, "error": ""}
+FRAME_MAX_BYTES = 64 * 1024
+FRAME_MAX_MOVES = 2000
+FRAME_MODES = {"box": "Rechteck", "hull": "Gummiband"}
+_FRAME_SETUP = ("G21", "G90", "M5", "M5 I", "M400")
+_FRAME_MOVE = re.compile(r"^G0?[01](?:\s*[XYFS]\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+))+$")
+_FRAME_WORD = re.compile(r"([XYFS])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 running = False
 
 
@@ -104,7 +114,11 @@ def status():
     result.update(estimated_tip_gap_mm=tip_gap,
                   estimated_focus_adjust_mm=(None if tip_gap is None else
                     round(config["focus_gap_mm"] - tip_gap, 3)),
-                  job=dict(job), firmware="marlin",
+                  job=dict(job), frame=dict(frame),
+                  activity=("framing" if frame["state"] == "running" else
+                            "job" if job["state"] in ("homing", "probing", "running")
+                            else "idle"),
+                  firmware="marlin",
                   expected_pwm="PA1 / M3 I / S0..255",
                   io={"laser_supply_switch":"FAN1 / PC6 (M106/M107, low-side)",
                       "laser_pwm":"BL-Touch / PA1",
@@ -118,6 +132,8 @@ def status():
 
 def local_owner():
     with machine.lock:
+        if machine.owner == "frame":
+            raise RuntimeError("Rahmenfahrt läuft – abwarten oder abbrechen")
         if machine.owner is not None:
             raise RuntimeError(
                 "Steuerung belegt durch " + machine.owner +
@@ -307,11 +323,16 @@ def action():
         local_owner()
         machine.park_safezone(owner="web")
         return jsonify(message="Geparkt: Laser aus, Z-Rückzug, X0/Y0")
+    if op == "frame":
+        return start_frame()
     if op == "start":
         return start_job()
     if op == "autorun":
         return start_job(automatic=True)
     if op == "abort":
+        if frame["state"] == "running":
+            stop_job.set()
+            return jsonify(message="Rahmen-Abbruch angefordert: stoppt an der nächsten Ecke, Laser bleibt aus")
         if job["state"] not in ("homing", "probing", "running"):
             raise RuntimeError("Kein laufender Auftrag")
         stop_job.set()
@@ -542,6 +563,117 @@ def start_job(automatic=False):
         return jsonify(message="Ein-Klick-Ablauf gestartet: Homing → Abtasten bei X%.1f Y%.1f "
                        "→ Fokus → %s → Park" % (probe_point[0], probe_point[1], filename))
     return jsonify(message="Job gestartet: " + filename)
+
+
+def frame_program(text):
+    """Validate a Studio frame program: laser-off absolute XY moves only.
+
+    Stricter than a job: no M3, no Z, no arcs, no relative moves, S only 0,
+    every point inside the machine travel. Each line also passes a fresh
+    MarlinLaserGuard, and the transport guard checks it again when sent.
+    """
+    if not machine.homing_verified:
+        raise RuntimeError("Mechanik noch nicht freigegeben")
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Rahmenprogramm fehlt (Feld gcode)")
+    if len(text.encode("utf-8")) > FRAME_MAX_BYTES:
+        raise ValueError("Rahmenprogramm zu groß (max. 64 KB)")
+    guard = MarlinLaserGuard()
+    travels = config["travels"]
+    commands, moves = [], 0
+    for number, line in enumerate(text.splitlines(), 1):
+        cmd = normalize(line)
+        if not cmd:
+            continue
+        try:
+            if cmd not in _FRAME_SETUP:
+                if not _FRAME_MOVE.match(cmd):
+                    raise ValueError("im Rahmen nur G0/G1 X/Y (S0), G21, G90, M5 I, M400")
+                words = _FRAME_WORD.findall(cmd)
+                letters = [k for k, _ in words]
+                if len(set(letters)) != len(letters):
+                    raise ValueError("Parameter doppelt")
+                values = {k: float(v) for k, v in words}
+                if "X" not in values and "Y" not in values:
+                    raise ValueError("Fahrbewegung ohne X/Y")
+                if values.get("S", 0.0) != 0.0:
+                    raise ValueError("Laserleistung im Rahmen verboten (nur S0)")
+                if not (0.0 <= values.get("X", 0.0) <= travels["x"] and
+                        0.0 <= values.get("Y", 0.0) <= travels["y"]):
+                    raise ValueError("Punkt außerhalb X0..%g / Y0..%g" % (
+                        travels["x"], travels["y"]))
+                if "F" in values and not 60.0 <= values["F"] <= 9000.0:
+                    raise ValueError("Vorschub außerhalb 60..9000 mm/min")
+                moves += 1
+            guard.check(cmd, True)
+        except ValueError as exc:
+            raise ValueError("Rahmen Zeile %d: %s" % (number, exc))
+        commands.append(cmd)
+    if not moves:
+        raise ValueError("Rahmen enthält keine Fahrbewegung")
+    if moves > FRAME_MAX_MOVES:
+        raise ValueError("Rahmen mit mehr als %d Fahrbewegungen" % FRAME_MAX_MOVES)
+    return commands
+
+
+def _frame_worker(commands):
+    try:
+        machine.command("M5 I", owner="frame", timeout=30)
+        machine.command("G90", owner="frame", timeout=8)
+        for i, command in enumerate(commands, 1):
+            if stop_job.is_set():
+                raise RuntimeError("Abgebrochen")
+            if machine.laser_enabled:
+                raise RuntimeError("Laser unerwartet aktiv – Rahmen gestoppt")
+            machine.command(command, owner="frame", timeout=150)
+            if _FRAME_MOVE.match(command):
+                # Wait for each edge, so an abort stops at the next corner
+                # instead of after Marlin has drained the whole outline.
+                machine.command("M400", owner="frame", timeout=600)
+            frame["line"] = i
+        machine.command("M5 I", owner="frame", timeout=30)
+        frame["state"] = "complete"
+    except Exception as exc:
+        frame.update(state="aborted" if stop_job.is_set() else "error", error=str(exc))
+        if not machine.emergency_latched:
+            try:
+                machine.command("M5 I", owner="frame", timeout=60)
+            except Exception:
+                logging.exception("Controlled frame stop failed; issuing M112")
+                try:
+                    machine.emergency_stop()
+                except Exception:
+                    pass
+    finally:
+        with machine.lock:
+            machine.owner = None
+        job_lock.release()
+
+
+def start_frame():
+    """op=frame: trace a laser-off outline without touching stored jobs."""
+    local_owner()
+    if machine.emergency_latched:
+        raise RuntimeError("Notstopp aktiv – erst quittieren")
+    if not machine.homed:
+        raise RuntimeError("Vor dem Rahmen referenzieren")
+    mode = request.form.get("mode", "box") or "box"
+    if mode not in FRAME_MODES:
+        raise ValueError("Rahmenart muss box oder hull sein")
+    commands = frame_program(request.form.get("gcode", ""))
+    if not job_lock.acquire(blocking=False):
+        raise RuntimeError("Ein Auftrag oder Rahmen läuft bereits")
+    stop_job.clear()
+    with machine.lock:
+        if machine.owner is not None:
+            job_lock.release()
+            raise RuntimeError("Steuerung inzwischen belegt durch " + machine.owner)
+        machine.owner = "frame"
+    frame.update(state="running", mode=mode, line=0, total=len(commands), error="")
+    threading.Thread(target=_frame_worker, args=(commands,), daemon=True,
+                     name="marlin-frame").start()
+    return jsonify(message="Rahmenfahrt gestartet (%s, Laser aus)" % FRAME_MODES[mode],
+                   frame=dict(frame))
 
 
 def monitor_loop():
