@@ -425,3 +425,56 @@ Still open:
 - Variable text evaluated at send time with an auto-incrementing counter – decide if wanted.
 - Windows hardware test of cut options, PDF import, image trace (incl. centre line) and the rebuilt
   exe – needs a Windows machine with the laser.
+
+## 15. Status update 2026-10-26 (review round 8)
+
+Done in this round (review side, `lumacut_import` only, no new dependencies – numpy / shapely):
+
+- **Trace curve fitting „Glätten“** (`lumacut_import/curvefit.py`, `TraceSettings.smooth_curves`,
+  default on like potrace / LightBurn): traced outlines (outer rings and holes) and centre lines are
+  fitted with cubic Béziers instead of only simplifying the pixel staircase. Pipeline per ring /
+  line: pixel-edge staircase → unit-edge midpoints → corner detection (turn angle over ±4 px of arc
+  length > 70°, non-maximum suppression; the corner is then placed on the intersection of straight
+  line fits of both sides) → per piece between corners: resample at 0.5 px, Gaussian pre-smoothing
+  (σ 1.5 px, ends pinned), Schneider least-squares Bézier fit with Newton re-parametrisation and
+  splitting at the worst point, tolerance max(0.3 px, „Toleranz“) → flattened to a fine polyline
+  (chord deviation ≤ 0.02 mm, clamped to 0.05–0.25 px). Closed rings without corners are fitted as
+  one loop with a shared tangent, tiny rings (< 12 px perimeter) stay as they are, and a result that
+  would make the polygon invalid falls back to the old simplification.
+- The document model has no general Bézier type (only per-segment Catmull-Rom `curves` for node
+  editing), so the curves are stored as the fine polyline – G-code, preview, export and the Pi
+  guard are unchanged. Measured on filled circles r 8–150 px: max radial deviation ≈ 0.68 px →
+  0.26–0.45 px, RMS ≈ 0.34 → 0.13–0.15 px; curvature spikes of the staircase are gone. Axis-aligned
+  squares keep exactly their 4 corners; rotated squares keep 4 sharp corners and straight edges
+  (Hausdorff to the true square below the plain trace).
+- **Centre lines:** chains are trimmed by 1.2× the local half stroke width at junctions (the
+  skeleton bends there), straight-through junctions are dropped from the pin list, sharp ones stay
+  pinned, then each chain is fitted like above; branch ends are snapped onto the fitted through-line
+  and refitted. Thick T-junctions now have a perfectly straight bar and the stem ends on it (before:
+  kink of ~1 px), crossings stay within 1 px of the true strokes, thick rings are round.
+- Dialog „Bild nachzeichnen“: new checkbox „Glätten (Kurven anpassen, Ecken bleiben scharf)“ with
+  tooltip, live preview, remembered via `TraceSettings`. „Toleranz“ now controls the fit (and the
+  Douglas-Peucker simplification when „Glätten“ is off); the point count is set by the fine
+  flattening.
+- Runtime: ≈ 45 µs per raw contour point (corner suppression uses bisect, no quadratic loop).
+  Above 150 000 raw contour points (noise, photos) smoothing is skipped and the preview says
+  „Glätten übersprungen – Bild sehr detailreich (nur vereinfacht)“, so the existing time limits hold
+  (2000×2000 noise unchanged, 1500×1500 line art with 150 strokes ≈ 4 s incl. smoothing).
+
+Tests: new `tests/test_trace_smooth.py` (19): default / normalisation, circles r 8/25/60 rounder
+than the plain trace with bounded flattening chord, axis square exact corners, rotated squares
+(17°/30°/45°) sharp corners and straight edges, holes smoothed and polygon valid, tiny dots and
+curve-fit helpers, tolerance vs. flattening, centre-line ring / thick T-junction / crossing strokes,
+speed (line art, logo-sized image), skip note on very detailed images, G-code through the Pi guard,
+dialog checkbox. Existing trace tests that check the pixel-exact raw trace or the Douglas-Peucker
+point reduction now set `smooth_curves=False` explicitly (`RAW`, despeckle / tolerance tests).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter – decide if wanted.
+- Trace: true Bézier objects in the document (editable curve handles) would need a model change
+  (Canvas); oblique thick crossings still split into two nearby junctions with a short bridge line.
+- Windows hardware test of cut options, PDF import, image trace (incl. centre line and „Glätten“)
+  and the rebuilt exe – needs a Windows machine with the laser.
