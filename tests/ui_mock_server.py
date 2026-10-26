@@ -38,6 +38,14 @@ if scenario != "offline":
     m.surface_z = 3.0
     m.command = fake_command
     m.ensure_ready = lambda: None
+    # Dimmable light without a real SKR: remember the values like the Pi does.
+    m.light_pwm = True
+    def fake_light(on, pct=None, owner="web"):
+        if pct is not None:
+            m.light_pct = float(pct)
+        m.lights = bool(on)
+        return m.lights, m.light_pct, m.light_pwm
+    m.set_light = fake_light
     for l in ("echo:LumaCut gateway ready", "ok", "X:142.50 Y:118.25 Z:20.00 E:0.00 Count X:11400", "ok"):
         m.lines.append(l)
 if scenario == "oldpi":

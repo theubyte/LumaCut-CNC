@@ -41,10 +41,23 @@ def test_material_ui_uses_real_api_only():
 
 
 def test_phase_display_and_estop_never_disabled():
-    assert 'id="phaseSteps"' in HTML and "s?.phase" in HTML
+    assert 'id="phaseSteps"' in HTML and "s?.job?.phase" in HTML   # der Pi meldet job.phase
     for phase in ("home", "probe", "focus", "job", "park"):
         assert 'data-phase="%s"' % phase in HTML
     assert 'id="stop"' in HTML
     assert not re.search(r'\$\("stop"\)\.disabled', HTML)
     assert not re.search(r'getElementById\(["\']stop["\']\)\.disabled', HTML)
     assert "confirm(" in HTML and "M112" in HTML
+
+
+def test_light_brightness_effects_and_material_editing():
+    for el in ("lightRange", "lightFx", "lightNote", "materialEdit", "materialNew", "materialDelete", "matDialog"):
+        assert 'id="%s"' % el in HTML
+    assert 'call("light",{brightness:' in HTML and 'call("light",{effects:' in HTML
+    assert 'method:"PUT",json:data' in HTML and 'method:"POST",json:data' in HTML and 'method:"DELETE"' in HTML
+    assert "base_revision" in HTML
+
+
+def test_single_main_start_button_runs_autorun():
+    assert '<button class="primary" data-action="autorun" data-motion type="button">Auftrag starten</button>' in HTML
+    assert "Motivmitte" not in HTML   # der Pi tastet ein Raster ab

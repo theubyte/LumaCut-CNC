@@ -212,6 +212,13 @@ details.more>div{padding:0 14px 12px}
  white-space:nowrap;min-height:50px;padding:8px 16px}
 .tabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--accent)}
 .tabpanel[hidden],[hidden]{display:none!important}
+input[type=range]{width:100%;accent-color:var(--accent);min-height:36px}
+.lightctl{margin-top:10px;display:grid;gap:6px}
+.lightctl .rangehead{display:flex;justify-content:space-between;font-size:13px;color:var(--text-dim)}
+dialog.matdlg{max-width:560px;width:calc(100vw - 32px);border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);padding:18px}
+dialog.matdlg::backdrop{background:rgba(0,0,0,.55)}
+dialog.matdlg form{display:grid;gap:10px}
+#cameraImg{max-width:100%;border-radius:8px;border:1px solid var(--border);margin-top:10px}
 .split{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px;align-items:start}
 #zSettings{display:grid;gap:12px}
 #zSettings .muted{margin:0}
@@ -314,6 +321,12 @@ details.more>div{padding:0 14px 12px}
   <button class="toggle" data-accessory="light" type="button"><span>LED<br><small>HE0 / PC8</small></span><span class="state">AUS</span></button>
   <button class="toggle" data-accessory="exhaust" type="button"><span>Abluft<br><small>BED / PC9</small></span><span class="state">AUS</span></button>
  </div>
+ <div class="lightctl" id="lightCtl">
+  <div class="rangehead"><span>LED-Helligkeit</span><strong id="lightPct">—</strong></div>
+  <input type="range" id="lightRange" min="1" max="100" step="1" value="60" aria-label="LED-Helligkeit in Prozent">
+  <label class="check"><input type="checkbox" id="lightFx"> Lichteffekte (Referenzieren, Auftragsstart, Auftragsende, Fehler)</label>
+  <p class="muted" id="lightNote" hidden>Für Dimmen und Lichteffekte die neue SKR-Firmware flashen (Reiter „SKR-Firmware“).</p>
+ </div>
  <details class="more">
   <summary>Hinweise zu Referenzfahrt und LightBurn</summary>
   <div>
@@ -346,6 +359,7 @@ details.more>div{padding:0 14px 12px}
     <rect id="bedGrid" x="0" y="0" width="390" height="370" fill="url(#grid)"/>
     <rect id="bedGrid50" x="0" y="0" width="390" height="370" fill="url(#grid50)"/>
     <path id="bedSafe" d="" fill="url(#hatch)" opacity=".9"/>
+    <path id="bedPaths" d="" fill="none" stroke="#f0a35c" stroke-width=".7" stroke-linecap="round" opacity=".9"/>
     <rect id="bedMotif" x="0" y="0" width="0" height="0" fill="rgba(76,212,176,.16)" stroke="#4cd4b0" stroke-width="1.6" stroke-dasharray="5 3" visibility="hidden"/>
     <g id="bedProbes"></g>
     <g id="bedHead" visibility="hidden">
@@ -359,6 +373,7 @@ details.more>div{padding:0 14px 12px}
   </svg>
   <div class="legend">
    <span><i style="background:#4a3b22"></i>30-mm-Safezone</span>
+   <span><i style="background:#f0a35c"></i>Laserwege</span>
    <span><i style="background:rgba(76,212,176,.5)"></i>Motiv (Analyse)</span>
    <span><i style="background:#f36b73"></i>Laserkopf</span>
    <span id="bedInfo">Nutzbar X30–390 · Y30–370 mm</span>
@@ -397,19 +412,27 @@ details.more>div{padding:0 14px 12px}
     <button id="materialCompare" class="small" type="button" title="Leistung und Vorschub im ausgewählten G-Code mit dem Material vergleichen">Mit Auftrag abgleichen</button>
     <button id="materialReload" class="small ghost" type="button">Liste neu laden</button>
    </div>
+   <div class="row3" style="margin-top:8px">
+    <button id="materialEdit" class="small" type="button">Bearbeiten</button>
+    <button id="materialNew" class="small" type="button">+ Neu</button>
+    <button id="materialDelete" class="small ghost" type="button">Löschen</button>
+   </div>
    <pre id="materialCheck" class="console" style="margin-top:8px;min-height:0" hidden></pre>
   </div>
  </section>
  <div class="stack" style="margin-top:10px">
-  <div class="row">
-   <button id="previewGeometry" type="button">Motiv analysieren</button>
-   <button id="frameJob" data-motion data-needs-home type="button" title="Rechteck um das Motiv abfahren, Laser aus">Rahmen fahren</button>
-  </div>
-  <button data-action="start" data-motion data-needs-home type="button">Auftrag starten</button>
-  <button class="primary" data-action="autorun" data-motion type="button">Ein-Klick: Homing → Abtasten → Fokus → Auftrag → Park</button>
+  <button class="primary" data-action="autorun" data-motion type="button">Auftrag starten</button>
+  <button id="frameJob" data-motion data-needs-home type="button" title="Rechteck um das Motiv abfahren, Laser aus">Rahmen zeigen (Laser aus)</button>
  </div>
- <p class="muted" style="margin-top:8px">Abgetastet wird unter der Motivmitte; dort muss Material liegen. Fokus wird vor der ersten Laserbewegung automatisch angefahren. Aufträge werden vor der Übertragung geprüft und mit echten Marlin-<code>ok</code>-Bestätigungen an das SKR übertragen.</p>
- <pre id="geometryOutput" class="console" style="margin-top:10px;min-height:56px">Noch kein Auftrag analysiert</pre>
+ <p class="muted" style="margin-top:8px">„Auftrag starten“ macht alles selbst: referenziert bei Bedarf, tastet das Material im Raster unter dem Motiv ab (auch am Rand), der Fokus folgt der Oberfläche, dann lasern und parken.</p>
+ <details class="more">
+  <summary>Mehr: Motiv analysieren, Start ohne Abtasten</summary>
+  <div class="stack">
+   <button id="previewGeometry" type="button">Motiv analysieren</button>
+   <button data-action="start" data-motion data-needs-home type="button" title="Nur wenn das Werkstück schon abgetastet ist">Ohne Abtasten starten</button>
+   <pre id="geometryOutput" class="console" style="min-height:56px">Noch kein Auftrag analysiert</pre>
+  </div>
+ </details>
  <h3>Warteschlange <small id="queueState" style="text-transform:none;letter-spacing:0;font-weight:500"></small></h3>
  <div class="row3">
   <button id="queueAdd" type="button" class="small">+ Einreihen</button>
@@ -478,6 +501,9 @@ details.more>div{padding:0 14px 12px}
      <div class="metric"><small>LightBurn-Clients</small><strong id="lbClients">0</strong></div>
      <div class="metric"><small>Status-Alter</small><strong id="statusAge">—</strong></div>
     </div>
+    <h3>Kopfkamera</h3>
+    <div class="row"><button id="cameraShot" type="button">Kamerabild holen</button><span class="muted" id="cameraState">—</span></div>
+    <img id="cameraImg" alt="Kamerabild vom Laserkopf" hidden>
     <p class="muted" style="margin-top:12px">Keine Anmeldung erforderlich. Die Steuerung ist für Geräte in deinem WLAN direkt erreichbar. WLAN-Zugang schützen und Port 8080 nicht im Router ins Internet freigeben.</p>
    </div>
    <div>
@@ -526,6 +552,23 @@ details.more>div{padding:0 14px 12px}
  </div>
 </section>
 </main>
+<dialog class="matdlg" id="matDialog" aria-labelledby="matTitle">
+ <form id="matForm" method="dialog">
+  <h3 id="matTitle" style="margin:0">Material</h3>
+  <div class="row"><label>Name<input id="mfName" required maxlength="60"></label>
+   <label>Dicke (mm)<input id="mfThick" type="number" step="any" min="0" max="50" required inputmode="decimal"></label></div>
+  <div class="row"><label>Bearbeitung<select id="mfProcess"><option>Schneiden</option><option>Gravieren</option><option>Markieren</option></select></label>
+   <label>Art<select id="mfMode"><option value="line">Linie</option><option value="fill">Füllen</option></select></label></div>
+  <div class="row"><label>Leistung (%)<input id="mfPower" type="number" step="any" min="0" max="100" required inputmode="decimal"></label>
+   <label>Tempo (mm/min)<input id="mfSpeed" type="number" step="any" min="1" max="6000" required inputmode="decimal"></label></div>
+  <div class="row"><label>Durchgänge<input id="mfPasses" type="number" step="1" min="1" max="30" required inputmode="numeric"></label>
+   <label>Zeilenabstand (mm)<input id="mfInterval" type="number" step="any" min="0.03" max="2" required inputmode="decimal"></label></div>
+  <div class="row"><label>Tiefe je Durchgang (mm, 0 = aus)<input id="mfDepth" type="number" step="any" min="0" max="10" inputmode="decimal"></label>
+   <label>Z-Absenkung je Durchgang (mm)<input id="mfZ" type="number" step="any" min="0" max="2" inputmode="decimal"></label></div>
+  <p class="muted" style="margin:0">Gilt für alle Programme (Windows, Android, diese Seite). Z-Absenkung insgesamt höchstens 3 mm.</p>
+  <div class="row"><button type="button" id="mfCancel" class="ghost">Abbrechen</button><button type="submit" class="primary" id="mfSave">Speichern</button></div>
+ </form>
+</dialog>
 <div id="alert" role="alert" title="Antippen zum Schließen"></div>
 
 <script>
@@ -539,6 +582,7 @@ const STALE_MS=2500;        // ab diesem stale_ms gilt die Anzeige als veraltet
 const RUNNING=["homing","probing","running"], QUEUE_ACTIVE=["running","pausing"];
 const JOB_LABEL={idle:"Kein Auftrag",homing:"Referenziert …",probing:"Tastet ab …",running:"Läuft",
  complete:"Fertig",aborted:"Abgebrochen",error:"Fehler"};
+const PHASE_LABEL={focusing:"Fokus wird gesetzt …",finishing:"Letzte Bahnen …",parking:"Parkt …"};
 const QUEUE_LABEL={idle:"",running:"· läuft",pausing:"· hält nach aktuellem Auftrag",paused:"· angehalten",
  stopped:"· gestoppt",complete:"· abgeschlossen"};
 for(const input of document.querySelectorAll("#zSettings input")) input.addEventListener("input",()=>settingsDirty=true);
@@ -554,9 +598,10 @@ function show(msg,error=false){
 $("alert").onclick=()=>{$("alert").className=""};
 
 /* ---------- API ---------- */
-async function api(endpoint,{body=null,method="GET"}={}){
+async function api(endpoint,{body=null,method="GET",json=null}={}){
  const opts={method,cache:"no-store",headers:{}};
- if(body){opts.body=body;if(body instanceof URLSearchParams)opts.headers["Content-Type"]="application/x-www-form-urlencoded"}
+ if(json!==null){opts.body=JSON.stringify(json);opts.headers["Content-Type"]="application/json"}
+ else if(body){opts.body=body;if(body instanceof URLSearchParams)opts.headers["Content-Type"]="application/x-www-form-urlencoded"}
  const r=await fetch(endpoint,opts);
  // A Response body may only be consumed once. Parse it a single time,
  // including non-JSON errors returned by the Pi service.
@@ -668,6 +713,9 @@ function refreshUI(s){
   button.querySelector(".state").textContent=on?"EIN":"AUS";
   button.disabled=!apiOk||!ownerFree(s)||Boolean(s.busy);
  }
+ renderLight(s);
+ $("cameraState").textContent=s.camera?.available?"Kamera "+(s.camera.device||"")+" erkannt":"Keine Kamera am Pi angeschlossen";
+ $("cameraShot").disabled=!s.camera?.available;
 
  // Firmware
  const fw=s.firmware_update||{};
@@ -689,7 +737,7 @@ function refreshUI(s){
   detail=s.frame?.error||"";cls="frame";$("activityLabel").textContent="Rahmen";
  }else{
   line=s.job?.line||0;total=s.job?.total||0;
-  label=JOB_LABEL[jobState]||jobState;
+  label=PHASE_LABEL[s.job?.phase]||JOB_LABEL[jobState]||jobState;
   if(queueActive&&q.current!=null) label+=" · Warteschlange #"+q.current;
   detail=(s.job?.file||"")+(s.job?.error?" · "+s.job.error:"");
   if(["error","aborted"].includes(jobState))cls="error";
@@ -780,12 +828,13 @@ $("queueClear").onclick=ev=>{if(confirm("Alle nicht laufenden Einträge aus der 
 /* ---------- Ein-Klick-Phasen (home → probe → focus → job → park) ---------- */
 const PHASES=["home","probe","focus","job","park"];
 const PHASE_ALIAS={home:"home",homing:"home",probe:"probe",probing:"probe",focus:"focus",focusing:"focus",
- job:"job",running:"job",laser:"job",park:"park",parking:"park",complete:"done",done:"done",
+ job:"job",running:"job",laser:"job",finishing:"job",park:"park",parking:"park",complete:"done",done:"done",
  error:"error",aborted:"error",idle:null,"":null};
 function currentPhase(s){
- // Bevorzugt ein vom Pi geliefertes Feld `phase` (falls künftig vorhanden),
- // sonst aus job.state + job.probe abgeleitet (op=autorun meldet homing → probing → running).
- if(typeof s?.phase==="string")return s.phase.toLowerCase() in PHASE_ALIAS?PHASE_ALIAS[s.phase.toLowerCase()]:null;
+ // Der Pi meldet die feine Phase in job.phase (homing, probing, focusing, running,
+ // finishing, parking; sonst null). Ohne sie aus job.state + job.probe ableiten.
+ const jp=s?.job?.phase;
+ if(typeof jp==="string"&&jp)return jp.toLowerCase() in PHASE_ALIAS?PHASE_ALIAS[jp.toLowerCase()]:null;
  const st=s?.job?.state||"idle",probe=s?.job?.probe,auto=probe!=null&&typeof probe==="object";
  if(st==="homing")return "home";
  if(st==="probing")return probe&&probe.total>0&&probe.done>=probe.total?"focus":"probe";
@@ -809,7 +858,7 @@ function renderPhase(s){
  box.classList.toggle("is-error",ph==="error");
 }
 
-/* ---------- Materialdatenbank (/api/materials, nur lesen) ---------- */
+/* ---------- Materialdatenbank (/api/materials: lesen, anlegen, ändern, löschen) ---------- */
 let materials=null,materialRevision=null,materialState="unknown",materialRetry=false,fileSizes={};
 const MAT_KEY="lumacut.material";
 const MAT_MODE={line:"Linie",fill:"Füllen"};
@@ -884,7 +933,7 @@ function showMaterial(m){
   d.innerHTML="<small></small><strong></strong><em></em>";
   d.children[0].textContent=k;d.children[1].textContent=v;d.children[2].textContent=sub;box.append(d);
  }
- $("materialNote").textContent=(m.builtin?"Startwert – auf der Maschine testen. ":"")+
+ $("materialNote").textContent=(m.builtin?"Startwert – auf der Maschine testen. ":"")+(m.notes?m.notes+" ":"")+
   "Die Werte steuern die G-Code-Erzeugung in LumaCut Studio/Android. Der Pi wendet sie nicht auf hochgeladenen G-Code an; „Mit Auftrag abgleichen“ prüft die Datei.";
 }
 $("materialName").onchange=()=>{const v=matSel();saveMatSel({...v,name:$("materialName").value,thickness:null});renderMaterials()};
@@ -892,6 +941,48 @@ $("materialThickness").onchange=()=>{saveMatSel({...matSel(),thickness:Number($(
 for(const b of $$("#materialProcess [data-process]"))
  b.onclick=()=>{saveMatSel({...matSel(),process:b.dataset.process});renderMaterials()};
 $("materialReload").onclick=ev=>loadMaterials(ev.currentTarget);
+let matEditing=null;   // null = neu, sonst das bearbeitete Material
+const MF=[["mfName","name"],["mfThick","thickness_mm"],["mfProcess","process"],["mfMode","mode"],["mfPower","power_pct"],
+ ["mfSpeed","speed_mm_min"],["mfPasses","passes"],["mfInterval","interval_mm"],["mfDepth","depth_per_pass_mm"],["mfZ","z_step_mm"]];
+function openMaterial(m){
+ matEditing=m;$("matTitle").textContent=m?"Material bearbeiten":"Neues Material";
+ const base=m||{name:"",thickness_mm:3,process:"Schneiden",mode:"line",power_pct:80,speed_mm_min:400,passes:1,
+  interval_mm:0.1,depth_per_pass_mm:0,z_step_mm:0};
+ for(const [id,key] of MF)$(id).value=base[key]??"";
+ $("matDialog").showModal();
+}
+$("materialEdit").onclick=()=>{if(!currentMaterial){show("Kein Material ausgewählt",true);return}openMaterial(currentMaterial)};
+$("materialNew").onclick=()=>openMaterial(null);
+$("mfCancel").onclick=()=>$("matDialog").close();
+$("mfMode").onchange=()=>{};
+$("matForm").onsubmit=async ev=>{
+ ev.preventDefault();
+ const num=["thickness_mm","power_pct","speed_mm_min","passes","interval_mm","depth_per_pass_mm","z_step_mm"];
+ const data={...(matEditing||{})};
+ for(const [id,key] of MF){const v=$(id).value;data[key]=num.includes(key)?Number(v||0):v.trim()}
+ data.passes=Math.round(data.passes);
+ delete data.id;delete data.builtin;delete data.updated;
+ data.base_revision=materialRevision;
+ try{
+  const r=await withPending($("mfSave"),()=>matEditing?
+   api("/api/materials/"+encodeURIComponent(matEditing.id),{method:"PUT",json:data}):
+   api("/api/materials",{method:"POST",json:data}));
+  $("matDialog").close();
+  saveMatSel({name:r.material.name,thickness:r.material.thickness_mm,process:r.material.process});
+  show("Material gespeichert – gilt jetzt in allen Programmen");await loadMaterials();
+ }catch(e){
+  show(/409|Revision|geändert/i.test(e.message)?"Jemand hat die Liste inzwischen geändert – neu geladen, bitte nochmal speichern.":e.message,true);
+  await loadMaterials();
+ }
+};
+$("materialDelete").onclick=async ev=>{
+ const m=currentMaterial;if(!m){show("Kein Material ausgewählt",true);return}
+ if(!confirm("Material „"+m.name+" "+m.thickness_mm+" mm · "+m.process+"“ für alle Programme löschen?"))return;
+ try{
+  await withPending(ev.currentTarget,()=>api("/api/materials/"+encodeURIComponent(m.id)+"?base_revision="+encodeURIComponent(materialRevision),{method:"DELETE"}));
+  show("Material gelöscht");await loadMaterials();
+ }catch(e){show(e.message,true);await loadMaterials()}
+};
 function analyseGcode(text){
  // Laserleistung (S) und Vorschub (F) der Laserbahnen: G1 mit S>0, modale Werte wie Marlin.
  let mode=0,F=null,S=0,cut=0;const sv=new Map(),fv=new Map();
@@ -999,9 +1090,41 @@ async function files(){
   if(r.files.some(o=>o.name===current))sel.value=current;
   $("fileCount").textContent=r.files.length+" Datei"+(r.files.length===1?"":"en");
   if(snapshot)refreshUI(snapshot);
+  loadPaths();
  }catch(e){show(e.message,true)}
 }
-$("jobSelect").onchange=()=>{if(snapshot)refreshUI(snapshot);else drawBed(null)};
+$("jobSelect").onchange=()=>{if(snapshot)refreshUI(snapshot);else drawBed(null);loadPaths()};
+let pathsFor="";
+function cutPath(text){
+ // Laserbahnen wie Marlin: G0 setzt die Leistung auf 0, G1 nutzt S oder das letzte S seit G0.
+ let x=0,y=0,abs=true,S=0,d=[],n=0;
+ for(const raw of text.split(/\r?\n/)){
+  const line=raw.replace(/\(.*?\)/g,"").split(";")[0].toUpperCase().trim();
+  if(!line)continue;
+  if(/^M5/.test(line)){S=0;continue}
+  if(/\bG90\b/.test(line))abs=true;
+  if(/\bG91\b/.test(line))abs=false;
+  const g=line.match(/^G0?([0-3])(?!\d)/);if(!g)continue;
+  const w={};for(const [,k,v] of line.matchAll(/([XYS])\s*(-?[\d.]+)/g))w[k]=Number(v);
+  const nx="X" in w?(abs?w.X:x+w.X):x,ny="Y" in w?(abs?w.Y:y+w.Y):y;
+  if(g[1]==="0")S=0;else if("S" in w)S=w.S;
+  if(g[1]!=="0"&&S>0&&(nx!==x||ny!==y)){d.push("M"+x.toFixed(2)+" "+y.toFixed(2)+"L"+nx.toFixed(2)+" "+ny.toFixed(2));if(++n>150000)break}
+  x=nx;y=ny;
+ }
+ return d.join("");
+}
+async function loadPaths(){
+ const name=selectedJob(),el=$("bedPaths");
+ const key=name+"|"+(fileSizes[name]||0);
+ if(key===pathsFor)return;
+ pathsFor=key;el.setAttribute("d","");
+ if(!name||(fileSizes[name]||0)>8*1024*1024)return;
+ try{
+  const r=await fetch("/api/jobs/"+encodeURIComponent(name)+"/content",{cache:"no-store"});
+  if(!r.ok||selectedJob()!==name)return;
+  el.setAttribute("d",cutPath(await r.text()));
+ }catch{}
+}
 async function loadGeometry(name){
  const result=await api("/api/jobs/"+encodeURIComponent(name)+"/geometry");
  geometry={name,bounds:result.bounds,candidates:result.probe_candidates||[]};
@@ -1118,6 +1241,34 @@ document.addEventListener("keydown",ev=>{
 
 for(const b of document.querySelectorAll("[data-accessory]"))
  b.onclick=()=>{const type=b.dataset.accessory;call(type,{on:snapshot&&snapshot[type==="light"?"lights":"exhaust"]?"0":"1"},b)};
+
+/* ---------- Licht: Helligkeit und Effekte ---------- */
+let lightDragging=false,lightTimer=null;
+function renderLight(s){
+ const dim=s.light_dimmable;   // true / false (alte Firmware) / null (noch nicht geprüft)
+ const free=apiOk&&ownerFree(s)&&!s.busy;
+ const range=$("lightRange"),fx=$("lightFx");
+ range.hidden=dim===false;$("lightPct").parentElement.hidden=dim===false;
+ fx.parentElement.hidden=dim===false;$("lightNote").hidden=dim!==false;
+ if(!lightDragging&&s.light_brightness!=null&&document.activeElement!==range)range.value=Math.round(s.light_brightness);
+ $("lightPct").textContent=range.value+" %";
+ if(document.activeElement!==fx)fx.checked=Boolean(s.light_effects);
+ range.disabled=!free;fx.disabled=!free;
+}
+$("lightRange").oninput=()=>{lightDragging=true;$("lightPct").textContent=$("lightRange").value+" %"};
+$("lightRange").onchange=()=>{
+ clearTimeout(lightTimer);
+ lightTimer=setTimeout(async()=>{await call("light",{brightness:$("lightRange").value});lightDragging=false},150);
+};
+$("lightFx").onchange=()=>call("light",{effects:$("lightFx").checked?"1":"0"});
+
+/* ---------- Kamera ---------- */
+$("cameraShot").onclick=ev=>{
+ const img=$("cameraImg"),btn=ev.currentTarget;btn.classList.add("pending");
+ img.onload=()=>{btn.classList.remove("pending");img.hidden=false};
+ img.onerror=()=>{btn.classList.remove("pending");show("Kein Kamerabild – Kamera am Pi prüfen",true)};
+ img.src="/api/camera/snapshot?w=1280&h=720&t="+Date.now();
+};
 // Not-Aus: wird nie deaktiviert und ist in der Kopfzeile immer erreichbar.
 $("stop").onclick=()=>{
  if(confirm("Marlin-Notstopp M112 auslösen? Die Maschine muss danach am physischen Not-Aus geprüft und zurückgesetzt werden."))
