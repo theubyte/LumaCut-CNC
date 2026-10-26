@@ -284,7 +284,9 @@ def test_time_limit_and_size_cap(monkeypatch):
     g[10:30, 10:30] = 0
     g[50:70, 50:70] = 0
     with pytest.raises(ValueError, match="dauert zu lange"):
-        trace_gray(g, RAW, time_limit_s=0.0)
+        # negative: already expired, independent of the clock resolution
+        # (Windows monotonic ticks ~15 ms, 0.0 raced and passed there)
+        trace_gray(g, RAW, time_limit_s=-1.0)
     assert len(trace_gray(g, RAW, time_limit_s=None).parts) == 2
     monkeypatch.setattr(tr, "MAX_PIXELS", 5000)
     with pytest.raises(ValueError, match="zu groß"):
