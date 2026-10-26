@@ -1,222 +1,516 @@
 <!doctype html>
 <html lang="de">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
 <title>LumaCut CNC · Marlin Control</title>
+<!--
+  LumaCut CNC · MARLIN CONTROL OS – Weboberfläche des Raspberry Pi 400.
+  Eine einzige, offline lauffähige Datei (keine CDN, keine Webfonts).
+  Aufbau, IDs, API-Verträge und Weiterarbeit: docs/PI_WEB_UI_REDESIGN.md
+-->
 <style>
-:root{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#edf5ff;background:#08111d}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 88% -10%,#1a3347 0,transparent 40%),#08111d;min-height:100vh}
-button,input,select{font:inherit}button{cursor:pointer;border:1px solid #2e4b62;background:#173044;color:#eef6ff;border-radius:13px;padding:12px 15px;min-height:43px;transition:.16s}
-button:hover:not(:disabled){background:#24475c;border-color:#6595ad}button:disabled{opacity:.36;cursor:not-allowed}
-button.primary{background:#52c6ef;border-color:#52c6ef;color:#001524;font-weight:720}
-button.danger{background:#57252f;border-color:#ad5261;color:#ffccd3;font-weight:750}
+/* ---------- Design-Tokens (aus LumaCut Studio: lumacut_canvas/theme.py) ---------- */
+:root{
+ --bg:#0b0e13;--panel:#10141b;--surface:#131820;--surface-2:#1a212b;--surface-3:#212a36;
+ --border:#28303d;--border-hover:#526275;--text:#edf2f7;--text-dim:#93a1b5;--text-faint:#66748a;
+ --accent:#4cd4b0;--accent-text:#09251f;--accent-bg:#173a33;
+ --danger:#f36b73;--danger-strong:#d93848;--danger-bg:#3a1a1f;
+ --warn:#f2c46d;--warn-bg:#3a2f17;--info:#7cc4f5;--info-bg:#15283a;
+ --radius:12px;--radius-sm:9px;--touch:52px;--gap:14px;
+ --mono:ui-monospace,SFMono-Regular,"DejaVu Sans Mono",Consolas,monospace;
+ --sans:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"DejaVu Sans",sans-serif;
+ color-scheme:dark;font-family:var(--sans);color:var(--text);background:var(--bg)
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font-size:15px;line-height:1.45;min-height:100vh}
+h1,h2,h3,p{margin:0}
+h2{font-size:16px;font-weight:650;letter-spacing:-.1px}
+h3{font-size:12px;font-weight:650;color:var(--text-dim);text-transform:uppercase;letter-spacing:.7px;margin:18px 0 9px}
+p{color:var(--text-dim)}
+small,.muted{color:var(--text-dim);font-size:12.5px}
+code{font-family:var(--mono);font-size:.92em;background:var(--surface-2);border:1px solid var(--border);padding:1px 5px;border-radius:5px;color:#bff3e4}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- Bedienelemente ---------- */
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;min-height:var(--touch);padding:10px 16px;border-radius:var(--radius-sm);
+ border:1px solid var(--border);background:var(--surface-2);color:var(--text);font-weight:600;
+ transition:background .12s,border-color .12s,transform .06s;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+button:hover:not(:disabled){background:var(--surface-3);border-color:var(--border-hover)}
+button:active:not(:disabled){transform:scale(.98)}
+button:disabled{opacity:.38;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:750}
+button.primary:disabled{background:var(--accent-bg);border-color:var(--accent-bg);color:var(--text-dim)}
+button.primary:hover:not(:disabled){background:#62e0bf;border-color:#62e0bf}
+button.danger{background:var(--danger-bg);border-color:#7a3540;color:#ffd5d9;font-weight:700}
+button.danger:hover:not(:disabled){background:#4a1f26;border-color:var(--danger)}
 button.ghost{background:transparent}
-input,select{width:100%;background:#0a1927;border:1px solid #30506b;border-radius:12px;padding:12px;color:#f2f8ff}
-input[type=checkbox]{width:auto;accent-color:#60cbf2}
-h1,h2,h3,p{margin-top:0}h1{font-size:26px;letter-spacing:-.7px;margin-bottom:5px}h2{font-size:16px;margin-bottom:14px}h3{font-size:13px;color:#b5cbe0;margin-bottom:10px}
-p{color:#a9c1d8;line-height:1.65}small,.muted{color:#9bb4ca;font-size:12px}
-header{padding:28px max(20px,calc((100vw - 1240px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid #1e374d}
-.brand{display:flex;align-items:center;gap:14px}.brand-symbol{background:#58c6ee;color:#082235;font-weight:900;font-size:20px;width:42px;height:42px;border-radius:14px;display:grid;place-items:center}
-.pill{padding:8px 12px;background:#102b35;color:#a8e9c9;border:1px solid #2a645b;border-radius:999px;font-size:12px}
-main{max-width:1280px;margin:auto;padding:24px 20px 55px}
-.grid{display:grid;grid-template-columns:1.2fr 1fr;gap:18px;align-items:start}
-.card{background:linear-gradient(145deg,#11263a,#0b1a2b);border:1px solid #294258;border-radius:20px;padding:22px;min-width:0;box-shadow:0 8px 32px #0001}
-.full{grid-column:1/-1}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.three{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:18px 0}
-.metric{background:#0a1b2b;border:1px solid #25435a;padding:14px;border-radius:14px;min-height:84px}
-.metric small{display:block;margin-bottom:8px}.metric strong{font-size:20px;letter-spacing:-.3px}
-.hint{border-left:3px solid #61c8ee;background:#092438;padding:12px 14px;color:#cde9f4;border-radius:8px;font-size:13px;margin:12px 0}
-.warning{border-left-color:#ec9872;background:#33251e;color:#ffd8bf}
-section{margin-bottom:18px}
-.controls{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
-.controls button:nth-child(1){grid-column:2}
-.console{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word;color:#a7dfd6;background:#06121d;border:1px solid #254058;padding:16px;border-radius:14px;max-height:250px;overflow:auto}
-.inline{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-label{font-size:13px;color:#bcd2e4}
-.headline{display:flex;align-items:center;justify-content:space-between;gap:12px}
-#alert{font-size:13px;padding:13px 16px;border-radius:13px;display:none;white-space:pre-wrap;word-break:break-word}
-#alert.show{display:block;background:#192c3f;border:1px solid #315e7a;color:#e4f3ff}
-#alert.error{background:#44232c;border-color:#89465b;color:#ffdbe5}
-.bar{height:8px;background:#172c42;border-radius:8px;overflow:hidden;margin-top:8px}.bar span{display:block;height:100%;background:#56c6ec;width:0}
-.jog{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;max-width:360px}
-.jog .center{display:grid;place-items:center;color:#75acc9;font-size:13px}
-.space{margin:16px 0}code{background:#1c3547;padding:2px 5px;border-radius:5px;color:#ade8ff}
-@media(max-width:850px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.metrics{grid-template-columns:repeat(2,1fr)}header{padding:16px 20px;align-items:start}}
-@media(max-width:520px){.metrics{grid-template-columns:1fr}.two{grid-template-columns:1fr}.three{grid-template-columns:1fr}h1{font-size:22px}}
-/* LumaCut Control Studio: compact, readable, responsive control surface */
-:root{color-scheme:dark}
-body{background:#0b1018;color:#f1f4f9;font-size:14px}
-header{background:#111925;border-bottom:1px solid #273343;padding-top:16px;padding-bottom:16px;position:sticky;top:0;z-index:10;backdrop-filter:blur(15px)}
-main{max-width:1520px;padding-top:18px}
-.grid{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px}
-.card{background:#151e2b;border:1px solid #2a394b;border-radius:15px;box-shadow:none;padding:19px}
-.card h2{font-size:18px;color:#f3f6fa}
-.metric{background:#0e1621;border-color:#283748;min-height:72px}
-.metric strong{font-size:22px}
-button{border-radius:9px;background:#243245;border-color:#35485c;min-height:42px}
-button.primary{background:#51b9ed;border-color:#51b9ed}
-input,select{border-radius:9px;background:#0c1520;border-color:#3a5064}
-label{display:block;margin-bottom:5px}
-.hint{border-radius:8px;background:#152b38;border-color:#64b6d9}
-.warning{background:#302621;border-color:#d6a077}
-#zSettings{display:grid;gap:11px}
+button.small{min-height:40px;padding:6px 12px;font-size:13px}
+button.pending{position:relative;color:transparent!important}
+button.pending::after{content:"";position:absolute;inset:0;margin:auto;width:18px;height:18px;border-radius:50%;
+ border:2px solid var(--text-dim);border-top-color:transparent;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+input,select{width:100%;min-height:var(--touch);background:var(--surface);border:1px solid var(--border);
+ border-radius:var(--radius-sm);padding:10px 12px;color:var(--text)}
+input:focus,select:focus{border-color:var(--accent);outline:none}
+input[type=checkbox]{width:22px;height:22px;min-height:0;accent-color:var(--accent);flex:none}
+input[type=file]{padding:12px}
+input[type=file]::file-selector-button{font:inherit;font-weight:600;color:var(--text);background:var(--surface-3);
+ border:1px solid var(--border);border-radius:7px;padding:6px 12px;margin-right:10px;cursor:pointer}
+label{display:block;font-size:13px;color:var(--text-dim)}
+label>input,label>select{margin-top:6px}
+.check{display:flex;gap:12px;align-items:center;font-size:14px;color:var(--text);min-height:var(--touch);cursor:pointer}
+
+/* ---------- Kopfzeile: Status + Not-Aus (immer sichtbar) ---------- */
+.topbar{position:sticky;top:0;z-index:20;background:rgba(16,20,27,.96);border-bottom:1px solid var(--border);
+ backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.topbar-row{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;
+ padding:10px max(16px,calc((100vw - 1560px)/2))}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.brand-symbol{width:40px;height:40px;border-radius:11px;background:var(--accent);color:var(--accent-text);
+ display:grid;place-items:center;font-weight:900;font-size:19px;flex:none}
+.brand h1{font-size:18px;font-weight:750;letter-spacing:-.3px;white-space:nowrap}
+.brand small{display:block;font-size:10.5px;letter-spacing:.9px;color:var(--text-faint);white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.chip{display:flex;flex-direction:column;justify-content:center;min-width:104px;min-height:48px;padding:5px 12px;
+ border-radius:10px;background:var(--surface);border:1px solid var(--border)}
+.chip small{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-faint)}
+.chip strong{font-size:14.5px;font-weight:700;white-space:nowrap;display:flex;align-items:center;gap:7px}
+.chip strong::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--text-faint);flex:none}
+.chip.ok{border-color:#245a4c;background:#0f221e}.chip.ok strong::before{background:var(--accent);box-shadow:0 0 8px var(--accent)}
+.chip.bad{border-color:#6a2c35;background:#24141a}.chip.bad strong::before{background:var(--danger)}
+.chip.warn{border-color:#6b5524;background:#241e10}.chip.warn strong::before{background:var(--warn)}
+.chip.info{border-color:#24496a}.chip.info strong::before{background:var(--info)}
+.estop{min-height:60px;min-width:150px;padding:8px 18px;border-radius:12px;border:2px solid #ff9aa2;
+ background:var(--danger-strong);color:#fff;font-size:16px;font-weight:850;letter-spacing:.3px;
+ box-shadow:0 0 0 3px rgba(217,56,72,.25);line-height:1.1}
+.estop small{display:block;font-size:11px;font-weight:600;opacity:.85;letter-spacing:.4px}
+.estop:hover:not(:disabled){background:#ee4456!important;border-color:#fff!important}
+/* Fortschrittszeile unter der Kopfzeile */
+.jobstrip{display:grid;grid-template-columns:auto 1fr auto auto;gap:14px;align-items:center;
+ padding:8px max(16px,calc((100vw - 1560px)/2)) 10px;border-top:1px solid var(--border)}
+.jobstrip .label{display:flex;gap:10px;align-items:baseline;min-width:0}
+.jobstrip strong{font-size:14px;white-space:nowrap}
+.jobstrip #jobDetails{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:38vw}
+.bar{height:10px;background:var(--surface-2);border-radius:6px;overflow:hidden;border:1px solid var(--border)}
+.bar span{display:block;height:100%;width:0;background:var(--accent);transition:width .4s}
+.bar.frame span{background:var(--info)}.bar.error span{background:var(--danger)}
+.percent{font:700 15px var(--mono);min-width:56px;text-align:right}
+.jobstrip button{min-height:44px}
+.banner{display:none;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+ padding:10px max(16px,calc((100vw - 1560px)/2));font-weight:600}
+.banner.show{display:flex}
+.banner.estop-latched{background:#5a1820;color:#ffe1e4;border-top:1px solid var(--danger)}
+.banner.stale{background:var(--warn-bg);color:#ffe7b3;border-top:1px solid #6b5524;font-size:13.5px}
+
+/* ---------- Meldungen ---------- */
+#alert{display:none;position:fixed;z-index:30;right:16px;bottom:16px;max-width:min(560px,calc(100vw - 32px));
+ padding:14px 44px 14px 16px;border-radius:12px;font-size:14px;white-space:pre-wrap;word-break:break-word;
+ box-shadow:0 12px 40px rgba(0,0,0,.5);cursor:pointer;max-height:50vh;overflow:auto}
+#alert.show{display:block;background:#12302a;border:1px solid #2c6d5c;color:#dcfff4}
+#alert.error{background:#3a1a1f;border-color:#8a3a46;color:#ffdfe3}
+#alert::after{content:"×";position:absolute;right:14px;top:9px;font-size:22px;opacity:.6}
+
+/* ---------- Hauptlayout: links Bewegung · Mitte Position/Arbeitsfläche · rechts Auftrag ---------- */
+main{max-width:1560px;margin:0 auto;padding:16px 16px 48px}
+.layout{display:grid;gap:var(--gap);grid-template-columns:minmax(300px,1fr) minmax(380px,1.3fr) minmax(320px,1.05fr);
+ grid-template-areas:"motion center job";align-items:start}
+#controlPanel{grid-area:motion}#centerPanel{grid-area:center}#jobsPanel{grid-area:job}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;min-width:0}
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;min-height:40px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.stack{display:grid;gap:10px}
+.full{width:100%}
+.hint{border-left:3px solid var(--accent);background:var(--surface);padding:11px 13px;border-radius:8px;font-size:13px;color:#cfe0ea;margin:12px 0}
+.hint.warning{border-left-color:var(--warn);background:#1d1a12;color:#f5e2b8}
+.hint.danger{border-left-color:var(--danger);background:#21141a;color:#ffd5d9}
+details.more{margin-top:12px;border:1px solid var(--border);border-radius:9px;background:var(--surface)}
+details.more summary{cursor:pointer;padding:12px 14px;min-height:44px;font-size:13px;font-weight:600;color:var(--text-dim);list-style:none}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary::before{content:"▸ ";display:inline-block;transition:transform .15s}
+details.more[open] summary::before{transform:rotate(90deg)}
+details.more>div{padding:0 14px 12px}
+.metric{background:var(--surface);border:1px solid var(--border);padding:12px 14px;border-radius:10px;min-width:0}
+.metric small{display:block;margin-bottom:4px;font-size:11.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-faint)}
+.metric strong{font-size:17px;font-weight:700;word-break:break-word}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.is-stale .live-cached{opacity:.55}
+
+/* Position (DRO) */
+.dro{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.dro .axis{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px}
+.dro .axis small{font:700 13px var(--mono);color:var(--accent)}
+.dro .axis b{display:block;font:650 28px/1.15 var(--mono);letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.dro .axis em{font-style:normal;font-size:12px;color:var(--text-faint);margin-left:3px}
+#position.unknown .axis b{color:var(--text-faint)}
+#board{margin-top:10px;font-size:12.5px}
+
+/* Arbeitsfläche (Maschinenbett) */
+.bed{margin-top:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px}
+.bed svg{display:block;width:100%;height:auto;max-height:440px}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--text-dim);padding:6px 6px 2px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+
+/* Jog */
+.segmented{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;background:var(--surface)}
+.segmented button{border:0;border-radius:0;background:transparent;font:700 15px var(--mono);min-height:48px}
+.segmented button+button{border-left:1px solid var(--border)}
+.segmented button[aria-pressed=true]{background:var(--accent-bg);color:var(--accent);box-shadow:inset 0 -3px 0 var(--accent)}
+.jogwrap{display:grid;grid-template-columns:3fr 1fr;gap:12px;margin-top:12px}
+.jog{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:8px;aspect-ratio:1/1;max-width:300px;width:100%}
+.jog button,.zjog button{font:750 17px var(--sans);min-height:64px;padding:4px;background:var(--surface-2)}
+.jog .center{display:grid;place-items:center;border-radius:var(--radius-sm);border:1px dashed var(--border);
+ color:var(--text-faint);font:700 13px var(--mono);text-align:center}
+.zjog{display:grid;grid-template-rows:1fr auto 1fr;gap:8px}
+.zjog span{text-align:center;font:700 13px var(--mono);color:var(--text-faint)}
+.kbd{font:600 11px var(--mono);color:var(--text-faint);margin-top:8px}
+.toggle{display:flex;justify-content:space-between;align-items:center;gap:10px;text-align:left}
+.toggle .state{font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--border);color:var(--text-dim)}
+.toggle.on{border-color:#2c6d5c;background:#11261f}
+.toggle.on .state{background:var(--accent);color:var(--accent-text);border-color:var(--accent)}
+
+/* Aufträge */
+.filebar{display:grid;grid-template-columns:1fr auto;gap:10px}
+.queue{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
+.queue li{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:var(--surface);
+ border:1px solid var(--border);border-radius:9px;padding:6px 6px 6px 12px;font-size:13.5px}
+.queue li .file{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.queue li.running{border-color:var(--accent)}
+.queue li.error,.queue li.aborted{border-color:#7a3540}
+.queue li.done,.queue li.skipped{opacity:.6}
+.queue .badge{font:700 11px var(--mono);padding:3px 7px;border-radius:6px;background:var(--surface-2);color:var(--text-dim)}
+.queue li.running .badge{background:var(--accent);color:var(--accent-text)}
+.queue .act{display:flex;gap:6px}
+.queue .empty{display:block;color:var(--text-faint);border-style:dashed;padding:12px}
+.console{font:12px/1.6 var(--mono);white-space:pre-wrap;word-break:break-word;color:#b5e9dc;background:#080b10;
+ border:1px solid var(--border);padding:12px 14px;border-radius:10px;max-height:340px;overflow:auto;margin:0}
+
+/* Einrichtung (Tabs) */
+.setup{margin-top:var(--gap)}
+.tabs{display:flex;gap:6px;overflow-x:auto;border-bottom:1px solid var(--border);margin:-6px -6px 16px;padding:0 6px;scrollbar-width:thin}
+.tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;color:var(--text-dim);
+ white-space:nowrap;min-height:50px;padding:8px 16px}
+.tabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--accent)}
+.tabpanel[hidden]{display:none}
+.split{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px;align-items:start}
+#zSettings{display:grid;gap:12px}
 #zSettings .muted{margin:0}
-#zSettings .two{align-items:end}
-#zSettings button{width:100%;margin-top:5px}
-#alert.show{position:sticky;top:80px;z-index:9}
-.console{max-height:340px}
-.quicklinks{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 17px}
-.quicklinks a{border:1px solid #34485d;background:#172332;color:#dbeffc;padding:9px 14px;border-radius:9px;text-decoration:none;font-weight:600;font-size:13px}
-.quicklinks a:hover{background:#26384b}
-@media(max-width:850px){header{position:relative}.grid{grid-template-columns:1fr}}
+
+/* ---------- Responsiv ---------- */
+@media (max-width:1240px){
+ .layout{grid-template-columns:1fr 1fr;grid-template-areas:"center center" "motion job"}
+ .chip{min-width:92px}
+}
+@media (max-width:900px){
+ .topbar-row{grid-template-columns:1fr auto;gap:10px}
+ .chips{grid-column:1/-1;grid-row:2;justify-content:stretch}
+ .chip{flex:1 1 calc(20% - 8px);min-width:0}
+ .split{grid-template-columns:1fr}
+ .jobstrip #jobDetails{max-width:30vw}
+}
+@media (max-width:700px){
+ .layout{grid-template-columns:1fr;grid-template-areas:"center" "motion" "job"}
+ .chip{flex:1 1 calc(33% - 8px)}
+ .jobstrip{grid-template-columns:1fr auto;row-gap:6px}
+ .jobstrip .bar{grid-column:1/-1;grid-row:2}
+ .jobstrip #jobDetails{display:none}
+ .dro .axis b{font-size:22px}
+ .brand small{display:none}
+ .estop{min-width:120px}
+}
+@media (max-width:420px){.row,.row3{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
-<header>
-<div class="brand"><div class="brand-symbol">L</div><div><h1>LumaCut CNC</h1><small>MARLIN CONTROL OS · Raspberry Pi 400 · SKR Mini MZ V1.0</small></div></div>
-<div class="pill" id="connectState">Marlin wird geprüft …</div>
+<header class="topbar" id="statusPanel">
+ <div class="topbar-row">
+  <div class="brand"><div class="brand-symbol" aria-hidden="true">L</div>
+   <div><h1>LumaCut CNC</h1><small>MARLIN CONTROL OS · Raspberry Pi 400 · SKR Mini MZ V1.0</small></div></div>
+  <div class="chips" role="status" aria-live="polite">
+   <div class="chip" id="chipConnect"><small>Verbindung</small><strong id="connectState">Marlin wird geprüft …</strong></div>
+   <div class="chip" id="chipHomed"><small>Referenziert</small><strong id="homed">NEIN</strong></div>
+   <div class="chip" id="chipState"><small>SKR</small><strong id="state">Offline</strong></div>
+   <div class="chip" id="chipOwner"><small>Steuerung</small><strong id="owner">—</strong></div>
+   <div class="chip" id="chipLaser"><small>Laser</small><strong id="laserState">—</strong></div>
+  </div>
+  <button class="estop" id="stop" type="button" title="Software-Notstopp M112 (ersetzt keinen physischen Not-Aus)">NOT-AUS<small>Software M112</small></button>
+ </div>
+ <div class="jobstrip" aria-label="Auftragsfortschritt">
+  <div class="label"><small id="activityLabel">Auftrag</small><strong id="jobStatus">Kein Auftrag</strong></div>
+  <div class="bar" id="jobBar"><span id="jobProgress"></span></div>
+  <span class="percent" id="jobPercent">—</span>
+  <button class="danger small" id="abortJob" type="button">Abbrechen</button>
+  <small id="jobDetails" style="grid-column:1/-1"></small>
+ </div>
+ <div class="banner estop-latched" id="estopBanner">
+  <span>⚠ Notstopp aktiv – SKR am Reset-Taster/Not-Aus zurücksetzen, dann quittieren und neu referenzieren.</span>
+  <button id="estopReset" type="button">Notstopp quittieren (nach Reset des SKR)</button>
+ </div>
+ <div class="banner stale" id="staleBanner" role="status">
+  <span id="staleBadge">Maschine beschäftigt – Anzeige teilweise veraltet.</span>
+ </div>
 </header>
-<main>
-<nav class="quicklinks" aria-label="Maschinenbereiche"><a href="#statusPanel">Status</a><a href="#controlPanel">Fahren</a><a href="#calibrationPanel">Fokus &amp; Taster</a><a href="#lightburnPanel">LightBurn</a><a href="#jobsPanel">Aufträge</a></nav>
-<div class="grid">
-<section class="card" id="statusPanel">
-<div class="headline"><h2>Maschinenstatus</h2><button class="ghost" id="refreshButton">Aktualisieren</button></div>
-<div class="metrics">
-<div class="metric"><small>SKR</small><strong id="state">Offline</strong></div>
-<div class="metric"><small>Steuerung</small><strong id="owner">—</strong></div>
-<div class="metric"><small>Referenziert</small><strong id="homed">NEIN</strong></div>
-</div>
-<h3>Maschinenposition</h3>
-<div style="font:600 24px/1.4 ui-monospace,Consolas,monospace" id="position">X — Y — Z —</div>
-<p class="muted" style="margin-top:10px" id="board">Firmware noch nicht identifiziert</p>
-<div class="hint warning" id="safety">Hardware noch nicht verifiziert. Laser-Versorgung getrennt lassen und Not-Aus prüfen.</div>
-<div class="two">
-<button data-action="connect">SKR-Verbindung prüfen</button>
-<button data-action="info">Marlin M115 lesen</button>
-</div>
-<div class="two" style="margin-top:10px">
-<button data-action="position">Position M114 lesen</button>
-<button data-action="endstops">Endschalter M119 lesen</button>
-</div>
+
+<main id="app">
+<div class="layout">
+
+<!-- ===== Links: Bewegung ===== -->
+<section class="card" id="controlPanel" aria-labelledby="hMotion">
+ <div class="card-head"><h2 id="hMotion">Bewegung</h2><button class="ghost small" id="refreshButton" type="button">Aktualisieren</button></div>
+ <div class="stack">
+  <button class="primary" data-action="home" data-motion type="button">XYZ referenzieren (X/Y zuerst)</button>
+  <div class="row">
+   <button data-action="probe" data-motion data-needs-home type="button">Werkstück abtasten (G30)</button>
+   <button data-action="park" data-motion data-needs-home type="button">Parken (X0/Y0)</button>
+  </div>
+ </div>
+ <h3>Joggen · Schrittweite</h3>
+ <input type="hidden" id="step" value="1">
+ <div class="segmented" role="group" aria-label="Schrittweite">
+  <button type="button" data-step="0.1" aria-pressed="false">0,1 mm</button>
+  <button type="button" data-step="1" aria-pressed="true">1 mm</button>
+  <button type="button" data-step="10" aria-pressed="false">10 mm</button>
+ </div>
+ <div class="jogwrap">
+  <div class="jog">
+   <div></div><button data-axis="Y" data-direction="1" type="button" aria-label="Y plus">Y +</button><div></div>
+   <button data-axis="X" data-direction="-1" type="button" aria-label="X minus">X −</button><span class="center" id="jogInfo">XY<br>1 mm</span><button data-axis="X" data-direction="1" type="button" aria-label="X plus">X +</button>
+   <div></div><button data-axis="Y" data-direction="-1" type="button" aria-label="Y minus">Y −</button><div></div>
+  </div>
+  <div class="zjog">
+   <button data-axis="Z" data-direction="1" type="button" aria-label="Z plus">Z +</button>
+   <span>Z</span>
+   <button data-axis="Z" data-direction="-1" type="button" aria-label="Z minus">Z −</button>
+  </div>
+ </div>
+ <p class="kbd">Tastatur: ← → X · ↑ ↓ Y · Bild↑/Bild↓ Z · 1/2/3 Schrittweite</p>
+ <p class="muted" id="jogHint" style="margin-top:6px">Joggen erst nach dem Referenzieren.</p>
+ <h3>Zubehör über SKR</h3>
+ <div class="row">
+  <button class="toggle" data-accessory="light" type="button"><span>LED<br><small>HE0 / PC8</small></span><span class="state">AUS</span></button>
+  <button class="toggle" data-accessory="exhaust" type="button"><span>Abluft<br><small>BED / PC9</small></span><span class="state">AUS</span></button>
+ </div>
+ <details class="more">
+  <summary>Hinweise zu Referenzfahrt und LightBurn</summary>
+  <div>
+   <p style="font-size:13px">LightBurn steuert den SKR exklusiv, sobald es verbunden ist. Für manuelles Joggen die LightBurn-Verbindung trennen. Speichern von Fokus- und Tasterwerten funktioniert unabhängig davon.</p>
+   <div class="hint">LightBurn „Referenzieren“ (G28): ZUERST X/Y zur freien Ecke referenzieren, DANACH Maschinenboden als Z=0 setzen und 20 mm anheben. Die gesonderte Werkstückabtastung (G30) benutzt den Marlin-Z-Taster nach dem Einrichten der X/Y-Tasterversätze und verändert Maschinen-Z=0 nicht.</div>
+  </div>
+ </details>
 </section>
-<section class="card" id="controlPanel">
-<h2>Direktsteuerung</h2>
-<p>LightBurn steuert den SKR exklusiv, sobald es verbunden ist. Für manuelles Joggen die LightBurn-Verbindung trennen. Speichern von Fokus- und Tasterwerten funktioniert unabhängig davon.</p>
-<div class="hint">LightBurn „Referenzieren“ (G28): ZUERST X/Y zur freien Ecke referenzieren, DANACH Maschinenboden als Z=0 setzen und 20 mm anheben. Die gesonderte Werkstückabtastung (G30) benutzt den Marlin-Z-Taster nach dem Einrichten der X/Y-Tasterversätze und verändert Maschinen-Z=0 nicht.</div>
-<div class="two"><button class="primary" data-action="home" data-motion>XYZ referenzieren (X/Y zuerst)</button>
-<button class="danger" id="stop">Software-Notstopp M112</button></div>
-<div class="space"></div>
-<button data-action="probe" data-motion data-needs-home style="width:100%">Werkstück unter Laserpunkt abtasten (G30)</button>
-<div class="space"></div>
-<h3>Joggen</h3>
-<div class="inline"><label>Schrittweite
-<select id="step"><option value="0.1">0,1 mm</option><option value="1" selected>1 mm</option><option value="10">10 mm</option></select></label></div>
-<div class="jog">
-<div></div><button data-axis="Y" data-direction="1">Y +</button><button data-axis="Z" data-direction="1">Z +</button>
-<button data-axis="X" data-direction="-1">X −</button><span class="center">XY</span><button data-axis="X" data-direction="1">X +</button>
-<div></div><button data-axis="Y" data-direction="-1">Y −</button><button data-axis="Z" data-direction="-1">Z −</button>
-</div>
-<div class="space"></div>
-<h3>Zubehör über SKR</h3>
-<div class="two">
-<button data-accessory="light">LED HE0 / PC8</button>
-<button data-accessory="exhaust">Abluft BED / PC9</button>
-</div>
+
+<!-- ===== Mitte: Position + Arbeitsfläche ===== -->
+<section class="card" id="centerPanel" aria-labelledby="hPos">
+ <div class="card-head"><h2 id="hPos">Maschinenposition</h2><small id="activity" class="muted">—</small></div>
+ <div class="dro unknown live-cached" id="position" aria-live="off">
+  <div class="axis"><small>X</small><b id="posX">—</b></div>
+  <div class="axis"><small>Y</small><b id="posY">—</b></div>
+  <div class="axis"><small>Z</small><b id="posZ">—</b></div>
+ </div>
+ <p class="muted" id="board">Firmware noch nicht identifiziert</p>
+ <div class="bed" aria-label="Arbeitsfläche">
+  <svg id="bed" viewBox="-14 -8 424 402" role="img" aria-label="Maschinenbett mit Safezone, Motiv und Kopfposition">
+   <defs>
+    <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+     <rect width="8" height="8" fill="#1b1714"/><line x1="0" y1="0" x2="0" y2="8" stroke="#4a3b22" stroke-width="3"/></pattern>
+    <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M10 0H0V10" fill="none" stroke="#18202b" stroke-width=".6"/></pattern>
+    <pattern id="grid50" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0H0V50" fill="none" stroke="#243041" stroke-width=".9"/></pattern>
+   </defs>
+   <g id="bedFlip">
+    <rect id="bedArea" x="0" y="0" width="390" height="370" fill="#111720" stroke="#3a4a5e" stroke-width="1.4"/>
+    <rect id="bedGrid" x="0" y="0" width="390" height="370" fill="url(#grid)"/>
+    <rect id="bedGrid50" x="0" y="0" width="390" height="370" fill="url(#grid50)"/>
+    <path id="bedSafe" d="" fill="url(#hatch)" opacity=".9"/>
+    <rect id="bedMotif" x="0" y="0" width="0" height="0" fill="rgba(76,212,176,.16)" stroke="#4cd4b0" stroke-width="1.6" stroke-dasharray="5 3" visibility="hidden"/>
+    <g id="bedProbes"></g>
+    <g id="bedHead" visibility="hidden">
+     <circle r="9" fill="rgba(243,107,115,.18)" stroke="#f36b73" stroke-width="1.6"/>
+     <path d="M-14 0H14M0 -14V14" stroke="#f36b73" stroke-width="1.4"/>
+    </g>
+   </g>
+   <g id="bedLabels" fill="#66748a" font-size="11" font-family="ui-monospace,monospace"></g>
+  </svg>
+  <div class="legend">
+   <span><i style="background:#4a3b22"></i>30-mm-Safezone</span>
+   <span><i style="background:rgba(76,212,176,.5)"></i>Motiv (Analyse)</span>
+   <span><i style="background:#f36b73"></i>Laserkopf</span>
+   <span id="bedInfo">Nutzbar X30–390 · Y30–370 mm</span>
+  </div>
+ </div>
 </section>
-<section class="card" id="calibrationPanel">
-<h2>Fokus &amp; Taster</h2>
-<p>Getrennte Werte für Schalter-Auslösepunkt, Sicherheitsabstand und Fokus. Änderungen werden auf dem Pi gespeichert und bleiben nach Neustart erhalten.</p>
-<form id="zSettings">
-<label>Schalter → Laserspitze (mm)
-<input id="zOffset" type="number" step="0.1" min="-20" max="20" value="1.5" required></label>
-<p class="muted">Positiv: Beim Schalterkontakt ist die Laserspitze um diesen Wert über der Referenzfläche. Bei umgekehrter Geometrie einen negativen Wert verwenden.</p>
-<div class="two">
-<label>Sicherheitsrückzug nach Homing (mm)
-<input id="zClearance" type="number" min="0.5" max="50" step="0.1" value="20" required></label>
-<label>Fokusabstand Laserspitze → Werkstück (mm)
-<input id="focusGap" type="number" min="0.1" max="30" step="0.1" value="7" required></label>
-</div>
-<div class="two">
-<label>Taster relativ zum Laserpunkt X (mm; mit Vorzeichen)<input id="probeX" type="number" min="-80" max="80" step="0.1" placeholder="Noch nicht gemessen"></label>
-<label>Taster relativ zum Laserpunkt Y (mm; mit Vorzeichen)<input id="probeY" type="number" min="-80" max="80" step="0.1" placeholder="Noch nicht gemessen"></label>
-</div>
-<p class="muted">Gemessen vom Laserpunkt zur Tastspitze entlang der Maschinenachsen: z. B. X+23 bedeutet Tastspitze 23 mm in +X-Richtung. Vorzeichen vor G30 kontrollieren.</p>
-<div class="metric" style="margin-top:12px"><small>Geschätzter Abstand Spitze → Referenzfläche</small><strong id="tipGap">—</strong></div>
-<div class="metric" style="margin-top:10px"><small>Geschätzte Z-Korrektur bis Fokus (nur Anzeige)</small><strong id="focusAdjust">—</strong></div>
-<p class="muted">Nur mit bestätigter Werkstückabtastung: Der Pi setzt vor der ersten G1-Laserbewegung den Fokus. Harte untere Z-Grenze: Oberfläche + 2 mm Tastabstand. Beispiel: Maschinenboden Z=0, Werkstückoberfläche bei Z=3 mm, Offset 1,5 mm: Fokus Z=8,5 mm, tiefster zulässiger Z-Wert 5,0 mm.</p>
-<div class="metric" style="margin-top:10px"><small>Werkstück Z-Referenz / Mindest-Z / Kühlung</small><strong id="workpieceSafety" style="font-size:13px">Noch nicht eingemessen</strong></div>
-<button type="submit" class="primary" id="saveZSettings">Fokus & Taster-Offsets speichern</button>
-<p class="muted">Speichern funktioniert auch nach Homing oder bei verbundener LightBurn-Sitzung. Nach Offset-Änderungen vor dem nächsten Schnitt erneut G30 abtasten.</p>
-</form>
-</section>
-<section class="card" id="lightburnPanel">
-<h2>LightBurn über WLAN</h2>
-<div class="hint">LightBurn: zuerst <code>G28</code> referenzieren, danach nur über einer geeigneten Werkstückstelle <code>G30</code> ausführen. Ohne eingemessenen X/Y-Tasterversatz keine automatische Abtastung. „Job-Ende“ auf <code>M2</code> setzen: Laser aus → Z nur nach oben bis mindestens 20 mm → X0/Y0 in die L-förmige Safezone. <code>M5 I</code> bleibt der normale Laser-Aus-Befehl für Pausen zwischen Schnitten. Beide Aktionen benötigen kein Webinterface.</div>
-<div class="hint warning">30-mm-Homing-Sicherheitszone: X=0–30 mm und Y=0–30 mm bleiben werkstückfrei. Schnittbewegungen sind nur bei X≥30 und Y≥30 erlaubt (nutzbar 360 × 340 mm bei Maschinenkoordinaten 390 × 370 mm). Maschinenreferenz G28 ausschließlich in frei zugänglicher Parkposition starten. Nach Einschalten ist die tatsächliche Kopfposition bis zum Homing unbekannt.</div>
-<p>LightBurn <b>Custom GCode</b> → Variante <b>Marlin</b> → Verbindung <b>Network/TCP</b>. Diese Weboberfläche und LightBurn teilen sich einen USB-Controller, führen aber nie gleichzeitig Befehle aus.</p>
-<div class="metrics" style="grid-template-columns:repeat(2,1fr)">
-<div class="metric"><small>IP/Hostname</small><strong style="font-size:15px" id="hostname">—</strong></div>
-<div class="metric"><small>TCP-Port</small><strong>23</strong></div>
-</div>
-<div class="hint">Marlin-Modus: <code>M3 I</code> aktivieren. S-Werte nur <code>0–255</code>. Bei LightBurn muss nach Leerfahrten die erste G1-Bearbeitung wieder einen S-Wert erhalten. Marlin <code>M4 I</code> nicht benutzen.</div>
-<p class="muted">Der native Marlin-Gateway ist absichtlich kein GRBL-Emulator. GRBL-Befehle wie <code>$$</code>, <code>$H</code> oder <code>?</code> sind hier ungültig.</p>
-</section>
-<section class="card" id="jobsPanel">
-<h2>G-Code-Aufträge</h2>
-<p>Aufträge werden vor der Übertragung geprüft und mit echten Marlin-<code>ok</code>-Bestätigungen an das SKR übertragen.</p>
-<form id="uploadForm" class="inline"><input style="flex:1;min-width:180px" type="file" accept=".gcode,.gc,.nc" id="file"><button type="submit">Hochladen</button></form>
-<div class="space"></div>
-<div class="two"><select id="jobSelect"><option>Keine Dateien</option></select><button data-action="start" data-motion>Auftrag starten</button></div>
-<div class="space"></div>
-<button class="primary" data-action="autorun" data-motion style="width:100%">Ein-Klick: Homing → Abtasten → Fokus → Auftrag → Park</button>
-<p class="muted">Abgetastet wird unter der Motivmitte; dort muss Material liegen. Fokus wird vor der ersten Laserbewegung automatisch angefahren.</p>
-<button class="danger" id="abortJob" style="width:100%">Auftrag abbrechen (Laser aus, parken)</button>
-<div class="space"></div>
-<div class="inline"><button id="previewGeometry" type="button">Motivfläche analysieren</button><small>Vorschau aus gespeichertem LightBurn-GCode</small></div><pre id="geometryOutput" class="console" style="margin-top:12px;min-height:64px">Noch kein Auftrag analysiert</pre>
-<div class="space"></div>
-<div class="metric"><small>Aktueller Auftrag</small><strong id="jobStatus" style="font-size:15px">Keiner</strong>
-<div class="bar"><span id="jobProgress"></span></div><small id="jobDetails"></small></div>
-</section>
-<section class="card">
-<h2>Maschinenfreigabe</h2>
-<p>Die Firmware wird zunächst im gesperrten Testbetrieb gestartet. Erst Endschalter, Motordrehrichtung, Z-Rückzug, PWM-Pegel, galvanische Trennung und unabhängiger Not-Aus müssen bei getrennter Laserversorgung geprüft werden.</p>
-<div class="hint warning">Diese Softwarefreigabe bestätigt keine elektrische Sicherheit und ersetzt weder Messungen noch Hardware-Interlocks.</div>
-<label><input type="checkbox" id="commissionCheck"> Ich habe die Prüfungen ohne verbundenen Laser abgeschlossen.</label>
-<div class="two" style="margin-top:12px">
-<button id="commissionEnable">Mechanik nach Prüfung freigeben</button>
-<button id="commissionDisable">Freigabe zurücknehmen</button>
-</div>
-</section>
-<section class="card">
-<h2>SKR-Firmware</h2>
-<p>Neue <code>firmware.bin</code> direkt über den Pi flashen. Die microSD-Karte bleibt dauerhaft im SKR; der Pi schreibt die Datei per USB darauf und startet das SKR neu, der Bootloader übernimmt sie.</p>
-<form id="firmwareForm" class="inline"><input style="flex:1;min-width:180px" type="file" accept=".bin" id="firmwareFile"><button type="submit" id="firmwareFlash">Flashen</button></form>
-<div class="metric" style="margin-top:12px"><small>Firmware-Update</small><strong id="firmwareStatus" style="font-size:14px">—</strong>
-<div class="bar"><span id="firmwareProgress"></span></div></div>
-<div class="space"></div>
-<button id="estopReset" style="width:100%">Notstopp quittieren (nach Reset des SKR)</button>
-</section>
-<section class="card">
-<h2>System & Verbindung</h2>
-<p class="muted">Keine Anmeldung erforderlich. Die Steuerung ist für Geräte in deinem WLAN direkt erreichbar. WLAN-Zugang schützen und Port 8080 nicht im Router ins Internet freigeben.</p>
-<div class="metrics" style="grid-template-columns:repeat(2,1fr)"><div class="metric"><small>Übertragene Befehle</small><strong id="commands">0</strong></div>
-<div class="metric"><small>Serielle Fehler</small><strong id="errors">0</strong></div></div>
-</section>
-<section class="card full">
-<div class="headline"><h2>Marlin-Ereignisprotokoll</h2><button class="ghost" id="clearLog">Ansicht leeren</button></div>
-<div id="alert" role="alert"></div>
-<pre class="console" id="console">Keine Meldungen.</pre>
+
+<!-- ===== Rechts: Aufträge ===== -->
+<section class="card" id="jobsPanel" aria-labelledby="hJobs">
+ <div class="card-head"><h2 id="hJobs">G-Code-Aufträge</h2><small class="muted" id="fileCount">—</small></div>
+ <form id="uploadForm" class="filebar">
+  <input type="file" accept=".gcode,.gc,.nc" id="file" aria-label="G-Code-Datei">
+  <button type="submit">Hochladen</button>
+ </form>
+ <h3>Auftrag</h3>
+ <div class="filebar">
+  <select id="jobSelect" aria-label="Gespeicherte Aufträge"><option>Keine Dateien</option></select>
+  <button class="ghost" id="deleteJob" type="button" title="Ausgewählten Auftrag löschen">Löschen</button>
+ </div>
+ <div class="stack" style="margin-top:10px">
+  <div class="row">
+   <button id="previewGeometry" type="button">Motiv analysieren</button>
+   <button id="frameJob" data-motion data-needs-home type="button" title="Rechteck um das Motiv abfahren, Laser aus">Rahmen fahren</button>
+  </div>
+  <button data-action="start" data-motion data-needs-home type="button">Auftrag starten</button>
+  <button class="primary" data-action="autorun" data-motion type="button">Ein-Klick: Homing → Abtasten → Fokus → Auftrag → Park</button>
+ </div>
+ <p class="muted" style="margin-top:8px">Abgetastet wird unter der Motivmitte; dort muss Material liegen. Fokus wird vor der ersten Laserbewegung automatisch angefahren. Aufträge werden vor der Übertragung geprüft und mit echten Marlin-<code>ok</code>-Bestätigungen an das SKR übertragen.</p>
+ <pre id="geometryOutput" class="console" style="margin-top:10px;min-height:56px">Noch kein Auftrag analysiert</pre>
+ <h3>Warteschlange <small id="queueState" style="text-transform:none;letter-spacing:0;font-weight:500"></small></h3>
+ <div class="row3">
+  <button id="queueAdd" type="button" class="small">+ Einreihen</button>
+  <button data-action="queue_run" data-motion data-needs-home type="button" class="small">Starten</button>
+  <button id="queuePause" type="button" class="small">Anhalten</button>
+ </div>
+ <ul class="queue" id="queueList"><li class="empty">Warteschlange leer</li></ul>
+ <button class="ghost small full" id="queueClear" type="button" style="margin-top:8px">Warteschlange leeren</button>
 </section>
 </div>
+
+<!-- ===== Einrichtung & Diagnose ===== -->
+<section class="card setup" aria-label="Einrichtung und Diagnose">
+ <div class="tabs" role="tablist">
+  <button role="tab" type="button" aria-selected="true" aria-controls="calibrationPanel" id="tab-calibration">Fokus &amp; Taster</button>
+  <button role="tab" type="button" aria-selected="false" aria-controls="diagnosePanel" id="tab-diagnose">Diagnose &amp; Protokoll</button>
+  <button role="tab" type="button" aria-selected="false" aria-controls="commissionPanel" id="tab-commission">Maschinenfreigabe</button>
+  <button role="tab" type="button" aria-selected="false" aria-controls="firmwarePanel" id="tab-firmware">SKR-Firmware</button>
+  <button role="tab" type="button" aria-selected="false" aria-controls="lightburnPanel" id="tab-lightburn">LightBurn</button>
+ </div>
+
+ <div class="tabpanel" role="tabpanel" id="calibrationPanel" aria-labelledby="tab-calibration">
+  <div class="split">
+   <form id="zSettings">
+    <p>Getrennte Werte für Schalter-Auslösepunkt, Sicherheitsabstand und Fokus. Änderungen werden auf dem Pi gespeichert und bleiben nach Neustart erhalten.</p>
+    <label>Schalter → Laserspitze (mm)
+     <input id="zOffset" type="number" step="0.1" min="-20" max="20" value="1.5" required inputmode="decimal"></label>
+    <p class="muted">Positiv: Beim Schalterkontakt ist die Laserspitze um diesen Wert über der Referenzfläche. Bei umgekehrter Geometrie einen negativen Wert verwenden.</p>
+    <div class="row">
+     <label>Sicherheitsrückzug nach Homing (mm)
+      <input id="zClearance" type="number" min="0.5" max="50" step="0.1" value="20" required inputmode="decimal"></label>
+     <label>Fokusabstand Laserspitze → Werkstück (mm)
+      <input id="focusGap" type="number" min="0.1" max="30" step="0.1" value="7" required inputmode="decimal"></label>
+    </div>
+    <div class="row">
+     <label>Taster relativ zum Laserpunkt X (mm; mit Vorzeichen)<input id="probeX" type="number" min="-80" max="80" step="0.1" placeholder="Noch nicht gemessen" inputmode="decimal"></label>
+     <label>Taster relativ zum Laserpunkt Y (mm; mit Vorzeichen)<input id="probeY" type="number" min="-80" max="80" step="0.1" placeholder="Noch nicht gemessen" inputmode="decimal"></label>
+    </div>
+    <p class="muted">Gemessen vom Laserpunkt zur Tastspitze entlang der Maschinenachsen: z. B. X+23 bedeutet Tastspitze 23 mm in +X-Richtung. Vorzeichen vor G30 kontrollieren.</p>
+    <button type="submit" class="primary" id="saveZSettings">Fokus &amp; Taster-Offsets speichern</button>
+    <p class="muted">Speichern funktioniert auch nach Homing oder bei verbundener LightBurn-Sitzung. Nach Offset-Änderungen vor dem nächsten Schnitt erneut G30 abtasten.</p>
+   </form>
+   <div class="stack">
+    <div class="metric live-cached"><small>Geschätzter Abstand Spitze → Referenzfläche</small><strong id="tipGap">—</strong></div>
+    <div class="metric live-cached"><small>Geschätzte Z-Korrektur bis Fokus (nur Anzeige)</small><strong id="focusAdjust">—</strong></div>
+    <div class="metric live-cached"><small>Werkstück Z-Referenz / Mindest-Z / Kühlung</small><strong id="workpieceSafety" style="font-size:14px">Noch nicht eingemessen</strong></div>
+    <div class="hint">Nur mit bestätigter Werkstückabtastung: Der Pi setzt vor der ersten G1-Laserbewegung den Fokus. Harte untere Z-Grenze: Oberfläche + 2 mm Tastabstand. Beispiel: Maschinenboden Z=0, Werkstückoberfläche bei Z=3 mm, Offset 1,5 mm: Fokus Z=8,5 mm, tiefster zulässiger Z-Wert 5,0 mm.</div>
+   </div>
+  </div>
+ </div>
+
+ <div class="tabpanel" role="tabpanel" id="diagnosePanel" aria-labelledby="tab-diagnose" hidden>
+  <div class="split">
+   <div>
+    <div class="hint warning" id="safety">Hardware noch nicht verifiziert. Laser-Versorgung getrennt lassen und Not-Aus prüfen.</div>
+    <div class="row">
+     <button data-action="connect" type="button">SKR-Verbindung prüfen</button>
+     <button data-action="info" type="button">Marlin M115 lesen</button>
+     <button data-action="position" type="button">Position M114 lesen</button>
+     <button data-action="endstops" type="button">Endschalter M119 lesen</button>
+    </div>
+    <h3>System &amp; Verbindung</h3>
+    <div class="metrics">
+     <div class="metric"><small>Übertragene Befehle</small><strong id="commands">0</strong></div>
+     <div class="metric"><small>Serielle Fehler</small><strong id="errors">0</strong></div>
+     <div class="metric"><small>LightBurn-Clients</small><strong id="lbClients">0</strong></div>
+     <div class="metric"><small>Status-Alter</small><strong id="statusAge">—</strong></div>
+    </div>
+    <p class="muted" style="margin-top:12px">Keine Anmeldung erforderlich. Die Steuerung ist für Geräte in deinem WLAN direkt erreichbar. WLAN-Zugang schützen und Port 8080 nicht im Router ins Internet freigeben.</p>
+   </div>
+   <div>
+    <div class="card-head"><h2>Marlin-Ereignisprotokoll</h2><button class="ghost small" id="clearLog" type="button">Ansicht leeren</button></div>
+    <pre class="console" id="console">Keine Meldungen.</pre>
+   </div>
+  </div>
+ </div>
+
+ <div class="tabpanel" role="tabpanel" id="commissionPanel" aria-labelledby="tab-commission" hidden>
+  <p>Die Firmware wird zunächst im gesperrten Testbetrieb gestartet. Erst Endschalter, Motordrehrichtung, Z-Rückzug, PWM-Pegel, galvanische Trennung und unabhängiger Not-Aus müssen bei getrennter Laserversorgung geprüft werden.</p>
+  <div class="hint warning">Diese Softwarefreigabe bestätigt keine elektrische Sicherheit und ersetzt weder Messungen noch Hardware-Interlocks.</div>
+  <label class="check"><input type="checkbox" id="commissionCheck"> Ich habe die Prüfungen ohne verbundenen Laser abgeschlossen.</label>
+  <div class="row" style="margin-top:10px;max-width:640px">
+   <button id="commissionEnable" type="button">Mechanik nach Prüfung freigeben</button>
+   <button id="commissionDisable" type="button">Freigabe zurücknehmen</button>
+  </div>
+ </div>
+
+ <div class="tabpanel" role="tabpanel" id="firmwarePanel" aria-labelledby="tab-firmware" hidden>
+  <p>Neue <code>firmware.bin</code> direkt über den Pi flashen. Die microSD-Karte bleibt dauerhaft im SKR; der Pi schreibt die Datei per USB darauf und startet das SKR neu, der Bootloader übernimmt sie.</p>
+  <form id="firmwareForm" class="filebar" style="margin-top:12px;max-width:720px">
+   <input type="file" accept=".bin" id="firmwareFile" aria-label="firmware.bin">
+   <button type="submit" id="firmwareFlash">Flashen</button>
+  </form>
+  <div class="metric" style="margin-top:12px;max-width:720px"><small>Firmware-Update</small><strong id="firmwareStatus" style="font-size:14px">—</strong>
+   <div class="bar" style="margin-top:8px"><span id="firmwareProgress"></span></div></div>
+ </div>
+
+ <div class="tabpanel" role="tabpanel" id="lightburnPanel" aria-labelledby="tab-lightburn" hidden>
+  <div class="split">
+   <div>
+    <p>LightBurn <b>Custom GCode</b> → Variante <b>Marlin</b> → Verbindung <b>Network/TCP</b>. Diese Weboberfläche und LightBurn teilen sich einen USB-Controller, führen aber nie gleichzeitig Befehle aus.</p>
+    <div class="metrics" style="margin-top:12px">
+     <div class="metric"><small>IP/Hostname</small><strong id="hostname">—</strong></div>
+     <div class="metric"><small>TCP-Port</small><strong>23</strong></div>
+    </div>
+    <div class="hint">Marlin-Modus: <code>M3 I</code> aktivieren. S-Werte nur <code>0–255</code>. Bei LightBurn muss nach Leerfahrten die erste G1-Bearbeitung wieder einen S-Wert erhalten. Marlin <code>M4 I</code> nicht benutzen.</div>
+    <p class="muted">Der native Marlin-Gateway ist absichtlich kein GRBL-Emulator. GRBL-Befehle wie <code>$$</code>, <code>$H</code> oder <code>?</code> sind hier ungültig.</p>
+   </div>
+   <div>
+    <div class="hint">LightBurn: zuerst <code>G28</code> referenzieren, danach nur über einer geeigneten Werkstückstelle <code>G30</code> ausführen. Ohne eingemessenen X/Y-Tasterversatz keine automatische Abtastung. „Job-Ende“ auf <code>M2</code> setzen: Laser aus → Z nur nach oben bis mindestens 20 mm → X0/Y0 in die L-förmige Safezone. <code>M5 I</code> bleibt der normale Laser-Aus-Befehl für Pausen zwischen Schnitten. Beide Aktionen benötigen kein Webinterface.</div>
+    <div class="hint warning">30-mm-Homing-Sicherheitszone: X=0–30 mm und Y=0–30 mm bleiben werkstückfrei. Schnittbewegungen sind nur bei X≥30 und Y≥30 erlaubt (nutzbar 360 × 340 mm bei Maschinenkoordinaten 390 × 370 mm). Maschinenreferenz G28 ausschließlich in frei zugänglicher Parkposition starten. Nach Einschalten ist die tatsächliche Kopfposition bis zum Homing unbekannt.</div>
+   </div>
+  </div>
+ </div>
+</section>
 </main>
+<div id="alert" role="alert" title="Antippen zum Schließen"></div>
+
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-let snapshot=null, lastFault="", dismissed=false, settingsDirty=false;
+const $$=sel=>Array.from(document.querySelectorAll(sel));
+let snapshot=null, lastFault="", dismissed=false, settingsDirty=false, apiOk=false;
+let geometry=null;          // {name, bounds, candidates} der letzten Motivanalyse
+let alertTimer=null, jogInFlight=false;
+const STALE_MS=2500;        // ab diesem stale_ms gilt die Anzeige als veraltet
+const RUNNING=["homing","probing","running"], QUEUE_ACTIVE=["running","pausing"];
+const JOB_LABEL={idle:"Kein Auftrag",homing:"Referenziert …",probing:"Tastet ab …",running:"Läuft",
+ complete:"Fertig",aborted:"Abgebrochen",error:"Fehler"};
+const QUEUE_LABEL={idle:"",running:"· läuft",pausing:"· hält nach aktuellem Auftrag",paused:"· angehalten",
+ stopped:"· gestoppt",complete:"· abgeschlossen"};
 for(const input of document.querySelectorAll("#zSettings input")) input.addEventListener("input",()=>settingsDirty=true);
 $("hostname").textContent=location.hostname;
-function show(msg,error=false){const el=$("alert");el.textContent=msg;el.className="show"+(error?" error":"");dismissed=false}
+const fmt=(v,d=2)=>v==null||!isFinite(v)?"—":Number(v).toFixed(d);
+
+/* ---------- Meldungen ---------- */
+function show(msg,error=false){
+ const el=$("alert");el.textContent=msg;el.className="show"+(error?" error":"");dismissed=false;
+ clearTimeout(alertTimer);
+ if(!error) alertTimer=setTimeout(()=>{el.className=""},7000);
+}
+$("alert").onclick=()=>{$("alert").className=""};
+
+/* ---------- API ---------- */
 async function api(endpoint,{body=null,method="GET"}={}){
  const opts={method,cache:"no-store",headers:{}};
  if(body){opts.body=body;if(body instanceof URLSearchParams)opts.headers["Content-Type"]="application/x-www-form-urlencoded"}
@@ -235,20 +529,53 @@ async function api(endpoint,{body=null,method="GET"}={}){
  return payload;
 }
 function param(data){return new URLSearchParams(data)}
-async function call(op,fields={}){
- try{
-  const res=await api("/api/action",{method:"POST",body:param({...fields,op})});
-  show(res.message||"Bestätigt");refresh();
- }catch(e){show(e.message,true)}
+async function withPending(button,task){
+ if(button) button.classList.add("pending");
+ try{return await task()}finally{if(button) button.classList.remove("pending")}
 }
+async function call(op,fields={},button=null){
+ try{
+  const res=await withPending(button,()=>api("/api/action",{method:"POST",body:param({...fields,op})}));
+  show(res.message||"Bestätigt");refresh();
+  return res;
+ }catch(e){show(e.message,true);refresh()}
+}
+function selectedJob(){
+ const v=$("jobSelect").value;
+ return v&&v!=="Keine Dateien"?v:"";
+}
+
+/* ---------- Status ---------- */
 function ownerFree(s){return s&&s.connected&&s.owner==="Frei"&&s.state==="Idle"}
+function chip(id,cls){const el=$(id);el.classList.remove("ok","bad","warn","info");if(cls)el.classList.add(cls)}
+function motionFree(s){
+ // Bewegung nur bei freier USB-Steuerung, ohne laufenden Auftrag/Rahmen/Queue,
+ // ohne Notstopp und mit frischem (nicht zwischengespeichertem) Status.
+ return apiOk&&ownerFree(s)&&!s.busy&&(s.activity||"idle")==="idle"&&!s.emergency_latched;
+}
 function refreshUI(s){
  snapshot=s;
+ const stale=Boolean(s.busy)&&(s.stale_ms==null||s.stale_ms>STALE_MS);
+ document.body.classList.toggle("is-stale",stale);
+ $("staleBanner").classList.toggle("show",stale);
+ $("staleBadge").textContent=s.stale_ms==null?
+   "Maschine beschäftigt – noch kein vollständiger Status, nur Live-Werte (Position, Besitzer, Laser).":
+   "Maschine beschäftigt – Detailwerte "+(s.stale_ms/1000).toFixed(1)+" s alt, Position/Besitzer/Laser live.";
+ $("statusAge").textContent=s.busy?(s.stale_ms==null?"unbekannt":(s.stale_ms/1000).toFixed(1)+" s"):"aktuell";
+
  $("connectState").textContent=s.connected?"USB verbunden · Marlin":"SKR getrennt";
+ chip("chipConnect",s.connected?"ok":"bad");
  $("state").textContent=s.state||"Offline";
+ chip("chipState",s.emergency_latched?"bad":s.state==="Idle"?"ok":s.connected?"warn":"bad");
  $("owner").textContent=s.owner||"Frei";
+ chip("chipOwner",(s.owner||"Frei")==="Frei"?"ok":"info");
  $("homed").textContent=s.homed?"JA":"NEIN";
+ chip("chipHomed",s.homed?"ok":"warn");
+ $("laserState").textContent=s.laser_armed?"AKTIV":"aus";
+ chip("chipLaser",s.laser_armed?"bad":"ok");
+ $("estopBanner").classList.toggle("show",Boolean(s.emergency_latched));
  $("board").textContent=s.identity||"Keine gültige LumaCut-Marlin-Kennung vom SKR";
+
  const zCfg=s.config||{};
  for(const [id,name] of [["zOffset","z_switch_tip_offset_mm"],["zClearance","z_clearance_mm"],["focusGap","focus_gap_mm"],["probeX","probe_offset_x_mm"],["probeY","probe_offset_y_mm"]]){
    const input=$(id);
@@ -257,64 +584,215 @@ function refreshUI(s){
  }
  $("tipGap").textContent=s.estimated_tip_gap_mm==null?"Noch nicht referenziert":s.estimated_tip_gap_mm.toFixed(2)+" mm";
  $("focusAdjust").textContent=s.estimated_focus_adjust_mm==null?"Werkstückkontakt fehlt":s.estimated_focus_adjust_mm.toFixed(2)+" mm";
- $("workpieceSafety").textContent=s.workpiece_surface_z==null?
+ $("workpieceSafety").textContent=s.workpiece_surface_z==null||s.probe_minimum_z==null?
    "Keine Werkstückoberfläche bestätigt":
-   "Z-Min "+s.probe_minimum_z.toFixed(2)+" mm · Z-Fokus "+s.laser_focus_z.toFixed(2)+" mm · Fan "+
+   "Z-Min "+fmt(s.probe_minimum_z)+" mm · Z-Fokus "+fmt(s.laser_focus_z)+" mm · Fan "+
    (s.laser_cooling_fan_on?"EIN":"AUS")+
    (s.cooldown_remaining_s!=null?" · Nachlauf "+s.cooldown_remaining_s+" s":"");
  // Saving local calibration does not move the axes and does not require a free USB owner.
  $("saveZSettings").disabled=false;
  $("commands").textContent=s.command_count||0;
  $("errors").textContent=s.serial_errors||0;
- $("position").textContent=s.position?["X","Y","Z"].map((axis,i)=>axis+" "+s.position[i].toFixed(2)).join("  "):"X — Y — Z —";
+ $("lbClients").textContent=s.lightburn_clients||0;
+
+ const pos=Array.isArray(s.position)&&s.position.length>=3?s.position:null;
+ $("position").classList.toggle("unknown",!pos||!s.homed);
+ $("posX").textContent=pos?fmt(pos[0]):"—";
+ $("posY").textContent=pos?fmt(pos[1]):"—";
+ $("posZ").textContent=pos?fmt(pos[2]):"—";
+ $("position").title=pos?["X","Y","Z"].map((a,i)=>a+" "+fmt(pos[i])).join("  "):"X — Y — Z —";
+
  const valid=Boolean(s.config?.validated);
  $("safety").textContent=valid?
    "Mechanik-Softwarefreigabe aktiv. Dies bestätigt NICHT die elektrische Laser-Sicherheit.":
    "Gesperrt: Endschalter/Z-Richtung und Hardware-Interlock müssen geprüft werden.";
+ $("safety").className="hint "+(valid?"":"warning");
  if(valid) $("commissionCheck").checked=true; // retain manual test checkbox while locked
+
+ const free=motionFree(s);
  for(const button of document.querySelectorAll("[data-motion]")){
-  button.disabled=!ownerFree(s)||!valid||((button.dataset.action==="start"||"needsHome" in button.dataset)&&!s.homed);
+  button.disabled=!free||!valid||((button.dataset.action==="start"||"needsHome" in button.dataset)&&!s.homed);
  }
- $("abortJob").disabled=!["homing","probing","running"].includes(s.job?.state);
+ for(const button of document.querySelectorAll("[data-axis]"))
+  button.disabled=jogInFlight||!free||!valid||!s.homed;
+ $("jogHint").textContent=!valid?"Gesperrt: Maschinenfreigabe fehlt.":
+   !s.homed?"Joggen erst nach dem Referenzieren.":
+   !free?"Joggen gesperrt: Steuerung belegt ("+(s.owner||"—")+", "+(s.activity||s.state)+").":
+   "Bereit. Jeder Schritt fährt genau "+$("step").value.replace(".",",")+" mm.";
+ for(const button of document.querySelectorAll("[data-accessory]")){
+  const on=Boolean(s[button.dataset.accessory==="light"?"lights":"exhaust"]);
+  button.classList.toggle("on",on);
+  button.querySelector(".state").textContent=on?"EIN":"AUS";
+  button.disabled=!apiOk||!ownerFree(s)||Boolean(s.busy);
+ }
+
+ // Firmware
  const fw=s.firmware_update||{};
  $("firmwareStatus").textContent=fw.state&&fw.state!=="idle"?fw.state+" · "+(fw.message||""):
    (s.firmware_upload_supported?"Bereit: Update über den Pi möglich":"Aktuelle Firmware kann keine Dateien empfangen – einmalig per SD-Karte flashen");
  $("firmwareProgress").style.width=(fw.progress||0)+"%";
  $("firmwareFlash").disabled=!ownerFree(s)||!s.firmware_upload_supported||["uploading","rebooting"].includes(fw.state);
  $("estopReset").disabled=!s.emergency_latched;
- for(const button of document.querySelectorAll("[data-axis]"))
-  button.disabled=!ownerFree(s)||!valid||!s.homed;
- for(const button of document.querySelectorAll("[data-accessory]"))
-  button.disabled=!ownerFree(s);
- $("jobStatus").textContent=s.job?.state||"Kein Auftrag";
- $("jobProgress").style.width=Math.max(0,Math.min(100,100*(s.job?.line||0)/Math.max(1,s.job?.total||1)))+"%";
- $("jobDetails").textContent=(s.job?.file||"")+(s.job?.error?" · "+s.job.error:"");
+
+ // Auftrag / Rahmen / Warteschlange
+ const jobState=s.job?.state||"idle", frameState=s.frame?.state||"idle", q=s.queue||{items:[],state:"idle"};
+ const queueActive=QUEUE_ACTIVE.includes(q.state);
+ $("abortJob").disabled=!(RUNNING.includes(jobState)||frameState==="running"||queueActive);
+ const framing=frameState==="running"||(s.activity==="framing");
+ let line,total,label,detail,cls="";
+ if(framing){
+  line=s.frame?.line||0;total=s.frame?.total||0;
+  label="Rahmenfahrt ("+(s.frame?.mode==="hull"?"Gummiband":"Rechteck")+", Laser aus)";
+  detail=s.frame?.error||"";cls="frame";$("activityLabel").textContent="Rahmen";
+ }else{
+  line=s.job?.line||0;total=s.job?.total||0;
+  label=JOB_LABEL[jobState]||jobState;
+  if(queueActive&&q.current!=null) label+=" · Warteschlange #"+q.current;
+  detail=(s.job?.file||"")+(s.job?.error?" · "+s.job.error:"");
+  if(["error","aborted"].includes(jobState))cls="error";
+  $("activityLabel").textContent="Auftrag";
+  if(frameState!=="idle"&&frameState!=="running"&&jobState==="idle"&&s.frame?.error)
+   detail="Letzter Rahmen: "+frameState+" · "+s.frame.error;
+ }
+ const pct=total>0?Math.max(0,Math.min(100,100*line/Math.max(1,total))):(jobState==="complete"?100:0);
+ $("jobStatus").textContent=label;
+ $("jobProgress").style.width=pct+"%";
+ $("jobBar").className="bar "+cls;
+ $("jobPercent").textContent=total>0||jobState==="complete"?Math.round(pct)+" %":"—";
+ $("jobDetails").textContent=detail+(total>0?"  ·  Zeile "+line+" / "+total:"");
+ $("activity").textContent={idle:"Bereit",job:"Auftrag aktiv",framing:"Rahmenfahrt"}[s.activity]||s.activity||"—";
+ renderQueue(q,valid);
+ $("queuePause").disabled=q.state!=="running";
+ $("queueClear").disabled=!(q.items||[]).some(i=>i.state!=="running");
+ $("queueAdd").disabled=!selectedJob()||(q.items||[]).length>=(q.max||50);
+ $("deleteJob").disabled=!selectedJob();
+
+ drawBed(s);
  $("console").textContent=(s.recent||[]).join("\n")||"Keine seriellen Nachrichten";
  if(s.fault&&s.fault!==lastFault){show("SKR: "+s.fault,true);lastFault=s.fault}
 }
+function lockAll(){
+ // API nicht erreichbar: alles sperren, was die Maschine bewegt. Not-Aus bleibt aktiv.
+ for(const b of document.querySelectorAll("[data-motion],[data-axis],[data-accessory]")) b.disabled=true;
+ chip("chipConnect","bad");
+ document.body.classList.add("is-stale");
+}
 async function refresh(){
  try{
-   refreshUI(await api("/api/status"));
+   const s=await api("/api/status");
+   apiOk=true;
+   refreshUI(s);
    dismissed=false;
  }catch(e){
+   apiOk=false;lockAll();
    $("connectState").textContent="API nicht verbunden";
    if(!dismissed)show(e.message,true);
    dismissed=true;
  }
 }
+
+/* ---------- Warteschlange ---------- */
+function renderQueue(q,valid){
+ const list=$("queueList"),items=q.items||[];
+ $("queueState").textContent=(items.length?items.length+" Einträge ":"")+(QUEUE_LABEL[q.state]||"");
+ if(!items.length){list.innerHTML='<li class="empty">Warteschlange leer</li>';return}
+ const sig=JSON.stringify(items.map(i=>[i.id,i.state,i.error]));
+ if(list.dataset.sig===sig)return;
+ list.dataset.sig=sig;list.replaceChildren();
+ for(const item of items){
+  const li=document.createElement("li");li.className=item.state;
+  const badge=document.createElement("span");badge.className="badge";badge.textContent="#"+item.id+" "+item.state;
+  const file=document.createElement("span");file.className="file";
+  file.textContent=item.file+(item.origin&&item.origin!=="absolute"?" · "+item.origin:"")+(item.error?" · "+item.error:"");
+  file.title=file.textContent;
+  const act=document.createElement("span");act.className="act";
+  if(item.state==="queued"){
+   const skip=document.createElement("button");skip.type="button";skip.className="small ghost";skip.textContent="Überspringen";
+   skip.dataset.queueOp="queue_skip";skip.dataset.id=item.id;act.append(skip);
+  }
+  if(item.state!=="running"){
+   const rm=document.createElement("button");rm.type="button";rm.className="small ghost";rm.textContent="Entfernen";
+   rm.dataset.queueOp="queue_remove";rm.dataset.id=item.id;act.append(rm);
+  }
+  li.append(badge,file,act);list.append(li);
+ }
+}
+$("queueList").onclick=ev=>{
+ const b=ev.target.closest("[data-queue-op]");
+ if(b) call(b.dataset.queueOp,{id:b.dataset.id},b);
+};
+$("queueAdd").onclick=ev=>{
+ const name=selectedJob();if(!name){show("Erst G-Code hochladen und auswählen",true);return}
+ call("queue_add",{name,origin:"absolute"},ev.currentTarget);
+};
+$("queuePause").onclick=ev=>call("queue_pause",{},ev.currentTarget);
+$("queueClear").onclick=ev=>{if(confirm("Alle nicht laufenden Einträge aus der Warteschlange entfernen?"))call("queue_clear",{},ev.currentTarget)};
+
+/* ---------- Arbeitsfläche ---------- */
+function drawBed(s){
+ const tr=s?.config?.travels||{x:390,y:370};
+ const W=Number(tr.x)||390,H=Number(tr.y)||370,safe=Number(s?.safe_zone_xy_mm)||30;
+ const svg=$("bed");
+ svg.setAttribute("viewBox",(-14)+" "+(-8)+" "+(W+34)+" "+(H+32));
+ $("bedFlip").setAttribute("transform","translate(0,"+H+") scale(1,-1)");
+ for(const id of ["bedArea","bedGrid","bedGrid50"]){$(id).setAttribute("width",W);$(id).setAttribute("height",H)}
+ $("bedSafe").setAttribute("d","M0 0H"+W+"V"+safe+"H"+safe+"V"+H+"H0Z");
+ $("bedInfo").textContent="Nutzbar X"+safe+"–"+W+" · Y"+safe+"–"+H+" mm";
+ const labels=$("bedLabels");
+ if(labels.dataset.size!==W+"x"+H){
+  labels.dataset.size=W+"x"+H;labels.replaceChildren();
+  const add=(x,y,t,anchor="middle")=>{const el=document.createElementNS("http://www.w3.org/2000/svg","text");
+   el.setAttribute("x",x);el.setAttribute("y",y);el.setAttribute("text-anchor",anchor);el.textContent=t;labels.append(el)};
+  for(let x=0;x<=W;x+=100)add(x,H+14,String(x));
+  for(let y=100;y<=H;y+=100)add(-3,H-y+4,String(y),"end");
+  add(W+2,H+14,"X","start");add(-3,-1,"Y","end");
+ }
+ const head=$("bedHead"),pos=s?.position;
+ if(Array.isArray(pos)&&s.homed){head.setAttribute("visibility","visible");head.setAttribute("transform","translate("+pos[0]+","+pos[1]+")")}
+ else head.setAttribute("visibility","hidden");
+ const m=$("bedMotif"),probes=$("bedProbes");
+ if(geometry&&geometry.name===selectedJob()){
+  const b=geometry.bounds;
+  m.setAttribute("x",b.xmin);m.setAttribute("y",b.ymin);
+  m.setAttribute("width",Math.max(.5,b.xmax-b.xmin));m.setAttribute("height",Math.max(.5,b.ymax-b.ymin));
+  m.setAttribute("visibility","visible");
+  if(probes.dataset.name!==geometry.name){
+   probes.dataset.name=geometry.name;probes.replaceChildren();
+   for(const p of geometry.candidates||[]){
+    if(!Array.isArray(p)||p.length<2)continue;
+    const c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+    c.setAttribute("cx",p[0]);c.setAttribute("cy",p[1]);c.setAttribute("r","2.2");c.setAttribute("fill","#7cc4f5");
+    probes.append(c);
+   }
+  }
+ }else{m.setAttribute("visibility","hidden");probes.replaceChildren();probes.dataset.name=""}
+}
+
+/* ---------- Dateien ---------- */
 async function files(){
  try{
   const r=await api("/api/jobs"), sel=$("jobSelect"),current=sel.value;
   sel.replaceChildren();
-  for(const item of r.files){const opt=new Option(item.name,item.name);sel.append(opt)}
+  for(const item of r.files){
+   const kb=item.bytes!=null?" ("+Math.max(1,Math.round(item.bytes/1024))+" KB)":"";
+   const opt=new Option(item.name+kb,item.name);sel.append(opt)}
+  if(!r.files.length)sel.append(new Option("Keine Dateien","Keine Dateien"));
   if(r.files.some(o=>o.name===current))sel.value=current;
+  $("fileCount").textContent=r.files.length+" Datei"+(r.files.length===1?"":"en");
+  if(snapshot)refreshUI(snapshot);
  }catch(e){show(e.message,true)}
 }
-$("previewGeometry").onclick=async()=>{
-  const name=$("jobSelect").value;
-  if(!name || name==="Keine Dateien"){show("Erst G-Code hochladen und auswählen",true);return}
+$("jobSelect").onchange=()=>{if(snapshot)refreshUI(snapshot);else drawBed(null)};
+async function loadGeometry(name){
+ const result=await api("/api/jobs/"+encodeURIComponent(name)+"/geometry");
+ geometry={name,bounds:result.bounds,candidates:result.probe_candidates||[]};
+ return result;
+}
+$("previewGeometry").onclick=async ev=>{
+  const name=selectedJob();
+  if(!name){show("Erst G-Code hochladen und auswählen",true);return}
   try{
-    const result=await api("/api/jobs/"+encodeURIComponent(name)+"/geometry");
+    const result=await withPending(ev.currentTarget,()=>loadGeometry(name));
     const b=result.bounds;
     $("geometryOutput").textContent=
       "Motiv X "+b.xmin.toFixed(2)+"–"+b.xmax.toFixed(2)+" mm\n"+
@@ -322,8 +800,35 @@ $("previewGeometry").onclick=async()=>{
       result.segments+" Bearbeitungssegmente\n"+
       result.probe_candidates.length+" mögliche Messpunkte (noch KEINE automatische Abtastung).\n"+
       result.warning;
+    drawBed(snapshot);
   }catch(e){$("geometryOutput").textContent=e.message;show(e.message,true)}
 };
+function frameGcode(b){
+ // Rechteck um die Motivfläche, Laser aus (nur G0 X/Y, S0 implizit), siehe web.py frame_program().
+ const p=v=>Number(v).toFixed(3);
+ const pts=[[b.xmin,b.ymin],[b.xmax,b.ymin],[b.xmax,b.ymax],[b.xmin,b.ymax],[b.xmin,b.ymin]];
+ return ["G21","G90","M5 I",...pts.map(([x,y],i)=>"G0 X"+p(x)+" Y"+p(y)+(i===0?" F3000":"")),"M5 I"].join("\n");
+}
+$("frameJob").onclick=async ev=>{
+ const name=selectedJob();if(!name){show("Erst G-Code hochladen und auswählen",true);return}
+ const btn=ev.currentTarget;
+ try{
+  if(!geometry||geometry.name!==name) await withPending(btn,()=>loadGeometry(name));
+  drawBed(snapshot);
+  await call("frame",{mode:"box",gcode:frameGcode(geometry.bounds)},btn);
+ }catch(e){show(e.message,true)}
+};
+$("deleteJob").onclick=async ev=>{
+ const name=selectedJob();if(!name)return;
+ if(!confirm("Auftrag „"+name+"“ vom Pi löschen?"))return;
+ try{
+  const r=await withPending(ev.currentTarget,()=>api("/api/jobs/"+encodeURIComponent(name)+"/delete",{method:"POST"}));
+  if(geometry?.name===name)geometry=null;
+  show(r.message);await files();
+ }catch(e){show(e.message,true)}
+};
+
+/* ---------- Einstellungen ---------- */
 $("zSettings").onsubmit=async ev=>{
  ev.preventDefault();
  const body=param({
@@ -334,7 +839,7 @@ $("zSettings").onsubmit=async ev=>{
   probe_offset_y_mm:$("probeY").value
  });
  try{
-  const result=await api("/api/settings",{method:"POST",body});
+  const result=await withPending($("saveZSettings"),()=>api("/api/settings",{method:"POST",body}));
   settingsDirty=false;
   show(result.message||"Gespeichert");
   refresh();
@@ -342,23 +847,58 @@ $("zSettings").onsubmit=async ev=>{
 };
 $("refreshButton").onclick=()=>{refresh();files()};
 $("clearLog").onclick=()=>{$("console").textContent="Ansicht geleert. Neue Geräteereignisse erscheinen beim nächsten Aktualisieren."};
+
+/* ---------- Aktionen ---------- */
 for(const b of document.querySelectorAll("[data-action]"))
- b.onclick=()=>call(b.dataset.action,
-  ["start","autorun"].includes(b.dataset.action)?{name:$("jobSelect").value}:{});
-$("abortJob").onclick=()=>call("abort");
-$("estopReset").onclick=()=>call("estop_reset");
+ b.onclick=()=>{
+  const needsName=["start","autorun"].includes(b.dataset.action);
+  if(needsName&&!selectedJob()){show("Erst G-Code hochladen und auswählen",true);return}
+  call(b.dataset.action,needsName?{name:selectedJob()}:{},b);
+ };
+$("abortJob").onclick=ev=>call("abort",{},ev.currentTarget);
+$("estopReset").onclick=ev=>call("estop_reset",{},ev.currentTarget);
 $("firmwareForm").onsubmit=async ev=>{
  ev.preventDefault();const file=$("firmwareFile").files?.[0];if(!file){show("firmware.bin auswählen",true);return}
  if(!confirm("SKR jetzt flashen? Laser wird abgeschaltet, das SKR startet neu und muss danach neu referenziert werden."))return;
  const data=new FormData();data.append("file",file);
- try{const r=await api("/api/firmware",{method:"POST",body:data});show(r.message);refresh()}
+ try{const r=await withPending($("firmwareFlash"),()=>api("/api/firmware",{method:"POST",body:data}));show(r.message);refresh()}
  catch(e){show(e.message,true)}
 };
 
+/* ---------- Joggen (nur ±0,1 / 1 / 10 mm, nur referenziert) ---------- */
+const STEPS=["0.1","1","10"];
+function setStep(v){
+ if(!STEPS.includes(v))return;
+ $("step").value=v;
+ for(const b of $$("[data-step]"))b.setAttribute("aria-pressed",String(b.dataset.step===v));
+ $("jogInfo").innerHTML="XY<br>"+v.replace(".",",")+" mm";
+ if(snapshot)refreshUI(snapshot);
+}
+for(const b of $$("[data-step]"))b.onclick=()=>setStep(b.dataset.step);
+async function jog(b){
+ if(jogInFlight||b.disabled)return;
+ jogInFlight=true;
+ for(const x of $$("[data-axis]"))x.disabled=true;
+ try{await call("jog",{axis:b.dataset.axis,distance:String(Number($("step").value)*Number(b.dataset.direction))},b)}
+ finally{jogInFlight=false;if(snapshot)refreshUI(snapshot)}
+}
 for(const b of document.querySelectorAll("[data-axis]"))
- b.onclick=()=>call("jog",{axis:b.dataset.axis,distance:String(Number($("step").value)*Number(b.dataset.direction))});
+ b.onclick=()=>jog(b);
+const KEYS={ArrowLeft:["X",-1],ArrowRight:["X",1],ArrowUp:["Y",1],ArrowDown:["Y",-1],PageUp:["Z",1],PageDown:["Z",-1]};
+document.addEventListener("keydown",ev=>{
+ const t=ev.target;
+ if(ev.altKey||ev.ctrlKey||ev.metaKey||t.closest?.("input,select,textarea,[role=tab]"))return;
+ if(["1","2","3"].includes(ev.key)){setStep(STEPS[Number(ev.key)-1]);return}
+ const k=KEYS[ev.key];if(!k)return;
+ ev.preventDefault();
+ if(ev.repeat)return;  // gedrückt halten erzeugt keine Schrittkette
+ const b=document.querySelector('[data-axis="'+k[0]+'"][data-direction="'+k[1]+'"]');
+ if(b&&!b.disabled)jog(b);
+});
+
 for(const b of document.querySelectorAll("[data-accessory]"))
- b.onclick=()=>{const type=b.dataset.accessory;call(type,{on:snapshot&&snapshot[type==="light"?"lights":"exhaust"]?"0":"1"})};
+ b.onclick=()=>{const type=b.dataset.accessory;call(type,{on:snapshot&&snapshot[type==="light"?"lights":"exhaust"]?"0":"1"},b)};
+// Not-Aus: wird nie deaktiviert und ist in der Kopfzeile immer erreichbar.
 $("stop").onclick=()=>{
  if(confirm("Marlin-Notstopp M112 auslösen? Die Maschine muss danach am physischen Not-Aus geprüft und zurückgesetzt werden."))
   call("estop");
@@ -366,8 +906,11 @@ $("stop").onclick=()=>{
 $("uploadForm").onsubmit=async ev=>{
  ev.preventDefault();const file=$("file").files?.[0];if(!file){show("Datei auswählen",true);return}
  const data=new FormData();data.append("file",file);
- try{const r=await api("/api/upload",{method:"POST",body:data});show(r.message);await files()}
- catch(e){show(e.message,true)}
+ try{
+  const r=await withPending(ev.submitter||null,()=>api("/api/upload",{method:"POST",body:data}));
+  show(r.message);await files();$("jobSelect").value=file.name;$("file").value="";
+  if(snapshot)refreshUI(snapshot);
+ }catch(e){show(e.message,true)}
 };
 async function commission(enable){
  if(enable&&!$("commissionCheck").checked){show("Vor Freigabe Prüfungen bestätigen",true);return}
@@ -379,6 +922,26 @@ async function commission(enable){
 }
 $("commissionEnable").onclick=()=>commission(true);
 $("commissionDisable").onclick=()=>commission(false);
+
+/* ---------- Tabs ---------- */
+const tabs=$$("[role=tab]");
+function openTab(tab,focus=false){
+ for(const t of tabs){const on=t===tab;t.setAttribute("aria-selected",String(on));t.tabIndex=on?0:-1;$(t.getAttribute("aria-controls")).hidden=!on}
+ if(focus)tab.focus();
+ try{localStorage.setItem("lumacut.tab",tab.id)}catch{}
+}
+tabs.forEach((t,i)=>{
+ t.onclick=()=>openTab(t);
+ t.onkeydown=ev=>{
+  if(ev.key==="ArrowRight")openTab(tabs[(i+1)%tabs.length],true);
+  if(ev.key==="ArrowLeft")openTab(tabs[(i-1+tabs.length)%tabs.length],true);
+ };
+});
+try{const saved=$(localStorage.getItem("lumacut.tab")||"");if(saved&&tabs.includes(saved))openTab(saved)}catch{}
+const hashTab=tabs.find(t=>"#"+t.getAttribute("aria-controls")===location.hash);
+if(hashTab)openTab(hashTab);
+
+drawBed(null);
 refresh();files()
 setInterval(refresh,1800);
 setInterval(files,12000);

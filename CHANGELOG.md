@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-10-26
+
+**Pi-Weboberfläche neu gestaltet:** Sticky-Statusleiste (verbunden, referenziert, SKR, Steuerung, Laser, Job-Fortschritt) mit immer erreichbarem Not-Aus, Bewegung links, Bettansicht mittig, Aufträge rechts, Einrichtung in Tabs; Studio-Dark-Theme, große Touch-Ziele, responsiv. Neu in der UI: Rahmen fahren, Warteschlange, Auftrag löschen, Veraltet-Banner. API unverändert. Details: `docs/PI_WEB_UI_REDESIGN.md`.
+
 ## 2026-10-25
 
 **Aufräumen:** grblHAL-Firmware, ESP32-HMI (Waveshare), Unraid-Build-Lab, alter GRBL-Pi-Dienst, GRBL-Exporte in Studio, GRBL-LightBurn-Profil und die veraltete Doku entfernt. Neue Doku: README, `docs/MASCHINE.md`, `PI_BETRIEB.md`, `FIRMWARE.md`, `ENTWICKLUNG.md`. `install.sh` installiert jetzt den Marlin-Dienst.
