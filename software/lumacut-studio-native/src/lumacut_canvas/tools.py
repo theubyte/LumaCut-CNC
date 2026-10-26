@@ -36,6 +36,7 @@ ROTATE_SNAP_DEG = 15.0
 
 class Tool(str, Enum):
     SELECT = "select"
+    NODE = "node"
     RECT = "rect"
     ELLIPSE = "ellipse"
     LINE = "line"
@@ -44,10 +45,10 @@ class Tool(str, Enum):
     TEXT = "text"
 
 
-TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
+TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.NODE: "Knoten", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
                Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.FREEHAND: "Freihand",
                Tool.TEXT: "Text"}
-TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
+TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.NODE: "N", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
                   Tool.POLYGON: "P", Tool.FREEHAND: "F", Tool.TEXT: "T"}
 CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
 # Freihand: Ramer-Douglas-Peucker-Toleranz in mm (Abweichung von der gezeichneten
@@ -168,11 +169,14 @@ class ToolController:
         if self.roi_pending:
             vp.setCursor(Qt.CrossCursor)
             return
-        vp.setCursor(Qt.ArrowCursor if self.tool == Tool.SELECT
+        vp.setCursor(Qt.ArrowCursor if self.tool in (Tool.SELECT, Tool.NODE)
                      else Qt.IBeamCursor if self.tool == Tool.TEXT else Qt.CrossCursor)
 
     def cancel(self) -> None:
         """Laufenden Zug abbrechen und Ausgangszustand wiederherstellen."""
+        ne = getattr(self.ed, "node_editor", None)
+        if ne is not None:
+            ne.cancel()
         if self._mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if self._mode in ("draw", "poly", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -196,6 +200,8 @@ class ToolController:
         mode = self._mode
         if mode == "poly":
             return
+        if mode == "node":
+            self.ed.node_editor.cancel()
         if mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if mode in ("draw", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -234,6 +240,9 @@ class ToolController:
             self._rubber.setVisible(True)
         elif self.tool == Tool.SELECT:
             self._press_select(pos, mods)
+        elif self.tool == Tool.NODE:
+            self._mode = "node"
+            self.ed.node_editor.press(pos)
         elif self.tool == Tool.TEXT:
             self._create_text(pos)
         elif self.tool == Tool.POLYGON:
@@ -286,6 +295,10 @@ class ToolController:
         self._rubber.setVisible(True)
 
     def move(self, pos: QPointF, mods: Qt.KeyboardModifier, dragging: bool) -> None:
+        if self._mode == "node":
+            if dragging:
+                self.ed.node_editor.move(pos)
+            return
         if self._mode == "poly":
             self._hover = self._poly_point(pos, bool(mods & Qt.ShiftModifier))
             self._update_poly_preview()
@@ -523,6 +536,9 @@ class ToolController:
 
     def release(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
         mode, self._mode = self._mode, None
+        if mode == "node":
+            self.ed.node_editor.release()
+            return
         if mode == "free":
             self.finish_freehand(pos)
             return
@@ -598,6 +614,9 @@ class ToolController:
         if self.tool == Tool.POLYGON and self._mode == "poly":
             self.finish_polygon()  # der erste Klick des Doppelklicks hat den Punkt schon gesetzt
             return
+        if self.tool == Tool.NODE:
+            self.ed.node_editor.double_click(pos)
+            return
         if self.tool != Tool.SELECT:
             return
         hit = self.ed.scene.editable_shape_at(pos)
@@ -625,6 +644,8 @@ class ToolController:
             if event.key() == Qt.Key_Escape:
                 self.cancel()
                 return True
+        if self.tool == Tool.NODE and not self.roi_pending and self.ed.node_editor.key_press(event):
+            return True
         if event.key() == Qt.Key_Escape and self.roi_pending:
             self.cancel()  # nur die Bereichsauswahl abbrechen, Auswahl bleibt
             return True

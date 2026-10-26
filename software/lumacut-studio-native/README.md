@@ -238,6 +238,21 @@ Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
 - Kopien bekommen neue IDs und eigene Gruppen; läge eine Kopie außerhalb der
   Arbeitsfläche oder wären es mehr als 500, passiert nichts (Meldung in der Statuszeile).
 
+### Knoten bearbeiten (Werkzeug „Knoten“, Taste N)
+
+- Polygon, Pfad oder Freihandlinie antippen: Knoten erscheinen (eckig = Gerade,
+  rund = Kurve); die Skalier-Griffe sind so lange ausgeblendet.
+- Knoten ziehen verschiebt ihn (ein Undo-Schritt je Zug, Raster fängt);
+  Pfeiltasten verschieben den gewählten Knoten um 1 mm (Umschalt: 10 mm).
+- Doppelklick/Doppeltippen auf ein Segment fügt dort einen Knoten ein, auf einen
+  Knoten löscht ihn; Entf löscht den gewählten Knoten.
+- Kontextleiste und Kontextmenü (Rechtsklick/langes Drücken): „+ Knoten“,
+  „− Knoten“, „Kurve ⇄ Gerade“ (Segment ab dem gewählten Knoten, Catmull-Rom
+  durch die Nachbarknoten), „Schließen/Öffnen“ (öffnet hinter dem gewählten
+  Knoten) und „In Pfad“ für Rechteck, Ellipse und Linie (auch per Doppelklick).
+- Gedrehte Objekte behalten ihre Drehung; Kurven landen gespeichert in `curves`
+  und gehen wie alles andere über `shape_path` in Schraffur, Export und G-Code.
+
 ### Pfad: Boole-Operationen, Verschweißen, Versatz, Text in Pfade
 
 Knopf „Pfad“ in der Aktionsleiste (und Untermenü im Kontextmenü), Rechnen in

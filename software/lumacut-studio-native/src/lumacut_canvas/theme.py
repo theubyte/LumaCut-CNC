@@ -127,7 +127,8 @@ CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
 #CanvasEditor[touch="true"] QToolBar#ToolStrip {{ padding: 8px 6px; }}
 #CanvasEditor[touch="true"] QToolButton {{ min-width: 40px; min-height: 40px; padding: 7px; border-radius: 8px; }}
 #CanvasEditor[touch="true"] QToolBar#ToolStrip {{ spacing: 6px; }}
-#CanvasEditor[touch="true"] QToolBar#ToolStrip QToolButton {{ min-width: 40px; min-height: 40px; padding: 7px; }}
+/* 48 × 48 px (34 + 2 × 6 + 2 × 1 Rand): acht Werkzeuge passen auch bei 1280 × 720 ohne Überlauf */
+#CanvasEditor[touch="true"] QToolBar#ToolStrip QToolButton {{ min-width: 34px; min-height: 34px; padding: 6px; }}
 #CanvasEditor[touch="true"] #PropertyBarScroll QScrollBar:horizontal {{ height: 16px; }}
 #LayersPanel[touch="true"] #LayersScroll QScrollBar:vertical {{ width: 16px; }}
 #LayersPanel[touch="true"] #LayersScroll QScrollBar:horizontal {{ height: 16px; }}

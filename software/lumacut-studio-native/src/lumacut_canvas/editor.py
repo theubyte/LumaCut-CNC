@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import arrange_ui, icons, pathops_ui, text_ui, theme, touch
+from . import arrange_ui, icons, node_ui, pathops_ui, text_ui, theme, touch
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip
@@ -130,6 +130,8 @@ class PropertyBar(QWidget):
         lay.addWidget(self.text)
         self.text_style = text_ui.TextStyleControls(editor)  # Schriftart/Größe/Fett/Kursiv
         lay.addWidget(self.text_style)
+        self.node_controls = node_ui.NodeControls(editor)  # Knotenwerkzeug: einfügen/löschen/Kurve/…
+        lay.addWidget(self.node_controls)
         lay.addStretch()
         self._updating = False
         self.refresh()
@@ -186,6 +188,7 @@ class PropertyBar(QWidget):
         if single_text and not self.text.hasFocus():
             self.text.setText(doc.shape(sel[0]).text)
         self.text_style.refresh()
+        self.node_controls.refresh()
         self._updating = False
 
     def _geometry_edited(self) -> None:
@@ -409,6 +412,7 @@ class CanvasEditor(QWidget):
                   lambda on: self.set_path_preview(on), "Ctrl+Shift+P", "path", checkable=True)
         self.arranger = arrange_ui.install(self)  # Ausrichten/Verteilen/Array
         self.path_ops = pathops_ui.install(self)  # Boole/Verschweißen/Versatz/Text in Pfade
+        self.node_editor = node_ui.install(self)  # Knotenwerkzeug (Tool.NODE)
         self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
                   lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
 
@@ -486,12 +490,22 @@ class CanvasEditor(QWidget):
     def set_tool(self, tool: Tool) -> None:
         self.tools.set_tool(tool)
         self.actions_by_name[f"tool_{tool.value}"].setChecked(True)
+        ne = getattr(self, "node_editor", None)
+        if ne is not None:
+            # Knotenwerkzeug übernimmt ein einzeln gewähltes Objekt; Skalier-Griffe aus.
+            sel = [i for i in self.selection if self.document.has_shape(i)]
+            ne.set_target(sel[0] if tool == Tool.NODE and len(sel) == 1 else None)
+            self.refresh_selection_overlay()
+            self.property_bar.refresh()
         self.notify(f"Werkzeug: {TOOL_LABELS[tool]}")
 
     # --- Kontextmenü (Rechtsklick / langes Drücken) -------------------------
     def build_context_menu(self, scene_pt: QPointF) -> QMenu:
         """Menü für ``scene_pt`` (mm). Ein Objekt unter dem Punkt, das noch
         nicht ausgewählt ist, wird vorher ausgewählt (wie in Zeichenprogrammen)."""
+        node_mode = self.tools.tool == Tool.NODE
+        if node_mode:
+            self.node_editor.context_target(scene_pt)
         hit = self.scene.editable_shape_at(scene_pt)
         if hit is not None and hit not in self.selection:
             self.set_selection([hit])
@@ -501,6 +515,8 @@ class CanvasEditor(QWidget):
             menu.setStyleSheet("QMenu::item { padding: 13px 28px 13px 20px; min-height: 18px; }")
         a = self.actions_by_name
         groups: list[tuple[str, ...]] = []
+        if node_mode:
+            node_ui.add_to_menu(self, menu)
         if self.selection:
             groups.append(("copy", "duplicate", "delete"))
             groups.append(("rotate_ccw", "rotate_cw", "group", "ungroup"))
@@ -628,7 +644,7 @@ class CanvasEditor(QWidget):
 
     def refresh_selection_overlay(self) -> None:
         frame = self.selection_frame()
-        if frame is None:
+        if frame is None or self.tools.tool == Tool.NODE:
             self.scene.overlay.set_rect(None)
         else:
             self.scene.overlay.set_rect(*frame)
@@ -740,6 +756,10 @@ class CanvasEditor(QWidget):
         self.set_selection([s.id for s in self.document.shapes])
 
     def delete_selection(self) -> None:
+        ne = getattr(self, "node_editor", None)
+        if ne is not None and ne.active and ne.node is not None:
+            ne.delete_node()  # im Knotenwerkzeug löscht Entf den gewählten Knoten
+            return
         if self.selection:
             ids = list(self.selection)
             self.undo_stack.push(DeleteShapesCommand(self.document, ids))
