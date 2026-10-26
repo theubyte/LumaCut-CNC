@@ -105,9 +105,62 @@ def homepage():
     return send_from_directory(str(ROOT), "index.html")
 
 
+#: /api/status waits at most this long for machine.lock. Home, park, probe
+#: and every frame edge (M400) hold the lock for the whole move; status must
+#: never wait for that (Studio and web UI would see a dead Pi).
+STATUS_LOCK_WAIT_S = 0.25
+_status_cache = {"snapshot": None, "at": None}
+_status_cache_lock = threading.Lock()
+# Read without machine.lock: plain attribute reads, safe in CPython, and the
+# values that matter during a move (owner, latch, laser, homed).
+_LIVE_STATUS_FIELDS = {
+    "state": lambda m: m.state,
+    "owner": lambda m: m.owner or "Frei",
+    "homed": lambda m: m.homed,
+    "z_homed": lambda m: m.z_homed,
+    "emergency_latched": lambda m: m.emergency_latched,
+    "laser_armed": lambda m: m.laser_enabled,
+    "laser_cooling_fan_on": lambda m: m.fan_power,
+    "position": lambda m: m.position,
+    "fault": lambda m: m.fault,
+    "workpiece_surface_z": lambda m: m.surface_z,
+}
+
+
+def machine_snapshot():
+    """Machine status that never blocks behind a long move.
+
+    Returns ``(status, busy, stale_ms)``. If machine.lock is free within
+    STATUS_LOCK_WAIT_S this is the full, consistent ``machine.status()``
+    (busy False, stale_ms 0) and becomes the cached snapshot. Otherwise the
+    last full snapshot is returned with the live fields above overlaid,
+    ``busy`` True and ``stale_ms`` the age of the cached part.
+    """
+    if machine.lock.acquire(timeout=STATUS_LOCK_WAIT_S):
+        try:
+            result = machine.status()
+        finally:
+            machine.lock.release()
+        with _status_cache_lock:
+            _status_cache.update(snapshot=dict(result), at=time.monotonic())
+        return result, False, 0
+    with _status_cache_lock:
+        cached, at = _status_cache["snapshot"], _status_cache["at"]
+    result = dict(cached or {})
+    for key, read in _LIVE_STATUS_FIELDS.items():
+        try:
+            value = read(machine)
+        except Exception:      # pragma: no cover - defensive
+            continue
+        result[key] = list(value) if isinstance(value, list) else value
+    result["connected"] = machine.serial is not None and bool(machine.identity)
+    stale_ms = (None if at is None else int((time.monotonic() - at) * 1000))
+    return result, True, stale_ms
+
+
 @app.get("/api/status")
 def status():
-    result = machine.status()
+    result, busy, stale_ms = machine_snapshot()
     # This is an estimate, not a measured surface map. Marlin Z=0
     # represents the endstop trigger, not necessarily the laser tip.
     tip_gap = None
@@ -124,6 +177,7 @@ def status():
                             "job" if job["state"] in ("homing", "probing", "running")
                             else "idle"),
                   firmware="marlin",
+                  busy=busy, stale_ms=stale_ms,
                   expected_pwm="PA1 / M3 I / S0..255",
                   io={"laser_supply_switch":"FAN1 / PC6 (M106/M107, low-side)",
                       "laser_pwm":"BL-Touch / PA1",

@@ -1031,6 +1031,54 @@ with web.app.test_client() as client:
                    "G1 X120.000 Y60.000 F3000 S0\nG1 X120.000 Y110.000 F3000 S0\n"
                    "G1 X60.000 Y110.000 F3000 S0\nG1 X60.000 Y60.000 F3000 S0\nM5 I\nM400\n")
 
+    def test_status_never_blocks_behind_long_move(self):
+        # Home, park, probe and frame edges hold machine.lock for the whole
+        # move. /api/status must answer anyway (cached snapshot + live
+        # owner/latch, busy/stale_ms) and stay full and fresh when idle.
+        self._run_web_script(r"""
+import threading, time
+from marlin import web
+m = web.machine
+m.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+m.serial = object()
+m.position = [10.0, 20.0, 30.0]
+with web.app.test_client() as c:
+    s = c.get("/api/status").get_json()
+    assert s["busy"] is False and s["stale_ms"] == 0, s
+    assert s["identity"].startswith("FIRMWARE_NAME") and s["owner"] == "Frei", s
+    held, release = threading.Event(), threading.Event()
+    def long_move():
+        with m.lock:
+            m.owner = "web"
+            m.state = "Busy"
+            held.set()
+            release.wait(10)
+            m.owner = None
+            m.state = "Idle"
+    t = threading.Thread(target=long_move, daemon=True)
+    t.start()
+    assert held.wait(5)
+    m.emergency_latched = True     # E-Stop writes without the lock
+    m.position = [11.0, 20.0, 30.0]
+    t0 = time.monotonic()
+    r = c.get("/api/status")
+    took = time.monotonic() - t0
+    assert r.status_code == 200 and took < 2.0, (r.status_code, took)
+    s = r.get_json()
+    assert s["busy"] is True and s["stale_ms"] >= 0, s
+    assert s["owner"] == "web" and s["state"] == "Busy", s
+    assert s["emergency_latched"] is True and s["position"] == [11.0, 20.0, 30.0], s
+    assert s["identity"].startswith("FIRMWARE_NAME"), "cached fields survive"
+    assert s["connected"] is True and "job" in s and "frame" in s, s
+    # No cached snapshot at all (first poll during a move): still answers.
+    web._status_cache.update(snapshot=None, at=None)
+    s = c.get("/api/status").get_json()
+    assert s["busy"] is True and s["stale_ms"] is None and s["owner"] == "web", s
+    release.set(); t.join(5)
+    s = c.get("/api/status").get_json()
+    assert s["busy"] is False and s["owner"] == "Frei" and s["stale_ms"] == 0, s
+""")
+
     def test_frame_keeps_uploaded_job_and_never_fires_laser(self):
         # op=frame through the real transport: the uploaded job file, the
         # job list and the job state stay byte-for-byte identical, and Marlin
