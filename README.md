@@ -45,6 +45,7 @@ Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrec
 
 - [docs/MASCHINE.md](docs/MASCHINE.md) – Hardware, Belegung, Koordinaten, Kalibrierwerte
 - [docs/PI_BETRIEB.md](docs/PI_BETRIEB.md) – Installation, Updates, Bedienung, API, Fehlersuche
+- [docs/PI_STATUS_UND_OFFENE_PUNKTE.md](docs/PI_STATUS_UND_OFFENE_PUNKTE.md) – Was der Pi-Dienst kann, Pi für Rahmen/Parken aktualisieren, offene Punkte
 - [docs/FIRMWARE.md](docs/FIRMWARE.md) – Marlin-Build, Flashen über den Pi, Marlin-Besonderheiten
 - [docs/ANDROID_APP.md](docs/ANDROID_APP.md) – Tablet-App: Bereiche, Aufbau, APK bauen und installieren
 - [docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md) – Tests, CI, Arbeitsweise, Stolperfallen
