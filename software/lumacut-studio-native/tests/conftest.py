@@ -52,7 +52,13 @@ def pytest_unconfigure(config):
     zerstört – das stürzte unter Linux sporadisch mit Segfault (Exit 139) ab,
     obwohl alle Tests bestanden hatten. Ergebnis und Zusammenfassung sind zu
     diesem Zeitpunkt bereits ausgegeben.
+
+    Nur außerhalb von Windows: Dort stürzt ``os._exit`` mit einer Access
+    Violation ab (Exit 1 trotz grüner Tests) und das Segfault-Problem
+    existiert nicht, der normale pytest-Exit ist dort sauber.
     """
+    if sys.platform == "win32":
+        return
     if "PySide6.QtWidgets" not in sys.modules or os.environ.get("LUMACUT_TEST_NO_HARD_EXIT"):
         return
     sys.stdout.flush()
