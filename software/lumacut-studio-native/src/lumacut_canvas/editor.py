@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QWidget)
 
 from . import icons, theme, touch
+from .fit import HScrollStrip
 from .canvas_view import PX_PER_MM_100, CanvasScene, CanvasView, Ruler
 from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand, SetGroupsCommand,
                        SetLayerAttrsCommand, SetShapeLayerCommand, SetTextCommand)
@@ -421,6 +422,7 @@ class CanvasEditor(QWidget):
 
         strip = self._toolbar("ToolStrip", Qt.Vertical)
         self.tool_strip = strip
+        strip.setIconSize(QSize(24, 24))
         for t in Tool:
             strip.addAction(a[f"tool_{t.value}"])
 
@@ -450,7 +452,9 @@ class CanvasEditor(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         root.addWidget(bar)
-        root.addWidget(self.property_bar)
+        # Auf schmalen Fenstern waagerecht scrollbar statt abgeschnitten.
+        self.property_scroll = HScrollStrip(self.property_bar)
+        root.addWidget(self.property_scroll)
         root.addLayout(body, 1)
 
     # --- Zustand ----------------------------------------------------------
@@ -480,8 +484,9 @@ class CanvasEditor(QWidget):
     def _apply_touch_style(self) -> None:
         """Werkzeug- und Aktionsleiste: 32-px-Icons in ≥ 48-px-Knöpfen mit Abstand."""
         px = self.view.metrics.icon_px
-        for tb in (self.action_bar, self.tool_strip):
-            tb.setIconSize(QSize(px, px))
+        self.action_bar.setIconSize(QSize(px, px))
+        strip_px = max(px, 24)  # Werkzeugleiste immer fingertauglich (≥ 44-px-Knöpfe)
+        self.tool_strip.setIconSize(QSize(strip_px, strip_px))
         self.setProperty("touch", "true" if self.touch_mode else "false")
         self.setStyleSheet("")
         self.setStyleSheet(theme.CANVAS_QSS)

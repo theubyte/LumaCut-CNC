@@ -31,6 +31,9 @@ CANVAS_QSS = f"""
 #CanvasEditor, #LayersPanel {{ background: {BG}; }}
 #CanvasEditor QToolBar {{ background: {PANEL}; border: none; spacing: 2px; padding: 4px; }}
 #CanvasEditor QToolBar#ToolStrip {{ border-right: 1px solid {BORDER}; padding: 6px 4px; }}
+/* Werkzeugleiste immer ≥ 44 × 44 px (Inhalt 34 + 2 × 4 Innenabstand + 2 × 1 Rand), mit Abstand */
+#CanvasEditor QToolBar#ToolStrip {{ spacing: 4px; }}
+#CanvasEditor QToolBar#ToolStrip QToolButton {{ min-width: 34px; min-height: 34px; padding: 4px; }}
 #CanvasEditor QToolBar#ActionBar {{ border-bottom: 1px solid {BORDER}; }}
 #CanvasEditor QToolButton {{
     background: transparent; border: 1px solid transparent; border-radius: 6px;
@@ -57,6 +60,22 @@ CANVAS_QSS = f"""
 #CanvasEditor QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {BORDER}; }}
 #Ruler {{ background: {PANEL}; }}
 CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
+#PropertyBarScroll, #LayersScroll {{ background: transparent; border: none; }}
+#LayersContent {{ background: {BG}; }}
+#PropertyBarScroll QScrollBar:horizontal, #LayersScroll QScrollBar:horizontal {{
+    background: {PANEL}; height: 10px; margin: 0; border: none;
+}}
+#LayersScroll QScrollBar:vertical {{ background: {PANEL}; width: 10px; margin: 0; border: none; }}
+#PropertyBarScroll QScrollBar::handle:horizontal, #LayersScroll QScrollBar::handle:horizontal {{
+    background: {BORDER_HOVER}; min-width: 40px; border-radius: 4px; margin: 2px;
+}}
+#LayersScroll QScrollBar::handle:vertical {{
+    background: {BORDER_HOVER}; min-height: 40px; border-radius: 4px; margin: 2px;
+}}
+#PropertyBarScroll QScrollBar::add-line, #PropertyBarScroll QScrollBar::sub-line,
+#LayersScroll QScrollBar::add-line, #LayersScroll QScrollBar::sub-line {{ width: 0; height: 0; }}
+#PropertyBarScroll QScrollBar::add-page, #PropertyBarScroll QScrollBar::sub-page,
+#LayersScroll QScrollBar::add-page, #LayersScroll QScrollBar::sub-page {{ background: none; }}
 
 #LayersPanel QLabel#SectionTitle {{ color: {TEXT}; font-weight: 600; font-size: 13px; padding: 2px 0; }}
 #LayersPanel QLabel#Hint {{ color: {TEXT_DIM}; font-size: 11px; }}
@@ -106,9 +125,14 @@ CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
 #CanvasEditor[touch="true"] QToolBar {{ spacing: 6px; padding: 6px; }}
 #CanvasEditor[touch="true"] QToolBar#ToolStrip {{ padding: 8px 6px; }}
 #CanvasEditor[touch="true"] QToolButton {{ min-width: 40px; min-height: 40px; padding: 7px; border-radius: 8px; }}
+#CanvasEditor[touch="true"] QToolBar#ToolStrip {{ spacing: 6px; }}
+#CanvasEditor[touch="true"] QToolBar#ToolStrip QToolButton {{ min-width: 40px; min-height: 40px; padding: 7px; }}
+#CanvasEditor[touch="true"] #PropertyBarScroll QScrollBar:horizontal {{ height: 16px; }}
+#LayersPanel[touch="true"] #LayersScroll QScrollBar:vertical {{ width: 16px; }}
+#LayersPanel[touch="true"] #LayersScroll QScrollBar:horizontal {{ height: 16px; }}
 #CanvasEditor[touch="true"] QDoubleSpinBox, #CanvasEditor[touch="true"] QLineEdit,
 #CanvasEditor[touch="true"] QComboBox {{ min-height: 34px; }}
-#LayersPanel[touch="true"] QToolButton {{ min-width: 40px; min-height: 40px; padding: 6px; }}
+#LayersPanel[touch="true"] QToolButton {{ min-width: 36px; min-height: 36px; padding: 4px; }}
 #LayersPanel[touch="true"] QDoubleSpinBox, #LayersPanel[touch="true"] QSpinBox,
 #LayersPanel[touch="true"] QLineEdit, #LayersPanel[touch="true"] QComboBox {{ min-height: 34px; }}
 #LayersPanel[touch="true"] QPushButton#ColorButton {{ min-height: 34px; max-height: 34px; }}

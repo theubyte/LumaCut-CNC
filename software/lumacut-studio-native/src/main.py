@@ -18,6 +18,7 @@ from machine.panel import MachinePanel, ESTOP_STYLE
 from lumacut_canvas.editor import CanvasEditor
 from lumacut_canvas.gcode import document_to_gcode
 from lumacut_canvas.layers_panel import LayersPanel
+from lumacut_canvas.fit import install_screen_fit
 # --- end canvas integration ---
 # --- scan integration (scan agent) ---
 from scanprobe.panel import ScanPanel
@@ -237,6 +238,9 @@ class LumaCutStudio(QMainWindow):
         # --- autosave integration (review agent) ---
         install_autosave(self)
         # --- end autosave integration ---
+        # --- canvas integration (canvas agent): small screens / touch ---
+        install_screen_fit(self)  # Fenster in Bildschirm, Seitenleiste nicht abgeschnitten, Touch-Modus
+        # --- end canvas integration ---
 
     def _toggle_left(self):
         visible = self.toggle_left.isChecked()

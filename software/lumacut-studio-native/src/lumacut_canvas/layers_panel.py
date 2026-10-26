@@ -22,11 +22,12 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QUndoStack
-from PySide6.QtWidgets import (QColorDialog, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox,
+from PySide6.QtWidgets import (QColorDialog, QGridLayout, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QPushButton, QSpinBox, QToolButton, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
 from . import icons, theme
+from .fit import enable_touch_scroll
 from .commands import (AddLayerCommand, MoveLayerCommand, RemoveLayerCommand, SetLayerAttrCommand,
                        SetLayerAttrsCommand)
 from .material import (BUILTIN_MATERIALS, DEPTH_PER_PASS_RANGE, THICKNESS_RANGE, Material,
@@ -106,6 +107,11 @@ class _LayerRow(QWidget):
         name.setObjectName("LayerName")
         summary = QLabel(layer_summary(layer))
         summary.setObjectName("LayerSummary")
+        summary.setToolTip(layer_summary(layer))
+        # Schmales Panel: Texte werden gekürzt statt das Panel zu verbreitern.
+        for lab in (name, summary):
+            lab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            lab.setMinimumWidth(40)
         text.addWidget(name)
         text.addWidget(summary)
         lay.addLayout(text, 1)
@@ -145,13 +151,32 @@ class LayersPanel(QWidget):
         self._presets: list = []
         self.touch_mode = False
 
-        root = QVBoxLayout(self)
+        # Inhalt in einer Scrollfläche: auf kleinen Bildschirmen (Surface Pro)
+        # senkrecht scrollbar statt abgeschnitten; mit dem Finger ziehbar.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("LayersScroll")
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        content = QWidget()
+        content.setObjectName("LayersContent")
+        content.setAttribute(Qt.WA_StyledBackground, True)
+        self.scroll.setWidget(content)
+        outer.addWidget(self.scroll)
+        enable_touch_scroll(self.scroll)
+
+        root = QVBoxLayout(content)
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(8)
-        head = QHBoxLayout()
+        head = QGridLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setHorizontalSpacing(6)
+        head.setVerticalSpacing(6)
         title = QLabel("Ebenen")
         title.setObjectName("SectionTitle")
-        head.addWidget(title, 1)
+        self._head, self._head_title, self._head_buttons = head, title, []
         for icon_name, tip, slot in (("plus", "Neue Ebene", self.add_layer),
                                      ("up", "Ebene nach oben", lambda: self.move_active(-1)),
                                      ("down", "Ebene nach unten", lambda: self.move_active(1)),
@@ -161,7 +186,8 @@ class LayersPanel(QWidget):
             b.setIconSize(QSize(18, 18))
             b.setToolTip(tip)
             b.clicked.connect(slot)
-            head.addWidget(b)
+            self._head_buttons.append(b)
+        self._layout_head()
         root.addLayout(head)
 
         self.list = QListWidget()
@@ -179,6 +205,7 @@ class LayersPanel(QWidget):
 
         self.params = QGroupBox("Laser-Einstellung der Ebene")
         form = QFormLayout(self.params)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)  # schmal: Feld unter die Beschriftung
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(8)
@@ -236,10 +263,13 @@ class LayersPanel(QWidget):
         box = QGroupBox("Material der Ebene")
         self.material_box = box
         form = QFormLayout(box)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(8)
         self.material = QComboBox()
+        self.material.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.material.setMinimumContentsLength(8)
         self.material.setToolTip(START_VALUES_HINT)
         self.material.activated.connect(self._material_chosen)
         self.thickness = self._mm_spin(THICKNESS_RANGE, 0.5, "–")
@@ -283,6 +313,22 @@ class LayersPanel(QWidget):
         if hasattr(self, "pass_plan"):
             self.refresh()
 
+    def _layout_head(self) -> None:
+        """Kopfzeile: Maus = Titel und Knöpfe in einer Zeile; Touch = Knöpfe in
+        eigener Zeile unter dem Titel (sonst wäre das Panel zu breit)."""
+        head = self._head
+        for w in (self._head_title, *self._head_buttons):
+            head.removeWidget(w)
+        head.setColumnStretch(0, 1)
+        if self.touch_mode:
+            head.addWidget(self._head_title, 0, 0, 1, 5)
+            for i, b in enumerate(self._head_buttons):
+                head.addWidget(b, 1, i + 1)
+        else:
+            head.addWidget(self._head_title, 0, 0)
+            for i, b in enumerate(self._head_buttons):
+                head.addWidget(b, 0, i + 1)
+
     def set_touch_mode(self, on: bool) -> None:
         """Größere Zeilen, Knöpfe und Eingabefelder für Finger (Theme-QSS mit
         ``touch="true"``); vgl. :meth:`CanvasEditor.set_touch_mode`."""
@@ -290,6 +336,7 @@ class LayersPanel(QWidget):
         if on == self.touch_mode:
             return
         self.touch_mode = on
+        self._layout_head()
         self.setProperty("touch", "true" if on else "false")
         self.setStyleSheet("")
         self.setStyleSheet(theme.CANVAS_QSS)

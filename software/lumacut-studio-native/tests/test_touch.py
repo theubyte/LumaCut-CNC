@@ -357,7 +357,9 @@ def test_tool_buttons_grow_in_touch_mode(ed):
     ed.show()
     QApplication.processEvents()
     small = [b.sizeHint() for b in _strip_buttons(ed)]
-    assert small and max(s.height() for s in small) < 44
+    # Werkzeugleiste ist immer fingertauglich (>= 44 px), Touch-Modus legt nach.
+    assert small and min(min(s.height(), s.width()) for s in small) >= 44
+    assert max(s.height() for s in small) < 48
     ed.set_touch_mode(True)
     QApplication.processEvents()
     assert ed.tool_strip.iconSize().width() == touch.TOUCH.icon_px
@@ -367,7 +369,7 @@ def test_tool_buttons_grow_in_touch_mode(ed):
     ed.set_touch_mode(False)
     QApplication.processEvents()
     again = [b.sizeHint() for b in _strip_buttons(ed)]
-    assert max(s.height() for s in again) < 44
+    assert [s.height() for s in again] == [s.height() for s in small]
     ed.close()
 
 
