@@ -15,7 +15,7 @@ from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen
 from PySide6.QtSvg import QSvgGenerator
 
 from .material import layer_pass_plan
-from .model import Document
+from .model import CUT_LAYER_FIELDS, Document
 from .shape_paths import shape_path
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
 
@@ -32,6 +32,18 @@ class JobLayer:
     # Tiefe je Durchgang aus der Material-Planung (material.layer_pass_plan),
     # leer ohne Planung. Nur für den optionalen G-Code-Hook (gcode.pass_hook).
     pass_depths_mm: tuple[float, ...] = ()
+    # Schnitt-Optionen der Ebene (Layer.kerf_mm …, siehe lumacut_job.cutpath).
+    # Werden erst vom Planer (lumacut_job.planner.optimize_layers) angewendet.
+    kerf_mm: float = 0.0
+    tab_count: int = 0
+    tab_width_mm: float = 1.0
+    tab_spacing_mm: float = 0.0
+    lead_in_mm: float = 0.0
+    lead_in_arc: bool = False
+    lead_out_mm: float = 0.0
+    # Art je Polylinie nach der Planung ("cut", "lead_in", "lead_out", "tab" =
+    # Schnittstück nach einer Steg-Lücke); leer = alles "cut".
+    poly_kinds: tuple[str, ...] = ()
 
 
 def job_layers(doc: Document) -> list[JobLayer]:
@@ -59,7 +71,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
             plan = layer_pass_plan(layer)
             result.append(JobLayer(layer.id, layer.name, layer.power, layer.speed,
                                    layer.passes, polys, layer.z_step,
-                                   plan.pass_depths if plan else ()))
+                                   plan.pass_depths if plan else (),
+                                   **{k: getattr(layer, k) for k in CUT_LAYER_FIELDS}))
     return result
 
 

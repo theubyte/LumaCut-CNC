@@ -34,6 +34,19 @@ Z_STEP_RANGE = (0.0, 2.0)
 MAX_FOCUS_DROP_MM = 3.0
 # Material-Felder der Ebene (material.py); nur gespeichert, wenn gesetzt.
 MATERIAL_LAYER_FIELDS = ("material", "thickness_mm", "target_depth_mm", "depth_per_pass_mm")
+# Schnitt-Optionen der Ebene (lumacut_job.cutpath): Kerf-Versatz, Haltestege
+# und An-/Abfahrt. Nur gespeichert, wenn gesetzt (≠ Standard),
+# damit Dateien ohne diese Optionen byte-gleich bleiben.
+KERF_RANGE = (-2.0, 2.0)            # mm, + = zur Abfallseite (Teile größer, Löcher kleiner)
+TAB_COUNT_RANGE = (0, 24)
+TAB_WIDTH_RANGE = (0.0, 10.0)       # mm
+TAB_SPACING_RANGE = (0.0, 500.0)    # mm, 0 = feste Anzahl
+LEAD_RANGE = (0.0, 10.0)            # mm
+CUT_LAYER_DEFAULTS = {
+    "kerf_mm": 0.0, "tab_count": 0, "tab_width_mm": 1.0, "tab_spacing_mm": 0.0,
+    "lead_in_mm": 0.0, "lead_in_arc": False, "lead_out_mm": 0.0,
+}
+CUT_LAYER_FIELDS = tuple(CUT_LAYER_DEFAULTS)
 
 SHAPE_KINDS = ("rect", "ellipse", "line", "text", "polygon", "path", "image")
 # Objekte mit Stützpunkten: "polygon" geschlossen, "path" (Freihand) offen.
@@ -149,6 +162,14 @@ class Layer:
     thickness_mm: float = 0.0       # Materialdicke
     target_depth_mm: float = 0.0    # Zieltiefe; 0 = Materialdicke (Durchschnitt)
     depth_per_pass_mm: float = 0.0  # Tiefe je Durchgang; 0 = keine Tiefenplanung
+    # Schnitt-Optionen (siehe CUT_LAYER_DEFAULTS / lumacut_job.cutpath)
+    kerf_mm: float = 0.0            # Versatz geschlossener Konturen
+    tab_count: int = 0              # Haltestege je geschlossener Kontur (0 = aus)
+    tab_width_mm: float = 1.0       # Breite eines Haltestegs
+    tab_spacing_mm: float = 0.0     # > 0: ein Steg je … mm Umfang statt fester Anzahl
+    lead_in_mm: float = 0.0         # Anfahrt (Abfallseite), 0 = aus
+    lead_in_arc: bool = False       # Anfahrt als Viertelkreis statt Gerade
+    lead_out_mm: float = 0.0        # Abfahrt, 0 = aus
 
     def normalized(self) -> "Layer":
         """Kopie mit Parametern im gültigen Bereich."""
@@ -163,13 +184,22 @@ class Layer:
             target_depth_mm=round(_clamp(float(self.target_depth_mm), *THICKNESS_RANGE), 3),
             depth_per_pass_mm=round(_clamp(float(self.depth_per_pass_mm),
                                            *DEPTH_PER_PASS_RANGE), 3),
+            kerf_mm=round(_clamp(float(self.kerf_mm), *KERF_RANGE), 3),
+            tab_count=int(_clamp(int(self.tab_count), *TAB_COUNT_RANGE)),
+            tab_width_mm=round(_clamp(float(self.tab_width_mm), *TAB_WIDTH_RANGE), 3),
+            tab_spacing_mm=round(_clamp(float(self.tab_spacing_mm), *TAB_SPACING_RANGE), 3),
+            lead_in_mm=round(_clamp(float(self.lead_in_mm), *LEAD_RANGE), 3),
+            lead_in_arc=bool(self.lead_in_arc),
+            lead_out_mm=round(_clamp(float(self.lead_out_mm), *LEAD_RANGE), 3),
         )
 
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "color": self.color,
                 "power": self.power, "speed": self.speed, "passes": self.passes,
                 "visible": self.visible, "locked": self.locked, "z_step": self.z_step,
-                **{k: getattr(self, k) for k in MATERIAL_LAYER_FIELDS if getattr(self, k)}}
+                **{k: getattr(self, k) for k in MATERIAL_LAYER_FIELDS if getattr(self, k)},
+                **{k: getattr(self, k) for k, v in CUT_LAYER_DEFAULTS.items()
+                   if getattr(self, k) != v}}
 
     @staticmethod
     def from_dict(d: dict) -> "Layer":
@@ -183,6 +213,7 @@ class Layer:
             thickness_mm=float(d.get("thickness_mm", 0.0)),
             target_depth_mm=float(d.get("target_depth_mm", 0.0)),
             depth_per_pass_mm=float(d.get("depth_per_pass_mm", 0.0)),
+            **{k: type(v)(d[k]) for k, v in CUT_LAYER_DEFAULTS.items() if k in d},
         ).normalized()
 
 
@@ -570,7 +601,7 @@ class Document:
                 raise AttributeError(k)
             setattr(layer, k, v)
         normalized = layer.normalized()
-        for k in ("power", "speed", "passes", "z_step") + MATERIAL_LAYER_FIELDS:
+        for k in ("power", "speed", "passes", "z_step") + MATERIAL_LAYER_FIELDS + CUT_LAYER_FIELDS:
             setattr(layer, k, getattr(normalized, k))
         self.changed()
 
