@@ -129,7 +129,7 @@ def test_panel_follows_current_step_and_skips(qapp):
     assert "✔" in p.list.item(0).text() and "erledigt" in p.list.item(0).text()
     p.toggle_skip()
     assert p.state("scan").status == SKIPPED and p.selected_key() == "mark"
-    assert p.state("mark").status == READY and p.run_button.text() == "Hinweis"
+    assert p.state("mark").status == READY and p.run_button.text() == "Markieren"
     assert "anhaken" in p.reason_label.text()
     p.select("probe")
     assert p.state("probe").status == BLOCKED and not p.run_button.isEnabled()
