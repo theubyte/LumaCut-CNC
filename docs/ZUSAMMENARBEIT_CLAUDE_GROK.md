@@ -233,6 +233,29 @@ Hauptweg, drei Schritte, immer sichtbar:
    - `api_version` in `/api/status`.
    - Abnahme: nur nach Freigabe durch den Nutzer.
 
+7. **Taster-Reichweite: nicht mehr ablehnen, sondern nah daneben tasten und warnen** (Grok, Machine; Meldung und Vorgabe des Besitzers 2026-10-26).
+   - Ist: Die Meldung entsteht nur in `pi400/marlin/heightmap.py` `_mark_reachable` (Z. ~276): sie markiert je Rasterpunkt `probe_reachable(x, y)`, verwirft Regionen ohne erreichbaren Punkt und wirft `ValueError("Kein Abtastpunkt erreichbar: …")`, wenn keine Region bleibt → `web.py auto_plan` → HTTP 400, der Auftrag startet nicht.
+   - Ist geprüft (`software/lumacut-studio-native/tests/test_machine_probe_reach.py`, folgt im nächsten Grok-Commit, ruft das echte `heightmap.plan_probe` und `MarlinTransport.probe_reachable` auf):
+     - Grenze stimmt mit dem Code überein: Kopf beim G30 X30–380 / Y30–360 (`transport.py` `_probe_head_ok`, `PROBE_HEAD_MAX`), Versatz Spitze minus Laser X−23 / Y+15 → abtastbare Laserpunkte **X30–357 / Y45–370** (inklusiv, ohne Rundung). (30, 45) geht, (30, 44.99) nicht, (357.01, …) nicht. Vorzeichen passt zu Scan Probe `geometry.py` und Firmware-Offset 0.
+     - Zu streng: `_per_side` nimmt bei Regionslänge < 20 mm nur die Mitte, `_grid` sonst Punkte 5 mm innen. Geprüft wird nur dieser Rasterpunkt, nicht die erreichbare Teilfläche. Beispiele (Maschinen-mm, Rechteck x0–x1 × y0–y1):
+       - 100–120 × 30–47 → Region Y30–49, ein Punkt Y39,5 → abgelehnt, obwohl Y45–49 erreichbar ist.
+       - 200–210 × 38–48 → Punkt (205, 43) → abgelehnt; dieselbe Form bei Y42–52 → Punkt (205, 47) → läuft.
+       - 352–366 × 200–210 → Punkt X359 → abgelehnt, obwohl X350–357 erreichbar ist.
+       - Richtig abgelehnt: 30–50 × 30–40 (Nullpunkt-Ecke), 100–140 × 30–42, 360–390 × 200–230, 360–390 × 340–370.
+     - Kopf-Minimum ist die Schutzzone 30, Marlin lehnt laut Kommentar erst unter `PROBING_MARGIN` 10 ab. Bei Kopf Y15–30 läge die Spitze bei Y30–45 (Schneidbereich).
+     - Meldung ohne Motiv-Box und ohne erreichbaren Bereich („Motiv weiter in die Mitte schieben“). Studio hängt den Bereich bis dahin selbst an (`client.explain_probe_error`, nächster Grok-Commit), das ist nur eine Rechnung aus dem Status.
+   - **Soll (Vorgabe des Besitzers 2026-10-26): nie abbrechen, nah daneben tasten und warnen.**
+     - Keine Ablehnung mehr wegen Reichweite: `_mark_reachable` wirft kein „Kein Abtastpunkt erreichbar“ mehr, `web.py auto_plan` (Z. ~851, auch Warteschlange Z. ~1171/1207) plant weiter.
+     - Jeder nicht erreichbare Rasterpunkt wird auf den **nächsten erreichbaren Punkt** geklemmt (Klemmen auf X30–357 / Y45–370 bzw. allgemein `safe_zone`..`PROBE_HEAD_MAX` + Versatz), z. B. (110, 39,5) → (110, 45), (359, 205) → (357, 205), (40, 35) → (40, 45). Auch Regionen ohne jede erreichbare Fläche werden so getastet, statt verworfen zu werden.
+     - Die Kopf-Grenzen beim G30 (`_probe_head_ok`, Schutzzone, `PROBE_HEAD_MAX`, Marlin `PROBING_MARGIN`) bleiben unverändert: geklemmt wird der Messpunkt, nicht die Grenze. Laser bleibt beim Tasten aus.
+     - Der Auftrag läuft weiter und lasert. Die Höhenkarte nutzt den geklemmten Messwert für den ursprünglichen Rasterpunkt.
+     - Warnung im Status, z. B. `job.warnings: [{"code": "probe_clamped", "text": "…", "box": [xmin, ymin, xmax, ymax], "points": [{"want": [x, y], "probed": [x, y], "distance_mm": d}]}]`. Text als ein deutscher Satz mit Box, Punkten und Abstand, z. B. „Taster nicht erreichbar bei X110 Y39.5 – stattdessen bei X110 Y45 getastet (5.5 mm daneben), Motiv X100–120 / Y30–47. Ist das Werkstück kleiner, misst der Taster neben dem Werkstück auf dem Bett – Fokus prüfen.“ Bleibt nach dem Auftrag stehen wie `job.probe`, wird beim nächsten Start geleert.
+     - Optional, nur nach Prüfung am Gerät: Kopf beim G30 bis X/Y 15 (statt 30) zulassen. ⚠ am Gerät.
+     - Optional: Feature-Name `probe_clamp` (und `queue_autorun`) in `FEATURES`, damit Studio/Android erkennen, dass der Pi klemmt statt ablehnt.
+   - Abnahme (Pi-Test): kleines Werkstück an der Ecke, Rechteck 30–50 × 30–40 → `autorun` läuft (homing → probing → running → complete), Messpunkt (40, 45), `job.warnings` enthält Box 30/30/50/40, want (40, 35), probed (40, 45), Abstand 10 mm. Ebenso 100–120 × 30–47 und 352–366 × 200–210. Warteschlange mit einem solchen Eintrag läuft durch. Kopf-Position bei jedem G30 bleibt in X30–380 / Y30–360.
+
+8. **Android: Warnung zur geklemmten Abtastung** (gehört zu Pi 7; Android-Teil siehe unten Android 6).
+
 **Android (`android/`)**
 
 1. **Gespiegelte Anzeige und Jog-Kreuz.**
@@ -251,6 +274,10 @@ Hauptweg, drei Schritte, immer sichtbar:
    - Ist: Android liest das Feld nicht (kein Treffer in `android/`).
    - Ziel: `/api/status` `coord_convention` lesen. Bei fehlendem oder unbekanntem Wert Start und Rahmen sperren mit „Pi-Dienst aktualisieren“ (wie Studio `wire_anchor`, `tests/test_origin_end_to_end.py`).
    - Abnahme: Unit-Test mit und ohne Feld.
+6. **Warnung „Taster nah am Werkstück“ statt Abbruch** (Vorgabe des Besitzers, zu Pi 7).
+   - Ist: Android zeigt den 400-Fehler „Kein Abtastpunkt erreichbar …“ von `op=autorun`; der Auftrag startet nicht.
+   - Ziel: `job.warnings` (Pi 7) lesen und deutlich anzeigen (gelb, mit Box, Punkt und Abstand), solange der Auftrag läuft und danach. Start nicht blockieren. Wenn der Pi vorab eine Warnung liefert (z. B. aus `op=place`/Plan), optional Rückfrage „Taster misst nah am Werkstück-Rand, evtl. auf dem Bett – trotzdem lasern?“.
+   - Abnahme: Unit-Test mit Status mit `job.warnings` → Text sichtbar, Start-Knopf bleibt aktiv; ohne Feld keine Änderung.
 - (Claude, Android) **Fertig: 6.1 Android (2) Phasenanzeige und (5) `coord_convention`**, Commit `9836ee6`,
   CI grün ([Run 40350969648](https://github.com/theubyte/LumaCut-CNC/actions/runs/40350969648)). Startbildschirm
   zeigt `job.phase` vorrangig (homing, probing mit Punktzähler, focusing, running mit Restzeit, finishing/parking
