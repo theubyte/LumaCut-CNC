@@ -62,7 +62,7 @@ data class Raster(val width: Int, val height: Int, val grayBase64: String) {
 }
 
 @Serializable
-enum class ImageMode { GRAYSCALE, DITHER, THRESHOLD }
+enum class ImageMode { GRAYSCALE, DITHER, THRESHOLD, DITHER_JARVIS, DITHER_STUCKI }
 
 /**
  * Something on the work area (coordinates in [Work] mm). Vector content
@@ -85,6 +85,7 @@ data class Element(
     val imageWidthMm: Double = 0.0,
     val imageHeightMm: Double = 0.0,
     val imageMode: ImageMode = ImageMode.GRAYSCALE,
+    val adjust: ImageAdjust = ImageAdjust(),
     val groupId: String? = null,
 ) {
     val isImage get() = raster != null

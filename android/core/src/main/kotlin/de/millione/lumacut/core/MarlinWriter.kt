@@ -143,11 +143,7 @@ class MarlinWriter(private val appVersion: String = "dev") {
             val py = min(raster.height - 1, ((r + 0.5) * raster.height / rows).toInt())
             gray[py * raster.width + px].toInt() and 0xFF
         }
-        val levels = when (element.imageMode) {
-            ImageMode.GRAYSCALE -> sampled
-            ImageMode.THRESHOLD -> IntArray(sampled.size) { if (sampled[it] < 128) 0 else 255 }
-            ImageMode.DITHER -> dither(sampled, cols, rows)
-        }
+        val levels = ImageTools.binarize(ImageTools.adjust(sampled, cols, rows, element.adjust), cols, rows, element.imageMode)
         val maxS = s(layer.powerPct)
         val minS = s(layer.minPowerPct)
         val cell = box.width / cols
@@ -170,23 +166,5 @@ class MarlinWriter(private val appVersion: String = "dev") {
             val ordered = if (r % 2 == 0) row else row.reversed().map { Run(it.x1, it.x0, it.power) }
             scanLine(y, ordered, layer)
         }
-    }
-
-    private fun dither(src: IntArray, w: Int, h: Int): IntArray {
-        val v = FloatArray(src.size) { src[it].toFloat() }
-        val out = IntArray(src.size)
-        for (y in 0 until h) for (x in 0 until w) {
-            val i = y * w + x
-            val q = if (v[i] < 128f) 0 else 255
-            out[i] = q
-            val err = v[i] - q
-            if (x + 1 < w) v[i + 1] += err * 7 / 16
-            if (y + 1 < h) {
-                if (x > 0) v[i + w - 1] += err * 3 / 16
-                v[i + w] += err * 5 / 16
-                if (x + 1 < w) v[i + w + 1] += err * 1 / 16
-            }
-        }
-        return out
     }
 }
