@@ -19,8 +19,9 @@ object Bed {
 
 /**
  * The area the operator works with: 0..360 x 0..340 mm, origin top-left,
- * Y down. The 30 mm safe zone is not part of it and never shown; the only
- * conversion to machine millimetres is here (same as the Windows app,
+ * Y down, as seen from the door. The 30 mm safe zone (top and right on screen)
+ * is not part of it and never shown; machine_x = 390 - x, machine_y = 30 + y.
+ * The only conversion to machine millimetres is here (same as the Windows app,
  * software/lumacut-studio-native/src/lumacut_canvas/workarea.py).
  */
 object Work {
@@ -28,9 +29,10 @@ object Work {
     const val HEIGHT = 340.0
     private const val EPS = 1e-6
 
-    fun toMachine(p: Pt) = Pt(p.x + Bed.SAFE, p.y + Bed.SAFE)
-    fun fromMachine(p: Pt) = Pt(p.x - Bed.SAFE, p.y - Bed.SAFE)
-    fun fromMachine(x: Double, y: Double) = Pt(x - Bed.SAFE, y - Bed.SAFE)
+    /** Seen from the door the limit switches (machine 0/0) are at the back right: a 180° turn, no mirroring. */
+    fun toMachine(p: Pt) = Pt(Bed.WIDTH - p.x, Bed.SAFE + p.y)
+    fun fromMachine(p: Pt) = fromMachine(p.x, p.y)
+    fun fromMachine(x: Double, y: Double) = Pt(Bed.WIDTH - x, y - Bed.SAFE)
     fun contains(p: Pt) = p.x >= -EPS && p.y >= -EPS && p.x <= WIDTH + EPS && p.y <= HEIGHT + EPS
     fun contains(b: Box) = b.minX >= -EPS && b.minY >= -EPS && b.maxX <= WIDTH + EPS && b.maxY <= HEIGHT + EPS
     val center get() = Pt(WIDTH / 2, HEIGHT / 2)

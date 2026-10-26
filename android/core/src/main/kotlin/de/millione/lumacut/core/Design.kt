@@ -141,6 +141,7 @@ data class Material(
     val intervalMm: Double = 0.1,
     val depthPerPassMm: Double = 0.0,
     val zStepMm: Double = 0.0,
+    val builtin: Boolean = false,
 ) {
     /** Passes derived from thickness / depth per pass when set, otherwise the stored passes. */
     val effectivePasses get() = if (depthPerPassMm > 0) Document.passesFor(thicknessMm, depthPerPassMm) else passes

@@ -4,21 +4,28 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+/** Automatic height probing of the Pi (job.probe in /api/status): [done] of [total] points. */
+@Serializable
+data class ProbeProgress(val done: Int = 0, val total: Int = 0)
+
 @Serializable
 data class JobProgress(val file: String = "", val state: String = "idle", val line: Int = 0,
-                       val total: Int = 0, val error: String = "") {
+                       val total: Int = 0, val error: String = "", val probe: ProbeProgress = ProbeProgress()) {
     val active get() = state in setOf("homing", "probing", "running")
     val fraction get() = if (total > 0) line.toDouble() / total else 0.0
 }
@@ -82,7 +89,7 @@ data class JobFile(val name: String, val bytes: Long = 0, val modified: Long = 0
 @Serializable
 private data class JobList(val files: List<JobFile> = emptyList())
 
-class PiException(message: String) : IOException(message)
+open class PiException(message: String) : IOException(message)
 
 /**
  * HTTP client for the Pi 400 service on port 8080. All safety rules are
@@ -94,6 +101,7 @@ class PiClient(
     private val http: OkHttpClient = defaultClient(),
 ) {
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
+    private val bodyJson = Json { encodeDefaults = true; explicitNulls = false }
 
     init {
         require(isLocalIpv4(host)) { "Nur lokale IPv4-Adressen (z. B. 192.168.2.89)" }
@@ -107,6 +115,7 @@ class PiClient(
         try {
             client.newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
+                if (response.code == 409) throw PiConflictException(errorText(body) ?: "Die Liste wurde inzwischen geändert", revisionOf(body))
                 if (!response.isSuccessful) throw PiException(errorText(body) ?: "Pi antwortet mit HTTP ${response.code}")
                 body
             }
@@ -119,6 +128,10 @@ class PiClient(
 
     private fun errorText(body: String): String? = runCatching {
         json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.content
+    }.getOrNull()
+
+    private fun revisionOf(body: String): Int? = runCatching {
+        json.parseToJsonElement(body).jsonObject["revision"]?.jsonPrimitive?.content?.toInt()
     }.getOrNull()
 
     private fun message(body: String): String = runCatching {
@@ -143,6 +156,45 @@ class PiClient(
         val form = FormBody.Builder().add("op", op).apply { fields.forEach { (k, v) -> add(k, v) } }.build()
         val long = op in setOf("home", "probe", "park", "moveto")
         return message(call(Request.Builder().url(url("api", "action")).post(form).build(), longRunning = long))
+    }
+
+    /**
+     * Starts the automatic run for an uploaded job: the Pi homes if needed, probes the
+     * surface, corrects the height, lasers and parks (docs/ZUSAMMENARBEIT_CLAUDE_GROK.md section 4).
+     */
+    suspend fun autorun(name: String): String = action("autorun", mapOf("name" to checkJobName(name)))
+
+    /* ---------- material database (/api/materials) ---------- */
+
+    suspend fun materials(): MaterialList =
+        json.decodeFromString(MaterialList.serializer(), call(Request.Builder().url(url("api", "materials")).build()))
+
+    /** Adds [m] as a new entry; returns the new revision and the stored material. */
+    suspend fun createMaterial(m: Material, baseRevision: Int): Pair<Int, Material> =
+        materialWrite(Request.Builder().url(url("api", "materials")).post(materialBody(m.toPi(newEntry = true), baseRevision)).build())
+
+    suspend fun updateMaterial(m: Material, baseRevision: Int): Pair<Int, Material> =
+        materialWrite(Request.Builder().url(url("api", "materials", m.id)).put(materialBody(m.toPi(), baseRevision)).build())
+
+    /** Returns the new revision. */
+    suspend fun deleteMaterial(id: String, baseRevision: Int): Int {
+        val u = url("api", "materials", id).newBuilder().addQueryParameter("base_revision", baseRevision.toString()).build()
+        return revisionOf(call(Request.Builder().url(u).delete().build())) ?: baseRevision + 1
+    }
+
+    private fun materialBody(m: PiMaterial, baseRevision: Int): RequestBody {
+        val obj = buildJsonObject {
+            val fields = bodyJson.encodeToJsonElement(PiMaterial.serializer(), m).jsonObject
+            for ((k, v) in fields) if (k != "builtin" && k != "updated") put(k, v)
+            put("base_revision", baseRevision)
+        }
+        return obj.toString().toRequestBody("application/json".toMediaType())
+    }
+
+    private suspend fun materialWrite(request: Request): Pair<Int, Material> {
+        val root = json.parseToJsonElement(call(request)).jsonObject
+        val stored = json.decodeFromJsonElement(PiMaterial.serializer(), root.getValue("material")).toMaterial()
+        return (root["revision"]?.jsonPrimitive?.content?.toInt() ?: 0) to stored
     }
 
     /** Traces [program] (from [Frame.program]) with the laser off. */

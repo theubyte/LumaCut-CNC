@@ -131,7 +131,7 @@ class MarlinWriterTest {
         }
     }
 
-    @Test fun `work area is shifted by the safe zone into machine coordinates`() {
+    @Test fun `work area is turned by 180 degrees into machine coordinates`() {
         val layers = Document.defaultLayers()
         val cut = layers[2]
         val g = MarlinWriter("t").write(doc(rect(cut, 100.0, 100.0), layers = layers))
@@ -139,7 +139,7 @@ class MarlinWriterTest {
         val t = Toolpath.parse(g)
         assertEquals(2 * 60.0, t.stats.cutMm, 1e-6)       // 2 passes
         assertEquals(217, t.stats.maxPower)                // 85 % of 255
-        assertEquals(Box(130.0, 130.0, 150.0, 140.0), t.bounds)
+        assertEquals(Box(270.0, 130.0, 290.0, 140.0), t.bounds)   // x: 390 - 120..100, y: 30 + 100..110
     }
 
     @Test fun `fill overscan stays inside the work area`() {
@@ -150,7 +150,7 @@ class MarlinWriterTest {
         assertNeverInSafeZone(g)
         val t = Toolpath.parse(g)
         assertEquals(2 * 10 * 20.0, t.stats.cutMm, 1e-6)
-        assertTrue("G0 X30.000 Y30.500" in g, "run-up clipped at the work area edge")
+        assertTrue("G0 X390.000 Y30.500" in g, "run-up clipped at the work area edge (work x 0 = machine X 390)")
     }
 
     @Test fun `focus drops between passes and returns afterwards`() {
@@ -182,8 +182,8 @@ class MarlinWriterTest {
                         imageWidthMm = 4.0, imageHeightMm = 2.0)
         val g = MarlinWriter().write(doc(e, layers = listOf(img)))
         assertPiCompatible(g)
-        assertTrue("G1 X102.000 Y100.500 F3000 S255" in g, g)   // two black pixels merged
-        assertTrue("G1 X104.000 Y100.500 F3000 S127" in g, g)   // gray pixel at half power
+        assertTrue("G1 X318.000 Y100.500 F3000 S255" in g, g)   // two black pixels merged, column 0 at big machine X
+        assertTrue("G1 X316.000 Y100.500 F3000 S127" in g, g)   // gray pixel at half power
         assertTrue(g.lines().none { it.contains("Y101.500") && Regex("S[1-9]").containsMatchIn(it) }, "white row is skipped")
         val rotated = e.copy(transform = e.transform.copy(rotation = 10.0))
         assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rotated, layers = listOf(img))) }
@@ -266,5 +266,31 @@ class GeometryTest {
         val (img, w, ht) = Homography.rectify(IntArray(4) { -1 }, 2, 2, back, 0.1)
         assertEquals(36 * 34, img.size); assertEquals(36, w); assertEquals(34, ht)
         assertFailsWith<IllegalArgumentException> { Homography.fit(List(4) { Pt(it.toDouble(), it.toDouble()) }, bed) }
+    }
+}
+
+class WorkCoordinatesTest {
+    @Test fun `conversion is a 180 degree turn and round trips`() {
+        assertEquals(Pt(390.0, 30.0), Work.toMachine(Pt(0.0, 0.0)))        // screen top-left = machine corner next to the safe zone
+        assertEquals(Pt(30.0, 370.0), Work.toMachine(Pt(Work.WIDTH, Work.HEIGHT)))
+        val p = Pt(123.4, 56.7)
+        Work.fromMachine(Work.toMachine(p)).let { assertEquals(p.x, it.x, 1e-9); assertEquals(p.y, it.y, 1e-9) }
+        assertTrue(Work.toMachine(Pt(0.0, 0.0)).let { Bed.inWorkArea(it.x, it.y) })
+        assertTrue(Work.toMachine(Pt(Work.WIDTH, Work.HEIGHT)).let { Bed.inWorkArea(it.x, it.y) })
+    }
+
+    @Test fun `letter F is not mirrored`() {
+        val layers = Document.defaultLayers()
+        val cut = layers[2].copy(passes = 1, zStepMm = 0.0)
+        // F on screen: stem at the left (x 100), bar and middle bar to the right.
+        val f = listOf(listOf(Pt(0.0, 40.0), Pt(0.0, 0.0), Pt(20.0, 0.0)), listOf(Pt(0.0, 20.0), Pt(15.0, 20.0)))
+        val e = Element(layerId = cut.id, kind = "F", transform = Transform(100.0, 100.0), paths = f)
+        val g = MarlinWriter().write(Document(title = "F", layers = listOf(cut), elements = listOf(e)))
+        val t = Toolpath.parse(g)
+        val bar = t.segments.filter { it.cut }.maxByOrNull { kotlin.math.abs(it.x1 - it.x0) }!!
+        val stemX = minOf(bar.x0, bar.x1).let { _ -> maxOf(bar.x0, bar.x1) }
+        val endX = minOf(bar.x0, bar.x1)
+        assertEquals(290.0, stemX.toDouble(), 1e-3)      // left on screen = large machine X
+        assertEquals(270.0, endX.toDouble(), 1e-3)       // the arm points to small X (screen right)
     }
 }

@@ -62,9 +62,9 @@ object Scan {
         require(stepX > 1 && stepY > 1) { "Kamera-Kalibrierung unplausibel (Bildausschnitt zu klein)" }
         val cols = max(1, ceil((Work.WIDTH - u.width) / stepX).toInt() + 1)
         val rows = max(1, ceil((Work.HEIGHT - u.height) / stepY).toInt() + 1)
-        // Head travel in work mm: machine 0..390 / 0..370 (laser off, may cross the safe zone like parking).
-        val minHx = -Bed.SAFE; val maxHx = Bed.WIDTH - Bed.SAFE
-        val minHy = -Bed.SAFE; val maxHy = Bed.HEIGHT - Bed.SAFE
+        // Head travel in work mm (machine 0..390 / 0..370, X reversed) (laser off, may cross the safe zone like parking).
+        val minHx = Work.fromMachine(Bed.WIDTH, 0.0).x; val maxHx = Work.fromMachine(0.0, 0.0).x   // machine X is reversed
+        val minHy = Work.fromMachine(0.0, 0.0).y; val maxHy = Work.fromMachine(0.0, Bed.HEIGHT).y
         val heads = ArrayList<Pt>()
         val missing = mutableListOf<String>()
         for (r in 0 until rows) {

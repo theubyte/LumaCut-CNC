@@ -12,7 +12,7 @@ class JobBuildException(message: String) : IllegalArgumentException(message)
  * Turns a [Document] (work-area mm) into G-code for the LumaCut Pi / Marlin 2.1.
  * Same rules as the Windows app (lumacut_canvas/gcode.py):
  * - one `M3 I` for the whole job, every G1 carries F and S0..255;
- * - output coordinates are machine mm = work mm + 30; nothing, not even a
+ * - output coordinates are machine_x = 390 - x, machine_y = 30 + y (see [Work]); nothing, not even a
  *   laser-off overscan, ever leaves the work area (the safe zone is never entered);
  * - layers with zStep lower the focus between passes with
  *   `G91 / G0 Z-… F600 / G90` and return to focus height afterwards;
@@ -124,7 +124,8 @@ class MarlinWriter(private val appVersion: String = "dev") {
     /**
      * Images: one row per interval, power from gray (dither/threshold give
      * on/off), equal neighbouring pixels merged into one G1. Row 0 of the
-     * picture is the top as seen on screen (smallest Y).
+     * picture is the top on screen (machine Y 30), column 0 the left on screen
+     * (large machine X); the picture is not mirrored.
      */
     private fun raster(element: Element, layer: Layer) {
         val raster = element.raster ?: return
