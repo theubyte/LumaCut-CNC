@@ -4,9 +4,13 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import de.millione.lumacut.core.Document
 import de.millione.lumacut.core.JobFile
+import de.millione.lumacut.core.Material
 import de.millione.lumacut.core.MachineStatus
 import de.millione.lumacut.core.PiClient
+import de.millione.lumacut.core.PiConflictException
+import de.millione.lumacut.core.PiException
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Scan
 import de.millione.lumacut.core.Toolpath
@@ -23,8 +27,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
+import java.io.File
 
 data class Notice(val text: String, val error: Boolean = false)
+
+/** Materials of the Pi database; [fromPi] false = offline copy that cannot be changed. */
+data class MaterialState(val revision: Int = 0, val items: List<Material> = emptyList(), val fromPi: Boolean = false)
 
 /** Selected job with its parsed toolpath and the probe point (work-area mm) for one-click runs. */
 data class JobView(val name: String, val toolpath: Toolpath?, val probe: Pt?, val probeChosen: Boolean, val error: String? = null)
@@ -57,6 +66,11 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
     private var client: PiClient? = null
     private var poller: Job? = null
     private var lastJobError = ""
+    private val materialFile = File(app.filesDir, "materials.json")
+    private var materialsTriedAt = 0L
+
+    private val _materials = MutableStateFlow(MaterialState(0, loadCachedMaterials()))
+    val materials: StateFlow<MaterialState> = _materials.asStateFlow()
 
     init { connect(_host.value, quiet = true) }
 
@@ -91,6 +105,7 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
             val s = c.status()
             _status.value = s
             _online.value = true
+            if (!_materials.value.fromPi && System.currentTimeMillis() - materialsTriedAt > 15_000) refreshMaterials()
             if (s.job.state == "error" && s.job.error.isNotBlank() && s.job.error != lastJobError) {
                 lastJobError = s.job.error
                 notify("Auftrag abgebrochen: ${s.job.error}", true)
@@ -195,6 +210,80 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveSettings(values: Map<String, String>) = request("settings") { it.settings(values) }
+
+    /* ---------- material database on the Pi (offline: last copy, read only) ---------- */
+
+    private fun loadCachedMaterials(): List<Material> = runCatching {
+        Document.JSON.decodeFromString(ListSerializer(Material.serializer()), materialFile.readText())
+    }.getOrNull()?.takeIf { it.isNotEmpty() } ?: Material.defaults()
+
+    private suspend fun loadMaterials(c: PiClient) {
+        val list = c.materials()
+        val items = list.materials.map { it.toMaterial() }
+        _materials.value = MaterialState(list.revision, items, fromPi = true)
+        withContext(Dispatchers.IO) {
+            runCatching { materialFile.writeText(Document.JSON.encodeToString(ListSerializer(Material.serializer()), items)) }
+        }
+    }
+
+    fun refreshMaterials() {
+        val c = client ?: return
+        materialsTriedAt = System.currentTimeMillis()
+        viewModelScope.launch {
+            try { loadMaterials(c) }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { /* offline: the cached list stays */ }
+        }
+    }
+
+    /** Creates or updates [m] on the Pi; a stale revision (409) reloads the list and asks to save again. */
+    fun saveMaterial(m: Material, isNew: Boolean) {
+        if (!_materials.value.fromPi) { notify("Materialien ändern geht nur mit Verbindung zum Pi", true); return }
+        request("material", "„${m.name}“ gespeichert") { c ->
+            try {
+                if (isNew) c.createMaterial(m, _materials.value.revision) else c.updateMaterial(m, _materials.value.revision)
+            } catch (e: PiConflictException) {
+                loadMaterials(c)
+                throw PiException("Die Liste wurde inzwischen geändert und neu geladen – bitte noch einmal speichern.")
+            }
+            loadMaterials(c)
+            "gespeichert"
+        }
+    }
+
+    fun deleteMaterial(id: String) {
+        if (!_materials.value.fromPi) { notify("Materialien ändern geht nur mit Verbindung zum Pi", true); return }
+        request("material", "Material gelöscht") { c ->
+            try {
+                c.deleteMaterial(id, _materials.value.revision)
+            } catch (e: PiConflictException) {
+                loadMaterials(c)
+                throw PiException("Die Liste wurde inzwischen geändert und neu geladen – bitte noch einmal löschen.")
+            }
+            loadMaterials(c)
+            "gelöscht"
+        }
+    }
+
+    /* ---------- main path: frame and start ---------- */
+
+    /** Uploads the built job and starts the Pi's automatic run: home if needed, probe, height correction, laser, park. */
+    fun startAutomatic(name: String, gcode: String) = request("start", quietSuccess = true) { c ->
+        val fileName = PiClient.checkJobName(name)
+        c.uploadJob(fileName, gcode)
+        _jobs.value = c.jobs().sortedByDescending { it.modified }
+        c.autorun(fileName)
+    }
+
+    /** Laser-off outline of the motif; references the machine first when that has not happened yet. */
+    fun frameAutomatic(points: List<Pt>) {
+        if (points.isEmpty()) { notify("Nichts zu zeigen – erst ein Motiv anlegen", true); return }
+        request("frame", quietSuccess = true) { c ->
+            if (_status.value?.homed != true) c.action("home")
+            val mode = de.millione.lumacut.core.Frame.Mode.BOX
+            c.frame(de.millione.lumacut.core.Frame.program(points, mode), mode)
+        }
+    }
 
     /** False when the switch cannot reach work point [p] (head would leave X30..390/Y30..370); null without offset. */
     fun probeReachable(p: Pt): Boolean? = _status.value?.probeOffset?.let { Scan.reachable(p, it) }

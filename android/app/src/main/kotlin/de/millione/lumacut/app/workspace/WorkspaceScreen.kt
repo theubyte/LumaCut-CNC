@@ -309,8 +309,8 @@ private fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel,
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     SmallText("10 mm:")
-                    IconBtn(LcIcons.left, "X−", { machine.jog('X', -10.0) })
-                    IconBtn(LcIcons.right, "X+", { machine.jog('X', 10.0) })
+                    IconBtn(LcIcons.left, "X+", { machine.jog('X', 10.0) })
+                    IconBtn(LcIcons.right, "X−", { machine.jog('X', -10.0) })
                     IconBtn(LcIcons.up, "Y−", { machine.jog('Y', -10.0) })
                     IconBtn(LcIcons.down, "Y+", { machine.jog('Y', 10.0) })
                 }

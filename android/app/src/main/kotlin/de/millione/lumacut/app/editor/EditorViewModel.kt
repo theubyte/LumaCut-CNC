@@ -1,6 +1,7 @@
 package de.millione.lumacut.app.editor
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
@@ -18,6 +19,7 @@ import de.millione.lumacut.core.Layer
 import de.millione.lumacut.core.LayerMode
 import de.millione.lumacut.core.MarlinWriter
 import de.millione.lumacut.core.Material
+import de.millione.lumacut.core.MaterialGroup
 import de.millione.lumacut.core.Poly
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Transform
@@ -54,7 +56,7 @@ class BuiltJob(val gcode: String, val focus: FocusReport?)
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val dir = app.filesDir
     private val projectFile = File(dir, "project.json")
-    private val materialFile = File(dir, "materials.json")
+    private val prefs = app.getSharedPreferences("lumacut", Context.MODE_PRIVATE)
     private val backgroundFile = File(dir, "background.png")
     private val heightFile = File(dir, "heights.json")
 
@@ -68,13 +70,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val _multi = MutableStateFlow(false)
     val multi: StateFlow<Boolean> = _multi.asStateFlow()
 
-    private val _activeLayer = MutableStateFlow(_doc.value.layers.getOrNull(1)?.id ?: _doc.value.layers.first().id)
+    private val _activeLayer = MutableStateFlow(_doc.value.layers.firstOrNull { it.name == "Gravieren" }?.id ?: _doc.value.layers.first().id)
     val activeLayer: StateFlow<String> = _activeLayer.asStateFlow()
 
     private val _tool = MutableStateFlow(Tool.SELECT)
     val tool: StateFlow<Tool> = _tool.asStateFlow()
 
-    private val _materials = MutableStateFlow(loadMaterials())
+    private val _materials = MutableStateFlow<List<Material>>(emptyList())
     val materials: StateFlow<List<Material>> = _materials.asStateFlow()
 
     private val _background = MutableStateFlow(loadBackground())
@@ -392,20 +394,34 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ---------- materials ---------- */
 
-    private fun loadMaterials(): List<Material> = runCatching {
-        Document.JSON.decodeFromString(ListSerializer(Material.serializer()), materialFile.readText())
-    }.getOrElse { Material.defaults() }
+    /** The Pi's material list (fed by the shell); only used for the per-layer menu under "Erweitert". */
+    fun setMaterials(list: List<Material>) { _materials.value = list }
 
-    fun saveMaterial(m: Material) {
-        _materials.update { list -> if (list.any { it.id == m.id }) list.map { if (it.id == m.id) m else it } else list + m }
-        persistMaterials()
+    /** "name|thickness" of the chosen material; null until the operator picked one. */
+    private val _materialKey = MutableStateFlow(prefs.getString("materialKey", null))
+    val materialKey: StateFlow<String?> = _materialKey.asStateFlow()
+
+    /**
+     * Applies a material to the whole motif: every process of it goes to its layer
+     * (Gravieren, Markieren → "Linie", Schneiden). Layers without an entry keep their values.
+     */
+    fun selectMaterial(g: MaterialGroup) {
+        _materialKey.value = g.key
+        prefs.edit().putString("materialKey", g.key).apply()
+        change { d ->
+            d.copy(layers = d.layers.map { layer ->
+                val process = when (layer.name) { "Gravieren" -> "Gravieren"; "Linie" -> "Markieren"; "Schneiden" -> "Schneiden"; else -> null }
+                val m = process?.let { g.entry(it) }
+                if (m != null) m.applyTo(layer) else layer
+            })
+        }
+        notify("„${g.name} ${formatThickness(g.thicknessMm)} mm“ gewählt: " + g.processes.joinToString(" · "))
     }
 
-    fun deleteMaterial(id: String) { _materials.update { it.filterNot { m -> m.id == id } }; persistMaterials() }
+    private fun formatThickness(v: Double) = if (v % 1.0 == 0.0) v.toInt().toString() else v.toString()
 
-    private fun persistMaterials() = viewModelScope.launch(Dispatchers.IO) {
-        runCatching { materialFile.writeText(Document.JSON.encodeToString(ListSerializer(Material.serializer()), _materials.value)) }
-    }
+    /** Layer with [name] (Gravieren, Linie, Schneiden) or the active one. */
+    fun layerIdByName(name: String): String = _doc.value.layers.firstOrNull { it.name == name }?.id ?: _activeLayer.value
 
     /* ---------- background photo & heights ---------- */
 

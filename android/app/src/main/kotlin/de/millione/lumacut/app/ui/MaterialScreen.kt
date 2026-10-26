@@ -4,12 +4,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -30,56 +32,78 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.millione.lumacut.app.editor.EditorViewModel
+import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.core.LayerMode
 import de.millione.lumacut.core.Limits
 import de.millione.lumacut.core.Material
+import de.millione.lumacut.core.MaterialGroup
+import de.millione.lumacut.core.grouped
 import kotlin.math.roundToInt
 
+private val PROCESSES = listOf("Schneiden", "Gravieren", "Markieren")
+
+/** Step 1: pick the material. The Pi database is the source; values go onto the motif's layers. */
 @Composable
-fun MaterialScreen(editor: EditorViewModel) {
-    val materials by editor.materials.collectAsStateWithLifecycle()
-    var editing by remember { mutableStateOf<Material?>(null) }
+fun MaterialScreen(machine: MachineViewModel, editor: EditorViewModel, onNext: () -> Unit) {
+    val state by machine.materials.collectAsStateWithLifecycle()
+    val chosen by editor.materialKey.collectAsStateWithLifecycle()
+    var query by remember { mutableStateOf("") }
+    var advanced by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Pair<Material, Boolean>?>(null) }
     var confirm by rememberConfirm()
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    val groups = state.items.grouped(query)
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f)) {
-                Text("Materialbibliothek", style = LcTypography.headlineSmall)
-                SmallText("Werte im Editor über „Material …“ auf eine Ebene übernehmen. Startwerte – jedes Material am eigenen Laser testen.")
+                Text("1 · Material wählen", style = LcTypography.headlineSmall)
+                SmallText("Leistung, Tempo und Durchgänge setzt die App danach selbst.")
             }
-            LcButton("Neues Material", {
-                editing = Material(name = "", thicknessMm = 3.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 80.0, speed = 400.0)
-            }, icon = LcIcons.plus, kind = BtnKind.PRIMARY)
+            TextInput("Suchen", query, { query = it }, Modifier.width(260.dp))
+            IconBtn(LcIcons.refresh, "Liste neu laden", { machine.refreshMaterials() })
+            val picked = groups.firstOrNull { it.key == chosen }
+            LcButton("Weiter: Motiv", onNext, icon = LcIcons.right, kind = BtnKind.PRIMARY, enabled = picked != null || chosen != null, big = true)
         }
-        Spacer(Modifier.height(16.dp))
-        LazyVerticalGrid(GridCells.Adaptive(300.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(materials, key = { it.id }) { m ->
+        if (!state.fromPi) Banner("Kein Kontakt zum Pi – das ist die zuletzt gespeicherte Liste. Verbindung unter Einstellungen prüfen.", Lc.info)
+        if (groups.isEmpty()) SmallText("Kein Material gefunden. Anderen Suchbegriff versuchen.")
+        LazyVerticalGrid(GridCells.Adaptive(300.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(groups, key = { it.key }) { g ->
+                val on = g.key == chosen
                 Column(
-                    Modifier.clip(RoundedCornerShape(18.dp)).background(Lc.surface).border(1.dp, Lc.line, RoundedCornerShape(18.dp))
-                        .clickable { editing = m }.padding(18.dp)
+                    Modifier.clip(RoundedCornerShape(18.dp)).background(if (on) Lc.accentSoft else Lc.surface)
+                        .border(if (on) 2.dp else 1.dp, if (on) Lc.accent else Lc.line, RoundedCornerShape(18.dp))
+                        .clickable { editor.selectMaterial(g) }.padding(18.dp)
                 ) {
-                    Eyebrow(m.process)
-                    Text("${m.name} · ${formatMm(m.thicknessMm)} mm", style = LcTypography.titleLarge)
-                    Spacer(Modifier.height(12.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Tile("Leistung", "${m.powerPct.roundToInt()} %", Modifier.weight(1f))
-                        Tile("Tempo", "${m.speed.roundToInt()}", Modifier.weight(1f))
-                        Tile(if (m.mode == LayerMode.FILL) "Abstand" else "Durchg.", if (m.mode == LayerMode.FILL) "${m.intervalMm} mm" else "${m.effectivePasses}×", Modifier.weight(1f))
-                    }
-                    if (m.depthPerPassMm > 0 || m.zStepMm > 0) {
-                        Spacer(Modifier.height(6.dp))
-                        SmallText(buildString {
-                            if (m.depthPerPassMm > 0) append("%.2f mm pro Durchgang".format(m.depthPerPassMm))
-                            if (m.zStepMm > 0) { if (isNotEmpty()) append(" · "); append("Fokus −%.2f mm je Durchgang".format(m.zStepMm)) }
-                        }, Lc.faint)
+                    Text(g.name, style = LcTypography.titleLarge)
+                    Text("${formatMm(g.thicknessMm)} mm", style = LcTypography.titleMedium, color = Lc.muted)
+                    Spacer(Modifier.height(10.dp))
+                    SmallText(g.processes.joinToString(" · "), if (on) Lc.accent else Lc.faint)
+                    if (advanced) {
+                        Spacer(Modifier.height(10.dp))
+                        for (m in g.entries) Row(
+                            Modifier.fillMaxWidth().heightIn(min = Lc.touch).clickable { editing = m to false },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("${m.process}: ${m.powerPct.roundToInt()} % · ${m.speed.roundToInt()} mm/min · ${m.effectivePasses}×",
+                                style = LcTypography.bodyMedium, modifier = Modifier.weight(1f))
+                            Text("ändern", style = LcTypography.labelMedium, color = Lc.accent)
+                        }
                     }
                 }
             }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            LcButton(if (advanced) "Erweitert ausblenden" else "Erweitert: Materialwerte bearbeiten", { advanced = !advanced }, kind = BtnKind.GHOST)
+            if (advanced) LcButton("Neues Material", {
+                editing = Material(id = "", name = "", thicknessMm = 3.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 80.0, speed = 400.0) to true
+            }, icon = LcIcons.plus)
+            SmallText("Startwerte – jedes Material am eigenen Laser testen. Änderungen gelten auch für Windows-App und Web-Oberfläche.", Lc.faint)
+        }
     }
-    editing?.let { m ->
-        MaterialDialog(m, onDismiss = { editing = null },
-            onSave = { editor.saveMaterial(it); editing = null },
-            onDelete = { editing = null; confirm = Confirm("Material löschen?", "${m.name} ${m.thicknessMm} mm · ${m.process}", "Löschen", true) { editor.deleteMaterial(m.id) } })
+    editing?.let { (m, isNew) ->
+        MaterialDialog(m, isNew, onDismiss = { editing = null },
+            onSave = { machine.saveMaterial(it, isNew); editing = null },
+            onDelete = { editing = null; confirm = Confirm("Material löschen?", "${m.name} ${formatMm(m.thicknessMm)} mm · ${m.process}", "Löschen", true) { machine.deleteMaterial(m.id) } })
     }
     ConfirmDialog(confirm) { confirm = null }
 }
@@ -87,7 +111,7 @@ fun MaterialScreen(editor: EditorViewModel) {
 private fun formatMm(v: Double) = if (v % 1.0 == 0.0) v.roundToInt().toString() else v.toString()
 
 @Composable
-private fun MaterialDialog(m: Material, onDismiss: () -> Unit, onSave: (Material) -> Unit, onDelete: () -> Unit) {
+private fun MaterialDialog(m: Material, isNew: Boolean, onDismiss: () -> Unit, onSave: (Material) -> Unit, onDelete: () -> Unit) {
     var name by remember { mutableStateOf(m.name) }
     var thick by remember { mutableStateOf(m.thicknessMm.toString()) }
     var process by remember { mutableStateOf(m.process) }
@@ -101,15 +125,18 @@ private fun MaterialDialog(m: Material, onDismiss: () -> Unit, onSave: (Material
     fun d(s: String) = s.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
-        title = { Text(if (m.name.isBlank()) "Neues Material" else "Material bearbeiten", style = LcTypography.titleLarge) },
+        title = { Text(if (isNew) "Neues Material" else "Material bearbeiten", style = LcTypography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextInput("Material", name, { name = it }, Modifier.weight(2f))
                     NumberField("Stärke", thick, { thick = it }, Modifier.weight(1f), "mm")
                 }
-                TextInput("Bearbeitung (z. B. Schneiden, Gravieren)", process, { process = it }, Modifier.fillMaxWidth())
-                Segmented(listOf(LayerMode.LINE to "Linie / Schneiden", LayerMode.FILL to "Füllen / Gravieren"), mode, { mode = it })
+                Segmented(PROCESSES.map { it to it }, process, { p ->
+                    process = p
+                    mode = if (p == "Gravieren") LayerMode.FILL else LayerMode.LINE
+                })
+                Segmented(listOf(LayerMode.LINE to "Linie", LayerMode.FILL to "Füllen"), mode, { mode = it })
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     NumberField("Leistung", power, { power = it }, Modifier.weight(1f), "%")
                     NumberField("Tempo", speed, { speed = it }, Modifier.weight(1f), "mm/min")
@@ -131,14 +158,14 @@ private fun MaterialDialog(m: Material, onDismiss: () -> Unit, onSave: (Material
                 d(interval)?.let { it in 0.03..2.0 } == true && d(depth)?.let { it in Limits.DEPTH_PER_PASS } == true &&
                 d(zStep)?.let { it in Limits.Z_STEP } == true
             LcButton("Speichern", {
-                onSave(m.copy(name = name.trim(), thicknessMm = d(thick)!!, process = process.trim().ifEmpty { "Schneiden" }, mode = mode,
+                onSave(m.copy(name = name.trim(), thicknessMm = d(thick)!!, process = process, mode = mode,
                     powerPct = d(power)!!, speed = d(speed)!!, passes = passes.toInt(), intervalMm = d(interval)!!,
                     depthPerPassMm = d(depth)!!, zStepMm = d(zStep)!!))
             }, kind = BtnKind.PRIMARY, enabled = valid)
         },
         dismissButton = {
             Row {
-                if (m.name.isNotBlank()) TextButton(onClick = onDelete) { Text("Löschen", color = Lc.bad) }
+                if (!isNew && !m.builtin) TextButton(onClick = onDelete) { Text("Löschen", color = Lc.bad) }
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) }
             }

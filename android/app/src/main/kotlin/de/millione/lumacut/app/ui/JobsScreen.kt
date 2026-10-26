@@ -157,7 +157,7 @@ private fun JobDetail(machine: MachineViewModel, view: JobView, busy: Set<String
                 Tile("Laserweg", st?.let { "%.2f m".format(it.cutMm / 1000) } ?: "—", Modifier.weight(1f))
                 Tile("Leerweg", st?.let { "%.2f m".format(it.travelMm / 1000) } ?: "—", Modifier.weight(1f))
             }
-            Tile("Größe · Position", tp?.bounds?.let { val o = Work.fromMachine(it.minX, it.minY); "%.1f × %.1f mm · ab X %.0f Y %.0f".format(it.width, it.height, o.x, o.y) } ?: "—", Modifier.fillMaxWidth())
+            Tile("Größe · Position", tp?.bounds?.let { val o = Work.fromMachine(it.maxX, it.minY); "%.1f × %.1f mm · ab X %.0f Y %.0f".format(it.width, it.height, o.x, o.y) } ?: "—", Modifier.fillMaxWidth())
             Tile("Abtastpunkt", view.probe?.let { "X %.1f · Y %.1f · %s".format(it.x, it.y, if (view.probeChosen) "gewählt" else "Motivmitte") } ?: "—", Modifier.fillMaxWidth())
             st?.warnings?.forEach { Banner(it) }
             view.probe?.let { p ->

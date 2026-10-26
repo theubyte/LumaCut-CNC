@@ -66,7 +66,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     private var worker: Job? = null
 
     private fun loadCalibration(): CameraCalibration? = runCatching {
-        Document.JSON.decodeFromString(CameraCalibration.serializer(), prefs.getString("headCamera", null)!!)
+        Document.JSON.decodeFromString(CameraCalibration.serializer(), prefs.getString("headCamera2", null)!!)
     }.getOrNull()
 
     fun markDone(step: String) = _done.update { it + step }
@@ -149,7 +149,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
             machine.notify("Kalibrierung unplausibel (Bildfeld %.0f × %.0f mm) – Marker prüfen".format(f.width, f.height), true); return false
         }
         _calibration.value = cal
-        prefs.edit().putString("headCamera", Document.JSON.encodeToString(CameraCalibration.serializer(), cal)).apply()
+        prefs.edit().putString("headCamera2", Document.JSON.encodeToString(CameraCalibration.serializer(), cal)).apply()
         machine.notify("Kopfkamera kalibriert: Bildfeld %.0f × %.0f mm".format(Locale.GERMANY, f.width, f.height))
         return true
     }

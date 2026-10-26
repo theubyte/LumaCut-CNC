@@ -122,7 +122,7 @@ import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 @Composable
-fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
+fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () -> Unit, onScan: () -> Unit) {
     val doc by editor.doc.collectAsStateWithLifecycle()
     val selected by editor.selected.collectAsStateWithLifecycle()
     val tool by editor.tool.collectAsStateWithLifecycle()
@@ -135,7 +135,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
     val scope = rememberCoroutineScope()
     var confirm by rememberConfirm()
     var textAt by remember { mutableStateOf<Pt?>(null) }
-    var sending by remember { mutableStateOf(false) }
+    var moreMenu by remember { mutableStateOf(false) }
     var cameraOpen by remember { mutableStateOf(false) }
     var materialTest by remember { mutableStateOf(false) }
     val machineStatus by machine.status.collectAsStateWithLifecycle()
@@ -169,7 +169,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
             var h = w * raster.height / raster.width
             val k = minOf(1.0, (Work.WIDTH - 10) / w, (Work.HEIGHT - 10) / h); w *= k; h *= k
             val x = Work.center.x - w / 2; val y = Work.center.y - h / 2
-            editor.addElement(Element(layerId = editor.activeLayer.value, kind = "Bild", transform = Transform(x, y),
+            editor.addElement(Element(layerId = editor.layerIdByName("Gravieren"), kind = "Bild", transform = Transform(x, y),
                 raster = raster, imageWidthMm = w, imageHeightMm = h))
             editor.notify(if (dpi != null && k == 1.0) "Bild eingefügt: %.0f × %.0f mm (%.0f dpi aus der Datei)".format(w, h, dpi)
                           else "Bild eingefügt: %.0f × %.0f mm".format(w, h))
@@ -201,26 +201,32 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
                     colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Lc.accent, unfocusedBorderColor = Lc.line))
                 IconBtn(LcIcons.undo, "Rückgängig", editor::undo, enabled = canUndo)
                 IconBtn(LcIcons.redo, "Wiederholen", editor::redo, enabled = canRedo)
-                IconBtn(LcIcons.multi, "Mehrfachauswahl", { editor.setMulti(!multi) }, tint = if (multi) Lc.accent else Lc.text)
-                IconBtn(LcIcons.group, "Gruppieren", editor::groupSelected, enabled = selected.size >= 2)
-                IconBtn(LcIcons.ungroup, "Gruppe auflösen", editor::ungroupSelected,
-                        enabled = doc.elements.any { it.id in selected && it.groupId != null })
                 IconBtn(LcIcons.copy, "Duplizieren", editor::duplicateSelected, enabled = selected.isNotEmpty())
                 IconBtn(LcIcons.trash, "Löschen", editor::deleteSelected, tint = Lc.bad, enabled = selected.isNotEmpty())
                 IconBtn(LcIcons.center, "Zentrieren", editor::centerInWorkArea)
                 Box(Modifier.width(1.dp).height(36.dp).background(Lc.line))
-                IconBtn(LcIcons.svg, "SVG/DXF importieren", { vectorPicker.launch(arrayOf("image/svg+xml", "image/vnd.dxf", "application/dxf", "*/*")) })
-                IconBtn(LcIcons.image, "Bild importieren", { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
-                IconBtn(LcIcons.camera, "Kamera-Hintergrund (Foto)", { cameraOpen = true })
-                IconBtn(LcIcons.material, "Materialtest", {
-                    confirm = Confirm("Materialtest erstellen?", "Das aktuelle Projekt wird durch ein Testraster ersetzt (Rückgängig holt es zurück).", "Weiter") { materialTest = true }
-                })
-                Box(Modifier.width(1.dp).height(36.dp).background(Lc.line))
-                IconBtn(LcIcons.plus, "Neues Projekt", { confirm = Confirm("Neues Projekt?", "Alle Elemente werden entfernt. Ebenen bleiben.", "Neu", danger = true) { editor.newDocument() } })
-                IconBtn(LcIcons.folder, "Projekt öffnen", { projectOpener.launch(arrayOf("application/json", "*/*")) })
-                IconBtn(LcIcons.save, "Projekt speichern", { projectSaver.launch(PiClient.jobNameFrom(doc.title).removeSuffix(".gcode") + ".lumacut.json") })
+                LcButton("Bild", { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, icon = LcIcons.image)
+                LcButton("SVG / DXF", { vectorPicker.launch(arrayOf("image/svg+xml", "image/vnd.dxf", "application/dxf", "*/*")) }, icon = LcIcons.svg)
+                LcButton("Arbeitsplatz scannen", onScan, icon = LcIcons.camera)
+                Box {
+                    LcButton("Mehr", { moreMenu = true }, kind = BtnKind.GHOST)
+                    DropdownMenu(moreMenu, { moreMenu = false }, containerColor = Lc.surface2) {
+                        @Composable fun item(label: String, enabled: Boolean = true, action: () -> Unit) =
+                            DropdownMenuItem(text = { Text(label) }, enabled = enabled, onClick = { moreMenu = false; action() })
+                        item(if (multi) "Mehrfachauswahl aus" else "Mehrfachauswahl an") { editor.setMulti(!multi) }
+                        item("Gruppieren", selected.size >= 2) { editor.groupSelected() }
+                        item("Gruppe auflösen", doc.elements.any { it.id in selected && it.groupId != null }) { editor.ungroupSelected() }
+                        item("Kamerafoto als Hintergrund") { cameraOpen = true }
+                        item("Materialtest …") {
+                            confirm = Confirm("Materialtest erstellen?", "Das aktuelle Projekt wird durch ein Testraster ersetzt (Rückgängig holt es zurück).", "Weiter") { materialTest = true }
+                        }
+                        item("Neues Projekt") { confirm = Confirm("Neues Projekt?", "Alle Elemente werden entfernt. Ebenen bleiben.", "Neu", danger = true) { editor.newDocument() } }
+                        item("Projekt öffnen …") { projectOpener.launch(arrayOf("application/json", "*/*")) }
+                        item("Projekt speichern …") { projectSaver.launch(PiClient.jobNameFrom(doc.title).removeSuffix(".gcode") + ".lumacut.json") }
+                    }
+                }
             }
-            LcButton("An Laser senden", { sending = true }, icon = LcIcons.send, kind = BtnKind.PRIMARY, busy = "upload" in busy,
+            LcButton("Weiter: Starten", onNext, icon = LcIcons.right, kind = BtnKind.PRIMARY,
                      enabled = doc.elements.isNotEmpty())
         }
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -251,21 +257,6 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
         editor.moveSelected(0.0, 0.0, "text")
     } }
 
-    if (sending) {
-        val cfg = machineStatus?.config
-        SendDialog(
-            title = doc.title,
-            hasHeights = heights != null,
-            build = { comp -> editor.buildJob(comp, cfg?.focus_gap_mm ?: 7.0, cfg?.z_switch_tip_offset_mm ?: 1.5) },
-            onFrame = { tp, mode -> machine.frame(Frame.cutPoints(tp), mode) },
-            canFrame = machineStatus.canControl(machineOnline) && machineStatus?.homed == true,
-            onDismiss = { sending = false },
-        ) { name, gcode ->
-            sending = false
-            machine.uploadJob(name, gcode)
-            editor.jobSent()
-        }
-    }
     if (materialTest) MaterialTestDialog(onDismiss = { materialTest = false }) { spec ->
         materialTest = false
         val generated = MaterialTest.build(spec) { t, h -> TextPaths.build(t, h, true, "sans-serif") }
@@ -544,7 +535,10 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier) {
             sel.size == 1 -> SelectionCard(editor, sel.first())
             sel.size > 1 -> MultiCard(editor, sel)
         }
-        LcCard(padding = 16.dp) {
+        EffectCard(editor, doc, sel, active)
+        var advanced by remember { mutableStateOf(false) }
+        LcButton(if (advanced) "Erweitert ausblenden" else "Erweitert: Ebenen & Laserwerte", { advanced = !advanced }, Modifier.fillMaxWidth(), kind = BtnKind.GHOST)
+        if (advanced) LcCard(padding = 16.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Ebenen", style = LcTypography.titleLarge, modifier = Modifier.weight(1f))
                 IconBtn(LcIcons.plus, "Ebene hinzufügen", editor::addLayer)
@@ -563,6 +557,22 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier) {
             Slider(bgAlpha, editor::setBackgroundAlpha, colors = SliderDefaults.colors(thumbColor = Lc.accent, activeTrackColor = Lc.accent))
             SmallText("Deckkraft ${(bgAlpha * 100).toInt()} %")
         }
+    }
+}
+
+/** The only laser decision a beginner makes: engrave, mark or cut. Values come from the chosen material. */
+@Composable
+private fun EffectCard(editor: EditorViewModel, doc: Document, sel: List<Element>, active: String) {
+    val focus = sel.firstOrNull()?.layerId ?: active
+    val byName = doc.layers.associateBy { it.name }
+    val options = listOf("Gravieren" to "Gravieren", "Linie" to "Markieren", "Schneiden" to "Schneiden")
+        .filter { byName.containsKey(it.first) }.map { byName.getValue(it.first).id to it.second }
+    LcCard(padding = 16.dp) {
+        Text("Was soll der Laser tun?", style = LcTypography.titleMedium)
+        Spacer(Modifier.height(10.dp))
+        Segmented(options, focus, { editor.setActiveLayer(it) })
+        Spacer(Modifier.height(6.dp))
+        SmallText(if (sel.isNotEmpty()) "Gilt für die Auswahl." else "Gilt für neue Formen. Zum Ändern erst etwas antippen.")
     }
 }
 
@@ -768,73 +778,6 @@ private fun TextDialog(onDismiss: () -> Unit, onOk: (String, Double, Boolean, St
             }
         },
         confirmButton = { LcButton("Einfügen", { size.replace(',', '.').toDoubleOrNull()?.takeIf { it in 1.0..300.0 }?.let { onOk(text, it, bold, family) } }, kind = BtnKind.PRIMARY, enabled = text.isNotBlank()) },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) } },
-    )
-}
-
-@Composable
-private fun SendDialog(
-    title: String,
-    hasHeights: Boolean,
-    build: suspend (Boolean) -> BuiltJob,
-    onFrame: (Toolpath, Frame.Mode) -> Unit,
-    canFrame: Boolean,
-    onDismiss: () -> Unit,
-    onSend: (String, String) -> Unit,
-) {
-    var name by remember { mutableStateOf(PiClient.jobNameFrom(title).removeSuffix(".gcode")) }
-    var compensate by remember { mutableStateOf(hasHeights) }
-    var job by remember { mutableStateOf<BuiltJob?>(null) }
-    var toolpath by remember { mutableStateOf<Toolpath?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    // Build and check the job before it leaves the tablet: time, size, warnings, focus heights.
-    LaunchedEffect(compensate) {
-        job = null; toolpath = null; error = null
-        try {
-            val j = build(compensate)
-            toolpath = withContext(Dispatchers.Default) { Toolpath.parse(j.gcode) }
-            job = j
-        } catch (e: Exception) { error = e.message ?: "Auftrag nicht erzeugbar" }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
-        title = { Text("An Laser senden", style = LcTypography.titleLarge) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                TextInput("Auftragsname", name, { name = it }, Modifier.fillMaxWidth())
-                if (hasHeights) Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(compensate, { compensate = it }, colors = CheckboxDefaults.colors(checkedColor = Lc.accent, checkmarkColor = Lc.accentInk))
-                    SmallText("Höhenkorrektur aus dem Höhenmesh (Fokus folgt der Oberfläche)")
-                }
-                val tp = toolpath
-                val failure = error
-                when {
-                    failure != null -> Banner(failure, Lc.bad)
-                    tp == null -> SmallText("Auftrag wird erzeugt …")
-                    else -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Tile("Dauer (ca.)", formatDuration(tp.stats.seconds), Modifier.weight(1f))
-                            Tile("Laserweg", "%.2f m".format(tp.stats.cutMm / 1000), Modifier.weight(1f))
-                        }
-                        Tile("Größe", tp.bounds?.let { "%.1f × %.1f mm".format(it.width, it.height) } ?: "—", Modifier.fillMaxWidth())
-                        job?.focus?.let { f ->
-                            Tile("Fokus Z", if (f.minZ.isNaN()) "—" else "%.2f … %.2f mm · %d Stücke".format(f.minZ, f.maxZ, f.segments), Modifier.fillMaxWidth())
-                            f.warnings.forEach { Banner(it) }
-                        }
-                        tp.stats.warnings.forEach { Banner(it) }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            LcButton("Rahmen", { onFrame(tp, Frame.Mode.BOX) }, Modifier.weight(1f), LcIcons.rect, enabled = canFrame)
-                            LcButton("Gummiband", { onFrame(tp, Frame.Mode.HULL) }, Modifier.weight(1f), LcIcons.polygon, enabled = canFrame)
-                        }
-                        SmallText(if (canFrame) "Rahmen fährt den Umriss mit ausgeschaltetem Laser ab." else "Rahmen fahren: Maschine erst referenzieren.")
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            LcButton("Senden", { job?.let { onSend(PiClient.jobNameFrom(name), it.gcode) } }, icon = LcIcons.send, kind = BtnKind.PRIMARY,
-                enabled = name.isNotBlank() && job != null)
-        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) } },
     )
 }

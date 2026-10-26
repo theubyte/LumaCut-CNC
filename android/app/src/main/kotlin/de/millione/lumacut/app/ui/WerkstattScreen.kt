@@ -128,15 +128,15 @@ private fun MoveCard(machine: MachineViewModel) {
             val enabled = control && homed
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Spacer(Modifier.size(PAD)); JogKey(LcIcons.up, "Y+", enabled) { machine.jog('Y', step) }; Spacer(Modifier.size(PAD))
+                    Spacer(Modifier.size(PAD)); JogKey(LcIcons.up, "Y−", enabled) { machine.jog('Y', -step) }; Spacer(Modifier.size(PAD))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    JogKey(LcIcons.left, "X−", enabled) { machine.jog('X', -step) }
+                    JogKey(LcIcons.left, "X+", enabled) { machine.jog('X', step) }
                     JogKey(LcIcons.park, "Park", enabled, center = true) { machine.action("park") }
-                    JogKey(LcIcons.right, "X+", enabled) { machine.jog('X', step) }
+                    JogKey(LcIcons.right, "X−", enabled) { machine.jog('X', -step) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Spacer(Modifier.size(PAD)); JogKey(LcIcons.down, "Y−", enabled) { machine.jog('Y', -step) }; Spacer(Modifier.size(PAD))
+                    Spacer(Modifier.size(PAD)); JogKey(LcIcons.down, "Y+", enabled) { machine.jog('Y', step) }; Spacer(Modifier.size(PAD))
                 }
             }
             Spacer(Modifier.width(22.dp))

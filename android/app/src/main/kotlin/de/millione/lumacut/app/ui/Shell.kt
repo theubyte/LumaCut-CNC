@@ -51,27 +51,27 @@ import de.millione.lumacut.app.editor.EditorViewModel
 import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.app.machine.Notice
 import de.millione.lumacut.app.machine.headline
-import de.millione.lumacut.app.workspace.WorkspaceScreen
 
-enum class Dest(val label: String, val icon: ImageVector) {
-    WERKSTATT("Werkstatt", LcIcons.machine),
-    AUFTRAEGE("Aufträge", LcIcons.jobs),
-    EDITOR("Editor", LcIcons.editor),
-    ARBEITSPLATZ("Arbeitsplatz", LcIcons.scan),
-    MATERIAL("Material", LcIcons.material),
+/** The main path is 1 Material → 2 Motiv → 3 Starten; everything else lives under Maschine. */
+enum class Dest(val label: String, val icon: ImageVector, val step: Int? = null) {
+    MATERIAL("Material", LcIcons.material, 1),
+    MOTIV("Motiv", LcIcons.editor, 2),
+    START("Starten", LcIcons.play, 3),
+    MASCHINE("Maschine", LcIcons.machine),
     EINSTELLUNGEN("Einstellungen", LcIcons.settings),
 }
 
 @Composable
 fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
-    var dest by rememberSaveable { mutableStateOf(Dest.WERKSTATT) }
+    var dest by rememberSaveable { mutableStateOf(if (editor.materialKey.value == null) Dest.MATERIAL else Dest.MOTIV) }
+    var machineTab by rememberSaveable { mutableStateOf(MachineTab.STEUERUNG) }
     val snackbar = remember { SnackbarHostState() }
     var lastNotice by remember { mutableStateOf<Notice?>(null) }
     LaunchedEffect(Unit) {
         machine.notices.collect { n -> lastNotice = n; snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(n.text) }
     }
     LaunchedEffect(Unit) { editor.notices.collect { n -> lastNotice = n; snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(n.text) } }
-    LaunchedEffect(Unit) { editor.openJobs.collect { dest = Dest.AUFTRAEGE } }
+    LaunchedEffect(Unit) { machine.materials.collect { editor.setMaterials(it.items) } }
 
     Box(Modifier.fillMaxSize().background(Lc.bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(Modifier.fillMaxSize()) {
@@ -81,11 +81,11 @@ fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
                 Box(Modifier.fillMaxSize()) {
                     AnimatedContent(dest, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "dest") { d ->
                         when (d) {
-                            Dest.WERKSTATT -> WerkstattScreen(machine)
-                            Dest.AUFTRAEGE -> JobsScreen(machine)
-                            Dest.EDITOR -> EditorScreen(editor, machine)
-                            Dest.ARBEITSPLATZ -> WorkspaceScreen(machine, editor)
-                            Dest.MATERIAL -> MaterialScreen(editor)
+                            Dest.MATERIAL -> MaterialScreen(machine, editor, onNext = { dest = Dest.MOTIV })
+                            Dest.MOTIV -> EditorScreen(editor, machine, onNext = { dest = Dest.START },
+                                onScan = { machineTab = MachineTab.SCAN; dest = Dest.MASCHINE })
+                            Dest.START -> StartScreen(machine, editor, onMaterial = { dest = Dest.MATERIAL }, onMotiv = { dest = Dest.MOTIV })
+                            Dest.MASCHINE -> MaschineScreen(machine, editor, machineTab) { machineTab = it }
                             Dest.EINSTELLUNGEN -> SettingsScreen(machine)
                         }
                     }
@@ -129,7 +129,8 @@ private fun TopBar(machine: MachineViewModel) {
         Spacer(Modifier.weight(1f))
         status?.position?.takeIf { it.size == 3 }?.let { p ->
             // Work-area coordinates like the editor; negative = head in the laser's reserved border (parked).
-            for ((axis, v) in listOf("X" to p[0] - de.millione.lumacut.core.Bed.SAFE, "Y" to p[1] - de.millione.lumacut.core.Bed.SAFE, "Z" to p[2])) {
+            val w = de.millione.lumacut.core.Work.fromMachine(p[0], p[1])
+            for ((axis, v) in listOf("X" to w.x, "Y" to w.y, "Z" to p[2])) {
                 Text(axis, style = LcTypography.labelMedium, color = Lc.faint)
                 Text("%.2f".format(v), style = LcTypography.titleMedium.merge(NumberStyle), color = Lc.text,
                      textAlign = TextAlign.End, modifier = Modifier.width(66.dp))
@@ -158,6 +159,7 @@ private fun Rail(selected: Dest, onSelect: (Dest) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             for (d in Dest.entries) {
+                if (d == Dest.MASCHINE) Box(Modifier.fillMaxWidth().height(1.dp).background(Lc.line))
                 val on = d == selected
                 Column(
                     Modifier
@@ -170,7 +172,7 @@ private fun Rail(selected: Dest, onSelect: (Dest) -> Unit) {
                 ) {
                     Icon(d.icon, d.label, tint = if (on) Lc.accent else Lc.muted, modifier = Modifier.size(26.dp))
                     Spacer(Modifier.height(6.dp))
-                    Text(d.label, style = LcTypography.labelMedium, color = if (on) Lc.accent else Lc.muted, textAlign = TextAlign.Center, maxLines = 1)
+                    Text(d.step?.let { "$it · ${d.label}" } ?: d.label, style = LcTypography.labelMedium, color = if (on) Lc.accent else Lc.muted, textAlign = TextAlign.Center, maxLines = 1)
                 }
             }
         }
