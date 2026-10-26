@@ -156,6 +156,14 @@ Hauptweg, drei Schritte, immer sichtbar:
   Abtasten als `job.state=error` mit `job.error` in einem Satz; (3) Warteschlange
   (`op=queue_run`) schickt jeden Auftrag durch denselben Ablauf und referenziert selbst,
   statt „Vor dem Job referenzieren“ zu melden.
+- (Claude, Android) **Fertig: Android-App nach Abschnitten 2–5**, Commit `6c48868`, CI „LumaCut Android APK“
+  grün (Run 40340021386, https://github.com/theubyte/LumaCut-CNC/actions/runs/40340021386, APK als Artifact
+  `LumaCut-Android-APK`). Umrechnung `390 − x` / `30 + y` nur in `Work` (Rasterbilder, Vorschau, Kopf,
+  Abtastpunkte, Scan, Jog-Pfeile: links = X+, unten = Y+). Hauptweg 1 Material (aus `/api/materials`, 409 →
+  neu laden) → 2 Motiv → 3 Starten (Upload ohne absolutes Z, `op=autorun`, Fortschritt aus `job.state` und
+  `job.probe`). Nur die relativen Fokus-Absenkungen je Durchgang (`G91`/`G0 Z-…`/`G90`) bleiben im Auftrag.
+  Starten sperrt, solange `/api/status` kein `autorun_mesh` meldet. Alte Kopfkamera-Kalibrierungen werden
+  verworfen (einmal neu kalibrieren). Nicht auf dem Tablet erprobt.
 
 ## Änderungslog
 
