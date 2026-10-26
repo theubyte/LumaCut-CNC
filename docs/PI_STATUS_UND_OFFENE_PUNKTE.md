@@ -62,7 +62,12 @@ Sonstiges → 500 „Interner Fehler – Pi-Protokoll ansehen“.
 | `place_clear` | Platzierung verwerfen | frei |
 | `start` | Auftrag `name` abarbeiten, danach Parken; mit `placement=1` (oder `origin`/`anchor`) platziert | gehomed, frei |
 | `autorun` | Ein-Klick: Homing → Abtasten unter Motivmitte (oder `x`/`y`) → Fokus → Auftrag → Parken | Tasterversatz gesetzt |
-| `abort` | Rahmen: Stopp an der nächsten Ecke. Auftrag: Laser aus, Parken | läuft etwas |
+| `queue_add` | Auftrag `name` einreihen; Platzierung (`origin`/`anchor` oder `placement=1`) und Datei-Prüfsumme werden jetzt eingefroren, nichts fährt | `current`: gehomed, frei; `user`: gehomed |
+| `queue_run` | wartende Einträge nacheinander abarbeiten (je wie `start`, Parken nach jedem Auftrag) | gehomed, frei |
+| `queue_pause` | nach dem laufenden Auftrag anhalten | Warteschlange läuft |
+| `queue_skip` / `queue_remove` | Eintrag `id` überspringen (nur wartende) / entfernen (nicht den laufenden) | – |
+| `queue_clear` | alle Einträge außer dem laufenden entfernen | – |
+| `abort` | Rahmen: Stopp an der nächsten Ecke. Auftrag: Laser aus, Parken. Warteschlange: aktueller Auftrag abgebrochen, Rest bleibt wartend | läuft etwas |
 
 Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
 
@@ -145,6 +150,26 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
   Die Pi-Web-UI hat keinen Ursprungs-Knopf.
 - ⚠ Hardware.
 
+### Auftrags-Warteschlange (`op=queue_*`)
+
+- Liste im Speicher (max. 50, nicht persistent: Dienst-Neustart leert sie,
+  ohne dass etwas startet). Status `queue={items, state, current, max}`;
+  `state` = `idle`/`running`/`pausing`/`paused`/`stopped`/`complete`,
+  Eintrag-`state` = `queued`/`running`/`done`/`error`/`skipped`/`aborted`.
+- Jeder Eintrag läuft durch denselben Ablauf wie `op=start`
+  (`_execute_job`): `M5 I` vorab, Fokus, Parken danach. Zwischen zwei
+  Aufträgen ist der Laser aus; die Steuerung bleibt beim Besitzer `job`,
+  LightBurn/Web-UI können nicht dazwischen.
+- Vor jedem Eintrag erneut geprüft: Datei vorhanden, Prüfsumme wie beim
+  Einreihen (sonst „neu einreihen“), Verfahrweg/Safezone der verschobenen
+  Zeilen, Laser-Guard.
+- Fehler, `abort` oder NOT-AUS stoppen die Warteschlange (`stopped`); die
+  übrigen Einträge bleiben `queued` und laufen erst mit neuem `queue_run`.
+- Eingereihte Dateien lassen sich nicht löschen.
+- Die Pi-Web-UI hat (noch) keine Warteschlangen-Ansicht; LightBurn ist
+  unverändert.
+- ⚠ Hardware.
+
 ### Parken (`op=park`)
 
 - Dieselbe Routine wie LightBurn `M2` und das Auftragsende: Laser aus,
@@ -209,6 +234,7 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
 | Status-Snapshot (`busy`, `stale_ms`) | fix(pi400): /api/status blockiert nicht mehr hinter langen Fahrten (siehe `git log --grep="blockiert nicht mehr"`) | `pi400/marlin/web.py`, `tests/test_marlin_gateway.py` |
 | `op=moveto`, `/api/camera/snapshot`, `camera` im Status | `2c61b8a` (Kamera-Scan) | `pi400/marlin/web.py`, `pi400/marlin/transport.py` |
 | Auftrags-Ursprung (`op=place`, `origin_set`, `origin_clear`, `place_clear`, `placement=1`, Status `origin`) | „feat(pi400): Auftrags-Ursprung …“ (`git log --grep="Auftrags-Ursprung"`) | `pi400/marlin/placement.py`, `pi400/marlin/web.py`, `tests/test_job_placement.py` |
+| Auftrags-Warteschlange (`op=queue_add/run/pause/skip/remove/clear`, Status `queue`) | „feat(pi400): Auftrags-Warteschlange …“ (`git log --grep="Auftrags-Warteschlange"`) | `pi400/marlin/web.py`, `tests/test_job_queue.py` |
 
 Es reicht, den Pi-Dienst zu aktualisieren (Python-Code). SKR-Firmware,
 `/etc/lumacut` und die Daten bleiben gleich.
@@ -220,6 +246,8 @@ Es reicht, den Pi-Dienst zu aktualisieren (Python-Code). SKR-Firmware,
   während Home/Park/Abtasten.
 - `origin` fehlt: keine Ursprungs-Optionen. Studio sperrt die Auswahl und
   startet nur absolut.
+- `queue` fehlt: keine Warteschlange. Studio sperrt die Liste; einzelne
+  Aufträge laufen weiter.
 - `op=park` lässt sich am Status nicht erkennen. Ein Pi ohne `frame` ist
   aber älter als `65a22b4` und kann auch älter als `eaa3f38` sein.
 
@@ -232,6 +260,9 @@ Es reicht, den Pi-Dienst zu aktualisieren (Python-Code). SKR-Firmware,
 - Ursprung: „Pi-Dienst kennt noch keine Ursprungs-Optionen (op=place
   fehlt in pi400/marlin/web.py – Pi aktualisieren)“. Im Panel steht „Pi-Dienst
   zu alt: nur absolute Aufträge – Pi aktualisieren“.
+- Warteschlange: „Pi-Dienst kennt noch keine Auftrags-Warteschlange
+  (op=queue_add fehlt in pi400/marlin/web.py – Pi aktualisieren)“. Im Panel
+  steht „Pi-Dienst zu alt: keine Warteschlange – Pi aktualisieren“.
 - Alle werden aus der Pi-Antwort 400 „Unbekannte Marlin-Aktion: …“
   übersetzt.
 - Ohne Snapshot zeigt Studio „Status N s alt“ statt „Pi fährt“ und sperrt
@@ -261,10 +292,10 @@ sudo systemctl restart lumacut-marlin.service
 # 3) Prüfen
 systemctl is-active lumacut-marlin.service
 sudo journalctl -u lumacut-marlin.service -n 50 --no-pager
-curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(frame|activity|busy|stale_ms|owner|origin)"'
+curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(frame|activity|busy|stale_ms|owner|origin|queue)"'
 ```
 
-- Erwartet: `frame`, `activity`, `busy`, `stale_ms` und `origin` sind vorhanden,
+- Erwartet: `frame`, `activity`, `busy`, `stale_ms`, `origin` und `queue` sind vorhanden,
   `owner` ist „Frei“.
 - Danach in Studio „Verbinden“ und einmal Rahmen und Parken probieren
   (vorher referenzieren, Laser getrennt).
@@ -326,6 +357,8 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
    - Kamera-Snapshot und `op=moveto`.
    - Platzierte Aufträge (`op=place`): Lage auf dem Material und Rahmen am
      Ursprung.
+   - Warteschlange: mehrere Aufträge nacheinander, Parken dazwischen,
+     Abbruch mitten in der Warteschlange.
 7. **Prüfergebnisse (Audit, kein akuter Fehler):**
    - `/api/settings` nimmt `machine.lock` und wartet daher hinter einer
      laufenden Fahrt. Die Antwort kommt erst danach; das ist harmlos, aber

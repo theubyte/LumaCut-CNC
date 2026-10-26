@@ -182,7 +182,8 @@ def status():
                     round(config["focus_gap_mm"] - tip_gap, 3)),
                   job=dict(job), frame=dict(frame),
                   activity=("framing" if frame["state"] == "running" else
-                            "job" if job["state"] in ("homing", "probing", "running")
+                            "job" if (job["state"] in ("homing", "probing", "running") or
+                                      job_queue["state"] in QUEUE_ACTIVE)
                             else "idle"),
                   firmware="marlin",
                   busy=busy, stale_ms=stale_ms,
@@ -195,6 +196,7 @@ def status():
                       "aux":"FAN2 PC7 unused"},
                   config=dict(config),
                   origin=_origin_status(),
+                  queue=_queue_status(),
                   camera={"device": CAMERA, "available": os.path.exists(CAMERA)})
     return jsonify(result)
 
@@ -414,6 +416,12 @@ def action():
         _forget_placement(lambda p: True)
         return jsonify(message="Platzierung aufgehoben: Aufträge laufen absolut",
                        origin=_origin_status())
+    if op == "queue_add":
+        return queue_add()
+    if op == "queue_run":
+        return queue_run()
+    if op in ("queue_remove", "queue_skip", "queue_clear", "queue_pause"):
+        return queue_edit(op)
     if op == "frame":
         return start_frame()
     if op == "start":
@@ -424,6 +432,9 @@ def action():
         if frame["state"] == "running":
             stop_job.set()
             return jsonify(message="Rahmen-Abbruch angefordert: stoppt an der nächsten Ecke, Laser bleibt aus")
+        if job_queue["state"] in QUEUE_ACTIVE:
+            stop_job.set()
+            return jsonify(message="Abbruch angefordert: Laser aus, Parkposition, Warteschlange hält an")
         if job["state"] not in ("homing", "probing", "running"):
             raise RuntimeError("Kein laufender Auftrag")
         stop_job.set()
@@ -657,6 +668,8 @@ def job_delete(filename):
     path = _job_path(filename)
     if job["state"] in ("homing", "probing", "running") and job["file"] == path.name:
         raise RuntimeError("Laufender Auftrag kann nicht gelöscht werden")
+    if _file_queued(path.name):
+        raise RuntimeError("Auftrag steht in der Warteschlange – zuerst dort entfernen")
     path.unlink()
     _forget_placement(lambda p: p["file"] == path.name)
     return jsonify(message="Auftrag gelöscht: " + path.name)
@@ -785,42 +798,55 @@ def _job_sets_focus(commands):
     return False
 
 
-def _job_worker(filename, commands, probe_point=None):
+def _execute_job(filename, commands, probe_point=None):
+    """Run one job under the "job" ownership; raises on error/abort.
+
+    Shared by the single-job worker and the queue worker (#17), so both
+    use exactly the same homing/probe/focus/park sequence.
+    """
     job.update(file=filename, state="running", line=0, total=len(commands), error="")
-    try:
-        if probe_point is not None:
-            # One-click: home XY then Z, probe the material under the motif,
-            # focus happens automatically before the first powered G1.
-            job["state"] = "homing"
+    if probe_point is not None:
+        # One-click: home XY then Z, probe the material under the motif,
+        # focus happens automatically before the first powered G1.
+        job["state"] = "homing"
+        machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
+        if stop_job.is_set():
+            raise RuntimeError("Abgebrochen")
+        job["state"] = "probing"
+        machine.command("G0 X%.3f Y%.3f" % probe_point, owner="job", timeout=60)
+        machine.probe_workpiece(owner="job")
+        job["state"] = "running"
+    if _job_sets_focus(commands):
+        machine.focused_this_job = True
+    machine.command("M5 I", owner="job")
+    for i, command in enumerate(commands, 1):
+        if stop_job.is_set():
+            raise RuntimeError("Abgebrochen")
+        normalized = normalize(command)
+        if normalized == "G28":
             machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
-            if stop_job.is_set():
-                raise RuntimeError("Abgebrochen")
-            job["state"] = "probing"
-            machine.command("G0 X%.3f Y%.3f" % probe_point, owner="job", timeout=60)
+        elif normalized == "G30":
             machine.probe_workpiece(owner="job")
-            job["state"] = "running"
-        if _job_sets_focus(commands):
-            machine.focused_this_job = True
-        machine.command("M5 I", owner="job")
-        for i, command in enumerate(commands, 1):
-            if stop_job.is_set():
-                raise RuntimeError("Abgebrochen")
-            normalized = normalize(command)
-            if normalized == "G28":
-                machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
-            elif normalized == "G30":
-                machine.probe_workpiece(owner="job")
-            elif normalized == "M2":
-                pass  # the worker always parks once at the end
-            elif normalized:
-                machine.command(command, owner="job", timeout=150)
-            job["line"]=i
-        machine.park_safezone(owner="job")
-        job["state"]="complete"
+        elif normalized == "M2":
+            pass  # the worker always parks once at the end
+        elif normalized:
+            machine.command(command, owner="job", timeout=150)
+        job["line"]=i
+    machine.park_safezone(owner="job")
+    job["state"]="complete"
+
+
+def _job_failed(exc):
+    job.update(state="aborted" if stop_job.is_set() else "error", error=str(exc))
+    if not machine.emergency_latched:
+        _stop_after_job_error()
+
+
+def _job_worker(filename, commands, probe_point=None):
+    try:
+        _execute_job(filename, commands, probe_point)
     except Exception as exc:
-        job.update(state="aborted" if stop_job.is_set() else "error", error=str(exc))
-        if not machine.emergency_latched:
-            _stop_after_job_error()
+        _job_failed(exc)
     finally:
         with machine.lock:
             machine.owner=None
@@ -865,6 +891,177 @@ def start_job(automatic=False):
         return jsonify(message="Ein-Klick-Ablauf gestartet: Homing → Abtasten bei X%.1f Y%.1f "
                        "→ Fokus → %s → Park" % (probe_point[0], probe_point[1], filename))
     return jsonify(message="Job gestartet: " + filename)
+
+
+# --- Multi-job queue (gap analysis #17) --------------------------------
+# An in-memory list of stored jobs that run one after another under one
+# "job" ownership, each through the same _execute_job as op=start (homing
+# state, focus, park after every job, laser off between jobs). The placement
+# (origin/anchor -> dx/dy) is frozen when an item is added, so jogging after
+# queue_add does not move queued work; the file sha is frozen too and a job
+# changed since then is refused. Abort, E-stop or an error stop the queue;
+# the remaining items stay "queued" for a later queue_run. Not persisted:
+# a service restart empties the queue (nothing runs without a new run).
+QUEUE_MAX = 50
+job_queue = {"items": [], "state": "idle", "current": None, "next_id": 1}
+queue_lock = threading.Lock()
+queue_pause = threading.Event()
+QUEUE_ACTIVE = ("running", "pausing")
+
+
+def _queue_status():
+    with queue_lock:
+        return {"items": [{k: v for k, v in item.items() if k != "sha"}
+                          for item in job_queue["items"]],
+                "state": job_queue["state"], "current": job_queue["current"],
+                "max": QUEUE_MAX}
+
+
+def _queue_item(raw_id):
+    """Item by id (caller holds queue_lock)."""
+    try:
+        wanted = int(raw_id)
+    except (TypeError, ValueError):
+        raise ValueError("Warteschlangen-Eintrag fehlt (Feld id)")
+    for item in job_queue["items"]:
+        if item["id"] == wanted:
+            return item
+    raise ValueError("Warteschlangen-Eintrag %d nicht gefunden" % wanted)
+
+
+def queue_add():
+    """op=queue_add: append a stored job with a frozen placement (nothing moves)."""
+    filename = request.form.get("name", "")
+    content = _job_file(filename)
+    origin = request.form.get("origin", "").strip() or "absolute"
+    if request.form.get("placement") == "1":
+        p = _stored_placement(filename, content)
+        _apply_offset(content.splitlines(), p["dx"], p["dy"])
+        result = dict(p)
+    else:
+        if origin == "current":
+            local_owner()   # fresh M114 needs the controller
+        result, _ = make_placement(filename, content, origin,
+                                   request.form.get("anchor", ""))
+    with queue_lock:
+        if len(job_queue["items"]) >= QUEUE_MAX:
+            raise RuntimeError("Warteschlange voll (max. %d Einträge)" % QUEUE_MAX)
+        item = {"id": job_queue["next_id"], "file": filename,
+                "origin": result["origin"], "anchor": result["anchor"],
+                "dx": result["dx"], "dy": result["dy"], "target": result.get("target"),
+                "bounds": result.get("bounds"), "sha": result["sha"],
+                "state": "queued", "error": ""}
+        job_queue["next_id"] += 1
+        job_queue["items"].append(item)
+    return jsonify(message="Eingereiht: %s (#%d, %s)" % (filename, item["id"], item["origin"]),
+                   queue=_queue_status())
+
+
+def queue_edit(op):
+    """op=queue_remove|queue_skip|queue_clear|queue_pause."""
+    with queue_lock:
+        if op == "queue_pause":
+            if job_queue["state"] != "running":
+                raise RuntimeError("Warteschlange läuft nicht")
+            queue_pause.set()
+            job_queue["state"] = "pausing"
+            message = "Warteschlange hält nach dem laufenden Auftrag an"
+        elif op == "queue_clear":
+            job_queue["items"] = [i for i in job_queue["items"] if i["state"] == "running"]
+            message = "Warteschlange geleert"
+        else:
+            item = _queue_item(request.form.get("id"))
+            if item["state"] == "running":
+                raise RuntimeError("Laufender Auftrag: zuerst abbrechen")
+            if op == "queue_skip":
+                if item["state"] != "queued":
+                    raise RuntimeError("Nur wartende Aufträge können übersprungen werden")
+                item["state"] = "skipped"
+                message = "Übersprungen: %s (#%d)" % (item["file"], item["id"])
+            else:
+                job_queue["items"].remove(item)
+                message = "Entfernt: %s (#%d)" % (item["file"], item["id"])
+    return jsonify(message=message, queue=_queue_status())
+
+
+def _queue_commands(item):
+    """Lines for a queued item, re-checked now (file, sha, bounds, guard)."""
+    content = _job_file(item["file"])
+    if _content_sha(content) != item["sha"]:
+        raise RuntimeError("%s seit dem Einreihen geändert – neu einreihen" % item["file"])
+    return _apply_offset(content.splitlines(), item["dx"], item["dy"])
+
+
+def _queue_worker():
+    final = "complete"
+    try:
+        while True:
+            if stop_job.is_set():
+                final = "stopped"
+                break
+            if queue_pause.is_set():
+                final = "paused"
+                break
+            with queue_lock:
+                item = next((i for i in job_queue["items"] if i["state"] == "queued"), None)
+                if item is None:
+                    break
+                item.update(state="running", error="")
+                job_queue["current"] = item["id"]
+            try:
+                job.update(file=item["file"], error="")
+                _execute_job(item["file"], _queue_commands(item))
+            except Exception as exc:
+                _job_failed(exc)
+                with queue_lock:
+                    item.update(state="aborted" if stop_job.is_set() else "error",
+                                error=str(exc))
+                final = "stopped"
+                break
+            with queue_lock:
+                item["state"] = "done"
+    except Exception:       # pragma: no cover - defensive
+        logging.exception("Queue worker failed")
+        final = "stopped"
+    finally:
+        with queue_lock:
+            job_queue.update(state=final, current=None)
+        with machine.lock:
+            machine.owner = None
+        job_lock.release()
+
+
+def queue_run():
+    """op=queue_run: run the waiting items in order (stops on error/abort)."""
+    local_owner()
+    if not machine.homed:
+        raise RuntimeError("Vor der Warteschlange referenzieren")
+    with queue_lock:
+        if job_queue["state"] in QUEUE_ACTIVE:
+            raise RuntimeError("Warteschlange läuft bereits")
+        waiting = sum(1 for i in job_queue["items"] if i["state"] == "queued")
+    if not waiting:
+        raise RuntimeError("Keine wartenden Aufträge in der Warteschlange")
+    if not job_lock.acquire(blocking=False):
+        raise RuntimeError("Ein Auftrag oder Rahmen läuft bereits")
+    stop_job.clear()
+    queue_pause.clear()
+    with machine.lock:
+        if machine.owner is not None:
+            job_lock.release()
+            raise RuntimeError("Steuerung inzwischen belegt durch " + machine.owner)
+        machine.owner = "job"
+    with queue_lock:
+        job_queue["state"] = "running"
+    threading.Thread(target=_queue_worker, daemon=True, name="marlin-job-queue").start()
+    return jsonify(message="Warteschlange gestartet: %d Auftrag/Aufträge" % waiting,
+                   queue=_queue_status())
+
+
+def _file_queued(name):
+    with queue_lock:
+        return any(i["file"] == name and i["state"] in ("queued", "running")
+                   for i in job_queue["items"])
 
 
 def frame_program(text):
