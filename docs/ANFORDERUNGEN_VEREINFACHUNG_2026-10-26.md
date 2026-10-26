@@ -191,6 +191,64 @@ Die Apps bilden einfach die echte Maschine ab.
 - **Web-UI-Agent (Pi-Web-UI):** Jog-Kreuz und Tastatur spiegeln, Bett-SVG mit Ursprung oben rechts, siehe 2.1 (3).
 - **Android-Agent:** Ankernamen als sichtbare Ecke senden; neue Pis melden `coord_convention`.
 
+### 2.3 Umsetzung Canvas (Studio Windows, 2026-10-26)
+
+**Status: Canvas-Seite fertig und getestet, Push gehalten.** Gepusht wird erst, wenn Scan Probe nachzieht. Sonst wird CI rot: Ohne die Scan-Änderungen schlagen 31 Scan- und Fokus-Tests fehl.
+
+**Ein Schalter, eine Stelle (`lumacut_canvas/workarea.py`):**
+- `ORIGIN_TOP_RIGHT = True` ist der einzige Schalter.
+- Umgerechnet wird nur hier, mit drei Koordinatenarten:
+  - **Bildschirm** (Dokument, Szene, Overlays, SVG/PNG): oben links, x nach rechts, wie bisher.
+    - Die Szene wird **nicht** gespiegelt (kein `scale(-1, 1)`), Text und Bilder bleiben lesbar.
+  - **Anzeige** (Lineale, Statusleiste, X/Y-Felder, Gitterbeschriftung): Nullpunkt oben rechts, X nach links.
+    - Umrechnung mit `screen_to_user(x, y) = (360 − x, y)`.
+    - Das X-Feld zeigt den Abstand der **rechten** Kante vom Nullpunkt.
+    - Breite/Höhe ändern hält die Nullpunkt-Seite fest. Am linken Rand wird die ganze Auswahl gemeinsam zurückgeschoben.
+  - **Maschine** (G-Code, Rahmen, Schätzung, Raster, Bilder, Relief): `screen_to_machine(x, y) = (390 − x, 30 + y)`, wie in §2.1.
+    - `to_machine`/`from_machine` bleiben als Namen und nehmen **Bildschirm**-mm.
+    - Hinweis zu §2.2: Dort steht `(u + 30, v + 30)` für **Anzeige**-Koordinaten u/v. Das ist dieselbe Umrechnung.
+- Grenzen des Schneidbereichs: `MACHINE_X_MIN/MAX`, `MACHINE_Y_MIN/MAX` = 30/390, 30/370. Diese Konstanten nutzen gcode, estimate, raster, cutpath und relief statt eigener Rechnungen.
+- Bilder: `IMAGE_FLIP_X`. Rasterzeilen laufen in Maschinenrichtung, der Ursprung ist `to_machine(rechte Kante, oben)`.
+
+**Dateien:**
+- Gespeichert wird weiter in Bildschirm-mm. Alte `.lumacut.json` liegen deshalb an **derselben sichtbaren Stelle**, ohne Umrechnung.
+- Neu ist das Feld `"coords": "screen-tl/machine-tr-v2"`.
+  - Fehlt es, ist die Datei alt, und das ist in Ordnung.
+  - Ein unbekannter Wert wird abgelehnt.
+  - `VERSION` bleibt gleich, damit ältere Studios die Dateien weiter öffnen.
+- Achtung: Ein alter Auftrag kommt auf der Maschine jetzt **an der gespiegelten Stelle** heraus, und zwar richtig herum. Vorher kam er seitenverkehrt.
+
+**Tests:** `tests/test_origin_top_right.py` prüft:
+- Formel, Ecken und Hin- und Rückweg.
+- +X = nach links.
+- Eine Form links ergibt großes Maschinen-X, nicht gespiegelt.
+- Anzeige- und X-Feld-Werte.
+- Alte Datei an derselben Stelle; unbekannte Konvention wird abgelehnt.
+
+Die Canvas-Tests (G-Code, Drehung, Import/Rahmen, Eigenschaftsleiste, Statusleiste) sind auf die neue Abbildung umgestellt.
+
+**Was Scan Probe spiegeln muss (`scanprobe/panel.py`):**
+
+Platzierung (Vektoren) und Bilder (Mosaik, Höhenkarte) sind getrennt zu behandeln:
+
+1. **Platzierung, Rechtecke aus zwei Ecken:** Über `to_machine` entstehen jetzt `x0 > x1`.
+   - Betroffen sind `work_rect_machine()` sowie die Design-Boxen (`Rect(x0, y0, x1, y1)`, ca. Z. 844) und der ROI (ca. Z. 890).
+   - Die Ecken müssen mit `min`/`max` sortiert werden, sonst kommt `ValueError: Rect max must be >= min`.
+   - Polygone und Punkte über `to_machine`/`from_machine` stimmen bereits.
+2. **Rückfall ohne Canvas-Paket:** `to_machine = (390 − x, y + 30)` und `from_machine = (390 − x, y − 30)`.
+3. **Bilder:** In `mosaic_to_work_image()` und beim Höhenkarten-Bild (`heatmap_rgba` in `set_heatmap`) ist Spalte 0 das kleinste Maschinen-X. Auf dem Bildschirm liegt das jetzt **rechts**.
+   - Beide Bilder bei `IMAGE_FLIP_X` waagerecht spiegeln (`img[:, ::-1]`).
+   - Alternative: `machine_rect_to_screen()` für Lage und Ausdehnung nutzen.
+   - Die Beschriftung erkannter Objekte gehört an `bounds.xmax` (linke Bildschirmkante).
+4. **Scan-Tests:** Mehrere Tests legen Canvas-Formen und Fake-Mesh mit `Maschine = Bildschirm + 30` übereinander, etwa `test_focus_export._union_mesh_rect` und die Szenen in `test_scan_panel`/`test_scan_marking`/`test_workflow`. Diese Tests müssen auf `to_machine` bzw. `390 − x` umgestellt werden.
+- Ein Patchvorschlag für 1–3 liegt auf der Box unter `/workspace/origin-scanprobe.patch` (nicht committet). Damit sinken die Fehler von 31 auf 17, und alle verbleibenden 17 liegen an Punkt 4.
+
+**Machine:** Keine Codeänderung nötig. Anker `tr` = Nullpunkt-Ecke passt (§2.2).
+
+**Physische Prüfung (⚠ offen):** Nach dem Homing in der Studio-Ansicht prüfen:
+- **X+10 fährt den Kopf nach links**, **Y+10 nach vorne zur Tür**.
+- Ein Testrechteck **oben links** auf dem Bildschirm wird **vorne gesehen oben links** gelasert, und Text ist lesbar.
+
 ## 3. Kamera-Scan
 
 - Optional, ausgelöst durch einen **einzigen Button** in beiden Apps.
@@ -286,7 +344,7 @@ API an; die eingebaute Datenbank ist in Studio nur lesbar (bearbeitet werden Pre
 | Thema | Zuständig | Status |
 |---|---|---|
 | Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1); großer Start-Knopf der Hauptansicht ruft `one_click.start` (Canvas, §5.1); Maschinen-Panel erledigt (§1.2: „Auftrag starten“ → `op=autorun`, Service-Gruppe „Erweitert“, Phasenanzeige, alter Pi); Pi-Code fertig, auf dem Pi noch nicht installiert |
-| Nullpunkt oben rechts | Canvas + Machine | Maschinenseite erledigt (`ce7da00`: Anker = sichtbare Ecke, `coord_convention`, Jog-Kreuz gespiegelt, siehe §2.2); Canvas (`workarea.py`, Absprache §2) offen |
+| Nullpunkt oben rechts | Canvas + Machine + Scan Probe | Maschinenseite erledigt (`ce7da00`, §2.2); Canvas fertig und getestet, **Push gehalten**, bis Scan Probe Platzierung und Bilder spiegelt (§2.3); danach physische Prüfung am Gerät |
 | Kamera-Scan als Button | Scan Probe | Studio erledigt (§3); Android: Vertrag vorbereitet, kein Code |
 | Probing immer im Auftrag (keine Auswahl) | Scan Probe | Studio erledigt (§1.1) |
 | Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | Studio-Client fertig (beide API-Varianten, offline, Konflikte; §4.1), Pi-Endpunkte in Arbeit |
