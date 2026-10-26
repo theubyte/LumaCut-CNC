@@ -5,7 +5,7 @@ Dieses Dokument beschreibt jeden HTTP-Aufruf, den die native App
 schickt. Alle Angaben stammen aus dem Code: `client.py` (HTTP),
 `worker.py` (Poller, Befehls-Threads), `panel.py` (Oberfläche) und
 `settings.py` (Einstellungen). Sie wurden gegen `pi400/marlin/web.py` und
-`pi400/marlin/transport.py` geprüft (Stand: Commit mit `op=park`).
+`pi400/marlin/transport.py` geprüft (Stand: Commit mit `op=frame`).
 
 ## Allgemeines
 
@@ -84,6 +84,8 @@ die Zeitlimits für Bewegungen lang.
   | `workpiece_surface_z`, `laser_focus_z` | float oder `null` | Fokus-Anzeige, Scan-Modul |
   | `probe_xy_offset_mm` | gesetzt ja/nein | `probe_offset_set` |
   | `job.file`, `job.state`, `job.line`, `job.total`, `job.error` | | Auftragsanzeige mit Fortschritt; `homing`/`probing`/`running` = aktiv |
+  | `frame.state`, `frame.mode`, `frame.line`, `frame.total`, `frame.error` | `FrameState` | Rahmenfahrt: `running` = aktiv (sperrt wie ein Auftrag), danach `complete`/`aborted`/`error`; fehlt bei älteren Pis → `idle` |
+  | `activity` | str | `idle` / `job` / `framing` (nur geparst über `raw`; die App nutzt `frame.state` bzw. `owner == "frame"`) |
 
 - **Robustheit:** Kein Objekt → `ProtocolError`. Ohne `firmware` und ohne
   eines der Kernfelder `connected`, `homed`, `position`, `owner`,
@@ -175,6 +177,61 @@ die Zeitlimits für Bewegungen lang.
   Die App zeigt dann „Pi-Dienst bietet noch kein Parken über die API
   (op=park fehlt in pi400/marlin/web.py)“. Abhilfe: Pi-Dienst aktualisieren.
 
+### `POST /api/action op=frame`: Rahmen abfahren (Laser aus)
+
+- **Auslöser:** Knopf „Rahmen“ im Panel (Auswahl „Rechteck“ = `box` /
+  „Gummiband“ = `hull`, mit Rückfrage) sowie Toolbar „Rahmen“
+  (*Strg+Umschalt+F*, Rechteck) und „Gummiband-Rahmen“ (*Alt+Umschalt+F*).
+  Freigegeben nur verbunden, Status frisch, gehomed, kein Notstopp, kein
+  Auftrag und keine Rahmenfahrt aktiv; die Toolbar-Aktionen folgen
+  `frame_available_changed`.
+- **Payload:** `op=frame gcode=<Rahmenprogramm> mode=box|hull`
+  (form-encoded). Das Programm erzeugt `lumacut_job.estimate.frame_gcode`
+  aus dem aktuellen Design, z. B.:
+
+  ```
+  ; LUMACUT FRAME (laser off)
+  G21
+  G90
+  M5 I
+  G0 X60.000 Y60.000
+  G1 X120.000 Y60.000 F3000 S0
+  …
+  M5 I
+  M400
+  ```
+
+  Die App prüft vorab Modus, leeres Programm und Größe (max. 64 KB).
+  **Zeitlimit:** 60 s (der Pi startet einen Hintergrund-Thread und
+  antwortet sofort).
+- **Pi:** `local_owner()`, kein Notstopp, `homed`, dann `frame_program()`:
+  pro Zeile nur `G0`/`G1` mit X/Y/F/S (S nur 0), `G21`, `G90`, `M5 I`,
+  `M400`; kein `M3`, kein Z, keine Bögen, kein `G91`; Punkte in X0..390 /
+  Y0..370, F 60..9000, max. 2000 Bewegungen; zusätzlich jede Zeile durch
+  einen frischen `MarlinLaserGuard`. Danach `job_lock` (gemeinsam mit
+  Aufträgen), Besitzer `frame`, Thread `_frame_worker`: `M5 I`, `G90`,
+  jede Bewegung mit eigenem `M400`, vor jeder Zeile Abbruch-Check und
+  `laser_enabled` muss aus sein, am Ende `M5 I`. **Kein Parken.**
+  Die hochgeladene Datei, die Auftragsliste und `job.*` bleiben
+  unverändert: Danach direkt „Starten“, ohne neu zu senden.
+- **Antwort:** `{"message": "Rahmenfahrt gestartet (Rechteck|Gummiband, Laser
+  aus)", "frame": {"state": "running", "mode": "box", "line": 0,
+  "total": N, "error": ""}}`. Fortschritt über `frame.*` in `/api/status`;
+  das Panel zeigt „Rahmenfahrt läuft (…) · Laser aus · <Auftrag> bleibt
+  geladen“ und danach „Rahmenfahrt fertig / abgebrochen / fehlgeschlagen“.
+- **Fehler (400):** „Vor dem Rahmen referenzieren“, „Rahmen Zeile n: …“
+  (z. B. „Laserleistung im Rahmen verboten (nur S0)“), „Rahmenart muss box
+  oder hull sein“, „Ein Auftrag oder Rahmen läuft bereits“, „Steuerung
+  belegt durch job …“, „Notstopp aktiv – erst quittieren“; 503 ohne USB.
+  Während einer Rahmenfahrt lehnen andere Befehle mit „Rahmenfahrt läuft –
+  abwarten oder abbrechen“ ab.
+- **Abbrechen:** `op=abort` stoppt an der nächsten Ecke („Rahmen-Abbruch
+  angefordert …“), `op=estop` sofort. „Abbrechen“ bleibt auch bei altem
+  Status nutzbar, weil der Pi `machine.lock` während jeder Kante hält.
+- **Ältere Pi-Dienste** antworten mit 400 „Unbekannte Marlin-Aktion:
+  frame“. Die App zeigt „Pi-Dienst bietet noch keine Rahmenfahrt über die
+  API (op=frame fehlt …)“.
+
 ### `POST /api/upload`: Auftrag senden
 
 - **Auslöser:** Knopf „Senden“ (gewählte Datei) und
@@ -206,10 +263,12 @@ die Zeitlimits für Bewegungen lang.
 
 ### `POST /api/action op=abort`: Auftrag abbrechen
 
-- **Auslöser:** Knopf „Abbrechen“ (nur bei aktivem Auftrag).
+- **Auslöser:** Knopf „Abbrechen“ (nur bei aktivem Auftrag oder Rahmenfahrt).
 - **Payload:** `op=abort`. **Zeitlimit:** 60 s.
 - **Antwort:** `message` „Abbruch angefordert: Laser aus, danach
-  Parkposition“. **Fehler:** 400 „Kein laufender Auftrag“.
+  Parkposition“ bzw. bei Rahmenfahrt „Rahmen-Abbruch angefordert: stoppt an
+  der nächsten Ecke, Laser bleibt aus“. **Fehler:** 400 „Kein laufender
+  Auftrag“.
 
 ### Im Client vorhanden, aber ohne Knopf
 
@@ -318,8 +377,13 @@ Der Software-NOT-AUS ersetzt **nicht** den physischen Not-Aus-Schalter.
 6. **Pi-Dienst aktualisieren:** `op=park` gibt es erst ab dem Commit
    „feat(pi400): op=park in /api/action“. Ältere Pis melden das klar (siehe
    oben).
-7. **Kein HTTPS:** Die Verbindung läuft unverschlüsselt im LAN.
-8. **Tests:** Die Maschinen-Tests (`tests/test_machine_*.py`) laufen gegen
+7. **Rahmenfahrt:** `op=frame` gibt es erst ab „feat(pi400): op=frame …“.
+   Während jeder Kante hält der Pi `machine.lock` (wegen `M400`), lange
+   Kanten lassen den Status daher kurz „alt“ werden; Abbrechen und NOT-AUS
+   bleiben bedienbar. Abbrechen wirkt an der nächsten Ecke, nicht mitten
+   in der Kante. Die Pi-Weboberfläche hat keinen eigenen Rahmen-Knopf.
+8. **Kein HTTPS:** Die Verbindung läuft unverschlüsselt im LAN.
+9. **Tests:** Die Maschinen-Tests (`tests/test_machine_*.py`) laufen gegen
    den Fake-Pi (`tests/fake_pi.py`) und im Workflow
    `lumacut-studio-native.yml` headless vor dem .exe-Build. Gegen einen
    echten Pi ist die Anbindung noch nicht getestet. Lokal:

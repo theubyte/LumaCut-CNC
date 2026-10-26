@@ -55,6 +55,10 @@ Eigenständig testen: `python src/canvas_demo.py`.
 - **An die Maschine:** „Design senden“ (Toolbar) erzeugt Marlin-G-Code
   (`lumacut_canvas/gcode.py`, Regeln wie `marlin-postprocessor.mjs`) und lädt
   ihn über das Maschinen-Panel hoch; gestartet wird erst mit „Start Job“.
+- **Rahmen:** „Rahmen“ (*Strg+Umschalt+F*, Rechteck) bzw. „Gummiband-Rahmen“
+  (*Alt+Umschalt+F*, konvexe Hülle) oder der Knopf „Rahmen“ im Maschinen-Panel
+  fahren den Umriss mit ausgeschaltetem Laser ab (`op=frame`). Der gesendete
+  Auftrag bleibt geladen: senden → Rahmen → starten, ohne neu zu senden.
 - Die Arbeitsfläche zeigt 0–360 × 0–340 mm. Objekte werden still in der Fläche
   gehalten; der interne Safezone-Versatz wird nur beim Export für die Maschine
   addiert (`lumacut_canvas/workarea.py`).
@@ -156,7 +160,8 @@ N s alt“, und alle Knöpfe außer NOT-AUS sind gesperrt.
 | Park | `op=park`: Laser aus, Z-Rückzug, X0/Y0 (nur gehomed) |
 | Senden | `POST /api/upload` (multipart `file`, .gcode/.gc/.nc, max. 32 MB) |
 | Starten / Ein-Klick | `op=start name=…` / `op=autorun name=…` (mit Rückfrage) |
-| Abbrechen | `op=abort` |
+| Rahmen (Rechteck / Gummiband), *Strg+Umschalt+F* / *Alt+Umschalt+F* | `op=frame gcode=… mode=box\|hull`: Umriss mit Laser aus, ohne Upload; der gesendete Auftrag bleibt geladen (nur gehomed, nicht während eines Auftrags; mit Rückfrage) |
+| Abbrechen | `op=abort` (Auftrag oder Rahmenfahrt) |
 
 Fehler des Pi (`{"error": …}`) erscheinen im Panel unter „Letzte Meldung“.
 
@@ -167,9 +172,9 @@ Zustandsautomat, NOT-AUS-Verhalten und Einstellungen:
 **Hinweise / offene Punkte im Pi-Dienst**
 - Der Pi prüft `X-LumaCut-Key` derzeit nicht. Die App sendet ihn trotzdem und
   zeigt HTTP 401/403 als „Schlüssel abgelehnt“ an, sobald der Pi ihn prüft.
-- `op=park` ist jetzt in `pi400/marlin/web.py` enthalten. Ein älterer
-  Pi-Dienst meldet „bietet noch kein Parken über die API“, bis er
-  aktualisiert ist.
+- `op=park` und `op=frame` sind jetzt in `pi400/marlin/web.py` enthalten.
+  Ein älterer Pi-Dienst meldet „bietet noch kein Parken über die API“ bzw.
+  „bietet noch keine Rahmenfahrt über die API“, bis er aktualisiert ist.
 - `/api/status` wartet auf die Maschinensperre und liefert deshalb während
   Home/Park/Abtasten keine Live-Position.
 
