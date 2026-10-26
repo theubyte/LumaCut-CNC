@@ -180,11 +180,13 @@ def test_old_mesh_warns():
     assert res.ok and any("h alt" in w for w in res.warnings)
 
 
-def test_pi_surface_guard_warning():
+def test_pi_surface_guard_blocks():
+    """Pi bricht Z-Fahrten unter (G30-Oberfläche + 2 mm) mitten im Lauf ab -> vorher Fehler."""
     res = compensate_for_export(job([(110, 110), (150, 110)]), fake_maps(), pi_surface_z=8.0)
-    assert res.ok and any("Pi-Sperre" in w for w in res.warnings)
+    assert not res.ok and res.gcode is None
+    assert any("Pi-Sperre" in e and "mitten im Lauf" in e and "G30" in e for e in res.errors)
     res = compensate_for_export(job([(110, 110), (150, 110)]), fake_maps(), pi_surface_z=3.0)
-    assert not any("Pi-Sperre" in w for w in res.warnings)
+    assert res.ok and not any("Pi-Sperre" in w for w in res.warnings + res.errors)
 
 
 def _mosaic(shift_px=0):

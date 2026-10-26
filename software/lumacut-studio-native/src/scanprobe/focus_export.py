@@ -164,6 +164,11 @@ def highest_surface(maps: HeightMapSet) -> Optional[float]:
     return max(vals) if vals else None
 
 
+def lowest_surface(maps: HeightMapSet) -> Optional[float]:
+    vals = [float(np.nanmin(m.z)) for m in maps.maps if np.isfinite(m.z).any()]
+    return min(vals) if vals else None
+
+
 def check_maps(maps: HeightMapSet, mosaic=None,
                now: Optional[float] = None, max_age_h: float = MAX_AGE_H) -> tuple[list[str], list[str]]:
     """Alter und Fingerabdruck des Meshes gegen den aktuellen Scan.
@@ -250,12 +255,26 @@ def compensate_for_export(gcode: str, maps: Optional[HeightMapSet], *,
         if "außerhalb" not in w:  # bereits oben mit Länge gemeldet
             res.warnings.append(w)
     if pi_surface_z is not None and math.isfinite(report.z_min):
+        # Der Pi prüft jede Z-Fahrt gegen *eine* Oberfläche (letztes G30) + 2 mm.
+        # Bei mehreren Werkstückhöhen bzw. Fokus-Absenkung würde er sonst mitten
+        # im Auftrag abbrechen (Brennspur halb fertig) – daher hier ein Fehler.
         limit = pi_surface_z + s.min_clearance_mm
         if report.z_min < limit - 1e-6:
-            res.warnings.append(
+            low = lowest_surface(maps)
+            why = []
+            if low is not None and low < pi_surface_z - 0.05:
+                why.append(f"niedrigster geprobter Bereich Z{low:.2f} liegt "
+                           f"{pi_surface_z - low:.2f} mm unter der Pi-Oberfläche")
+            if report.focus_offset_min < 0:
+                why.append(f"Fokus-Absenkung bis {-report.focus_offset_min:.2f} mm (Tiefe je "
+                           "Durchgang/3D-Stufen)")
+            res.errors.append(
                 f"Tiefste Fokushöhe Z{report.z_min:.2f} liegt unter der Pi-Sperre Z{limit:.2f} "
-                f"(zuletzt gemessene Oberfläche {pi_surface_z:.2f} + 2 mm). Der Pi würde den Auftrag "
-                "abbrechen – vorher auf dem niedrigsten Werkstück proben.")
+                f"(zuletzt am Pi gemessene Oberfläche {pi_surface_z:.2f} + {s.min_clearance_mm:g} mm)"
+                + (" – " + "; ".join(why) if why else "") + ". Der Pi würde den Auftrag mitten im "
+                "Lauf abbrechen. Fokus (G30) auf dem niedrigsten Werkstück antasten oder die "
+                "Fokus-Absenkung verringern.")
+            res.gcode = None
     return res
 
 
