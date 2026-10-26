@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QWidget)
 
 from . import icons, theme, touch
+from .fill_preview import FillPreview
 from .fit import HScrollStrip
 from .canvas_view import PX_PER_MM_100, CanvasScene, CanvasView, Ruler
 from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand, SetGroupsCommand,
@@ -321,6 +322,7 @@ class CanvasEditor(QWidget):
         self._build_layout()
 
         self.document.add_listener(self._on_document_changed)
+        self.fill_preview = FillPreview(self)  # Schraffur der Ebenen sichtbar machen
         self.undo_stack.cleanChanged.connect(self._clean_changed)
         self.set_tool(Tool.SELECT)
 

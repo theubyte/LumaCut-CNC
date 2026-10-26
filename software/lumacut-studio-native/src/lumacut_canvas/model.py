@@ -19,6 +19,7 @@ import uuid
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Callable, Iterable
 
+from . import hatch as _hatch
 from .material import DEPTH_PER_PASS_RANGE, THICKNESS_RANGE
 from .workarea import Rect, clamp_offset, fit_scale, is_inside_work_area
 
@@ -47,6 +48,12 @@ CUT_LAYER_DEFAULTS = {
     "lead_in_mm": 0.0, "lead_in_arc": False, "lead_out_mm": 0.0,
 }
 CUT_LAYER_FIELDS = tuple(CUT_LAYER_DEFAULTS)
+# Vektor-Füllung je Ebene (hatch.py); nur gespeichert, wenn vom Standard abweichend.
+FILL_LAYER_DEFAULTS = {"fill_mode": "none", "line_interval_mm": _hatch.DEFAULT_INTERVAL_MM,
+                       "hatch_angle": 0.0, "hatch_bidirectional": True, "hatch_outline": True}
+FILL_LAYER_FIELDS = tuple(FILL_LAYER_DEFAULTS)
+# Geschlossene Objektarten, die gefüllt werden (Linie/Freihand/Bild nicht).
+FILLABLE_KINDS = ("rect", "ellipse", "polygon", "text")
 
 SHAPE_KINDS = ("rect", "ellipse", "line", "text", "polygon", "path", "image")
 # Objekte mit Stützpunkten: "polygon" geschlossen, "path" (Freihand) offen.
@@ -170,6 +177,12 @@ class Layer:
     lead_in_mm: float = 0.0         # Anfahrt (Abfallseite), 0 = aus
     lead_in_arc: bool = False       # Anfahrt als Viertelkreis statt Gerade
     lead_out_mm: float = 0.0        # Abfahrt, 0 = aus
+    # Vektor-Füllung (siehe hatch.py / FILL_LAYER_DEFAULTS)
+    fill_mode: str = "none"          # "none" | "hatch" | "crosshatch"
+    line_interval_mm: float = _hatch.DEFAULT_INTERVAL_MM  # Linienabstand
+    hatch_angle: float = 0.0         # Grad, [0, 180); Kreuzschraffur zusätzlich +90°
+    hatch_bidirectional: bool = True  # jede zweite Linie rückwärts (kürzere Leerfahrten)
+    hatch_outline: bool = True       # Kontur zusätzlich zur Füllung lasern
 
     def normalized(self) -> "Layer":
         """Kopie mit Parametern im gültigen Bereich."""
@@ -191,6 +204,11 @@ class Layer:
             lead_in_mm=round(_clamp(float(self.lead_in_mm), *LEAD_RANGE), 3),
             lead_in_arc=bool(self.lead_in_arc),
             lead_out_mm=round(_clamp(float(self.lead_out_mm), *LEAD_RANGE), 3),
+            fill_mode=self.fill_mode if self.fill_mode in _hatch.FILL_MODES else "none",
+            line_interval_mm=round(_clamp(float(self.line_interval_mm), *_hatch.INTERVAL_RANGE), 3),
+            hatch_angle=_hatch.normalize_angle_180(self.hatch_angle),
+            hatch_bidirectional=bool(self.hatch_bidirectional),
+            hatch_outline=bool(self.hatch_outline),
         )
 
     def to_dict(self) -> dict:
@@ -199,6 +217,8 @@ class Layer:
                 "visible": self.visible, "locked": self.locked, "z_step": self.z_step,
                 **{k: getattr(self, k) for k in MATERIAL_LAYER_FIELDS if getattr(self, k)},
                 **{k: getattr(self, k) for k, v in CUT_LAYER_DEFAULTS.items()
+                   if getattr(self, k) != v},
+                **{k: getattr(self, k) for k, v in FILL_LAYER_DEFAULTS.items()
                    if getattr(self, k) != v}}
 
     @staticmethod
@@ -214,6 +234,7 @@ class Layer:
             target_depth_mm=float(d.get("target_depth_mm", 0.0)),
             depth_per_pass_mm=float(d.get("depth_per_pass_mm", 0.0)),
             **{k: type(v)(d[k]) for k, v in CUT_LAYER_DEFAULTS.items() if k in d},
+            **{k: type(v)(d[k]) for k, v in FILL_LAYER_DEFAULTS.items() if k in d},
         ).normalized()
 
 
@@ -601,7 +622,8 @@ class Document:
                 raise AttributeError(k)
             setattr(layer, k, v)
         normalized = layer.normalized()
-        for k in ("power", "speed", "passes", "z_step") + MATERIAL_LAYER_FIELDS + CUT_LAYER_FIELDS:
+        for k in ("power", "speed", "passes", "z_step") + MATERIAL_LAYER_FIELDS + CUT_LAYER_FIELDS \
+                + FILL_LAYER_FIELDS:
             setattr(layer, k, getattr(normalized, k))
         self.changed()
 

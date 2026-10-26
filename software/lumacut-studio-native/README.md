@@ -131,6 +131,31 @@ layer_pass_plan(layer)           # mit den eingestellten layer.passes (Override)
   wird. Jede Änderung ist ein Undo-Schritt (`SetLayerAttrsCommand`). „manuell“ wird aus
   `passes ≠ ceil(Tiefe/Tiefe je Durchgang)` erkannt (kein eigenes Override-Feld).
 
+### Füllung: Schraffur und Kreuzschraffur je Ebene
+
+Im Ebenen-Panel unter **Füllung der Ebene**: *Füllmodus* (Keine / Schraffur /
+Kreuzschraffur), *Linienabstand* in mm (0,05–20), *Winkel* in ° (0 = waagerecht,
+gegen den Uhrzeigersinn; Kreuzschraffur fügt +90° hinzu, beim Einschalten
+mit 0° wird 45° vorgeschlagen), *Kontur mitlasern* und *Bidirektional*
+(abwechselnde Zeilenrichtung, kürzere Leerfahrten). Jede Änderung ist ein
+Undo-Schritt.
+
+- Gefüllt werden geschlossene Objekte: Rechteck, Ellipse, Polygon, Text
+  (auch gedreht und gruppiert). Löcher (Buchstaben, Ringe) bleiben frei
+  (Gerade-Ungerade-Regel); Linien/Freihand bleiben reine Konturen.
+- G-Code: je Durchgang zuerst die Füllung (G0 an den Zeilenanfang, G1 mit
+  Leistung/Geschwindigkeit der Ebene), danach die Kontur; Durchgangs-Hook
+  (Tiefe je Durchgang) gilt auch für reine Füll-Ebenen. Ohne Füllung ist der
+  G-Code unverändert.
+- Auf der Arbeitsfläche erscheint die Schraffur als dünne Linien in der
+  Ebenenfarbe (Overlay `fill_preview`, nicht anklickbar). `export_svg` /
+  `export_png` zeichnen sie mit `show_fill=True`.
+- Datei: neue Felder (`fill_mode`, `line_interval_mm`, `hatch_angle`,
+  `hatch_bidirectional`, `hatch_outline`) werden nur geschrieben, wenn sie vom
+  Standard abweichen; alte Dateien laden unverändert.
+- Grenzen: kein Overscan; Schnittfuge (Kerf) wirkt nur auf Konturen; mehr als
+  20 000 Linien je Richtung werden abgelehnt (Linienabstand vergrößern).
+
 ### Schnittstellen für andere Module (Scan & Probe)
 
 Alle Koordinaten in Arbeitsflächen-mm (0,0 links oben). Getestet in

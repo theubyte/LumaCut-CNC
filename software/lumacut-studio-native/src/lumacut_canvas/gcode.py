@@ -20,11 +20,20 @@ Hook-Zeilen dürfen keine Zeilenumbrüche enthalten und müssen ASCII sein;
 Bewegungen in Z sind Sache des Aufrufers (``MAX_FOCUS_DROP_MM`` beachten).
 :func:`depth_comment_hook` ist ein harmloses Beispiel (nur Kommentare).
 
+Vektor-Füllung: ``JobLayer.fills`` (Schraffurblöcke je Objekt, siehe
+``hatch.py``) wird in jedem Durchgang *vor* den Konturen gelasert – gleiche
+Leistung/Geschwindigkeit/Durchgänge und derselbe Tiefen-Hook wie die Ebene.
+Jede Schraffurstrecke ist ein ``G0`` zum Anfang und ein ``G1`` zum Ende;
+die Blöcke werden in der Reihenfolge der Objekte gefahren, jeweils vorwärts
+oder rückwärts – je nachdem, welches Ende näher liegt. Ohne Füllung bleibt
+die Ausgabe unverändert.
+
 Die Funktion erzeugt nur Text; sie startet nie eine Maschine.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Callable, Iterable
 
@@ -68,13 +77,35 @@ def _hook_lines(hook: PassHook, layer: JobLayer, p: int, acc: float) -> list[str
     return lines
 
 
+def _has_moves(layer: JobLayer) -> bool:
+    return bool(layer.polylines or getattr(layer, "fills", None))
+
+
+def order_fill_blocks(blocks, pos=None):
+    """Schraffurblöcke in Objekt-Reihenfolge, jeder vorwärts oder rückwärts.
+
+    Ein rückwärts gefahrener Block kehrt Reihenfolge *und* Richtung seiner
+    Strecken um. ``pos`` = aktuelle Kopfposition (``None`` = unbekannt).
+    """
+    out = []
+    for block in blocks:
+        if not block:
+            continue
+        if pos is not None and math.dist(pos, block[-1][1]) < math.dist(pos, block[0][0]):
+            block = [(b, a) for a, b in reversed(block)]
+        out.append(block)
+        pos = block[-1][1]
+    return out
+
+
 def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -> str:
-    if not any(l.polylines for l in layers):
+    if not any(_has_moves(l) for l in layers):
         raise ValueError("Keine sichtbaren Objekte zum Lasern")
     out = ["; LUMACUT STUDIO NATIVE CANVAS JOB (homing, focus and park run on the Pi)",
            "G21", "G90", "M5 I", "M3 I"]
+    pos = None
     for layer in layers:
-        if not layer.polylines:
+        if not _has_moves(layer):
             continue
         if not (POWER_RANGE[0] <= layer.power_percent <= POWER_RANGE[1]
                 and SPEED_RANGE[0] <= layer.speed_mm_min <= SPEED_RANGE[1]
@@ -98,6 +129,11 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
             if use_hook:
                 acc += depths[p]
                 out += _hook_lines(pass_hook, layer, p, round(acc, 6))
+            for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos):
+                for a, b in block:
+                    out.append(f"G0 {_xy(*a)}")
+                    out.append(f"G1 {_xy(*b)} F{f} S{s}")
+                pos = block[-1][1]
             kinds = getattr(layer, "poly_kinds", ()) or ()
             prev_end = None
             for i, line in enumerate(layer.polylines):
@@ -112,6 +148,7 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
                 if not joined:
                     out.append(f"G0 {_xy(*line[0])}")
                 out.extend(f"G1 {_xy(*pt)} F{f} S{s}" for pt in line[1:])
+                pos = line[-1]
         if z_step > 0 and drop > 0:
             out += ["G91", f"G0 Z{drop:.3f} F600", "G90"]  # zurück auf Fokushöhe
     out += ["M5 I", "M400"]
