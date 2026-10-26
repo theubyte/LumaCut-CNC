@@ -1,22 +1,28 @@
 """Erreichbarkeit des Tasters für ``op=autorun`` – dieselbe Rechnung wie der Pi.
 
-Der Pi (``pi400/marlin/heightmap.py`` + ``transport.probe_reachable``) legt je
-Motivbereich ein kleines Raster (1×1 … 4×4) und tastet einen Laserpunkt P nur
-ab, wenn der Kopf dafür in ``X30…380 / Y30…360`` bleibt::
+Der Pi (``pi400/marlin/heightmap.py`` + ``transport.probe_reachable``, Stand
+``b966c89`` „Motive bis an den Rand lasern“) legt je Motivbereich ein kleines
+Raster (1×1 … 4×4) und tastet einen Laserpunkt P direkt ab, wenn der Kopf dafür
+in ``X10…380 / Y10…360`` bleibt (Laser aus, Kopf darf in die Safezone)::
 
     Kopf = P − Tasterversatz          (Versatz = Tasterspitze − Laserpunkt)
-    30 ≤ Px − dx ≤ 380,  30 ≤ Py − dy ≤ 360
+    10 ≤ Px − dx ≤ 380,  10 ≤ Py − dy ≤ 360
 
-380/360 = Marlin ``PROBING_MARGIN`` 10 mm vor ``X/Y_BED_SIZE`` 390/370 (Firmware
-``NOZZLE_TO_PROBE_OFFSET {0,0,0}``, der Pi verschiebt selbst), 30 = Safezone.
-Mit dem Versatz −23/+15 heißt das: Laserpunkte X30…357 / Y45…370 sind abtastbar.
+10/380/360 = Marlin ``PROBING_MARGIN`` 10 mm vor 0 bzw. ``X/Y_BED_SIZE`` 390/370.
+Mit dem Versatz −23/+15: Laserpunkte X−13…357 / Y25…375, auf der Arbeitsfläche
+also X30…357 / Y30…370 – nur der linke Streifen (Bildschirm x < 33) fehlt.
+
+Ein Rasterpunkt außerhalb wird am **nächsten erreichbaren Ort höchstens 40 mm
+daneben** abgetastet (``heightmap.nearest_reachable``, 1-mm-Raster), dessen Höhe
+gilt für den Punkt (Ersatzpunkt, Anforderungen 2026-10-26 §2.4). Abgelehnt
+(„Kein Abtastpunkt erreichbar“) wird nur, wenn auch so kein Punkt erreichbar ist.
 
 Bildschirm (Canvas, oben links, x nach rechts): ``Maschine = (390 − x, 30 + y)``.
 Großes Maschinen-X ist also **links**, großes Y **vorn/unten**.
 
-Hier wird das Raster des Pi nachgerechnet, damit Studio vor dem Hochladen sagt,
-welche Seite nicht erreichbar ist und um wie viele mm das Motiv zu schieben ist
-(Anforderungen 2026-10-26 §2.4). Test gegen den Pi-Code: ``test_probe_reach.py``.
+Hier wird das Raster des Pi nachgerechnet, damit Studio vor dem Hochladen warnt,
+an welcher Seite daneben gemessen wird. Test gegen den Pi-Code:
+``test_probe_reach.py`` (Konstanten, Punktzahl, Ersatzpunkte).
 """
 from __future__ import annotations
 
@@ -25,7 +31,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional, Sequence
 
-from .geometry import PROBE_OFFSET_MM
+from .geometry import PROBE_OFFSET_MM, SUBSTITUTE_MAX_MM
 
 # --- Pi-Konstanten (pi400/marlin/heightmap.py, transport.py, web.py) ---------
 CELL_MM = 5.0
@@ -37,7 +43,9 @@ MAX_PER_SIDE = 4
 MAX_REGIONS = 12
 MAX_TOTAL_POINTS = 36
 SAFE_ZONE_MM = 30.0
+PROBE_HEAD_MIN = (10.0, 10.0)      # transport.PROBE_HEAD_MIN (b966c89)
 PROBE_HEAD_MAX = (380.0, 360.0)
+SUBSTITUTE_STEP_MM = 1.0
 TRAVEL = (390.0, 370.0)
 SCREEN_X0 = 390.0   # Maschine_x = 390 − Bildschirm_x
 SCREEN_Y0 = 30.0    # Maschine_y = 30 + Bildschirm_y
@@ -65,8 +73,41 @@ class Region:
 def laser_reach(offset=PROBE_OFFSET_MM) -> Box:
     """Laserpunkte (Maschinen-mm), an die der Taster kommt – ohne Arbeitsflächen-Schnitt."""
     dx, dy = offset
-    return Box(SAFE_ZONE_MM + dx, SAFE_ZONE_MM + dy,
+    return Box(PROBE_HEAD_MIN[0] + dx, PROBE_HEAD_MIN[1] + dy,
                PROBE_HEAD_MAX[0] + dx, PROBE_HEAD_MAX[1] + dy)
+
+
+def in_box(x: float, y: float, b: Box) -> bool:
+    """Wie ``transport._probe_head_ok`` (Kopf = Punkt − Versatz), exakte Grenzen."""
+    return b.xmin <= x <= b.xmax and b.ymin <= y <= b.ymax
+
+
+def pi_reachable(offset=PROBE_OFFSET_MM):
+    """``transport.probe_reachable`` als Funktion (Laserpunkt → bool)."""
+    dx, dy = offset
+
+    def ok(x: float, y: float) -> bool:
+        hx, hy = x - dx, y - dy
+        return (PROBE_HEAD_MIN[0] <= hx <= PROBE_HEAD_MAX[0]
+                and PROBE_HEAD_MIN[1] <= hy <= PROBE_HEAD_MAX[1])
+    return ok
+
+
+def nearest_reachable(x: float, y: float, reachable, max_mm: float = SUBSTITUTE_MAX_MM,
+                      step: float = SUBSTITUTE_STEP_MM) -> Optional[tuple]:
+    """Wie ``heightmap.nearest_reachable``: nächster erreichbarer Ort im 1-mm-Raster
+    um (x, y), höchstens ``max_mm`` entfernt, sonst ``None``."""
+    n = int(max_mm / step)
+    best = None
+    for i in range(-n, n + 1):
+        for j in range(-n, n + 1):
+            d = math.hypot(i * step, j * step)
+            if d > max_mm or (best is not None and d >= best[0]):
+                continue
+            px, py = x + i * step, y + j * step
+            if reachable(px, py):
+                best = (d, (px, py))
+    return None if best is None else best[1]
 
 
 def work_reach(offset=PROBE_OFFSET_MM) -> Box:
@@ -322,27 +363,31 @@ def describe(shift_x: float, shift_y: float, offset=PROBE_OFFSET_MM) -> str:
 
 
 def check_gcode(gcode, offset=PROBE_OFFSET_MM) -> ReachReport:
-    """Rechnet wie der Pi: welche Rasterpunkte von ``op=autorun`` sind erreichbar?
+    """Rechnet wie der Pi (``heightmap._mark_reachable``): direkt erreichbare Punkte,
+    Ersatzpunkte ≤ 40 mm daneben (Warnung, kein Abbruch) und nicht erreichbare.
 
-    Nicht erreichbare Punkte werden auf den Abtastbereich geklemmt (Ersatzpunkt,
-    Warnung, kein Abbruch). Ist gar keiner erreichbar, gibt es zusätzlich
-    ``fallback_point`` (nächster Ersatzpunkt) und ``message`` (Seite, mm).
+    ``reachable_points`` zählt wie der Pi (direkt + mit Ersatzpunkt). Ist gar keiner
+    erreichbar, gibt es ``fallback_point`` (nächster Punkt im Abtastbereich der
+    Arbeitsfläche) und ``message`` (Seite, mm).
     """
     reach = laser_reach(offset)
     box = work_reach(offset)
+    ok_fn = pi_reachable(offset)
     regions = probe_regions(gcode)
-    total = sum(len(r.xs) * len(r.ys) for r in regions)
-    ok_points = sum(1 for r in regions for x in r.xs for y in r.ys
-                    if reach.xmin - 1e-9 <= x <= reach.xmax + 1e-9
-                    and reach.ymin - 1e-9 <= y <= reach.ymax + 1e-9)
-    subs = [sb for r in regions for y in r.ys for x in r.xs
-            for sb in [substitute(x, y, box)] if sb is not None
-            and not (reach.xmin - 1e-9 <= x <= reach.xmax + 1e-9
-                     and reach.ymin - 1e-9 <= y <= reach.ymax + 1e-9)]
-    rep = ReachReport(ok=not subs, reachable_points=ok_points, total_points=total,
-                      offset=tuple(offset), substitutes=subs,
-                      warning=substitution_warning(subs, box))
     pts = [(x, y) for r in regions for y in r.ys for x in r.xs]
+    subs, lost, direct = [], 0, 0
+    for x, y in pts:
+        if ok_fn(x, y):
+            direct += 1
+            continue
+        near = nearest_reachable(x, y, ok_fn)
+        if near is None:
+            lost += 1
+        else:
+            subs.append(Substitute(x, y, near[0], near[1]))
+    rep = ReachReport(ok=not subs and not lost, reachable_points=direct + len(subs),
+                      total_points=len(pts), offset=tuple(offset), substitutes=subs,
+                      warning=substitution_warning(subs, reach))
     if pts:
         nx, ny = min(pts, key=lambda p: math.hypot(clamp(*p, box)[0] - p[0],
                                                    clamp(*p, box)[1] - p[1]))
@@ -353,6 +398,8 @@ def check_gcode(gcode, offset=PROBE_OFFSET_MM) -> ReachReport:
         rep.shift_x, rep.shift_y = best
         rep.message = describe(*best, offset=offset)
         rep.fallback_point = rep.nearest_point
+        rep.warning = substitution_warning(
+            [Substitute(nx, ny, *rep.fallback_point)], reach)
     return rep
 
 
@@ -378,6 +425,6 @@ def explain_pi_error(text: str, gcode=None, offset=PROBE_OFFSET_MM) -> str:
         return text
     if gcode is not None:
         rep = check_gcode(gcode, offset)
-        if not rep.ok:
+        if rep.none_reachable:
             return rep.message
     return describe(0.0, 0.0, offset)

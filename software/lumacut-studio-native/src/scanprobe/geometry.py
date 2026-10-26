@@ -15,6 +15,8 @@ Point = tuple[float, float]
 PROBE_OFFSET_MM: Point = (-23.0, 15.0)
 #: Marlin lässt G30 nur bis ``BED_SIZE − PROBING_MARGIN`` zu (Kopf X380/Y360).
 PROBING_MARGIN_MM = 10.0
+#: Ersatzpunkt höchstens so weit neben dem Rasterpunkt (Pi ``heightmap.SUBSTITUTE_MAX_MM``).
+SUBSTITUTE_MAX_MM = 40.0
 
 
 @dataclass(frozen=True)
@@ -32,17 +34,20 @@ class MachineLimits:
 
     def probe_head_ok(self, x: float, y: float, eps: float = 1e-6) -> bool:
         """Kopfposition, an der der Pi ``G30`` zulässt (``transport._probe_head_ok``):
-        X/Y ab Safezone 30 bis 380/360 (Marlin ``PROBING_MARGIN`` 10 mm, Anf. §2.4)."""
-        return (self.safezone - eps <= x <= self.x_max - PROBING_MARGIN_MM + eps
-                and self.safezone - eps <= y <= self.y_max - PROBING_MARGIN_MM + eps)
+        X/Y 10…380 / 10…360 (Marlin ``PROBING_MARGIN`` 10 mm auf beiden Seiten; der
+        Laser ist beim Abtasten aus, der Kopf darf in die Safezone – Pi ``b966c89``)."""
+        m = PROBING_MARGIN_MM
+        return (m - eps <= x <= self.x_max - m + eps
+                and m - eps <= y <= self.y_max - m + eps)
 
     def probe_laser_rect(self, offset: tuple[float, float]) -> "Rect":
         """Laserpunkte, die der Taster abtasten kann (Kopf = Punkt − Versatz),
-        geschnitten mit der Bearbeitungszone. Mit −23/+15: X30–357, Y45–370."""
+        geschnitten mit der Bearbeitungszone. Mit −23/+15: X30–357, Y30–370."""
         dx, dy = offset
-        return Rect(max(self.safezone + dx, self.safezone), max(self.safezone + dy, self.safezone),
-                    min(self.x_max - PROBING_MARGIN_MM + dx, self.x_max),
-                    min(self.y_max - PROBING_MARGIN_MM + dy, self.y_max))
+        m = PROBING_MARGIN_MM
+        return Rect(max(m + dx, self.safezone), max(m + dy, self.safezone),
+                    min(self.x_max - m + dx, self.x_max),
+                    min(self.y_max - m + dy, self.y_max))
 
     def in_work_zone(self, x: float, y: float, eps: float = 1e-6) -> bool:
         """Bearbeitungszone (außerhalb der Safezone)."""

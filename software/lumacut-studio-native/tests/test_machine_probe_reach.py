@@ -5,9 +5,11 @@ _mark_reachable) with the real plan_probe and MarlinTransport.probe_reachable
 (no serial port is opened). Read-only: nothing on the Pi side is changed.
 
 Machine mm: X0/Y0 = endstop corner, top right seen from the door; cutting
-area X30-390 / Y30-370; head during G30 X30-380 / Y30-360
-(transport.PROBE_HEAD_MAX, Marlin PROBING_MARGIN); probe offset
-(tip minus laser) X-23 / Y+15 -> probe-able laser points X30-357 / Y45-370.
+area X30-390 / Y30-370; head during G30 X10-380 / Y10-360
+(transport.PROBE_HEAD_MIN/MAX, Marlin PROBING_MARGIN, Pi b966c89); probe offset
+(tip minus laser) X-23 / Y+15 -> probe-able laser points X30-357 / Y30-370.
+Grid points outside are probed up to 40 mm next to them (substitute), so
+since b966c89 every case below is accepted.
 
 Run ``python tests/test_machine_probe_reach.py`` for the table.
 """
@@ -23,7 +25,7 @@ import _paths  # noqa: F401
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "pi400"))
 from marlin import heightmap  # noqa: E402
-from marlin.transport import PROBE_HEAD_MAX, MarlinTransport  # noqa: E402
+from marlin.transport import PROBE_HEAD_MAX, PROBE_HEAD_MIN, MarlinTransport  # noqa: E402
 
 from machine import client as mc  # noqa: E402
 
@@ -32,17 +34,17 @@ BOUNDS = heightmap.Box(30.0, 30.0, 390.0, 370.0)    # web.py auto_plan bounds
 
 # name, (xmin, ymin, xmax, ymax) of the lasered rectangle, expected
 CASES = [
-    ("Nullpunkt-Ecke (30,30), 20x10", (30, 30, 50, 40), False),
+    ("Nullpunkt-Ecke (30,30), 20x10", (30, 30, 50, 40), True),
     ("Nullpunkt-Ecke (30,30), 50x50", (30, 30, 80, 80), True),
-    ("Streifen oben, 40x12 bei Y30", (100, 30, 140, 42), False),
-    ("Oben, 20x17 bei Y30 (Unterkante Y47)", (100, 30, 120, 47), False),
+    ("Streifen oben, 40x12 bei Y30", (100, 30, 140, 42), True),
+    ("Oben, 20x17 bei Y30 (Unterkante Y47)", (100, 30, 120, 47), True),
     ("Oben, 20x20 bei Y30 (Unterkante Y50)", (100, 30, 120, 50), True),
-    ("Klein 10x10 bei Y38-48, Mitte Y43", (200, 38, 210, 48), False),
+    ("Klein 10x10 bei Y38-48, Mitte Y43", (200, 38, 210, 48), True),
     ("Klein 10x10 bei Y42-52, Mitte Y47", (200, 42, 210, 52), True),
-    ("Linker Rand, 30x30 bei X360", (360, 200, 390, 230), False),
-    ("Links, 14 breit X352-366 (Mitte X359)", (352, 200, 366, 210), False),
+    ("Linker Rand, 30x30 bei X360", (360, 200, 390, 230), True),
+    ("Links, 14 breit X352-366 (Mitte X359)", (352, 200, 366, 210), True),
     ("Links, 30x30 bei X350", (350, 200, 380, 230), True),
-    ("Gegenecke Schalter-fern (390,370), 30x30", (360, 340, 390, 370), False),
+    ("Gegenecke Schalter-fern (390,370), 30x30", (360, 340, 390, 370), True),
     ("Gegenecke, 60x60 bis (390,370)", (330, 310, 390, 370), True),
     ("Ecke unten rechts (30,370), 20x20", (30, 350, 50, 370), True),
     ("Mitte 100x80", (150, 150, 250, 230), True),
@@ -78,13 +80,14 @@ class ProbeReachTests(unittest.TestCase):
     def test_limits_from_pi_code(self):
         t = machine()
         self.assertEqual(PROBE_HEAD_MAX, mc.PROBE_HEAD_MAX)
-        self.assertTrue(t.probe_reachable(30.0, 45.0))
-        self.assertFalse(t.probe_reachable(30.0, 44.99))
+        self.assertEqual(PROBE_HEAD_MIN, mc.PROBE_HEAD_MIN)
+        self.assertTrue(t.probe_reachable(30.0, 25.0))
+        self.assertFalse(t.probe_reachable(30.0, 24.99))
         self.assertTrue(t.probe_reachable(357.0, 370.0))
         self.assertFalse(t.probe_reachable(357.01, 200.0))
         # head = laser point - offset: (100, 50) -> head (123, 35)
         self.assertTrue(t._probe_head_ok(123.0, 35.0))
-        self.assertEqual(mc.probe_reach(OFFSET), (30.0, 357.0, 45.0, 370.0))
+        self.assertEqual(mc.probe_reach(OFFSET), (30.0, 357.0, 30.0, 370.0))
 
     def test_cases(self):
         for name, box, expected in CASES:
@@ -94,27 +97,27 @@ class ProbeReachTests(unittest.TestCase):
                 if not expected:
                     self.assertIn("Kein Abtastpunkt erreichbar", error)
 
-    def test_refused_although_part_of_motif_is_reachable(self):
-        """Too strict: only the grid point (box centre for < 20 mm) counts."""
-        for box in ((100, 30, 120, 47), (200, 38, 210, 48), (352, 200, 366, 210)):
-            with self.subTest(box):
-                xmin, ymin, xmax, ymax = box
-                self.assertTrue(machine().probe_reachable(min(xmax, 357.0), max(ymin, 45.0)))
-                self.assertIsNone(plan(box)[0])
+    def test_edge_point_probed_next_to_it(self):
+        """Formerly refused (only the grid point counted); since b966c89 the Pi
+        probes the nearest reachable spot within 40 mm instead."""
+        box = (352, 200, 366, 210)                  # grid point X359 > 357
+        self.assertFalse(machine().probe_reachable(359.0, 205.0))
+        grids = heightmap.plan_probe(rect_gcode(*box), BOUNDS, machine().probe_reachable)
+        self.assertEqual([g.probe_point(0) for g in grids], [(357.0, 205.0)])
 
     def test_studio_explains_refusal(self):
         msg = ("Kein Abtastpunkt erreichbar: der Taster kommt an keine Stelle des "
                "Motivs – Motiv weiter in die Mitte schieben, dann neu starten.")
         text = mc.explain_probe_error(msg, OFFSET)
         self.assertTrue(text.startswith(msg))
-        self.assertIn("X30–357 / Y45–370", text)
-        self.assertIn("obersten 15 mm", text)
+        self.assertIn("X30–357 / Y30–370", text)
+        self.assertNotIn("obersten", text)
         self.assertIn("linken 33 mm", text)
         self.assertIn("X-23 / Y+15", text)
         self.assertEqual(mc.explain_probe_error("Abgebrochen", OFFSET), "Abgebrochen")
         other = mc.explain_probe_error(msg, (10.0, -5.0))
-        self.assertIn("X40–390 / Y30–355", other)
-        self.assertIn("rechten 10 mm", other)
+        self.assertIn("X30–390 / Y30–355", other)
+        self.assertNotIn("rechten", other)
         self.assertIn("untersten 15 mm", other)
 
 
@@ -141,7 +144,7 @@ class StudioShowsReachTests(unittest.TestCase):
             with self.assertRaises(mc.ApiError) as ctx:
                 call()
             self.assertIn("Kein Abtastpunkt erreichbar", str(ctx.exception))
-            self.assertIn("X30–357 / Y45–370", str(ctx.exception))
+            self.assertIn("X30–357 / Y30–370", str(ctx.exception))
 
 
 class ProbeWarningShownTests(unittest.TestCase):

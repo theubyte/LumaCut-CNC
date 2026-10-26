@@ -17,21 +17,16 @@ from test_job_flow import PiAutorunPort
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 OFFSET = (-23.0, 15.0)   # docs/MASCHINE.md, Stand 25.10.2026
-
-
-def _pi_heightmap():
-    spec = importlib.util.spec_from_file_location(
-        "pi_heightmap", ROOT / "pi400" / "marlin" / "heightmap.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["pi_heightmap"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+FAR = (-60.0, 15.0)      # gedachter Versatz: linker Rand > 40 mm außer Reichweite
+sys.path.insert(0, str(ROOT / "pi400"))
+from marlin import heightmap as pi_hm, transport as pi_tr  # noqa: E402
 
 
 def pi_reachable(x, y, offset=OFFSET):
-    """``transport.probe_reachable`` mit ``safe_zone_xy_mm`` 30 und PROBE_HEAD_MAX 380/360."""
-    hx, hy = x - offset[0], y - offset[1]
-    return 30.0 <= hx <= 380.0 and 30.0 <= hy <= 360.0
+    """Echter ``MarlinTransport.probe_reachable`` (kein Port wird geöffnet)."""
+    t = pi_tr.MarlinTransport("/dev/null")
+    t.probe_xy_offset_mm = offset
+    return t.probe_reachable(x, y)
 
 
 def screen_rect_gcode(x0, y0, w, h):
@@ -44,49 +39,88 @@ def screen_rect_gcode(x0, y0, w, h):
     return "\n".join(lines) + "\n"
 
 
-def pi_points(gcode):
-    hm = _pi_heightmap()
-    grids = hm.plan_probe(gcode.splitlines(), hm.Box(30, 30, 390, 370), pi_reachable)
-    return sum(sum(g.reachable) for g in grids)
+def pi_grids(gcode, offset=OFFSET):
+    return pi_hm.plan_probe(gcode.splitlines(), pi_hm.Box(30, 30, 390, 370),
+                            lambda x, y: pi_reachable(x, y, offset))
+
+
+def pi_points(gcode, offset=OFFSET):
+    return sum(sum(g.reachable) for g in pi_grids(gcode, offset))
+
+
+def pi_substitutes(gcode, offset=OFFSET):
+    return sorted((round(x, 6), round(y, 6), round(p[0], 6), round(p[1], 6))
+                  for g in pi_grids(gcode, offset)
+                  for i, p in enumerate(g.probe_at) if p is not None
+                  for x, y in [g.point(i)])
+
+
+def studio_substitutes(rep):
+    return sorted((round(s.x, 6), round(s.y, 6), round(s.probe_x, 6), round(s.probe_y, 6))
+                  for s in rep.substitutes)
 
 
 def test_reach_constants_match_pi_source():
     tr = (ROOT / "pi400" / "marlin" / "transport.py").read_text(encoding="utf-8")
-    assert "PROBE_HEAD_MAX = (380.0, 360.0)" in tr
     assert "return self._probe_head_ok(x - dx, y - dy)" in tr
-    hm = _pi_heightmap()
+    assert pi_tr.PROBE_HEAD_MIN == reach.PROBE_HEAD_MIN
+    assert pi_tr.PROBE_HEAD_MAX == reach.PROBE_HEAD_MAX
     for name in ("CELL_MM", "REGION_GAP_MM", "REGION_MARGIN_MM", "GRID_INSET_MM",
-                 "GRID_SPACING_MM", "MAX_PER_SIDE", "MAX_REGIONS", "MAX_TOTAL_POINTS"):
-        assert getattr(hm, name) == getattr(reach, name), name
+                 "GRID_SPACING_MM", "MAX_PER_SIDE", "MAX_REGIONS", "MAX_TOTAL_POINTS",
+                 "SUBSTITUTE_MAX_MM", "SUBSTITUTE_STEP_MM"):
+        assert getattr(pi_hm, name) == getattr(reach, name), name
     assert "{ 0, 0, 0 }" in (ROOT / "firmware" / "marlin" / "build.py").read_text(encoding="utf-8")
+
+
+def test_nearest_reachable_matches_pi():
+    rnd = random.Random(7)
+    for _ in range(30):
+        x, y = rnd.uniform(30, 390), rnd.uniform(30, 370)
+        for off in (OFFSET, FAR):
+            fn = lambda px, py, o=off: pi_reachable(px, py, o)
+            assert reach.nearest_reachable(x, y, reach.pi_reachable(off)) == \
+                pi_hm.nearest_reachable(x, y, fn)
 
 
 def test_reach_region_default_offset():
     w = reach.work_reach(OFFSET)
-    assert (w.xmin, w.ymin, w.xmax, w.ymax) == (30, 45, 357, 370)
+    assert (w.xmin, w.ymin, w.xmax, w.ymax) == (30, 30, 357, 370)
     s = reach.screen_box(w)
-    assert (s.xmin, s.ymin, s.xmax, s.ymax) == (33, 15, 360, 340)
+    assert (s.xmin, s.ymin, s.xmax, s.ymax) == (33, 0, 360, 340)
+    lr = reach.laser_reach(OFFSET)
+    assert (lr.xmin, lr.ymin, lr.xmax, lr.ymax) == (-13, 25, 357, 375)
 
 
-def test_bottom_left_design_is_truly_unreachable_on_pi_and_in_studio():
+def test_bottom_left_design_is_substituted_on_pi_and_in_studio():
+    """Linker 33-mm-Streifen: Pi (b966c89) misst daneben, kein Abbruch mehr."""
     g = screen_rect_gcode(5, 300, 20, 30)          # unten links, 20 mm breit
-    with pytest.raises(ValueError, match="Kein Abtastpunkt erreichbar"):
-        pi_points(g)
     rep = reach.check_gcode(g, OFFSET)
+    assert not rep.ok and not rep.none_reachable and rep.fallback_point is None
+    assert rep.reachable_points == rep.total_points == pi_points(g)
+    assert studio_substitutes(rep) == pi_substitutes(g)
+    assert all(s.probe_x == 357 and s.distance_mm <= 40 for s in rep.substitutes)
+    assert rep.warning.startswith("Achtung:") and "am linken Rand (Maschine X > 357)" in rep.warning
+    assert "neben dem Werkstück" in rep.warning and "Gelasert wird trotzdem" in rep.warning
+
+
+def test_left_edge_beyond_40mm_is_truly_unreachable_on_pi_and_in_studio():
+    g = screen_rect_gcode(2, 150, 10, 10)          # Maschine X378–388, Reichweite X ≤ 320
+    with pytest.raises(ValueError, match="Kein Abtastpunkt erreichbar"):
+        pi_points(g, FAR)
+    rep = reach.check_gcode(g, FAR)
     assert not rep.ok and rep.reachable_points == 0 and rep.none_reachable
     assert rep.shift_x < 0 and rep.shift_y == 0
     assert "zu weit links" in rep.message and "nach rechts" in rep.message
-    assert "x 33–360" in rep.message and "X30–357" in rep.message
-    # Neue Regel (§2.4): Warnung + Ersatzpunkt statt Abbruch
-    assert rep.warning.startswith("Achtung:") and "am linken Rand (Maschine X > 357)" in rep.warning
-    assert "neben dem Werkstück" in rep.warning and "Gelasert wird trotzdem" in rep.warning
+    assert "X30–320" in rep.message
     fx, fy = rep.fallback_point
-    assert fx == 357 and 330 <= fy <= 360
-    assert pi_reachable(fx, fy)                     # der Pi nimmt den Ersatzpunkt an
+    assert fx == 320 and 180 <= fy <= 190
+    assert pi_reachable(fx, fy, FAR)                # der Pi nimmt den Ersatzpunkt an
+    assert "linken Rand" in rep.warning and "Gelasert wird trotzdem" in rep.warning
     # Um die empfohlenen mm nach rechts geschoben → Pi findet einen Punkt
     mm = int(rep.message.split("mind. ")[1].split(" mm")[0])
-    assert pi_points(screen_rect_gcode(5 + mm, 300, 20, 30)) >= 1
-    assert not reach.check_gcode(screen_rect_gcode(5 + mm, 300, 20, 30), OFFSET).none_reachable
+    moved = screen_rect_gcode(2 + mm, 150, 10, 10)
+    assert pi_points(moved, FAR) >= 1
+    assert reach.check_gcode(moved, FAR).ok
 
 
 def test_bottom_left_wide_design_is_reachable_with_partial_warning():
@@ -96,14 +130,12 @@ def test_bottom_left_wide_design_is_reachable_with_partial_warning():
     assert rep.substitutes and "linken Rand" in rep.warning
 
 
-def test_top_strip_warns_upper_edge():
+def test_top_strip_is_directly_reachable_now():
+    """Kopf darf bis Y10 (b966c89): oberer Rand braucht keinen Ersatzpunkt mehr."""
     g = screen_rect_gcode(150, 1, 30, 8)
-    with pytest.raises(ValueError):
-        pi_points(g)
     rep = reach.check_gcode(g, OFFSET)
-    assert rep.none_reachable and rep.shift_y > 0 and "nach unten" in rep.message
-    assert "oberen/hinteren Rand (Maschine Y < 45)" in rep.warning
-    assert rep.fallback_point[1] == 45
+    assert rep.ok and rep.warning == "" and rep.reachable_points == pi_points(g) >= 1
+    assert pi_substitutes(g) == []
 
 
 def test_bottom_right_corner_is_reachable():
@@ -114,11 +146,14 @@ def test_bottom_right_corner_is_reachable():
 def test_substitute_sides_and_distance():
     box = reach.work_reach(OFFSET)
     sb = reach.substitute(370, 40, box)
-    assert sb.sides == ("links", "oben") and (sb.probe_x, sb.probe_y) == (357, 45)
-    assert abs(sb.distance_mm - (13 ** 2 + 5 ** 2) ** 0.5) < 1e-9
+    assert sb.sides == ("links",) and (sb.probe_x, sb.probe_y) == (357, 40)
+    assert abs(sb.distance_mm - 13) < 1e-9
     assert reach.substitute(200, 200, box) is None
-    w = reach.substitution_warning([sb], box)
-    assert "1 Abtastpunkt am linken Rand" in w and "oberen/hinteren Rand" in w and "14 mm" in w
+    corner = reach.Substitute(370, 20, 357, 25)
+    assert corner.sides == ("links", "oben")
+    w = reach.substitution_warning([corner], reach.laser_reach(OFFSET))
+    assert "1 Abtastpunkt am linken Rand" in w and "oberen/hinteren Rand (Maschine Y < 25)" in w
+    assert "14 mm" in w
 
 
 @pytest.mark.parametrize("seed", range(40))
@@ -129,21 +164,24 @@ def test_studio_counts_same_points_as_pi(seed):
         w, h = rnd.uniform(3, 150), rnd.uniform(3, 120)
         parts.append(screen_rect_gcode(rnd.uniform(0, 360 - w), rnd.uniform(0, 340 - h), w, h))
     g = "".join(parts)
-    rep = reach.check_gcode(g, OFFSET)
-    try:
-        n = pi_points(g)
-    except ValueError:
-        n = 0
-    assert rep.reachable_points == n
+    for off in (OFFSET, FAR):
+        rep = reach.check_gcode(g, off)
+        try:
+            n, subs = pi_points(g, off), pi_substitutes(g, off)
+        except ValueError:
+            n, subs = 0, []
+        assert rep.reachable_points == n
+        if n:
+            assert studio_substitutes(rep) == subs
 
 
 def test_explain_pi_error():
-    g = screen_rect_gcode(5, 300, 20, 30)
+    g = screen_rect_gcode(2, 150, 10, 10)
     pi_text = ("Kein Abtastpunkt erreichbar: der Taster kommt an keine Stelle des Motivs – "
                "Motiv weiter in die Mitte schieben, dann neu starten.")
-    assert "nach rechts" in reach.explain_pi_error(pi_text, g, OFFSET)
+    assert "nach rechts" in reach.explain_pi_error(pi_text, g, FAR)
     general = reach.explain_pi_error(pi_text, None, OFFSET)
-    assert "x 33–360" in general and "nach" not in general
+    assert "x 33–360" in general and "y 0–340" in general and "nach" not in general
     assert reach.explain_pi_error("anderer Fehler", g) == "anderer Fehler"
 
 
@@ -156,10 +194,17 @@ def test_pi_offset_from_status():
 class PointPort(PiAutorunPort):
     """Pi-Port, der ``autorun`` mit x/y annimmt und wie der Pi ohne Punkt ablehnt."""
 
-    def __init__(self, *a, pi_refuses=True, **kw):
+    def __init__(self, *a, pi_refuses=True, offset=None, **kw):
         super().__init__(*a, **kw)
         self.points = []
         self.pi_refuses = pi_refuses
+        self.offset = offset
+
+    def status(self):
+        st = super().status()
+        if self.offset is not None:
+            st.raw["probe_xy_offset_mm"] = list(self.offset)
+        return st
 
     def autorun(self, name, x=None, y=None):
         self.points.append(None if x is None else (x, y))
@@ -169,14 +214,27 @@ class PointPort(PiAutorunPort):
         return super().autorun(name)
 
 
-def test_one_click_warns_and_lasers_with_substitute_point():
+def test_one_click_warns_and_pi_substitutes_itself():
+    """Linker Streifen: der Pi misst selbst daneben (b966c89), Studio warnt vorab."""
     hw = adapters.simulated_setup()
-    port = PointPort(hw.machine)
+    port = PointPort(hw.machine, pi_refuses=False)
     events = []
     flow = OneClickJob(port, None, poll_s=0.0, sleep=lambda s: None, on_event=events.append)
     res = flow.run(screen_rect_gcode(5, 300, 20, 30), "rand.gcode")
     assert res.ok, res.error
-    assert port.points and port.points[0][0] == 357      # gleich mit Ersatzpunkt
+    assert port.points == [None]                          # normales autorun, kein x/y
+    assert any(n.startswith("Achtung") and "linken Rand" in n for n in res.notes)
+    assert any(e.get("warning") for e in events)
+
+
+def test_one_click_beyond_40mm_lasers_with_fallback_point():
+    hw = adapters.simulated_setup()
+    port = PointPort(hw.machine, offset=FAR)
+    events = []
+    flow = OneClickJob(port, None, poll_s=0.0, sleep=lambda s: None, on_event=events.append)
+    res = flow.run(screen_rect_gcode(2, 150, 10, 10), "rand.gcode")
+    assert res.ok, res.error
+    assert port.points and port.points[0][0] == 320      # gleich mit Ersatzpunkt
     assert any(n.startswith("Achtung") and "linken Rand" in n for n in res.notes)
     assert any(e.get("warning") for e in events)
 
@@ -219,26 +277,40 @@ def test_one_click_placed_pi_400_is_explained():
     res = flow.run(screen_rect_gcode(5, 300, 20, 30), "rand.gcode")
     assert res.error_code == "unreachable"
     assert "Abtastbar ist auf dem Bildschirm x 33–360" in res.error
-    assert "Ersatzpunkt-Regel" in res.error
+    assert "40 mm daneben" in res.error
 
 
 def test_studio_probe_plan_respects_pi_head_limits():
-    # Kopf darf nicht unter Y30 (Safezone) / über X380
-    assert not DEFAULT_LIMITS.probe_head_ok(100, 25)
-    assert not DEFAULT_LIMITS.probe_head_ok(385, 100)
-    assert DEFAULT_LIMITS.probe_head_ok(380, 360)
+    # Kopf X/Y 10…380/360 wie transport.PROBE_HEAD_MIN/MAX (b966c89)
+    t = pi_tr.MarlinTransport("/dev/null")
+    for x, y in ((100, 25), (100, 10), (10, 100), (100, 9.9), (9.9, 100), (385, 100),
+                 (380, 360), (100, 361)):
+        assert DEFAULT_LIMITS.probe_head_ok(x, y) == t._probe_head_ok(x, y), (x, y)
+    assert DEFAULT_LIMITS.probe_head_ok(100, 25) and not DEFAULT_LIMITS.probe_head_ok(385, 100)
     r = DEFAULT_LIMITS.probe_laser_rect(OFFSET)
-    assert (r.xmin, r.ymin, r.xmax, r.ymax) == (30, 45, 357, 370)
+    assert (r.xmin, r.ymin, r.xmax, r.ymax) == (30, 30, 357, 370)
 
 
 def test_studio_probe_plan_substitutes_unreachable_points():
-    area = ProbeArea("a", Polygon([(100, 31), (160, 31), (160, 44), (100, 44)]))
+    area = ProbeArea("a", Polygon([(360, 100), (385, 100), (385, 160), (360, 160)]))
     job = plan_probe_job([area])
     pts = job.points
-    assert pts and all(p.substituted and p.probe_y == 45 for p in pts)
+    assert pts and all(p.substituted and p.probe_x == 357 for p in pts)
     for p in pts:
         assert DEFAULT_LIMITS.probe_head_ok(p.probe_x - OFFSET[0], p.probe_y - OFFSET[1])
-    assert any(w.startswith("Achtung") and "oberen/hinteren Rand" in w for w in job.warnings)
+        assert p.x - p.probe_x <= 40
+    assert any(w.startswith("Achtung") and "linken Rand" in w for w in job.warnings)
+    # oberer Rand ist jetzt direkt erreichbar
+    top = plan_probe_job([ProbeArea("t", Polygon([(100, 31), (160, 31), (160, 44), (100, 44)]))])
+    assert top.points and not any(p.substituted for p in top.points)
+
+
+def test_studio_probe_plan_skips_points_beyond_40mm():
+    from scanprobe.probe_plan import ProbeSettings
+    area = ProbeArea("a", Polygon([(370, 100), (388, 100), (388, 160), (370, 160)]))
+    job = plan_probe_job([area], ProbeSettings(probe_offset_mm=FAR))
+    assert not job.points
+    assert any("kein abtastbarer Punkt" in w for w in job.warnings)
 
 
 def test_probe_runner_marks_substituted_points():

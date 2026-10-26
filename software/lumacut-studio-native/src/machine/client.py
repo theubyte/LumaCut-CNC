@@ -80,8 +80,10 @@ def wire_anchor(anchor: str, convention: str | None) -> str:
         return anchor
     return anchor[0] + ("r" if anchor[1] == "l" else "l")
 #: Probe reach as the Pi computes it (pi400/marlin/transport.py): the head
-#: stays in safe_zone..PROBE_HEAD_MAX during G30 (Marlin PROBING_MARGIN), the
-#: switch touches laser point = head + offset (offset = tip minus laser).
+#: stays in PROBE_HEAD_MIN..PROBE_HEAD_MAX during G30 (Marlin PROBING_MARGIN,
+#: Pi b966c89), the switch touches laser point = head + offset (offset = tip
+#: minus laser); the motif itself stays in the cutting area from safe_zone on.
+PROBE_HEAD_MIN = (10.0, 10.0)
 PROBE_HEAD_MAX = (380.0, 360.0)
 DEFAULT_PROBE_OFFSET = (-23.0, 15.0)
 WORK_AREA_MM = (390.0, 370.0)
@@ -92,8 +94,8 @@ def probe_reach(offset=None, safe_zone: float = 30.0,
                 travels=WORK_AREA_MM) -> tuple[float, float, float, float]:
     """(xmin, xmax, ymin, ymax) in machine mm the switch can probe."""
     dx, dy = offset if offset is not None else DEFAULT_PROBE_OFFSET
-    return (max(safe_zone, safe_zone + dx), min(travels[0], PROBE_HEAD_MAX[0] + dx),
-            max(safe_zone, safe_zone + dy), min(travels[1], PROBE_HEAD_MAX[1] + dy))
+    return (max(safe_zone, PROBE_HEAD_MIN[0] + dx), min(travels[0], PROBE_HEAD_MAX[0] + dx),
+            max(safe_zone, PROBE_HEAD_MIN[1] + dy), min(travels[1], PROBE_HEAD_MAX[1] + dy))
 
 
 def explain_probe_error(message: str, offset=None, safe_zone: float = 30.0) -> str:

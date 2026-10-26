@@ -19,7 +19,7 @@ Der Rest läuft automatisch:
 
 **Kein** manueller Schritt für Referenzieren oder „mit/ohne Probing“. Probing ist immer dabei und soll schnell sein.
 
-**Regel (Besitzer, 2026-10-26): Nicht erreichbare Abtastpunkte brechen den Auftrag nicht ab.** Kommt der Taster an einen geplanten Punkt nicht heran, wird stattdessen an der **nächstgelegenen erreichbaren Stelle** gemessen (Punkt in den Abtastbereich geklemmt, §2.4). Der Punkt gilt im Höhenmesh als **„ersetzt/Nachbarmessung“**, es gibt eine **Warnung** (welche Seite, wie viele mm, Gefahrenhinweis), und **gelasert wird trotzdem**. Fehler bleiben nur: Taster misst gar nicht / kein Material gefunden, Not-Aus, Abbruch.
+**Regel (Besitzer, 2026-10-26): Nicht erreichbare Abtastpunkte brechen den Auftrag nicht ab.** Kommt der Taster an einen geplanten Punkt nicht heran, wird stattdessen an der **nächstgelegenen erreichbaren Stelle** gemessen (höchstens 40 mm daneben, §2.4). Der Punkt gilt im Höhenmesh als **„ersetzt/Nachbarmessung“**, es gibt eine **Warnung** (welche Seite, wie viele mm, Gefahrenhinweis), und **gelasert wird trotzdem**. Fehler bleiben nur: Taster misst gar nicht / kein Material gefunden, Not-Aus, Abbruch.
 
 ### 1.1 Ein-Klick-Auftrag: Schnittstelle Scan Probe <-> Machine (Scan Probe, 2026-10-26)
 
@@ -296,34 +296,37 @@ Platzierung (Vektoren) und Bilder (Mosaik, Höhenkarte) sind getrennt zu behande
 
 **Rechnung (Maschinenkoordinaten, ohne Bildschirm-Konvention):**
 - Versatz `d = Tasterspitze − Laser` (Pi: `machine.probe_xy_offset_mm`, eingetragen −23/+15). Kopf beim Abtasten = Laserpunkt − d.
-- Pi `transport.py:1075` `_probe_head_ok`: `safe_zone (30) ≤ Kopf-X ≤ 380` und `30 ≤ Kopf-Y ≤ 360` (`PROBE_HEAD_MAX`, Marlin PROBING_MARGIN 10 mm). Firmware `NOZZLE_TO_PROBE_OFFSET {0,0,0}` (`firmware/marlin/build.py:98`), der Pi rechnet den Versatz selbst.
-- Erreichbare Laserpunkte: X `30+dx … 380+dx`, Y `30+dy … 360+dy` → mit −23/+15: X 7–357, Y 45–375; geschnitten mit dem Arbeitsbereich X30–390/Y30–370: **Maschine X30–357, Y45–370**.
-- Bildschirm (`x = 390 − X`, `y = Y − 30`): **x 33–360 mm, y 15–340 mm**. Nicht abtastbar: **linker Rand 33 mm** (Maschine X > 357) und **oberer Rand 15 mm** (Maschine Y < 45, hinten).
+- Pi `transport._probe_head_ok` (Stand `b966c89`, Claude): `10 ≤ Kopf-X ≤ 380` und `10 ≤ Kopf-Y ≤ 360` (`PROBE_HEAD_MIN`/`PROBE_HEAD_MAX`, Marlin PROBING_MARGIN 10 mm; beim Abtasten ist der Laser aus, der Kopf darf in die Safezone). Vorher galt unten die Safezone 30. Firmware `NOZZLE_TO_PROBE_OFFSET {0,0,0}` (`firmware/marlin/build.py:98`), der Pi rechnet den Versatz selbst.
+- Erreichbare Laserpunkte: X `10+dx … 380+dx`, Y `10+dy … 360+dy` → mit −23/+15: X −13–357, Y 25–375; geschnitten mit dem Arbeitsbereich X30–390/Y30–370: **Maschine X30–357, Y30–370** (vorher Y45–370).
+- Bildschirm (`x = 390 − X`, `y = Y − 30`): **x 33–360 mm, y 0–340 mm**. Direkt nicht abtastbar ist nur noch der **linke Rand 33 mm** (Maschine X > 357); dort misst der Pi daneben (Ersatzpunkt, unten).
 
 **Urteil:** Die Pi-Prüfung rechnet richtig (kein Spiegelfehler durch Nullpunkt oben rechts). Ein Motiv in den linken 33 mm des Bildschirms ist mit dem eingetragenen Versatz wirklich nicht abtastbar.
 - ⚠ Hardware offen: Das Vorzeichen des Versatzes −23/+15 wurde am 25.10. vor der neuen Konvention eingetragen. Prüfen: Laserpunkt schießen, Tasterspitze darüberfahren, Versatz = Punkt − Kopfposition. Ist das Vorzeichen falsch, liegt der nicht abtastbare Streifen rechts/unten statt links/oben.
-- ⚠ Kopf-Y min 30 (safe zone) kostet oben 15 mm; Marlin erlaubt 10. Lockern nur nach Prüfung am Gerät (Claude).
+- Kopf-Min 10 statt 30 hat Claude in `b966c89` umgesetzt (oberer Rand jetzt direkt abtastbar). ⚠ Am Gerät noch nicht geprüft: G30 mit Kopf bei X/Y 10.
 - Studio-Fehler (behoben, Scan Probe): `scanprobe/probe_plan.grid_for_area` prüfte nur 0–390/0–370 statt der Pi-Kopfgrenzen; der Pi hätte solche Punkte mit „Werkstück-Abtastpunkt außerhalb“ abgelehnt. Jetzt `MachineLimits.probe_head_ok` wie der Pi.
 
 **Neue Regel (Besitzer, 2026-10-26) – kein Abbruch, Ersatzpunkt:**
-1. Ist ein geplanter Abtastpunkt nicht erreichbar, wird er auf den nächsten erreichbaren Punkt geklemmt: `X' = min(max(X, Xmin), Xmax)`, `Y'` ebenso (Bereich oben). Gemessen wird bei (X', Y'); der Wert gilt für den Originalpunkt.
+1. Ist ein geplanter Abtastpunkt nicht erreichbar, wird am nächsten erreichbaren Ort **höchstens 40 mm daneben** gemessen (Pi `heightmap.nearest_reachable`, 1-mm-Raster, `SUBSTITUTE_MAX_MM = 40`; beim rechteckigen Bereich praktisch `X' = min(max(X, Xmin), Xmax)`, `Y'` ebenso). Der Wert gilt für den Originalpunkt. Punkte ohne Ersatz in 40 mm bleiben unerreichbar (Pi: Raster ohne Punkt fällt weg; nur wenn gar kein Punkt bleibt, 400 „Kein Abtastpunkt erreichbar“). Mit −23/+15 ist der Ersatz höchstens 33 mm entfernt, eine Ablehnung gibt es dann nicht mehr.
 2. Im Höhenmesh wird der Punkt als **„ersetzt/Nachbarmessung“** markiert (Statistik + eigenes Symbol in der Heatmap), mit Abstand in mm.
 3. Warnung (ein Satz, gleicher Wortlaut Studio/Pi/Android), z. B.: „Achtung: 3 Abtastpunkte am linken Rand (Maschine X > 357) nicht erreichbar – stattdessen bis 12 mm daneben gemessen. Ist das Werkstück dort kleiner, landet der Taster neben dem Werkstück auf dem Bett und die Höhe stimmt am Rand nicht. Gelasert wird trotzdem.“
 4. Der Auftrag läuft weiter (Laser startet). Fehler bleiben: Taster misst gar nicht / kein Material, Not-Aus, Abbruch.
 5. Studio-Vorprüfung vor dem Hochladen: gleiche Rechnung wie der Pi, Ergebnis jetzt **Warnung** in Bestätigung und Status, kein Fehler.
 
-**Umsetzung Studio (Scan Probe, `8d6112d`):**
-- `scanprobe/reach.py`: `work_reach`, `substitute`/`clamp`, `substitution_warning` (Wortlaut oben), `check_gcode` → `ReachReport` mit `substitutes`, `warning`, `fallback_point` (wenn kein Punkt erreichbar).
-- Planung (`probe_plan.grid_for_area`, `MachineLimits.probe_laser_rect`) und `ProbeRunner` klemmen statt zu überspringen; Status `SUBSTITUTED` (6) in `heightmap.py`, Statistik `substituted`, orange Raute in der Heatmap (`heatmap.mark_substituted`).
-- Ein-Klick (`job_flow.py`): Warnung in Status (`warning=True`), Bestätigung (`OneClickController.confirm_text`) und Ergebnis. Ist kein Punkt erreichbar, startet Studio `op=autorun` mit `x`/`y` am Ersatzpunkt (bestehender Vertrag, ein Punkt, flach ausgeglichen). Lehnt der Pi trotzdem mit 400 ab, ein Wiederholversuch mit dem nächsten erreichbaren Punkt, ohne neues Hochladen.
-- Platzierte Aufträge (`autorun_task`): Studio kennt die Lage nicht; ein Pi-400 bleibt Fehler mit Seite/mm-Erklärung, bis der Pi die Regel kann (Claude). Wunsch an Machine (optional): `autorun_task` mit Ersatzpunkt `x`/`y` erlauben.
-- Tests: `tests/test_probe_reach.py`.
+**Umsetzung Pi + Android (Claude, `b966c89`):** Kopf-Min 10, Ersatzpunkt ≤ 40 mm (`HeightGrid.probe_at`, `probe_point(i)`, `as_dict["probe_at"]`), `web.py` tastet `probe_point(i)` ab; Android `Scan.reachable` gleiche Regel. Noch keine Warnungsliste vom Pi.
+
+**Umsetzung Studio (Scan Probe, `8d6112d`, an `b966c89` angeglichen):**
+- `scanprobe/reach.py`: Pi-Konstanten (`PROBE_HEAD_MIN/MAX`, `SUBSTITUTE_MAX_MM/STEP_MM`), `nearest_reachable` wie der Pi, `check_gcode` → `ReachReport`: `reachable_points` zählt wie der Pi (direkt + Ersatzpunkt), `substitutes` = dieselben Ersatzpunkte wie `HeightGrid.probe_at`, `warning` (Wortlaut oben), `fallback_point` nur, wenn gar kein Punkt erreichbar ist (anderer Versatz).
+- Planung (`probe_plan.grid_for_area`, `MachineLimits.probe_head_ok`/`probe_laser_rect` mit Kopf 10–380/10–360) und `ProbeRunner` klemmen höchstens 40 mm weit, weiter entfernte Punkte werden übersprungen; Status `SUBSTITUTED` (6) in `heightmap.py`, Statistik `substituted`, orange Raute in der Heatmap (`heatmap.mark_substituted`).
+- Ein-Klick (`job_flow.py`): Warnung in Status (`warning=True`), Bestätigung (`OneClickController.confirm_text`) und Ergebnis; den Ersatzpunkt misst der Pi selbst (normales `op=autorun`). Nur wenn gar kein Punkt in 40 mm erreichbar ist, startet Studio `op=autorun` mit `x`/`y` am nächsten abtastbaren Punkt (ein Punkt, flach ausgeglichen). Lehnt der Pi trotzdem mit 400 ab, ein Wiederholversuch mit dem nächsten erreichbaren Punkt, ohne neues Hochladen.
+- Platzierte Aufträge (`autorun_task`): Ersatzpunkte macht der Pi; ein Pi-400 (nichts in 40 mm) bleibt Fehler mit Seite/mm-Erklärung (`machine.client.probe_reach` mit Kopf-Min 10).
+- Tests: `tests/test_probe_reach.py` (Studio gegen echten Pi-Code: Konstanten, `nearest_reachable`, Punktzahl und Ersatzpunkte für 40 Zufallsmotive bei zwei Versätzen), `tests/test_machine_probe_reach.py`.
 
 **Übergaben:**
-- **Claude (Pi):** `heightmap._mark_reachable` (`pi400/marlin/heightmap.py:271–278`) wirft den 400er; stattdessen klemmen und weitermachen, Warnungsliste in Antwort und `job.probe.warnings` (Details `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` §6). Zusätzlich Abtastbereich in `/api/status` melden (`probe_reach_mm: [xmin, ymin, xmax, ymax]`).
-- **Claude (Android):** Warnung anzeigen, kein Abbruch, gleicher Wortlaut (Pi-Vertrag).
-- **Canvas (Vorschlag, kein Code von Scan Probe):** Abtastbereich als gestrichelte Fläche einblenden (Bildschirm x 33–360, y 15–340 beim Standardversatz; `scanprobe.reach.screen_box(work_reach(offset))`), Rand außerhalb leicht schraffiert „hier wird daneben gemessen“.
-- **Machine:** keine Code-Änderung nötig; platzierte Aufträge (`autorun_task`) zeigen die Warnung des Pi.
+- ~~Claude (Pi): klemmen statt 400~~ – erledigt in `b966c89` (Ersatzpunkt ≤ 40 mm).
+- **Claude (Pi), offen:** Warnungsliste zu den Ersatzpunkten in Antwort und `job.warnings` (Studio zeigt `job.warnings` schon an, `machine.client.JobState.warnings`; Details `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` §6). Optional Abtastbereich in `/api/status` (`probe_reach_mm: [xmin, ymin, xmax, ymax]`).
+- **Claude (Android), offen:** Warnung anzeigen, kein Abbruch, gleicher Wortlaut (Pi-Vertrag); `Scan.reachable` rechnet schon mit der neuen Regel.
+- **Canvas (Vorschlag, kein Code von Scan Probe):** Abtastbereich als gestrichelte Fläche einblenden (Bildschirm x 33–360, y 0–340 beim Standardversatz; `scanprobe.reach.screen_box(work_reach(offset))`), Rand außerhalb leicht schraffiert „hier wird daneben gemessen“.
+- **Machine:** `client.probe_reach`/`PROBE_HEAD_MIN` und `test_machine_probe_reach.py` minimal an `b966c89` angepasst (Scan Probe, sonst CI rot); platzierte Aufträge zeigen die Warnung des Pi, sobald er sie meldet.
 
 ## 3. Kamera-Scan
 

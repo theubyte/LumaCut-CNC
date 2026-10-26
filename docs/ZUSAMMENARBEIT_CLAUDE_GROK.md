@@ -203,6 +203,10 @@ Hauptweg, drei Schritte, immer sichtbar:
 
 - (Grok, Scan Probe) **Wunsch Besitzer 2026-10-26 – nicht erreichbare Abtastpunkte nicht mehr abbrechen**
   (Anforderungen §1 und §2.4):
+  - **Stand `b966c89` (Claude):** Teil erledigt – Kopf beim Abtasten X10–380 / Y10–360, Ersatzpunkt
+    höchstens 40 mm daneben (`HeightGrid.probe_at`), 400 nur noch, wenn auch so nichts erreichbar ist;
+    Android `Scan.reachable` gleich. Studio-Vorprüfung ist angeglichen (Grok, `reach.py`). **Offen:**
+    Warnungsliste (`job.warnings`) vom Pi und Anzeige in Android.
   - Pi: Der 400 „Kein Abtastpunkt erreichbar …“ (`heightmap._mark_reachable`, `pi400/marlin/heightmap.py:271`)
     darf `autorun`/Mesh nicht mehr abbrechen. Nicht erreichbare Punkte auf die nächste erreichbare
     Tasterposition klemmen (Laserpunkt in `[30+dx, 380+dx] × [30+dy, 360+dy]` ∩ Arbeitsbereich),
@@ -250,6 +254,7 @@ Hauptweg, drei Schritte, immer sichtbar:
    - Abnahme: nur nach Freigabe durch den Nutzer.
 
 7. **Taster-Reichweite: nicht mehr ablehnen, sondern nah daneben tasten und warnen** (Grok, Machine; Meldung und Vorgabe des Besitzers 2026-10-26).
+   - **Stand `b966c89`:** Ablehnung und Klemmen erledigt (Ersatzpunkt ≤ 40 mm, Kopf-Min 10 statt 30 – oberer Rand jetzt direkt abtastbar, die Fälle unten laufen alle). **Offen bleibt nur `job.warnings`** (Abschnitt „Warnung im Status“ unten) und ⚠ G30 bei Kopf X/Y 10 am Gerät prüfen. Der folgende Ist-Stand ist der vor `b966c89`.
    - Ist: Die Meldung entsteht nur in `pi400/marlin/heightmap.py` `_mark_reachable` (Z. ~276): sie markiert je Rasterpunkt `probe_reachable(x, y)`, verwirft Regionen ohne erreichbaren Punkt und wirft `ValueError("Kein Abtastpunkt erreichbar: …")`, wenn keine Region bleibt → `web.py auto_plan` → HTTP 400, der Auftrag startet nicht.
    - Ist geprüft (`software/lumacut-studio-native/tests/test_machine_probe_reach.py`, folgt im nächsten Grok-Commit, ruft das echte `heightmap.plan_probe` und `MarlinTransport.probe_reachable` auf):
      - Grenze stimmt mit dem Code überein: Kopf beim G30 X30–380 / Y30–360 (`transport.py` `_probe_head_ok`, `PROBE_HEAD_MAX`), Versatz Spitze minus Laser X−23 / Y+15 → abtastbare Laserpunkte **X30–357 / Y45–370** (inklusiv, ohne Rundung). (30, 45) geht, (30, 44.99) nicht, (357.01, …) nicht. Vorzeichen passt zu Scan Probe `geometry.py` und Firmware-Offset 0.

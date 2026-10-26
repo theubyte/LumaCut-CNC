@@ -608,7 +608,7 @@ class OneClickJob:
                 raise FlowError("unreachable", explain_pi_error(
                     text, None if rep is None else gcode,
                     getattr(self, "_probe_offset", None) or PROBE_OFFSET_MM)
-                    + " (Pi-Software kennt die Ersatzpunkt-Regel noch nicht, "
+                    + " (Auch kein Ersatzpunkt höchstens 40 mm daneben, "
                       "Anforderungen §2.4.)") from exc
             note = ("Achtung: Der Pi erreicht keinen Abtastpunkt des Motivs – stattdessen "
                     f"einmal bei X{point[0]:.1f} Y{point[1]:.1f} gemessen. {DANGER_NOTE}")

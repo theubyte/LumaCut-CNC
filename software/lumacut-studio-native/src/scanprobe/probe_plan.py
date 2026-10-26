@@ -3,7 +3,8 @@
 * Raster je Bereich mit Randabstand (Tasterspitze fährt nie über die Kante)
 * Tasterversatz X −23 / Y +15: Punkte, deren Kopfposition außerhalb des
   Abtastbereichs läge, werden am nächsten erreichbaren Punkt gemessen
-  (Ersatzpunkt, Warnung, kein Abbruch – Anforderungen §2.4)
+  (Ersatzpunkt höchstens 40 mm daneben wie der Pi, Warnung, kein Abbruch –
+  Anforderungen §2.4); weiter entfernte Punkte werden übersprungen
 * Reihenfolge: Bereiche per Nächster-Nachbar, innerhalb eines Bereichs eine
   Serpentine mit der günstigsten Einstiegsecke -> minimale Leerfahrt
 """
@@ -14,7 +15,7 @@ import math
 from typing import Iterable, Optional, Sequence
 
 from .geometry import (Polygon, Rect, MachineLimits, DEFAULT_LIMITS, PROBE_OFFSET_MM,
-                       path_length)
+                       SUBSTITUTE_MAX_MM, path_length)
 
 
 @dataclass
@@ -195,22 +196,34 @@ def grid_for_area(area: ProbeArea, settings: ProbeSettings,
         for i, x in enumerate(xs):
             if not poly.contains_with_margin(x, y, margin):
                 continue
-            pts[(i, j)] = _point(area.id, i, j, x, y, reach)
-    if not pts:
+            p = _point(area.id, i, j, x, y, reach)
+            if p is None:
+                skipped.append((x, y, f"Taster > {SUBSTITUTE_MAX_MM:g} mm außer Reichweite"))
+            else:
+                pts[(i, j)] = p
+    if not pts and not skipped:
         cx, cy = poly.centroid
         if poly.contains(cx, cy):
-            xs, ys = [cx], [cy]
-            pts[(0, 0)] = _point(area.id, 0, 0, cx, cy, reach)
+            p = _point(area.id, 0, 0, cx, cy, reach)
+            if p is None:
+                skipped.append((cx, cy, f"Taster > {SUBSTITUTE_MAX_MM:g} mm außer Reichweite"))
+            else:
+                xs, ys = [cx], [cy]
+                pts[(0, 0)] = p
     return AreaGrid(area, xs, ys, list(pts.values()), skipped, reach)
 
 
-def _point(area_id: str, i: int, j: int, x: float, y: float, reach: Optional[Rect]) -> ProbePoint:
-    """Rasterpunkt; außerhalb des Abtastbereichs mit Ersatzpunkt (geklemmt)."""
+def _point(area_id: str, i: int, j: int, x: float, y: float,
+           reach: Optional[Rect]) -> Optional[ProbePoint]:
+    """Rasterpunkt; außerhalb des Abtastbereichs mit Ersatzpunkt (geklemmt), ``None``,
+    wenn der Ersatzpunkt mehr als ``SUBSTITUTE_MAX_MM`` entfernt wäre (wie der Pi)."""
     if reach is None:
         return ProbePoint(area_id, i, j, x, y)
     px, py = clamp_to(reach, x, y)
     if abs(px - x) <= 1e-6 and abs(py - y) <= 1e-6:
         return ProbePoint(area_id, i, j, x, y)
+    if math.hypot(px - x, py - y) > SUBSTITUTE_MAX_MM + 1e-9:
+        return None
     return ProbePoint(area_id, i, j, x, y, px, py)
 
 

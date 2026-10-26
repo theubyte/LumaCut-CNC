@@ -131,13 +131,16 @@ Erledigt seit dem ersten Stand: Start-Knopf der Hauptansicht → `one_click.star
 „Kamera-Scan“ → `ScanPanel.camera_scan` (47704f9), Pi meldet `autorun_mesh` + `job.probe`
 (Claude, Pi-Code), Ursprung ≠ Absolut über `machine_panel.autorun_task` (Pi mit
 `autorun_mesh`), Ein-Klick-Auftrag ohne Kamera-Kalibrierung, Leerbett-Referenz,
-Bilder bei Nullpunkt oben rechts (§2.3).
+Bilder bei Nullpunkt oben rechts (§2.3), Ersatzpunkt ≤ 40 mm daneben auf dem Pi
+(Claude, `b966c89`) samt angeglichener Studio-Vorprüfung (§2.4).
 
 - **Nur an der Maschine prüfbar:** echter Kachel-Scan + Kalibrierung, Werkstückerkennung
   mit Leerbett, G30-Reichweite (Kopf bis X380/Y360), Abbruch während des Abtastens,
   Ein-Klick-Ablauf auf einem Pi mit installiertem `autorun_mesh`.
 - **Pi (Claude):** neuen Pi-Dienst auf dem Gerät installieren; `op=park` fehlt auf
   älteren Diensten (Studio meldet dann „Parken nicht möglich“ und fährt nicht).
+  Offen aus §2.4: Ersatzpunkt-Warnung als `job.warnings` melden (Studio zeigt sie an,
+  `client.JobState.warnings`), Android zeigt sie an.
 - **Machine:** keine offene Übergabe von Scan Probe.
 - **Android:** kein Scan-Probe-Code nötig, solange die App direkt Pi-Vertrag §4 nutzt.
 
@@ -184,8 +187,15 @@ Nur `qt_bridge.py` importiert PySide6.
    * Manuelle Bereiche: `ProbeArea.from_rect(...)` bzw. `ProbeArea(id, Polygon, ...)`.
 5. **Proben** (`plan_probe_job`, `ProbeRunner`)
    * Raster je Bereich (Abstand, Randabstand), nur Punkte innerhalb der Form.
-   * Punkte, bei denen der Kopf wegen des Tasterversatzes (X −23 / Y +15) den
-     Fahrbereich verlassen würde, werden übersprungen.
+   * Kopf beim Abtasten X10–380 / Y10–360 wie der Pi (`transport.PROBE_HEAD_MIN/MAX`,
+     seit `b966c89`). Mit dem Tasterversatz (X −23 / Y +15) sind Laserpunkte
+     X30–357 / Y30–370 der Arbeitsfläche direkt abtastbar; nur der linke 33-mm-Streifen nicht.
+   * Punkte dort werden am nächsten erreichbaren Ort **höchstens 40 mm daneben** gemessen
+     (Ersatzpunkt, orange markiert, Warnung, kein Abbruch – Anforderungen §2.4). Weiter
+     entfernte Punkte werden übersprungen (wie `heightmap.SUBSTITUTE_MAX_MM` des Pi).
+   * Ein-Klick über den Pi (`op=autorun`): `reach.check_gcode` rechnet das Pi-Raster samt
+     Ersatzpunkten nach (gleiche Punktzahl, gleiche Ersatzpunkte; Test gegen den Pi-Code in
+     `test_probe_reach.py`) und warnt vor dem Start. Den Ersatzpunkt misst der Pi selbst.
    * Reihenfolge: Bereiche nach nächstem Nachbarn, innerhalb Serpentine (beste von 8 Varianten).
    * Fehlmessung → Wiederholung leicht versetzt (innerhalb der Form). Bleibt sie
      erfolglos, wird interpoliert und markiert (`FAILED`).
