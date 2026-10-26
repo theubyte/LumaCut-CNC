@@ -28,6 +28,11 @@ except ImportError:  # pragma: no cover - nur ohne OpenCV
     cv2 = None
 
 
+# Felder, die der Pi zusätzlich zur Kalibrierung liefert/verwaltet.
+PI_METADATA = ("schema_version", "revision", "updated_at", "updated_by", "notes",
+               "calibrated", "placeholder", "storage", "status", "message")
+
+
 @dataclass
 class CameraCalibration:
     image_width: int
@@ -42,6 +47,7 @@ class CameraCalibration:
     camera_matrix: Optional[list[list[float]]] = None
     dist_coeffs: Optional[list[float]] = None
     exposure: Optional[float] = None      # feste Belichtung (OpenCV CAP_PROP_EXPOSURE), None = Treiber
+    homography: Optional[list[list[float]]] = None  # optional Bild→Bett 3×3 (wird mitgespeichert)
     _maps: Optional[tuple] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
@@ -137,6 +143,8 @@ class CameraCalibration:
         d.pop("format", None)
         d.pop("_maps", None)
         d.pop("comment", None)                # freier Kommentar erlaubt
+        for key in PI_METADATA:               # Pi-Antwort (GET /api/camera/calibration)
+            d.pop(key, None)
         d["offset_mm"] = tuple(d.get("offset_mm", (0.0, 0.0)))
         return cls(**d)
 

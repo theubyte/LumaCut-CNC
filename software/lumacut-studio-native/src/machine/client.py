@@ -49,6 +49,7 @@ MAX_FRAME_BYTES = 64 * 1024
 # requests need long timeouts (mirrors the Tauri studio bridge).
 STATUS_TIMEOUT_S = 4.0
 DEFAULT_TIMEOUT_S = 60.0
+CAMERA_CALIBRATION_PATH = "/api/camera/calibration"
 LONG_TIMEOUT_S = 240.0
 UPLOAD_TIMEOUT_S = 120.0
 #: The Pi answers an upload only after preflight checked every line; a
@@ -97,9 +98,10 @@ class AuthFailed(MachineError):
 class ApiError(MachineError):
     """The Pi answered but refused the request (HTTP 4xx/5xx with a reason)."""
 
-    def __init__(self, message: str, status: int | None = None):
+    def __init__(self, message: str, status: int | None = None, payload: Any = None):
         super().__init__(message)
         self.status = status
+        self.payload = payload  # decoded JSON body, e.g. "current" on HTTP 409
 
 
 class ProtocolError(MachineError):
@@ -378,7 +380,7 @@ class LumaCutClient:
             raise ProtocolError("Pi leitet um (HTTP %d) – Adresse prüfen" % status)
         if status >= 400:
             raise ApiError("Pi lehnt ab (HTTP %d): %s" % (
-                status, _reason(data) or "ohne Begründung"), status)
+                status, _reason(data) or "ohne Begründung"), status, data)
         if not isinstance(data, dict):
             raise ProtocolError("Ungültige Pi-Antwort (HTTP %d)" % status)
         return data
@@ -403,6 +405,21 @@ class LumaCutClient:
     def job_geometry(self, name: str) -> dict:
         _check_job_name(name)
         return self._get("/api/jobs/%s/geometry" % urllib.parse.quote(name))
+
+    # ---- camera calibration (stored on the Pi, belongs to the machine) ----
+    def camera_calibration(self, timeout: float = STATUS_TIMEOUT_S) -> dict:
+        """GET /api/camera/calibration – record incl. revision/placeholder/storage."""
+        return self._get(CAMERA_CALIBRATION_PATH, timeout=timeout)
+
+    def put_camera_calibration(self, record: dict, revision: int,
+                               timeout: float = 10.0) -> dict:
+        """PUT with optimistic concurrency: ``revision`` is the one last read.
+
+        HTTP 409 (changed meanwhile) raises ApiError(status=409) whose
+        ``payload["current"]`` holds the record now stored on the Pi."""
+        body = json.dumps(dict(record, revision=int(revision))).encode("utf-8")
+        return self._request("PUT", CAMERA_CALIBRATION_PATH, body=body, timeout=timeout,
+                             content_type="application/json")
 
     # ---- actions -------------------------------------------------------
     def action(self, op: str, timeout: float | None = None, **fields) -> str:

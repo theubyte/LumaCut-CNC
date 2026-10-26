@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from . import adapters
 from .calibration import CameraCalibration
+from . import pi_calibration
 from .detection import DetectedObject
 from .focus_export import FocusExport, compensate_for_export
 from .geometry import DEFAULT_LIMITS, Polygon, Rect
@@ -274,6 +275,10 @@ class ScanPanel(QWidget):
         self.ask = ask
         self.calibration: Optional[CameraCalibration] = None
         self.calibration_path: Optional[Path] = None
+        # Stand auf dem Pi (Revision/Status); None = noch nicht gelesen/kein Pi
+        self.pi_calibration: Optional[pi_calibration.PiCalibration] = None
+        self.pi_calibration_error = ""
+        self.calibration_dirty = False      # lokal geändert, noch nicht auf dem Pi
         self.hardware: Optional[adapters.Hardware] = None
         self.workflow: Optional[ScanProbeWorkflow] = None
         self.worker: Optional[ScanProbeWorker] = None
@@ -307,14 +312,25 @@ class ScanPanel(QWidget):
         self.camera_edit.setPlaceholderText("USB-Index oder Stream-URL")
         self.camera_edit.setToolTip("z. B. 0 für die erste USB-Kamera oder http://lumacut.local:8081/stream")
         form.addRow("Kamera", self.camera_edit)
-        cal_row = QHBoxLayout()
+        cal_box = QVBoxLayout()
         self.cal_label = QLabel("Standardwerte (unkalibriert)")
         self.cal_label.setWordWrap(True)
-        self.cal_button = QPushButton("Laden …")
+        cal_box.addWidget(self.cal_label)
+        cal_row = QHBoxLayout()
+        self.pi_cal_button = QPushButton("Vom Pi laden")
+        self.pi_cal_button.setToolTip("Kalibrierung gehört zur Maschine und liegt auf dem Pi")
+        self.pi_cal_button.clicked.connect(lambda: self.refresh_pi_calibration(report=True))
+        self.pi_save_button = QPushButton("Auf Pi speichern")
+        self.pi_save_button.clicked.connect(lambda: self.save_calibration_to_pi())
+        self.cal_button = QPushButton("Importieren …")
+        self.cal_button.setToolTip("camera.json laden (Import, Simulation/offline)")
         self.cal_button.clicked.connect(self._choose_calibration)
-        cal_row.addWidget(self.cal_label, 1)
-        cal_row.addWidget(self.cal_button)
-        form.addRow("Kalibrierung", cal_row)
+        self.cal_export_button = QPushButton("Exportieren …")
+        self.cal_export_button.clicked.connect(self._export_calibration_dialog)
+        for b in (self.pi_cal_button, self.pi_save_button, self.cal_button, self.cal_export_button):
+            cal_row.addWidget(b)
+        cal_box.addLayout(cal_row)
+        form.addRow("Kalibrierung", cal_box)
         self.spacing_spin = QDoubleSpinBox()
         self.spacing_spin.setRange(5.0, 60.0)
         self.spacing_spin.setValue(15.0)
@@ -456,14 +472,22 @@ class ScanPanel(QWidget):
         self.camera_edit.setEnabled(pi)
         self.hardware = None
         self.workflow = None
+        if pi and self.pi_calibration is None and self._client() is not None:
+            self.refresh_pi_calibration()
         self._update_estimate()
+        if hasattr(self, "pi_save_button"):
+            self._update_enabled()
 
     def _update_enabled(self) -> None:
         busy = self.busy
         for w in (self.scan_button, self.full_button, self.mode_combo, self.camera_edit,
-                  self.cal_button, self.spacing_spin, self.load_button, self.clear_button):
+                  self.cal_button, self.cal_export_button, self.spacing_spin, self.load_button,
+                  self.clear_button):
             w.setEnabled(not busy)
         self.camera_edit.setEnabled(not busy and self.mode == MODE_PI)
+        pi = self.mode == MODE_PI
+        self.pi_cal_button.setEnabled(not busy and pi)
+        self.pi_save_button.setEnabled(not busy and pi and self.calibration is not None)
         self.probe_button.setEnabled(not busy and (bool(self.checked_objects()) or bool(self.manual_areas)
                                                    or bool(self.design_bounds())))
         for w in (self.mark_button, self.selection_button):
@@ -490,24 +514,140 @@ class ScanPanel(QWidget):
         self.statusMessage.emit(text)
 
     # --------------------------------------------------------- Kalibrierung
-    def load_calibration(self, path: str | Path) -> CameraCalibration:
-        cal = CameraCalibration.load(path)
-        self.calibration, self.calibration_path = cal, Path(path)
-        self.cal_label.setText(f"{Path(path).name}: {cal.px_per_mm:.2f} px/mm @ Z{cal.scan_z:.0f}, "
-                               f"{cal.image_width}×{cal.image_height}")
+    # Die Kalibrierung gehört zur Maschine: im Pi-Modus gilt der Stand auf dem
+    # Pi (GET/PUT /api/camera/calibration). camera.json ist Import/Export und
+    # Rückfall für Simulation/offline (docs/KAMERA_STATUS_UND_KALIBRIERUNG.md).
+    def _client(self):
+        return self.client_provider() if self.client_provider else None
+
+    def _set_calibration(self, cal: Optional[CameraCalibration]) -> None:
+        self.calibration = cal
         self.hardware = None
         self.workflow = None
         self._update_estimate()
+
+    def _show_calibration_status(self) -> None:
+        cal = self.calibration
+        if self.calibration_dirty and cal is not None:
+            name = self.calibration_path.name if self.calibration_path else "lokal"
+            text = (f"{name}: {cal.px_per_mm:.2f} px/mm @ Z{cal.scan_z:.0f}, "
+                    f"{cal.image_width}×{cal.image_height}")
+            if self.mode == MODE_PI:
+                text += " – nicht auf dem Pi gespeichert"
+            if self.pi_calibration_error:
+                text += f"\n{self.pi_calibration_error}"
+        elif self.pi_calibration is not None:
+            text = self.pi_calibration.status_text()
+        elif self.pi_calibration_error:
+            text = self.pi_calibration_error
+        else:
+            text = "Standardwerte (unkalibriert)"
+        self.cal_label.setText(text)
+
+    def refresh_pi_calibration(self, report: bool = False) -> Optional[pi_calibration.PiCalibration]:
+        """Kalibrierung vom Pi holen; Fehler als deutscher Hinweis im Label."""
+        client = self._client()
+        if client is None:
+            self.pi_calibration_error = "Pi nicht verbunden – Kalibrierung vom Pi nicht geladen"
+            self._show_calibration_status()
+            if report:
+                self._error(self.pi_calibration_error)
+            return None
+        try:
+            pc = pi_calibration.fetch(client)
+        except pi_calibration.PiCalibrationError as exc:
+            self.pi_calibration = None
+            self.pi_calibration_error = str(exc)
+            self._show_calibration_status()
+            if report:
+                self._error(str(exc))
+            return None
+        self.pi_calibration, self.pi_calibration_error = pc, ""
+        self.calibration_dirty = False
+        self.calibration_path = None
+        # Platzhalter des Pi nie als echte Kalibrierung verwenden.
+        self._set_calibration(None if pc.placeholder else pc.calibration)
+        self._show_calibration_status()
+        if report:
+            self._notify(pc.status_text().splitlines()[0])
+        self._update_enabled()
+        return pc
+
+    def save_calibration_to_pi(self, notes: Optional[str] = None) -> bool:
+        """Aktuelle Kalibrierung (mit Bestätigung) auf den Pi schreiben."""
+        if self.calibration is None:
+            self._error("Keine Kalibrierung zum Speichern – zuerst camera.json importieren")
+            return False
+        client = self._client()
+        if client is None:
+            self._error("Pi nicht verbunden – Kalibrierung nicht gespeichert")
+            return False
+        if self.pi_calibration is None and self.refresh_pi_calibration() is None:
+            # Nur bei unbekannter Revision abbrechen; lokale Werte bleiben erhalten.
+            self._error(self.pi_calibration_error or "Kalibrierung auf dem Pi nicht lesbar")
+            return False
+        base = self.pi_calibration
+        if self.ask:
+            before = "Platzhalter" if base.placeholder else f"Revision {base.revision}"
+            if QMessageBox.question(
+                    self, "Kalibrierung auf dem Pi speichern?",
+                    f"Die Kamera-Kalibrierung gehört zur Maschine und gilt danach für alle "
+                    f"Clients.\nAuf dem Pi ersetzen ({before})?") != QMessageBox.StandardButton.Yes:
+                return False
+        try:
+            pc = pi_calibration.store(client, self.calibration, base.revision, notes=notes)
+        except pi_calibration.Conflict as exc:
+            if exc.current is not None:
+                self.pi_calibration = exc.current
+            self._error(f"{exc}\nLokale Werte bleiben erhalten; „Vom Pi laden“ zeigt den neuen Stand.")
+            return False
+        except pi_calibration.PiCalibrationError as exc:
+            self._error(str(exc))
+            return False
+        self.pi_calibration, self.pi_calibration_error = pc, ""
+        self.calibration_dirty = False
+        self._set_calibration(pc.calibration)
+        self._show_calibration_status()
+        self._notify(f"Kalibrierung auf dem Pi gespeichert (Revision {pc.revision})")
+        self._update_enabled()
+        return True
+
+    def load_calibration(self, path: str | Path) -> CameraCalibration:
+        """camera.json importieren (lokal; im Pi-Modus danach „Auf Pi speichern“)."""
+        cal = CameraCalibration.load(path)
+        self.calibration_path = Path(path)
+        self.calibration_dirty = True
+        self._set_calibration(cal)
+        self._show_calibration_status()
+        self._update_enabled()
+        return cal
+
+    def export_calibration(self, path: str | Path) -> CameraCalibration:
+        cal = self.calibration or adapters.default_calibration()
+        cal.save(path)
+        self._notify(f"Kalibrierung exportiert: {path}")
         return cal
 
     def _choose_calibration(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Kamera-Kalibrierung laden", "",
+        path, _ = QFileDialog.getOpenFileName(self, "Kamera-Kalibrierung importieren", "",
                                               "Kalibrierung (*.json)")
         if path:
             try:
                 self.load_calibration(path)
             except Exception as exc:  # noqa: BLE001 - Meldung an den Nutzer
                 self._error(f"Kalibrierung ungültig: {exc}")
+                return
+            if self.mode == MODE_PI and self._client() is not None:
+                self.save_calibration_to_pi()
+
+    def _export_calibration_dialog(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Kamera-Kalibrierung exportieren",
+                                              "camera.json", "Kalibrierung (*.json)")
+        if path:
+            try:
+                self.export_calibration(path)
+            except Exception as exc:  # noqa: BLE001
+                self._error(f"Export fehlgeschlagen: {exc}")
 
     # ---------------------------------------------------------- Hardware
     def _build_hardware(self) -> adapters.Hardware:
@@ -521,8 +661,14 @@ class ScanPanel(QWidget):
         client = self.client_provider() if self.client_provider else None
         if client is None:
             raise adapters.HardwareNotReady("Nicht mit dem Pi verbunden – unten unter „Maschine“ verbinden")
+        if self.calibration is None and not self.calibration_dirty:
+            self.refresh_pi_calibration()
         if self.calibration is None:
-            raise adapters.HardwareNotReady("Für echte Scans zuerst camera.json laden (siehe docs/KAMERA_KALIBRIERUNG.md)")
+            why = self.pi_calibration_error or (
+                "Auf dem Pi ist noch keine Kalibrierung gespeichert (Platzhalter)")
+            raise adapters.HardwareNotReady(
+                f"{why}. Für echte Scans camera.json importieren und „Auf Pi speichern“ "
+                "(siehe docs/KAMERA_STATUS_UND_KALIBRIERUNG.md)")
         return adapters.pi_setup(client, self.calibration, self.camera_edit.text().strip())
 
     def _ensure_workflow(self, need_camera: bool) -> ScanProbeWorkflow:
