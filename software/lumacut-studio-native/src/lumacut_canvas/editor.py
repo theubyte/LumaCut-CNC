@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QWidget)
 
 from . import icons, theme, touch
-from .canvas_view import CanvasScene, CanvasView, Ruler
+from .canvas_view import PX_PER_MM_100, CanvasScene, CanvasView, Ruler
 from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand, SetGroupsCommand,
                        SetLayerAttrsCommand, SetShapeLayerCommand, SetTextCommand)
 from .document_io import FILE_SUFFIX, load_into, save_document
@@ -485,7 +485,7 @@ class CanvasEditor(QWidget):
 
     def _emit_zoom(self) -> None:
         # 100 % = Arbeitsfläche in physischer Größe (logische 96 dpi).
-        pct = self.view.px_per_mm / (96 / 25.4) * 100
+        pct = self.view.px_per_mm / PX_PER_MM_100 * 100
         self.zoom_label.setText(f"{pct:.0f} %")
 
     def notify(self, text: str) -> None:

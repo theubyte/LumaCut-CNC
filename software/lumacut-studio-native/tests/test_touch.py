@@ -116,3 +116,155 @@ def test_default_settings_only_with_organization(qapp):
         assert touch.default_settings() is None
     finally:
         qapp.setOrganizationName(old)
+
+
+# --- Hilfen für Touch-Ereignisse -----------------------------------------
+_DEV = None
+
+
+def _device():
+    from PySide6.QtGui import QInputDevice, QPointingDevice
+    global _DEV
+    if _DEV is None:  # bewusst nicht registriert (siehe Moduldoku)
+        _DEV = QPointingDevice("lumacut test touch", 4711, QInputDevice.DeviceType.TouchScreen,
+                               QPointingDevice.PointerType.Finger, QInputDevice.Capability.Position, 10, 0)
+    return _DEV
+
+
+def _touch(ed, etype, points, device=None):
+    """points: [(id, viewport-Position, Zustand)] mit Zustand 'p'/'m'/'s'/'r'."""
+    from PySide6.QtGui import QEventPoint, QTouchEvent
+    from PySide6.QtWidgets import QApplication
+    states = {"p": QEventPoint.State.Pressed, "m": QEventPoint.State.Updated,
+              "s": QEventPoint.State.Stationary, "r": QEventPoint.State.Released}
+    vp = ed.view.viewport()
+    eps = [QEventPoint(i, states[s], QPointF(pos), vp.mapToGlobal(QPointF(pos))) for i, pos, s in points]
+    ev = QTouchEvent(etype, device or _device(), Qt.NoModifier, eps)
+    QApplication.sendEvent(vp, ev)
+    return ev
+
+
+def _drag1(ed, a: QPointF, b: QPointF, steps=5):
+    _touch(ed, QEvent.TouchBegin, [(0, a, "p")])
+    for k in range(1, steps + 1):
+        _touch(ed, QEvent.TouchUpdate, [(0, a + (b - a) * (k / steps), "m")])
+    _touch(ed, QEvent.TouchEnd, [(0, b, "r")])
+
+
+def _pinch(ed, c: QPointF, d0: float, d1: float, shift=QPointF(0, 0), steps=6):
+    """Zwei Finger waagrecht um ``c``, Abstand d0 -> d1, Mitte wandert um ``shift``."""
+    def pts(d, cc, state):
+        return [(1, cc - QPointF(d / 2, 0), state), (2, cc + QPointF(d / 2, 0), state)]
+    _touch(ed, QEvent.TouchBegin, pts(d0, c, "p"))
+    for k in range(1, steps + 1):
+        f = k / steps
+        _touch(ed, QEvent.TouchUpdate, pts(d0 + (d1 - d0) * f, c + shift * f, "m"))
+    _touch(ed, QEvent.TouchEnd, pts(d1, c + shift, "r"))
+
+
+# --- 2: Pinch-Zoom -----------------------------------------------------------
+def test_pinch_zooms_about_finger_center(ed):
+    v = ed.view
+    c = QPointF(400, 300)
+    scene_c = v.mapToScene(c.toPoint())
+    z0 = v.px_per_mm
+    seen = []
+    v.viewChanged.connect(lambda: seen.append(1))
+    _pinch(ed, c, 100, 200)
+    assert v.px_per_mm == pytest.approx(2 * z0, rel=1e-6)
+    after = v.mapFromScene(scene_c).toPointF()
+    assert abs(after.x() - c.x()) <= 1.5 and abs(after.y() - c.y()) <= 1.5
+    assert seen  # Lineale/Raster bekommen die Änderung mit
+
+
+def test_pinch_with_moving_center_pans_and_respects_limits(ed):
+    from lumacut_canvas.canvas_view import MAX_SCALE, MIN_SCALE
+    v = ed.view
+    c = QPointF(400, 300)
+    scene_c = v.mapToScene(c.toPoint())
+    shift = QPointF(60, -40)
+    _pinch(ed, c, 150, 150, shift)  # reines Zwei-Finger-Verschieben
+    after = v.mapFromScene(scene_c).toPointF()
+    assert abs(after.x() - (c + shift).x()) <= 1.5 and abs(after.y() - (c + shift).y()) <= 1.5
+    _pinch(ed, c, 20, 2000)
+    assert v.px_per_mm == pytest.approx(MAX_SCALE)
+    _pinch(ed, c, 2000, 20)
+    _pinch(ed, c, 2000, 20)
+    assert v.px_per_mm == pytest.approx(MIN_SCALE)
+
+
+def test_pinch_math_helper_direct(ed):
+    v = ed.view
+    anchor, scene_pt = QPointF(300, 200), QPointF(100, 100)
+    v.pinch_to(8.0, anchor, scene_pt)
+    assert v.px_per_mm == pytest.approx(8.0)
+    p = v.mapFromScene(scene_pt).toPointF()
+    assert abs(p.x() - anchor.x()) <= 1 and abs(p.y() - anchor.y()) <= 1
+
+
+def test_second_finger_aborts_object_drag(ed):
+    sid = _rect(ed, 60, 60, 40, 40)
+    g0 = ed.document.shape(sid).geom.copy()
+    a = _vp(ed, QPointF(80, 80))
+    _touch(ed, QEvent.TouchBegin, [(1, a, "p")])
+    _touch(ed, QEvent.TouchUpdate, [(1, a + QPointF(40, 0), "m")])  # Objekt wird gezogen …
+    assert ed.document.shape(sid).geom.x != g0.x
+    b = a + QPointF(140, 0)
+    _touch(ed, QEvent.TouchUpdate, [(1, a + QPointF(40, 0), "s"), (2, b, "p")])  # … zweiter Finger
+    assert ed.document.shape(sid).geom.x == pytest.approx(g0.x)  # zurückgesprungen
+    _touch(ed, QEvent.TouchUpdate, [(1, a + QPointF(20, 0), "m"), (2, b + QPointF(30, 0), "m")])
+    _touch(ed, QEvent.TouchUpdate, [(2, b + QPointF(30, 0), "s"), (1, a, "r")])
+    _touch(ed, QEvent.TouchEnd, [(2, b + QPointF(60, 0), "r")])
+    assert ed.document.shape(sid).geom.x == pytest.approx(g0.x)
+    assert not ed.undo_stack.canUndo() or ed.undo_stack.undoText() != "Verschieben"
+
+
+def test_one_finger_drag_moves_object_like_mouse(ed):
+    sid = _rect(ed, 60, 60, 40, 40)
+    px = ed.view.px_per_mm
+    _drag1(ed, _vp(ed, QPointF(80, 80)), _vp(ed, QPointF(80, 80)) + QPointF(20 * px, 0))
+    assert ed.document.shape(sid).geom.x == pytest.approx(80, abs=1.0)
+    assert ed.undo_stack.undoText() == "Verschieben"
+
+
+def test_tap_selects_object(ed):
+    sid = _rect(ed, 60, 60, 40, 40)
+    p = _vp(ed, QPointF(80, 80))
+    _touch(ed, QEvent.TouchBegin, [(0, p, "p")])
+    _touch(ed, QEvent.TouchEnd, [(0, p + QPointF(3, 2), "r")])
+    assert ed.selection == [sid]
+
+
+def test_touchpad_events_are_left_to_qt(ed):
+    from PySide6.QtGui import QInputDevice, QPointingDevice
+    pad = QPointingDevice("pad", 4712, QInputDevice.DeviceType.TouchPad,
+                          QPointingDevice.PointerType.Finger, QInputDevice.Capability.Position, 5, 0)
+    z0 = ed.view.px_per_mm
+    c = QPointF(400, 300)
+    _touch(ed, QEvent.TouchBegin, [(1, c - QPointF(50, 0), "p"), (2, c + QPointF(50, 0), "p")], pad)
+    _touch(ed, QEvent.TouchUpdate, [(1, c - QPointF(100, 0), "m"), (2, c + QPointF(100, 0), "m")], pad)
+    assert ed.view.px_per_mm == pytest.approx(z0)
+
+
+def test_zoom_buttons_large_and_only_in_touch_mode(ed):
+    from lumacut_canvas.canvas_view import PX_PER_MM_100
+    zb = ed.view.zoom_buttons
+    assert not zb.isVisible()
+    ed.set_touch_mode(True)
+    assert zb.isVisible()
+    for b in zb.buttons.values():
+        assert b.width() >= 44 and b.height() >= 44
+    z0 = ed.view.px_per_mm
+    zb.buttons["zoom_in"].click()
+    assert ed.view.px_per_mm == pytest.approx(z0 * 1.25)
+    zb.buttons["zoom_out"].click()
+    assert ed.view.px_per_mm == pytest.approx(z0)
+    zb.buttons["zoom_100"].click()
+    assert ed.view.px_per_mm == pytest.approx(PX_PER_MM_100)
+    assert ed.zoom_label.text() == "100 %"
+    zb.buttons["fit"].click()
+    assert ed.view.px_per_mm != pytest.approx(PX_PER_MM_100)
+    vp = ed.view.viewport().geometry()
+    assert vp.contains(zb.geometry())
+    ed.set_touch_mode(False)
+    assert not zb.isVisible()

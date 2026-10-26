@@ -10,12 +10,12 @@ from __future__ import annotations
 import logging
 import math
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import (QColor, QFont, QImage, QMouseEvent, QPainter, QPaintEvent, QPen,
-                           QWheelEvent)
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QWidget
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (QColor, QEventPoint, QFont, QImage, QMouseEvent, QPainter, QPaintEvent,
+                           QPen, QWheelEvent)
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsView, QHBoxLayout, QToolButton, QWidget
 
-from . import theme, touch
+from . import icons, theme, touch
 from .items import SelectionOverlay, ShapeItem
 from .model import Document
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
@@ -26,6 +26,8 @@ SCENE_MARGIN_MM = 60.0
 MIN_SCALE = 0.4    # px/mm
 MAX_SCALE = 60.0   # px/mm
 NICE_STEPS = (0.5, 1, 2, 5, 10, 20, 50, 100, 200)
+PX_PER_MM_100 = 96 / 25.4  # 100 % = physische Größe bei logischen 96 dpi
+TAP_SLOP_PX = 10.0         # so weit darf ein Finger wandern, bevor aus Tippen Ziehen wird
 
 
 def nice_step(px_per_mm: float, min_px: float) -> float:
@@ -86,6 +88,51 @@ class CanvasScene(QGraphicsScene):
         return None
 
 
+_TOUCH_EVENTS = (QEvent.TouchBegin, QEvent.TouchUpdate, QEvent.TouchEnd, QEvent.TouchCancel)
+
+
+class ZoomButtons(QWidget):
+    """Große Zoom-Knöpfe im Canvas (unten rechts), für Finger gedacht:
+    Verkleinern, Vergrößern, Einpassen, 100 %."""
+
+    def __init__(self, view: "CanvasView") -> None:
+        super().__init__(view)
+        self.setObjectName("ZoomButtons")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(
+            f"#ZoomButtons {{ background: {theme.PANEL}; border: 1px solid {theme.BORDER}; border-radius: 10px; }}"
+            f"#ZoomButtons QToolButton {{ background: transparent; border: 1px solid transparent;"
+            f" border-radius: 8px; color: {theme.TEXT}; font-weight: 600; }}"
+            f"#ZoomButtons QToolButton:pressed {{ background: #173a33; border-color: {theme.ACCENT}; }}")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(4, 4, 4, 4)
+        lay.setSpacing(6)
+        self.buttons: dict[str, QToolButton] = {}
+        for name, icon, text, tip, slot in (
+                ("zoom_out", "zoom_out", "", "Verkleinern", lambda: view.zoom_by(0.8)),
+                ("zoom_in", "zoom_in", "", "Vergrößern", lambda: view.zoom_by(1.25)),
+                ("fit", "fit", "", "Einpassen", view.fit_work_area),
+                ("zoom_100", None, "100%", "100 % (physische Größe)", lambda: view.set_zoom(PX_PER_MM_100))):
+            b = QToolButton(self)
+            b.setObjectName(f"Zoom_{name}")
+            b.setToolTip(tip)
+            b.setFocusPolicy(Qt.NoFocus)
+            if icon:
+                b.setIcon(icons.icon(icon))
+            else:
+                b.setText(text)
+            b.clicked.connect(slot)
+            lay.addWidget(b)
+            self.buttons[name] = b
+        self.set_button_size(touch.MOUSE.zoom_button_px)
+
+    def set_button_size(self, px: int) -> None:
+        for b in self.buttons.values():
+            b.setFixedSize(px, px)
+            b.setIconSize(QSize(int(px * 0.6), int(px * 0.6)))
+        self.adjustSize()
+
+
 class CanvasView(QGraphicsView):
     """Zoom (Mausrad), Pan (mittlere Maustaste oder Leertaste+Ziehen), Raster."""
 
@@ -118,6 +165,11 @@ class CanvasView(QGraphicsView):
         self._fitted_once = False
         self.touch_mode = False
         self.metrics: touch.TouchMetrics = touch.MOUSE
+        self._touch_seen = False
+        self._touch: dict | None = None  # laufende Touch-Folge (siehe _touch_event)
+        self.viewport().setAttribute(Qt.WA_AcceptTouchEvents, True)
+        self.zoom_buttons = ZoomButtons(self)
+        self.zoom_buttons.setVisible(False)  # nur im Touch-Modus; mit Maus gibt es die Aktionsleiste
         self.horizontalScrollBar().valueChanged.connect(self.viewChanged)
         self.verticalScrollBar().valueChanged.connect(self.viewChanged)
 
@@ -128,7 +180,16 @@ class CanvasView(QGraphicsView):
         self.metrics = touch.metrics(self.touch_mode)
         scene: CanvasScene = self.scene()  # type: ignore[assignment]
         scene.overlay.set_metrics(self.metrics)
+        self.zoom_buttons.set_button_size(self.metrics.zoom_button_px)
+        self.zoom_buttons.setVisible(self.touch_mode)
+        self._place_zoom_buttons()
         self._after_zoom()
+
+    def _place_zoom_buttons(self) -> None:
+        zb = self.zoom_buttons
+        vp = self.viewport().geometry()
+        zb.move(vp.right() - zb.width() - 12, vp.bottom() - zb.height() - 12)
+        zb.raise_()
 
     # --- Zoom -------------------------------------------------------------
     @property
@@ -205,6 +266,7 @@ class CanvasView(QGraphicsView):
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         super().resizeEvent(event)
+        self._place_zoom_buttons()
         self.viewChanged.emit()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
@@ -255,7 +317,119 @@ class CanvasView(QGraphicsView):
             self.zoom_by(1.0 + event.value(), event.position())
             event.accept()
             return True
+        if event.type() in _TOUCH_EVENTS and self._touch_event(event):
+            return True
         return super().viewportEvent(event)
+
+    # --- Touch ------------------------------------------------------------
+    def pinch_to(self, px_per_mm: float, anchor: QPointF, scene_pt: QPointF) -> None:
+        """Zoom auf ``px_per_mm`` (begrenzt auf MIN/MAX_SCALE) und ``scene_pt``
+        (mm) an die Viewport-Position ``anchor`` legen. Zoomen und Verschieben
+        in einem Schritt: so folgt die Zeichnung beim Pinch den Fingern."""
+        px_per_mm = max(MIN_SCALE, min(MAX_SCALE, px_per_mm))
+        f = px_per_mm / self.px_per_mm
+        scaled = abs(f - 1.0) > 1e-9
+        if scaled:
+            self.setTransformationAnchor(QGraphicsView.NoAnchor)
+            self.scale(f, f)
+            self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self._pin(scene_pt, anchor)
+        if scaled:
+            self._after_zoom()
+            self._pin(scene_pt, anchor)
+
+    def _touch_points(self, event) -> list[tuple[int, QPointF]]:
+        """Aktive Finger (id, Viewport-Position), über die globale Position
+        abgebildet – funktioniert auch für selbst erzeugte Ereignisse."""
+        vp = self.viewport()
+        return [(p.id(), vp.mapFromGlobal(p.globalPosition()))
+                for p in event.points() if p.state() != QEventPoint.State.Released]
+
+    def _touch_event(self, event) -> bool:
+        """Touchscreen-Folge auswerten.
+
+        * Ein Finger: tippen/ziehen wie mit der linken Maustaste. Der Druck
+          wird erst weitergegeben, wenn der Finger ``TAP_SLOP_PX`` wandert
+          oder abhebt – kommt vorher ein zweiter Finger dazu, passiert am
+          Objekt gar nichts.
+        * Zwei Finger: Pinch-Zoom um die Fingermitte, gleichzeitig Verschieben
+          mit der Mitte. Ein schon laufender Zug wird verworfen
+          (:meth:`ToolController.abort_drag`), damit nichts versehentlich
+          verschoben wird. Bis alle Finger oben sind, bleibt es beim Zoomen.
+
+        Touchpad-Ereignisse und aus Mausereignissen synthetisierte Touch-Events
+        werden nicht ausgewertet (False -> Qt-Standardbehandlung).
+        """
+        if not touch.is_touchscreen_event(event):
+            return False
+        event.accept()
+        if not self._touch_seen:
+            self._touch_seen = True
+            self.touchDetected.emit()
+        et = event.type()
+        st = self._touch
+        if et == QEvent.TouchCancel:
+            if st and st["mode"] == "tool" and self.tool_handler is not None:
+                self.tool_handler.abort_drag()
+            self._touch = None
+            return True
+        pts = self._touch_points(event)
+        if st is None:
+            if not pts:
+                return True
+            st = self._touch = {"mode": "pending", "start": QPointF(pts[0][1]), "last": QPointF(pts[0][1])}
+        if len(pts) >= 2 and st["mode"] != "pinch":
+            if st["mode"] == "tool" and self.tool_handler is not None:
+                self.tool_handler.abort_drag()
+            self._start_pinch(st, pts)
+        elif st["mode"] == "pinch":
+            self._update_pinch(st, pts)
+        elif pts:
+            pos = pts[0][1]
+            st["last"] = QPointF(pos)
+            self._touch_single_move(st, pos)
+        if et == QEvent.TouchEnd or not pts:
+            self._touch_end(st)
+            self._touch = None
+        return True
+
+    def _start_pinch(self, st: dict, pts: list[tuple[int, QPointF]]) -> None:
+        (i0, a), (i1, b) = pts[0], pts[1]
+        st.update(mode="pinch", ids=(i0, i1), dist0=max(1.0, math.hypot(b.x() - a.x(), b.y() - a.y())),
+                  scale0=self.px_per_mm)
+        c = (a + b) / 2
+        st["scene0"] = self.viewportTransform().inverted()[0].map(c)
+
+    def _update_pinch(self, st: dict, pts: list[tuple[int, QPointF]]) -> None:
+        by_id = dict(pts)
+        if len(pts) < 2:
+            return  # ein Finger ist schon oben: nichts mehr tun, bis alle oben sind
+        if not all(i in by_id for i in st["ids"]):
+            self._start_pinch(st, pts)  # anderer Finger übernimmt: neu ansetzen
+            return
+        a, b = by_id[st["ids"][0]], by_id[st["ids"][1]]
+        d = max(1.0, math.hypot(b.x() - a.x(), b.y() - a.y()))
+        self.pinch_to(st["scale0"] * d / st["dist0"], (a + b) / 2, st["scene0"])
+
+    def _touch_single_move(self, st: dict, pos: QPointF) -> None:
+        if st["mode"] == "pending":
+            d = pos - st["start"]
+            if math.hypot(d.x(), d.y()) < TAP_SLOP_PX:
+                return
+            st["mode"] = "tool"
+            if self.tool_handler is not None:
+                self.tool_handler.press(self.mapToScene(st["start"].toPoint()), Qt.NoModifier)
+        if st["mode"] == "tool" and self.tool_handler is not None:
+            scene_pos = self.mapToScene(pos.toPoint())
+            self.cursorMoved.emit(scene_pos.x(), scene_pos.y())
+            self.tool_handler.move(scene_pos, Qt.NoModifier, True)
+
+    def _touch_end(self, st: dict) -> None:
+        if self.tool_handler is None or st["mode"] not in ("pending", "tool"):
+            return
+        if st["mode"] == "pending":  # Tippen = Klick an der Startposition
+            self.tool_handler.press(self.mapToScene(st["start"].toPoint()), Qt.NoModifier)
+        self.tool_handler.release(self.mapToScene(st["last"].toPoint()), Qt.NoModifier)
 
     # --- Maus -------------------------------------------------------------
     def _scene_pos(self, event: QMouseEvent) -> QPointF:

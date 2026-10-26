@@ -188,6 +188,25 @@ class ToolController:
             self.update_cursor()
             self.ed.roiCancelled.emit()
 
+    def abort_drag(self) -> None:
+        """Laufenden Zug verwerfen, z. B. wenn ein zweiter Finger zum Zoomen
+        dazukommt: Objekte springen zurück, Vorschauen verschwinden. Anders als
+        :meth:`cancel` bleiben ein angefangenes Polygon und eine angeforderte
+        Bereichsauswahl erhalten."""
+        mode = self._mode
+        if mode == "poly":
+            return
+        if mode in ("move", "resize", "rotate") and self._orig:
+            self._apply(self._orig)
+        if mode in ("draw", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
+            self.doc.remove_shape(self._preview_id)
+        self._free = []
+        self._orig = {}
+        self._rubber.setVisible(False)
+        self._mode = None
+        self._preview_id = None
+        self._moved = False
+
     def _apply(self, geoms: dict[str, Geometry]) -> None:
         self.doc.begin_batch()
         for sid, g in geoms.items():
