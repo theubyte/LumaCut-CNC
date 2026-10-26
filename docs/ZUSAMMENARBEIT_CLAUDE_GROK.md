@@ -322,6 +322,9 @@ Hauptweg, drei Schritte, immer sichtbar:
 - (Claude, Android) **Fertig: dimmbares Licht** – Helligkeitsregler in der Werkstatt (nur bei `light_dimmable` ≠ false, Senden beim Loslassen),
   Schalter „Lichteffekte“ in den Einstellungen, Firmware-Hinweis bei `light_dimmable=false`, `PiClient.light` + MockWebServer-Test.
   Commit 809d841, CI grün: https://github.com/theubyte/LumaCut-CNC/actions/runs/40413500704. Nicht am Gerät erprobt.
+- (Claude, Android) **Fertig: Messwerkzeug** im Editor (Commit 34aef6f, CI grün: https://github.com/theubyte/LumaCut-CNC/actions/runs/40422762188).
+  Fangen (Ecke > Mitte/Kantenmitte > Kante, 24 dp) mit Lupe; Abstand, Linie–Linie, Element-Info, Winkel, Rand; Liste mit Kopieren/Löschen.
+  Geometrie in core (`Measure.kt`, Tests grün), Maße nur Anzeige, nicht im Projekt. Nicht am Tablet erprobt (Lupe/Gesten nur per CI kompiliert).
 
 ## Änderungslog
 
