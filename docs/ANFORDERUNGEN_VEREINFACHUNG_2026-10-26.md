@@ -312,6 +312,13 @@ Platzierung (Vektoren) und Bilder (Mosaik, Höhenkarte) sind getrennt zu behande
 4. Der Auftrag läuft weiter (Laser startet). Fehler bleiben: Taster misst gar nicht / kein Material, Not-Aus, Abbruch.
 5. Studio-Vorprüfung vor dem Hochladen: gleiche Rechnung wie der Pi, Ergebnis jetzt **Warnung** in Bestätigung und Status, kein Fehler.
 
+**Umsetzung Studio (Scan Probe, `8d6112d`):**
+- `scanprobe/reach.py`: `work_reach`, `substitute`/`clamp`, `substitution_warning` (Wortlaut oben), `check_gcode` → `ReachReport` mit `substitutes`, `warning`, `fallback_point` (wenn kein Punkt erreichbar).
+- Planung (`probe_plan.grid_for_area`, `MachineLimits.probe_laser_rect`) und `ProbeRunner` klemmen statt zu überspringen; Status `SUBSTITUTED` (6) in `heightmap.py`, Statistik `substituted`, orange Raute in der Heatmap (`heatmap.mark_substituted`).
+- Ein-Klick (`job_flow.py`): Warnung in Status (`warning=True`), Bestätigung (`OneClickController.confirm_text`) und Ergebnis. Ist kein Punkt erreichbar, startet Studio `op=autorun` mit `x`/`y` am Ersatzpunkt (bestehender Vertrag, ein Punkt, flach ausgeglichen). Lehnt der Pi trotzdem mit 400 ab, ein Wiederholversuch mit dem nächsten erreichbaren Punkt, ohne neues Hochladen.
+- Platzierte Aufträge (`autorun_task`): Studio kennt die Lage nicht; ein Pi-400 bleibt Fehler mit Seite/mm-Erklärung, bis der Pi die Regel kann (Claude). Wunsch an Machine (optional): `autorun_task` mit Ersatzpunkt `x`/`y` erlauben.
+- Tests: `tests/test_probe_reach.py`.
+
 **Übergaben:**
 - **Claude (Pi):** `heightmap._mark_reachable` (`pi400/marlin/heightmap.py:271–278`) wirft den 400er; stattdessen klemmen und weitermachen, Warnungsliste in Antwort und `job.probe.warnings` (Details `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` §6). Zusätzlich Abtastbereich in `/api/status` melden (`probe_reach_mm: [xmin, ymin, xmax, ymax]`).
 - **Claude (Android):** Warnung anzeigen, kein Abbruch, gleicher Wortlaut (Pi-Vertrag).
