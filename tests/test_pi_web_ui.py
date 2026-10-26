@@ -61,3 +61,10 @@ def test_light_brightness_effects_and_material_editing():
 def test_single_main_start_button_runs_autorun():
     assert '<button class="primary" data-action="autorun" data-motion type="button">Auftrag starten</button>' in HTML
     assert "Motivmitte" not in HTML   # der Pi tastet ein Raster ab
+
+
+def test_android_app_tab():
+    for el in ("appPanel", "appVersion", "appCheck", "appDownload"):
+        assert 'id="%s"' % el in HTML
+    assert 'api("/api/app/android")' in HTML and 'op:"app_update_check"' in HTML
+    assert 'href="/api/app/android.apk"' in HTML

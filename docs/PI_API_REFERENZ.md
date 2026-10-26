@@ -122,6 +122,8 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 | POST | `/api/jobs/<name>/delete` | – | Auftrag löschen |
 | GET | `/api/jobs/<name>/geometry` | – | Motivgrenzen und Abtastkandidaten |
 | GET | `/api/camera/snapshot` | – | ein JPEG der Kopfkamera |
+| GET | `/api/app/android` | – | neueste Android-App auf dem Pi (Version, Prüfsumme) – Abschnitt 4.15 |
+| GET | `/api/app/android.apk` | – | die APK zum Installieren |
 | GET | `/api/camera/calibration` | – | Kamera-Kalibrierung lesen |
 | PUT | `/api/camera/calibration` | JSON | Kamera-Kalibrierung schreiben (mit Revision) |
 | GET | `/api/materials` | – | Material-Datenbank lesen (Abschnitt 4.14) |
@@ -226,7 +228,7 @@ Felder aus `web.py` (`status()`):
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
 | `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
-| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden. Fehlt bei älteren Pi-Ständen. |
+| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi). Fehlt bei älteren Pi-Ständen. |
 | `coord_convention` | string | `"origin_top_right"`: Bedeutung der Ankernamen (siehe `op=place`). Fehlt bei Pi-Ständen vor 2026-10-26; Studio tauscht dann links/rechts. |
 | `estimated_tip_gap_mm` | number \| null | geschätzter Abstand Spitze ↔ Werkstück (nur wenn referenziert, Position und Oberfläche bekannt). Schätzung, keine Messung. |
 | `estimated_focus_adjust_mm` | number \| null | Fokusabstand − `estimated_tip_gap_mm` (nur Anzeige) |
@@ -792,6 +794,38 @@ bei veralteter `base_revision` (neu laden, erneut versuchen); **404**
 `Material nicht gefunden`; 400 `base_revision fehlt`, `JSON-Objekt erwartet …`,
 `power_pct muss zwischen 0 und 100 liegen` usw. Die Apps halten nur einen
 Zwischenspeicher für den Fall ohne Verbindung.
+
+### 4.15 Android-App-Updates
+
+Die Android-CI veröffentlicht jede mit dem festen Schlüssel signierte APK als GitHub-Release
+(Tag `android-1.0.<n>`, Assets `LumaCut-Android.apk` und `LumaCut-Android.json`). Der Pi holt
+die neueste Version selbst: ca. 30 s nach dem Start, danach alle 6 h (nicht während eines
+Auftrags) und auf `op=app_update_check`. Er prüft Größe und SHA-256 und behält genau eine APK
+(`/var/lib/lumacut/marlin/app/`). Die Maschine wird dabei nie angesprochen. Android installiert
+nur eine APK mit demselben Signaturschlüssel wie die installierte App.
+
+#### `GET /api/app/android`
+
+| | |
+| --- | --- |
+| Erfolg | 200 `{"available": true, "version_code": 52, "version_name": "1.0.52", "sha256": "…", "size": 9876543, "checked_at": "2026-10-27T08:00:00Z", "error": null}`; ohne gespeicherte APK `available: false` und `version_*` = `null` |
+
+#### `GET /api/app/android.apk`
+
+| | |
+| --- | --- |
+| Erfolg | 200, `application/vnd.android.package-archive`, Datei `LumaCut.apk` |
+| Fehler | 404 `Keine App-Version auf dem Pi – …` |
+
+#### `op=app_update_check`
+
+Keine Parameter, **keine** Vorbedingung (nur Netzwerk). Prüft das neueste GitHub-Release
+sofort und lädt eine neuere APK.
+
+| | |
+| --- | --- |
+| Erfolg | 200 `{"message": "App-Version 1.0.52 auf dem Pi bereit", …Felder wie oben}` |
+| Fehler | 503 `{"error": "App-Update: <Grund>", …}` (z. B. kein Internet, Prüfsumme falsch); eine schon vorhandene APK bleibt erhalten |
 
 ---
 

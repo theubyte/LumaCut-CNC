@@ -212,6 +212,7 @@ details.more>div{padding:0 14px 12px}
  white-space:nowrap;min-height:50px;padding:8px 16px}
 .tabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--accent)}
 .tabpanel[hidden],[hidden]{display:none!important}
+a.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:8px 16px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2,var(--surface));color:var(--text);text-decoration:none;font-weight:600}
 input[type=range]{width:100%;accent-color:var(--accent);min-height:36px}
 .lightctl{margin-top:10px;display:grid;gap:6px}
 .lightctl .rangehead{display:flex;justify-content:space-between;font-size:13px;color:var(--text-dim)}
@@ -451,6 +452,7 @@ dialog.matdlg form{display:grid;gap:10px}
   <button role="tab" type="button" aria-selected="false" aria-controls="diagnosePanel" id="tab-diagnose">Diagnose &amp; Protokoll</button>
   <button role="tab" type="button" aria-selected="false" aria-controls="commissionPanel" id="tab-commission">Maschinenfreigabe</button>
   <button role="tab" type="button" aria-selected="false" aria-controls="firmwarePanel" id="tab-firmware">SKR-Firmware</button>
+  <button role="tab" type="button" aria-selected="false" aria-controls="appPanel" id="tab-app">Android-App</button>
   <button role="tab" type="button" aria-selected="false" aria-controls="lightburnPanel" id="tab-lightburn">LightBurn</button>
  </div>
 
@@ -531,6 +533,20 @@ dialog.matdlg form{display:grid;gap:10px}
   </form>
   <div class="metric" style="margin-top:12px;max-width:720px"><small>Firmware-Update</small><strong id="firmwareStatus" style="font-size:14px">—</strong>
    <div class="bar" style="margin-top:8px"><span id="firmwareProgress"></span></div></div>
+ </div>
+
+ <div class="tabpanel" role="tabpanel" id="appPanel" aria-labelledby="tab-app" hidden>
+  <p>Der Pi holt neue Versionen der Android-App selbst von GitHub (beim Start und alle 6 Stunden). Die App auf dem Tablet fragt hier nach und bietet das Update an – ohne Deinstallieren.</p>
+  <div class="metrics" style="margin-top:12px;max-width:720px">
+   <div class="metric"><small>Version auf dem Pi</small><strong id="appVersion">—</strong></div>
+   <div class="metric"><small>Zuletzt geprüft</small><strong id="appChecked" style="font-size:14px">—</strong></div>
+  </div>
+  <p class="muted" id="appError" hidden></p>
+  <div class="row" style="margin-top:12px;max-width:720px">
+   <button id="appCheck" type="button">Jetzt prüfen</button>
+   <a class="button" id="appDownload" href="/api/app/android.apk" download="LumaCut.apk" hidden>APK herunterladen (Erstinstallation)</a>
+  </div>
+  <p class="muted" style="margin-top:8px">Erstinstallation: diese Seite auf dem Tablet öffnen und „APK herunterladen“ tippen. Danach kommen Updates direkt in der App.</p>
  </div>
 
  <div class="tabpanel" role="tabpanel" id="lightburnPanel" aria-labelledby="tab-lightburn" hidden>
@@ -1263,6 +1279,18 @@ $("lightRange").onchange=()=>{
 $("lightFx").onchange=()=>call("light",{effects:$("lightFx").checked?"1":"0"});
 
 /* ---------- Kamera ---------- */
+/* ---------- Android-App auf dem Pi ---------- */
+function renderApp(a){
+ $("appVersion").textContent=a.available?a.version_name+" ("+a.version_code+")":"noch keine";
+ $("appChecked").textContent=a.checked_at?new Date(a.checked_at).toLocaleString("de-DE"):"noch nicht";
+ $("appError").hidden=!a.error;$("appError").textContent=a.error?"Letzte Prüfung: "+a.error:"";
+ $("appDownload").hidden=!a.available;
+}
+async function loadApp(){try{renderApp(await api("/api/app/android"))}catch{$("appVersion").textContent="Pi-Dienst ohne App-Updates (aktualisieren)"}}
+$("appCheck").onclick=async ev=>{
+ try{const r=await withPending(ev.currentTarget,()=>api("/api/action",{method:"POST",body:param({op:"app_update_check"})}));show(r.message);renderApp(r)}
+ catch(e){show(e.message,true);loadApp()}
+};
 $("cameraShot").onclick=ev=>{
  const img=$("cameraImg"),btn=ev.currentTarget;btn.classList.add("pending");
  img.onload=()=>{btn.classList.remove("pending");img.hidden=false};
@@ -1313,7 +1341,8 @@ const hashTab=tabs.find(t=>"#"+t.getAttribute("aria-controls")===location.hash);
 if(hashTab)openTab(hashTab);
 
 drawBed(null);
-refresh();files();loadMaterials();
+refresh();files();loadMaterials();loadApp();
+setInterval(loadApp,300000);
 setInterval(()=>{if(materialState==="on")loadMaterials()},60000);
 setInterval(refresh,1800);
 setInterval(files,12000);

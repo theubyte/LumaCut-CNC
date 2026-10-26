@@ -24,6 +24,7 @@ from . import heightmap
 from . import focus_compensation as focus
 from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import create_blueprint as camera_calibration_api
+from .app_update import AppUpdates
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "marlin"
@@ -32,7 +33,7 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # /api/status "features": clients switch on Pi-side behaviour by these names.
 # autorun_mesh: op=autorun probes the motif areas and compensates the focus
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
-FEATURES = ("autorun_mesh", "materials")
+FEATURES = ("autorun_mesh", "materials", "app_update")
 JOBS = DATA / "jobs"
 USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
 # Head camera (USB/UVC or CSI via V4L2) for the workspace scan.
@@ -408,6 +409,14 @@ def action():
         machine.command("G90", owner="web")
         machine.command("M114", owner="web")
         return jsonify(message="Bewegung ausgeführt: " + axis + " " + str(distance))
+    if op == "app_update_check":
+        # Network only, never touches the machine: allowed at any time.
+        info = app_updates.check()
+        if info["error"]:
+            return jsonify({**info, "error": "App-Update: " + info["error"]}), 503
+        text = ("App-Version %s auf dem Pi bereit" % info["version_name"]) if info["available"] else \
+            "Noch keine App-Version auf dem Pi"
+        return jsonify(message=text, **info)
     if op == "light":
         # Dimmable LED strip on PC8: on=1|0, optional brightness 1..100 %,
         # optional effects=1|0. Without "on" only the settings change.
@@ -682,6 +691,24 @@ def _optional_point(form):
             machine.safe_zone_xy_mm <= y <= travels["y"]):
         raise ValueError("Abtastpunkt außerhalb X30..390 / Y30..370")
     return x, y
+
+
+app_updates = AppUpdates(DATA)
+
+
+@app.get("/api/app/android")
+def app_android_info():
+    """Newest Android app the Pi holds (fetched from the GitHub release)."""
+    return jsonify(app_updates.status())
+
+
+@app.get("/api/app/android.apk")
+def app_android_apk():
+    if not app_updates.meta():
+        return jsonify(error="Keine App-Version auf dem Pi – „Jetzt prüfen“ oder später erneut versuchen"), 404
+    return send_from_directory(str(app_updates.dir), app_updates.apk.name,
+                               mimetype="application/vnd.android.package-archive",
+                               as_attachment=True, download_name="LumaCut.apk")
 
 
 @app.get("/api/camera/snapshot")
@@ -1399,6 +1426,9 @@ def main():
     running=True
     threading.Thread(target=monitor_loop, daemon=True,
                      name="marlin-usb-heartbeat").start()
+    threading.Thread(target=app_updates.run_forever,
+                     args=(lambda: running, lambda: job["state"] in ("homing", "probing", "running")),
+                     daemon=True, name="android-app-updates").start()
     threading.Thread(target=serve_tcp,
                      args=(machine,"0.0.0.0",TCP,lambda: running),
                      daemon=True, name="marlin-lightburn-server").start()
