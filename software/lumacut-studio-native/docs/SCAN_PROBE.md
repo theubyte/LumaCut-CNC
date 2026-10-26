@@ -98,6 +98,12 @@ Rechte Spalte, Gruppe **„Scan & Probe"** (`src/scanprobe/panel.py`, eingebunde
 4. Objekte in der Liste an-/abhaken, **Rasterabstand** einstellen, optional
    **„Nur Werkstücke unter dem Design proben"** (Standard; Bereiche aus den Bounding-Boxen
    der sichtbaren Designformen ∩ erkannte Werkstücke – ohne Scan direkt aus dem Design).
+   **Markieren** (Ablauf-Schritt „Markieren" oder **„Auf Canvas markieren"**): ein Klick/kurzes Antippen
+   auf ein erkanntes Werkstück hakt es an/ab (angehakt = gefüllt); ein aufgezogener Bereich hakt die
+   darin liegenden Werkstücke an oder wird – ohne Werkstück darin – zum **manuellen Bereich**
+   (orange gestrichelt, auf die Arbeitsfläche beschnitten). **„Auswahl als Bereich"** macht aus den
+   gewählten Designformen (Umriss + 3 mm) Bereiche; **„Manuelle Bereiche löschen"** setzt zurück.
+   Manuelle Bereiche werden auch ohne Scan geprobt.
 5. **„Auto-Probe"**: probt nur die angehakten Objekte bzw. Designbereiche. Danach liegt die
    Höhen-Heatmap halbtransparent über dem Canvas, Min/Max-Z wird angezeigt.
 6. **„Scan + Probe (komplett)"**: beides in einem Lauf; mit „Geladenes Mesh nach
@@ -154,7 +160,7 @@ Prüfungen (deutsche Meldungen; **Fehler** blockieren, **Warnungen** müssen bes
 | Bild-Fingerabdruck passt nicht zum aktuellen Scan (Material bewegt) | Fehler – neu proben. |
 | Kein aktueller Scan / Mesh ohne Fingerabdruck | Warnung (Lage nicht prüfbar). |
 | Mesh älter als 8 h oder ohne Zeitstempel | Warnung. |
-| Ziel-Z unter Pi-Oberfläche + 2 mm | Warnung (Pi-Sperre würde den Job ablehnen). |
+| Ziel-Z unter Pi-Oberfläche + 2 mm (z. B. mehrere Werkstücke unterschiedlicher Höhe, G30 auf dem höheren) | Fehler – der Pi würde den Auftrag mitten im Lauf abbrechen. G30 auf dem niedrigsten Werkstück oder Fokus-Absenkung verringern. |
 
 Grenzen:
 
@@ -166,6 +172,9 @@ Grenzen:
   Hook-Zeilen mit eigenem Z würden abgelehnt.
 * Der Pi fokussiert vor der ersten Brennbewegung auf *seine* gemessene Oberfläche und prüft Z
   nur gegen diese eine Oberfläche (≥ Oberfläche + 2 mm).
+  Mehrere Werkstücke: Z wird je Punkt aus dem passenden Mesh gerechnet (inkl. `z_step` und 3D-Tiefe,
+  getestet in `test_focus_multi_region.py`); Studio blockiert, wenn das niedrigste Ziel-Z unter
+  dieser Pi-Sperre läge.
 * Der Pi hängt an jede Bewegung mit Z ein `M400`/`M114` an. Bei der Korrektur hat fast jedes
   Segment Z → der Planer läuft leer, der Laser **stockt** (Punkte/Brandflecken an Segmentgrenzen
   möglich). Empfehlung: Pi-seitig Z-Prüfung ohne `M400` für Folgezeilen. Bis dahin vorsichtig mit
@@ -206,7 +215,8 @@ Details, Beispiel und Kalibrierablauf: [KAMERA_KALIBRIERUNG.md](KAMERA_KALIBRIER
 ## Tests
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m pytest tests/test_scanprobe.py tests/test_scan_panel.py tests/test_focus_export.py
+QT_QPA_PLATFORM=offscreen python -m pytest tests/test_scanprobe.py tests/test_scan_panel.py tests/test_scan_marking.py \
+  tests/test_focus_export.py tests/test_focus_multi_region.py
 ```
 
 Alle Tests laufen mit Fakes (`scanprobe.fakes`: synthetisches Bett, Maschine mit
