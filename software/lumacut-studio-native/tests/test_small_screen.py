@@ -48,13 +48,36 @@ def test_panels_fit_inside_small_windows(make_win, size):
     for area in (win.right_scroll, win.layers_panel.scroll):
         assert isinstance(area, QScrollArea) and area.widgetResizable()
         assert _not_clipped(area)
-    # Ab 1024 px braucht keine Seitenleiste einen waagerechten Bildlauf.
-    assert not win.right_scroll.horizontalScrollBar().isVisible()
+    # Die rechte Leiste wird so breit wie ihr Inhalt (bis zur Obergrenze);
+    # nur wenn der Inhalt breiter ist, scrollt sie waagerecht (nie abgeschnitten).
+    r = win.right_scroll
+    need, cap = fit.sidebar_needed_width(r), fit.sidebar_cap(win.width())
+    info = (f"need={need} cap={cap} vp={r.viewport().width()} "
+            f"content={r.widget().minimumSizeHint().width()} sizes={sp.sizes()}")
+    if need <= cap:
+        assert not r.horizontalScrollBar().isVisible(), info
+        assert r.width() >= need - 2, info
     assert not win.layers_panel.scroll.horizontalScrollBar().isVisible()
     # Canvas (inkl. Eigenschaftsleiste) passt, die Leiste scrollt notfalls.
     assert win.canvas.minimumSizeHint().width() <= win.canvas.width()
     assert _not_clipped(win.canvas.property_scroll)
     assert win.canvas.view.width() >= 200
+
+
+def test_sidebar_refits_when_content_grows(make_win, qapp):
+    """Wird der Inhalt später breiter (Schrift/DPI unter Windows, neue Felder),
+    passt sich die Leiste an, statt waagerecht zu scrollen."""
+    from PySide6.QtWidgets import QLabel
+    win = make_win(1280, 720)
+    content = win.right_scroll.widget()
+    wide = QLabel("breit")
+    wide.setMinimumWidth(fit.sidebar_cap(1280) - 60)
+    content.layout().addWidget(wide)
+    for _ in range(5):
+        qapp.processEvents()
+    assert fit.sidebar_needed_width(win.right_scroll) <= fit.sidebar_cap(1280)
+    assert not win.right_scroll.horizontalScrollBar().isVisible()
+    assert win.right_scroll.viewport().width() >= wide.minimumWidth()
 
 
 def test_very_narrow_window_scrolls_instead_of_clipping(make_win):

@@ -106,11 +106,27 @@ class _ScreenFit(QObject):
     def __init__(self, win) -> None:
         super().__init__(win)
         self.win = win
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(0)
+        self._timer.timeout.connect(self.fit_panels)
         win.installEventFilter(self)
+        # Inhalt der Seitenleisten kann später wachsen (Panels füllen sich,
+        # Schrift/DPI unter Windows) – dann erneut anpassen.
+        for name in ("right_scroll", "layers_panel"):
+            area = self._area(getattr(win, name, None))
+            if area is not None and area.widget() is not None:
+                area.widget().installEventFilter(self)
+
+    @staticmethod
+    def _area(panel):
+        area = panel if isinstance(panel, QScrollArea) else getattr(panel, "scroll", None)
+        return area if isinstance(area, QScrollArea) else None
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
-        if obj is self.win and event.type() == QEvent.Show:
-            QTimer.singleShot(0, self.fit_panels)
+        t = event.type()
+        if (obj is self.win and t in (QEvent.Show, QEvent.Resize)) or t == QEvent.LayoutRequest:
+            self._timer.start()
         return False
 
     def fit_panels(self) -> None:
@@ -128,10 +144,10 @@ class _ScreenFit(QObject):
             panel = getattr(win, name, None)
             if panel is None:
                 continue
-            area = panel if isinstance(panel, QScrollArea) else getattr(panel, "scroll", None)
-            if not isinstance(area, QScrollArea):
+            area = self._area(panel)
+            if area is None:
                 continue
-            want = min(sidebar_needed_width(area), max(160, int(win.width() * fraction)))
+            want = min(sidebar_needed_width(area), sidebar_cap(win.width(), fraction))
             # Hartes Minimum klein halten (das Fenster darf nie breiter als der
             # Bildschirm erzwungen werden); in sehr schmalen Fenstern scrollt die
             # Leiste dann notfalls waagerecht, statt Felder abzuschneiden.
@@ -146,6 +162,11 @@ class _ScreenFit(QObject):
             changed = True
         if changed:
             splitter.setSizes(sizes)
+
+
+def sidebar_cap(window_width: int, fraction: float = SIDEBAR_MAX_FRACTION) -> int:
+    """Höchstbreite einer Seitenleiste; breiterer Inhalt scrollt waagerecht."""
+    return max(160, int(window_width * fraction))
 
 
 def default_window_size(screen=None) -> QSize:
