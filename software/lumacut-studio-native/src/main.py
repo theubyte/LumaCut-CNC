@@ -27,6 +27,7 @@ from scanprobe.panel import ScanPanel
 from lumacut_job.estimate import estimate_gcode
 from lumacut_job.planner import optimized_document_gcode
 from lumacut_job.qt_tools import install_job_tools
+from lumacut_job.help_qt import install_help
 # --- end job tools integration ---
 # --- materials integration (materials agent) ---
 from lumacut_materials.dialog import install_materials
@@ -241,6 +242,9 @@ class LumaCutStudio(QMainWindow):
         # --- canvas integration (canvas agent): small screens / touch ---
         install_screen_fit(self)  # Fenster in Bildschirm, Seitenleiste nicht abgeschnitten, Touch-Modus
         # --- end canvas integration ---
+        # --- help integration (review agent): Hilfe › Tastenkürzel (F1), zuletzt ---
+        install_help(self)
+        # --- end help integration ---
 
     def _toggle_left(self):
         visible = self.toggle_left.isChecked()
