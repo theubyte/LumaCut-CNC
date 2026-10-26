@@ -183,6 +183,16 @@ def _group(p, c, ungroup: bool = False):
         p.drawRect(QRectF(6, 6, 7, 7)); p.drawEllipse(QRectF(11, 11, 7, 7))
 
 
+def _touch(p, c):
+    """Finger mit Tipp-Kreisen (Touch-Modus)."""
+    _pen(p, c, 1.6)
+    p.drawArc(QRectF(6, 2.5, 8, 8), 0, 180 * 16)
+    _pen(p, c)
+    path = QPainterPath(); path.moveTo(8, 21); path.lineTo(8, 7.5)
+    path.arcTo(QRectF(8, 5.5, 4, 4), 180, -180); path.lineTo(12, 12); path.lineTo(17, 13)
+    path.arcTo(QRectF(15, 13, 4, 4), 90, -90); path.lineTo(19, 21); p.drawPath(path)
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "polygon": _polygon, "freehand": _freehand,
@@ -195,6 +205,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "duplicate": _duplicate, "link": _link,
     "group": _group, "ungroup": lambda p, c: _group(p, c, True),
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
+    "touch": _touch,
 }
 
 

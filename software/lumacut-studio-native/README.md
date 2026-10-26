@@ -46,6 +46,35 @@ Eigenständig testen: `python src/canvas_demo.py`.
   Auswahlmitte zu – sie bleibt stehen bzw. wird zentriert; 0,4–60 px/mm), mittlere Maustaste oder Leertaste+Ziehen = Verschieben,
   Strg+0 = Fläche einpassen, Raster und Fangen (1 mm) umschaltbar, Lineale in mm,
   Cursorposition in mm in der Statusleiste.
+- **Touch (z. B. Surface Pro):** „Touch-Modus“ in der Canvas-Aktionsleiste. Er schaltet
+  sich bei einem Touchscreen, auf kleinen Bildschirmen (< 1500 × 950 logische px, z. B.
+  Surface Pro mit 150–200 % Skalierung) oder beim ersten Fingertipp selbst ein; eine manuelle Wahl wird in QSettings (`canvas/touch_mode`) gespeichert und
+  hat dann Vorrang. Im Touch-Modus (Werte in `lumacut_canvas/touch.py`, `TouchMetrics`):
+  - Griffe 16 px gezeichnet, Trefferfläche 32 × 32 px, Dreh-Griff 44 px über dem Rahmen;
+    konstant in Bildschirm-Pixeln bei jedem Zoom (Maus-Modus unverändert 9 px).
+  - Fangbereich für Objekte 12 px statt 5 px. Liegen mehrere Objekte darin, gewinnt ein
+    Treffer auf dem Umriss (bzw. im Text/Bild) vor einem Treffer nur im Inneren, dann das
+    kleinere Objekt, dann das oberste – so bleibt eine dünne Linie auf/unter einer Fläche greifbar.
+  - Zwei Finger: Pinch-Zoom um die Fingermitte (0,4–60 px/mm) und gleichzeitig Verschieben;
+    Lineale und Raster laufen mit. Ein laufendes Verschieben/Skalieren wird beim zweiten
+    Finger abgebrochen (nichts verrutscht).
+  - Ein Finger: auf einem Objekt/Griff wie die Maus (verschieben, skalieren, drehen,
+    zeichnen); mit dem Auswahl-Werkzeug auf leerer Fläche = Ansicht verschieben. Tippen =
+    Klick (leere Fläche: Auswahl aufheben), Doppeltippen = Doppelklick.
+    Ein Gummiband-Rahmen geht nur mit Maus oder Stift.
+  - Zoom-Knöpfe unten rechts im Canvas (−, +, Einpassen, 100 %), 52 px.
+  - Werkzeugleisten mit 32-px-Icons in ≥ 48-px-Knöpfen; im Ebenen-Panel 56 px hohe Zeilen,
+    ≥ 40-px-Knöpfe und 34 px hohe Eingabefelder.
+- **Kleine Bildschirme** (`lumacut_canvas/fit.py`): Die senkrechte Werkzeugleiste hat immer
+  ≥ 44 × 44-px-Knöpfe mit Abstand. Das Fenster startet in der Größe des verfügbaren
+  Bildschirms (max. 1400 × 900) und wird zentriert; die Mindestgröße wird nie größer als der
+  Bildschirm. Eigenschaftsleiste über dem Canvas scrollt waagerecht statt Felder
+  abzuschneiden; Ebenen-Panel und rechte Seitenleiste scrollen senkrecht (auch per Finger)
+  und bekommen beim Öffnen die Breite, die ihr Inhalt braucht (höchstens 26 % bzw. 42 % der
+  Fensterbreite, sonst zusätzlich waagerechter Bildlauf). Formulare im Ebenen-Panel brechen
+  bei schmaler Breite unter die Beschriftung um.
+  - Vom System aus Touch erzeugte Maus-Ereignisse werden während und 0,6 s nach einer
+    Berührung ignoriert (keine doppelte Ausführung); Touchpad-Gesten bleiben beim System.
 - **Ebenen:** Farbe, Name, sichtbar, gesperrt, Reihenfolge; je Ebene
   Leistung (1–100 %), Geschwindigkeit (1–6000 mm/min) und Durchgänge (1–30),
   optional Material/Dicke/Tiefe je Durchgang (siehe „Material-Grundlage“).
@@ -61,6 +90,27 @@ Eigenständig testen: `python src/canvas_demo.py`.
   (*Alt+Umschalt+F*, konvexe Hülle) oder der Knopf „Rahmen“ im Maschinen-Panel
   fahren den Umriss mit ausgeschaltetem Laser ab (`op=frame`). Der gesendete
   Auftrag bleibt geladen: senden → Rahmen → starten, ohne neu zu senden.
+- **Schnittoptionen je Ebene** („Schnittoptionen…“, *Alt+K*, aktive Ebene, ein Undo-Schritt;
+  wirken beim Senden, Schätzen, Rahmen und „G-Code speichern“, nur auf geschlossene Konturen):
+  - *Kerf-Versatz* (`kerf_mm`, −2…2 mm): positiv verschiebt den Schnitt zur Abfallseite –
+    Außenkonturen wachsen, Löcher schrumpfen (Polygon-Versatz mit `shapely`, spitze Ecken).
+  - *Haltestege* (`tab_count` 0–24 bzw. `tab_spacing_mm` = ein Steg je … mm Umfang,
+    `tab_width_mm`): Lücken mit Laser aus, gleichmäßig verteilt und nicht in Ecken;
+    Konturen unter 10 mm Umfang bekommen keine Stege.
+  - *Anfahrt/Abfahrt* (`lead_in_mm`, `lead_in_arc`, `lead_out_mm`, 0–10 mm): auf der
+    Abfallseite (außen bei Teilen, innen bei Löchern), 45°-Gerade oder tangentialer Viertelkreis;
+    der Konturstart wird dafür von einer Ecke in die Kantenmitte verlegt. Passt die Anfahrt nicht
+    (Arbeitsfläche, kleines Loch), wird sie gekürzt, senkrecht gesetzt oder weggelassen.
+    Kollisionen mit benachbarten Teilen werden nicht geprüft.
+  Code: `src/lumacut_job/cutpath.py`; die Art jedes Teilpfads (`cut`, `lead_in`, `lead_out`,
+  `tab`) steht in `JobLayer.poly_kinds` (z. B. für eine Pfadvorschau).
+- **G-Code speichern…** (*Alt+G*): optimierter G-Code des Designs als Datei (ohne
+  Scan-Fokuskorrektur, die nur beim Senden über das Scan-Panel dazukommt).
+- **Verlauf…** (*Strg+H*): die letzten 20 gesendeten Aufträge (alle Sendewege) mit Zeit und
+  Schätzung; *Erneut senden* lädt den Auftrag wieder hoch (gestartet wird über „Start“),
+  *Als Datei speichern*, *Entfernen*. Ablage: `%APPDATA%\LumaCut\LumaCut Studio\history`
+  (`LUMACUT_HISTORY_DIR`).
+- **Hilfe › Tastenkürzel** (*F1*): alle Kürzel des Fensters mit Suche.
 - Die Arbeitsfläche zeigt 0–360 × 0–340 mm. Objekte werden still in der Fläche
   gehalten; der interne Safezone-Versatz wird nur beim Export für die Maschine
   addiert (`lumacut_canvas/workarea.py`).
@@ -101,6 +151,31 @@ layer_pass_plan(layer)           # mit den eingestellten layer.passes (Override)
   Darunter der Tiefenplan je Durchgang, rot mit ⚠, wenn die Zieltiefe nicht erreicht
   wird. Jede Änderung ist ein Undo-Schritt (`SetLayerAttrsCommand`). „manuell“ wird aus
   `passes ≠ ceil(Tiefe/Tiefe je Durchgang)` erkannt (kein eigenes Override-Feld).
+
+### Füllung: Schraffur und Kreuzschraffur je Ebene
+
+Im Ebenen-Panel unter **Füllung der Ebene**: *Füllmodus* (Keine / Schraffur /
+Kreuzschraffur), *Linienabstand* in mm (0,05–20), *Winkel* in ° (0 = waagerecht,
+gegen den Uhrzeigersinn; Kreuzschraffur fügt +90° hinzu, beim Einschalten
+mit 0° wird 45° vorgeschlagen), *Kontur mitlasern* und *Bidirektional*
+(abwechselnde Zeilenrichtung, kürzere Leerfahrten). Jede Änderung ist ein
+Undo-Schritt.
+
+- Gefüllt werden geschlossene Objekte: Rechteck, Ellipse, Polygon, Text
+  (auch gedreht und gruppiert). Löcher (Buchstaben, Ringe) bleiben frei
+  (Gerade-Ungerade-Regel); Linien/Freihand bleiben reine Konturen.
+- G-Code: je Durchgang zuerst die Füllung (G0 an den Zeilenanfang, G1 mit
+  Leistung/Geschwindigkeit der Ebene), danach die Kontur; Durchgangs-Hook
+  (Tiefe je Durchgang) gilt auch für reine Füll-Ebenen. Ohne Füllung ist der
+  G-Code unverändert.
+- Auf der Arbeitsfläche erscheint die Schraffur als dünne Linien in der
+  Ebenenfarbe (Overlay `fill_preview`, nicht anklickbar). `export_svg` /
+  `export_png` zeichnen sie mit `show_fill=True`.
+- Datei: neue Felder (`fill_mode`, `line_interval_mm`, `hatch_angle`,
+  `hatch_bidirectional`, `hatch_outline`) werden nur geschrieben, wenn sie vom
+  Standard abweichen; alte Dateien laden unverändert.
+- Grenzen: kein Overscan; Schnittfuge (Kerf) wirkt nur auf Konturen; mehr als
+  20 000 Linien je Richtung werden abgelehnt (Linienabstand vergrößern).
 
 ### Schnittstellen für andere Module (Scan & Probe)
 

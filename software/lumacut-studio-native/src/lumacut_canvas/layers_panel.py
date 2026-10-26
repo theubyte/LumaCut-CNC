@@ -22,17 +22,35 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QUndoStack
-from PySide6.QtWidgets import (QColorDialog, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox,
-                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QPushButton, QSpinBox, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QColorDialog, QGridLayout, QComboBox, QDoubleSpinBox, QFormLayout, QFrame, QGroupBox,
+                               QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QPushButton, QScrollArea, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
+from . import hatch as _hatch
 from . import icons, theme
+from .fit import enable_touch_scroll
 from .commands import (AddLayerCommand, MoveLayerCommand, RemoveLayerCommand, SetLayerAttrCommand,
                        SetLayerAttrsCommand)
 from .material import (BUILTIN_MATERIALS, DEPTH_PER_PASS_RANGE, THICKNESS_RANGE, Material,
                        builtin_material, derived_passes, layer_pass_plan,
                        material_from_preset, material_layer_attrs)
-from .model import MATERIAL_LAYER_FIELDS, PASSES_RANGE, POWER_RANGE, SPEED_RANGE, Document, Layer
+from .model import FILL_LAYER_FIELDS, MATERIAL_LAYER_FIELDS, PASSES_RANGE, POWER_RANGE, SPEED_RANGE, Document, Layer
+
+# Undo-Beschriftungen der Füll-Felder (ohne commands.py anzufassen).
+for _k, _v in {"line_interval_mm": "Linienabstand", "hatch_angle": "Schraffurwinkel",
+               "fill_mode": "Füllmodus"}.items():
+    SetLayerAttrCommand.LABELS.setdefault(_k, _v)
+
+class _FillParamCommand(SetLayerAttrCommand):
+    """Linienabstand/Winkel: aufeinanderfolgende Änderungen = ein Undo-Schritt."""
+
+    def mergeWith(self, other) -> bool:  # noqa: N802 - Qt API
+        if (isinstance(other, _FillParamCommand) and other.layer_id == self.layer_id
+                and other.attr == self.attr):
+            self.new = other.new
+            return True
+        return False
+
 
 NO_MATERIAL = "— ohne Material —"
 START_VALUES_HINT = ("Eingebaute Materialien sind editierbare Startwerte, nicht validiert – "
@@ -41,6 +59,8 @@ START_VALUES_HINT = ("Eingebaute Materialien sind editierbare Startwerte, nicht 
 
 def layer_summary(layer: Layer) -> str:
     text = f"{layer.power:g} % · {layer.speed:g} mm/min · {layer.passes}×"
+    if layer.fill_mode != "none":
+        text += f" · {_hatch.FILL_LABELS[layer.fill_mode]} {_mm(layer.line_interval_mm)} mm"
     return f"{text} · {layer.material}" if layer.material else text
 
 
@@ -106,6 +126,11 @@ class _LayerRow(QWidget):
         name.setObjectName("LayerName")
         summary = QLabel(layer_summary(layer))
         summary.setObjectName("LayerSummary")
+        summary.setToolTip(layer_summary(layer))
+        # Schmales Panel: Texte werden gekürzt statt das Panel zu verbreitern.
+        for lab in (name, summary):
+            lab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            lab.setMinimumWidth(40)
         text.addWidget(name)
         text.addWidget(summary)
         lay.addLayout(text, 1)
@@ -121,7 +146,7 @@ class _LayerRow(QWidget):
     def _toggle(self, icon_name: str, tip: str, slot) -> QToolButton:
         b = QToolButton()
         b.setIcon(icons.icon(icon_name))
-        b.setIconSize(QSize(18, 18))
+        b.setIconSize(QSize(24, 24) if self.panel.touch_mode else QSize(18, 18))
         b.setToolTip(tip)
         b.setAutoRaise(True)
         b.clicked.connect(slot)
@@ -143,14 +168,34 @@ class LayersPanel(QWidget):
         self._updating = False
         self._preset_source = presets or _default_presets
         self._presets: list = []
+        self.touch_mode = False
 
-        root = QVBoxLayout(self)
+        # Inhalt in einer Scrollfläche: auf kleinen Bildschirmen (Surface Pro)
+        # senkrecht scrollbar statt abgeschnitten; mit dem Finger ziehbar.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("LayersScroll")
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        content = QWidget()
+        content.setObjectName("LayersContent")
+        content.setAttribute(Qt.WA_StyledBackground, True)
+        self.scroll.setWidget(content)
+        outer.addWidget(self.scroll)
+        enable_touch_scroll(self.scroll)
+
+        root = QVBoxLayout(content)
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(8)
-        head = QHBoxLayout()
+        head = QGridLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setHorizontalSpacing(6)
+        head.setVerticalSpacing(6)
         title = QLabel("Ebenen")
         title.setObjectName("SectionTitle")
-        head.addWidget(title, 1)
+        self._head, self._head_title, self._head_buttons = head, title, []
         for icon_name, tip, slot in (("plus", "Neue Ebene", self.add_layer),
                                      ("up", "Ebene nach oben", lambda: self.move_active(-1)),
                                      ("down", "Ebene nach unten", lambda: self.move_active(1)),
@@ -160,7 +205,8 @@ class LayersPanel(QWidget):
             b.setIconSize(QSize(18, 18))
             b.setToolTip(tip)
             b.clicked.connect(slot)
-            head.addWidget(b)
+            self._head_buttons.append(b)
+        self._layout_head()
         root.addLayout(head)
 
         self.list = QListWidget()
@@ -178,6 +224,7 @@ class LayersPanel(QWidget):
 
         self.params = QGroupBox("Laser-Einstellung der Ebene")
         form = QFormLayout(self.params)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)  # schmal: Feld unter die Beschriftung
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(8)
@@ -226,6 +273,7 @@ class LayersPanel(QWidget):
         self.pass_plan.setWordWrap(True)
         form.addRow(self.pass_plan)
         root.addWidget(self.params)
+        root.addWidget(self._build_fill_box())
 
         self.reload_presets()
         self.doc.add_listener(self.refresh)
@@ -235,10 +283,13 @@ class LayersPanel(QWidget):
         box = QGroupBox("Material der Ebene")
         self.material_box = box
         form = QFormLayout(box)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(8)
         self.material = QComboBox()
+        self.material.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.material.setMinimumContentsLength(8)
         self.material.setToolTip(START_VALUES_HINT)
         self.material.activated.connect(self._material_chosen)
         self.thickness = self._mm_spin(THICKNESS_RANGE, 0.5, "–")
@@ -259,6 +310,79 @@ class LayersPanel(QWidget):
         note.setWordWrap(True)
         form.addRow(note)
         return box
+
+    def _build_fill_box(self) -> QGroupBox:
+        """Vektor-Füllung der Ebene (Schraffur/Kreuzschraffur, hatch.py)."""
+        box = QGroupBox("Füllung der Ebene")
+        self.fill_box = box
+        form = QFormLayout(box)
+        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(8)
+        self.fill_mode = QComboBox()
+        for mode in _hatch.FILL_MODES:
+            self.fill_mode.addItem(_hatch.FILL_LABELS[mode], mode)
+        self.fill_mode.setToolTip("Geschlossene Objekte (Rechteck, Ellipse, Polygon, Text) mit "
+                                  "parallelen Linien füllen; Löcher bleiben frei")
+        self.fill_mode.activated.connect(self._fill_mode_chosen)
+        self.fill_interval = QDoubleSpinBox()
+        self.fill_interval.setRange(*_hatch.INTERVAL_RANGE)
+        self.fill_interval.setDecimals(2)
+        self.fill_interval.setSingleStep(0.05)
+        self.fill_interval.setSuffix(" mm")
+        self.fill_interval.setToolTip("Abstand der Schraffurlinien")
+        self.fill_angle = QDoubleSpinBox()
+        self.fill_angle.setRange(0.0, 179.0)
+        self.fill_angle.setDecimals(0)
+        self.fill_angle.setSingleStep(15)
+        self.fill_angle.setWrapping(True)
+        self.fill_angle.setSuffix(" °")
+        self.fill_angle.setToolTip("Linienwinkel (0° = waagerecht); Kreuzschraffur zusätzlich +90°")
+        for spin, attr in ((self.fill_interval, "line_interval_mm"), (self.fill_angle, "hatch_angle")):
+            spin.setKeyboardTracking(False)
+            spin.setAlignment(Qt.AlignRight)
+            spin.valueChanged.connect(lambda v, a=attr: self._param_edited(a, v))
+        self.fill_outline = QCheckBox("Kontur mitlasern")
+        self.fill_outline.setToolTip("Aus: nur die Füllung lasern (z. B. Text gravieren)")
+        self.fill_bidir = QCheckBox("Bidirektional")
+        self.fill_bidir.setToolTip("Jede zweite Linie rückwärts – kürzere Leerfahrten")
+        for box_, attr in ((self.fill_outline, "hatch_outline"), (self.fill_bidir, "hatch_bidirectional")):
+            box_.toggled.connect(lambda on, a=attr: self._fill_flag_toggled(a, on))
+        form.addRow("Füllmodus", self.fill_mode)
+        form.addRow("Linienabstand", self.fill_interval)
+        form.addRow("Winkel", self.fill_angle)
+        form.addRow(self.fill_outline)    # untereinander: passt auch in schmale Seitenleisten
+        form.addRow(self.fill_bidir)
+        return box
+
+    def _show_fill(self, layer: Layer) -> None:
+        self.fill_mode.setCurrentIndex(max(0, self.fill_mode.findData(layer.fill_mode)))
+        self.fill_interval.setValue(layer.line_interval_mm)
+        self.fill_angle.setValue(layer.hatch_angle)
+        self.fill_outline.setChecked(layer.hatch_outline)
+        self.fill_bidir.setChecked(layer.hatch_bidirectional)
+        on = layer.fill_mode != "none"
+        for w in (self.fill_interval, self.fill_angle, self.fill_outline, self.fill_bidir):
+            w.setEnabled(on)
+
+    def _fill_mode_chosen(self, index: int) -> None:
+        layer = self.doc.active_layer
+        mode = self.fill_mode.itemData(index)
+        if self._updating or layer is None or mode == layer.fill_mode:
+            return
+        attrs = {"fill_mode": mode}
+        if mode == "crosshatch" and layer.fill_mode == "none" and layer.hatch_angle == 0:
+            attrs["hatch_angle"] = 45.0   # übliche Kreuzschraffur 45°/135°
+        self.stack.push(SetLayerAttrsCommand(self.doc, layer.id, attrs,
+                                             f"Füllmodus: {_hatch.FILL_LABELS[mode]}"))
+
+    def _fill_flag_toggled(self, attr: str, on: bool) -> None:
+        layer = self.doc.active_layer
+        if self._updating or layer is None or getattr(layer, attr) == on:
+            return
+        label = "Kontur mitlasern" if attr == "hatch_outline" else "Bidirektional"
+        self.stack.push(SetLayerAttrsCommand(self.doc, layer.id, {attr: bool(on)}, label))
 
     @staticmethod
     def _mm_spin(rng: tuple[float, float], step: float, zero_text: str) -> QDoubleSpinBox:
@@ -282,6 +406,39 @@ class LayersPanel(QWidget):
         if hasattr(self, "pass_plan"):
             self.refresh()
 
+    def _layout_head(self) -> None:
+        """Kopfzeile: Maus = Titel und Knöpfe in einer Zeile; Touch = Knöpfe in
+        eigener Zeile unter dem Titel (sonst wäre das Panel zu breit)."""
+        head = self._head
+        for w in (self._head_title, *self._head_buttons):
+            head.removeWidget(w)
+        head.setColumnStretch(0, 1)
+        if self.touch_mode:
+            head.addWidget(self._head_title, 0, 0, 1, 5)
+            for i, b in enumerate(self._head_buttons):
+                head.addWidget(b, 1, i + 1)
+        else:
+            head.addWidget(self._head_title, 0, 0)
+            for i, b in enumerate(self._head_buttons):
+                head.addWidget(b, 0, i + 1)
+
+    def set_touch_mode(self, on: bool) -> None:
+        """Größere Zeilen, Knöpfe und Eingabefelder für Finger (Theme-QSS mit
+        ``touch="true"``); vgl. :meth:`CanvasEditor.set_touch_mode`."""
+        on = bool(on)
+        if on == self.touch_mode:
+            return
+        self.touch_mode = on
+        self._layout_head()
+        self.setProperty("touch", "true" if on else "false")
+        self.setStyleSheet("")
+        self.setStyleSheet(theme.CANVAS_QSS)
+        size = QSize(24, 24) if on else QSize(18, 18)
+        for b in self.findChildren(QToolButton):
+            b.setIconSize(size)
+        self._signature = None
+        self.refresh()
+
     def showEvent(self, event) -> None:  # noqa: N802
         # Ein Hauptfenster mit setPalette() vererbt seine Palette beim
         # Einhängen und überschreibt damit die QSS-Farben der Kinder. Einmal
@@ -299,7 +456,8 @@ class LayersPanel(QWidget):
             counts[s.layer_id] = counts.get(s.layer_id, 0) + 1
         return (self.doc.active_layer_id,
                 tuple((l.id, l.name, l.color, l.power, l.speed, l.passes, l.visible, l.locked,
-                       *(getattr(l, f) for f in MATERIAL_LAYER_FIELDS), counts[l.id])
+                       *(getattr(l, f) for f in MATERIAL_LAYER_FIELDS + FILL_LAYER_FIELDS),
+                       counts[l.id])
                       for l in self.doc.layers))
 
     def refresh(self) -> None:
@@ -316,7 +474,7 @@ class LayersPanel(QWidget):
             item = QListWidgetItem()
             item.setData(Qt.UserRole, layer.id)
             row = _LayerRow(self, layer, counts[layer.id])
-            item.setSizeHint(QSize(0, 46))
+            item.setSizeHint(QSize(0, 56 if self.touch_mode else 46))
             self.list.addItem(item)
             self.list.setItemWidget(item, row)
         active = self.doc.active_layer
@@ -331,9 +489,12 @@ class LayersPanel(QWidget):
             self.passes.setValue(active.passes)
             self.material_box.setEnabled(True)
             self._show_material(active)
+            self.fill_box.setEnabled(True)
+            self._show_fill(active)
         else:
             self.params.setEnabled(False)
             self.material_box.setEnabled(False)
+            self.fill_box.setEnabled(False)
         self._updating = False
 
     def _show_material(self, layer: Layer) -> None:
@@ -412,7 +573,8 @@ class LayersPanel(QWidget):
         layer = self.doc.active_layer
         value = int(value) if attr == "passes" else float(value)
         if getattr(layer, attr) != value:
-            self.stack.push(SetLayerAttrCommand(self.doc, layer.id, attr, value))
+            cls = _FillParamCommand if attr in FILL_LAYER_FIELDS else SetLayerAttrCommand
+            self.stack.push(cls(self.doc, layer.id, attr, value))
 
     # --- Material -----------------------------------------------------------
     def _material_for(self, kind: str, name: str) -> Material | None:

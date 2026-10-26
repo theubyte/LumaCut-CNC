@@ -44,6 +44,8 @@ class WindowWorkflowAdapter(QObject):
         sp.resultReady.connect(lambda *_: self.changed.emit())
         sp.objects_list.itemChanged.connect(lambda *_: self.changed.emit())
         sp.design_only.toggled.connect(lambda *_: self.changed.emit())
+        if hasattr(sp, "areasChanged"):
+            sp.areasChanged.connect(lambda *_: self.changed.emit())
         sp.mode_combo.currentIndexChanged.connect(lambda *_: self.changed.emit())
         ed.documentChanged.connect(self._on_document)
 
@@ -117,6 +119,10 @@ class WindowWorkflowAdapter(QObject):
         elif key == "scan":
             return bool(sp.start_scan())
         elif key == "mark":
+            if hasattr(sp, "start_marking") and sp.start_marking():
+                self.message.emit("Bereich auf dem Canvas aufziehen: umschlossene Werkstücke werden "
+                                  "angehakt, sonst wird der Bereich selbst geprobt (Esc bricht ab).")
+                return True
             sp.objects_list.setFocus()
             self.message.emit("Werkstücke in der Liste „Erkannte Werkstücke“ anhaken "
                               "oder das Design auf dem Werkstück platzieren.")
@@ -248,10 +254,9 @@ class WorkflowPanel(QWidget):
         st = self.state(key)
         sd = step_def(key)
         self.reason_label.setText(st.reason or sd.hint)
-        self.run_button.setEnabled(st.status in (READY, DONE) and key != "mark"
-                                   or (key == "mark" and st.status == READY))
-        self.run_button.setText("Wiederholen" if st.status == DONE else
-                                ("Hinweis" if key == "mark" else "Ausführen"))
+        self.run_button.setEnabled(st.status in (READY, DONE))
+        self.run_button.setText("Markieren" if key == "mark" else
+                                ("Wiederholen" if st.status == DONE else "Ausführen"))
         self.skip_button.setEnabled(sd.skippable and st.status != RUNNING)
         self.skip_button.setText("Nicht überspringen" if st.status == SKIPPED else "Überspringen")
 

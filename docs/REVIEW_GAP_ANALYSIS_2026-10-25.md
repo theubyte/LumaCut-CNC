@@ -68,12 +68,12 @@ M 1–3 days, L > 3 days. Status after this pass in **bold**.
 | 9 | Import SVG/DXF/PNG/JPG/PDF | LB / XCS yes | none in native | **done** for SVG/DXF/PNG/JPG/BMP (`lumacut_import`, Datei › Importieren Ctrl+I, drag-and-drop, mm conversion, one undo step, clamped to the 360×340 mm work area); PDF open | very high | M | Canvas |
 | 10 | Workflow wizard scan → detect → probe → focus → job → park, focus compensation applied on send | n/a (LB has camera overlay; XCS auto-focus + camera) | pieces exist separately; compensation not hooked into "Design senden" | **done** (`lumacut_workflow`: panel "Ablauf" Home → Scan → Markieren → Probe → Fokus → Rahmen → Auftrag → Parken; status per step, skip, precondition checks; uses the existing panel actions, focus compensation via `prepare_job_gcode`) | very high (USP) | M | Scan Probe + Machine; Review can wire the send path |
 | 11 | Fill / hatch for vectors (Fill mode, line interval, cross-hatch) | LB / XCS yes | none | open (hatch helper exists in material_test) | high | M | Canvas |
-| 12 | Kerf offset, tabs/bridges, lead-in/out | LB yes / XCS partial | none | open | medium (diodes have small kerf; tabs useful) | M | Review (planner) |
+| 12 | Kerf offset, tabs/bridges, lead-in/out | LB yes / XCS partial | none | **done** (`lumacut_job.cutpath`, per-layer fields, dialog „Schnittoptionen…“ Alt+K) | medium (diodes have small kerf; tabs useful) | M | Review (planner) |
 | 13 | Boolean ops, node editing, offset, arrays | LB / XCS yes | polygon only | open | medium | L | Canvas |
 | 14 | Preview of G-code path (travel lines, order animation) | LB / XCS yes | none | open (estimate only) – not done in this pass | medium | M | Canvas overlay + Review |
 | 15 | Air assist M8/M9 per layer | LB yes | none (Pi allows M7/M8/M9) | **not feasible on this machine** – see §8 | medium (if relay installed) | S | Materials/layer field + gcode |
 | 16 | Origin options (current position / user origin), job placement on camera | LB yes / XCS yes | absolute only | open | medium | M | Machine |
-| 17 | Job queue, autosave / crash recovery | LB autosave yes | none | **autosave/recovery done** (`lumacut_session`, every 60 s, crash recovery on start); queue open | medium | S–M | Canvas (autosave), Machine (queue) |
+| 17 | Job queue, autosave / crash recovery | LB autosave yes | none | **autosave/recovery done** (`lumacut_session`, every 60 s, crash recovery on start); **job history done** (`lumacut_job.history`, Ctrl+H: last 20 sent jobs, resend/save); multi-job queue on the Pi open | medium | S–M | Canvas (autosave), Machine (queue) |
 | 18 | Raster throughput to SKR (Pi-side streaming / line compression) | n/a | risk noted in plan | open | high for photos | L | Pi / Machine |
 
 ## 4. Focus areas
@@ -177,3 +177,27 @@ Still open: path preview overlay (#14), kerf/tabs/lead-in (#12), vector fill/hat
 import, job queue, raster streaming (#18). Error diffusion on very large images is slow
 (pure-Python inner loop).
 
+
+## 9. Status update 2026-10-26 (review round 3)
+
+Ownership this round: touch, vector fill/hatch (#11) and the path-preview overlay incl. its data
+(#14) belong to the **Canvas agent**; the review side did planner/job-side items only.
+
+Done and pushed to `main` (G-code checked against `MarlinLaserGuard` in tests):
+
+- **Kerf / tabs / lead-in/out** (#12): per-layer fields on `Layer` and `JobLayer`
+  (`kerf_mm`, `tab_count`, `tab_width_mm`, `tab_spacing_mm`, `lead_in_mm`, `lead_in_arc`,
+  `lead_out_mm`; defaults in `lumacut_canvas.model.CUT_LAYER_DEFAULTS`, written to the file only
+  when set, so older files and readers are unaffected). Applied in `optimize_layers`: kerf before
+  ordering (shapely, side by nesting parity), tabs and leads after ordering. Each output polyline
+  is tagged in `JobLayer.poly_kinds` (`cut`/`lead_in`/`lead_out`/`tab`). Dialog „Schnittoptionen…“
+  (Alt+K). New dependency `shapely>=2.0` (requirements + `build-windows.bat`).
+- **Job history + G-Code speichern** (part of #17): last 20 sent jobs (any sender) with resend
+  (upload only, start stays manual) and save-as-file; „G-Code speichern…“ (Alt+G) for offline use.
+- **Shortcut overview**: Hilfe › Tastenkürzel (F1), collected live from all window actions.
+
+Still open: unit toggle mm/inch (touches canvas widgets → Canvas), PDF import (no small,
+permissively licensed vector-PDF reader; PyMuPDF is AGPL), multi-job queue on the Pi (Machine),
+boolean/node/offset/array tools (#13, Canvas), origin options (#16, Machine), raster streaming
+(#18, Pi), lead collision check against neighbouring parts, Windows hardware test of the new
+cut options.

@@ -45,7 +45,7 @@ STEPS: tuple[StepDef, ...] = (
     StepDef("home", "Referenzfahrt", "Maschine referenzieren (Home), damit Koordinaten stimmen.",
             skippable=False),
     StepDef("scan", "Scan", "Arbeitsfläche mit der Kamera abfahren (Hintergrundbild + Werkstücke)."),
-    StepDef("mark", "Markieren", "Werkstücke in der Scan-Liste anhaken oder das Design darauf platzieren."),
+    StepDef("mark", "Markieren", "Werkstücke anhaken, Bereiche auf dem Canvas aufziehen oder das Design darauf platzieren."),
     StepDef("probe", "Probe", "Höhenmesh der markierten Bereiche messen (für Fokuskorrektur)."),
     StepDef("focus", "Fokus", "Werkstückoberfläche antasten (G30) – setzt die Fokushöhe."),
     StepDef("frame", "Rahmen", "Umriss mit ausgeschaltetem Laser abfahren und Lage prüfen."),
@@ -180,7 +180,7 @@ def evaluate(f: WorkflowFacts, marks: WorkflowMarks | None = None) -> list[StepS
     elif not scan_ok and f.design_empty:
         add("mark", BLOCKED, "Erst scannen oder ein Design platzieren")
     else:
-        add("mark", READY, "Werkstück in der Scan-Liste anhaken oder Design platzieren")
+        add("mark", READY, "Werkstück anhaken, Bereich aufziehen oder Design platzieren")
 
     # Probe -------------------------------------------------------------
     if f.scan_busy and f.scan_kind in ("probe", "full"):

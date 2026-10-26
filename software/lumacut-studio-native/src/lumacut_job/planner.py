@@ -141,14 +141,27 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), **options):
     """Copy of ``JobLayer`` list with each layer's polylines reordered.
 
     The end position of one layer is the start position of the next.
+    Per-layer cut options (kerf offset, tabs, lead-in/out, see
+    :mod:`.cutpath`) are applied here: kerf before ordering, tabs and leads
+    after ordering (they depend on the chosen start point).
     """
+    from .cutpath import CutOptions, apply_cut_options, nesting_depth, offset_closed
     out = []
     pos = start
     for layer in layers:
-        ordered = order_polylines(layer.polylines, pos, **options)
-        if ordered:
-            pos = ordered[-1][-1]
-        out.append(replace(layer, polylines=ordered))
+        opts = CutOptions.of(layer)
+        polys = layer.polylines
+        if opts.kerf_mm:
+            polys, _ = offset_closed(polys, opts.kerf_mm)
+        ordered = order_polylines(polys, pos, **options)
+        if opts.active and ordered:
+            res = apply_cut_options(ordered, opts, nesting_depth(ordered))
+            new = replace(layer, polylines=res.polylines, poly_kinds=tuple(res.kinds))
+        else:
+            new = replace(layer, polylines=ordered)
+        if new.polylines:
+            pos = new.polylines[-1][-1]
+        out.append(new)
     return out
 
 

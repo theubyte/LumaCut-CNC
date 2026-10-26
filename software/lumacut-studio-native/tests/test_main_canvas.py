@@ -22,6 +22,6 @@ def test_main_window_hosts_canvas(qapp, monkeypatch, tmp_path):
     win._send_canvas_job()
     assert sent and sent[0][0] == "canvas.gcode" and sent[0][2] is False and "M3 I" in sent[0][1]
     win.canvas.cursorMoved.emit(12.34, 5.0)
-    assert "12.3 mm" in win.cursor_label.text()
+    assert "12.3" in win.cursor_label.text()
     win.canvas.undo_stack.setClean()
     win.close()

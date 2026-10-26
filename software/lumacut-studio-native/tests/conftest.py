@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # Autosave der Tests nie in den echten AppData-Ordner (und keine Wiederherstellungs-Rückfrage)
 import tempfile  # noqa: E402
 os.environ.setdefault("LUMACUT_AUTOSAVE_DIR", tempfile.mkdtemp(prefix="lumacut-autosave-"))
+os.environ.setdefault("LUMACUT_HISTORY_DIR", tempfile.mkdtemp(prefix="lumacut-history-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest  # noqa: E402

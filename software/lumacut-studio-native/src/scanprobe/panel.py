@@ -35,10 +35,10 @@ from . import adapters
 from .calibration import CameraCalibration
 from .detection import DetectedObject
 from .focus_export import FocusExport, compensate_for_export
-from .geometry import DEFAULT_LIMITS, Rect
+from .geometry import DEFAULT_LIMITS, Polygon, Rect
 from .heatmap import heatmap_rgba
 from .heightmap import HeightMapSet
-from .probe_plan import ProbeSettings, areas_from_design_bounds, areas_from_objects
+from .probe_plan import ProbeArea, ProbeSettings, areas_from_design_bounds, areas_from_objects
 from .qt_bridge import ScanProbeWorker
 from .stitch import Mosaic
 from .workflow import ScanProbeWorkflow
@@ -60,6 +60,8 @@ MODE_PI = "pi"
 PHASES = {"scan": "Scan", "stitch": "Stitching", "probe": "Proben", "reuse": "Kontrollmessung",
           "detect": "Erkennung"}
 KINDS = {"rectangle": "Rechteck", "circle": "Kreis", "polygon": "Polygon"}
+TAP_MM = 3.0        # kleiner aufgezogener Bereich = Antippen (Werkstück an/aus)
+MANUAL_PAD_MM = 3.0  # Rand um Bereiche aus Canvas-Formen (wie bei der Design-Box)
 Z_OVERLAY = 5e8  # über allen Ebenen (Rang × 1e6, auch bei vielen Ebenen z. B. Materialtest), unter Auswahlrahmen (1e9)
 
 
@@ -119,6 +121,7 @@ class CanvasOverlay:
     def __init__(self, canvas: Any):
         self.canvas = canvas
         self.object_items: list[QGraphicsItem] = []
+        self.manual_items: list[QGraphicsItem] = []
         self.heat_item: Optional[QGraphicsPixmapItem] = None
         self.backdrop: Optional[QImage] = None
 
@@ -169,8 +172,47 @@ class CanvasOverlay:
                 self.object_items.append(it)
 
     def show_objects(self, visible: bool) -> None:
-        for it in self.object_items:
+        for it in self.object_items + self.manual_items:
             it.setVisible(visible)
+
+    def mark_objects(self, checked_ids: set[str]) -> None:
+        """Angehakte Werkstücke gefüllt, nicht angehakte nur gestrichelt."""
+        for it in self.object_items:
+            if isinstance(it, QGraphicsPathItem):
+                on = it.data(0) in checked_ids
+                it.setBrush(QBrush(QColor(34, 211, 238, 28 if on else 0)))
+                pen = it.pen()
+                pen.setStyle(Qt.PenStyle.DashLine if on else Qt.PenStyle.DotLine)
+                it.setPen(pen)
+
+    def set_manual(self, areas: list[ProbeArea], visible: bool = True) -> None:
+        """Manuell markierte Probe-Bereiche (orange, nicht anklickbar)."""
+        for it in self.manual_items:
+            if it.scene() is not None:
+                it.scene().removeItem(it)
+        self.manual_items = []
+        scene = self.scene
+        if scene is None:
+            return
+        pen = QPen(QColor("#f59e0b"), 1.5, Qt.PenStyle.DashLine)
+        pen.setCosmetic(True)
+        for area in areas:
+            pts = [QPointF(*from_machine(x, y)) for x, y in area.polygon.points]
+            path = QPainterPath()
+            path.moveTo(pts[0])
+            for p in pts[1:]:
+                path.lineTo(p)
+            path.closeSubpath()
+            item = QGraphicsPathItem(path)
+            item.setPen(pen)
+            item.setBrush(QBrush(QColor(245, 158, 11, 24)))
+            item.setZValue(Z_OVERLAY)
+            item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            item.setData(0, area.id)
+            item.setToolTip(f"Manueller Probe-Bereich {area.id}")
+            item.setVisible(visible)
+            scene.addItem(item)
+            self.manual_items.append(item)
 
     def clear_objects(self) -> None:
         for it in self.object_items:
@@ -208,6 +250,7 @@ class CanvasOverlay:
 
     def clear(self) -> None:
         self.clear_objects()
+        self.set_manual([])
         self.clear_heatmap()
         self.backdrop = None
         self.show_mosaic(False)
@@ -219,6 +262,7 @@ class ScanPanel(QWidget):
     statusMessage = Signal(str)  # noqa: N815
     busyChanged = Signal(bool)  # noqa: N815
     resultReady = Signal(str)  # noqa: N815 - "scan" | "probe" | "full"
+    areasChanged = Signal()  # noqa: N815 - Markierung (Werkstücke/Design/manuell) geändert
 
     def __init__(self, canvas: Any = None, client_provider: Optional[Callable[[], Any]] = None,
                  parent: Optional[QWidget] = None, *, sim_delay_s: float = 0.0, ask: bool = True):
@@ -240,7 +284,13 @@ class ScanPanel(QWidget):
         self.last_notes: list[str] = []
         self.last_error = ""
         self._kind = ""
+        self.manual_areas: list[ProbeArea] = []
+        self._manual_seq = 0
+        self._marking = False
         self._build()
+        if canvas is not None and hasattr(canvas, "roiSelected"):
+            canvas.roiSelected.connect(self._on_roi)
+            canvas.roiCancelled.connect(self._on_roi_cancelled)
         self._update_enabled()
 
     # ------------------------------------------------------------------ UI
@@ -274,6 +324,7 @@ class ScanPanel(QWidget):
         lay.addLayout(form)
         self.design_only = QCheckBox("Nur Werkstücke unter dem Design proben")
         self.design_only.setChecked(True)
+        self.design_only.toggled.connect(lambda *_: self._areas_changed())
         lay.addWidget(self.design_only)
 
         row = QHBoxLayout()
@@ -320,8 +371,27 @@ class ScanPanel(QWidget):
         lay.addWidget(QLabel("Erkannte Werkstücke"))
         self.objects_list = QListWidget()
         self.objects_list.setMaximumHeight(120)
-        self.objects_list.itemChanged.connect(lambda _i: self._update_enabled())
+        self.objects_list.itemChanged.connect(self._objects_checked)
         lay.addWidget(self.objects_list)
+        row = QHBoxLayout()
+        self.mark_button = QPushButton("Auf Canvas markieren")
+        self.mark_button.setToolTip(
+            "Bereich aufziehen: umschlossene Werkstücke werden angehakt, sonst wird der Bereich "
+            "selbst geprobt. Ein kurzer Zug (< 3 mm) auf ein Werkstück schaltet es an/aus.")
+        self.mark_button.clicked.connect(self.start_marking)
+        self.selection_button = QPushButton("Auswahl als Bereich")
+        self.selection_button.setToolTip("Umriss der auf dem Canvas ausgewählten Objekte proben")
+        self.selection_button.clicked.connect(self.add_selection_areas)
+        row.addWidget(self.mark_button)
+        row.addWidget(self.selection_button)
+        lay.addLayout(row)
+        self.areas_label = QLabel("")
+        self.areas_label.setWordWrap(True)
+        self.areas_label.setStyleSheet("color: #93a1b5;")
+        lay.addWidget(self.areas_label)
+        self.clear_marks_button = QPushButton("Manuelle Bereiche löschen")
+        self.clear_marks_button.clicked.connect(self.clear_manual_areas)
+        lay.addWidget(self.clear_marks_button)
 
         self.show_mosaic = QCheckBox("Scanbild als Hintergrund")
         self.show_mosaic.setChecked(True)
@@ -394,7 +464,11 @@ class ScanPanel(QWidget):
                   self.cal_button, self.spacing_spin, self.load_button, self.clear_button):
             w.setEnabled(not busy)
         self.camera_edit.setEnabled(not busy and self.mode == MODE_PI)
-        self.probe_button.setEnabled(not busy and (bool(self.checked_objects()) or bool(self.design_bounds())))
+        self.probe_button.setEnabled(not busy and (bool(self.checked_objects()) or bool(self.manual_areas)
+                                                   or bool(self.design_bounds())))
+        for w in (self.mark_button, self.selection_button):
+            w.setEnabled(not busy and self.canvas is not None)
+        self.clear_marks_button.setEnabled(not busy and bool(self.manual_areas))
         self.save_button.setEnabled(not busy and self.maps is not None)
         has_maps = self.maps is not None and bool(self.maps.maps)
         if not has_maps:
@@ -501,15 +575,141 @@ class ScanPanel(QWidget):
         return [o for o in self.objects if o.id in ids]
 
     def probe_areas(self):
+        """(Bereiche, Hinweise): angehakte Werkstücke bzw. Design-Bereiche plus
+        manuell markierte Bereiche. Das Design dient nur als Rückfall, solange
+        weder Werkstücke angehakt noch Bereiche markiert sind."""
         objs = self.checked_objects()
+        manual = list(self.manual_areas)
         design = self.design_bounds() if self.design_only.isChecked() else []
         if design:
-            return areas_from_design_bounds(design, objs)
-        if objs:
-            return areas_from_objects(objs), []
-        if self.design_bounds():
-            return areas_from_design_bounds(self.design_bounds(), [])
-        return [], []
+            areas, notes = areas_from_design_bounds(design, objs)
+        elif objs:
+            areas, notes = areas_from_objects(objs), []
+        elif self.design_bounds() and not manual:
+            areas, notes = areas_from_design_bounds(self.design_bounds(), [])
+        else:
+            areas, notes = [], []
+        return list(areas) + manual, list(notes)
+
+    # ------------------------------------------------------------ Markieren
+    def start_marking(self) -> bool:
+        """Nächsten Zug auf dem Canvas als Markierung auswerten (siehe :meth:`mark_rect`)."""
+        if self.canvas is None or not hasattr(self.canvas, "request_roi") or self.busy:
+            return False
+        if getattr(self.canvas, "roi_pending", False) and not self._marking:
+            self._error("Auf dem Canvas wird bereits ein Bereich aufgezogen.")
+            return False
+        self._marking = True
+        self.canvas.request_roi("Probe-Bereich aufziehen oder Werkstück antippen (Esc bricht ab)")
+        return True
+
+    def _on_roi(self, x: float, y: float, w: float, h: float) -> None:
+        if not self._marking:
+            return  # Bereich gehört einem anderen Werkzeug
+        self._marking = False
+        if hasattr(self.canvas, "clear_roi"):
+            self.canvas.clear_roi()  # eigene Anzeige über das Overlay
+        x0, y0 = to_machine(x, y)
+        x1, y1 = to_machine(x + w, y + h)
+        self.mark_rect(Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
+
+    def _on_roi_cancelled(self) -> None:
+        self._marking = False
+
+    def mark_rect(self, r: Rect) -> str:
+        """Markierung in Maschinen-mm auswerten.
+
+        * Kleiner Bereich (< ``TAP_MM``, d. h. Antippen): Werkstück an dieser
+          Stelle an-/abhaken.
+        * Größerer Bereich: Werkstücke, deren Mitte darin liegt, werden angehakt;
+          liegt keines darin, wird der Bereich selbst ein manueller Probe-Bereich.
+
+        Rückgabe: ``"toggle"``, ``"objects"``, ``"manual"`` oder ``""`` (nichts).
+        """
+        if r.width < TAP_MM and r.height < TAP_MM:
+            cx, cy = r.center
+            hits = [o for o in self.objects if o.polygon.contains(cx, cy)]
+            if not hits:
+                self._notify("Kein erkanntes Werkstück an dieser Stelle – Bereich größer aufziehen.")
+                return ""
+            self._set_checked({o.id for o in hits}, toggle=True)
+            self._notify("Werkstück " + ", ".join(o.id for o in hits) + " umgeschaltet.")
+            return "toggle"
+        inside = [o for o in self.objects if r.contains(*o.bounds.center)]
+        if inside:
+            self._set_checked({o.id for o in inside})
+            self._notify(f"{len(inside)} Werkstück(e) markiert.")
+            return "objects"
+        self.add_manual_area(r.to_polygon(), kind="rectangle")
+        return "manual"
+
+    def add_manual_area(self, polygon: Polygon, kind: str = "polygon") -> Optional[ProbeArea]:
+        """Manuellen Probe-Bereich (Maschinen-mm) anlegen, auf die Arbeitsfläche begrenzt."""
+        wr = work_rect_machine()
+        b = polygon.bounds
+        if wr.intersect(b) is None:
+            self._error("Bereich liegt außerhalb der Arbeitsfläche.")
+            return None
+        if b.xmin < wr.xmin or b.ymin < wr.ymin or b.xmax > wr.xmax or b.ymax > wr.ymax:
+            pts = [(min(max(x, wr.xmin), wr.xmax), min(max(y, wr.ymin), wr.ymax)) for x, y in polygon.points]
+            try:
+                polygon = Polygon(pts)
+            except ValueError:
+                return None
+            if polygon.area < 1.0:
+                return None
+        self._manual_seq += 1
+        area = ProbeArea(f"m{self._manual_seq}", polygon, kind, "manual")
+        self.manual_areas.append(area)
+        self._manual_changed()
+        self._notify(f"Probe-Bereich {area.id} markiert "
+                     f"({polygon.bounds.width:.0f} × {polygon.bounds.height:.0f} mm).")
+        return area
+
+    def add_selection_areas(self) -> int:
+        """Ausgewählte Canvas-Objekte als Probe-Bereiche (Umriss + Rand)."""
+        doc = getattr(self.canvas, "document", None)
+        ids = [i for i in getattr(self.canvas, "selection", []) if doc is not None and doc.has_shape(i)]
+        if not ids:
+            self._error("Keine Objekte auf dem Canvas ausgewählt.")
+            return 0
+        n = 0
+        for sid in ids:
+            poly = _shape_area_polygon(doc.shape(sid))
+            if poly is not None and self.add_manual_area(poly) is not None:
+                n += 1
+        return n
+
+    def clear_manual_areas(self) -> None:
+        self.manual_areas = []
+        self._manual_changed()
+
+    def _manual_changed(self) -> None:
+        self.overlay.set_manual(self.manual_areas, self.show_objects.isChecked())
+        self._areas_changed()
+
+    def _set_checked(self, ids: set[str], toggle: bool = False) -> None:
+        self.objects_list.blockSignals(True)
+        for i in range(self.objects_list.count()):
+            item = self.objects_list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) in ids:
+                on = item.checkState() != Qt.CheckState.Checked if toggle else True
+                item.setCheckState(Qt.CheckState.Checked if on else Qt.CheckState.Unchecked)
+        self.objects_list.blockSignals(False)
+        self._objects_checked()
+
+    def _objects_checked(self, *_):
+        self.overlay.mark_objects({o.id for o in self.checked_objects()})
+        self._areas_changed()
+
+    def _areas_changed(self) -> None:
+        areas, _notes = self.probe_areas()
+        manual = len(self.manual_areas)
+        self.areas_label.setText(
+            f"Zu proben: {len(areas)} Bereich(e)" + (f", davon {manual} manuell" if manual else "")
+            if areas else "Noch keine Probe-Bereiche markiert.")
+        self._update_enabled()
+        self.areasChanged.emit()
 
     # ------------------------------------------------------------ Aktionen
     def start_scan(self) -> bool:
@@ -538,9 +738,10 @@ class ScanPanel(QWidget):
     def start_full(self) -> bool:
         saved = self.maps if (self.maps is not None and self.reuse_check.isChecked()) else None
         design = self.design_bounds() if self.design_only.isChecked() else None
+        manual = list(self.manual_areas)
 
         def task(wf: ScanProbeWorkflow):
-            return {"result": wf.run(design_bounds=design or None, saved=saved,
+            return {"result": wf.run(design_bounds=design or None, saved=saved, manual_areas=manual,
                                      start=_machine_xy(wf.machine))}
         return self._start("full", task, need_camera=True)
 
@@ -712,7 +913,7 @@ class ScanPanel(QWidget):
             self.objects_list.addItem(item)
         self.objects_list.blockSignals(False)
         self.overlay.set_objects(self.objects, self.show_objects.isChecked())
-        self._update_enabled()
+        self._objects_checked()
 
     def set_maps(self, maps: Optional[HeightMapSet]) -> None:
         self.maps = maps
@@ -834,11 +1035,56 @@ class ScanPanel(QWidget):
 
     def clear(self) -> None:
         self.mosaic, self.objects, self.maps = None, [], None
+        self.manual_areas = []
         self.objects_list.clear()
         self.overlay.clear()
+        self._areas_changed()
         self.heat_label.setText("Noch keine Höhenkarte")
         self.preview.setVisible(False)
         self._update_enabled()
+
+
+def _shape_area_polygon(shape) -> Optional[Polygon]:
+    """Probe-Bereich (Maschinen-mm) für eine Canvas-Form: gedrehte Box + Rand;
+    Polygone/Ellipsen mit ihrem Umriss (Rand über die Box-Erweiterung)."""
+    try:
+        b = shape.bounds()
+    except Exception:  # noqa: BLE001
+        return None
+    pts: list[tuple[float, float]] = []
+    if shape.kind in ("polygon", "ellipse"):
+        try:
+            from lumacut_canvas.shape_paths import shape_path
+            poly = shape_path(shape).toFillPolygon()
+            raw = [(p.x(), p.y()) for p in poly]
+            step = max(1, len(raw) // 64)
+            pts = _offset_outline(raw[::step], MANUAL_PAD_MM)
+        except Exception:  # noqa: BLE001 - Rückfall auf die Box
+            pts = []
+    if len(pts) < 3:
+        x0, y0, x1, y1 = b.x - MANUAL_PAD_MM, b.y - MANUAL_PAD_MM, b.x + b.w + MANUAL_PAD_MM, b.y + b.h + MANUAL_PAD_MM
+        pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    try:
+        return Polygon([to_machine(x, y) for x, y in pts])
+    except ValueError:
+        return None
+
+
+def _offset_outline(pts: list[tuple[float, float]], pad: float) -> list[tuple[float, float]]:
+    """Punkte radial vom Schwerpunkt um ``pad`` nach außen schieben (grob, für
+    konvexe/sternförmige Umrisse ausreichend – das Proben-Raster ist ohnehin gröber)."""
+    if len(pts) > 1 and pts[0] == pts[-1]:
+        pts = pts[:-1]
+    if len(pts) < 3:
+        return []
+    cx = sum(p[0] for p in pts) / len(pts)
+    cy = sum(p[1] for p in pts) / len(pts)
+    out = []
+    for x, y in pts:
+        d = ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+        f = (d + pad) / d if d > 1e-9 else 1.0
+        out.append((cx + (x - cx) * f, cy + (y - cy) * f))
+    return out
 
 
 def _machine_xy(machine) -> tuple[float, float]:

@@ -4,3 +4,4 @@ numpy>=1.26
 opencv-python-headless>=4.8
 svgelements>=1.9
 ezdxf>=1.1
+shapely>=2.0

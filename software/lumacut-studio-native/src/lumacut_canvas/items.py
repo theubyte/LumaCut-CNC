@@ -14,6 +14,7 @@ from PySide6.QtGui import (QBrush, QColor, QPainter, QPainterPath, QPainterPathS
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 
 from . import theme
+from .touch import MOUSE, TouchMetrics
 from .model import Geometry, Layer, Shape, rotate_point
 from .shape_paths import geometry_transform, shape_path
 from .workarea import Rect
@@ -23,15 +24,16 @@ from .workarea import Rect
 #   7   3
 #   6 5 4
 HANDLE_FRACTIONS = ((0, 0), (0.5, 0), (1, 0), (1, 0.5), (1, 1), (0.5, 1), (0, 1), (0, 0.5))
-HANDLE_PX = 9.0
+HANDLE_PX = MOUSE.handle_px  # Mausmodus; Touch-Modus siehe touch.TOUCH
 ROTATE_HANDLE = 8          # Index des Dreh-Griffs
-ROTATE_HANDLE_OFFSET_PX = 24.0  # Abstand über der oberen Kante
+ROTATE_HANDLE_OFFSET_PX = MOUSE.rotate_offset_px  # Abstand über der oberen Kante
 
 
 class ShapeItem(QGraphicsItem):
     """Ein Vektorobjekt, gezeichnet in der Farbe seiner Ebene."""
 
-    # Klicktoleranz in Pixeln; wird von der View in mm umgerechnet.
+    # Klicktoleranz in mm; die View rechnet TouchMetrics.hit_tolerance_px
+    # (Maus 5 px, Touch 12 px) bei jedem Zoom in mm um.
     hit_tolerance_mm: float = 1.0
 
     def __init__(self, shape: Shape, layer: Layer) -> None:
@@ -39,6 +41,7 @@ class ShapeItem(QGraphicsItem):
         self.shape_id = shape.id
         self._path = QPainterPath()
         self._hit = QPainterPath()
+        self._outline = QPainterPath()  # Fangbereich direkt am Umriss (Trefferpriorität)
         self._color = QColor(layer.color)
         self._kind = shape.kind
         self._geom = shape.geom.copy()
@@ -58,10 +61,11 @@ class ShapeItem(QGraphicsItem):
         self.update()
 
     def _rebuild_hit(self) -> None:
+        stroker = QPainterPathStroker()
+        stroker.setWidth(self.hit_tolerance_mm * 2)
         if self._kind in ("line", "path", "polygon"):
-            stroker = QPainterPathStroker()
-            stroker.setWidth(self.hit_tolerance_mm * 2)
             self._hit = stroker.createStroke(self._path)
+            self._outline = self._hit
             if self._kind == "polygon":  # Polygone sind wie Flächen auch innen anklickbar
                 self._hit = self._hit.united(self._path)
         else:
@@ -69,13 +73,32 @@ class ShapeItem(QGraphicsItem):
             # Die Klickfläche dreht mit dem Objekt mit.
             b = self._geom.local_bounds()
             m = self.hit_tolerance_mm
-            r = QRectF(b.x, b.y, b.w, b.h).adjusted(-m, -m, m, m)
+            body = QRectF(b.x, b.y, b.w, b.h)
+            r = body.adjusted(-m, -m, m, m)
             hit = QPainterPath()
             if self._kind == "ellipse":
                 hit.addEllipse(r)
             else:
                 hit.addRect(r)
-            self._hit = geometry_transform(self._geom).map(hit) if self._geom.rot else hit
+            xf = geometry_transform(self._geom) if self._geom.rot else None
+            self._hit = xf.map(hit) if xf is not None else hit
+            if self._kind in ("text", "image"):
+                # Sichtbar gefüllt: ein Treffer im Objekt zählt wie ein Umriss-Treffer.
+                solid = QPainterPath()
+                solid.addRect(body)
+                self._outline = xf.map(solid) if xf is not None else solid
+            else:
+                self._outline = stroker.createStroke(self._path)
+
+    def outline_hit(self, pos: QPointF) -> bool:
+        """``pos`` (Item-Koordinaten) liegt im Fangbereich des Umrisses bzw. im
+        sichtbar gefüllten Objekt (Text, Bild) – nicht nur im Inneren einer Kontur."""
+        return self._outline.contains(pos)
+
+    def hit_area(self) -> float:
+        """Größe für die Trefferpriorität (mm², Umriss-Box; Linien ≈ 0)."""
+        r = self._path.boundingRect()
+        return abs(r.width() * r.height())
 
     def refresh_hit_area(self) -> None:
         self.prepareGeometryChange()
@@ -130,7 +153,22 @@ class SelectionOverlay(QGraphicsItem):
         self._rect: Rect | None = None
         self._angle = 0.0
         self._px = 1.0  # mm pro Bildschirmpixel, von der View gesetzt
+        self.metrics: TouchMetrics = MOUSE  # Griffgrößen in Bildschirmpixeln
         self.setAcceptedMouseButtons(Qt.NoButton)
+
+    def set_metrics(self, m: TouchMetrics) -> None:
+        """Griffgrößen (Maus/Touch) umschalten; Pixelmaße, also zoomunabhängig."""
+        self.prepareGeometryChange()
+        self.metrics = m
+        self.update()
+
+    def handle_size_mm(self) -> float:
+        """Gezeichnete Griffgröße in Szenen-mm (konstant in Bildschirmpixeln)."""
+        return self.metrics.handle_px * self._px
+
+    def handle_hit_mm(self) -> float:
+        """Halbe Kantenlänge des Fangquadrats eines Griffs in Szenen-mm."""
+        return max(self.metrics.handle_hit_px, self.metrics.handle_px / 2) * self._px
 
     def set_scale(self, mm_per_px: float) -> None:
         self.prepareGeometryChange()
@@ -176,7 +214,7 @@ class SelectionOverlay(QGraphicsItem):
             return []
         r = self._rect
         pts = [QPointF(r.x + fx * r.w, r.y + fy * r.h) for fx, fy in HANDLE_FRACTIONS]
-        pts.append(QPointF(r.x + r.w / 2, r.y - ROTATE_HANDLE_OFFSET_PX * self._px))
+        pts.append(QPointF(r.x + r.w / 2, r.y - self.metrics.rotate_offset_px * self._px))
         return pts
 
     def handle_points(self) -> list[QPointF]:
@@ -189,7 +227,7 @@ class SelectionOverlay(QGraphicsItem):
         Bei kleinen Objekten überlappen sich die Fangbereiche; dann gewinnt
         der nächste Griff, Ecken vor Kanten. Der Dreh-Griff hat Vorrang.
         """
-        tol = HANDLE_PX * self._px
+        tol = self.handle_hit_mm()
         lp = self.to_local(pos)
         best: tuple[float, int, int] | None = None
         for i, hp in enumerate(self._local_handles()):
@@ -204,7 +242,7 @@ class SelectionOverlay(QGraphicsItem):
     def boundingRect(self) -> QRectF:  # noqa: N802
         if self._rect is None:
             return QRectF()
-        m = HANDLE_PX * self._px * 1.5 + ROTATE_HANDLE_OFFSET_PX * self._px
+        m = (self.metrics.handle_px * 1.5 + self.metrics.rotate_offset_px) * self._px
         r = self._rect
         local = QRectF(r.x, r.y, r.w, r.h).adjusted(-m, -m, m, m)
         return self._transform().mapRect(local)
@@ -228,8 +266,8 @@ class SelectionOverlay(QGraphicsItem):
         handles = self._local_handles()
         rot = handles.pop()
         p.drawLine(QPointF(r.x + r.w / 2, r.y), rot)
-        s = HANDLE_PX * self._px
-        pen = QPen(QColor(theme.SELECTION), 1.2)
+        s = self.handle_size_mm()
+        pen = QPen(QColor(theme.SELECTION), 1.6 if self.metrics.handle_px > HANDLE_PX else 1.2)
         pen.setCosmetic(True)
         p.setPen(pen)
         p.setBrush(QColor(theme.BG))
