@@ -7,6 +7,9 @@ schickt. Alle Angaben stammen aus dem Code: `client.py` (HTTP),
 `settings.py` (Einstellungen). Sie wurden gegen `pi400/marlin/web.py` und
 `pi400/marlin/transport.py` geprüft (Stand: Commit mit `op=frame`).
 
+Die vollständige, vom Client unabhängige Referenz aller Pi-Endpunkte und
+`op`-Werte steht in [docs/PI_API_REFERENZ.md](../../../docs/PI_API_REFERENZ.md).
+
 ## Allgemeines
 
 | Punkt | Wert |

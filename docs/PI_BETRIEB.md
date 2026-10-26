@@ -67,6 +67,8 @@ Bis LumaCut Studio alles kann, funktioniert LightBurn weiter:
 
 ## HTTP-API (für Studio und Tablet)
 
+Kurzübersicht. Vollständige Referenz mit Parametern, Fehlern, Sperren, Statusschema und Beispielen: [PI_API_REFERENZ.md](PI_API_REFERENZ.md).
+
 | Methode | Pfad | Zweck |
 |---|---|---|
 | GET | `/api/status` | Zustand: Verbindung, Besitzer, Position, homed, Ursprung (`origin`), Warteschlange (`queue`), Werkstück-Z, Fokus-Z, Job, Rahmen (`frame`), Tätigkeit (`activity`: `idle`/`job`/`framing`), `busy`/`stale_ms` (Snapshot, blockiert nicht hinter Fahrten), Firmware-Update, Konfiguration |
