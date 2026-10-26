@@ -100,10 +100,13 @@ def test_panels_fit_inside_small_windows(make_win, size):
 def test_sidebar_fits_with_wide_windows_fonts(make_win, qapp, width):
     """Windows-CI (offscreen) misst Text ~1,9× breiter als Linux. Mit gleich
     breiter Schrift muss die rechte Leiste trotzdem ohne Seitwärts-Scrollen passen."""
-    from PySide6.QtGui import QFont
+    from PySide6.QtGui import QFont, QFontMetrics
     old = QFont(qapp.font())
     wide = QFont(old)
-    wide.setLetterSpacing(QFont.PercentageSpacing, 187)
+    # Ziel: Windows-CI-Breite dieses Texts (612 px); ist die Schrift schon so
+    # breit (Windows), bleibt sie unverändert.
+    adv = QFontMetrics(old).horizontalAdvance("Geladenes Mesh nach Kontrollmessung wiederverwenden")
+    wide.setLetterSpacing(QFont.PercentageSpacing, max(100.0, min(200.0, 100.0 * 612 / max(1, adv))))
     qapp.setFont(wide)
     try:
         win = make_win(width, width * 9 // 16)
@@ -160,7 +163,8 @@ def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
     assert all(b.parentWidget() is root for b in btns)
     root.show()
     qapp.processEvents()
-    assert len({b.y() for b in btns}) == 2  # 2×2 statt einer Reihe
+    # 2×2 statt einer Reihe; bei breiter Schrift (Windows-CI) untereinander.
+    assert len({b.y() for b in btns}) in (2, 4)
     assert mixed.count() == 5
     assert root.minimumSizeHint().width() < before
     # Langes Häkchen: schmal im Minimum, Text unverändert, bricht um.
