@@ -155,6 +155,16 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
         raise RuntimeError("Marlin laser startup value layout changed")
     adv = adv.replace(laser_default, "#define SPEED_POWER_STARTUP         0    // (%)", 1)
     adv = uncomment(adv, "COOLANT_CONTROL")
+    # PC8 (HE0) is the 24 V LED light, now dimmable: Marlin's case light
+    # (M355 S<on> P<0-255>) on the hardware PWM of TIM8 CH3 (~1.1 kHz, no
+    # visible flicker). Only the exhaust stays on coolant M8/M9.
+    mist = "  #define COOLANT_MIST                // Enable if mist coolant is present"
+    if adv.count(mist) != 1:
+        raise RuntimeError("Marlin COOLANT_MIST layout changed")
+    adv = adv.replace(mist, "  //#define COOLANT_MIST              // LumaCut: PC8 is the dimmable case light", 1)
+    adv = uncomment(adv, "CASE_LIGHT_ENABLE")
+    adv = replace_active(adv, "CASE_LIGHT_DEFAULT_ON", "false")
+    adv = replace_active(adv, "CASE_LIGHT_DEFAULT_BRIGHTNESS", "153")
     adv = uncomment(adv, "EMERGENCY_PARSER")
     adv = uncomment(adv, "ADVANCED_OK")
     # Firmware update from the Pi without removing the SD card:
@@ -192,7 +202,8 @@ PIN_PATCH = """
 #define HEATER_BED_PIN -1
 #define SPINDLE_LASER_ENA_PIN PC7
 #define SPINDLE_LASER_PWM_PIN PA1
-#define COOLANT_MIST_PIN PC8
+#undef CASE_LIGHT_PIN
+#define CASE_LIGHT_PIN PC8
 #define COOLANT_FLOOD_PIN PC9
 """
 
@@ -288,7 +299,7 @@ def main():
             "usb": "Marlin native USB CDC",
             "laser": {"supply": "FAN1 PC6 / FAN0 M106-M107 (Pi 180s cooldown)", "enable": "PC7 unwired", "pwm": "PA1",
                       "mode": "M3 I", "s_max": 255},
-            "accessories": {"lights": "M7 HE0 PC8",
+            "accessories": {"lights": "M355 S<0|1> P<0-255> HE0 PC8 (PWM, dimmable)",
                             "exhaust": "M8 BED PC9"},
             "tones": "M300 S<Hz> P<ms> [X] [Y]: stepper coils, no motion, laser must be off",
             "update": "Pi: M28 B1 binary transfer to SD + M997 (SD card stays in SKR)",

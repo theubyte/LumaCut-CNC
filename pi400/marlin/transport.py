@@ -22,6 +22,16 @@ LOG = logging.getLogger("lumacut.marlin")
 
 # Melodies on the stepper coils (LumaCut firmware M300: no motion, laser off).
 # (frequency Hz, duration ms); 0 Hz is a rest. No tones on alarms by design.
+# Light effects on the dimmable 24 V LED strip (PC8, firmware M355): steps
+# of (brightness %, duration ms). Afterwards the light returns to the
+# operator's setting. Alarms get light only, never tones.
+LIGHT_EFFECTS = {
+    "home": ((100, 120), (0, 100), (100, 120), (0, 100)),
+    "start": ((10, 60), (25, 60), (45, 60), (70, 60), (100, 250)),
+    "done": ((100, 250), (20, 250), (100, 250), (20, 250), (100, 250), (20, 250), (100, 300)),
+    "error": ((100, 80), (0, 80)) * 3,
+}
+
 MELODIES = {
     "home": ((784, 130), (0, 40), (1047, 260)),
     "start": ((523, 110), (659, 110), (784, 220)),
@@ -232,6 +242,10 @@ class MarlinTransport:
         self.focused_this_job = False
         self.fan_off_at = None
         self.lights = False
+        self.light_pct = 60            # operator brightness 1..100 %
+        self.light_effects = True
+        # None = not tried; True = M355 dimming; False = old firmware (M7/M9).
+        self.light_pwm: bool | None = None
         self.exhaust = False
         self.client = None
         self.guard = MarlinLaserGuard()
@@ -260,6 +274,7 @@ class MarlinTransport:
         self.inflight.clear()
         self.state = "Disconnected"
         self.homed = False
+        self.light_pwm = None          # new firmware may have been flashed
         self.z_homed = False
         self.surface_z = None
         self.focused_this_job = False
@@ -721,7 +736,9 @@ class MarlinTransport:
             if normalized == "M8":
                 self.exhaust = True
             if normalized == "M9":
-                self.lights = self.exhaust = False
+                self.exhaust = False
+                if self.light_pwm is not True:
+                    self.lights = False    # old firmware: M9 also switched PC8 off
             return reply
         except (ValueError, MarlinCommandError) as exc:
             # Rejected G-code is not the same as a disconnected USB cable.
@@ -784,11 +801,79 @@ class MarlinTransport:
             return False
 
     def play_melody(self, event: str, owner: str = "job") -> bool:
-        """Job start/end melody when enabled; never blocks a job on failure."""
+        """Job start/end light effect and melody; never blocks a job on failure."""
         with self.lock:
-            if self.owner not in (None, owner) or not self.job_chime_enabled:
+            if self.owner not in (None, owner):
+                return False
+            self._light_effect_locked(event)
+            if not self.job_chime_enabled:
                 return False
             return self._play_stepper_chime_locked(event)
+
+    # ---------- dimmable light (PC8) ----------
+
+    def _light_raw_locked(self, pct: float) -> bool:
+        """Sets PC8 to ``pct``; False when the firmware cannot dim (old M7/M9)."""
+        if self.light_pwm is not False:
+            replies = self._exchange_locked(
+                "M355 S%d P%d" % (1 if pct > 0 else 0, round(max(0.0, min(100.0, pct)) * 2.55)), timeout=8)
+            if "unknown command" not in " ".join(replies).lower():
+                self.light_pwm = True
+                return True
+            self.light_pwm = False
+            LOG.info("Firmware without dimmable light (M355); using M7/M9")
+        if pct > 0:
+            self._exchange_locked("M7", timeout=8)
+        else:
+            self._exchange_locked("M9", timeout=8)
+            if self.exhaust:
+                self._exchange_locked("M8", timeout=8)
+        return False
+
+    def _apply_light_locked(self):
+        self._light_raw_locked(self.light_pct if self.lights else 0)
+
+    def set_light(self, on: bool, pct: float | None = None, owner: str = "web"):
+        """Light on/off and brightness 1..100 %; returns (on, pct, dimmable)."""
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None:
+                raise ConnectionError("SKR USB nicht verbunden")
+            if pct is not None:
+                if not 1 <= pct <= 100:
+                    raise ValueError("Helligkeit 1..100 %")
+                self.light_pct = float(pct)
+            self.lights = bool(on)
+            self._apply_light_locked()
+            return self.lights, self.light_pct, self.light_pwm
+
+    def _light_effect_locked(self, event: str) -> bool:
+        """Plays LIGHT_EFFECTS[event], then restores the operator's light."""
+        steps = LIGHT_EFFECTS.get(event)
+        if (steps is None or not self.light_effects or self.serial is None
+                or self.light_pwm is False or self.emergency_latched):
+            return False
+        before = self.state
+        try:
+            for pct, ms in steps:
+                if not self._light_raw_locked(pct):
+                    return False           # old firmware: no effects
+                time.sleep(ms / 1000.0)
+            self._apply_light_locked()
+            return True
+        except Exception as exc:
+            # A light effect must never leave the machine looking busy.
+            LOG.warning("Light effect '%s' unavailable: %s", event, exc)
+            if self.serial is not None:
+                self.state = before
+            return False
+
+    def light_effect(self, event: str, owner: str = "job") -> bool:
+        with self.lock:
+            if self.owner not in (None, owner):
+                return False
+            return self._light_effect_locked(event)
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
                   probe_contact_confirmed: bool = False, should_stop=None):
@@ -840,6 +925,7 @@ class MarlinTransport:
                 self.last_xy_commanded = (0.0, 0.0)
                 self.guard = MarlinLaserGuard()
                 self.laser_enabled = False
+                self._light_effect_locked("home")
                 if self.homing_chime_enabled:
                     self._play_stepper_chime_locked("home")
                 if self.fan_power:
@@ -930,6 +1016,7 @@ class MarlinTransport:
             result = self._exchange_locked("M114", timeout=8)
             self.focused_this_job = False
             self.last_xy_commanded = (0.0, 0.0)
+            self._light_effect_locked("done")
             if self.job_chime_enabled:
                 self._play_stepper_chime_locked("done")
             return result
@@ -1368,6 +1455,8 @@ class MarlinTransport:
                 "homing_verified": self.homing_verified,
                 "position": self.position, "fault": self.fault,
                 "lights": self.lights, "exhaust": self.exhaust,
+                "light_brightness": self.light_pct, "light_dimmable": self.light_pwm,
+                "light_effects": self.light_effects,
                 "laser_armed": self.laser_enabled,
                 "laser_cooling_fan_on": self.fan_power,
                 "workpiece_surface_z": self.surface_z,

@@ -194,7 +194,10 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `homing_verified` | bool | = Mechanik-Freigabe (`config.validated`) |
 | `position` | [x, y, z] \| null | letzte M114-Position in Maschinen-mm |
 | `fault` | string | letzter Fehler (z. B. nach E-Stop), `""` wenn keiner |
-| `lights` | bool | Licht (M7) an |
+| `lights` | bool | Licht (LED-Streifen an PC8) an |
+| `light_brightness` | number | eingestellte Helligkeit 1..100 % (gilt, wenn `lights` an) |
+| `light_dimmable` | bool \| null | `true` = Firmware dimmt (`M355`), `false` = alte Firmware (nur `M7`/`M9`), `null` = noch nicht geprüft |
+| `light_effects` | bool | Lichteffekte bei Referenzieren, Auftragsstart, Auftragsende, Fehler |
 | `exhaust` | bool | Abluft (M8) an |
 | `laser_armed` | bool | Laser per `M3 I` scharf; außerhalb eines Auftrags immer `false` |
 | `laser_cooling_fan_on` | bool | Laserversorgung/Kühlung (FAN1/PC6) an |
@@ -230,7 +233,7 @@ Felder aus `web.py` (`status()`):
 | `firmware` | string | immer `"marlin"` |
 | `expected_pwm` | string | `"PA1 / M3 I / S0..255"` (Info) |
 | `io` | object | Klartext-Belegung `laser_supply_switch`, `laser_pwm`, `fan_cooldown`, `exhaust`, `lights`, `aux` (Info) |
-| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 90}`, `user_origin` |
+| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 90}`, `user_origin`, `light_brightness`, `light_effects` |
 | `camera` | object | `{device, available}`: Gerätepfad (`LUMACUT_CAMERA`, Standard `/dev/video0`) und ob er existiert (sagt nichts darüber, ob ffmpeg ein Bild bekommt) |
 
 `job.line` / `job.total`: `total` = Zahl der Auftragszeilen; `line` zählt
@@ -397,7 +400,27 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 
 ### 4.5 `POST /api/action` – Zubehör
 
-#### `op=light` / `op=exhaust`
+#### `op=light`
+
+Dimmbarer 24-V-LED-Streifen an PC8 (Firmware: Marlin-Gehäuselicht `M355 S<0|1> P<0-255>`,
+Hardware-PWM ~1,1 kHz).
+
+| Parameter | Typ | Erlaubt |
+| --- | --- | --- |
+| `on` | string, optional | `1` = ein, sonst aus; ohne `on` bleibt der Zustand |
+| `brightness` | number, optional | 1..100 %; wird gespeichert (`config.light_brightness`) |
+| `effects` | string, optional | `1`/`0`: Lichteffekte an/aus (gespeichert, `config.light_effects`) |
+
+| | |
+| --- | --- |
+| Vorbedingungen | **frei** (also nicht während Auftrag/Rahmen/LightBurn), SKR verbunden |
+| Wirkung | `M355 S1 P<brightness·2,55>` bzw. `M355 S0`. Alte Firmware ohne `M355` („Unknown command“): `M7` an, `M9` aus (danach `M8`, falls Abluft an war); `light_dimmable` wird dann `false`. |
+| Erfolg | 200 `{"message": "Licht EIN · 60 %", "lights": true, "brightness": 60, "dimmable": true}` |
+| Fehler | 400 `Helligkeit 1..100 %` |
+| Lichteffekte | Der Pi spielt sie selbst (nicht abschaltbar pro Ereignis, nur gesamt über `effects`): Referenzieren = 2× aufblitzen, Auftragsstart = hochdimmen, Auftragsende = 3× „atmen“, Auftragsfehler = 3× schnell blinken (nicht bei Abbruch durch den Bediener). Danach gilt wieder `lights`/`light_brightness`. Nur mit Dimm-Firmware. |
+| UI | Schalter aus `lights`, Regler aus `light_brightness` (nur zeigen, wenn `light_dimmable` nicht `false`) |
+
+#### `op=exhaust`
 
 | Parameter | Typ | Erlaubt |
 | --- | --- | --- |
@@ -405,10 +428,9 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 
 | | |
 | --- | --- |
-| Vorbedingungen | **frei** (also nicht während Auftrag/Rahmen/LightBurn) |
-| Wirkung | Licht `M7`, Abluft `M8`; „aus“ ist `M9` (schaltet beide aus) und schaltet das andere danach wieder ein. Nur wenn sich der Zustand ändert. |
-| Erfolg | 200 `Licht EIN` / `Licht AUS` / `Abluft EIN` / `Abluft AUS` |
-| UI | aktuellen Zustand aus `lights` / `exhaust` lesen und invertiert senden |
+| Vorbedingungen | **frei** |
+| Wirkung | Abluft `M8` an, `M9` aus. Das Licht bleibt unberührt (alte Firmware: `M9` schaltete auch PC8, der Pi schaltet es dann wieder ein). |
+| Erfolg | 200 `Abluft EIN` / `Abluft AUS` |
 
 ### 4.6 `POST /api/action` – Ursprung und Platzierung
 

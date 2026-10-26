@@ -673,6 +673,44 @@ class USBProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Laserleistung"):
             bridge.command("G1 X120 Y120 S60", owner="web")
 
+    def test_dimmable_light_and_effects(self):
+        from marlin import transport as tr
+        serial = FakeSerial(["ok\n"] * 60)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        self.assertEqual(bridge.set_light(True, 60), (True, 60.0, True))
+        self.assertEqual(serial.writes, [b"M355 S1 P153\n"])
+        bridge.set_light(False)
+        self.assertEqual(serial.writes[-1], b"M355 S0 P0\n")
+        # Exhaust off (M9) no longer switches the dimmable light.
+        bridge.set_light(True)
+        bridge.exhaust = True
+        bridge.command("M9", owner="web")
+        self.assertTrue(bridge.lights)
+        self.assertFalse(bridge.exhaust)
+        # An effect plays its steps, then returns to the operator's setting.
+        serial.writes.clear()
+        tr.LIGHT_EFFECTS["test"] = ((100, 0), (0, 0))
+        self.assertTrue(bridge.light_effect("test", owner="web"))
+        self.assertEqual(serial.writes, [b"M355 S1 P255\n", b"M355 S0 P0\n", b"M355 S1 P153\n"])
+        bridge.light_effects = False
+        self.assertFalse(bridge.light_effect("test", owner="web"))
+        with self.assertRaisesRegex(ValueError, "Helligkeit"):
+            bridge.set_light(True, 150)
+
+    def test_old_firmware_light_falls_back_to_m7_m9(self):
+        serial = FakeSerial(['echo:Unknown command: "M355 S1 P153"\n', "ok\n"] + ["ok\n"] * 10)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.exhaust = True
+        self.assertEqual(bridge.set_light(True, 60)[2], False)
+        self.assertEqual(serial.writes, [b"M355 S1 P153\n", b"M7\n"])
+        bridge.set_light(False)
+        self.assertEqual(serial.writes[-2:], [b"M9\n", b"M8\n"])   # exhaust stays on
+        self.assertFalse(bridge.light_effect("home", owner="web"))  # no effects without dimming
+
     def test_melodies_play_on_motor_coils_without_any_motion(self):
         from marlin.transport import MELODIES
         for event in ("home", "start", "done"):

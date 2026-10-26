@@ -53,6 +53,8 @@ config = {
     "probe_offset_y_mm": None,  # tip height above reference plane at switch trigger
     "travels": {"x": 390.0, "y": 370.0, "z": 90.0},
     "user_origin": None,        # [x, y] machine mm, op=origin_set (job placement)
+    "light_brightness": 60,     # % for the dimmable LED strip on PC8
+    "light_effects": True,      # light effects at homing, job start/end, error
 }
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
@@ -68,6 +70,8 @@ machine.homing_verified = bool(config["validated"])
 machine.clearance_mm = float(config["z_clearance_mm"])
 machine.probe_tip_offset_mm = float(config["z_switch_tip_offset_mm"])
 machine.focus_gap_mm = float(config["focus_gap_mm"])
+machine.light_pct = float(config["light_brightness"])
+machine.light_effects = bool(config["light_effects"])
 if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is not None:
     machine.probe_xy_offset_mm = (float(config["probe_offset_x_mm"]),
                                   float(config["probe_offset_y_mm"]))
@@ -213,7 +217,7 @@ def status():
                       "laser_pwm":"BL-Touch / PA1",
                       "fan_cooldown":"180s via Pi: requires firmware FAN0 PC6; no crash-proof fan timer",
                       "exhaust":"BED PC9 M8",
-                      "lights":"HE0 PC8 M7",
+                      "lights":"HE0 PC8 M355 (dimmbar), alte Firmware M7",
                       "aux":"FAN2 PC7 unused"},
                   config=dict(config),
                   origin=_origin_status(),
@@ -404,27 +408,41 @@ def action():
         machine.command("G90", owner="web")
         machine.command("M114", owner="web")
         return jsonify(message="Bewegung ausgeführt: " + axis + " " + str(distance))
-    if op in ("light","exhaust"):
+    if op == "light":
+        # Dimmable LED strip on PC8: on=1|0, optional brightness 1..100 %,
+        # optional effects=1|0. Without "on" only the settings change.
+        local_owner()
+        changed = False
+        if "effects" in request.form:
+            machine.light_effects = config["light_effects"] = request.form.get("effects") == "1"
+            changed = True
+        pct = request.form.get("brightness")
+        pct = None if pct in (None, "") else float(pct)
+        target = machine.lights if "on" not in request.form else request.form.get("on") == "1"
+        on, level, dimmable = machine.set_light(target, pct, owner="web")
+        if pct is not None:
+            config["light_brightness"] = level
+            changed = True
+        if changed:
+            persist()
+        text = "Licht " + ("EIN" if on else "AUS")
+        if on and dimmable:
+            text += " · %d %%" % round(level)
+        elif dimmable is False and pct is not None:
+            text += " (Firmware ohne Dimmen: neue Firmware flashen)"
+        return jsonify(message=text, lights=on, brightness=level, dimmable=dimmable)
+    if op == "exhaust":
         local_owner()
         target = request.form.get("on") == "1"
-        if op=="light":
-            old, other = machine.lights, machine.exhaust
-            if target!=old:
-                if target:
-                    manual("M7")
-                else:
-                    manual("M9")
-                    if other: manual("M8")
-        else:
-            old, other = machine.exhaust, machine.lights
-            if target!=old:
-                if target:
-                    manual("M8")
-                else:
-                    manual("M9")
-                    if other: manual("M7")
-        return jsonify(message=("Licht" if op=="light" else "Abluft") +
-                       (" EIN" if target else " AUS"))
+        if target != machine.exhaust:
+            if target:
+                manual("M8")
+            else:
+                lights = machine.lights
+                manual("M9")
+                if lights and not machine.lights:
+                    machine.set_light(True, owner="web")   # old firmware: M9 also hit PC8
+        return jsonify(message="Abluft" + (" EIN" if target else " AUS"))
     if op == "probe":
         # Web counterpart of LightBurn G30: measure the workpiece below the
         # current laser XY (or at an explicitly given point).
@@ -998,6 +1016,11 @@ def _job_failed(exc):
                error=job_error_text(exc), phase=None)
     if not machine.emergency_latched and not getattr(exc, "parked", False):
         _stop_after_job_error()
+    if job["state"] == "error" and not machine.emergency_latched:
+        try:
+            machine.light_effect("error", owner="job")   # light only, no tones; not on operator abort
+        except Exception:
+            logging.exception("Error light effect failed")
 
 
 def _job_worker(filename, commands, auto=None):

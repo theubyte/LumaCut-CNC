@@ -17,7 +17,7 @@ Ausgänge laut `firmware/marlin/build.py` (`PIN_PATCH`):
 |---|---|---|---|
 | Laser PWM | PT-DET-Header (über PWM-Isolator) | PA1 | `M3 I`, `G1 … S0–255`, `M5 I` |
 | Laser-24-V-Versorgung + Lüfter | FAN1-Klemme | PC6 (Marlin FAN0) | `M106 P0 S255` / `M107 P0` (vom Pi gesteuert) |
-| Licht (LED) | HE0 | PC8 | `M7` an, `M9` aus |
+| Licht (24-V-LED-Streifen, dimmbar) | HE0 | PC8 | `M355 S1 P0–255` (Hardware-PWM TIM8 ~1,1 kHz), `M355 S0` aus; ältere Firmware: `M7`/`M9` |
 | Abluft | BED | PC9 | `M8` an, `M9` aus |
 | Laser-Enable (Marlin-Pflicht) | FAN2 | PC7 | **nicht verdrahten** |
 
