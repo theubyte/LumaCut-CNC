@@ -215,6 +215,27 @@ class FakePi:
             self.actions -= set(ORIGIN_ACTIONS)
         self.make_pre_queue_pi()
 
+    def make_pre_autorun_pi(self) -> None:
+        """Behave like a Pi service without the one-click op=autorun."""
+        with self.lock:
+            self.actions.discard("autorun")
+
+    def set_job_phase(self, state: str, probe: tuple[int, int] | None = None,
+                      phase: str | None = None, file: str = "a.gcode") -> None:
+        """Mirror the one-click status of ZUSAMMENARBEIT §4: job.state
+        homing/probing/running/complete/error, job.probe while probing and an
+        optional finer job.phase (focusing/parking)."""
+        with self.lock:
+            job = dict(self.status.get("job") or {})
+            job.update({"file": file, "state": state})
+            job.pop("probe", None)
+            job.pop("phase", None)
+            if probe is not None:
+                job["probe"] = {"done": probe[0], "total": probe[1]}
+            if phase is not None:
+                job["phase"] = phase
+            self.status["job"] = job
+
     def make_pre_queue_pi(self) -> None:
         """Behave like a Pi service with origins (#16) but no job queue (#17)."""
         with self.lock:

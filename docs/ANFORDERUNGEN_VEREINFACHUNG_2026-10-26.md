@@ -53,6 +53,45 @@ Details und JSON-Nachrichten: `docs/SCAN_PROBE.md`. Getestet nur mit Simulation 
 3. Machine: `op=park` fehlt auf älteren Pi-Diensten. Nach einem Abbruch vor dem Lasern erscheint dann nur ein Hinweis.
 4. Claude: Merkmal `autorun_mesh` und `job.probe` in `/api/status` (Wunsch in ZUSAMMENARBEIT §6).
 
+### 1.2 Maschinen-Panel: ein Startknopf (Machine-Agent, 2026-10-26)
+
+Der Pi-Ablauf gehört Claude (pi-automatik, ZUSAMMENARBEIT §4). Studio schickt nur den
+Auftrag und `op=autorun`:
+
+- Maschinen-Panel: ein Hauptknopf **„Auftrag starten“** (sendet eine gewählte Datei im
+  selben Klick, dann `op=autorun`, mit Platzierung `placement=1` falls gewählt). Kein
+  Probing-Schalter, keine Referenzfahrt aus Studio.
+- Home, Park, Fokus (G30), Jog, Notstopp quittieren und „Ohne Automatik starten“
+  (`op=start`) liegen in der eingeklappten Gruppe **„Erweitert: Bewegung, Taster, Jog“**.
+- Phasenanzeige aus `/api/status`: `job.state` homing/probing/running/complete/error,
+  `job.probe` = „Abtasten 3 / 12“; ein optionales `job.phase` (focusing/parking) wird
+  angezeigt, wenn der Pi es sendet. Abbrechen und NOT-AUS in jeder Phase.
+- Älterer Pi ohne `op=autorun`: klare Meldung „Pi-Dienst aktualisieren … oder unter
+  „Erweitert“ ohne Automatik starten“.
+- Canvas/Workflow: `MachinePanel.send_gcode(name, gcode, autorun=True)` startet den
+  automatischen Ablauf (bisher `start=True` = ohne Automatik; Umstellung in
+  `lumacut_workflow/qt.py` und dem Toolbar-Knopf in `main.py` ist Sache der jeweiligen
+  Agents).
+- Warteschlange: Studio reiht weiter wie bisher ein; ob die Pi-Warteschlange jeden
+  Auftrag durch den automatischen Ablauf schickt, ist ein Wunsch an den Pi-Teil
+  (ZUSAMMENARBEIT §6).
+- Tests: `tests/test_machine_oneclick.py` (Fake-Pi bildet §4 nach: `set_job_phase`,
+  `make_pre_autorun_pi`).
+- Verhältnis zu §1.1: Der Panel-Knopf verlässt sich auf den Pi-Ablauf (`op=autorun` mit
+  Merkmal `autorun_mesh`, Claude `ce15b2f`/`9ff1953`). Auf einem Pi ohne `autorun_mesh`
+  tastet `autorun` nur einmal (G30); den vollständigen Studio-Ablauf mit eigenem Mesh liefert
+  dann `OneClickController` von Scan Probe.
+- Antworten auf die offenen Fragen aus §1.1: (1) Ja. Der große Start der Hauptansicht ruft
+  bereits `one_click.start` (Canvas, `285d8b0`); der alte Toolbar-Start in `main.py`
+  sollte ebenfalls dorthin zeigen (Besitzer von `main.py`). (2) Das Panel sendet bei Platzierung `op=autorun … placement=1`; mit
+  `autorun_mesh` tastet der Pi nach der Platzierung ab. (3) Ein fehlendes `op=park` auf
+  einem alten Pi ist bekannt; dort erscheint nur der Hinweis, kein Fehlerzustand.
+- Hinweis aus dem Pi-Teil: `autorun` erwartet Aufträge ohne eigenes Z und ohne Bögen
+  (G2/G3), sonst wird nur abgetastet bzw. abgelehnt. Der Canvas-Export schreibt keine
+  Bögen, bei mehreren Durchgängen aber relative Z-Schritte (`G91`/`G0 Z…`). Ob der Pi diese
+  korrigiert oder nur abtastet, klärt der Pi-Teil (`PI_API_REFERENZ.md`). Eine Pi-Ablehnung
+  erscheint als Satz im Panel.
+
 ## 2. Nullpunkt und Achsen
 
 - **X/Y 0,0 ist oben rechts** (Seite der Endschalter / Tür auf der anderen Seite).
@@ -246,7 +285,7 @@ API an; die eingebaute Datenbank ist in Studio nur lesbar (bearbeitet werden Pre
 
 | Thema | Zuständig | Status |
 |---|---|---|
-| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1); großer Start-Knopf der Hauptansicht ruft `one_click.start` (Canvas, §5.1); Pi in Arbeit |
+| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1); großer Start-Knopf der Hauptansicht ruft `one_click.start` (Canvas, §5.1); Maschinen-Panel erledigt (§1.2: „Auftrag starten“ → `op=autorun`, Service-Gruppe „Erweitert“, Phasenanzeige, alter Pi); Pi-Code fertig, auf dem Pi noch nicht installiert |
 | Nullpunkt oben rechts | Canvas + Machine | Maschinenseite erledigt (`ce7da00`: Anker = sichtbare Ecke, `coord_convention`, Jog-Kreuz gespiegelt, siehe §2.2); Canvas (`workarea.py`, Absprache §2) offen |
 | Kamera-Scan als Button | Scan Probe | Studio erledigt (§3); Android: Vertrag vorbereitet, kein Code |
 | Probing immer im Auftrag (keine Auswahl) | Scan Probe | Studio erledigt (§1.1) |

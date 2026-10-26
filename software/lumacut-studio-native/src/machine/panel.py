@@ -4,8 +4,9 @@ Public integration points for the main window (and other panels):
     MachinePanel.connection_changed(state, text)  – for a toolbar badge
     MachinePanel.emergency_stop()                 – toolbar / shortcut
     MachinePanel.start_job()                      – toolbar "Start Job"
+    MachinePanel.autorun_job()                    – "Auftrag starten" (one click)
     MachinePanel.set_job_file(path)               – select a G-code file
-    MachinePanel.send_gcode(name, text, start)    – export from the canvas
+    MachinePanel.send_gcode(name, text, start, autorun) – export from the canvas
     MachinePanel.frame_gcode(text, mode)          – laser-off outline (op=frame)
     MachinePanel.set_frame_provider(fn)           – mode -> frame G-code for the button
     MachinePanel.frame_available_changed(bool)    – frame shortcuts enabled state
@@ -25,7 +26,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QGridLayout, QGroupBox, QHBoxLayout, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem,
                                QMessageBox, QProgressBar,
-                               QPushButton, QSizePolicy, QVBoxLayout, QWidget)
+                               QPushButton, QSizePolicy, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from . import settings as settings_store
 from .client import (ANCHORS, DEFAULT_ANCHOR, wire_anchor, FRAME_MODES, JOB_SUFFIXES, JOG_STEPS, ORIGIN_MODES,
@@ -56,6 +58,11 @@ ORIGIN_LABELS = {"absolute": "Absolut", "current": "Aktuelle Position",
                  "user": "Benutzer-Ursprung"}
 ANCHOR_LABELS = {"tl": "Oben links", "tr": "Oben rechts", "bl": "Unten links",
                  "br": "Unten rechts", "center": "Mitte"}
+#: Job state/phase names (ZUSAMMENARBEIT §4; focusing/parking tolerated).
+PHASE_NAMES = {"idle": "Bereit", "homing": "Referenzfahrt", "probing": "Abtasten",
+               "focusing": "Fokus einstellen", "running": "Läuft", "parking": "Parken",
+               "complete": "Fertig", "aborted": "Abgebrochen", "error": "Fehler"}
+
 POSITION_HINT = ("Maschinenkoordinaten in mm: X0/Y0 = Endschalter-Ecke oben rechts, "
                  "X wächst nach links, Y nach vorne (Tür). Arbeitsfläche = X30–390 / Y30–370.")
 OLD_PI_ORIGIN = "Pi-Dienst zu alt: nur absolute Aufträge – Pi aktualisieren"
@@ -241,7 +248,7 @@ class MachinePanel(QWidget):
             jog.addWidget(b, r, c)
             self.jog_buttons.append(b)
         mv.addLayout(jog)
-        root.addWidget(motion)
+        self.motion_group = motion
 
         # Job
         job = QGroupBox("Auftrag")
@@ -257,18 +264,23 @@ class MachinePanel(QWidget):
         jl.addLayout(file_row)
         jb = QGridLayout()
         self.send_button = QPushButton("Senden")
-        self.start_button = QPushButton("Starten")
-        self.start_button.setObjectName("primary")
-        self.autorun_button = QPushButton("Ein-Klick")
-        self.autorun_button.setToolTip("Home → Abtasten unter Motivmitte → Fokus → Auftrag → Park")
+        self.start_button = QPushButton("Ohne Automatik starten")
+        self.start_button.setToolTip("Fachleute: nur den Auftrag abarbeiten, ohne "
+                                     "Referenzfahrt und Abtasten (op=start)")
+        # Main path: one button, the Pi does home (if needed) → probe → focus
+        # → job → park (op=autorun, ZUSAMMENARBEIT §4).
+        self.autorun_button = QPushButton("Auftrag starten")
+        self.autorun_button.setObjectName("primary")
+        self.autorun_button.setToolTip("Referenzfahrt (nur wenn nötig) → Abtasten → Fokus "
+                                       "→ Auftrag → Parken. Sendet die gewählte Datei "
+                                       "vorher, falls nötig.")
         self.abort_button = QPushButton("Abbrechen")
         self.send_button.clicked.connect(self.send_job)
         self.start_button.clicked.connect(self.start_job)
         self.autorun_button.clicked.connect(self.autorun_job)
         self.abort_button.clicked.connect(self.abort_job)
-        jb.addWidget(self.send_button, 0, 0)
-        jb.addWidget(self.start_button, 0, 1)
-        jb.addWidget(self.autorun_button, 1, 0)
+        jb.addWidget(self.autorun_button, 0, 0, 1, 2)
+        jb.addWidget(self.send_button, 1, 0)
         jb.addWidget(self.abort_button, 1, 1)
         jl.addLayout(jb)
         frame_row = QHBoxLayout()
@@ -320,6 +332,20 @@ class MachinePanel(QWidget):
         jl.addWidget(self.job_label)
         jl.addWidget(self.job_progress)
         root.addWidget(job)
+
+        # Advanced/service: manual home, probe, jog, start without automation.
+        # Hidden by default; a beginner never needs it (ZUSAMMENARBEIT §5).
+        buttons.addWidget(self.start_button, 2, 0, 1, 2)
+        self.advanced_toggle = QToolButton()
+        self.advanced_toggle.setText("Erweitert: Bewegung, Taster, Jog")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.setChecked(False)
+        self.advanced_toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.advanced_toggle.setArrowType(Qt.RightArrow)
+        self.advanced_toggle.toggled.connect(self.set_advanced_visible)
+        root.addWidget(self.advanced_toggle)
+        root.addWidget(motion)
+        motion.setVisible(False)
 
         # Job queue on the Pi (#17): several sent jobs run one after another.
         queue = QGroupBox("Warteschlange")
@@ -584,10 +610,9 @@ class MachinePanel(QWidget):
                 self.job_progress.setFormat("Rahmen …")
             return
         job = status.job
-        names = {"idle": "Bereit", "homing": "Referenzfahrt", "probing": "Abtasten",
-                 "running": "Läuft", "complete": "Fertig", "aborted": "Abgebrochen",
-                 "error": "Fehler"}
-        text = names.get(job.state, job.state)
+        text = PHASE_NAMES.get(job.phase, PHASE_NAMES.get(job.state, job.state))
+        if job.phase == "probing" and job.probe_total > 0:
+            text += " %d / %d" % (job.probe_done, job.probe_total)
         if job.file:
             text += " · " + job.file
         if job.error:
@@ -597,7 +622,11 @@ class MachinePanel(QWidget):
         self.job_label.setText(text)
         self.job_label.setStyleSheet("color: %s;" % colour)
         progress = job.progress
-        if progress is None:
+        if job.phase == "probing" and job.probe_total > 0:
+            self.job_progress.setValue(int(1000 * min(1.0, job.probe_done / job.probe_total)))
+            self.job_progress.setFormat("Abtasten %d / %d Punkte" % (
+                job.probe_done, job.probe_total))
+        elif progress is None:
             self.job_progress.setValue(0)
             self.job_progress.setFormat("—")
         else:
@@ -664,7 +693,9 @@ class MachinePanel(QWidget):
             self.send_button.setEnabled(False)
         if not self._uploaded:
             self.start_button.setEnabled(False)
-            self.autorun_button.setEnabled(False)
+            # One click also sends a chosen (not yet sent) file first.
+            if not self._job_path:
+                self.autorun_button.setEnabled(False)
         self._update_origin(s)
         self._update_queue(s)
         # The emergency stop is never disabled.
@@ -932,8 +963,10 @@ class MachinePanel(QWidget):
             return message
         self._run_upload("Senden", task)
 
-    def send_gcode(self, name: str, gcode: str, start: bool = False) -> None:
-        """Upload generated G-code (e.g. from the canvas) and optionally start."""
+    def send_gcode(self, name: str, gcode: str, start: bool = False,
+                   autorun: bool = False) -> None:
+        """Upload generated G-code (e.g. from the canvas) and optionally start:
+        ``start`` = op=start (no automation), ``autorun`` = one-click op=autorun."""
         if self._client is None:
             self._show_message("Nicht mit dem Pi verbunden", WARN)
             return
@@ -943,10 +976,14 @@ class MachinePanel(QWidget):
             message = client.upload_job(name, gcode)
             if not self._mark_uploaded(gen, name):
                 return message + " (inzwischen anderer Auftrag gewählt)"
+            if autorun:
+                return client.autorun_job(name)
             if start:
                 message = client.start_job(name)
             return message
-        if self._run_upload("Senden & Starten" if start else "Senden", task):
+        label = ("Auftrag starten" if autorun else
+                 "Senden & Starten" if start else "Senden")
+        if self._run_upload(label, task):
             self.file_label.setText(name)
 
     def _run_upload(self, label: str, task: Callable[[int], str]) -> bool:
@@ -1126,23 +1163,56 @@ class MachinePanel(QWidget):
 
     @Slot()
     def autorun_job(self) -> None:
-        if self._client is None or not self._uploaded:
+        """"Auftrag starten": the Pi homes if needed, probes, focuses, runs the
+        job and parks (op=autorun). A chosen file that is not sent yet is
+        uploaded first, in the same click."""
+        if self._client is None:
+            self._show_message("Nicht mit dem Pi verbunden", WARN)
+            return
+        upload = not self._uploaded and self._job_path is not None
+        if not self._uploaded and not upload:
+            self._show_message("Zuerst ein Motiv oder eine Datei wählen", WARN)
             return
         origin, anchor = self.job_origin()
         if origin != "absolute" and not self._origin_ready():
             return
-        if not self._confirm("Ein-Klick-Start",
-                             "Maschine fährt Homing, tastet unter der Motivmitte ab "
-                             "und lasert %s. Bereich frei und Material eingelegt?"
-                             % self._uploaded):
+        label = self._job_path.name if upload else self._uploaded
+        if not self._confirm("Auftrag starten",
+                             "Die Maschine referenziert bei Bedarf, tastet ab, stellt den "
+                             "Fokus ein, lasert %s und parkt danach. Bereich frei, Material "
+                             "eingelegt, Schutzbrille?" % label):
             return
-        client, name = self._client, self._uploaded
+        client = self._client
+        if upload:
+            path = self._job_path
+
+            def task(gen: int) -> str:
+                name, message = client.upload_job_file(path)
+                if not self._mark_uploaded(gen, name):
+                    return message + " (inzwischen anderer Auftrag gewählt)"
+                return self._autorun_call(client, name, origin, anchor)
+            self._run_upload("Auftrag starten", task)
+            return
+        name = self._uploaded
+        self._run("Auftrag starten",
+                  lambda: self._autorun_call(client, name, origin, anchor))
+
+    def _autorun_call(self, client: LumaCutClient, name: str, origin: str,
+                      anchor: str) -> str:
+        """Worker thread: op=autorun, placed first unless absolute (placed
+        before the run homes, so "current" keeps the head position)."""
         if origin == "absolute":
-            self._run("Ein-Klick", lambda: client.autorun_job(name))
-            return
-        # Placed before the run homes, so "current" keeps the head position.
-        self._run("Ein-Klick", lambda: self._placed_call(
-            client, name, origin, anchor, lambda: client.autorun_job(name, placement=True)))
+            return client.autorun_job(name)
+        return self._placed_call(client, name, origin, anchor,
+                                 lambda: client.autorun_job(name, placement=True))
+
+    @Slot(bool)
+    def set_advanced_visible(self, visible: bool) -> None:
+        """Show/hide the service group (manual home, probe, jog, op=start)."""
+        self.motion_group.setVisible(bool(visible))
+        self.advanced_toggle.setArrowType(Qt.DownArrow if visible else Qt.RightArrow)
+        if self.advanced_toggle.isChecked() != bool(visible):
+            self.advanced_toggle.setChecked(bool(visible))
 
     def active_operation(self) -> str:
         """What the machine is doing that closing the app would not stop

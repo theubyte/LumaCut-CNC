@@ -272,7 +272,11 @@ die Zeitlimits für Bewegungen lang.
 
 ### `POST /api/action op=start` / `op=autorun`: Auftrag starten
 
-- **Auslöser:** „Starten“ bzw. „Ein-Klick“ (beide mit Rückfrage), der
+- **Auslöser:** Hauptknopf **„Auftrag starten“** (`autorun`, mit Rückfrage;
+  sendet eine gewählte, noch nicht gesendete Datei im selben Klick vorher)
+  und `send_gcode(autorun=True)`. `op=start` nur noch über „Ohne Automatik
+  starten“ in der eingeklappten Gruppe **„Erweitert: Bewegung, Taster,
+  Jog“** (dort auch Home, Park, Fokus/G30, Jog, Notstopp quittieren), den
   Start-Knopf der Toolbar (`main.py`) und `send_gcode(start=True)`.
 - **Payload:** `op=start name=<datei>` bzw. `op=autorun name=<datei>`
   (optional `x`, `y`; die App sendet keinen Punkt, der Pi nimmt die
@@ -284,7 +288,17 @@ die Zeitlimits für Bewegungen lang.
   Auftragsdatei“, „X/Y-Tasterversatz zuerst unter Fokus & Taster
   eintragen“, „Motivmitte nicht bestimmbar …“, „Ein Auftrag läuft bereits“,
   „LightBurn hat inzwischen die Steuerung“, Belegt-/USB-Fehler.
-- Fortschritt danach über `job.*` in `/api/status`.
+- Fortschritt danach über `job.*` in `/api/status`. Anzeige der Phasen
+  (ZUSAMMENARBEIT §4): `job.state` `homing` → `probing` → `running` →
+  `complete`/`error`; während `probing` zeigt das Panel `job.probe`
+  (`{"done": 3, "total": 12}`) als „Abtasten 3 / 12“ und im
+  Fortschrittsbalken. Ein optionales feineres `job.phase`
+  (`focusing`, `parking`) wird angezeigt, falls der Pi es sendet;
+  `JobState.active` zählt `homing/probing/focusing/running/parking`.
+  Abbrechen und NOT-AUS sind in jeder Phase bedienbar.
+- **Älterer Pi ohne `op=autorun`:** Der Client ersetzt „Unbekannte
+  Marlin-Aktion: autorun“ durch `client.OLD_PI_AUTORUN` („Pi-Dienst
+  aktualisieren … oder unter „Erweitert“ ohne Automatik starten“).
 
 ### Auftrags-Ursprung: `op=origin_set` / `origin_clear` / `place` / `place_clear`
 

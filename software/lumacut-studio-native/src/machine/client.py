@@ -40,7 +40,15 @@ JOG_AXES = ("X", "Y", "Z")
 JOB_SUFFIXES = (".gcode", ".gc", ".nc")
 MAX_JOB_BYTES = 32 * 1024 * 1024
 #: Job states reported by the Pi job worker.
-JOB_ACTIVE_STATES = ("homing", "probing", "running")
+#: Pi job states while the machine works. "focusing"/"parking" are tolerated
+#: for a Pi that reports these one-click phases separately (ZUSAMMENARBEIT §4
+#: only promises homing/probing/running).
+JOB_ACTIVE_STATES = ("homing", "probing", "focusing", "running", "parking")
+
+#: Shown when the Pi does not know op=autorun (Pi service too old).
+OLD_PI_AUTORUN = ("Dieser Pi kennt den automatischen Auftrag noch nicht – Pi-Dienst "
+                  "aktualisieren (docs/PI_STATUS_UND_OFFENE_PUNKTE.md) oder unter "
+                  "„Erweitert“ ohne Automatik starten")
 #: Frame outlines accepted by the Pi op=frame (box = bounding box,
 #: hull = convex hull / rubber band).
 FRAME_MODES = ("box", "hull")
@@ -168,10 +176,17 @@ class JobState:
     line: int = 0
     total: int = 0
     error: str = ""
+    #: one-click phase: job.phase if the Pi sends it, else job.state
+    phase: str = "idle"
+    #: probe grid progress during "probing" (job.probe = {"done", "total"})
+    probe_done: int = 0
+    probe_total: int = 0
 
     @property
     def active(self) -> bool:
-        return self.state in JOB_ACTIVE_STATES
+        return self.state in JOB_ACTIVE_STATES or (
+            self.state not in ("idle", "complete", "aborted", "error")
+            and self.phase in JOB_ACTIVE_STATES)
 
     @property
     def progress(self) -> float | None:
@@ -184,11 +199,16 @@ class JobState:
     def from_json(cls, data: Any) -> "JobState":
         if not isinstance(data, dict):
             return cls()
+        state = str(data.get("state") or "idle")
+        probe = data.get("probe") if isinstance(data.get("probe"), dict) else {}
         return cls(file=str(data.get("file") or ""),
-                   state=str(data.get("state") or "idle"),
+                   state=state,
                    line=_int(data.get("line")),
                    total=_int(data.get("total")),
-                   error=str(data.get("error") or ""))
+                   error=str(data.get("error") or ""),
+                   phase=str(data.get("phase") or state),
+                   probe_done=_int(probe.get("done")),
+                   probe_total=_int(probe.get("total")))
 
 
 @dataclass
@@ -781,7 +801,12 @@ class LumaCutClient:
         point = {} if x is None else {"x": "%.3f" % x, "y": "%.3f" % y}
         if placement:
             point["placement"] = "1"
-        return self.action("autorun", name=name, **point)
+        try:
+            return self.action("autorun", name=name, **point)
+        except ApiError as exc:
+            if "Unbekannte" in str(exc) and "autorun" in str(exc):
+                raise ApiError(OLD_PI_AUTORUN, exc.status, exc.payload) from exc
+            raise
 
     def upload_job(self, name: str, content: bytes | str) -> str:
         """Upload G-code; the Pi validates every line and the safe zone."""

@@ -148,6 +148,14 @@ Hauptweg, drei Schritte, immer sichtbar:
     10 mm), nicht bis 390/370. Mit dem Versatz des Pi (−23/+15) sind Motivpunkte über
     Maschinen-X357 oder unter Y45 nicht abtastbar; der Pi ergänzt sie aus Nachbarn.
   - Bögen (G2/G3) und relative X/Y lehnt `autorun` vor jeder Bewegung ab: als Linien ausgeben.
+- (Grok, Machine) Studio-Startknopf ist auf `op=autorun` umgestellt (Anforderungen §1.1).
+  Studio erwartet vom Pi nur Abschnitt 4: `job.state` homing/probing/running/complete/error
+  und `job.probe` während des Abtastens; ein zusätzliches `job.phase` (`focusing`,
+  `parking`) wird angezeigt, falls vorhanden, ist aber nicht nötig. Wünsche an den Pi:
+  (1) Abbrechen/Not-Aus in jeder Phase, Laser zwischen den Phasen aus; (2) Fehler beim
+  Abtasten als `job.state=error` mit `job.error` in einem Satz; (3) Warteschlange
+  (`op=queue_run`) schickt jeden Auftrag durch denselben Ablauf und referenziert selbst,
+  statt „Vor dem Job referenzieren“ zu melden.
 
 ## Änderungslog
 
@@ -155,3 +163,4 @@ Hauptweg, drei Schritte, immer sichtbar:
 - 2026-10-26 Claude: Abgleich mit Groks `docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` (zeitgleich entstanden). Koordinaten stimmen überein (nur X gespiegelt, Pi bleibt in Maschinen-mm). `placement.py` und Studio-Maschinenseite gehören Grok; Material-API und autorun-Ablauf auf dem Pi gehören Claude (pi-automatik), Groks Agents binden sie an. Beide Dokumente gelten, bei Widerspruch zuerst hier klären.
 - 2026-10-26 Grok (Machine-Agent): Abschnitt 2 ergänzt – Platzierungsanker nach sichtbarer Ecke,
   Statusfeld `coord_convention` (nur `placement.py`/Status, sonst keine API-Änderung).
+- 2026-10-26 Grok (Machine-Agent): Abschnitt 6 – Studio-Erwartungen an `op=autorun`/Statusfelder (nur Abschnitt 4 nötig, `job.phase` optional) und Wünsche an den Pi-Ablauf (Abbruch je Phase, Fehlertext, Warteschlange mit Automatik).
