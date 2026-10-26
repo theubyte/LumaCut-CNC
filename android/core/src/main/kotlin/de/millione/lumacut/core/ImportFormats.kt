@@ -18,13 +18,14 @@ import kotlin.math.min
 
 /** What a file contains, recognised from its content (the extension is only a hint). */
 enum class FileKind(val label: String) {
-    SVG("SVG"), DXF("DXF"), XCS("xTool Creative Space"), LBRN("LightBurn"), HPGL("HPGL"),
+    SVG("SVG"), DXF("DXF"), XCS("xTool Creative Space"), XS("xTool Studio"), LBRN("LightBurn"), HPGL("HPGL"),
     PDF("PDF / Illustrator"), IMAGE("Bild"), PROJECT("LumaCut-Projekt"), UNKNOWN("Unbekannt"),
 }
 
 object FileKinds {
     fun detect(bytes: ByteArray): FileKind {
         if (bytes.size < 4) return FileKind.UNKNOWN
+        if (bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()) return if (Xs.isXs(bytes)) FileKind.XS else FileKind.UNKNOWN
         fun b(i: Int) = bytes[i].toInt() and 0xFF
         fun ascii(from: Int, n: Int) = if (bytes.size >= from + n) String(bytes, from, n, Charsets.ISO_8859_1) else ""
         if (ascii(0, 4) == "%PDF") return FileKind.PDF
@@ -52,8 +53,18 @@ object FileKinds {
 /** An image embedded in a design file, placed on the work plane (mm). */
 class EmbeddedImage(val bytes: ByteArray, val box: Box)
 
-/** Vector geometry (mm, y down) plus embedded pictures; [skipped] says what could not be taken over. */
-class VectorImport(val polys: List<Poly>, val images: List<EmbeddedImage>, val skipped: List<String>) {
+/** One drawable of a design file: its paths, the layer (xTool colour) it was on, filled or line, and its groups (outermost first). */
+class ImportItem(val polys: List<Poly>, val layerKey: String?, val fill: Boolean, val groups: List<String>, val name: String?)
+
+/** A layer of the source file (xTool colour layer) in drawing order. */
+class ImportLayerInfo(val key: String, val name: String, val order: Int, val visible: Boolean)
+
+/**
+ * Vector geometry (mm, y down) plus embedded pictures; [skipped] says what could not be taken over.
+ * Formats that know layers and groups (xTool) also deliver [items] and [layers].
+ */
+class VectorImport(val polys: List<Poly>, val images: List<EmbeddedImage>, val skipped: List<String>,
+                   val items: List<ImportItem> = emptyList(), val layers: List<ImportLayerInfo> = emptyList()) {
     /** One sentence for the operator, or null when nothing was left out. */
     fun skippedSentence(): String? =
         if (skipped.isEmpty()) null else "Übersprungen: " + skipped.joinToString(", ") + " (in Pfade bzw. Bild umwandeln)"
@@ -67,6 +78,7 @@ object ImportFormats {
         FileKind.SVG -> VectorImport(SvgImport.parse(bytes), emptyList(), emptyList())
         FileKind.DXF -> VectorImport(DxfImport.parse(bytes), emptyList(), emptyList())
         FileKind.XCS -> Xcs.parse(bytes)
+        FileKind.XS -> Xs.parse(bytes)
         FileKind.LBRN -> Lbrn.parse(bytes)
         FileKind.HPGL -> VectorImport(Hpgl.parse(bytes), emptyList(), emptyList())
         else -> throw ImportException("Dieses Format wird nicht als Vektor gelesen")
@@ -90,77 +102,6 @@ object ImportFormats {
     }.getOrNull()?.takeIf { it.size > 8 }
 
     internal fun translate(polys: List<Poly>, dx: Double, dy: Double) = polys.map { p -> p.map { Pt(it.x + dx, it.y + dy) } }
-}
-
-/**
- * xTool Creative Space (.xcs, JSON). Best effort: paths (SVG path data), rectangles, circles/ellipses
- * and embedded bitmaps are taken over; text and unknown elements are skipped and named. The element
- * position is taken as the top-left of its box (graphicX/graphicY when present).
- */
-object Xcs {
-    private val json = Json { ignoreUnknownKeys = true }
-
-    fun parse(bytes: ByteArray): VectorImport {
-        val root = try { json.parseToJsonElement(String(bytes, Charsets.UTF_8)) } catch (e: Exception) { throw ImportException("Keine gültige xTool-Datei") }
-        val polys = ArrayList<Poly>(); val images = ArrayList<EmbeddedImage>(); val skipped = LinkedHashMap<String, Int>()
-        fun num(o: JsonObject, key: String): Double? = (o[key] as? JsonPrimitive)?.doubleOrNull
-        fun str(o: JsonObject, key: String): String? = (o[key] as? JsonPrimitive)?.contentOrNull
-
-        fun place(local: List<Poly>, o: JsonObject) {
-            val b = boundsOf(local) ?: return
-            val w = num(o, "width")?.takeIf { it > 0 }; val h = num(o, "height")?.takeIf { it > 0 }
-            val sx = if (w != null && b.width > 1e-9) w / b.width else 1.0
-            val sy = if (h != null && b.height > 1e-9) h / b.height else 1.0
-            val x0 = num(o, "graphicX") ?: num(o, "x") ?: 0.0
-            val y0 = num(o, "graphicY") ?: num(o, "y") ?: 0.0
-            val scaled = local.map { p -> p.map { Pt(x0 + (it.x - b.minX) * sx, y0 + (it.y - b.minY) * sy) } }
-            val angle = num(o, "angle") ?: 0.0
-            if (angle == 0.0) { polys += scaled; return }
-            val c = Box(x0, y0, x0 + b.width * sx, y0 + b.height * sy).center
-            val r = Math.toRadians(angle); val cs = kotlin.math.cos(r); val sn = kotlin.math.sin(r)
-            polys += scaled.map { p -> p.map { Pt(c.x + (it.x - c.x) * cs - (it.y - c.y) * sn, c.y + (it.x - c.x) * sn + (it.y - c.y) * cs) } }
-        }
-
-        fun element(type: String, o: JsonObject): Boolean {
-            val w = num(o, "width") ?: 0.0; val h = num(o, "height") ?: 0.0
-            when (type) {
-                "PATH", "LINE" -> {
-                    val d = str(o, "dPath") ?: return false
-                    place(SvgImport.pathData(d), o)
-                }
-                "RECT" -> if (w > 0 && h > 0) place(listOf(Shapes.rect(w, h, num(o, "radius") ?: num(o, "rx") ?: 0.0)), o) else return false
-                "CIRCLE", "ELLIPSE" -> if (w > 0 && h > 0) place(listOf(Shapes.ellipse(w, h)), o) else return false
-                "BITMAP", "IMAGE" -> {
-                    val data = listOf("base64", "src", "data", "image").firstNotNullOfOrNull { k -> str(o, k)?.takeIf { it.length > 32 } }
-                    val img = data?.let { ImportFormats.decodeBase64(it) } ?: return false
-                    val x0 = num(o, "graphicX") ?: num(o, "x") ?: 0.0; val y0 = num(o, "graphicY") ?: num(o, "y") ?: 0.0
-                    if (w <= 0 || h <= 0) return false
-                    images += EmbeddedImage(img, Box(x0, y0, x0 + w, y0 + h))
-                }
-                else -> return false
-            }
-            return true
-        }
-
-        fun walk(e: JsonElement) {
-            when (e) {
-                is JsonObject -> {
-                    val type = str(e, "type")?.uppercase()
-                    if (type != null && element(type, e)) return
-                    if (type != null && (e.containsKey("width") || e.containsKey("dPath"))) skipped.merge(type.lowercase().replaceFirstChar { it.uppercase() }, 1, Int::plus)
-                    e.values.forEach(::walk)
-                }
-                is JsonArray -> e.forEach(::walk)
-                else -> {}
-            }
-        }
-        walk(root)
-        if (polys.isEmpty() && images.isEmpty()) {
-            val what = if (skipped.isEmpty()) "Keine Formen gefunden" else "Nur " + skipped.keys.joinToString(", ") + " gefunden (nicht lesbar)"
-            throw ImportException("$what – in xTool Creative Space Text in Pfade umwandeln und erneut speichern")
-        }
-        return VectorImport(polys, images, skipped.map { (k, n) -> "$n× $k" })
-    }
 }
 
 /** LightBurn projects (.lbrn / .lbrn2, XML): Rect, Ellipse, Path (lines and Béziers), Bitmap, Groups, XForm. */

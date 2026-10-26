@@ -10,7 +10,12 @@ import de.millione.lumacut.core.Box
 import de.millione.lumacut.core.Element
 import de.millione.lumacut.core.FileKind
 import de.millione.lumacut.core.FileKinds
+import de.millione.lumacut.core.EmbeddedImage
+import de.millione.lumacut.core.FitKind
 import de.millione.lumacut.core.ImportFormats
+import de.millione.lumacut.core.ImportLayout
+import de.millione.lumacut.core.Layout
+import de.millione.lumacut.core.Raster
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Transform
 import de.millione.lumacut.core.Work
@@ -77,30 +82,27 @@ private suspend fun importPdf(context: Context, uri: Uri, editor: EditorViewMode
 
 private suspend fun importVector(kind: FileKind, bytes: ByteArray, editor: EditorViewModel) {
     val result = withContext(Dispatchers.Default) { ImportFormats.parseVector(kind, bytes) }
-    var all: Box? = boundsOf(result.polys)
-    for (img in result.images) all = img.box.union(all)
-    val box = all ?: run { editor.notify("Nichts Lasertaugliches gefunden.", true); return }
-    // one common transform: centred in the work area, scaled down when too big
-    val k = minOf(1.0, (Work.WIDTH - 10) / max(box.width, 1e-9), (Work.HEIGHT - 10) / max(box.height, 1e-9))
-    val cx = Work.center.x; val cy = Work.center.y
-    fun map(p: Pt) = Pt(cx + (p.x - box.center.x) * k, cy + (p.y - box.center.y) * k)
-    var partCount = 0
-    if (result.polys.isNotEmpty()) partCount = editor.addParts(kind.label, result.polys.map { poly -> poly.map(::map) })
-    var pictures = 0
+    val units = withContext(Dispatchers.Default) { ImportLayout.units(result) }
+    if (units.isEmpty()) { editor.notify("Nichts Lasertaugliches gefunden.", true); return }
+    val rasters = HashMap<EmbeddedImage, Raster>()
     for (img in result.images) {
         val bmp = withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(img.bytes, 0, img.bytes.size) } ?: continue
-        val a = map(Pt(img.box.minX, img.box.minY)); val b = map(Pt(img.box.maxX, img.box.maxY))
-        val raster = withContext(Dispatchers.Default) { Images.toRaster(bmp) }
-        editor.addElement(Element(layerId = editor.layerIdByName("Gravieren"), kind = "Bild", transform = Transform(a.x, a.y),
-            raster = raster, imageWidthMm = b.x - a.x, imageHeightMm = b.y - a.y))
-        pictures++
+        rasters[img] = withContext(Dispatchers.Default) { Images.toRaster(bmp) }
     }
-    val parts = buildList {
-        if (result.polys.isNotEmpty()) add(if (partCount > 1) "$partCount Teile (als Gruppe, mit „Gruppe auflösen“ einzeln wählbar)" else "${result.polys.size} Pfade")
-        if (pictures > 0) add("$pictures Bild" + if (pictures > 1) "er" else "")
+    val layout = withContext(Dispatchers.Default) { ImportLayout.arrange(units) }
+    val skipped = result.skippedSentence()?.let { ". $it" } ?: ""
+    fun report(n: Int, how: String) = editor.notify("${kind.label} importiert: $n Elemente$how$skipped")
+    when (layout.kind) {
+        FitKind.AS_IS -> report(editor.addImported(kind.label, layout, 1.0, result.layers, rasters), " (Originalgröße)")
+        FitKind.PACKED -> report(editor.addImported(kind.label, layout, 1.0, result.layers, rasters),
+            " (Originalgröße, nebeneinander angeordnet, damit alles in den Arbeitsbereich passt)")
+        FitKind.PARTIAL -> {
+            val k = ImportLayout.shrinkFactor(units)
+            editor.pendingImport.value = PendingImport(kind.label, layout.units.size, layout.units.size - layout.leftOut, (k * 100).toInt(),
+                onFitting = { report(editor.addImported(kind.label, layout, 1.0, result.layers, rasters), " (Originalgröße, ${layout.leftOut} Teile ausgelassen)") },
+                onShrink = { report(editor.addImported(kind.label, Layout(FitKind.AS_IS, units, units.map { Pt(0.0, 0.0) }), k, result.layers, rasters), " (auf ${(k * 100).toInt()} % verkleinert)") })
+        }
     }
-    val shrink = if (k < 1.0) " · verkleinert, damit es in den Arbeitsbereich passt" else ""
-    editor.notify("${kind.label} importiert: ${parts.joinToString(", ")}$shrink" + (result.skippedSentence()?.let { ". $it" } ?: ""))
 }
 
 /** Puts a picture, [widthMm] wide (scaled down to fit), in the middle of the work area on the engraving layer. */

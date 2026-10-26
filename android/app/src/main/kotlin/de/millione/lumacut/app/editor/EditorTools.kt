@@ -325,3 +325,24 @@ fun GridDialog(editor: EditorViewModel, onDismiss: () -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) } },
     )
 }
+
+/* ---------- import that does not fit ---------- */
+
+/** Vector imports keep their size: when parts do not fit even when arranged, the operator decides. */
+@Composable
+fun ImportFitDialog(p: PendingImport, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
+        title = { Text("Passt nicht in den Arbeitsbereich", style = LcTypography.titleLarge) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${p.kindLabel}: ${p.total - p.fitting} von ${p.total} Teilen sind auch nebeneinander angeordnet zu groß für 360 × 340 mm.", style = LcTypography.bodyLarge)
+                SmallText("Funktionsteile (Steckmaße, Flex-Muster) sollten nicht verkleinert werden.")
+                LcButton("Nur Teile nehmen, die passen (${p.fitting})", { p.onFitting(); onDismiss() }, Modifier.fillMaxWidth(), enabled = p.fitting > 0)
+                LcButton("Verkleinern auf ${p.shrinkPercent} %", { p.onShrink(); onDismiss() }, Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) } },
+    )
+}

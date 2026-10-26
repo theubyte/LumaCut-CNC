@@ -255,6 +255,8 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     }
 
     if (cameraOpen) CameraBackgroundDialog(editor, machine) { cameraOpen = false }
+    val pending by editor.pendingImport.collectAsStateWithLifecycle()
+    pending?.let { ImportFitDialog(it) { editor.pendingImport.value = null } }
     if (contourOpen) ContourDialog(editor) { contourOpen = false }
     if (qrOpen) QrDialog(editor) { qrOpen = false }
     if (gridOpen) GridDialog(editor) { gridOpen = false }

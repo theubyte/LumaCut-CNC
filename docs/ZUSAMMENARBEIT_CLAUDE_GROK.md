@@ -314,6 +314,10 @@ Hauptweg, drei Schritte, immer sichtbar:
 - (Claude, Android) **Fertig: Import als Gruppe aus Einzelteilen und Laser-Suche im WLAN**, Commit `44c0af2`, CI grün ([Run 40387941681](https://github.com/theubyte/LumaCut-CNC/actions/runs/40387941681)): `PartSplitter` (Even-Odd, Löcher bleiben im Teil, >500 Teile = ein
   Element), `LaserDiscovery` (/24 parallel, `GET /api/status`, erkennt nur LumaCut-Pis), Popup „Laser auswählen“ beim
   Start, bei leerer/nicht erreichbarer Adresse, nach 10 s Ausfall (einmal je Ausfall) und über „Laser suchen“.
+- (Claude, Android) **Fertig: ruhige Verbindung (keine automatische Suche), `.xs`-Import, Originalgröße, Schneidreihenfolge**,
+  Commit/CI siehe Antwort an die Sitzung. Einstellungen → „Laser“ mit manueller Suche und Adresse; Status 1,5 s, eine Anfrage zugleich,
+  offline erst nach 3 Fehlschlägen, nie automatische Aktionen. xTool Studio `.xs` und `.xcs` mit den Editor-Transformationen,
+  Farb-Ebenen und Gruppen. Vektorimporte 1:1 mit Reihen-Anordnung bzw. Dialog. Innen vor außen schneiden (`orderForCutting`).
 
 ## Änderungslog
 

@@ -90,7 +90,7 @@ class MarlinWriter(private val appVersion: String = "dev") {
 
     private fun lines(paths: List<Poly>, layer: Layer) {
         val power = s(layer.powerPct)
-        for (path in orderPaths(paths, at ?: Pt(0.0, 0.0))) {
+        for (path in orderForCutting(paths, at ?: Pt(0.0, 0.0))) {
             rapid(path.first())
             for (p in path.drop(1)) burn(p, power, layer)
         }

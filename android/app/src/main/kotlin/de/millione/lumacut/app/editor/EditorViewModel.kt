@@ -10,6 +10,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.millione.lumacut.app.machine.Notice
 import de.millione.lumacut.core.Arrange
+import de.millione.lumacut.core.EmbeddedImage
+import de.millione.lumacut.core.ImportLayerInfo
+import de.millione.lumacut.core.ImportLayout
+import de.millione.lumacut.core.Layout
+import de.millione.lumacut.core.Raster
 import de.millione.lumacut.core.Box
 import de.millione.lumacut.core.Document
 import de.millione.lumacut.core.Element
@@ -44,6 +49,10 @@ import java.util.UUID
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
+
+/** An import that does not fit as drawn: the operator picks one of the ways out (dialog in the editor). */
+class PendingImport(val kindLabel: String, val total: Int, val fitting: Int, val shrinkPercent: Int,
+                    val onFitting: () -> Unit, val onShrink: () -> Unit)
 
 enum class Tool(val label: String) { SELECT("Auswahl"), RECT("Rechteck"), ELLIPSE("Ellipse"), POLYGON("Vieleck"),
     LINE("Linie"), PEN("Freihand"), TEXT("Text") }
@@ -89,6 +98,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     /** Measured surface heights of the current workpieces (camera workplace / probe grid). */
     private val _heights = MutableStateFlow(loadHeights())
     val heights: StateFlow<HeightMapSet?> = _heights.asStateFlow()
+
+    val pendingImport = MutableStateFlow<PendingImport?>(null)
 
     private val _canUndo = MutableStateFlow(false); val canUndo: StateFlow<Boolean> = _canUndo
     private val _canRedo = MutableStateFlow(false); val canRedo: StateFlow<Boolean> = _canRedo
@@ -205,6 +216,76 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         change { it.copy(elements = it.elements + e) }
         _selected.value = setOf(e.id)
         return e
+    }
+
+    private fun parseColor(key: String, fallback: Long): Long =
+        key.removePrefix("#").takeIf { it.length == 6 }?.toLongOrNull(16)?.let { 0xFF000000L or it } ?: fallback
+
+    /**
+     * Places an arranged import as single elements. Original size ([scale] 1) or shrunk about the middle of the work area.
+     * Groups of the file become our groups (outermost group, single parts stay single); xTool colour layers become layers
+     * named after the colour with the values of the chosen material (lines like Schneiden, fills like Gravieren).
+     * Returns the number of elements.
+     */
+    fun addImported(kind: String, layout: Layout, scale: Double, infos: List<ImportLayerInfo>, rasters: Map<EmbeddedImage, Raster>): Int {
+        val doc = _doc.value
+        val all = ImportLayout.union(layout.units).center
+        fun map(p: Pt, i: Int): Pt {
+            val o = layout.offsets[i] ?: Pt(0.0, 0.0)
+            return if (scale == 1.0) Pt(p.x + o.x, p.y + o.y) else Pt(Work.center.x + (p.x - all.x) * scale, Work.center.y + (p.y - all.y) * scale)
+        }
+        val placed = layout.units.indices.filter { layout.offsets[it] != null }
+        val cutBase = doc.layers.firstOrNull { it.name == "Schneiden" } ?: doc.layers.last()
+        val engraveBase = doc.layers.firstOrNull { it.name == "Gravieren" } ?: doc.layers.first()
+        val order = infos.associate { it.key to it.order }
+        val used = placed.flatMap { layout.units[it].items }.filter { it.layerKey != null }
+            .map { it.layerKey!! to it.fill }.distinct().sortedBy { order[it.first] ?: 1000 }
+        val info = infos.associateBy { it.key }
+        val layerIds = HashMap<Pair<String, Boolean>, String>()
+        val fresh = ArrayList<Pair<Layer, Boolean>>()
+        for ((key, fill) in used) {
+            val name = (info[key]?.name ?: key) + if (fill) " (Füllen)" else ""
+            val existing = doc.layers.firstOrNull { it.name == name }
+            if (existing != null) { layerIds[key to fill] = existing.id; continue }
+            val base = if (fill) engraveBase else cutBase
+            val layer = base.copy(id = UUID.randomUUID().toString(), name = name, color = parseColor(key, base.color),
+                mode = if (fill) LayerMode.FILL else LayerMode.LINE, visible = info[key]?.visible ?: true)
+            layerIds[key to fill] = layer.id
+            fresh += layer to fill
+        }
+        val groupSize = HashMap<String, Int>()
+        for (u in placed) for (item in layout.units[u].items) item.groups.firstOrNull()?.let { groupSize.merge(it, 1, Int::plus) }
+        val groupIds = HashMap<String, String>()
+        fun groupOf(tag: String?): String? = if (tag == null || (groupSize[tag] ?: 0) < 2) null else groupIds.getOrPut(tag) { UUID.randomUUID().toString() }
+        val fallbackLayer = writableLayer()
+        val elements = ArrayList<Element>()
+        for (u in placed) {
+            val unit = layout.units[u]
+            for (item in unit.items) {
+                val polys = item.polys.map { poly -> poly.map { map(it, u) } }
+                val box = boundsOf(polys) ?: continue
+                elements += Element(layerId = item.layerKey?.let { layerIds[it to item.fill] } ?: fallbackLayer, kind = item.name?.takeIf { it.isNotBlank() } ?: kind,
+                    transform = Transform(box.minX, box.minY), paths = polys.map { poly -> poly.map { Pt(it.x - box.minX, it.y - box.minY) } },
+                    groupId = groupOf(item.groups.firstOrNull()))
+            }
+            for (img in unit.images) {
+                val raster = rasters[img] ?: continue
+                val a = map(Pt(img.box.minX, img.box.minY), u); val b = map(Pt(img.box.maxX, img.box.maxY), u)
+                elements += Element(layerId = layerIdByName("Gravieren"), kind = "Bild", transform = Transform(a.x, a.y), raster = raster,
+                    imageWidthMm = b.x - a.x, imageHeightMm = b.y - a.y)
+            }
+        }
+        if (elements.isEmpty()) return 0
+        change { d ->
+            val layers = d.layers.toMutableList()
+            val afterEngrave = layers.indexOfFirst { it.id == engraveBase.id } + 1
+            var insertAt = afterEngrave
+            for ((layer, fill) in fresh) if (fill) layers.add(insertAt++, layer)
+            for ((layer, fill) in fresh) if (!fill) layers += layer       // cutting layers last
+            d.copy(layers = layers, elements = d.elements + elements)
+        }
+        _selected.value = elements.map { it.id }.toSet()
+        return elements.size
     }
 
     /**
