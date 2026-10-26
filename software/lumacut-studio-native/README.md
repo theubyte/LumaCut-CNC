@@ -24,6 +24,33 @@ python build_exe.py
 ezdxf/svgelements/pypdf/shapely) – dieselben nutzt die CI – und bricht ab, wenn die
 Materialdaten im Ergebnis `dist/LumaCutStudio/` fehlen (`python build_exe.py --check` prüft nur).
 
+## Hauptansicht: Material · Design · Start
+
+Siehe `docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` §1/§3. Rechts stehen drei
+große Knöpfe (≥ 48 px, touchtauglich) – das reicht für den normalen Auftrag:
+
+1. **Material** – öffnet die Materialbibliothek; darunter bleibt die schnelle
+   Wahl (Material, Dicke, „Auf aktive Ebene“) immer sichtbar.
+2. **Design** – Menü: Importieren …, Text, Rechteck, Ellipse, Polygon, Freihand, Linie.
+3. **Start** – Ein-Klick-Auftrag: baut den G-Code wie „Design senden“
+   (inkl. „Nur Auswahl“ und Fokuskorrektur), lädt ihn hoch und startet den
+   automatischen Ablauf der Maschine (Pi `op=autorun`: Referenzfahrt → Abtasten
+   → Fokus → Auftrag → Parken). Vorher fragt die Maschine einmal nach.
+   *Hook:* Ein Höhenmesh fährt der Pi im Ein-Klick-Ablauf noch nicht (nur ein
+   Abtastpunkt); umstellen in `lumacut_canvas/main_view.py` (`START_HOOK`).
+
+Daneben: **Kamera-Scan** (optional, `ScanPanel.start_scan`, ändert den Auftrag
+nicht) und **Verbinden** (nur sichtbar, solange keine Verbindung besteht).
+
+**Mehr ▸** (standardmäßig zu) blendet alles Erweiterte ein: Ablauf, Scan &
+Probe, Maschine (Adresse, Joggen, Homing, Abtasten, Fokus, Rahmen …),
+„Manuell senden“ (Design senden / hochgeladenen Auftrag starten), die
+Werkzeugleiste „Auftrag“ (Schnittoptionen mit Kerf, Haltestege, Anfahrt;
+Rahmen, Zeit, Materialtest …) sowie in der Ebenenliste Leistung/Tempo/Durchgänge
+und Füllung. Die Auftrags-Aktionen sind zusätzlich im Menü **Auftrag** und über
+ihre Tastenkürzel erreichbar, auch wenn „Mehr“ zu ist. NOT-AUS bleibt immer
+oben in der Leiste.
+
 ## Arbeitsfläche (Canvas)
 
 Code: `src/lumacut_canvas/` (eigenes Paket, Modell ohne Qt-Abhängigkeit).

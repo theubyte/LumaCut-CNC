@@ -142,6 +142,11 @@ class QtMachineTests(unittest.TestCase):
         win = main.LumaCutStudio()
         win.show()
         self.app.processEvents()
+        # NOT-AUS ist immer sichtbar (Werkzeugleiste); das Machine-Panel selbst
+        # liegt seit der Vereinfachung 2026-10-26 hinter „Mehr“.
+        self.assertTrue(win.estop_toolbar_button.isVisible())
+        win.main_view.set_more(True)
+        self.app.processEvents()
         self.assertTrue(win.machine_panel.estop_button.isVisible())
         win.close()  # closeEvent shuts the machine panel down
         self.assertTrue(win.machine_panel._shut_down)

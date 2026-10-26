@@ -19,6 +19,7 @@ from lumacut_canvas.editor import CanvasEditor
 from lumacut_canvas.gcode import document_to_gcode
 from lumacut_canvas.layers_panel import LayersPanel
 from lumacut_canvas.fit import install_screen_fit
+from lumacut_canvas.main_view import MainActions, MoreToggle, install_main_view
 # --- end canvas integration ---
 # --- scan integration (scan agent) ---
 from scanprobe.panel import ScanPanel
@@ -115,17 +116,18 @@ class LumaCutStudio(QMainWindow):
         toolbar.addWidget(self.status_label)
         toolbar.addWidget(QLabel("  "))
 
-        start_btn = QPushButton("Start Job")
-        start_btn.setObjectName("primary")
+        # Vereinfachung 2026-10-26 (§1): „Start Job“ wanderte unter „Mehr › Maschine“;
+        # die große Start-Aktion rechts ist der Ein-Klick-Auftrag (main_view.py).
+        start_btn = QPushButton("Hochgeladenen Auftrag starten")
+        start_btn.setToolTip("Nur den schon gesendeten Auftrag starten (ohne Referenzfahrt/Abtasten)")
         start_btn.setMinimumHeight(40)
-        toolbar.addWidget(start_btn)
 
         # --- machine integration (machine agent) ---
         self.machine_panel = MachinePanel()
         self.machine_panel.connection_changed.connect(self._on_machine_state)
         start_btn.clicked.connect(self.machine_panel.start_job)
-        toolbar.addWidget(QLabel("  "))
         estop_btn = QPushButton("NOT-AUS")
+        self.estop_toolbar_button = estop_btn  # immer sichtbar, auch wenn „Mehr“ zu ist
         estop_btn.setStyleSheet(ESTOP_STYLE + " min-height: 40px; font-size: 15px; font-weight: bold;")
         estop_btn.setToolTip("Software-Notstopp M112")
         estop_btn.clicked.connect(self.machine_panel.emergency_stop)
@@ -156,21 +158,37 @@ class LumaCutStudio(QMainWindow):
         send_btn.setToolTip("Sichtbare Ebenen als G-Code an den Pi übertragen (startet nicht)")
         send_btn.setMinimumHeight(40)
         send_btn.clicked.connect(self._send_canvas_job)
-        start_action = next(a for a in toolbar.actions() if toolbar.widgetForAction(a) is start_btn)
-        toolbar.insertWidget(start_action, send_btn)
-        toolbar.insertWidget(start_action, QLabel(" "))
         # --- end canvas integration ---
 
         # Right: Controls (scrollable)
         right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(8, 8, 8, 8)
-        right_layout.setSpacing(8)
+        outer_layout = QVBoxLayout(right)
+        outer_layout.setContentsMargins(8, 8, 8, 8)
+        outer_layout.setSpacing(8)
 
-        design = QGroupBox("Design")
+        # --- canvas integration (canvas agent): Hauptansicht Material · Design · Start ---
+        self.main_actions = MainActions()
+        outer_layout.addWidget(self.main_actions)
+        # Schnelle Materialwahl bleibt sichtbar (Materials-Modul füllt die Zeile;
+        # es sucht die Gruppe „Design“, danach heißt sie „Material“).
+        self.material_group = design = QGroupBox("Design")
         design_form = QFormLayout(design)
         design_form.addRow("Material", QComboBox())
-        right_layout.addWidget(design)
+        outer_layout.addWidget(design)
+        self.more_toggle = MoreToggle()
+        outer_layout.addWidget(self.more_toggle)
+        # Alles Erweiterte hinter „Mehr“ (Ablauf, Scan & Probe, Maschine).
+        self.more_panel = QWidget()
+        right_layout = QVBoxLayout(self.more_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        manual = QGroupBox("Manuell senden")
+        manual_layout = QVBoxLayout(manual)
+        manual_layout.addWidget(send_btn)
+        manual_layout.addWidget(start_btn)
+        right_layout.addWidget(manual)
+        outer_layout.addWidget(self.more_panel)
+        # --- end canvas integration ---
 
         # --- scan integration (scan agent) ---
         scan = QGroupBox("Scan & Probe")
@@ -188,7 +206,7 @@ class LumaCutStudio(QMainWindow):
         right_layout.addWidget(machine)
         # --- end machine integration ---
 
-        right_layout.addStretch()
+        outer_layout.addStretch()
 
         self.right_scroll = QScrollArea()
         self.right_scroll.setWidgetResizable(True)
@@ -239,6 +257,9 @@ class LumaCutStudio(QMainWindow):
         # --- autosave integration (review agent) ---
         install_autosave(self)
         # --- end autosave integration ---
+        # --- canvas integration (canvas agent): Hauptansicht, „Mehr“ standardmäßig zu ---
+        install_main_view(self)
+        self.material_group.setTitle("Material")
         # --- canvas integration (canvas agent): small screens / touch ---
         install_screen_fit(self)  # Fenster in Bildschirm, Seitenleiste nicht abgeschnitten, Touch-Modus
         # --- end canvas integration ---
@@ -276,7 +297,8 @@ class LumaCutStudio(QMainWindow):
     # --- end machine integration ---
 
     # --- canvas integration (canvas agent) ---
-    def _send_canvas_job(self):
+    def _build_canvas_job(self):
+        """(Dateiname, G-Code, Planer-Hinweis) oder None (Meldung schon gezeigt)."""
         tools = getattr(self, "job_tools", None)
         try:
             # job_tools: „Nur Auswahl“ und Planer-Hinweise (z. B. weggelassene Anfahrten)
@@ -284,11 +306,19 @@ class LumaCutStudio(QMainWindow):
                            else (optimized_document_gcode(self.canvas.document), ""))
         except ValueError as exc:
             self.statusBar().showMessage(f"Senden nicht möglich: {exc}", 6000)
-            return
+            return None
         gcode = self.scan_panel.prepare_job_gcode(gcode)
         if gcode is None:
-            return
+            return None
         stem = self.canvas.file_path.name.split(".")[0] if self.canvas.file_path else "canvas"
+        return f"{stem}.gcode", gcode, note
+
+    def _send_canvas_job(self):
+        job = self._build_canvas_job()
+        if job is None:
+            return
+        name, gcode, note = job
+        stem = name[:-len(".gcode")]
         self.machine_panel.send_gcode(f"{stem}.gcode", gcode, start=False)
         msg = f"Gesendet: {stem}.gcode {estimate_gcode(gcode).summary()}"
         self.statusBar().showMessage(msg + (f" – {note}" if note else ""), 15000 if note else 10000)

@@ -311,6 +311,12 @@ class LayersPanel(QWidget):
         form.addRow(note)
         return box
 
+    def set_advanced_visible(self, on: bool) -> None:
+        """Feineinstellungen der Ebene (Leistung/Tempo/Durchgänge, Füllung) nur
+        hinter „Mehr“ zeigen (Vereinfachung 2026-10-26, §1). Material/Dicke bleibt."""
+        self.params.setVisible(on)
+        self.fill_box.setVisible(on)
+
     def _build_fill_box(self) -> QGroupBox:
         """Vektor-Füllung der Ebene (Schraffur/Kreuzschraffur, hatch.py)."""
         box = QGroupBox("Füllung der Ebene")
