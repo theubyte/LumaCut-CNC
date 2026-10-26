@@ -63,6 +63,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -102,6 +103,8 @@ import de.millione.lumacut.core.ImageMode
 import de.millione.lumacut.core.ShapeLib
 import de.millione.lumacut.core.Layer
 import de.millione.lumacut.core.LayerMode
+import de.millione.lumacut.core.MeasureEval
+import de.millione.lumacut.core.SnapHit
 import de.millione.lumacut.core.Limits
 import de.millione.lumacut.core.MaterialTest
 import de.millione.lumacut.core.PiClient
@@ -133,6 +136,9 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     val selected by editor.selected.collectAsStateWithLifecycle()
     val tool by editor.tool.collectAsStateWithLifecycle()
     val multi by editor.multi.collectAsStateWithLifecycle()
+    val measureMode by editor.measureMode.collectAsStateWithLifecycle()
+    val measurePoints by editor.pendingPoints.collectAsStateWithLifecycle()
+    val measureFirst by editor.pendingElement.collectAsStateWithLifecycle()
     val heights by editor.heights.collectAsStateWithLifecycle()
     val canUndo by editor.canUndo.collectAsStateWithLifecycle()
     val canRedo by editor.canRedo.collectAsStateWithLifecycle()
@@ -222,18 +228,21 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
             ToolColumn(tool, editor::setTool)
             Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(18.dp))) {
                 EditorCanvas(editor, machineStatus?.position, onText = { textAt = it })
+                if (tool == Tool.MEASURE) MeasureBar(editor, Modifier.align(Alignment.TopStart).padding(12.dp))
                 SmallText(
                     when (tool) {
                         Tool.SELECT -> if (multi) "Mehrfachauswahl: Antippen fügt hinzu oder entfernt · Rahmen ziehen wählt mehrere"
                                        else "Antippen wählt · ziehen verschiebt · auf leerer Fläche Rahmen ziehen · ⟳-Griff dreht · Eckgriff skaliert · zwei Finger zoomen"
                         Tool.PEN -> "Mit dem Finger zeichnen"
                         Tool.TEXT -> "Antippen, wo der Text beginnen soll"
+                        Tool.MEASURE -> measureHint(measureMode, measurePoints.size, measureFirst != null) + " · zwei Finger zoomen"
                         else -> "Ziehen, um ${tool.label.lowercase()} aufzuziehen · zwei Finger zoomen"
                     },
                     Lc.faint, Modifier.align(Alignment.BottomStart).padding(12.dp),
                 )
             }
-            Inspector(editor, Modifier.width(350.dp).fillMaxHeight(), onAdjust = { adjustOpen = true })
+            if (tool == Tool.MEASURE) MeasurePanel(editor, Modifier.width(350.dp).fillMaxHeight())
+            else Inspector(editor, Modifier.width(350.dp).fillMaxHeight(), onAdjust = { adjustOpen = true })
         }
     }
 
@@ -270,7 +279,8 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
 @Composable
 private fun ToolColumn(tool: Tool, onTool: (Tool) -> Unit) {
     val icons = mapOf(Tool.SELECT to LcIcons.select, Tool.RECT to LcIcons.rect, Tool.ELLIPSE to LcIcons.ellipse,
-                      Tool.POLYGON to LcIcons.polygon, Tool.LINE to LcIcons.line, Tool.PEN to LcIcons.pen, Tool.TEXT to LcIcons.text)
+                      Tool.POLYGON to LcIcons.polygon, Tool.LINE to LcIcons.line, Tool.PEN to LcIcons.pen, Tool.TEXT to LcIcons.text,
+                      Tool.MEASURE to LcIcons.ruler)
     Column(
         Modifier.width(76.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Lc.surface).border(1.dp, Lc.line, RoundedCornerShape(18.dp)).padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -320,6 +330,17 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
     var draftEnd by remember { mutableStateOf<Pt?>(null) }
     var band by remember { mutableStateOf<Pair<Pt, Pt>?>(null) }
     var angleHint by remember { mutableStateOf<String?>(null) }
+    var probe by remember { mutableStateOf<Offset?>(null) }
+    var probeHit by remember { mutableStateOf<SnapHit?>(null) }
+    val measureMode by editor.measureMode.collectAsStateWithLifecycle()
+    val snapOn by editor.snapOn.collectAsStateWithLifecycle()
+    val measurements by editor.measurements.collectAsStateWithLifecycle()
+    val measureSel by editor.measureSelected.collectAsStateWithLifecycle()
+    val pendingPoints by editor.pendingPoints.collectAsStateWithLifecycle()
+    val pendingElement by editor.pendingElement.collectAsStateWithLifecycle()
+    val measuring = tool == Tool.MEASURE
+    val measureViews = remember(doc, measurements, measuring) { if (measuring) measurements.map { it.id to MeasureEval.eval(it, doc) } else emptyList() }
+    val pointMode = measureMode == MeasureMode.DISTANCE || measureMode == MeasureMode.ANGLE
     val pen = remember { mutableStateListOf<Pt>() }
     val images = remember { HashMap<String, ImageBitmap>() }
 
@@ -336,6 +357,13 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
             val slop = viewConfiguration.touchSlop
             // Handles are decided at touch-down so they win over moving the shape underneath.
             val startHandles = editor.selectionBounds()?.takeIf { tool == Tool.SELECT }?.let { Handles.of(mapper(), it) }
+            fun refreshProbe(pos: Offset) {
+                probe = pos
+                val mm = mapper()
+                val pm = editor.measureMode.value
+                probeHit = if (pm == MeasureMode.DISTANCE || pm == MeasureMode.ANGLE) editor.snapAt(mm.toWork(pos), mm.mm(24.dp.toPx()).toDouble()) else null
+            }
+            if (tool == Tool.MEASURE) refreshProbe(start)
             val pivot = editor.selectionBounds()?.center
             val anchor = editor.selectionBounds()?.let { Pt(it.minX, it.minY) }
             do {
@@ -344,6 +372,7 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
                 if (pressed.size >= 2) {
                     if (mode == 1) { draftStart = null; draftEnd = null; pen.clear(); band = null; angleHint = null }
                     mode = 2
+                    probe = null; probeHit = null
                     val m = mapper()
                     val z = event.calculateZoom(); val p = event.calculatePan(); val c = event.calculateCentroid()
                     val newZoom = (zoom * z).coerceIn(0.6f, 12f); val k = newZoom / zoom
@@ -354,6 +383,7 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
                     event.changes.forEach { it.consume() }
                 } else if (pressed.size == 1 && mode != 2) {
                     val pos = pressed.first().position
+                    if (tool == Tool.MEASURE && mode != 2) refreshProbe(pos)
                     if (mode == 0 && (pos - start).getDistance() > slop) {
                         mode = 1
                         val m = mapper(); val p0 = m.toWork(start)
@@ -373,6 +403,7 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
                             }
                             Tool.PEN -> { pen.clear(); pen.add(p0) }
                             Tool.TEXT -> drag = Drag.PAN
+                            Tool.MEASURE -> {}
                             else -> { draftStart = p0; draftEnd = p0 }
                         }
                     }
@@ -398,6 +429,7 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
                             } }
                             Tool.PEN -> pen.add(b)
                             Tool.TEXT -> pan += pos - last
+                            Tool.MEASURE -> {}
                             else -> draftEnd = b
                         }
                         pressed.first().consume()
@@ -406,6 +438,12 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
                 }
             } while (event.changes.any { it.pressed })
             val m = mapper()
+            if (tool == Tool.MEASURE) {
+                val pr = probe
+                if (mode != 2 && pr != null) editor.measureTap(m.toWork(pr), probeHit, m.mm(24.dp.toPx()).toDouble())
+                probe = null; probeHit = null
+                return@awaitEachGesture
+            }
             if (mode == 0) {
                 val p = m.toWork(start)
                 when (tool) {
@@ -434,6 +472,7 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
     Canvas(Modifier.fillMaxSize().onSizeChanged { size = it }.then(gestures)) {
         if (size == IntSize.Zero) return@Canvas
         val m = mapper()
+        fun DrawScope.scene() {
         drawWorkArea(m)
         background?.let { bmp ->
             val a = m.at(Pt(0.0, 0.0)); val b = m.at(Pt(Work.WIDTH, Work.HEIGHT))
@@ -498,6 +537,32 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
             drawPath(path, Lc.accent, style = Stroke(2.5f, cap = StrokeCap.Round))
         }
         drawHead(m, head)
+        }
+        scene()
+        fun DrawScope.measureLayer() {
+            drawMeasurements(m, measureViews, measureSel)
+            val pts = pendingPoints.map { m.at(it.p) }
+            pts.zipWithNext().forEach { (a, b) -> drawLine(Lc.accent, a, b, 2f) }
+            pts.forEach { drawCircle(Lc.bg, 8f, it); drawCircle(Lc.accent, 6f, it) }
+            pendingElement?.let { id ->
+                doc.elements.firstOrNull { it.id == id }?.worldBounds()?.let { b ->
+                    val a = m.at(Pt(b.minX, b.minY)); val c = m.at(Pt(b.maxX, b.maxY))
+                    drawRect(Lc.accent, a, Size(c.x - a.x, c.y - a.y), style = Stroke(2.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))))
+                }
+            }
+            val pr = probe
+            if (pr != null && pointMode) pts.lastOrNull()?.let { last ->
+                drawLine(Lc.accent.copy(alpha = .8f), last, probeHit?.let { m.at(it.p) } ?: pr, 2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f)))
+            }
+        }
+        if (measuring) {
+            measureLayer()
+            val pr = probe
+            if (pr != null && pointMode) {
+                probeHit?.let { drawSnapMarker(m.at(it.p), it.kind) }
+                drawLoupe(pr, probeHit, probeHit?.let { m.at(it.p) }, snapOn, 64.dp.toPx()) { scene(); measureLayer() }
+            }
+        }
     }
     angleHint?.let { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { Banner(it, Lc.accent, Modifier.padding(12.dp)) } }
 }

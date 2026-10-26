@@ -18,6 +18,10 @@ import de.millione.lumacut.core.Raster
 import de.millione.lumacut.core.Box
 import de.millione.lumacut.core.Document
 import de.millione.lumacut.core.Element
+import de.millione.lumacut.core.MeasPt
+import de.millione.lumacut.core.Measurement
+import de.millione.lumacut.core.Snap
+import de.millione.lumacut.core.SnapHit
 import de.millione.lumacut.core.FocusCompensation
 import de.millione.lumacut.core.FocusReport
 import de.millione.lumacut.core.HeightMapSet
@@ -55,7 +59,12 @@ class PendingImport(val kindLabel: String, val total: Int, val fitting: Int, val
                     val onFitting: () -> Unit, val onShrink: () -> Unit)
 
 enum class Tool(val label: String) { SELECT("Auswahl"), RECT("Rechteck"), ELLIPSE("Ellipse"), POLYGON("Vieleck"),
-    LINE("Linie"), PEN("Freihand"), TEXT("Text") }
+    LINE("Linie"), PEN("Freihand"), TEXT("Text"), MEASURE("Messen") }
+
+/** What the next taps of the measuring tool create. */
+enum class MeasureMode(val label: String) {
+    DISTANCE("Abstand"), GAP("Linie–Linie"), INFO("Element"), ANGLE("Winkel"), EDGES("Rand")
+}
 
 /** A built job: G-code for the Pi plus what the focus compensation did (null = not applied). */
 class BuiltJob(val gcode: String, val focus: FocusReport?)
@@ -156,7 +165,72 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ---------- selection & tools ---------- */
 
-    fun setTool(t: Tool) { _tool.value = t; if (t != Tool.SELECT) _selected.value = emptySet() }
+    fun setTool(t: Tool) {
+        _tool.value = t; if (t != Tool.SELECT) _selected.value = emptySet()
+        if (t != Tool.MEASURE) clearPendingMeasure()
+    }
+
+    /* ---------- measuring: display only, never part of the document or the job ---------- */
+
+    private val _measureMode = MutableStateFlow(MeasureMode.DISTANCE)
+    val measureMode: StateFlow<MeasureMode> = _measureMode.asStateFlow()
+    private val _snapOn = MutableStateFlow(true)
+    val snapOn: StateFlow<Boolean> = _snapOn.asStateFlow()
+    private val _measurements = MutableStateFlow<List<Measurement>>(emptyList())
+    val measurements: StateFlow<List<Measurement>> = _measurements.asStateFlow()
+    private val _measureSelected = MutableStateFlow<String?>(null)
+    val measureSelected: StateFlow<String?> = _measureSelected.asStateFlow()
+    /** Points already placed for the measurement in progress (distance: 1, angle: 1-2). */
+    private val _pendingPoints = MutableStateFlow<List<MeasPt>>(emptyList())
+    val pendingPoints: StateFlow<List<MeasPt>> = _pendingPoints.asStateFlow()
+    /** First element of a line-to-line measurement in progress. */
+    private val _pendingElement = MutableStateFlow<String?>(null)
+    val pendingElement: StateFlow<String?> = _pendingElement.asStateFlow()
+
+    private fun clearPendingMeasure() { _pendingPoints.value = emptyList(); _pendingElement.value = null }
+
+    fun setMeasureMode(m: MeasureMode) { _measureMode.value = m; clearPendingMeasure() }
+    fun setSnap(on: Boolean) { _snapOn.value = on }
+    fun selectMeasurement(id: String?) { _measureSelected.value = id }
+    fun removeMeasurement(id: String) { _measurements.update { l -> l.filter { it.id != id } }; if (_measureSelected.value == id) _measureSelected.value = null }
+    fun clearMeasurements() { _measurements.value = emptyList(); _measureSelected.value = null; clearPendingMeasure() }
+
+    private fun measurable() = _doc.value.elements.filter { e -> _doc.value.layer(e.layerId)?.visible == true }
+
+    /** What the finger would catch at [p] (null = free point or snapping off). */
+    fun snapAt(p: Pt, radiusMm: Double): SnapHit? = if (_snapOn.value) Snap.find(p, radiusMm, measurable()) else null
+
+    private fun addMeasurement(m: Measurement) { _measurements.update { it + m }; _measureSelected.value = m.id; clearPendingMeasure() }
+
+    /** A finished touch of the measuring tool at [p]; [hit] is the snap result shown under the finger. */
+    fun measureTap(p: Pt, hit: SnapHit?, pickRadiusMm: Double) {
+        when (_measureMode.value) {
+            MeasureMode.DISTANCE, MeasureMode.ANGLE -> {
+                val pt = MeasPt.of(hit, p, _doc.value.elements)
+                val pts = _pendingPoints.value + pt
+                val need = if (_measureMode.value == MeasureMode.DISTANCE) 2 else 3
+                if (pts.size < need) { _pendingPoints.value = pts; return }
+                addMeasurement(if (need == 2) Measurement.Distance(pts[0], pts[1]) else Measurement.Angle(pts[0], pts[1], pts[2]))
+            }
+            MeasureMode.INFO, MeasureMode.EDGES, MeasureMode.GAP -> {
+                val e = Snap.pick(p, pickRadiusMm, measurable()) ?: run { notify("Hier ist kein Element – direkt auf eine Form tippen", true); return }
+                val ids = if (_measureMode.value == MeasureMode.GAP) listOf(e.id)
+                          else (if (e.groupId == null) listOf(e.id) else _doc.value.elements.filter { it.groupId == e.groupId }.map { it.id })
+                when (_measureMode.value) {
+                    MeasureMode.INFO -> addMeasurement(Measurement.Info(ids))
+                    MeasureMode.EDGES -> addMeasurement(Measurement.Edges(ids))
+                    else -> {
+                        val first = _pendingElement.value
+                        when {
+                            first == null -> _pendingElement.value = e.id
+                            first == e.id -> notify("Das ist dasselbe Element – ein anderes antippen", true)
+                            else -> addMeasurement(Measurement.Gap(first, e.id))
+                        }
+                    }
+                }
+            }
+        }
+    }
     fun setMulti(on: Boolean) { _multi.value = on }
 
     private fun selectable(e: Element): Boolean = _doc.value.layer(e.layerId)?.let { it.visible && !it.locked } ?: false

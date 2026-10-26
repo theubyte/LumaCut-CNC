@@ -81,6 +81,18 @@ data class Transform(val x: Double = 0.0, val y: Double = 0.0, val scaleX: Doubl
         val s = sin(r)
         return Pt(sx * c - sy * s + x, sx * s + sy * c + y)
     }
+
+    /** Inverse of [apply]: a work-area point back into element coordinates. */
+    fun invert(p: Pt): Pt {
+        val r = Math.toRadians(rotation)
+        val c = cos(r)
+        val s = sin(r)
+        val dx = p.x - x
+        val dy = p.y - y
+        val sx = dx * c + dy * s
+        val sy = -dx * s + dy * c
+        return Pt(if (scaleX == 0.0) 0.0 else sx / scaleX, if (scaleY == 0.0) 0.0 else sy / scaleY)
+    }
 }
 
 /**

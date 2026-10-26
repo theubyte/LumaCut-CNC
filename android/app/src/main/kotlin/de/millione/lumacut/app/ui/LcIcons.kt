@@ -35,6 +35,7 @@ object LcIcons {
     val fan = icon("fan", "M12 10c0-4 1-7 4-7 2 0 2 3 0 5M14 12c4 0 7 1 7 4 0 2-3 2-5 0M12 14c0 4-1 7-4 7-2 0-2-3 0-5M10 12c-4 0-7-1-7-4 0-2 3-2 5 0")
     val refresh = icon("refresh", "M20 11a8 8 0 1 0-2.3 5.7", "M20 4v7h-7")
     val upload = icon("upload", "M12 16V4M7 9l5-5 5 5", "M4 20h16")
+    val ruler = icon("ruler", "M3.5 16.5l13-13 4 4-13 13z", "M7 13l2 2M10 10l2 2M13 7l2 2")
     val trash = icon("trash", "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13")
     val play = icon("play", "M7 4l13 8-13 8z")
     val stop = icon("stop", "M6 6h12v12H6z")
