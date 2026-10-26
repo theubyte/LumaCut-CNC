@@ -79,6 +79,51 @@ def wire_anchor(anchor: str, convention: str | None) -> str:
     if convention == COORD_CONVENTION or anchor not in ("tl", "tr", "bl", "br"):
         return anchor
     return anchor[0] + ("r" if anchor[1] == "l" else "l")
+#: Probe reach as the Pi computes it (pi400/marlin/transport.py): the head
+#: stays in safe_zone..PROBE_HEAD_MAX during G30 (Marlin PROBING_MARGIN), the
+#: switch touches laser point = head + offset (offset = tip minus laser).
+PROBE_HEAD_MAX = (380.0, 360.0)
+DEFAULT_PROBE_OFFSET = (-23.0, 15.0)
+WORK_AREA_MM = (390.0, 370.0)
+NO_PROBE_POINT = ("Kein Abtastpunkt erreichbar", "für den Taster nicht erreichbar")
+
+
+def probe_reach(offset=None, safe_zone: float = 30.0,
+                travels=WORK_AREA_MM) -> tuple[float, float, float, float]:
+    """(xmin, xmax, ymin, ymax) in machine mm the switch can probe."""
+    dx, dy = offset if offset is not None else DEFAULT_PROBE_OFFSET
+    return (max(safe_zone, safe_zone + dx), min(travels[0], PROBE_HEAD_MAX[0] + dx),
+            max(safe_zone, safe_zone + dy), min(travels[1], PROBE_HEAD_MAX[1] + dy))
+
+
+def explain_probe_error(message: str, offset=None, safe_zone: float = 30.0) -> str:
+    """Pi refusal "Kein Abtastpunkt erreichbar" plus where the switch reaches.
+
+    Machine mm and the canvas view (origin top right: machine X grows to
+    the left, Y towards the door; view x = 390 - X, view y = Y - 30).
+    """
+    if not any(k in message for k in NO_PROBE_POINT):
+        return message
+    xmin, xmax, ymin, ymax = probe_reach(offset, safe_zone)
+    dx, dy = offset if offset is not None else DEFAULT_PROBE_OFFSET
+    bands = []
+    if ymin > safe_zone:
+        bands.append("in den obersten %.0f mm" % (ymin - safe_zone))
+    if xmax < WORK_AREA_MM[0]:
+        bands.append("in den linken %.0f mm" % (WORK_AREA_MM[0] - xmax))
+    if ymax < WORK_AREA_MM[1]:
+        bands.append("in den untersten %.0f mm" % (WORK_AREA_MM[1] - ymax))
+    if xmin > safe_zone:
+        bands.append("in den rechten %.0f mm" % (xmin - safe_zone))
+    where = (" In der Ansicht (Nullpunkt oben rechts) liegt das Motiv dann ganz "
+             + " oder ".join(bands) + " der Arbeitsfläche." if bands else "")
+    return ("%s\nDer Taster erreicht nur Motivstellen in X%.0f–%.0f / Y%.0f–%.0f "
+            "(Maschinen-mm; Tasterversatz X%+.0f / Y%+.0f, Kopf beim Abtasten höchstens "
+            "X%.0f / Y%.0f).%s Motiv weiter nach unten bzw. rechts schieben, dann neu "
+            "starten." % (message.rstrip(), xmin, xmax, ymin, ymax, dx, dy,
+                          PROBE_HEAD_MAX[0], PROBE_HEAD_MAX[1], where))
+
+
 #: Pi feature: op=autorun probes a height map over the whole motif.
 FEATURE_AUTORUN_MESH = "autorun_mesh"
 #: Queue item states on the Pi (web.py job_queue, #17).
@@ -184,6 +229,9 @@ class JobState:
     #: probe grid progress during "probing" (job.probe = {"done", "total"})
     probe_done: int = 0
     probe_total: int = 0
+    #: job.warnings texts (ZUSAMMENARBEIT §6.1 Pi 7: probe point clamped next
+    #: to the motif); shown, never block a start. Empty on Pis without the field.
+    warnings: tuple[str, ...] = ()
 
     @property
     def active(self) -> bool:
@@ -219,7 +267,8 @@ class JobState:
                    error=str(data.get("error") or ""),
                    phase=phase,
                    probe_done=_int(probe.get("done")),
-                   probe_total=_int(probe.get("total")))
+                   probe_total=_int(probe.get("total")),
+                   warnings=_warning_texts(data.get("warnings")))
 
 
 @dataclass
@@ -345,6 +394,9 @@ class MachineStatus:
     workpiece_surface_z: float | None = None
     laser_focus_z: float | None = None
     probe_offset_set: bool = False
+    #: Pi probe_xy_offset_mm (tip minus laser point), None until calibrated.
+    probe_offset: tuple[float, float] | None = None
+    safe_zone_mm: float = 30.0
     job: JobState = field(default_factory=JobState)
     frame: FrameState = field(default_factory=FrameState)
     origin: OriginState = field(default_factory=OriginState)
@@ -417,6 +469,8 @@ class MachineStatus:
             workpiece_surface_z=_float(data.get("workpiece_surface_z")),
             laser_focus_z=_float(data.get("laser_focus_z")),
             probe_offset_set=data.get("probe_xy_offset_mm") is not None,
+            probe_offset=_offset(data.get("probe_xy_offset_mm")),
+            safe_zone_mm=_float(data.get("safe_zone_xy_mm")) or 30.0,
             job=JobState.from_json(data.get("job")),
             frame=FrameState.from_json(data.get("frame")),
             origin=OriginState.from_json(data.get("origin")),
@@ -471,6 +525,26 @@ def _int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _warning_texts(raw: Any) -> tuple[str, ...]:
+    """job.warnings: strings or {"text": …} objects -> texts."""
+    if not isinstance(raw, list):
+        return ()
+    texts = []
+    for item in raw:
+        text = item.get("text") if isinstance(item, dict) else item
+        if isinstance(text, str) and text.strip():
+            texts.append(text.strip())
+    return tuple(texts)
+
+
+def _offset(raw) -> tuple[float, float] | None:
+    if isinstance(raw, (list, tuple)) and len(raw) == 2:
+        x, y = _float(raw[0]), _float(raw[1])
+        if x is not None and y is not None:
+            return (x, y)
+    return None
 
 
 def _float(value: Any) -> float | None:
@@ -566,7 +640,15 @@ class LumaCutClient:
 
     # ---- reads ---------------------------------------------------------
     def status(self, timeout: float = STATUS_TIMEOUT_S) -> MachineStatus:
-        return MachineStatus.from_json(self._get("/api/status", timeout=timeout))
+        status = MachineStatus.from_json(self._get("/api/status", timeout=timeout))
+        self._reach = (status.probe_offset, status.safe_zone_mm)
+        return status
+
+    def _explained(self, exc: "ApiError") -> "ApiError":
+        """Same refusal, with the probe reach for "Kein Abtastpunkt erreichbar"."""
+        offset, safe = getattr(self, "_reach", (None, 30.0))
+        text = explain_probe_error(str(exc), offset, safe)
+        return exc if text == str(exc) else ApiError(text, exc.status, exc.payload)
 
     def jobs(self) -> list[dict]:
         files = self._get("/api/jobs").get("files")
@@ -705,8 +787,12 @@ class LumaCutClient:
                               origin=origin, anchor=anchor)
 
     def queue_run(self) -> str:
-        """Run all waiting queue items in order (stops on error/abort)."""
-        return self._newer_op("queue_run", "Auftrags-Warteschlange")
+        """Run all waiting queue items in order (stops on error/abort); the Pi
+        runs each like op=autorun and checks every item before moving."""
+        try:
+            return self._newer_op("queue_run", "Auftrags-Warteschlange")
+        except ApiError as exc:
+            raise self._explained(exc) from exc
 
     def queue_pause(self) -> str:
         """Stop the queue after the job that is running now."""
@@ -839,7 +925,7 @@ class LumaCutClient:
         except ApiError as exc:
             if "Unbekannte" in str(exc) and "autorun" in str(exc):
                 raise ApiError(OLD_PI_AUTORUN, exc.status, exc.payload) from exc
-            raise
+            raise self._explained(exc) from exc
 
     def upload_job(self, name: str, content: bytes | str) -> str:
         """Upload G-code; the Pi validates every line and the safe zone."""

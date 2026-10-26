@@ -380,6 +380,24 @@ gewählt ist. Das ist der Standard und genau das bisherige Verhalten.
   hängt an ihm).
 - ⚠ Hardware: Position nach dem Verschieben am echten Gerät nicht geprüft.
 
+### Taster-Reichweite bei `op=autorun` / `queue_run`
+
+- Pi: `heightmap._mark_reachable` lehnt mit „Kein Abtastpunkt erreichbar: …“
+  ab, wenn kein Rasterpunkt des Motivs abtastbar ist. Abtastbar ist ein
+  Laserpunkt, wenn der Kopf (Punkt − `probe_xy_offset_mm`) in
+  `safe_zone_xy_mm`..`PROBE_HEAD_MAX` (380/360) liegt. Mit Versatz −23/+15:
+  **X30–357 / Y45–370** (Maschinen-mm); in der Ansicht nicht ganz in den
+  obersten 15 mm oder den linken 33 mm. Regionen < 20 mm haben nur den
+  Mittelpunkt als Rasterpunkt.
+- Studio: `client.explain_probe_error` hängt bei `autorun_job` und
+  `queue_run` den Bereich aus dem Status an (`MachineStatus.probe_offset`,
+  `safe_zone_mm`). Zahlenfälle: `tests/test_machine_probe_reach.py`
+  (als Skript: Tabelle).
+- Vorgabe des Besitzers (ZUSAMMENARBEIT §6.1 Pi 7, beim Pi noch offen):
+  nicht ablehnen, nah daneben tasten und warnen. Studio liest dafür schon
+  `job.warnings` (Liste aus Texten oder `{"text": …}`, `JobState.warnings`)
+  und zeigt sie gelb mit „⚠“ unter dem Auftrag; Start bleibt frei.
+
 ### Auftrags-Warteschlange: `op=queue_add` / `queue_run` / `queue_pause` / `queue_skip` / `queue_remove` / `queue_clear`
 
 - **Auslöser:** Gruppe „Warteschlange“ im Maschinen-Panel: „Einreihen“
@@ -394,11 +412,12 @@ gewählt ist. Das ist der Standard und genau das bisherige Verhalten.
 - Der Pi friert beim Einreihen Versatz (`dx`/`dy`) und Prüfsumme ein: Ein
   späteres Tippen verschiebt eingereihte Aufträge nicht, eine geänderte
   Datei wird beim Abarbeiten abgelehnt („neu einreihen“).
-- Abarbeiten: ein Auftrag nach dem anderen, je wie `op=start` (Parken
-  danach) – **ohne** Abtasten und ohne Fokuskorrektur, und nur referenziert
-  („Vor der Warteschlange referenzieren“). Panel-Tooltip und Rückfrage von
-  „Warteschlange starten“ sagen das (`panel.QUEUE_NOTE`). Relative
-  Fokus-Absenkungen (`G91`/`G0 Z-…`) gehen dabei roh an Marlin. Fehler, Abbrechen oder NOT-AUS stoppen die Warteschlange; der
+- Abarbeiten (Pi ab `8efe0ea`): ein Auftrag nach dem anderen, je wie
+  `op=autorun` – referenziert bei Bedarf, tastet ab, Höhenkorrektur,
+  lasert, parkt. Keine Referenzfahrt-Pflicht mehr; der Pi plant vorab alle
+  Einträge, ein nicht lauffähiger → 400 „Warteschlange #<id> (<datei>): …“.
+  Panel-Tooltip und Rückfrage sagen das (`panel.QUEUE_NOTE`), der Knopf
+  verlangt keine Referenzfahrt mehr. Fehler, Abbrechen oder NOT-AUS stoppen die Warteschlange; der
   Rest bleibt „wartet“. Während sie läuft, sind Start/Home/Rahmen/Tippen
   gesperrt, „Abbrechen“ bleibt aktiv (auch zwischen zwei Aufträgen).
 - **Status:** `queue` = `{items: [{id, file, origin, anchor, dx, dy,

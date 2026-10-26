@@ -85,9 +85,8 @@ Auftrag und `op=autorun`:
   automatischen Ablauf (bisher `start=True` = ohne Automatik; Umstellung in
   `lumacut_workflow/qt.py` und dem Toolbar-Knopf in `main.py` ist Sache der jeweiligen
   Agents).
-- Warteschlange: Studio reiht weiter wie bisher ein; ob die Pi-Warteschlange jeden
-  Auftrag durch den automatischen Ablauf schickt, ist ein Wunsch an den Pi-Teil
-  (ZUSAMMENARBEIT §6).
+- Warteschlange: Studio reiht weiter wie bisher ein; seit Pi `8efe0ea` schickt die
+  Pi-Warteschlange jeden Auftrag durch den automatischen Ablauf.
 - Tests: `tests/test_machine_oneclick.py` (Fake-Pi bildet §4 nach: `set_job_phase`,
   `make_pre_autorun_pi`).
 - Verhältnis zu §1.1: Der Panel-Knopf verlässt sich auf den Pi-Ablauf (`op=autorun` mit
@@ -116,7 +115,8 @@ Geprüft gegen `pi400/marlin/web.py`, `scanprobe/job_flow*.py`, `main_view.py`, 
 | Eine Phasenanzeige | Während des Ein-Klick-Ablaufs sperrt `set_external_operation` die Panel-Knöpfe (auch Panel-„Abbrechen“); Abbruch über „■ Abbrechen“ der Hauptansicht, NOT-AUS (Toolbar + Panel) bleibt aktiv. Panel-Phasenzeile und Scan-Probe-Anzeige lesen dieselben `job.*`-Felder | Erledigt: Panel „Letzte Bahnen, dann Parken“ (`finishing`), Hauptansicht-Text in `scanprobe/job_flow.py:625` angeglichen (Einzeiler, Machine-Agent) |
 | Platzierung + Mesh | Pi kann `autorun placement=1` (Raster über dem platzierten Auftrag); `OneClickController.start()` nutzt bei `autorun_mesh` `machine_panel.autorun_task(name)` (Scan Probe `d7e1fe2`), ohne Merkmal klare Meldung | – |
 | Alter Pi | ohne `autorun`: klare Meldung; ohne `autorun_mesh`: Hinweis „ein Punkt“; ohne `coord_convention`: `wire_anchor` tauscht links/rechts (Test `test_origin_end_to_end.py`) | Studio und Pi gemeinsam aktualisieren |
-| Warteschlange | `_queue_worker` startet ohne `auto` → kein Abtasten/Fokus, verlangt Referenzfahrt. Studio sagt das jetzt im Tooltip und in der Rückfrage (`QUEUE_NOTE`); `fake_pi` verlangt wie der Pi Referenzfahrt für `start`/`queue_run` | Claude: Warteschlange über den Autorun-Ablauf (ZUSAMMENARBEIT §6) |
+| Warteschlange | Seit Pi `8efe0ea`: jeder Eintrag wie `op=autorun` (referenziert selbst, tastet ab, Fokus, parkt), vorab geprüft. Studio: `QUEUE_NOTE` angepasst, Knopf ohne Referenzfahrt-Pflicht, `fake_pi` wie der Pi | erledigt |
+| Taster-Reichweite | „Kein Abtastpunkt erreichbar“: Grenze stimmt (abtastbar X30–357 / Y45–370 bei Versatz −23/+15), aber kleine Motive (< 20 mm) am oberen/linken Rand werden abgelehnt, obwohl ein Teil erreichbar ist. Studio hängt Bereich und Hinweis an (`client.explain_probe_error`, `tests/test_machine_probe_reach.py`) | Claude: Punkte klemmen, Meldung mit Box (ZUSAMMENARBEIT §6.1 Pi 7) |
 | Parken | Pi parkt nach jedem Auftrag selbst (`park_safezone`) | – |
 | Fehler/Abbruch je Phase | Pi setzt `aborted`/`error` + `job.error`, Panel zeigt den Satz (Test `test_pi_error_texts_shown`); Abtasten prüft `stop_job` vor jedem Punkt, Laufen vor jeder Zeile; NOT-AUS = M112 in jeder Phase. `safe_home` prüft `stop_job` nicht: Abbruch während Referenzfahrt wirkt erst danach | Claude: Referenzfahrt abbrechbar machen; ⚠ am Gerät: Abbruch während Abtasten |
 | Veralteter Status | `stale_ms`/`pi_busy` sperren Knöpfe, NOT-AUS bleibt | – |

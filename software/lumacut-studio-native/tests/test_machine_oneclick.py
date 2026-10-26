@@ -277,8 +277,8 @@ class OneClickPanelTests(unittest.TestCase):
 
 class RealPiAlignmentTests(unittest.TestCase):
     """Studio against the rules of pi400/marlin/web.py (start_job, queue_run,
-    _execute_job): autorun homes itself, start and the queue need homing,
-    the queue never probes, the Pi's job.error reaches the panel."""
+    _execute_job, 8efe0ea): autorun and the queue home themselves, op=start
+    needs homing, the Pi's job.error reaches the panel."""
 
     @classmethod
     def setUpClass(cls):
@@ -299,12 +299,9 @@ class RealPiAlignmentTests(unittest.TestCase):
         with self.assertRaises(ApiError) as ctx:
             client.start_job("a.gcode")
         self.assertIn("Vor dem Job referenzieren", str(ctx.exception))
-        with self.assertRaises(ApiError) as ctx:
-            client.queue_run()
-        self.assertIn("Vor der Warteschlange referenzieren", str(ctx.exception))
         client.autorun_job("a.gcode")   # the Pi homes itself in op=autorun
 
-    def test_queue_confirm_says_no_probing(self):
+    def test_queue_confirm_says_automatic_run(self):
         from machine import settings
         from machine.panel import QUEUE_NOTE, MachinePanel
         asked = []
@@ -315,13 +312,16 @@ class RealPiAlignmentTests(unittest.TestCase):
         panel.connect_to_pi()
         self.assertTrue(wait_until(panel.home_button.isEnabled))
         self.assertIn(QUEUE_NOTE, panel.queue_run_button.toolTip())
+        self.assertIn("tastet ab", QUEUE_NOTE)
         with self.pi.lock:
+            self.pi.status["homed"] = False   # queue_run homes itself now
             self.pi.status["queue"]["items"].append(
                 {"id": 1, "file": "a.gcode", "origin": "absolute", "anchor": "tr",
                  "dx": 0.0, "dy": 0.0, "target": None, "bounds": None,
                  "state": "queued", "error": ""})
         self.assertTrue(wait_until(lambda: panel._status is not None
                                    and panel._status.queue.waiting == 1))
+        self.assertTrue(wait_until(panel.queue_run_button.isEnabled))
         self.assertFalse(panel.queue_run())   # declined
         self.assertIn(QUEUE_NOTE, asked[-1])
         self.assertIn("a.gcode", asked[-1])

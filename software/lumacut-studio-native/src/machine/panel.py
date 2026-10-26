@@ -75,11 +75,11 @@ POSITION_HINT = ("Maschinenkoordinaten in mm: X0/Y0 = Endschalter-Ecke oben rech
                  "X wächst nach links, Y nach vorne (Tür). Arbeitsfläche = X30–390 / Y30–370.")
 OLD_PI_ORIGIN = "Pi-Dienst zu alt: nur absolute Aufträge – Pi aktualisieren"
 OLD_PI_QUEUE = "Pi-Dienst zu alt: keine Warteschlange – Pi aktualisieren"
-#: web.py _queue_worker runs every item like op=start (no auto plan): the Pi
-#: neither probes nor corrects the focus, and queue_run needs a homed machine.
-QUEUE_NOTE = ("Die Warteschlange lasert jede Datei wie „Senden & Starten“: der Pi "
-              "tastet nicht ab und korrigiert den Fokus nicht (Dateien mit eigener "
-              "Höhenkorrektur aus Studio einreihen).")
+#: web.py _queue_worker (8efe0ea) runs every item through auto_plan like
+#: op=autorun and queue_run checks all items before anything moves.
+QUEUE_NOTE = ("Jeder Auftrag läuft wie „Auftrag starten“: der Pi referenziert bei "
+              "Bedarf, tastet ab, führt den Fokus nach und parkt. Er prüft vorher alle "
+              "wartenden Aufträge.")
 QUEUE_ITEM_LABELS = {"queued": "wartet", "running": "läuft", "done": "fertig",
                      "error": "Fehler", "skipped": "übersprungen",
                      "aborted": "abgebrochen"}
@@ -371,7 +371,7 @@ class MachinePanel(QWidget):
         self.queue_add_button.setToolTip("Gesendeten Auftrag mit dem gewählten Ursprung "
                                          "einreihen (Platzierung wird jetzt festgelegt)")
         self.queue_run_button = QPushButton("Abarbeiten")
-        self.queue_run_button.setToolTip("Referenziert nötig. " + QUEUE_NOTE)
+        self.queue_run_button.setToolTip(QUEUE_NOTE)
         self.queue_pause_button = QPushButton("Anhalten")
         self.queue_pause_button.setToolTip("Nach dem laufenden Auftrag anhalten")
         self.queue_skip_button = QPushButton("Überspringen")
@@ -632,6 +632,11 @@ class MachinePanel(QWidget):
             text += " · " + job.error
         colour = {"error": BAD, "aborted": WARN, "complete": OK}.get(
             job.state, INFO if job.active else MUTED)
+        if job.warnings:
+            # Pi clamped a probe point next to the motif: the job still runs.
+            text += "\n⚠ " + "\n⚠ ".join(job.warnings)
+            if colour != BAD:
+                colour = WARN
         self.job_label.setText(text)
         self.job_label.setStyleSheet("color: %s;" % colour)
         progress = job.progress
@@ -758,7 +763,7 @@ class MachinePanel(QWidget):
         self.queue_add_button.setEnabled(idle and bool(self._uploaded) and not blocked
                                          and len(q.items) < (q.max or 50))
         self.queue_run_button.setEnabled(idle and q.waiting > 0 and not q.active
-                                         and not s.job.active and s.homed and not blocked)
+                                         and not s.job.active and not blocked)
         self.queue_pause_button.setEnabled(idle and q.state == "running")
         self.queue_skip_button.setEnabled(idle and selected is not None
                                           and selected.state == "queued")
