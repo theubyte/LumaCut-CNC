@@ -29,6 +29,7 @@ MIN_SCALE = 0.4    # px/mm
 MAX_SCALE = 60.0   # px/mm
 NICE_STEPS = (0.5, 1, 2, 5, 10, 20, 50, 100, 200)
 PX_PER_MM_100 = 96 / 25.4  # 100 % = physische Größe bei logischen 96 dpi
+WHEEL_PAN_PX = 48  # Umschalt+Mausrad: Bildschirm-px seitlich je Rastschritt (120)
 TAP_SLOP_PX = 10.0         # so weit darf ein Finger wandern, bevor aus Tippen Ziehen wird
 DOUBLE_TAP_PX = 24.0       # zwei Taps so nah beieinander = Doppeltipp
 TOUCH_MOUSE_GUARD_S = 0.6  # so lange nach Touch werden "Maus"-Ereignisse aus Touch ignoriert
@@ -302,8 +303,22 @@ class CanvasView(QGraphicsView):
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         # Wheel (and Ctrl+wheel) zooms at the pointer like LightBurn; trackpads
-        # without angle delta report pixel deltas.
-        steps = event.angleDelta().y() / 120.0 or event.pixelDelta().y() / 60.0
+        # without angle delta report pixel deltas. Umschalt+Rad und reines
+        # Seitwärts-Scrollen (Kipprad, Trackpad quer) verschieben waagerecht
+        # (docs/REVIEW_GAP_ANALYSIS_2026-10-25.md §4).
+        ad, pd = event.angleDelta(), event.pixelDelta()
+        mods = event.modifiers()
+        shift = bool(mods & Qt.ShiftModifier) and not mods & Qt.ControlModifier
+        sideways = not ad.y() and not pd.y() and (ad.x() or pd.x())
+        if shift or sideways:
+            # Manche Plattformen melden Umschalt+Rad schon als x-Delta.
+            a = ad.y() or ad.x()
+            px = -a / 120.0 * WHEEL_PAN_PX if a else -(pd.y() or pd.x())
+            hb = self.horizontalScrollBar()
+            hb.setValue(hb.value() + int(round(px)))
+            event.accept()
+            return
+        steps = ad.y() / 120.0 or pd.y() / 60.0
         if steps:
             self.zoom_wheel(1.15 ** max(-4.0, min(4.0, steps)), event.position())
         event.accept()
