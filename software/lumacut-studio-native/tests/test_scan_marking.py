@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from scanprobe.geometry import Rect
+from scan_coords import screen_rect
 
 
 @pytest.fixture()
@@ -57,25 +58,23 @@ def test_tap_toggles_object_and_overlay_style(panel):
 
 def test_roi_from_canvas_checks_objects_or_adds_manual_area(panel, editor):
     from PySide6.QtCore import Qt
-    from scanprobe.panel import Z_OVERLAY, from_machine
+    from scanprobe.panel import Z_OVERLAY
     _scan(panel)
     rect = [o for o in panel.objects if o.kind == "rectangle"][0]
     circle = [o for o in panel.objects if o.kind == "circle"][0]
     panel._set_checked({rect.id, circle.id}, toggle=True)
     assert _checked(panel) == set()
     # Fremde ROI (z. B. Kamera-Ausschnitt) wird ignoriert
-    _drag(editor, *from_machine(60, 70), 140, 110)
+    _drag(editor, *screen_rect(60, 70, 140, 110))   # Maschinen-mm (§2.3)
     assert _checked(panel) == set()
     # Bereich um das Rechteck -> Werkstück angehakt, keine manuelle Fläche
     assert panel.start_marking() and editor.roi_pending
-    x, y = from_machine(60, 70)
-    _drag(editor, x, y, 140.0, 110.0)
+    _drag(editor, *screen_rect(60, 70, 140, 110))
     assert _checked(panel) == {rect.id} and panel.manual_areas == []
     assert not editor.roi_pending
     # Bereich auf leerer Fläche -> manueller Rechteck-Bereich
     assert panel.start_marking()
-    x, y = from_machine(40, 300)
-    _drag(editor, x, y, 50.0, 40.0)
+    _drag(editor, *screen_rect(40, 300, 50, 40))
     assert len(panel.manual_areas) == 1
     area = panel.manual_areas[0]
     assert area.source == "manual" and area.polygon.bounds == Rect(40, 300, 90, 340)
@@ -112,17 +111,16 @@ def test_probe_manual_area_without_scan(panel):
 
 def test_selection_becomes_polygon_area(panel, editor):
     from lumacut_canvas.model import Geometry, Shape
-    from scanprobe.panel import to_machine
+    from scanprobe.panel import machine_rect, to_machine
     doc = editor.document
     rect = doc.add_shape(Shape("rect", Geometry(100, 100, 40, 20), doc.active_layer_id))
     ell = doc.add_shape(Shape("ellipse", Geometry(200, 150, 40, 40), doc.active_layer_id))
     editor.set_selection([rect.id, ell.id])
     assert panel.add_selection_areas() == 2
     ra, ea = panel.manual_areas
-    x0, y0 = to_machine(97, 97)
-    x1, y1 = to_machine(143, 123)
+    want = machine_rect(97, 97, 143, 123)      # Ecken sortiert (Nullpunkt oben rechts)
     b = ra.polygon.bounds
-    assert (b.xmin, b.ymin, b.xmax, b.ymax) == pytest.approx((x0, y0, x1, y1))
+    assert (b.xmin, b.ymin, b.xmax, b.ymax) == pytest.approx((want.xmin, want.ymin, want.xmax, want.ymax))
     cx, cy = to_machine(220, 170)
     assert ea.polygon.contains(cx, cy) and ea.kind == "polygon"
     assert len(ea.polygon.points) > 8                   # Umriss, nicht nur Box

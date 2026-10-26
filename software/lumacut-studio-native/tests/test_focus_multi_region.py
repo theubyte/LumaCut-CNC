@@ -13,6 +13,7 @@ from scanprobe.compensation import FocusSettings
 from scanprobe.focus_export import compensate_for_export, precheck_gcode
 from scanprobe.geometry import Rect
 from scanprobe.heightmap import MEASURED, HeightMap, HeightMapSet
+from scan_coords import add_rect_at_machine, screen_rect
 
 FOCUS = FocusSettings().focus_z(0.0)  # 5,5 mm über der Oberfläche
 _W = re.compile(r"([XYZS])(-?[\d.]+)")
@@ -90,10 +91,10 @@ def test_depth3d_image_across_adjacent_regions(qapp):
     from test_focus_export import _image
     d = Document()
     d.add_layer(Layer("Ebene 1"))
-    # Arbeitsfläche 70..170 -> Maschine 100..200 (Grenze der Meshes bei X150)
-    _image(d, 70, 70, 100, 40, mode="depth3d", line_interval_mm=1.0, overscan_mm=5,
+    # Maschine 100..200 (Grenze der Meshes bei X150); Bildschirmlage über from_machine (§2.3)
+    _image(d, *screen_rect(100, 100, 100, 40), mode="depth3d", line_interval_mm=1.0, overscan_mm=5,
            z_step_mm=0.3, depth_levels=4)
-    d.add_shape(Shape("rect", Geometry(80, 115, 80, 10), d.active_layer_id))
+    add_rect_at_machine(d, 110, 145, 80, 10)
     src = optimized_document_gcode(d)
     maps = two_heights(a=Rect(90, 90, 150, 160), za=2.0, b=Rect(150, 90, 210, 160), zb=3.5)
     res = compensate_for_export(src, maps)
@@ -116,7 +117,9 @@ def test_depth3d_image_across_adjacent_regions(qapp):
     assert {s for s, _ in seen} == {2.0, 3.5}
     assert {o for _, o in seen} == steps
     assert res.report.focus_offset_min == pytest.approx(-0.9, abs=1e-3)
-    assert res.report.z_min == pytest.approx(2 + FOCUS - 0.9, abs=0.01)
+    # tiefste Stufe liegt je nach Spiegelung (Nullpunkt oben rechts, §2.3) auf 2.0 oder 3.5
+    assert res.report.z_min == pytest.approx(min(z for *_, z in burns), abs=0.01)
+    assert res.report.z_min >= 2 + FOCUS - 0.9 - 0.01
 
 
 def test_height_difference_vs_pi_guard():
@@ -149,8 +152,8 @@ def test_send_paths_with_two_heights(qapp, tmp_path, monkeypatch):
         monkeypatch.setattr(win.machine_panel, "send_gcode",
                             lambda name, gcode, start=False: sent.append((gcode, start)))
         doc = win.canvas.document
-        doc.add_shape(Shape("rect", Geometry(50, 50, 40, 30), doc.active_layer_id))    # Maschine 80..120
-        doc.add_shape(Shape("rect", Geometry(210, 50, 40, 30), doc.active_layer_id))   # Maschine 240..280
+        add_rect_at_machine(doc, 80, 80, 40, 30)    # Maschine 80..120
+        add_rect_at_machine(doc, 240, 80, 40, 30)   # Maschine 240..280
         sp = win.scan_panel
         sp.ask = False
         sp.set_maps(two_heights())

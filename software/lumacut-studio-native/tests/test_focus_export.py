@@ -14,6 +14,7 @@ from scanprobe.focus_export import compensate_for_export, job_coverage, precheck
 from scanprobe.geometry import Rect
 from scanprobe.heightmap import MEASURED, HeightMap, HeightMapSet
 from scanprobe.stitch import Mosaic
+from scan_coords import add_rect_at_machine, gcode_rect
 
 FOCUS = FocusSettings().focus_z(0.0)  # Fokus über Oberfläche (5,5 mm)
 
@@ -142,7 +143,7 @@ def test_material_test_grid_with_hatch(qapp):
     doc = Document()
     add_material_test(doc, MaterialTestSpec(columns=3, rows=2, line_interval_mm=1.0))
     src = document_to_gcode(doc)
-    maps = fake_maps(rect=Rect(40, 40, 140, 120), z_fn=lambda x, y: 4.0)
+    maps = fake_maps(rect=gcode_rect(src), z_fn=lambda x, y: 4.0)
     res = compensate_for_export(src, maps)
     assert res.ok, res.errors
     assert res.coverage.outside_mm == 0
@@ -244,7 +245,7 @@ def test_focus_correction_is_automatic_with_mesh(panel, editor, tmp_path):
     """Anforderungen 2026-10-26 §1: keine Auswahl mit/ohne Höhenmesh mehr."""
     from lumacut_job.planner import optimized_document_gcode as document_to_gcode
     assert not hasattr(panel, "focus_check") and not hasattr(panel, "focus_hint")
-    _add_rect(editor, 80, 80, 40, 30)   # Maschine 110..150 / 110..140
+    add_rect_at_machine(editor, 110, 110, 40, 30)   # Maschine 110..150 / 110..140
     plain = document_to_gcode(editor.document)
     assert panel.prepare_job_gcode(plain) == plain          # ohne Mesh: der Auftrag misst selbst
     p = tmp_path / "a.gcode"
@@ -267,7 +268,7 @@ def test_focus_correction_is_automatic_with_mesh(panel, editor, tmp_path):
 def test_stale_mesh_is_an_error_not_a_question(panel, editor):
     import time
     from lumacut_job.planner import optimized_document_gcode as document_to_gcode
-    _add_rect(editor, 80, 80, 40, 30)
+    add_rect_at_machine(editor, 110, 110, 40, 30)
     panel.set_maps(fake_maps(created=time.time() - 48 * 3600))
     assert panel.prepare_job_gcode(document_to_gcode(editor.document)) is None
     assert "alt" in panel.last_error and "neu messen" in panel.last_error
@@ -287,15 +288,19 @@ def test_end_to_end_scan_probe_export(panel, editor, tmp_path):
     assert panel.start_probe() and panel.wait(60000) and panel.last_error == ""
     assert panel.maps.fingerprints            # beim Proben angelegt
     # Design auf dem schrägen Rechteck-Werkstück (Maschine 70..190 / 80..170)
-    _add_rect(editor, 60, 70, 60, 40)
+    add_rect_at_machine(editor, 90, 100, 60, 40)
     p = tmp_path / "c.gcode"
     assert panel.export_gcode(p), panel.last_error
     res = panel.last_focus_export
     assert res.ok and res.coverage.outside_mm == 0
     assert not any("neu proben" in w for w in res.warnings)
-    # Fokus = Oberfläche (3 + 0.008(x-70) + 0.004(y-80)) + 5.5 an der Startecke X90 Y100
-    first = [l for l in p.read_text().splitlines() if l.startswith("G0 Z")][0]
-    assert float(first[4:]) == pytest.approx(3 + 0.008 * 20 + 0.004 * 20 + FOCUS, abs=0.1)
+    # Fokus = Oberfläche (3 + 0.008(x-70) + 0.004(y-80)) + 5.5 an der Startecke
+    # (X90 oder X150 je nach Nullpunkt, Y100)
+    lines = p.read_text().splitlines()
+    first = [l for l in lines if l.startswith("G0 Z")][0]
+    sx, sy = (float(v) for v in re.findall(r"[XY](-?[\d.]+)", [l for l in lines if l.startswith("G0 X")][0]))
+    assert (round(sx), round(sy)) in {(90, 100), (150, 100)}
+    assert float(first[4:]) == pytest.approx(3 + 0.008 * (sx - 70) + 0.004 * (sy - 80) + FOCUS, abs=0.1)
 
 
 def test_main_window_send_uses_focus_option(qapp, tmp_path, monkeypatch):
@@ -308,7 +313,7 @@ def test_main_window_send_uses_focus_option(qapp, tmp_path, monkeypatch):
     sent = []
     monkeypatch.setattr(win.machine_panel, "send_gcode",
                         lambda name, gcode, start=False: sent.append(gcode))
-    _add_rect(win.canvas, 80, 80, 40, 30)
+    add_rect_at_machine(win.canvas, 110, 110, 40, 30)
     plain = document_to_gcode(win.canvas.document)
     win._send_canvas_job()
     assert sent[-1] == plain                            # ohne Mesh unverändert
@@ -373,7 +378,7 @@ def test_relief_raster_with_layer_step_down():
     rjob = job_from_plan(plan_relief(load_db(), "basswood_solid", 2.0), hm, 80.0, 80.0)
     assert rjob.z_step_mm > 0
     code, _ = relief_to_gcode(rjob)
-    res = compensate_for_export(code, fake_maps(z_fn=lambda x, y: 3.0))
+    res = compensate_for_export(code, fake_maps(rect=gcode_rect(code), z_fn=lambda x, y: 3.0))
     assert res.ok, res.errors
     drop = rjob.z_step_mm * (rjob.layers - 1)
     assert res.report.focus_offset_min == pytest.approx(-drop, abs=1e-3)
@@ -401,9 +406,10 @@ def _image(doc, x, y, w, h, **settings):
 def _union_mesh_rect(doc):
     from lumacut_canvas.workarea import to_machine
     bs = [s.bounds() for s in doc.shapes]
-    x0, y0 = to_machine(min(b.x for b in bs), min(b.y for b in bs))
-    x1, y1 = to_machine(max(b.x + b.w for b in bs), max(b.y + b.h for b in bs))
-    return Rect(x0 - 1, y0 - 1, x1 + 1, y1 + 1)
+    ax, ay = to_machine(min(b.x for b in bs), min(b.y for b in bs))
+    bx, by = to_machine(max(b.x + b.w for b in bs), max(b.y + b.h for b in bs))
+    # Nullpunkt oben rechts (Anforderungen 2026-10-26 §2.3): X kann gespiegelt sein
+    return Rect(min(ax, bx) - 1, min(ay, by) - 1, max(ax, bx) + 1, max(ay, by) + 1)
 
 
 @pytest.mark.parametrize("mode", ["grayscale", "floyd", "depth3d"])
@@ -469,8 +475,8 @@ def test_scan_export_matches_send_with_selection_only(qapp, monkeypatch, tmp_pat
     panel.ask = False
     doc = win.canvas.document
     lid = doc.active_layer_id
-    a = doc.add_shape(Shape("rect", Geometry(80, 80, 40, 30), lid))
-    doc.add_shape(Shape("rect", Geometry(140, 80, 40, 30), lid))
+    a = add_rect_at_machine(doc, 110, 110, 40, 30)   # Maschine 110..150 (im Mesh)
+    add_rect_at_machine(doc, 170, 110, 40, 30)
     sent = []
     monkeypatch.setattr(win.machine_panel, "send_gcode",
                         lambda n, g, start=False: sent.append(g))

@@ -224,7 +224,8 @@ def test_full_guided_run_against_fake_pi(win):
         # Rahmen braucht ein Design
         assert p.state("frame").status in (READY, BLOCKED)
         doc = win.canvas.document
-        doc.add_shape(Shape("rect", Geometry(60, 60, 80, 40), doc.active_layer_id))
+        from scan_coords import screen_rect   # Maschine 90..170 / 90..130, auf dem Werkstück (§2.3)
+        doc.add_shape(Shape("rect", Geometry(*screen_rect(90, 90, 80, 40)), doc.active_layer_id))
         win.canvas.documentChanged.emit()
         assert _wait(lambda: p.state("frame").status == READY)
         assert p.selected_key() == "frame" and p.run_selected()
