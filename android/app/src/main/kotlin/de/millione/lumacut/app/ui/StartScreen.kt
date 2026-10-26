@@ -51,6 +51,7 @@ private fun blocker(s: MachineStatus?, online: Boolean?, host: String): String? 
     !s.connected -> "Der Laser-Controller ist nicht verbunden – USB-Kabel am Pi prüfen."
     s.emergency_latched -> "Not-Aus ist aktiv – SKR zurücksetzen, dann unter Maschine quittieren."
     !s.ownerFree -> "Der Laser wird gerade von ${s.owner} benutzt – dort zuerst trennen."
+    "autorun_mesh" !in s.features -> "Der Pi kennt den automatischen Ablauf noch nicht – Pi-Dienst aktualisieren."
     else -> null
 }
 

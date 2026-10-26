@@ -6,7 +6,6 @@ import okhttp3.mockwebserver.MockWebServer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class MaterialApiTest {
@@ -69,11 +68,11 @@ class MaterialApiTest {
     }
 
     @Test fun `job progress carries probe done and total`() = runBlocking {
-        val body = """{"connected":true,"job":{"file":"a.gcode","state":"probing","line":0,"total":200,"probe":{"done":3,"total":12}}}"""
+        val body = """{"connected":true,"job":{"file":"a.gcode","state":"probing","line":0,"total":200,"probe":{"done":3,"total":12}},"features":["autorun_mesh","materials"]}"""
         val srv = MockWebServer().apply { enqueue(MockResponse().setBody(body)); start() }
         val s = PiClient("127.0.0.1", srv.port).status()
         assertTrue(s.job.active); assertEquals(3, s.job.probe.done); assertEquals(12, s.job.probe.total)
-        assertNull(null)
+        assertTrue("autorun_mesh" in s.features)
         srv.shutdown()
     }
 }

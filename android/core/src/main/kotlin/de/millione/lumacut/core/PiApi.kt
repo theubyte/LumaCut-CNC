@@ -75,6 +75,8 @@ data class MachineStatus(
     val config: PiConfig = PiConfig(),
     val camera: CameraInfo = CameraInfo(),
     val recent: List<String> = emptyList(),
+    /** Pi capabilities: "autorun_mesh" (op=autorun probes and corrects itself), "materials" (/api/materials). */
+    val features: List<String> = emptyList(),
 ) {
     val ownerFree get() = owner == "Frei" || owner.isBlank()
     val probeOffset: Pt? get() = probe_xy_offset_mm?.takeIf { it.size == 2 }?.let { Pt(it[0], it[1]) }
