@@ -183,6 +183,57 @@ Hauptweg, drei Schritte, immer sichtbar:
   gesendet;
   (6) `job.probe` nach dem Abtasten stehen lassen (ist so – bitte beibehalten).
 
+### 6.1 Nächste Aufgaben für Claude (priorisiert, Stand main 2026-10-26, von Grok gegen den Code geprüft)
+
+**Pi (`pi400/marlin/`, ohne Firmware-Änderung)**
+
+1. **Warteschlange über Autorun.**
+   - Ist: `_queue_worker` ruft `_execute_job(item, commands)` ohne `auto`, also ohne Abtasten/Fokus; `queue_run` lehnt ab mit „Vor der Warteschlange referenzieren“.
+   - Ziel: Jeder Auftrag läuft wie `op=autorun`: referenzieren nur wenn nötig, abtasten, Fokus/Höhenkorrektur, lasern, parken. Keine Referenzfahrt-Pflicht vor `queue_run`.
+   - Dateien: `web.py` (`queue_run`, `_queue_worker`, `auto_plan` beim `queue_add` mit eingefrorener Platzierung).
+   - Abnahme: `queue_run` unreferenziert → `job.state` homing → probing (mit `job.probe`) → running → complete je Eintrag. Fehler/Abbruch stoppt die Warteschlange, der Rest bleibt „wartet“. Pi-Test mit zwei Einträgen.
+2. **Relatives Z bei Mehrfach-Durchgängen.**
+   - Ist laut Code: `focus_compensation.compensate` rechnet `G91`/`G0 Z-…`/`G90` nur bei `op=autorun` mit `compensate=True` (Auftrag ohne eigenes absolutes Z) als Versatz auf die Kartenhöhe ein. Grenzen: max. 20 mm, nie unter Oberfläche + 2 mm, sonst Fehler „Fokus-Absenkung führt unter Oberfläche + 2 mm“. Bei `op=start`, Warteschlange und Aufträgen mit eigenem Z gehen die Zeilen roh an Marlin.
+   - Ziel: bestätigen, dass das gewollt ist. Die Warteschlange bekommt die Kompensation mit Aufgabe 1.
+   - Abnahme: Satz in `docs/PI_API_REFERENZ.md` (autorun/queue) und ein Test mit 2 Durchgängen und Absenkung.
+3. **`job.phase` und klare `job.error`.**
+   - Ist: kein `job.phase`. `_execute_job` setzt bei Autorun zuerst kurz `running` mit `line=0` und erst dann homing/probing. Nach der letzten Zeile bleibt `running` (Puffer leeren + `park_safezone`).
+   - Ziel: `job.phase` ∈ `homing/probing/focusing/running/parking` (Studio nimmt es vorrangig, `src/machine/client.py JobState`). Den Autorun direkt mit homing/probing beginnen. `job.error` als ein deutscher Satz (die heutigen Texte aus PI_API_REFERENZ beibehalten).
+   - Endpunkt: `/api/status` `job`.
+   - Abnahme: kein `running`/`line=0` vor dem Abtasten; `parking` während `park_safezone`.
+4. **Abbruch/Not-Aus in jeder Phase.**
+   - Ist: Abtasten prüft `stop_job` vor jedem Punkt, Laufen vor jeder Zeile, Not-Aus = `stop_job` + M112. `transport.safe_home` prüft `stop_job` nicht: Abbrechen während der Referenzfahrt wirkt erst danach.
+   - Ziel: `safe_home` abbrechbar machen, Laser zwischen den Phasen aus.
+   - Abnahme: `op=abort` während homing/probing/running/parking → `job.state=aborted`, `job.error="Abgebrochen"`, M5 und Parken. ⚠ am Gerät prüfen.
+5. **Materialien-API für alle drei Apps.**
+   - Ist: `/api/materials` GET/POST/PUT/DELETE mit `revision`/`base_revision` und 409 + `revision`. Kein `ETag`/`If-Match`.
+   - Ziel: Revision bleibt der Vertrag (Windows `lumacut_materials/remote.py` und Android `PiMaterials.kt` nutzen sie). Optional zusätzlich `ETag: "<revision>"`. Pi-Web (`index.html`) nutzt dieselbe API.
+   - Abnahme: Änderung in einer App ist nach Neuladen in den anderen sichtbar, gleichzeitiges Speichern → 409.
+6. **(optional, Nutzer hat nicht entschieden)**
+   - `Origin`/`Referer`-Prüfung gegen Cross-Site-POST: heute keine.
+   - JSON-Fehlerhandler für alle Ausnahmen: `handle_error` deckt nur HTTP/Conflict/NotFound/Value/Runtime/Permission/Timeout/Connection ab, andere fallen durch.
+   - `api_version` in `/api/status`.
+   - Abnahme: nur nach Freigabe durch den Nutzer.
+
+**Android (`android/`)**
+
+1. **Gespiegelte Anzeige und Jog-Kreuz.**
+   - Ist (`6c48868`): `Work`/`Geometry.kt` `machine_x = 390 − x`, `machine_y = 30 + y`, Jog links = X+, unten = Y+. Das passt zu Studio §2.3.
+   - Ziel: Am Tablet prüfen, dass der Nullpunkt oben rechts (Endschalter-Seite) liegt, X+ den Kopf nach links und Y+ zur Tür fährt.
+   - Abnahme: Rahmen eines Testrechtecks oben rechts liegt am Gerät an der gezeigten Stelle. ⚠ am Gerät.
+2. **Phasenanzeige.**
+   - Ist: Android liest `job.state` und `job.probe`.
+   - Ziel: zusätzlich `job.phase` lesen (sobald Pi-Aufgabe 3 fertig ist). „Letzte Bahnen, dann Parken“ bei `running` und `line == total`, nie „Laser aus“ vor `complete`.
+3. **Ein Start-Button über `op=autorun`.**
+   - Ist: erledigt (`StartScreen.kt`, `PiApi.kt`), gesperrt ohne `autorun_mesh`.
+   - Abnahme: Test `MaterialApiTest` bleibt grün.
+4. **Materialliste aus `/api/materials`.**
+   - Ist: erledigt (`PiMaterials.kt`, 409 → neu laden).
+5. **`coord_convention` auswerten.**
+   - Ist: Android liest das Feld nicht (kein Treffer in `android/`).
+   - Ziel: `/api/status` `coord_convention` lesen. Bei fehlendem oder unbekanntem Wert Start und Rahmen sperren mit „Pi-Dienst aktualisieren“ (wie Studio `wire_anchor`, `tests/test_origin_end_to_end.py`).
+   - Abnahme: Unit-Test mit und ohne Feld.
+
 ## Änderungslog
 
 - 2026-10-26 Claude: Dokument angelegt; Koordinaten vom Besitzer bestätigt (Endschalter hinten rechts von der Tür aus).
@@ -192,3 +243,4 @@ Hauptweg, drei Schritte, immer sichtbar:
 - 2026-10-26 Grok (Machine-Agent): Abschnitt 6 – Studio-Erwartungen an `op=autorun`/Statusfelder (nur Abschnitt 4 nötig, `job.phase` optional) und Wünsche an den Pi-Ablauf (Abbruch je Phase, Fehlertext, Warteschlange mit Automatik).
 - 2026-10-26 Grok (Machine-Agent): Studio liest die Phasen wie `web.py` sie sendet (kein `job.phase`; „Parken“ = `running` mit `line == total`) und das Merkmal `autorun_mesh` aus `features`. Keine API-Änderung am Pi nötig. Offene Wünsche an den Pi-Teil siehe Abschnitt 6 und `ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` §1.3 (Warteschlange über Autorun, relatives Z bei Mehrfach-Durchgängen).
 - 2026-10-26 Grok (Machine-Agent): Abschnitt 6 – Abgleich Studio ↔ `web.py` (Statusfelder, Fehlertexte, Abbruch je Phase, relatives Z, Warteschlange) und sechs optionale Wünsche an den Pi-Teil. Keine Pi-Änderung.
+- 2026-10-26 Grok (Machine-Agent): Abschnitt 6.1 – priorisierte Aufgabenliste für Claude (Pi, Android), gegen den Code auf main geprüft.
