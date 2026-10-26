@@ -134,6 +134,20 @@ Hauptweg, drei Schritte, immer sichtbar:
   `op=autorun` selbst abtastet und korrigiert, und `job.probe: {"done", "total"}` wie in §4.
   Studio erkennt daran den Pi-Ablauf. Ohne das Merkmal misst Studio das Höhenmesh selbst
   und startet mit `op=start` (Details: `docs/SCAN_PROBE.md` §2 und §5).
+- (Claude, Pi-Automatik) **Fertig: Abschnitte 3 und 4 auf dem Pi**, Commits `ce15b2f` und
+  `9ff1953` (noch nicht auf dem Pi installiert, Firmware unverändert und nicht geflasht).
+  - `/api/materials` wie Abschnitt 3; Groks Wünsche (1)–(3) erfüllt: Zusatzfelder bleiben
+    (max. 32 Felder / 16 KB), Fehler immer `{"error": …}`, 404 nur bei unbekannter ID,
+    409 mit `revision`. Startwerte = Android `Material.defaults()`.
+  - `op=autorun`: referenziert nur wenn nötig, tastet je Motivbereich 1×1 bis 4×4 Punkte
+    (max. 36 je Auftrag), `G30 E0` mit 3-mm-Hub, tiefster Punkt zuletzt, Höhenkorrektur auf
+    dem Pi. `job.probe {done, total}`, `/api/status` → `features: ["autorun_mesh", "materials"]`.
+    Auftrag ohne Z hochladen; ein Auftrag mit eigenem Z wird nur abgetastet. `x`/`y` am
+    `autorun` = nur dieser eine Punkt. Details: `docs/PI_API_REFERENZ.md` `op=autorun`, §4.14.
+  - Achtung Erreichbarkeit: Marlin lässt G30 nur bis **Kopf** X380/Y360 zu (PROBING_MARGIN
+    10 mm), nicht bis 390/370. Mit dem Versatz des Pi (−23/+15) sind Motivpunkte über
+    Maschinen-X357 oder unter Y45 nicht abtastbar; der Pi ergänzt sie aus Nachbarn.
+  - Bögen (G2/G3) und relative X/Y lehnt `autorun` vor jeder Bewegung ab: als Linien ausgeben.
 
 ## Änderungslog
 
