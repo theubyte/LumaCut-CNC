@@ -121,7 +121,7 @@ Geprüft gegen `pi400/marlin/web.py`, `scanprobe/job_flow*.py`, `main_view.py`, 
 | Schließen während Auftrag | `confirm_close` fragt nach | – |
 | Workflow-Senden | `lumacut_workflow/qt.py:166` ruft `send_gcode(..., start=True)` (ohne Automatik) | Workflow-Besitzer: `autorun=True` |
 | Mehrfach-Durchgänge mit relativem Z | Canvas schreibt `G91`/`G0 Z…`; Pi tastet dann nur ab | Claude: klären, ob kompensiert wird |
-| Nullpunkt §2.3 | Studio-Maschinenseite + Pi fertig; Canvas-Spiegelung noch nicht auf main | Canvas/Scan Probe: §2.3 pushen; danach greift `test_visible_top_right_is_near_switch_corner` (jetzt übersprungen) |
+| Nullpunkt §2.3 | Studio-Maschinenseite + Pi fertig; Canvas (`3b79ab6`) und Scan Probe auf main, `test_visible_top_right_is_near_switch_corner` läuft | ⚠ physische Prüfung am Gerät |
 | ⚠ Hardware | Jog-Richtungen (X+ links, Y+ zur Tür), Lage des Testrechtecks, Abtastraster am Gerät | Nutzer am Gerät |
 
 ## 2. Nullpunkt und Achsen
@@ -225,7 +225,7 @@ Die Apps bilden einfach die echte Maschine ab.
 
 ### 2.3 Umsetzung Canvas (Studio Windows, 2026-10-26)
 
-**Status: Canvas-Seite fertig und getestet, Push gehalten.** Gepusht wird erst, wenn Scan Probe nachzieht. Sonst wird CI rot: Ohne die Scan-Änderungen schlagen 31 Scan- und Fokus-Tests fehl.
+**Status: auf `main` (`3b79ab6`, Schalter an; Helfer `c75182b`).** Gepusht nach dem Scan-Probe-Teil (`f00485e`, `3c3a801`, `d8b4528`); volle Studio-Suite grün. Raster: Bildspalte 0 liegt bei `390 − x` (großes Maschinen-X), Test `test_origin_top_right.py::test_raster_column_0_lands_at_large_machine_x`. Der Kamera-Scan-Knopf der Hauptansicht ruft jetzt `ScanPanel.camera_scan()`.
 
 **Ein Schalter, eine Stelle (`lumacut_canvas/workarea.py`):**
 - `ORIGIN_TOP_RIGHT = True` ist der einzige Schalter.
@@ -413,7 +413,7 @@ Offen:
 | Thema | Zuständig | Status |
 |---|---|---|
 | Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1); großer Start-Knopf der Hauptansicht ruft `one_click.start` (Canvas, §5.1); Maschinen-Panel erledigt (§1.2: „Datei-Auftrag starten“ → `op=autorun`, Service-Gruppe „Erweitert“, Phasenanzeige mit echten Pi-Feldern inkl. „Parken“, Hinweis ohne `autorun_mesh`, `autorun_task` für platzierte Ein-Klick-Aufträge); Lücken §1.3; Pi-Code fertig, auf dem Pi noch nicht installiert |
-| Nullpunkt oben rechts | Canvas + Machine + Scan Probe | Maschinenseite erledigt (`ce7da00`, §2.2; Ende-zu-Ende-Test Export → Pi-Platzierung → Rahmen, alter Pi: `tests/test_origin_end_to_end.py`); Canvas fertig und getestet; Scan Probe erledigt (`f00485e`, `3c3a801`, §2.3), Canvas kann pushen; danach physische Prüfung am Gerät |
+| Nullpunkt oben rechts | Canvas + Machine + Scan Probe | Maschinenseite erledigt (`ce7da00`, §2.2; Ende-zu-Ende-Test Export → Pi-Platzierung → Rahmen, alter Pi: `tests/test_origin_end_to_end.py`); Canvas auf main (`3b79ab6`, §2.3); Scan Probe erledigt (`f00485e`, `3c3a801`, `d8b4528`, §2.3); offen: physische Prüfung am Gerät |
 | Kamera-Scan als Button | Scan Probe | Studio erledigt (§3); Android: Vertrag vorbereitet, kein Code |
 | Probing immer im Auftrag (keine Auswahl) | Scan Probe | Studio erledigt (§1.1) |
 | Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | Pi-API fertig (Variante B, Revision); Studio gegen den echten Pi-Dienst geprüft (§4.1); Android angebunden; Pi-Web offen |

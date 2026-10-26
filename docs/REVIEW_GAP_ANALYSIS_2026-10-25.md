@@ -82,8 +82,9 @@ M 1–3 days, L > 3 days. Status after this pass in **bold**.
 Ctrl+Shift+A (frame selection). XCS uses Ctrl+wheel for zoom and plain wheel to scroll, plus
 fit-width/height/screen. LumaCut now has explicit anchoring at the event position (wheel and
 pinch), pixel-delta trackpads, clamped 0.4–60 px/mm, fit-to-selection (Ctrl+Shift+A, falls back
-to all objects, then the work area). Kept the LightBurn convention (plain wheel = zoom). Still
-open: zoom % field / fit-width buttons, Shift+wheel horizontal pan.
+to all objects, then the work area). Kept the LightBurn convention (plain wheel = zoom). Done
+since (Canvas, §13): zoom % menu with presets and a „100 %“ button next to „Einpassen“ (9658b85),
+Shift+wheel / sideways wheel pans horizontally (88ea265).
 
 **Material automation.** Test grid done; every cell is a real layer, so a grid that worked can be
 copied straight into a preset. Needed from the Materials agent: library with material +
@@ -178,8 +179,8 @@ off the extraction during cutting). Air assist needs its own output (e.g. a free
 pin with a dedicated M-code such as `M106 P<n>`) plus a matching guard rule on the Pi before a
 layer field makes sense.
 
-Still open: path preview overlay (#14), kerf/tabs/lead-in (#12), vector fill/hatch (#11), PDF
-import, job queue, raster streaming (#18). Error diffusion on very large images is slow
+Still open at the time: path preview overlay (#14), kerf/tabs/lead-in (#12), vector fill/hatch
+(#11), PDF import, job queue, raster streaming (#18) – all done since, see §9–§11 and §13. Error diffusion on very large images is slow
 (pure-Python inner loop).
 
 
@@ -201,7 +202,7 @@ Done and pushed to `main` (G-code checked against `MarlinLaserGuard` in tests):
   (upload only, start stays manual) and save-as-file; „G-Code speichern…“ (Alt+G) for offline use.
 - **Shortcut overview**: Hilfe › Tastenkürzel (F1), collected live from all window actions.
 
-Still open: unit toggle mm/inch (touches canvas widgets → Canvas), PDF import (no small,
+Still open (at the time; unit toggle, #13, #16, #17, #18 and PDF import done since, see §10–§13): unit toggle mm/inch (touches canvas widgets → Canvas), PDF import (no small,
 permissively licensed vector-PDF reader; PyMuPDF is AGPL), multi-job queue on the Pi (Machine),
 boolean/node/offset/array tools (#13, Canvas), origin options (#16, Machine), raster streaming
 (#18, Pi), lead collision check against neighbouring parts, Windows hardware test of the new
@@ -237,13 +238,14 @@ Done (review side, pushed to `main`, G-code checked against `MarlinLaserGuard` w
   now runs `python build_exe.py`; a test keeps `OWN_PACKAGES` in sync with `src/`.
 
 Caveats: the path preview overlay (Canvas) and the scan/probe panel still show the whole design,
-not the selection; the thin-ring merge is a heuristic (≤0.5 mm ring width) and can merge a real
+not the selection (path preview fixed since: follows „Nur Auswahl“, 6bd4b8c, §13; scan/probe panel
+still whole design – Scan Probe); the thin-ring merge is a heuristic (≤0.5 mm ring width) and can merge a real
 very thin outline frame.
 
 Done meanwhile by the Machine agent: origin options (#16; absolute / current position / user
 origin, `op=place`, fd7601c + ed96c63).
 
-Still open: unit toggle mm/inch, boolean/node/offset/array (#13) – Canvas; multi-job queue on the
+Still open: ~~unit toggle mm/inch~~ (done, a73bfe7), ~~boolean/node/offset/array (#13)~~ (done, §11) – Canvas; multi-job queue on the
 Pi (#17) – Machine; raster streaming (#18) – Pi; Windows hardware test of
 cut options, PDF import and the rebuilt exe – needs a Windows machine with the laser.
 
@@ -283,7 +285,7 @@ Tests: `tests/test_trace.py` (12), `tests/test_serial_numbers.py` (7).
 
 Still open:
 
-- Unit toggle mm/inch – Canvas.
+- ~~Unit toggle mm/inch – Canvas.~~ Done (a73bfe7, §13).
 - Job placement on the camera image (rest of #16) – Machine / Scan Probe.
 - Variable text evaluated at send time with an auto-incrementing counter (CSV/merge, counter
   persisted per job) – the batch grid covers the common case; decide if the job-time variant is
@@ -324,7 +326,7 @@ finishes or is refused within the time limit, time limit and size cap, preview r
 
 Still open:
 
-- Unit toggle mm/inch – Canvas.
+- ~~Unit toggle mm/inch – Canvas.~~ Done (a73bfe7, §13).
 - Job placement on the camera image (rest of #16) – Machine / Scan Probe.
 - Variable text evaluated at send time with an auto-incrementing counter (CSV/merge, counter
   persisted per job) – the batch grid covers the common case; decide if the job-time variant is
@@ -336,3 +338,36 @@ Still open:
   that limit is possible now but costs memory and time.
 - Windows hardware test of cut options, PDF import, image trace and the rebuilt exe – needs a
   Windows machine with the laser.
+
+## 13. Status update 2026-10-26 (Canvas)
+
+Done and pushed to `main` (Canvas agent; full Studio suite green offscreen before each push):
+
+- **Coordinate helpers** (c75182b): all screen ↔ user ↔ machine conversions go through
+  `lumacut_canvas/workarea.py` (`screen_to_machine`, `machine_to_screen`, `machine_rect_to_screen`,
+  `screen_to_user`, `axis_tooltips`, …). `ORIGIN_TOP_RIGHT` exists only there.
+- **Origin top right** (3b79ab6, `docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` §2.3):
+  `ORIGIN_TOP_RIGHT = True`, machine = (390 − x, 30 + y); file marker `coords` =
+  `screen-tl/machine-tr-v2`, unknown conventions are refused. Pushed together with Scan Probe's
+  part (f00485e, 3c3a801, d8b4528). Raster export: image column 0 (left edge on screen) lands at
+  the large machine X, checked by `test_origin_top_right.py::test_raster_column_0_lands_at_large_machine_x`.
+- **Units mm/inch** (a73bfe7): action bar toggle „mm/Zoll“ (Ctrl+Shift+U), saved in QSettings.
+  Storage, G-code and raster stay in mm; rulers, property bar, cursor readout and all
+  `LengthSpin` fields convert for display only and accept `25,4 mm`, `1 in`, `1″`. Layer and
+  material dialogs stay in mm (process values).
+- **Zoom** (9658b85): „100 %“ (Ctrl+1, physical size) next to „Einpassen“; the zoom % label is a
+  menu with 25/50/100/200/400/800 %.
+- **Pan** (88ea265): Shift+wheel and sideways wheel/trackpad scroll horizontally.
+- **Path preview = job** (6bd4b8c): with „Nur Auswahl“ the preview computes only the selection
+  (readout „Nur Auswahl · …“), rebuilds on selection change; nothing selected shows the job's
+  message instead of a path.
+- **Kamera-Scan** in the main view calls `ScanPanel.camera_scan()` (switches to the Pi camera when
+  connected), falling back to `start_scan()` on older panels.
+
+Still open / for others:
+
+- Scan/probe panel areas still use the whole design, not „Nur Auswahl“ – Scan Probe.
+- Old toolbar start in `main.py` should also go to `one_click.start` (§1.1 answer 1) – owner of
+  that block (Machine).
+- Physical check on the machine after homing (X+10 moves left, Y+10 towards the door, test rectangle
+  position) – user at the machine.
