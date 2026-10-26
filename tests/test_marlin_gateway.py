@@ -954,6 +954,166 @@ with web.app.test_client() as client:
     m.owner = None
 """)
 
+    FRAME_GCODE = ("; LUMACUT FRAME (laser off)\nG21\nG90\nM5 I\nG0 X60.000 Y60.000\n"
+                   "G1 X120.000 Y60.000 F3000 S0\nG1 X120.000 Y110.000 F3000 S0\n"
+                   "G1 X60.000 Y110.000 F3000 S0\nG1 X60.000 Y60.000 F3000 S0\nM5 I\nM400\n")
+
+    def test_frame_keeps_uploaded_job_and_never_fires_laser(self):
+        # op=frame through the real transport: the uploaded job file, the
+        # job list and the job state stay byte-for-byte identical, and Marlin
+        # never sees M3 or a non-zero S.
+        self._run_web_script(r"""
+import re, time
+from marlin import web
+from marlin.transport import MarlinTransport
+FRAME = %r
+
+class Sim:
+    def __init__(self):
+        self.pos = [150.0, 150.0, 40.0]
+        self.out = []
+        self.writes = []
+    def write(self, raw):
+        cmd = raw.decode().strip()
+        self.writes.append(cmd)
+        reply = []
+        if cmd == "M115":
+            reply += ["FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin", "Cap:Z_PROBE:1"]
+        elif cmd == "M114":
+            reply.append("X:%%.2f Y:%%.2f Z:%%.2f E:0.00 Count X:0 Y:0 Z:0" %% tuple(self.pos))
+        elif cmd.startswith("G28"):
+            self.pos = [0.0, 0.0, 0.0] if cmd == "G28 Z" else [0.0, 0.0, self.pos[2]]
+        elif re.match(r"G[01] ", cmd):
+            for i, axis in enumerate("XYZ"):
+                m = re.search(axis + r"([-+]?[0-9.]+)", cmd)
+                if m and " G91" not in " ".join(self.writes[-3:]):
+                    self.pos[i] = float(m.group(1))
+        elif cmd == "M119":
+            reply += ["Reporting endstop status", "z_min: open"]
+        self.out += [r + "\n" for r in reply] + ["ok\n"]
+        return len(raw)
+    def readline(self):
+        return self.out.pop(0).encode() if self.out else b""
+    def reset_input_buffer(self):
+        pass
+    def close(self):
+        pass
+
+sim = Sim()
+web.machine = m = MarlinTransport("/dev/null", serial_factory=lambda *a, **k: sim)
+m.homing_verified = True
+m.ensure_ready()
+job_text = "G21\nG90\nM5 I\nG0 X80 Y80\nM3 I\nG1 X100 Y80 F1500 S60\nM5 I\n"
+with web.app.test_client() as c:
+    r = c.post("/api/action", data={"op": "frame", "gcode": FRAME})
+    assert r.status_code == 400 and "referenzieren" in r.get_json()["error"], r.data
+    m.homed = True
+    m.state = "Idle"
+    import io
+    r = c.post("/api/upload", data={"file": (io.BytesIO(job_text.encode()), "Schild.gcode")})
+    assert r.status_code == 200, r.data
+    web.job.update(file="Schild.gcode", state="complete", line=7, total=7, error="")
+    before_job = dict(web.job)
+    before_files = sorted(p.name for p in web.JOBS.iterdir())
+    before_text = (web.JOBS / "Schild.gcode").read_bytes()
+    sent_before = len(sim.writes)
+    r = c.post("/api/action", data={"op": "frame", "mode": "hull", "gcode": FRAME})
+    assert r.status_code == 200, r.data
+    assert "Gummiband" in r.get_json()["message"], r.data
+    for _ in range(200):
+        if web.frame["state"] != "running":
+            break
+        time.sleep(0.02)
+    assert web.frame["state"] == "complete", web.frame
+    assert web.frame["mode"] == "hull" and web.frame["line"] == web.frame["total"], web.frame
+    assert web.job == before_job, (web.job, before_job)
+    assert sorted(p.name for p in web.JOBS.iterdir()) == before_files
+    assert (web.JOBS / "Schild.gcode").read_bytes() == before_text
+    framed = sim.writes[sent_before:]
+    assert not any(w.startswith("M3") for w in framed), framed
+    assert all(re.search(r"S0*[1-9]", w) is None for w in framed if w.startswith("G")), framed
+    assert "G1 X120.000 Y110.000 F3000 S0" in framed and framed[-1] in ("M5 I", "M400", "M114"), framed
+    assert framed.count("M400") >= 5, "waits per edge so abort stops at the next corner"
+    assert m.laser_enabled is False and m.owner is None and not web.job_lock.locked()
+    status = c.get("/api/status").get_json()
+    assert status["frame"]["state"] == "complete" and status["activity"] == "idle", status
+    assert status["job"] == before_job
+""" % self.FRAME_GCODE)
+
+    def test_frame_refusals_validation_and_abort(self):
+        self._run_web_script(r"""
+from marlin import web
+FRAME = %r
+m = web.machine
+m.serial = object()
+m.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+m.state = "Idle"
+m.homing_verified = True
+sent = []
+m.command = lambda cmd, **k: sent.append((cmd, k.get("owner")))
+with web.app.test_client() as c:
+    post = lambda **d: c.post("/api/action", data=dict(op="frame", **d))
+    m.homed = False
+    r = post(gcode=FRAME)
+    assert r.status_code == 400 and "referenzieren" in r.get_json()["error"], r.data
+    m.homed = True
+    for bad, why in (("G0 X50 Y50\nM3 I\nG1 X60 Y50 S100\n", "M3"),
+                     ("G1 X60 Y50 F3000 S10\n", "S"),
+                     ("G0 X50 Y50 Z3\n", "Z"),
+                     ("G91\nG0 X5\n", "G91"),
+                     ("G2 X60 Y60 I5 J0\n", "G2"),
+                     ("G0 X50 Y500\n", "travel"),
+                     ("G0 X-1 Y50\n", "negative"),
+                     ("M106 S255\nG0 X50 Y50\n", "fan"),
+                     ("; only comment\nM5 I\n", "no move"),
+                     ("", "empty")):
+        r = post(gcode=bad)
+        assert r.status_code == 400 and "error" in r.get_json(), (why, r.data)
+    r = post(gcode=FRAME, mode="spiral")
+    assert r.status_code == 400, r.data
+    assert sent == [], sent
+    # While a job runs: owner is "job" -> refused, nothing sent.
+    web.job.update(file="Schild.gcode", state="running")
+    web.job_lock.acquire()
+    m.owner = "job"
+    r = post(gcode=FRAME)
+    assert r.status_code == 400 and "job" in r.get_json()["error"], r.data
+    m.owner = None
+    r = post(gcode=FRAME)
+    assert r.status_code == 400 and "läuft bereits" in r.get_json()["error"], r.data
+    assert sent == [] and web.job["state"] == "running", sent
+    web.job_lock.release()
+    web.job.update(state="complete")
+    # While framing: a job start is refused with a clear message.
+    m.owner = "frame"
+    r = c.post("/api/action", data={"op": "start", "name": "Schild.gcode"})
+    assert r.status_code == 400 and "Rahmenfahrt" in r.get_json()["error"], r.data
+    m.owner = None
+    # op=abort reaches a running frame.
+    web.frame["state"] = "running"
+    web.stop_job.clear()
+    r = c.post("/api/action", data={"op": "abort"})
+    assert r.status_code == 200 and web.stop_job.is_set(), r.data
+    assert c.get("/api/status").get_json()["activity"] == "framing"
+# Worker: abort after the first edge -> stops, laser off, lock released.
+cmds = web.frame_program(FRAME)
+sent.clear()
+def stop_on_first_edge(cmd, **k):
+    sent.append(cmd)
+    if cmd.startswith("G1"):
+        web.stop_job.set()
+m.command = stop_on_first_edge
+web.stop_job.clear()
+web.job_lock.acquire()
+m.owner = "frame"
+web.frame.update(state="running")
+web._frame_worker(cmds)
+assert web.frame["state"] == "aborted", web.frame
+assert [c for c in sent if c.startswith("G1")] == ["G1 X120.000 Y60.000 F3000 S0"], sent
+assert sent[-1] == "M5 I" and m.owner is None and not web.job_lock.locked(), sent
+assert web.job["state"] == "complete"
+""" % self.FRAME_GCODE)
+
     def test_one_click_end_to_end_against_simulated_marlin(self):
         # Studio output -> Pi preflight -> home -> G30 -> focus -> cut -> park,
         # all through the real transport against a stateful Marlin model.
