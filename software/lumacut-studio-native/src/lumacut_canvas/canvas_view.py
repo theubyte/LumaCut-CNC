@@ -84,12 +84,28 @@ class CanvasScene(QGraphicsScene):
             self.removeItem(self.items_by_id.pop(sid))
 
     def editable_shape_at(self, pos: QPointF) -> str | None:
-        """Oberstes anklickbares Objekt (sichtbare, ungesperrte Ebene) an ``pos``."""
-        for item in self.items(pos, Qt.IntersectsItemShape, Qt.DescendingOrder):
-            if isinstance(item, ShapeItem) and self.doc.has_shape(item.shape_id) \
-                    and self.doc.is_editable(item.shape_id):
-                return item.shape_id
-        return None
+        """Anklickbares Objekt (sichtbare, ungesperrte Ebene) an ``pos``.
+
+        Fangbereich: ``ShapeItem.hit_tolerance_mm`` (Bildschirm-Pixel des
+        Touch-Modus, von der View in mm umgerechnet). Liegen mehrere Objekte im
+        Fangbereich, gewinnt
+          1. ein Treffer auf dem Umriss (bzw. im Bild/Text) vor einem Treffer
+             nur im Inneren einer Kontur,
+          2. dann das kleinere Objekt (damit eine dünne Linie oder ein kleines
+             Teil auf/unter einer großen Fläche erreichbar bleibt),
+          3. dann das oberste.
+        """
+        best: tuple | None = None
+        best_id: str | None = None
+        for z, item in enumerate(self.items(pos, Qt.IntersectsItemShape, Qt.DescendingOrder)):
+            if not (isinstance(item, ShapeItem) and self.doc.has_shape(item.shape_id)
+                    and self.doc.is_editable(item.shape_id)):
+                continue
+            local = item.mapFromScene(pos)
+            key = (0 if item.outline_hit(local) else 1, item.hit_area(), z)
+            if best is None or key < best:
+                best, best_id = key, item.shape_id
+        return best_id
 
 
 _TOUCH_EVENTS = (QEvent.TouchBegin, QEvent.TouchUpdate, QEvent.TouchEnd, QEvent.TouchCancel)
@@ -259,7 +275,7 @@ class CanvasView(QGraphicsView):
         mm_per_px = 1.0 / self.px_per_mm
         scene: CanvasScene = self.scene()  # type: ignore[assignment]
         scene.overlay.set_scale(mm_per_px)
-        ShapeItem.hit_tolerance_mm = 5.0 * mm_per_px
+        ShapeItem.hit_tolerance_mm = self.metrics.hit_tolerance_px * mm_per_px
         for item in scene.items_by_id.values():
             item.refresh_hit_area()
         self.viewChanged.emit()

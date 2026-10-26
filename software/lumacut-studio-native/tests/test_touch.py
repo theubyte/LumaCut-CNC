@@ -388,3 +388,45 @@ def test_layers_panel_touch_mode(ed):
     panel.set_touch_mode(False)
     assert panel.list.item(0).sizeHint().height() == 46
     panel.close()
+
+
+# --- Schritt 5: Fangbereich und Trefferpriorität --------------------------
+def test_hit_tolerance_is_screen_pixels_and_grows_in_touch_mode(ed):
+    lid = _rect(ed, 20, 50, 100, 0, kind="line")
+    ed.view.set_zoom(4.0)
+    for zoom in (4.0, 16.0):
+        ed.view.set_zoom(zoom)
+        px = ed.view.px_per_mm
+        near = QPointF(60, 50 + 3.5 / px)    # 3,5 px neben der Linie
+        mid = QPointF(60, 50 + 9.0 / px)     # 9 px daneben
+        far = QPointF(60, 50 + 15.0 / px)    # 15 px daneben
+        ed.set_touch_mode(False)
+        assert ed.scene.editable_shape_at(near) == lid
+        assert ed.scene.editable_shape_at(mid) is None
+        ed.set_touch_mode(True)
+        assert ed.scene.editable_shape_at(mid) == lid
+        assert ed.scene.editable_shape_at(far) is None
+        assert 10 <= touch.TOUCH.hit_tolerance_px <= 14
+
+
+def test_hit_priority_prefers_smaller_object_and_outline(ed):
+    ed.set_touch_mode(True)
+    small = _rect(ed, 40, 40, 10, 10)          # unten
+    big = _rect(ed, 0, 0, 100, 100)            # oben, deckt small ab
+    # Im kleinen Objekt (beide nur innen getroffen): das kleinere gewinnt.
+    assert ed.scene.editable_shape_at(QPointF(45, 45)) == small
+    # Auf dem Umriss des großen (weit weg vom kleinen): das große.
+    assert ed.scene.editable_shape_at(QPointF(100, 60)) == big
+    # Eine dünne Linie unter einer Fläche ist knapp daneben noch greifbar.
+    line = _rect(ed, 10, 80, 30, 0, kind="line")
+    px = ed.view.px_per_mm
+    assert ed.scene.editable_shape_at(QPointF(25, 80 + 8 / px)) == line
+    # Innen in der großen Fläche, fern von allem anderen: die große.
+    assert ed.scene.editable_shape_at(QPointF(75, 30)) == big
+
+
+def test_hit_priority_topmost_wins_for_equal_objects(ed):
+    a = _rect(ed, 10, 10, 30, 30)
+    b = _rect(ed, 12, 12, 30, 30)  # gleich groß, oben
+    assert ed.scene.editable_shape_at(QPointF(25, 25)) == b
+    assert ed.scene.editable_shape_at(QPointF(10, 25)) == a  # nur a im Umriss-Fangbereich (b: 8 px weg)

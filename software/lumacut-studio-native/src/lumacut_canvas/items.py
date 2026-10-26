@@ -32,7 +32,8 @@ ROTATE_HANDLE_OFFSET_PX = MOUSE.rotate_offset_px  # Abstand über der oberen Kan
 class ShapeItem(QGraphicsItem):
     """Ein Vektorobjekt, gezeichnet in der Farbe seiner Ebene."""
 
-    # Klicktoleranz in Pixeln; wird von der View in mm umgerechnet.
+    # Klicktoleranz in mm; die View rechnet TouchMetrics.hit_tolerance_px
+    # (Maus 5 px, Touch 12 px) bei jedem Zoom in mm um.
     hit_tolerance_mm: float = 1.0
 
     def __init__(self, shape: Shape, layer: Layer) -> None:
@@ -40,6 +41,7 @@ class ShapeItem(QGraphicsItem):
         self.shape_id = shape.id
         self._path = QPainterPath()
         self._hit = QPainterPath()
+        self._outline = QPainterPath()  # Fangbereich direkt am Umriss (Trefferpriorität)
         self._color = QColor(layer.color)
         self._kind = shape.kind
         self._geom = shape.geom.copy()
@@ -59,10 +61,11 @@ class ShapeItem(QGraphicsItem):
         self.update()
 
     def _rebuild_hit(self) -> None:
+        stroker = QPainterPathStroker()
+        stroker.setWidth(self.hit_tolerance_mm * 2)
         if self._kind in ("line", "path", "polygon"):
-            stroker = QPainterPathStroker()
-            stroker.setWidth(self.hit_tolerance_mm * 2)
             self._hit = stroker.createStroke(self._path)
+            self._outline = self._hit
             if self._kind == "polygon":  # Polygone sind wie Flächen auch innen anklickbar
                 self._hit = self._hit.united(self._path)
         else:
@@ -70,13 +73,32 @@ class ShapeItem(QGraphicsItem):
             # Die Klickfläche dreht mit dem Objekt mit.
             b = self._geom.local_bounds()
             m = self.hit_tolerance_mm
-            r = QRectF(b.x, b.y, b.w, b.h).adjusted(-m, -m, m, m)
+            body = QRectF(b.x, b.y, b.w, b.h)
+            r = body.adjusted(-m, -m, m, m)
             hit = QPainterPath()
             if self._kind == "ellipse":
                 hit.addEllipse(r)
             else:
                 hit.addRect(r)
-            self._hit = geometry_transform(self._geom).map(hit) if self._geom.rot else hit
+            xf = geometry_transform(self._geom) if self._geom.rot else None
+            self._hit = xf.map(hit) if xf is not None else hit
+            if self._kind in ("text", "image"):
+                # Sichtbar gefüllt: ein Treffer im Objekt zählt wie ein Umriss-Treffer.
+                solid = QPainterPath()
+                solid.addRect(body)
+                self._outline = xf.map(solid) if xf is not None else solid
+            else:
+                self._outline = stroker.createStroke(self._path)
+
+    def outline_hit(self, pos: QPointF) -> bool:
+        """``pos`` (Item-Koordinaten) liegt im Fangbereich des Umrisses bzw. im
+        sichtbar gefüllten Objekt (Text, Bild) – nicht nur im Inneren einer Kontur."""
+        return self._outline.contains(pos)
+
+    def hit_area(self) -> float:
+        """Größe für die Trefferpriorität (mm², Umriss-Box; Linien ≈ 0)."""
+        r = self._path.boundingRect()
+        return abs(r.width() * r.height())
 
     def refresh_hit_area(self) -> None:
         self.prepareGeometryChange()
