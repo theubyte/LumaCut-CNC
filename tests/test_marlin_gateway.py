@@ -673,45 +673,42 @@ class USBProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Laserleistung"):
             bridge.command("G1 X120 Y120 S60", owner="web")
 
-    def test_homing_and_job_done_music_step_frequency_and_restoration(self):
-        for event, notes in (("home", 2), ("done", 3)):
+    def test_melodies_play_on_motor_coils_without_any_motion(self):
+        from marlin.transport import MELODIES
+        for event in ("home", "start", "done"):
             with self.subTest(event=event):
-                serial = FakeSerial(["ok\n"] * 40)
+                serial = FakeSerial(["ok\n"] * 20)
                 bridge = MarlinTransport("/dev/null")
                 bridge.serial = serial
                 bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
                 bridge.homed = True
-                bridge.position = [0.0, 0.0, 20.0]
-                bridge.absolute_mode = True
+                bridge.position = [143.0, 105.0, 20.0]   # anywhere: nothing moves
                 self.assertTrue(bridge._play_stepper_chime_locked(event))
-                writes = serial.writes
-                self.assertIn(b"M5 I\n", writes)
-                self.assertIn(b"M569 S0 X\n", writes)
-                self.assertIn(b"M569 S1 X\n", writes)
-                self.assertIn(b"G91\n", writes)
-                self.assertIn(b"G90\n", writes)
-                self.assertLess(writes.index(b"M569 S0 X\n"),
-                                writes.index(b"M569 S1 X\n"))
-                strokes = [w for w in writes if w.startswith(b"G1 X")]
-                self.assertEqual(len(strokes), notes * 2)
-                self.assertIn(b"F588\n", b"\n".join(strokes) + b"\n")
-                self.assertIn(b"F392\n", b"\n".join(strokes) + b"\n")
-                self.assertEqual(
-                    sum(float(w.decode().split("X")[1].split()[0])
-                        for w in strokes), 0.0)
-                self.assertNotIn(b"G1 Y", b"".join(writes))
-                self.assertFalse(bridge.laser_enabled)
+                expected = [f"M300 S{hz} P{ms}\n".encode() for hz, ms in MELODIES[event]]
+                self.assertEqual(serial.writes, expected)
                 self.assertTrue(bridge.homed)
+                self.assertTrue(bridge.motor_tones_supported)
 
-    def test_music_never_moves_when_park_is_not_verified(self):
-        serial = FakeSerial()
+    def test_no_melody_with_laser_on_or_for_alarms(self):
+        serial = FakeSerial(["ok\n"] * 5)
         bridge = MarlinTransport("/dev/null")
         bridge.serial = serial
         bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
-        bridge.homed = True
-        bridge.position = [143.0, 105.0, 20.0]
-        self.assertFalse(bridge._play_stepper_chime_locked("home"))
+        bridge.laser_enabled = True
+        self.assertFalse(bridge._play_stepper_chime_locked("done"))
+        bridge.laser_enabled = False
+        self.assertFalse(bridge._play_stepper_chime_locked("alarm"))
         self.assertEqual(serial.writes, [])
+
+    def test_old_firmware_without_motor_tones_switches_melodies_off(self):
+        serial = FakeSerial(['echo:Unknown command: "M300 S784 P130"\n', "ok\n"])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        self.assertFalse(bridge._play_stepper_chime_locked("home"))
+        self.assertIs(bridge.motor_tones_supported, False)
+        self.assertFalse(bridge._play_stepper_chime_locked("done"))
+        self.assertEqual(len(serial.writes), 1)
 
     def test_marlin_error_drains_ack_and_keeps_serial_alive(self):
         from marlin.transport import MarlinCommandError
@@ -1318,7 +1315,13 @@ assert w.index("G0 Z8.500 F600") < cuts[0]
 assert w.index("G4 P800") < w.index("M3 I")
 park = w.index("G0 X0.000 Y0.000 F9000")
 assert park > cuts[-1] and w[park - 2].startswith("G0 Z20.000")
-assert w.count("M569 S0 X") == 2, "homing and job-end melodies"
+from marlin.transport import MELODIES
+tones = [c for c in w if c.startswith("M300 ")]
+assert len(tones) == sum(len(MELODIES[e]) for e in ("home", "start", "done")), tones
+first_cut = cuts[0]
+start_tones = [i for i, c in enumerate(w) if c.startswith("M300 ") and w.index("G30") < i < first_cut]
+assert len(start_tones) == len(MELODIES["start"]), "start melody after probing, before the first cut"
+assert "M569 S0 X" not in w, "no driver mode switching from the Pi any more"
 assert "M112" not in w
 assert m.surface_z == 3.0 and abs(m.position[0]) < 0.01 and abs(m.position[1]) < 0.01
 """)

@@ -26,7 +26,7 @@ Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrec
 - 30-mm-Safezone in L-Form (X < 30 oder Y < 30) bleibt werkstückfrei; Schnitte nur bei X ≥ 30 und Y ≥ 30. Parkpunkt X0/Y0.
 - Werkstückoberfläche per G30 mit dem Z-Taster; Fokus standardmäßig 7 mm über dem Material.
 - Laser: PA1 PWM, Marlin `M3 I` (Inline-Modus), S 0–255. Licht `M7` (HE0/PC8), Abluft `M8` (BED/PC9).
-- Motor-Melodien nach erfolgreichem Homing und nach Jobende.
+- Motor-Melodien nach dem Referenzieren, beim Auftragsstart und am Auftragsende – über die Motorspulen, ohne Bewegung.
 - Ein-Klick-Ablauf: Homing → Abtasten → Fokus → Auftrag → Park.
 
 ## Repository

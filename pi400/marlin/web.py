@@ -819,6 +819,9 @@ def _execute_job(filename, commands, probe_point=None):
     if _job_sets_focus(commands):
         machine.focused_this_job = True
     machine.command("M5 I", owner="job")
+    # Start melody on the motor coils (no motion, laser off); a missing or
+    # failing melody never stops the job.
+    machine.play_melody("start", owner="job")
     for i, command in enumerate(commands, 1):
         if stop_job.is_set():
             raise RuntimeError("Abgebrochen")

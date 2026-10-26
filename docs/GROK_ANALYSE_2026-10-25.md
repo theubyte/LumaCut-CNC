@@ -122,8 +122,9 @@ Der Nutzer hat explizit **Marlin** genannt → Fokus auf `firmware/marlin/` und 
 > - Aufträge mit eigenem Z (Höhenkorrektur) überspringen den automatischen Einzelfokus.
 > - **Offen:** Der Lüfter-/Versorgungsnachlauf (180 s) hängt am Pi, nicht an der Hardware.
 >   Fällt der Pi aus, läuft nichts nach.
-> - Melodie: läuft nur nach Homing/Parken, nur bei bestätigter Position X0/Y0 und sicherem Z,
->   mit kleinen hin- und zurücklaufenden X-Wegen in der leeren Ecke; sonst wird sie übersprungen.
+> - Melodie: erledigt. Die Motoren spielen über die Spulen (Firmware-`M300`), der Kopf
+>   bewegt sich nicht mehr, die Position kann dadurch nicht verloren gehen.
+>   Braucht die neue Firmware (geflasht über den Pi).
 
 ### 2.6 Weitere Lücken
 - Kein automatisches SKR-USB-Flashing (Bootloader-abhängig, nur SD/SWD).

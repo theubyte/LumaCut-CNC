@@ -14,6 +14,7 @@ python firmware/marlin/build.py                   # Ergebnis: firmware/marlin/di
 - Fester Z-Taster am Z-MIN-Pin (`FIX_MOUNTED_PROBE`, `Z_SAFE_HOMING` an X0/Y0, Tasterversatz 0, Grenze für zu frühes Auslösen 16 mm).
 - `COOLANT_CONTROL` (M7/M8), `EMERGENCY_PARSER`, `ADVANCED_OK`.
 - `BINARY_FILE_TRANSFER` für Updates über den Pi.
+- **Motortöne `M300 S<Hz> P<ms> [X] [Y]`** (`firmware/marlin/motor_tone.cpp`): Das Board hat keinen Summer, deshalb spielt `M300` auf den Spulen von X und Y. Pro Tonperiode ein Mikroschritt vor und einer zurück, also ohne Bewegung (höchstens 0,0125 mm Ausschlag, Ergebnis exakt 0). Die Treiber schalten dafür kurz von StealthChop auf SpreadCycle (laut) und danach zurück. Strom, Positionszähler und Richtungs-Pins bleiben unverändert. Bei eingeschaltetem Laser lehnt Marlin ab (`echo:LumaCut M300 refused: laser on`). `S0` ist eine Pause, ein Aufruf spielt höchstens 2 s.
 
 Auf GitHub baut `.github/workflows/marlin.yml` die Firmware bei jeder Änderung unter `firmware/marlin/`. Die `firmware.bin` liegt 14 Tage als Download in den Actions. `.bin`-Dateien kommen bewusst nicht ins Repository.
 

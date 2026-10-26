@@ -42,6 +42,7 @@ Die SKR-Firmware wird nie automatisch aktualisiert, siehe [FIRMWARE.md](FIRMWARE
 ## Bedienung (Web-UI `http://lumacut.local:8080`)
 
 - **XYZ referenzieren:** X/Y, dann Z, dann Rückzug 20 mm, danach die Melodie.
+- **Melodien:** nach dem Referenzieren, beim Auftragsstart (nach dem Abtasten, vor dem ersten Laserweg) und am Auftragsende. Die Motoren singen über die Spulen, der Kopf bewegt sich dabei nicht (Firmware-Befehl `M300`, siehe [FIRMWARE.md](FIRMWARE.md)). Bei Alarmen gibt es bewusst keine Töne. Ältere Firmware ohne diesen Befehl spielt einfach nichts.
 - **Werkstück abtasten (G30):** unter der aktuellen Laserposition.
 - **Aufträge:** `.gcode` hochladen. Beim Hochladen prüft der Pi jede Zeile und ob das Motiv in der Safezone liegt.
   - „Auftrag starten“ setzt voraus, dass schon referenziert und abgetastet ist.

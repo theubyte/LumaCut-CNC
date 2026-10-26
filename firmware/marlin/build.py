@@ -190,6 +190,24 @@ PIN_PATCH = """
 """
 
 
+def patch_motor_tone(src: pathlib.Path) -> None:
+    """M300 plays tones on the X/Y stepper coils without moving (no buzzer)."""
+    gcode_h = src / "Marlin/src/gcode/gcode.h"
+    gcode_cpp = src / "Marlin/src/gcode/gcode.cpp"
+    decl = "  #if HAS_SOUND\n    static void M300();\n  #endif\n"
+    dispatch = ("      #if HAS_SOUND\n"
+                "        case 300: M300(); break;                                  // M300: Play beep tone\n"
+                "      #endif\n")
+    h, cpp = gcode_h.read_text(), gcode_cpp.read_text()
+    if h.count(decl) != 1 or cpp.count(dispatch) != 1:
+        raise RuntimeError("Marlin M300 dispatch changed; motor tone patch needs review")
+    gcode_h.write_text(h.replace(decl, "  static void M300(); // LumaCut: beeper or stepper-coil tones\n", 1))
+    gcode_cpp.write_text(cpp.replace(dispatch, "        case 300: M300(); break;  // LumaCut: beeper or stepper-coil tones\n", 1))
+    target = src / "Marlin/src/lumacut"
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / "motor_tone.cpp", target / "motor_tone.cpp")
+
+
 def run(*argv: str, cwd: pathlib.Path | None = None, timeout: int = 600):
     print("+", " ".join(argv), flush=True)
     subprocess.run(argv, cwd=cwd, check=True, timeout=timeout)
@@ -240,6 +258,7 @@ def main():
         if pin_text.count(include) != 1:
             raise RuntimeError("Official Marlin board pinout changed")
         pins.write_text(pin_text + PIN_PATCH)
+        patch_motor_tone(src)
         ini = src / "platformio.ini"
         text = ini.read_text()
         text = re.sub(r"(?m)^default_envs\s*=.*$",
@@ -264,6 +283,7 @@ def main():
                       "mode": "M3 I", "s_max": 255},
             "accessories": {"lights": "M7 HE0 PC8",
                             "exhaust": "M8 BED PC9"},
+            "tones": "M300 S<Hz> P<ms> [X] [Y]: stepper coils, no motion, laser must be off",
             "update": "Pi: M28 B1 binary transfer to SD + M997 (SD card stays in SKR)",
             "hardware_verified": False,
             "do_not_flash_before_isolation_interlock_test": True,

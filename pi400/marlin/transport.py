@@ -19,6 +19,14 @@ import time
 from collections import deque
 
 LOG = logging.getLogger("lumacut.marlin")
+
+# Melodies on the stepper coils (LumaCut firmware M300: no motion, laser off).
+# (frequency Hz, duration ms); 0 Hz is a rest. No tones on alarms by design.
+MELODIES = {
+    "home": ((784, 130), (0, 40), (1047, 260)),
+    "start": ((523, 110), (659, 110), (784, 220)),
+    "done": ((784, 120), (659, 120), (523, 120), (0, 60), (1047, 320)),
+}
 POSITION_RE = re.compile(
     r"(?:^|\s)X:([-+]?\d+(?:\.\d+)?)\s+Y:([-+]?\d+(?:\.\d+)?)\s+Z:([-+]?\d+(?:\.\d+)?)")
 PROBE_RESULT_RE = re.compile(
@@ -194,6 +202,8 @@ class MarlinTransport:
         self.last_xy_commanded = None
         self.homing_chime_enabled = True
         self.job_chime_enabled = True
+        # None = not tried yet; False after "Unknown command" (old firmware).
+        self.motor_tones_supported: bool | None = None
         self.absolute_mode = True
         self.focused_this_job = False
         self.fan_off_at = None
@@ -239,6 +249,7 @@ class MarlinTransport:
         self.identity = ""
         self.cap_z_probe = None
         self.cap_binary_transfer = False
+        self.motor_tones_supported = None   # new firmware may have been flashed
         if message:
             self.fault = message[:200]
 
@@ -718,78 +729,42 @@ class MarlinTransport:
             return True
 
     def _play_stepper_chime_locked(self, event: str) -> bool:
-        """Play musical STEP frequencies on TMC2209 X, returning to X0.
+        """Melody on the X/Y stepper coils, the head does not move.
 
-        Tones use real planner STEP pulses, not M300 (which needs a buzzer).
-        The X driver is temporarily changed from quiet StealthChop to audible
-        spreadCycle via Marlin M569, then restored. Each note uses a small
-        reversible X motion inside the completely empty 30mm homing strip.
-        The physical step frequency is (feed_mm_min / 60) * steps_per_mm.
-        Call only AFTER completed homing or parked job, at X0/Y0 with Z safe.
+        Uses the LumaCut firmware M300 (firmware/marlin/motor_tone.cpp): each
+        tone alternates one microstep forward and back in SpreadCycle, so the
+        motors sing loudly with zero net travel; Marlin refuses it while the
+        laser is on. Coordinates and homing stay valid. Older firmware
+        without it answers "Unknown command" and the melodies switch off
+        quietly until the next connection.
         """
-        if (event not in ("home", "done") or not self.homed
-                or self.serial is None or self.laser_enabled
-                or not self.absolute_mode or self.position is None):
+        notes = MELODIES.get(event)
+        if (notes is None or self.serial is None or self.laser_enabled
+                or self.motor_tones_supported is False):
             return False
-        x, y, z = self.position
-        if abs(x) > 0.15 or abs(y) > 0.15 or z < self.clearance_mm - 0.15:
-            LOG.warning("Skip stepper chime: not verified in X0/Y0 safe park")
-            return False
-        notes = ((784.0, 2.0), (523.25, 2.0)) if event == "home" else (
-            (523.25, 1.5), (659.25, 1.5), (784.0, 2.0))
-        step_per_mm = 80.0  # LumaCut X M92 EEPROM; adjust if calibrated.
-        spread = False
-        relative = False
-        started_motion = False
-        ok = False
         try:
-            self._exchange_locked("M400", timeout=20)
-            self._exchange_locked("M5 I", timeout=8)
-            self._exchange_locked("M569 S0 X", timeout=8)
-            spread = True
-            self._exchange_locked("G91", timeout=8)
-            relative = True
-            for frequency_hz, stroke_mm in notes:
-                feed = round(frequency_hz * 60.0 / step_per_mm)
-                started_motion = True
-                self._exchange_locked(f"G1 X{stroke_mm:g} F{feed}", timeout=15)
-                self._exchange_locked(f"G1 X{-stroke_mm:g} F{feed}", timeout=15)
-                self._exchange_locked("M400", timeout=20)
-                self._exchange_locked("G4 P60", timeout=8)
-            ok = True
+            for hz, ms in notes:
+                replies = self._exchange_locked(f"M300 S{hz} P{ms}",
+                                                timeout=ms / 1000.0 + 10)
+                text = " ".join(replies).lower()
+                if "unknown command" in text:
+                    self.motor_tones_supported = False
+                    LOG.info("Firmware without motor tones (M300); melodies off")
+                    return False
+                if "refused" in text:
+                    return False
+            self.motor_tones_supported = True
+            return True
         except Exception as exc:
-            LOG.warning("Stepper music '%s' unavailable: %s", event, exc)
-            self.fault = ("Motormelodie: " + str(exc))[:200]
-            if started_motion:
-                # If a stroke failed, the logical park coordinate may be
-                # wrong. Don't permit subsequent processing without homing.
-                self.homed = False
-        finally:
-            if relative and self.serial is not None:
-                try:
-                    self._exchange_locked("G90", timeout=8)
-                    self.absolute_mode = True
-                except Exception:
-                    self.homed = False
-                    ok = False
-            if spread and self.serial is not None:
-                try:
-                    self._exchange_locked("M569 S1 X", timeout=8)
-                except Exception:
-                    LOG.error("Could not restore X driver StealthChop mode")
-                    ok = False
-            if self.serial is not None:
-                try:
-                    self._exchange_locked("M400", timeout=20)
-                    self._exchange_locked("M114", timeout=8)
-                    if self.position is None or max(
-                        abs(self.position[0]), abs(self.position[1])) > 0.15:
-                        self.homed = False
-                        ok = False
-                except Exception:
-                    self.homed = False
-                    ok = False
-        return ok
+            LOG.warning("Motor melody '%s' unavailable: %s", event, exc)
+            return False
+
+    def play_melody(self, event: str, owner: str = "job") -> bool:
+        """Job start/end melody when enabled; never blocks a job on failure."""
+        with self.lock:
+            if self.owner not in (None, owner) or not self.job_chime_enabled:
+                return False
+            return self._play_stepper_chime_locked(event)
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
                   probe_contact_confirmed: bool = False):
@@ -837,9 +812,6 @@ class MarlinTransport:
                 self.laser_enabled = False
                 if self.homing_chime_enabled:
                     self._play_stepper_chime_locked("home")
-                    if not self.homed:
-                        raise RuntimeError("Motor melody lost verified coordinates; home again")
-                    result = self._exchange_locked("M114", timeout=8)
                 if self.fan_power:
                     self.fan_off_at = time.monotonic() + self.fan_cooldown_s
                 # One upstream G28 must receive exactly one ACK. Sending
@@ -928,9 +900,6 @@ class MarlinTransport:
             self.last_xy_commanded = (0.0, 0.0)
             if self.job_chime_enabled:
                 self._play_stepper_chime_locked("done")
-                if not self.homed:
-                    raise RuntimeError("Motor melody lost verified coordinates; home again")
-                result = self._exchange_locked("M114", timeout=8)
             return result
 
     def probe_workpiece(self, owner: str = "lightburn"):
