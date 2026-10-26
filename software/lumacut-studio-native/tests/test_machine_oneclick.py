@@ -51,11 +51,13 @@ class JobStateParseTests(unittest.TestCase):
 
     def test_real_pi_status_without_phase(self):
         """web.py sends no job.phase: after the last line it drains and parks
-        while still "running" with line == total -> shown as parking."""
+        while still "running" with line == total -> "finishing" (the
+        buffered moves may still burn, so never "parking")."""
         run = {"file": "a.gcode", "state": "running", "line": 5, "total": 10,
                "error": "", "probe": {"done": 13, "total": 13}}
         self.assertEqual(JobState.from_json(run).phase, "running")
-        self.assertEqual(JobState.from_json(dict(run, line=10)).phase, "parking")
+        self.assertEqual(JobState.from_json(dict(run, line=10)).phase, "finishing")
+        self.assertTrue(JobState.from_json(dict(run, line=10)).active)
         self.assertEqual(JobState.from_json(dict(run, line=0, total=0)).phase, "running")
         self.assertEqual(JobState.from_json(dict(run, state="complete", line=10)).phase,
                          "complete")
@@ -199,7 +201,7 @@ class OneClickPanelTests(unittest.TestCase):
         self.pi.set_job_phase("running", line=4, total=10)
         self.assertTrue(wait_until(lambda: "Läuft" in panel.job_label.text()))
         self.pi.set_job_phase("running", line=10, total=10)
-        self.assertTrue(wait_until(lambda: "Parken" in panel.job_label.text()))
+        self.assertTrue(wait_until(lambda: "Letzte Bahnen, dann Parken" in panel.job_label.text()))
         self.assertTrue(panel.abort_button.isEnabled())
         self.pi.set_job_phase("error")
         with self.pi.lock:
@@ -271,6 +273,75 @@ class OneClickPanelTests(unittest.TestCase):
         self.assertTrue(self.idle(panel))
         self.assertTrue(wait_until(lambda: "Pi-Dienst" in panel.error_label.text()))
         self.assertIn("Erweitert", panel.error_label.text())
+
+
+class RealPiAlignmentTests(unittest.TestCase):
+    """Studio against the rules of pi400/marlin/web.py (start_job, queue_run,
+    _execute_job): autorun homes itself, start and the queue need homing,
+    the queue never probes, the Pi's job.error reaches the panel."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def setUp(self):
+        os.environ.pop("LUMACUT_KEY", None)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = QSettings(os.path.join(self.tmp.name, "s.ini"), QSettings.IniFormat)
+        self.pi = FakePi().__enter__()
+        self.addCleanup(self.pi.__exit__, None, None, None)
+
+    def test_autorun_without_homing_start_needs_it(self):
+        client = LumaCutClient(self.pi.url)
+        with self.pi.lock:
+            self.pi.status["homed"] = False
+        with self.assertRaises(ApiError) as ctx:
+            client.start_job("a.gcode")
+        self.assertIn("Vor dem Job referenzieren", str(ctx.exception))
+        with self.assertRaises(ApiError) as ctx:
+            client.queue_run()
+        self.assertIn("Vor der Warteschlange referenzieren", str(ctx.exception))
+        client.autorun_job("a.gcode")   # the Pi homes itself in op=autorun
+
+    def test_queue_confirm_says_no_probing(self):
+        from machine import settings
+        from machine.panel import QUEUE_NOTE, MachinePanel
+        asked = []
+        settings.save(settings.ConnectionSettings(base_url=self.pi.url), self.store)
+        panel = MachinePanel(store=self.store,
+                             confirm=lambda title, text: asked.append(text) or False)
+        self.addCleanup(panel.shutdown)
+        panel.connect_to_pi()
+        self.assertTrue(wait_until(panel.home_button.isEnabled))
+        self.assertIn(QUEUE_NOTE, panel.queue_run_button.toolTip())
+        with self.pi.lock:
+            self.pi.status["queue"]["items"].append(
+                {"id": 1, "file": "a.gcode", "origin": "absolute", "anchor": "tr",
+                 "dx": 0.0, "dy": 0.0, "target": None, "bounds": None,
+                 "state": "queued", "error": ""})
+        self.assertTrue(wait_until(lambda: panel._status is not None
+                                   and panel._status.queue.waiting == 1))
+        self.assertFalse(panel.queue_run())   # declined
+        self.assertIn(QUEUE_NOTE, asked[-1])
+        self.assertIn("a.gcode", asked[-1])
+
+    def test_pi_error_texts_shown(self):
+        """job.error strings of web.py reach the label unchanged."""
+        from machine import settings
+        from machine.panel import MachinePanel
+        settings.save(settings.ConnectionSettings(base_url=self.pi.url), self.store)
+        panel = MachinePanel(store=self.store, confirm=lambda *_: True)
+        self.addCleanup(panel.shutdown)
+        panel.connect_to_pi()
+        self.assertTrue(wait_until(panel.home_button.isEnabled))
+        for state, error in (("aborted", "Abgebrochen"),
+                             ("error", "Zeile 3: relative X/Y-Fahrten (G91) gehen im "
+                                       "automatischen Ablauf nicht")):
+            self.pi.set_job_phase(state)
+            with self.pi.lock:
+                self.pi.status["job"]["error"] = error
+            self.assertTrue(wait_until(lambda: error in panel.job_label.text()), error)
 
 
 if __name__ == "__main__":

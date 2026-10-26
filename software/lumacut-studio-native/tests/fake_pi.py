@@ -159,6 +159,12 @@ class FakePi:
                         return self._reply(code, data)
                     if op not in fake.actions:
                         return self._reply(400, {"error": "Unbekannte Marlin-Aktion: " + op})
+                    # Like web.py: start and queue_run need a homed machine,
+                    # op=autorun homes itself (and probes) when needed.
+                    unhomed = {"start": "Vor dem Job referenzieren",
+                               "queue_run": "Vor der Warteschlange referenzieren"}
+                    if op in unhomed and not fake.status.get("homed"):
+                        return self._reply(400, {"error": unhomed[op]})
                     if op == "frame":
                         # Like web.py start_frame: own state, job untouched.
                         moves = [l for l in form.get("gcode", "").splitlines()
