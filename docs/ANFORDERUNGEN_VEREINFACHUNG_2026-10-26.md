@@ -149,7 +149,7 @@ Die Apps bilden einfach die echte Maschine ab.
 | Thema | Zuständig | Status |
 |---|---|---|
 | Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Start-Knopf in Studio: Machine | in Arbeit (Pi) |
-| Nullpunkt oben rechts | Canvas + Machine | offen |
+| Nullpunkt oben rechts | Canvas + Machine | Maschinenseite erledigt (`ce7da00`: Anker = sichtbare Ecke, `coord_convention`, Jog-Kreuz gespiegelt, siehe §2.2); Canvas (`workarea.py`, Absprache §2) offen |
 | Kamera-Scan als Button | Scan Probe | offen |
 | Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | in Arbeit (Pi) |
 | Cleaner UI Windows | Canvas | offen |
