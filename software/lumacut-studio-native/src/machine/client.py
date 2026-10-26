@@ -50,6 +50,11 @@ MAX_FRAME_BYTES = 64 * 1024
 STATUS_TIMEOUT_S = 4.0
 DEFAULT_TIMEOUT_S = 60.0
 CAMERA_CALIBRATION_PATH = "/api/camera/calibration"
+CAMERA_SNAPSHOT_PATH = "/api/camera/snapshot"
+#: The Pi runs ffmpeg with a 15 s limit per snapshot (web.py), plus margin.
+SNAPSHOT_TIMEOUT_S = 25.0
+#: Pi limits for /api/camera/snapshot?w=&h= (web.py camera_snapshot).
+SNAPSHOT_SIZE_RANGE = ((160, 4096), (120, 3072))
 LONG_TIMEOUT_S = 240.0
 UPLOAD_TIMEOUT_S = 120.0
 #: The Pi answers an upload only after preflight checked every line; a
@@ -349,7 +354,7 @@ class LumaCutClient:
     # ---- transport -----------------------------------------------------
     def _request(self, method: str, path: str, *, body: bytes | None = None,
                  content_type: str | None = None,
-                 timeout: float = DEFAULT_TIMEOUT_S) -> dict:
+                 timeout: float = DEFAULT_TIMEOUT_S, binary: bool = False) -> Any:
         url = self.base_url + path
         request = urllib.request.Request(url, data=body, method=method)
         request.add_header("Accept", "application/json")
@@ -372,6 +377,8 @@ class LumaCutClient:
                     timeout, self.base_url)) from None
             raise ConnectionFailed("Pi nicht erreichbar (%s): %s" % (
                 self.base_url, reason)) from None
+        if binary and status < 300:
+            return raw
         data = _decode(raw)
         if status in (401, 403):
             raise AuthFailed("Pi lehnt den Schlüssel ab (HTTP %d): %s" % (
@@ -420,6 +427,24 @@ class LumaCutClient:
         body = json.dumps(dict(record, revision=int(revision))).encode("utf-8")
         return self._request("PUT", CAMERA_CALIBRATION_PATH, body=body, timeout=timeout,
                              content_type="application/json")
+
+    # ---- head camera on the Pi (GET /api/camera/snapshot) ---------------
+    def camera_snapshot(self, width: int, height: int,
+                        timeout: float = SNAPSHOT_TIMEOUT_S) -> bytes:
+        """One JPEG from the Pi head camera; never moves. 503 = no camera/image,
+        404 = Pi service without the endpoint (raised as ApiError)."""
+        return self._request("GET", "%s?w=%d&h=%d" % (CAMERA_SNAPSHOT_PATH, int(width),
+                                                       int(height)),
+                             timeout=timeout, binary=True)
+
+    def move_to(self, x: float, y: float, timeout: float = LONG_TIMEOUT_S) -> dict:
+        """Laser-off absolute XY move (Pi ``op=moveto``, machine mm).
+
+        The Pi answers after M400 (blocking), raises Z to its clearance
+        height when lower and never lowers Z. Older Pi services answer
+        "Unbekannte Marlin-Aktion: moveto" (ApiError, HTTP 400)."""
+        return self._post_form("/api/action", {"op": "moveto", "x": "%.3f" % x,
+                                               "y": "%.3f" % y}, timeout)
 
     # ---- actions -------------------------------------------------------
     def action(self, op: str, timeout: float | None = None, **fields) -> str:

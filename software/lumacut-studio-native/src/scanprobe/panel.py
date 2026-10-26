@@ -3,7 +3,7 @@
 Bedienung (rechte Spalte im Hauptfenster):
 
 1. Quelle wählen: *Simulation* (ohne Hardware) oder *Maschine (Pi-API)*
-   mit Kamera-Quelle und ``camera.json``.
+   mit Kamera „Pi (Snapshot)“ oder „Lokal (USB/URL)“ und der Kalibrierung vom Pi.
 2. **Scan starten** – Kachel-Scan bei fester Höhe, Stitching, Objekterkennung.
    Das Mosaik wird Hintergrund der Arbeitsfläche, erkannte Werkstücke
    erscheinen als gestrichelte Hilfsformen und in der Liste.
@@ -279,6 +279,9 @@ class ScanPanel(QWidget):
         self.pi_calibration: Optional[pi_calibration.PiCalibration] = None
         self.pi_calibration_error = ""
         self.calibration_dirty = False      # lokal geändert, noch nicht auf dem Pi
+        # Fähigkeiten des Pi (moveto/Snapshot); None = noch nicht gelesen
+        self.pi_features: Optional[adapters.PiFeatures] = None
+        self._camera_kind_chosen = False    # Nutzer hat Pi/Lokal selbst gewählt
         self.hardware: Optional[adapters.Hardware] = None
         self.workflow: Optional[ScanProbeWorkflow] = None
         self.worker: Optional[ScanProbeWorker] = None
@@ -308,10 +311,24 @@ class ScanPanel(QWidget):
         self.mode_combo.addItem("Maschine (Pi-API + Kamera)", MODE_PI)
         self.mode_combo.currentIndexChanged.connect(self._mode_changed)
         form.addRow("Quelle", self.mode_combo)
+        self.camera_kind_combo = QComboBox()
+        self.camera_kind_combo.addItem("Pi (Snapshot)", adapters.CAMERA_PI)
+        self.camera_kind_combo.addItem("Lokal (USB/URL)", adapters.CAMERA_LOCAL)
+        self.camera_kind_combo.setCurrentIndex(1)   # Pi erst, wenn der Pi es meldet
+        self.camera_kind_combo.setToolTip("Pi: Kopfkamera am Pi (GET /api/camera/snapshot); "
+                                          "Lokal: Kamera am PC oder Stream-URL")
+        self.camera_kind_combo.activated.connect(self._camera_kind_activated)
+        self.camera_kind_combo.currentIndexChanged.connect(self._camera_kind_changed)
         self.camera_edit = QLineEdit("0")
         self.camera_edit.setPlaceholderText("USB-Index oder Stream-URL")
         self.camera_edit.setToolTip("z. B. 0 für die erste USB-Kamera oder http://lumacut.local:8081/stream")
-        form.addRow("Kamera", self.camera_edit)
+        cam_row = QHBoxLayout()
+        cam_row.addWidget(self.camera_kind_combo)
+        cam_row.addWidget(self.camera_edit, 1)
+        form.addRow("Kamera", cam_row)
+        self.camera_note = QLabel("")
+        self.camera_note.setWordWrap(True)
+        form.addRow("", self.camera_note)
         cal_box = QVBoxLayout()
         self.cal_label = QLabel("Standardwerte (unkalibriert)")
         self.cal_label.setWordWrap(True)
@@ -467,13 +484,51 @@ class ScanPanel(QWidget):
     def busy(self) -> bool:
         return self.worker is not None
 
+    @property
+    def camera_kind(self) -> str:
+        return self.camera_kind_combo.currentData()
+
+    def set_camera_kind(self, kind: str) -> None:
+        """Kamera-Quelle setzen (wie eine Auswahl durch den Nutzer)."""
+        self._camera_kind_chosen = True
+        self.camera_kind_combo.setCurrentIndex(self.camera_kind_combo.findData(kind))
+
+    def _camera_kind_activated(self, *_):
+        self._camera_kind_chosen = True
+
+    def _camera_kind_changed(self, *_):
+        self.hardware = None
+        self.workflow = None
+        if hasattr(self, "pi_save_button"):
+            self._update_enabled()
+
+    def refresh_pi_features(self) -> Optional[adapters.PiFeatures]:
+        """Fähigkeiten des Pi lesen; Standard-Kamera „Pi (Snapshot)“, wenn möglich."""
+        client = self._client()
+        if client is None:
+            return None
+        try:
+            feats = adapters.pi_features(client)
+        except Exception as exc:  # noqa: BLE001 - Hinweis, kein Abbruch
+            self.pi_features = None
+            self.camera_note.setText(f"Pi-Fähigkeiten nicht lesbar: {exc}")
+            return None
+        self.pi_features = feats
+        if not self._camera_kind_chosen:
+            kind = adapters.CAMERA_PI if feats.snapshot else adapters.CAMERA_LOCAL
+            self.camera_kind_combo.setCurrentIndex(self.camera_kind_combo.findData(kind))
+        self.camera_note.setText(feats.summary)
+        return feats
+
     def _mode_changed(self, *_):
         pi = self.mode == MODE_PI
         self.camera_edit.setEnabled(pi)
         self.hardware = None
         self.workflow = None
-        if pi and self.pi_calibration is None and self._client() is not None:
-            self.refresh_pi_calibration()
+        if pi and self._client() is not None:
+            if self.pi_calibration is None:
+                self.refresh_pi_calibration()
+            self.refresh_pi_features()
         self._update_estimate()
         if hasattr(self, "pi_save_button"):
             self._update_enabled()
@@ -484,7 +539,9 @@ class ScanPanel(QWidget):
                   self.cal_button, self.cal_export_button, self.spacing_spin, self.load_button,
                   self.clear_button):
             w.setEnabled(not busy)
-        self.camera_edit.setEnabled(not busy and self.mode == MODE_PI)
+        self.camera_kind_combo.setEnabled(not busy and self.mode == MODE_PI)
+        self.camera_edit.setEnabled(not busy and self.mode == MODE_PI
+                                    and self.camera_kind == adapters.CAMERA_LOCAL)
         pi = self.mode == MODE_PI
         self.pi_cal_button.setEnabled(not busy and pi)
         self.pi_save_button.setEnabled(not busy and pi and self.calibration is not None)
@@ -669,7 +726,10 @@ class ScanPanel(QWidget):
             raise adapters.HardwareNotReady(
                 f"{why}. Für echte Scans camera.json importieren und „Auf Pi speichern“ "
                 "(siehe docs/KAMERA_STATUS_UND_KALIBRIERUNG.md)")
-        return adapters.pi_setup(client, self.calibration, self.camera_edit.text().strip())
+        if self.pi_features is None:
+            self.refresh_pi_features()
+        return adapters.pi_setup(client, self.calibration, self.camera_edit.text().strip(),
+                                 self.camera_kind, self.pi_features)
 
     def _ensure_workflow(self, need_camera: bool) -> ScanProbeWorkflow:
         if self.hardware is None or self.workflow is None:
@@ -681,6 +741,12 @@ class ScanPanel(QWidget):
         self.workflow.settings = self._probe_settings()
         if need_camera and self.hardware.camera is None:
             raise adapters.HardwareNotReady("Keine Kamera-Quelle angegeben")
+        check = getattr(self.hardware.machine, "check_scan_height", None)
+        if need_camera and not self.hardware.simulated and check is not None:
+            # vor dem Start prüfen statt mitten im Scan scheitern (Z-Freigabe, Scanhöhe)
+            notes = check(self.hardware.calibration.scan_z)
+            if notes:
+                self.camera_note.setText("\n".join(notes))
         return self.workflow
 
     def _probe_settings(self) -> ProbeSettings:
