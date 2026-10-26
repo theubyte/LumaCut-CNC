@@ -22,6 +22,7 @@ from lumacut_canvas.fit import install_screen_fit
 from lumacut_canvas.main_view import MainActions, MoreToggle, install_main_view
 # --- end canvas integration ---
 # --- scan integration (scan agent) ---
+from scanprobe.job_flow_qt import install_one_click
 from scanprobe.panel import ScanPanel
 # --- end scan integration ---
 # --- job tools integration (review agent) ---
@@ -197,6 +198,8 @@ class LumaCutStudio(QMainWindow):
             self.canvas, client_provider=lambda: getattr(self.machine_panel, "_client", None))
         scan_layout.addWidget(self.scan_panel)
         right_layout.addWidget(scan)
+        # Ein-Klick-Auftrag (Anforderungen 2026-10-26 §1); Start-Knopf: Machine-Agent
+        self.one_click = install_one_click(self)
         # --- end scan integration ---
 
         # --- machine integration (machine agent) ---

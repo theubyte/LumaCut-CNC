@@ -358,3 +358,21 @@ def test_studio_mesh_forced_even_if_pi_could():
     flow = OneClickJob(port, wf, poll_s=0.0, sleep=lambda s: None, use_pi_mesh=False)
     res = flow.run(GCODE)
     assert res.ok and not res.pi_mesh and "autorun" not in port.calls
+
+
+def test_detach_leaves_running_job_on_pi():
+    flow, port, events, _ = make(job_polls=10_000)
+    orig = port.status
+    calls = {"n": 0}
+
+    def status():
+        st = orig()
+        if st.job.active:
+            calls["n"] += 1
+            if calls["n"] == 3:
+                flow.detach()
+        return st
+    port.status = status
+    res = flow.run(GCODE, "motiv.gcode")
+    assert res.state == "fehler" and res.error_code == "detached"
+    assert "abort" not in port.calls and "park" not in port.calls

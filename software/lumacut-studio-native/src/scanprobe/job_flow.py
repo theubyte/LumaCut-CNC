@@ -80,6 +80,7 @@ ERROR_CODES = {
     "emergency": "Notstopp aktiv",
     "connection_lost": "Verbindung zum Pi verloren",
     "cancelled": "Vom Nutzer abgebrochen",
+    "detached": "Studio geschlossen, Auftrag läuft auf dem Pi weiter",
 }
 
 #: Schnelles Probing: grobes Raster, Krümmung wird adaptiv nachverdichtet.
@@ -350,6 +351,14 @@ class OneClickJob:
     def cancel(self) -> None:
         self.control.cancel()
 
+    def detach(self) -> None:
+        """Studio schließt: nicht abbrechen, nur aufhören zu beobachten. Läuft
+        der Auftrag schon auf dem Pi, läuft er dort weiter (wie beim
+        Machine-Panel); vorher wirkt es wie Abbrechen."""
+        self._detached = True
+        if not self._job_started:
+            self.control.cancel()
+
     # ---- Ereignisse ---------------------------------------------------
     def _emit(self, message: str, progress: Optional[float] = None, **extra) -> None:
         ev = {"type": "job_state", "state": self.state, "label": STATE_LABELS[self.state],
@@ -574,6 +583,8 @@ class OneClickJob:
         errors = 0
         seen_active = False
         while True:
+            if self._detached:
+                raise FlowError("detached", "Studio geschlossen – der Auftrag läuft auf dem Pi weiter")
             if self.control.cancelled:
                 self._abort_running()
                 raise Cancelled()
@@ -649,6 +660,7 @@ class OneClickJob:
             self._sleep(self.poll_s)
 
     _job_started = False
+    _detached = False
     _parked_note = ""
 
     def _stop_before_job(self) -> None:
