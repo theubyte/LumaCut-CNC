@@ -66,6 +66,7 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
     val online by machine.online.collectAsStateWithLifecycle()
     val host by machine.host.collectAsStateWithLifecycle()
     val busy by machine.busy.collectAsStateWithLifecycle()
+    val update by machine.update.collectAsStateWithLifecycle()
     var confirm by rememberConfirm()
     var built by remember { mutableStateOf<Built?>(null) }
 
@@ -101,6 +102,7 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
         }
         Column(Modifier.width(380.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("3 · Starten", style = LcTypography.headlineSmall)
+            if (update.available && !running) Banner("Update ${update.info?.version_name} verfügbar – unter Einstellungen aktualisieren.", Lc.info)
             val materialText = materialSummary(doc)
             Tile("Material", materialText ?: "noch keines gewählt", Modifier.fillMaxWidth(), if (materialText == null) Lc.warn else Lc.text)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {

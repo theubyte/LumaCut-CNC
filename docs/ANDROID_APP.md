@@ -38,6 +38,14 @@ Ruhige Statusabfrage: höchstens eine Anfrage zugleich, alle 1,5 s, 5 s Zeitlimi
 
 Werkstatt → Zubehör: Schalter und darunter ein Helligkeitsregler 1–100 % (gesendet erst beim Loslassen, `op=light` mit `on=1` und `brightness`; Wert aus `light_brightness` im Status). Der Regler erscheint nur, wenn `light_dimmable` nicht `false` ist. Einstellungen → Licht: Schalter „Lichteffekte“ (`effects=1|0`); bei alter Firmware der Hinweis „Für Dimmen und Lichteffekte die neue Firmware flashen.“ `PiClient.light(on, brightness, effects)`.
 
+## Updates
+
+Die App holt neue Versionen vom Pi, ohne Deinstallieren. Der Pi (`features` enthält `app_update`) lädt die APK aus dem GitHub-Release und liefert sie unter `GET /api/app/android` (Metadaten) und `GET /api/app/android.apk`. Die App fragt beim Start und danach alle 6 h nach (nie während ein Auftrag läuft) und zeigt bei höherem `version_code` einen ruhigen Hinweis „Update 1.0.N verfügbar“ auf dem Startbildschirm. Einstellungen → **App-Update** zeigt installierte und angebotene Version, „Jetzt prüfen“ (`op=app_update_check`, der Pi schaut sofort auf GitHub) und „Aktualisieren“.
+
+Aktualisieren lädt die APK mit Fortschrittsanzeige in den Cache, prüft Größe und SHA-256 gegen die Metadaten (bei Abweichung wird die Datei verworfen) und übergibt sie einer PackageInstaller-Sitzung. Android fragt dann einmal nach der Bestätigung; stilles Installieren gibt es nicht. Fehlt die Erlaubnis „Unbekannte Apps installieren“, führt ein Satz einmal in die Systemeinstellung. Während eines Auftrags wird nichts geprüft und nichts installiert.
+
+Wichtig: Ein Update lässt sich nur über eine APK installieren, die mit **demselben Schlüssel** signiert ist. Die erste Installation nach dem Umstieg auf den festen Schlüssel (Secret `ANDROID_KEYSTORE_B64`) braucht deshalb noch einmal Deinstallieren der alten, mit einem Wegwerf-Schlüssel signierten App (die Einstellungen und Entwürfe gehen dabei verloren). Danach reicht Aktualisieren.
+
 ## Aufbau
 
 ```

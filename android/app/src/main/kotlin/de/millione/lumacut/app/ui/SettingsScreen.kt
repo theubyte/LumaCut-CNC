@@ -62,6 +62,7 @@ fun SettingsScreen(machine: MachineViewModel) {
     Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             LaserCard(machine)
+            UpdateCard(machine)
             LcCard {
                 CardTitle("Arbeitsbereich")
                 SmallText("360 × 340 mm, Nullpunkt oben links. Der 30-mm-Rand der Maschine ist für den Laser reserviert (Parken, Referenzieren) und wird nicht angezeigt – dort wird nie gelasert, auch kein Überlauf.")
@@ -108,7 +109,7 @@ fun SettingsScreen(machine: MachineViewModel) {
                 }
                 if (status?.light_dimmable == false) {
                     Spacer(Modifier.height(8.dp))
-                    SmallText("F�r Dimmen und Lichteffekte die neue Firmware flashen.")
+                    SmallText("Für Dimmen und Lichteffekte die neue Firmware flashen.")
                 }
             }
             LcCard {

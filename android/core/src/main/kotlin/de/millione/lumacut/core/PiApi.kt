@@ -16,8 +16,17 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+
+/** The APK the Pi offers (GET /api/app/android); [version_code] is compared with the installed versionCode. */
+@Serializable
+data class AppUpdateInfo(val available: Boolean = false, val version_code: Int = 0, val version_name: String = "",
+                         val sha256: String = "", val size: Long = 0, val checked_at: String? = null, val error: String? = null) {
+    fun isNewerThan(installedCode: Int) = available && version_code > installedCode
+}
 
 /** Automatic height probing of the Pi (job.probe in /api/status): [done] of [total] points. */
 @Serializable
@@ -255,6 +264,52 @@ class PiClient(
         } catch (e: PiException) { throw e } catch (e: IOException) { throw PiException("Pi nicht erreichbar (${e.message ?: e.javaClass.simpleName})") }
     }
 
+    /** What APK the Pi currently offers. */
+    suspend fun appUpdate(): AppUpdateInfo = parseUpdate(call(Request.Builder().url(url("api", "app", "android")).build(), callTimeoutSec = 8))
+
+    /** Asks the Pi to look at GitHub right now; the answer carries the same fields as [appUpdate]. */
+    suspend fun appUpdateCheck(): AppUpdateInfo {
+        val form = FormBody.Builder().add("op", "app_update_check").build()
+        return parseUpdate(call(Request.Builder().url(url("api", "action")).post(form).build(), callTimeoutSec = 60))
+    }
+
+    private fun parseUpdate(body: String): AppUpdateInfo =
+        runCatching { json.decodeFromString(AppUpdateInfo.serializer(), body) }.getOrElse { throw PiException("Antwort des Pi zum App-Update nicht lesbar") }
+
+    /**
+     * Downloads the offered APK to [dest] and checks size and SHA-256 against [info]; a file that does not match
+     * is deleted. [onProgress] gets (bytes so far, expected bytes).
+     */
+    suspend fun downloadApp(info: AppUpdateInfo, dest: File, onProgress: (Long, Long) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
+        if (info.sha256.isBlank()) throw PiException("Der Pi nennt keine Prüfsumme – Update wird nicht geladen")
+        val client = http.newBuilder().readTimeout(60, TimeUnit.SECONDS).build()
+        val tmp = File(dest.parentFile, dest.name + ".part")
+        try {
+            client.newCall(Request.Builder().url(url("api", "app", "android.apk")).build()).execute().use { r ->
+                if (!r.isSuccessful) throw PiException(errorText(r.body?.string().orEmpty()) ?: "Pi antwortet mit HTTP ${r.code}")
+                val body = r.body ?: throw PiException("Leere Antwort des Pi")
+                val total = if (info.size > 0) info.size else body.contentLength()
+                val md = MessageDigest.getInstance("SHA-256")
+                var n = 0L
+                body.byteStream().use { input -> tmp.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val k = input.read(buf); if (k < 0) break
+                        out.write(buf, 0, k); md.update(buf, 0, k); n += k
+                        onProgress(n, total)
+                    }
+                } }
+                if (info.size > 0 && n != info.size) throw PiException("Download unvollständig ($n von ${info.size} Bytes)")
+                val hex = md.digest().joinToString("") { "%02x".format(it) }
+                if (!hex.equals(info.sha256.trim(), ignoreCase = true)) throw PiException("Prüfsumme der Datei stimmt nicht – Download verworfen")
+            }
+            if (dest.exists()) dest.delete()
+            if (!tmp.renameTo(dest)) throw PiException("Datei konnte nicht gespeichert werden")
+            dest
+        } catch (e: PiException) { tmp.delete(); throw e
+        } catch (e: IOException) { tmp.delete(); throw PiException("Pi nicht erreichbar (${e.message ?: e.javaClass.simpleName})") }
+    }
+
     suspend fun settings(values: Map<String, String>): String {
         val form = FormBody.Builder().apply { values.forEach { (k, v) -> add(k, v) } }.build()
         return message(call(Request.Builder().url(url("api", "settings")).post(form).build()))
@@ -278,7 +333,7 @@ class PiClient(
         const val COORD_CONVENTION = "origin_top_right"
 
         val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame", "moveto",
-                            "abort", "estop", "estop_reset")
+                            "abort", "estop", "estop_reset", "app_update_check")
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(4, TimeUnit.SECONDS)

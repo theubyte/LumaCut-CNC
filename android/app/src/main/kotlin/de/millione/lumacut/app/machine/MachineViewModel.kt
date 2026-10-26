@@ -5,6 +5,8 @@ import android.content.Context
 import android.net.ConnectivityManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import de.millione.lumacut.app.update.AppInstaller
+import de.millione.lumacut.core.AppUpdateInfo
 import de.millione.lumacut.core.DiscoveredLaser
 import de.millione.lumacut.core.Document
 import de.millione.lumacut.core.LaserDiscovery
@@ -43,6 +45,13 @@ data class MaterialState(val revision: Int = 0, val items: List<Material> = empt
 /** The "Laser auswählen" popup: [found] are LumaCut Pis in the Wi-Fi subnet. */
 data class DiscoveryState(val open: Boolean = false, val scanning: Boolean = false,
                           val found: List<DiscoveredLaser> = emptyList(), val note: String? = null)
+
+/** App update: what is installed, what the Pi offers, download [progress] (0..1) while loading. */
+data class UpdateState(val installedCode: Int = 0, val installedName: String = "", val info: AppUpdateInfo? = null,
+                       val checking: Boolean = false, val progress: Float? = null, val installing: Boolean = false,
+                       val error: String? = null) {
+    val available get() = info?.isNewerThan(installedCode) == true
+}
 
 /** Selected job with its parsed toolpath and the probe point (work-area mm) for one-click runs. */
 data class JobView(val name: String, val toolpath: Toolpath?, val probe: Pt?, val probeChosen: Boolean, val error: String? = null)
@@ -92,8 +101,18 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
     private val _materials = MutableStateFlow(MaterialState(0, loadCachedMaterials()))
     val materials: StateFlow<MaterialState> = _materials.asStateFlow()
 
+    private val _update = MutableStateFlow(UpdateState(
+        runCatching { AppInstaller.installedCode(app) }.getOrDefault(0), runCatching { AppInstaller.installedName(app) }.getOrDefault("?")))
+    val update: StateFlow<UpdateState> = _update.asStateFlow()
+    private var updateCheckedAt = 0L
+
     // The saved address is simply used; nothing is searched or switched automatically.
-    init { connect(_host.value, quiet = true) }
+    init {
+        connect(_host.value, quiet = true)
+        viewModelScope.launch {
+            AppInstaller.failures.collect { text -> _update.update { it.copy(installing = false) }; notify(text, true) }
+        }
+    }
 
     fun notify(text: String, error: Boolean = false) { _notices.tryEmit(Notice(text, error)) }
 
@@ -135,6 +154,7 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
             _online.value = true
             _readError.value = null
             failures = 0; calmNoticeShown = false
+            maybeCheckUpdate(s)
             if (!_materials.value.fromPi && System.currentTimeMillis() - materialsTriedAt > 15_000) refreshMaterials()
             if (s.job.state == "error" && s.job.error.isNotBlank() && s.job.error != lastJobError) {
                 lastJobError = s.job.error
@@ -152,6 +172,61 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
                     calmNoticeShown = true
                     notify("Verbindung zum Pi kurz weg – der Auftrag läuft auf dem Pi weiter.")
                 }
+            }
+        }
+    }
+
+    /* ---------- app update from the Pi ---------- */
+
+    /** At start and every 6 h, only when the Pi can deliver APKs and no job is running. */
+    private fun maybeCheckUpdate(s: MachineStatus) {
+        if ("app_update" !in s.features || s.job.active) return
+        val now = System.currentTimeMillis()
+        if (updateCheckedAt != 0L && now - updateCheckedAt < 6 * 3600_000L) return
+        updateCheckedAt = now
+        checkUpdate(refresh = false, quiet = true)
+    }
+
+    /** [refresh] = the Pi looks at GitHub right now; [quiet] = failures stay silent (background check). */
+    fun checkUpdate(refresh: Boolean = false, quiet: Boolean = true) {
+        val c = client ?: return
+        if (_update.value.checking) return
+        if (_status.value?.job?.active == true) return
+        _update.update { it.copy(checking = true, error = null) }
+        viewModelScope.launch {
+            try {
+                val info = if (refresh) c.appUpdateCheck() else c.appUpdate()
+                _update.update { it.copy(info = info, checking = false) }
+                if (!quiet) notify(if (_update.value.available) "Update ${info.version_name} verfügbar" else info.error ?: "Die App ist aktuell.")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _update.update { it.copy(checking = false, error = if (quiet) null else (e.message ?: "Update-Prüfung fehlgeschlagen")) }
+            }
+        }
+    }
+
+    /** Downloads the offered APK (checksum verified) and hands it to Android's installer; never while a job runs. */
+    fun startUpdate() {
+        val c = client ?: return
+        val state = _update.value
+        val info = state.info?.takeIf { it.isNewerThan(state.installedCode) } ?: return
+        if (state.progress != null || state.installing) return
+        if (_status.value?.job?.active == true) { notify("Während ein Auftrag läuft, wird nicht aktualisiert.", true); return }
+        _update.update { it.copy(progress = 0f, error = null) }
+        viewModelScope.launch {
+            try {
+                val app = getApplication<Application>()
+                val dest = File(app.cacheDir, "update/LumaCut-${info.version_name}.apk").also { it.parentFile?.mkdirs() }
+                c.downloadApp(info, dest) { n, total ->
+                    if (total > 0) _update.update { it.copy(progress = (n.toFloat() / total).coerceIn(0f, 1f)) }
+                }
+                _update.update { it.copy(progress = null, installing = true) }
+                withContext(Dispatchers.IO) { AppInstaller.install(app, dest) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _update.update { it.copy(progress = null, installing = false, error = e.message ?: "Update fehlgeschlagen") }
             }
         }
     }
