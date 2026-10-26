@@ -42,6 +42,19 @@ class WorkflowResult:
         return self.probe.maps if self.probe else None
 
 
+EMPTY_BED_MISMATCH = ("Leerbett-Referenz passt nicht zu diesem Scan (anderer Bereich, Auflösung "
+                      "oder Scanhöhe) – Erkennung ohne Referenz. Leeres Bett neu scannen und merken.")
+
+
+def background_matches(bed: Mosaic, mosaic: Mosaic) -> bool:
+    """Passt eine Leerbett-Referenz pixelgenau zum Scan?"""
+    return (bed.image.shape == mosaic.image.shape
+            and abs(bed.mm_per_px - mosaic.mm_per_px) < 1e-9
+            and abs(bed.origin_mm[0] - mosaic.origin_mm[0]) < 1e-6
+            and abs(bed.origin_mm[1] - mosaic.origin_mm[1]) < 1e-6
+            and abs(bed.scan_z - mosaic.scan_z) < 0.05)
+
+
 class ScanProbeWorkflow:
     def __init__(self, machine: MachineInterface, camera: Optional[CameraInterface],
                  probe: Optional[ProbeInterface], calibration: CameraCalibration,
@@ -152,6 +165,9 @@ class ScanProbeWorkflow:
                 res.reused = True
                 res.probe = ProbeResult(saved)
                 return res
+        if background is not None and not background_matches(background, res.mosaic):
+            res.notes.append(EMPTY_BED_MISMATCH)
+            background = None
         res.objects = self.detect(res.mosaic, background)
         areas, notes = self.suggest_areas(res.objects, design_bounds)
         res.areas = list(areas) + list(manual_areas)

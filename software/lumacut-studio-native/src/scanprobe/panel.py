@@ -47,7 +47,7 @@ from .heightmap import HeightMapSet
 from .probe_plan import ProbeArea, ProbeSettings, areas_from_design_bounds, areas_from_objects
 from .qt_bridge import ScanProbeWorker
 from .stitch import Mosaic
-from .workflow import ScanProbeWorkflow
+from .workflow import EMPTY_BED_MISMATCH, ScanProbeWorkflow, background_matches
 
 # Arbeitsfläche (Canvas) = Maschine X30–390 / Y30–370 (siehe lumacut_canvas.workarea)
 # Bildschirm-mm (Canvas, oben links) <-> Maschinen-mm. Vertrag (ZUSAMMENARBEIT_CLAUDE_GROK.md §2,
@@ -329,6 +329,11 @@ class ScanPanel(QWidget):
         self.workflow: Optional[ScanProbeWorkflow] = None
         self.worker: Optional[ScanProbeWorker] = None
         self.mosaic: Optional[Mosaic] = None
+        #: Leerbett-Referenz für die Werkstückerkennung (Differenzbild, robuster
+        #: als „ohne Referenz“); wird beim ersten Scan von hier geladen.
+        self.empty_bed_path: Path = default_empty_bed_path()
+        self._empty_bed: Optional[Mosaic] = None
+        self._empty_bed_loaded = False
         self.objects: list[DetectedObject] = []
         self.maps: Optional[HeightMapSet] = None
         self.last_focus_export: Optional[FocusExport] = None
@@ -511,6 +516,20 @@ class ScanPanel(QWidget):
                                       "(fokuskorrigiert, sobald ein Höhenmesh vorliegt)")
         self.export_button.clicked.connect(self._export_dialog)
         lay.addWidget(self.export_button)
+        bed_row = QHBoxLayout()
+        self.empty_bed_button = QPushButton("Letzten Scan als leeres Bett merken")
+        self.empty_bed_button.setToolTip(
+            "Einmal das leere Bett scannen und hier merken: danach erkennt der Scan "
+            "Werkstücke als Unterschied dazu (auch dunkles Material auf dunklem Bett).")
+        self.empty_bed_button.clicked.connect(self.remember_empty_bed)
+        self.forget_bed_button = QPushButton("Vergessen")
+        self.forget_bed_button.clicked.connect(self.forget_empty_bed)
+        bed_row.addWidget(self.empty_bed_button)
+        bed_row.addWidget(self.forget_bed_button)
+        lay.addLayout(bed_row)
+        self.empty_bed_label = QLabel("")
+        self.empty_bed_label.setWordWrap(True)
+        lay.addWidget(self.empty_bed_label)
         self.clear_button = QPushButton("Scan-Anzeige leeren")
         self.clear_button.clicked.connect(self.clear)
         lay.addWidget(self.clear_button)
@@ -652,6 +671,8 @@ class ScanPanel(QWidget):
         self.clear_marks_button.setEnabled(not busy and bool(self.manual_areas))
         self.save_button.setEnabled(not busy and self.maps is not None)
         self.export_button.setEnabled(not busy)
+        self.empty_bed_button.setEnabled(not busy and self.mosaic is not None)
+        self.forget_bed_button.setEnabled(not busy and self.empty_bed_path.exists())
         self.more_button.setEnabled(True)
         self.pause_button.setEnabled(busy)
         self.cancel_button.setEnabled(busy)
@@ -854,6 +875,7 @@ class ScanPanel(QWidget):
             notes = check(self.hardware.calibration.scan_z)
             if notes:
                 self.camera_note.setText("\n".join(notes))
+                self._notify("Hinweis: " + notes[0])   # „Mehr …“ ist meist zugeklappt
         return self.workflow
 
     def _probe_settings(self) -> ProbeSettings:
@@ -1032,8 +1054,65 @@ class ScanPanel(QWidget):
         def task(wf: ScanProbeWorkflow):
             mosaic = wf.scan()
             wf.control.checkpoint()
-            return {"mosaic": mosaic, "objects": wf.detect(mosaic)}
+            background, note = self._empty_bed_for(mosaic)
+            return {"mosaic": mosaic, "objects": wf.detect(mosaic, background),
+                    "notes": [note] if note else []}
         return self._start("scan", task, need_camera=True)
+
+    # ------------------------------------------------------------ Leerbett
+    def empty_bed(self) -> Optional[Mosaic]:
+        """Gemerkte Leerbett-Referenz (lädt einmal von ``empty_bed_path``)."""
+        if not self._empty_bed_loaded:
+            self._empty_bed_loaded = True
+            if self.empty_bed_path.exists():
+                try:
+                    self._empty_bed = Mosaic.load(self.empty_bed_path)
+                except (OSError, ValueError, KeyError) as exc:
+                    self._empty_bed = None
+                    self.empty_bed_label.setText(f"Leerbett-Referenz unlesbar: {exc}")
+        return self._empty_bed
+
+    def _empty_bed_for(self, mosaic: Mosaic) -> tuple[Optional[Mosaic], str]:
+        """Referenz, wenn sie zum Scan passt; sonst ``None`` und ein Hinweis."""
+        bed = self.empty_bed()
+        if bed is None:
+            return None, ""
+        if not background_matches(bed, mosaic):
+            return None, EMPTY_BED_MISMATCH
+        return bed, ""
+
+    def remember_empty_bed(self) -> bool:
+        """Aktuellen Scan als leeres Bett speichern (Bett muss dabei leer sein)."""
+        if self.mosaic is None or self.busy:
+            self._error("Erst das leere Bett scannen („Kamera-Scan“), dann merken.")
+            return False
+        if self.ask and QMessageBox.question(
+                self, "Leeres Bett merken",
+                "Ist das Bett auf dem letzten Scan wirklich leer (kein Material)?"
+                ) != QMessageBox.StandardButton.Yes:
+            return False
+        try:
+            self.empty_bed_path.parent.mkdir(parents=True, exist_ok=True)
+            self.mosaic.save(self.empty_bed_path)
+        except OSError as exc:
+            self._error(f"Leerbett-Referenz nicht gespeichert: {exc}")
+            return False
+        self._empty_bed, self._empty_bed_loaded = self.mosaic, True
+        self.set_objects([])
+        self.empty_bed_label.setText(f"Leeres Bett gemerkt (Scanhöhe Z{self.mosaic.scan_z:.0f}).")
+        self._notify("Leeres Bett gemerkt – künftige Scans erkennen Werkstücke als Unterschied.")
+        self._update_enabled()
+        return True
+
+    def forget_empty_bed(self) -> None:
+        for p in (self.empty_bed_path, self.empty_bed_path.with_suffix(".json")):
+            try:
+                p.unlink()
+            except FileNotFoundError:
+                pass
+        self._empty_bed, self._empty_bed_loaded = None, True
+        self.empty_bed_label.setText("Keine Leerbett-Referenz – Erkennung über den Bett-Hintergrund.")
+        self._update_enabled()
 
     def start_probe(self) -> bool:
         areas, notes = self.probe_areas()
@@ -1055,10 +1134,12 @@ class ScanPanel(QWidget):
         saved = self.maps if (self.maps is not None and self.reuse_check.isChecked()) else None
         design = self.design_bounds() if self.design_only.isChecked() else None
         manual = list(self.manual_areas)
+        bed = self.empty_bed()
 
         def task(wf: ScanProbeWorkflow):
-            return {"result": wf.run(design_bounds=design or None, saved=saved, manual_areas=manual,
-                                     start=_machine_xy(wf.machine))}
+            return {"result": wf.run(design_bounds=design or None, saved=saved,
+                                     manual_areas=manual, start=_machine_xy(wf.machine),
+                                     background=bed)}
         return self._start("full", task, need_camera=True)
 
     def _start(self, kind: str, task, need_camera: bool) -> bool:
@@ -1175,7 +1256,9 @@ class ScanPanel(QWidget):
         elif "mosaic" in payload:
             self.set_mosaic(payload["mosaic"])
             self.set_objects(payload["objects"])
-            self._notify(f"Scan fertig: {len(self.objects)} Werkstück(e) erkannt.")
+            notes = list(payload.get("notes", []))
+            self._notify(f"Scan fertig: {len(self.objects)} Werkstück(e) erkannt."
+                         + (f" Hinweis: {notes[0]}" if notes else ""))
         elif "probe" in payload:
             res = payload["probe"]
             self.set_maps(res.maps)
@@ -1421,6 +1504,13 @@ def _offset_outline(pts: list[tuple[float, float]], pad: float) -> list[tuple[fl
         f = (d + pad) / d if d > 1e-9 else 1.0
         out.append((cx + (x - cx) * f, cy + (y - cy) * f))
     return out
+
+
+def default_empty_bed_path() -> Path:
+    """Ablage der Leerbett-Referenz (``LUMACUT_DATA`` oder ``~/.lumacut``)."""
+    import os
+    base = os.environ.get("LUMACUT_DATA") or str(Path.home() / ".lumacut")
+    return Path(base) / "leerbett.png"
 
 
 def _machine_xy(machine) -> tuple[float, float]:

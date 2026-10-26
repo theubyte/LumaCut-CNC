@@ -81,3 +81,28 @@ def test_external_run_takes_pause_and_cancel(panel):
     assert panel.last_error == "Sonde löst nicht aus"
     panel.detach_external_run()
     assert not panel.busy and panel.full_button.isEnabled()
+
+
+def test_empty_bed_reference_remember_use_forget(panel, tmp_path, monkeypatch):
+    """Leerbett-Referenz: merken, beim nächsten Scan als Differenzbild nutzen, vergessen."""
+    from scanprobe.workflow import ScanProbeWorkflow
+    panel.empty_bed_path = tmp_path / "leerbett.png"
+    assert not panel.empty_bed_button.isEnabled()          # noch kein Scan
+    assert not panel.remember_empty_bed() and "leere Bett scannen" in panel.last_error
+    assert panel.camera_scan() and panel.wait(60000) and panel.last_error == ""
+    assert panel.empty_bed_button.isEnabled()
+    assert panel.remember_empty_bed() and panel.empty_bed_path.exists()
+    assert "gemerkt" in panel.empty_bed_label.text() and panel.objects == []
+    seen = []
+    real = ScanProbeWorkflow.detect
+    monkeypatch.setattr(ScanProbeWorkflow, "detect",
+                        lambda self, m, bg=None, **kw: seen.append(bg) or real(self, m, bg, **kw))
+    panel._empty_bed, panel._empty_bed_loaded = None, False   # frisch von der Platte laden
+    assert panel.camera_scan() and panel.wait(60000) and panel.last_error == ""
+    assert seen and seen[-1] is not None and seen[-1].image.shape == panel.mosaic.image.shape
+    # passt nicht (andere Scanhöhe) -> ohne Referenz, mit Hinweis
+    panel._empty_bed.scan_z += 5
+    bed, note = panel._empty_bed_for(panel.mosaic)
+    assert bed is None and "passt nicht" in note
+    panel.forget_empty_bed()
+    assert not panel.empty_bed_path.exists() and panel.empty_bed() is None
