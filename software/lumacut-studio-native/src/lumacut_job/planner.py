@@ -12,7 +12,7 @@ exported that way by ``job_layers``).
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 
 Point = tuple[float, float]
 Poly = list[Point]
@@ -137,25 +137,58 @@ def travel_length(polys: list[Poly], start: Point = (30.0, 30.0)) -> float:
     return total
 
 
-def optimize_layers(layers, start: Point = (30.0, 30.0), **options):
+@dataclass
+class PlanReport:
+    """Was der Planer angepasst hat – für eine kurze Meldung in der UI."""
+
+    skipped_leads: int = 0
+    moved_leads: int = 0
+    layers_with_skipped: list[str] = field(default_factory=list)
+
+    def message(self) -> str:
+        """Kurzer Hinweis (leer, wenn nichts zu melden ist)."""
+        if not self.skipped_leads:
+            return ""
+        where = ", ".join(self.layers_with_skipped)
+        n = self.skipped_leads
+        return (f"Anfahrt bei {n} Kontur{'en' if n != 1 else ''} weggelassen "
+                f"(kein Platz / Kollision mit anderen Teilen) – Ebene {where}")
+
+
+def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | None = None,
+                    **options):
     """Copy of ``JobLayer`` list with each layer's polylines reordered.
 
     The end position of one layer is the start position of the next.
     Per-layer cut options (kerf offset, tabs, lead-in/out, see
     :mod:`.cutpath`) are applied here: kerf before ordering, tabs and leads
-    after ordering (they depend on the chosen start point).
+    after ordering (they depend on the chosen start point). Leads are
+    checked against the contours of *all* layers (no lead may cut into
+    another part); what had to be dropped is counted in ``report``.
     """
-    from .cutpath import CutOptions, apply_cut_options, nesting_depth, offset_closed
-    out = []
-    pos = start
+    from .cutpath import (CutOptions, LeadObstacles, apply_cut_options, nesting_depth,
+                          offset_closed)
+    prepared = []
     for layer in layers:
         opts = CutOptions.of(layer)
         polys = layer.polylines
         if opts.kerf_mm:
             polys, _ = offset_closed(polys, opts.kerf_mm)
+        prepared.append((layer, opts, polys))
+    obstacles = None
+    if any(o.lead_in_mm > 0 or o.lead_out_mm > 0 for _, o, _ in prepared):
+        obstacles = LeadObstacles([p for _, _, polys in prepared for p in polys])
+    out = []
+    pos = start
+    for layer, opts, polys in prepared:
         ordered = order_polylines(polys, pos, **options)
         if opts.active and ordered:
-            res = apply_cut_options(ordered, opts, nesting_depth(ordered))
+            res = apply_cut_options(ordered, opts, nesting_depth(ordered), obstacles)
+            if report is not None:
+                report.moved_leads += res.moved_leads
+                if res.skipped_leads:
+                    report.skipped_leads += res.skipped_leads
+                    report.layers_with_skipped.append(getattr(layer, "name", "?"))
             new = replace(layer, polylines=res.polylines, poly_kinds=tuple(res.kinds))
         else:
             new = replace(layer, polylines=ordered)
