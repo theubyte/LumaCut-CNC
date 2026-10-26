@@ -54,6 +54,10 @@ FILL_LAYER_DEFAULTS = {"fill_mode": "none", "line_interval_mm": _hatch.DEFAULT_I
 FILL_LAYER_FIELDS = tuple(FILL_LAYER_DEFAULTS)
 # Geschlossene Objektarten, die gefüllt werden (Linie/Freihand/Bild nicht).
 FILLABLE_KINDS = ("rect", "ellipse", "polygon", "text")
+# Verknüpfung mit der Materialbibliothek (lumacut_materials): ``material_ref``
+# = "lib:<material>/<operation>/<laser>", ``material_link`` = Ebene folgt der
+# Bibliothek (Dicke ändern plant Leistung/Geschwindigkeit/Durchgänge neu).
+LINK_LAYER_FIELDS = ("material_ref", "material_link")
 
 SHAPE_KINDS = ("rect", "ellipse", "line", "text", "polygon", "path", "image")
 # Objekte mit Stützpunkten: "polygon" geschlossen, "path" (Freihand) offen.
@@ -183,6 +187,8 @@ class Layer:
     hatch_angle: float = 0.0         # Grad, [0, 180); Kreuzschraffur zusätzlich +90°
     hatch_bidirectional: bool = True  # jede zweite Linie rückwärts (kürzere Leerfahrten)
     hatch_outline: bool = True       # Kontur zusätzlich zur Füllung lasern
+    material_ref: str = ""          # Bibliotheksbezug, s. LINK_LAYER_FIELDS
+    material_link: bool = False     # True: Dicke ändern wendet die Bibliothek neu an
 
     def normalized(self) -> "Layer":
         """Kopie mit Parametern im gültigen Bereich."""
@@ -209,13 +215,16 @@ class Layer:
             hatch_angle=_hatch.normalize_angle_180(self.hatch_angle),
             hatch_bidirectional=bool(self.hatch_bidirectional),
             hatch_outline=bool(self.hatch_outline),
+            material_ref=str(self.material_ref or "").strip()[:120],
+            material_link=bool(self.material_link and self.material_ref),
         )
 
     def to_dict(self) -> dict:
         return {"id": self.id, "name": self.name, "color": self.color,
                 "power": self.power, "speed": self.speed, "passes": self.passes,
                 "visible": self.visible, "locked": self.locked, "z_step": self.z_step,
-                **{k: getattr(self, k) for k in MATERIAL_LAYER_FIELDS if getattr(self, k)},
+                **{k: getattr(self, k) for k in MATERIAL_LAYER_FIELDS + LINK_LAYER_FIELDS
+                   if getattr(self, k)},
                 **{k: getattr(self, k) for k, v in CUT_LAYER_DEFAULTS.items()
                    if getattr(self, k) != v},
                 **{k: getattr(self, k) for k, v in FILL_LAYER_DEFAULTS.items()
@@ -235,6 +244,8 @@ class Layer:
             depth_per_pass_mm=float(d.get("depth_per_pass_mm", 0.0)),
             **{k: type(v)(d[k]) for k, v in CUT_LAYER_DEFAULTS.items() if k in d},
             **{k: type(v)(d[k]) for k, v in FILL_LAYER_DEFAULTS.items() if k in d},
+            material_ref=str(d.get("material_ref", "")),
+            material_link=bool(d.get("material_link", False)),
         ).normalized()
 
 
@@ -623,7 +634,7 @@ class Document:
             setattr(layer, k, v)
         normalized = layer.normalized()
         for k in ("power", "speed", "passes", "z_step") + MATERIAL_LAYER_FIELDS + CUT_LAYER_FIELDS \
-                + FILL_LAYER_FIELDS:
+                + FILL_LAYER_FIELDS + LINK_LAYER_FIELDS:
             setattr(layer, k, getattr(normalized, k))
         self.changed()
 

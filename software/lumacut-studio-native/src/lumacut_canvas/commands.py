@@ -211,39 +211,83 @@ class MoveLayerCommand(QUndoCommand):
         self.doc.move_layer(self.layer_id, self.old_index)
 
 
+# --- Abgeleitete Ebenen-Attribute (z. B. Materialbibliothek) -----------------
+# Ein Hook ``fn(layer, changes) -> dict`` darf zu einer Ebenen-Änderung weitere
+# Attribute liefern (z. B. neu geplante Leistung/Geschwindigkeit, wenn sich bei
+# einer verknüpften Ebene die Dicke ändert). Sie landen im *selben* Undo-Schritt.
+# Werte, die die Änderung selbst setzt, haben Vorrang – außer der Hook nennt sie
+# unter dem Schlüssel ``"__override__"`` (z. B. abgeleitete Durchgänge, die das
+# Panel aus veralteten Werten mitschickt). Fehler im Hook werden ignoriert,
+# damit die eigentliche Änderung nie scheitert.
+_LAYER_ATTR_HOOKS: list = []
+
+
+def register_layer_attr_hook(fn) -> None:
+    if fn not in _LAYER_ATTR_HOOKS:
+        _LAYER_ATTR_HOOKS.append(fn)
+
+
+def unregister_layer_attr_hook(fn) -> None:
+    if fn in _LAYER_ATTR_HOOKS:
+        _LAYER_ATTR_HOOKS.remove(fn)
+
+
+def derived_layer_attrs(layer, changes: dict) -> dict:
+    """Zusätzliche (bzw. ausdrücklich überschriebene) Attribute aller Hooks."""
+    extra: dict = {}
+    for fn in list(_LAYER_ATTR_HOOKS):
+        try:
+            more = dict(fn(layer, {**changes, **extra}) or {})
+            override = tuple(more.pop("__override__", ()))
+        except Exception:  # noqa: BLE001 - Hook darf die Änderung nicht verhindern
+            continue
+        for k, v in more.items():
+            if k == "id" or not hasattr(layer, k) or (k in changes and k not in override):
+                continue
+            extra[k] = v
+    return extra
+
+
 class SetLayerAttrCommand(QUndoCommand):
     """Ändert ein Ebenen-Attribut (Name, Farbe, Leistung, ...).
 
     Aufeinanderfolgende Änderungen desselben Felds werden zusammengeführt,
     damit z. B. das Hochzählen der Leistung ein einziger Undo-Schritt ist.
+    Abgeleitete Attribute (:func:`derived_layer_attrs`) gehören zum Schritt.
     """
 
     LABELS = {"name": "Ebene umbenennen", "color": "Ebenenfarbe", "power": "Leistung",
               "speed": "Geschwindigkeit", "passes": "Durchgänge",
               "visible": "Sichtbarkeit", "locked": "Sperre", "z_step": "Fokus-Absenkung",
               "material": "Material", "thickness_mm": "Materialdicke",
-              "target_depth_mm": "Zieltiefe", "depth_per_pass_mm": "Tiefe je Durchgang"}
+              "target_depth_mm": "Zieltiefe", "depth_per_pass_mm": "Tiefe je Durchgang",
+              "material_link": "Materialverknüpfung"}
 
     def __init__(self, doc: Document, layer_id: str, attr: str, value) -> None:
         super().__init__(self.LABELS.get(attr, attr))
         self.doc = doc
         self.layer_id = layer_id
         self.attr = attr
-        self.old = getattr(doc.layer(layer_id), attr)
+        layer = doc.layer(layer_id)
+        self.old = getattr(layer, attr)
         self.new = value
+        self.extra_new = {k: v for k, v in derived_layer_attrs(layer, {attr: value}).items()
+                          if k != attr}
+        self.extra_old = {k: getattr(layer, k) for k in self.extra_new}
 
     def redo(self) -> None:
-        self.doc.update_layer(self.layer_id, **{self.attr: self.new})
+        self.doc.update_layer(self.layer_id, **{**self.extra_new, self.attr: self.new})
 
     def undo(self) -> None:
-        self.doc.update_layer(self.layer_id, **{self.attr: self.old})
+        self.doc.update_layer(self.layer_id, **{**self.extra_old, self.attr: self.old})
 
     def id(self) -> int:  # noqa: A003 - Qt API
         return _ID_LAYER_ATTR
 
     def mergeWith(self, other: QUndoCommand) -> bool:  # noqa: N802 - Qt API
         if (isinstance(other, SetLayerAttrCommand) and other.layer_id == self.layer_id
-                and other.attr == self.attr and self.attr in ("power", "speed", "passes", "name")):
+                and other.attr == self.attr and self.attr in ("power", "speed", "passes", "name")
+                and not other.extra_new):
             self.new = other.new
             return True
         return False
@@ -257,8 +301,8 @@ class SetLayerAttrsCommand(QUndoCommand):
         self.doc = doc
         self.layer_id = layer_id
         layer = doc.layer(layer_id)
-        self.old = {k: getattr(layer, k) for k in attrs}
-        self.new = dict(attrs)
+        self.new = {**attrs, **derived_layer_attrs(layer, dict(attrs))}
+        self.old = {k: getattr(layer, k) for k in self.new}
 
     def redo(self) -> None:
         self.doc.update_layer(self.layer_id, **self.new)
