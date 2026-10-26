@@ -152,7 +152,7 @@ def test_rotation_round_trip_and_old_files():
     d = Document()
     d.add_shape(Shape("ellipse", Geometry(10, 10, 30, 10, 33.5), d.active_layer_id))
     data = d.to_dict()
-    assert data["version"] == Document.VERSION and data["objects"][0]["rot"] == 33.5
+    assert data["version"] == Document.VERSION_WITHOUT_IMAGES and data["objects"][0]["rot"] == 33.5
     e = Document()
     e.load_dict(data)
     assert e.shapes[0].geom.rot == 33.5

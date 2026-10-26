@@ -151,7 +151,7 @@ class PropertyBar(QWidget):
         else:
             kinds = {doc.shape(i).kind for i in sel}
             names = {"rect": "Rechteck", "ellipse": "Ellipse", "line": "Linie", "text": "Text",
-                     "polygon": "Polygon", "path": "Freihand"}
+                     "polygon": "Polygon", "path": "Freihand", "image": "Bild"}
             tops = {doc.shape(i).groups[0] if doc.shape(i).groups else i for i in sel}
             if len(sel) == 1:
                 self.title.setText(names.get(kinds.pop(), "Objekt"))

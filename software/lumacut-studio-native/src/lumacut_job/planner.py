@@ -153,7 +153,29 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), **options):
 
 
 def optimized_document_gcode(doc, **options) -> str:
-    """Like ``lumacut_canvas.gcode.document_to_gcode`` but with the cut planner."""
+    """Like ``lumacut_canvas.gcode.document_to_gcode`` but with the cut planner.
+
+    Bildobjekte werden zuerst graviert (Raster/3D, unterste Ebene zuerst),
+    danach folgen die Vektorebenen – Gravieren vor Schneiden, damit sich
+    ausgeschnittene Teile nicht verschieben. Ohne Bilder ist die Ausgabe
+    identisch mit der reinen Vektor-Planung.
+    """
     from lumacut_canvas.export import job_layers
     from lumacut_canvas.gcode import layers_to_gcode
-    return layers_to_gcode(optimize_layers(job_layers(doc), **options))
+    layers = optimize_layers(job_layers(doc), **options)
+    if not any(s.kind == "image" for s in doc.shapes):
+        return layers_to_gcode(layers)
+    from .images import document_image_jobs
+    jobs = document_image_jobs(doc)
+    if not jobs and not any(l.polylines for l in layers):
+        raise ValueError("Keine sichtbaren Objekte zum Lasern")
+    if not any(l.polylines for l in layers):
+        vector = ["; LUMACUT STUDIO NATIVE CANVAS JOB (homing, focus and park run on the Pi)",
+                  "G21", "G90", "M5 I", "M3 I", "M5 I", "M400"]
+    else:
+        vector = layers_to_gcode(layers).strip().splitlines()
+    out = vector[:5]
+    for job in jobs:
+        out += job.lines
+    out += vector[5:]
+    return "\n".join(out) + "\n"

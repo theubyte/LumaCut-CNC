@@ -42,12 +42,14 @@ class ShapeItem(QGraphicsItem):
         self._color = QColor(layer.color)
         self._kind = shape.kind
         self._geom = shape.geom.copy()
+        self._png: bytes | None = None
         self.update_from(shape, layer)
 
     def update_from(self, shape: Shape, layer: Layer) -> None:
         self.prepareGeometryChange()
         self._kind = shape.kind
         self._geom = shape.geom.copy()
+        self._png = shape.image.png if shape.kind == "image" and shape.image else None
         self._path = shape_path(shape)
         self._color = QColor(layer.color)
         self._rebuild_hit()
@@ -89,6 +91,8 @@ class ShapeItem(QGraphicsItem):
         pen = QPen(self._color, 1.6)
         pen.setCosmetic(True)  # konstante Bildschirmbreite, unabhängig vom Zoom
         p.setRenderHint(QPainter.Antialiasing)
+        if self._png is not None:
+            self._paint_image(p)
         p.setPen(pen)
         if self._kind == "text":
             fill = QColor(self._color)
@@ -97,6 +101,20 @@ class ShapeItem(QGraphicsItem):
         else:
             p.setBrush(Qt.NoBrush)
         p.drawPath(self._path)
+
+
+    def _paint_image(self, p: QPainter) -> None:
+        from .image_cache import qimage_for
+        img = qimage_for(self._png)
+        if img.isNull():
+            return
+        b = self._geom.local_bounds()
+        p.save()
+        if self._geom.rot:
+            p.setTransform(geometry_transform(self._geom), True)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.drawImage(QRectF(b.x, b.y, b.w, b.h), img)
+        p.restore()
 
 
 class SelectionOverlay(QGraphicsItem):

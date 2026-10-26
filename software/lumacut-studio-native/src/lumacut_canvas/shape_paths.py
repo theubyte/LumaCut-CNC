@@ -60,7 +60,7 @@ def local_path(shape: Shape) -> QPainterPath:
         return path
     b = g.local_bounds()
     box = QRectF(b.x, b.y, b.w, b.h)
-    if shape.kind == "rect":
+    if shape.kind in ("rect", "image"):  # Bild: Umriss = Bildrahmen
         path.addRect(box)
     elif shape.kind == "ellipse":
         path.addEllipse(box)

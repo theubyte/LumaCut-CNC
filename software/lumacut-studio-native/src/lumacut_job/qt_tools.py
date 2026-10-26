@@ -151,7 +151,9 @@ class JobTools(QObject):
 
     def frame_program(self, mode: str = "box") -> str:
         """Frame G-code (laser off) of the current design; ValueError if empty."""
-        return frame_gcode(optimize_layers(job_layers(self.editor.document)), mode=mode)
+        from .images import image_outline_layers
+        doc = self.editor.document
+        return frame_gcode(optimize_layers(job_layers(doc)) + image_outline_layers(doc), mode=mode)
 
     def frame_job(self, mode: str = "box", confirm: bool = True):
         try:

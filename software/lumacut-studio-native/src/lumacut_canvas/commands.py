@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from PySide6.QtGui import QUndoCommand
 
-from .model import Document, Geometry, Layer, Shape
+from .model import Document, Geometry, ImageSettings, Layer, Shape
 
 _ID_LAYER_ATTR = 1001
 _ID_GEOMETRY = 1002
@@ -265,3 +265,21 @@ class SetLayerAttrsCommand(QUndoCommand):
 
     def undo(self) -> None:
         self.doc.update_layer(self.layer_id, **self.old)
+
+
+class SetImageSettingsCommand(QUndoCommand):
+    """Gravur-Einstellungen eines Bildobjekts (Modus, Linienabstand, …)."""
+
+    def __init__(self, doc: Document, shape_id: str, old: ImageSettings, new: ImageSettings,
+                 text: str = "Bildeinstellungen") -> None:
+        super().__init__(text)
+        self.doc = doc
+        self.shape_id = shape_id
+        self.old = old
+        self.new = new
+
+    def redo(self) -> None:
+        self.doc.set_image_settings(self.shape_id, self.new)
+
+    def undo(self) -> None:
+        self.doc.set_image_settings(self.shape_id, self.old)

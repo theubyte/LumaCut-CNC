@@ -13,9 +13,10 @@ benachrichtigt registrierte Listener nach jeder Änderung.
 
 from __future__ import annotations
 
+import base64
 import math
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Callable, Iterable
 
 from .material import DEPTH_PER_PASS_RANGE, THICKNESS_RANGE
@@ -34,9 +35,88 @@ MAX_FOCUS_DROP_MM = 3.0
 # Material-Felder der Ebene (material.py); nur gespeichert, wenn gesetzt.
 MATERIAL_LAYER_FIELDS = ("material", "thickness_mm", "target_depth_mm", "depth_per_pass_mm")
 
-SHAPE_KINDS = ("rect", "ellipse", "line", "text", "polygon", "path")
+SHAPE_KINDS = ("rect", "ellipse", "line", "text", "polygon", "path", "image")
 # Objekte mit Stützpunkten: "polygon" geschlossen, "path" (Freihand) offen.
 POINT_KINDS = {"polygon": 3, "path": 2}  # Art -> Mindestanzahl Punkte
+
+# Bildmodi: Rastermodi der Engine (lumacut_job.raster) plus 3D-Tiefe
+# (sliced depth). Leistung/Geschwindigkeit eines Bildes kommen aus seinen
+# Bildeinstellungen, nicht aus der Ebene (wie bei LightBurn "Image"-Ebenen).
+IMAGE_MODES = ("threshold", "floyd", "atkinson", "ordered", "grayscale", "depth3d")
+
+
+@dataclass(frozen=True)
+class ImageSettings:
+    """Gravur-Einstellungen eines Bildobjekts (unveränderlich, Undo-sicher)."""
+
+    mode: str = "floyd"
+    line_interval_mm: float = 0.1     # 254 DPI
+    power: float = 60.0               # % bei Schwarz
+    min_power: float = 0.0            # % bei Weiß (nur Graustufen)
+    speed_mm_min: float = 3000.0
+    passes: int = 1
+    threshold: int = 128
+    bidirectional: bool = True
+    overscan_mm: float = 3.0
+    negative: bool = False
+    depth_levels: int = 8             # nur 3D-Tiefe
+    z_step_mm: float = 0.0            # nur 3D-Tiefe: Fokus je Stufe tiefer
+
+    def normalized(self) -> "ImageSettings":
+        return ImageSettings(
+            mode=self.mode if self.mode in IMAGE_MODES else "floyd",
+            line_interval_mm=_clamp(float(self.line_interval_mm), 0.03, 2.0),
+            power=_clamp(float(self.power), *POWER_RANGE),
+            min_power=_clamp(float(self.min_power), 0.0, _clamp(float(self.power), *POWER_RANGE)),
+            speed_mm_min=_clamp(float(self.speed_mm_min), *SPEED_RANGE),
+            passes=int(_clamp(int(self.passes), *PASSES_RANGE)),
+            threshold=int(_clamp(int(self.threshold), 0, 255)),
+            bidirectional=bool(self.bidirectional),
+            overscan_mm=_clamp(float(self.overscan_mm), 0.0, 20.0),
+            negative=bool(self.negative),
+            depth_levels=int(_clamp(int(self.depth_levels), 2, 64)),
+            z_step_mm=_clamp(float(self.z_step_mm), 0.0, 2.0))
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "ImageSettings":
+        names = {f.name for f in fields(ImageSettings)}
+        return ImageSettings(**{k: v for k, v in (d or {}).items() if k in names}).normalized()
+
+
+@dataclass(frozen=True)
+class RasterImage:
+    """Eingebettete Bitmap eines Bildobjekts: 8-bit-Graustufen-PNG.
+
+    Transparenz wird beim Import auf Weiß gelegt (Weiß = nicht lasern).
+    """
+
+    png: bytes
+    px_width: int
+    px_height: int
+    settings: ImageSettings = field(default_factory=ImageSettings)
+
+    def dpi(self, width_mm: float) -> float:
+        """Effektive Auflösung bei der aktuellen Objektbreite."""
+        return self.px_width / (abs(width_mm) / 25.4) if width_mm else 0.0
+
+    def to_dict(self) -> dict:
+        return {"png": base64.b64encode(self.png).decode("ascii"),
+                "px": [self.px_width, self.px_height],
+                "settings": self.settings.to_dict()}
+
+    @staticmethod
+    def from_dict(d: dict) -> "RasterImage":
+        png = base64.b64decode(str(d["png"]))
+        if not png.startswith(b"\x89PNG"):
+            raise ValueError("Bilddaten sind kein PNG")
+        w, h = (int(v) for v in d.get("px", (0, 0)))
+        if w <= 0 or h <= 0:
+            raise ValueError("Bildgröße fehlt")
+        return RasterImage(png, w, h, ImageSettings.from_dict(d.get("settings", {})))
+
 
 # Vorgabefarben für neue Ebenen, gut unterscheidbar auf dunklem Grund.
 LAYER_COLORS = ("#4cd4b0", "#f3a64b", "#6fa8ff", "#f36b73", "#c08cff",
@@ -235,6 +315,8 @@ class Shape:
     # Stützpunkte für polygon/path, normiert auf die (ungedrehte) Objektbox
     # (0..1). Dadurch wirken Verschieben, Skalieren und Drehen ohne Sonderfälle.
     points: tuple[tuple[float, float], ...] = ()
+    # Nur für kind == "image": eingebettete Bitmap + Gravur-Einstellungen.
+    image: RasterImage | None = None
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -273,6 +355,8 @@ class Shape:
             d["font"] = self.font_family
         if self.kind in POINT_KINDS:
             d["points"] = [[round(u, 6), round(v, 6)] for u, v in self.points]
+        if self.kind == "image" and self.image is not None:
+            d["image"] = self.image.to_dict()
         return d
 
     @staticmethod
@@ -283,7 +367,8 @@ class Shape:
         points = tuple((float(u), float(v)) for u, v in d.get("points", ())) if kind in POINT_KINDS else ()
         if kind in POINT_KINDS and len(points) < POINT_KINDS[kind]:
             raise ValueError(f"{kind} braucht mindestens {POINT_KINDS[kind]} Punkte")
-        return Shape(kind=kind, layer_id=str(d["layer"]), points=points,
+        image = RasterImage.from_dict(d["image"]) if kind == "image" else None
+        return Shape(kind=kind, layer_id=str(d["layer"]), points=points, image=image,
                      geom=Geometry(float(d["x"]), float(d["y"]), float(d["w"]), float(d["h"]),
                                    normalize_angle(float(d.get("rot", 0.0)))),
                      text=str(d.get("text", "")), font_family=str(d.get("font", "Segoe UI")),
@@ -371,7 +456,10 @@ class Document:
     FORMAT = "lumacut-canvas"
     # Version 2: Drehung ("rot") und Gruppen ("groups"). Ältere Dateien (v1) werden weiter gelesen;
     # ältere Programmversionen lehnen v2 ab, statt die Drehung still zu verlieren.
-    VERSION = 3  # 3: optionale Material-Felder je Ebene (v1/v2 laden weiter)
+    VERSION = 4  # 3: optionale Material-Felder je Ebene; 4: Bildobjekte (v1-v3 laden weiter)
+    # Dateien ohne Bilder werden weiter als v3 geschrieben, damit ältere
+    # Versionen der App sie öffnen können.
+    VERSION_WITHOUT_IMAGES = 3
 
     def __init__(self, with_default_layer: bool = True) -> None:
         self.layers: list[Layer] = []
@@ -528,6 +616,13 @@ class Document:
         self.shape(shape_id).text = text
         self.changed()
 
+    def set_image_settings(self, shape_id: str, settings: ImageSettings) -> None:
+        s = self.shape(shape_id)
+        if s.image is None:
+            raise ValueError("Objekt ist kein Bild")
+        s.image = replace(s.image, settings=settings.normalized())
+        self.changed()
+
     def set_groups(self, shape_id: str, groups: tuple[str, ...]) -> None:
         self.shape(shape_id).groups = tuple(groups)
         self.changed()
@@ -568,7 +663,10 @@ class Document:
     # --- Serialisierung ---------------------------------------------------
     def to_dict(self) -> dict:
         return {
-            "format": self.FORMAT, "version": self.VERSION, "units": "mm",
+            "format": self.FORMAT,
+            "version": (self.VERSION if any(s.kind == "image" for s in self.shapes)
+                        else self.VERSION_WITHOUT_IMAGES),
+            "units": "mm",
             "work_area": {"width": 360.0, "height": 340.0},
             "active_layer": self.active_layer_id,
             "layers": [l.to_dict() for l in self.layers],

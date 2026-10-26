@@ -46,6 +46,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
             continue
         polys: list[list[tuple[float, float]]] = []
         for s in doc.shapes_in_layer(layer.id):
+            if s.kind == "image":
+                continue  # Bilder werden gerastert (lumacut_job.images), nicht umfahren
             path = shape_path(s)
             if s.kind == "line":
                 a, b = path.elementAt(0), path.elementAt(1)
@@ -71,8 +73,25 @@ def _paint(doc: Document, p: QPainter, line_width_mm: float) -> None:
             pen = QPen(color, line_width_mm)
             pen.setCosmetic(False)
             p.setPen(pen)
+            if s.kind == "image" and s.image is not None:
+                _paint_image(p, s)
+                continue
             p.setBrush(QBrush(color) if s.kind == "text" else Qt.NoBrush)
             p.drawPath(shape_path(s))
+
+
+def _paint_image(p: QPainter, s) -> None:
+    from .image_cache import qimage_for
+    from .shape_paths import geometry_transform
+    img = qimage_for(s.image.png)
+    if img.isNull():
+        return
+    b = s.geom.local_bounds()
+    p.save()
+    if s.geom.rot:
+        p.setTransform(geometry_transform(s.geom), True)
+    p.drawImage(QRectF(b.x, b.y, b.w, b.h), img)
+    p.restore()
 
 
 def export_svg(doc: Document, path: str | os.PathLike[str]) -> None:
