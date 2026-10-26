@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -93,6 +95,21 @@ fun SettingsScreen(machine: MachineViewModel) {
                 }, kind = BtnKind.PRIMARY, busy = "settings" in busy, enabled = online == true)
                 Spacer(Modifier.height(10.dp))
                 SmallText("Fokus Z = Werkstück Z + Fokusabstand − Schalter→Spitze. Tasterversatz = Tasterspitze relativ zum Laserpunkt. Nach Änderungen neu abtasten.")
+            }
+            LcCard {
+                CardTitle("Licht")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Lichteffekte", style = LcTypography.titleMedium)
+                        SmallText("Blitzen beim Referenzieren, Hochdimmen beim Auftragsstart, Atmen am Ende, Blinken bei Fehlern.")
+                    }
+                    Switch(status?.light_effects != false, { machine.action("light", mapOf("effects" to if (it) "1" else "0"), key = "light", quiet = true) },
+                           enabled = online == true && status?.light_dimmable != false)
+                }
+                if (status?.light_dimmable == false) {
+                    Spacer(Modifier.height(8.dp))
+                    SmallText("F�r Dimmen und Lichteffekte die neue Firmware flashen.")
+                }
             }
             LcCard {
                 CardTitle("SKR-Firmware")

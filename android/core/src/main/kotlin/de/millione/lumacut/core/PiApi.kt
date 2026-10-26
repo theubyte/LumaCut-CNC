@@ -67,6 +67,10 @@ data class MachineStatus(
     val position: List<Double>? = null,
     val fault: String = "",
     val lights: Boolean = false,
+    /** 1..100 %; dimmable null = not yet known, false = old firmware without M355. */
+    val light_brightness: Int? = null,
+    val light_dimmable: Boolean? = null,
+    val light_effects: Boolean = true,
     val exhaust: Boolean = false,
     val laser_cooling_fan_on: Boolean = false,
     val cooldown_remaining_s: Int? = null,
@@ -170,6 +174,15 @@ class PiClient(
         val form = FormBody.Builder().add("op", op).apply { fields.forEach { (k, v) -> add(k, v) } }.build()
         val long = op in setOf("home", "probe", "park", "moveto")
         return message(call(Request.Builder().url(url("api", "action")).post(form).build(), longRunning = long))
+    }
+
+    /** Light on PC8: switch and/or dim (1..100 %) and/or effects on/off; absent values stay as they are. */
+    suspend fun light(on: Boolean? = null, brightness: Int? = null, effects: Boolean? = null): String {
+        val f = linkedMapOf<String, String>()
+        on?.let { f["on"] = if (it) "1" else "0" }
+        brightness?.let { f["brightness"] = it.coerceIn(1, 100).toString() }
+        effects?.let { f["effects"] = if (it) "1" else "0" }
+        return action("light", f)
     }
 
     /**

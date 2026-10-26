@@ -19,10 +19,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -192,6 +196,17 @@ private fun ExtrasCard(machine: MachineViewModel) {
             ToggleTile(LcIcons.fan, "Abluft", s?.exhaust == true, {
                 if (usable) machine.action("exhaust", mapOf("on" to if (s?.exhaust == true) "0" else "1"))
             }, Modifier.weight(1f), busy = "exhaust" in busy || !usable)
+        }
+        if (s?.light_dimmable != false) {
+            val pi = s?.light_brightness ?: 100
+            var level by remember(pi) { mutableFloatStateOf(pi.toFloat()) }
+            Spacer(Modifier.height(14.dp))
+            SmallText("Helligkeit ${level.toInt()} %")
+            Slider(
+                level, { level = it }, valueRange = 1f..100f, enabled = usable,
+                onValueChangeFinished = { machine.action("light", mapOf("on" to "1", "brightness" to level.toInt().toString()), key = "light", quiet = true) },
+                colors = SliderDefaults.colors(thumbColor = Lc.accent, activeTrackColor = Lc.accent),
+            )
         }
         if (s?.emergency_latched == true) {
             Spacer(Modifier.height(14.dp))

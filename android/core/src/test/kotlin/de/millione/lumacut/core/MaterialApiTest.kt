@@ -67,6 +67,23 @@ class MaterialApiTest {
         srv.shutdown()
     }
 
+    @Test fun `light posts on, brightness and effects, status reports dimming`() = runBlocking {
+        val srv = MockWebServer().apply {
+            enqueue(MockResponse().setBody("""{"message":"Licht EIN · 60 %","lights":true,"brightness":60,"dimmable":true}"""))
+            enqueue(MockResponse().setBody("""{"message":"ok"}"""))
+            enqueue(MockResponse().setBody("""{"connected":true,"lights":true,"light_brightness":60,"light_dimmable":false,"light_effects":false}"""))
+            start()
+        }
+        val pi = PiClient("127.0.0.1", srv.port)
+        pi.light(on = true, brightness = 250)
+        assertEquals("op=light&on=1&brightness=100", srv.takeRequest().body.readUtf8())
+        pi.light(effects = false)
+        assertEquals("op=light&effects=0", srv.takeRequest().body.readUtf8())
+        val s = pi.status()
+        assertEquals(60, s.light_brightness); assertEquals(false, s.light_dimmable); assertEquals(false, s.light_effects)
+        srv.shutdown()
+    }
+
     @Test fun `phase and coordinate convention are read, missing means old Pi`() = runBlocking {
         val srv = MockWebServer().apply {
             enqueue(MockResponse().setBody("""{"connected":true,"coord_convention":"origin_top_right","job":{"state":"running","line":50,"total":50,"phase":"finishing"}}"""))

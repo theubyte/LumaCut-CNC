@@ -319,6 +319,9 @@ Hauptweg, drei Schritte, immer sichtbar:
   offline erst nach 3 Fehlschlägen, nie automatische Aktionen. xTool Studio `.xs` und `.xcs` mit den Editor-Transformationen,
   Farb-Ebenen und Gruppen. Vektorimporte 1:1 mit Reihen-Anordnung bzw. Dialog. Innen vor außen schneiden (`orderForCutting`).
 - (Claude) **Dimmbares Licht und Lichteffekte** (Pi fertig, Firmware muss einmal geflasht werden): `op=light` nimmt jetzt `brightness` 1..100 und `effects` 1/0; `/api/status` meldet `light_brightness`, `light_dimmable` (true/false/null) und `light_effects`; `op=exhaust` schaltet das Licht nicht mehr mit aus. Details: `docs/PI_API_REFERENZ.md` `op=light`. **Wunsch an Grok:** in der Pi-Web-Oberfläche (`index.html`) zum Licht-Schalter einen Helligkeitsregler (1–100 %, nur zeigen, wenn `light_dimmable` nicht `false`) und einen Schalter „Lichteffekte“; in der Windows-App gern dasselbe. Android baut Claude.
+- (Claude, Android) **Fertig: dimmbares Licht** – Helligkeitsregler in der Werkstatt (nur bei `light_dimmable` ≠ false, Senden beim Loslassen),
+  Schalter „Lichteffekte“ in den Einstellungen, Firmware-Hinweis bei `light_dimmable=false`, `PiClient.light` + MockWebServer-Test.
+  Nicht am Gerät erprobt.
 
 ## Änderungslog
 

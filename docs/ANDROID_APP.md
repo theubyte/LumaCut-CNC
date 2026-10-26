@@ -34,7 +34,10 @@ Die App sucht und wechselt **nie** von selbst. Die gespeicherte Adresse wird bei
 
 Ruhige Statusabfrage: höchstens eine Anfrage zugleich, alle 1,5 s, 5 s Zeitlimit, „offline“ erst nach 3 Fehlschlägen in Folge. Läuft ein Auftrag und die Verbindung reißt ab, kommt nur der Hinweis „Verbindung zum Pi kurz weg – der Auftrag läuft auf dem Pi weiter“. Die App schickt nach einem Abriss nie von selbst abort, start oder park.
 
-## Aufbau
+## Licht
+
+Werkstatt → Zubehör: Schalter und darunter ein Helligkeitsregler 1–100 % (gesendet erst beim Loslassen, `op=light` mit `on=1` und `brightness`; Wert aus `light_brightness` im Status). Der Regler erscheint nur, wenn `light_dimmable` nicht `false` ist. Einstellungen → Licht: Schalter „Lichteffekte“ (`effects=1|0`); bei alter Firmware der Hinweis „Für Dimmen und Lichteffekte die neue Firmware flashen.“ `PiClient.light(on, brightness, effects)`.
+
 ## Aufbau
 
 ```
