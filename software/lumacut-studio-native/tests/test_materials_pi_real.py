@@ -133,6 +133,16 @@ def test_save_update_delete_roundtrip_between_devices(pi, tmp_path):
     assert web.MATERIALS.list()["revision"] == rev + 1
     assert b.refresh(t(url)).presets_changed
     assert named(b, p.name).power_pct == 85.0
+    # Android/Pi-Web ändern per PUT nur die Pi-Felder (ohne Studio-Zusatzfelder).
+    rev = web.MATERIALS.list()["revision"]
+    web.MATERIALS.update(stored["id"], {"name": p.name, "thickness_mm": 4.0, "process": "Gravieren",
+                                        "mode": "fill", "power_pct": 30.0, "speed_mm_min": 2000.0,
+                                        "passes": 1, "base_revision": rev})
+    assert on_pi(web)[p.name]["laser_id"] == "diode_10w"  # Zusatzfelder bleiben
+    b.refresh(t(url))
+    android = named(b, p.name)
+    assert (android.op, android.power_pct, android.laser_id) == ("engrave_medium", 30.0, "diode_10w")
+    a.refresh(ta)
     # Löschen auf b → verschwindet auf dem Pi und bei a.
     assert b.delete_preset(p.name, t(url)) == "pi"
     assert p.name not in on_pi(web)
