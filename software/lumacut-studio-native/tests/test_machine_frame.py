@@ -97,6 +97,53 @@ class FrameMatchesPiGuardTests(unittest.TestCase):
         except ImportError:  # pragma: no cover
             self.skipTest("flask not installed")
         programs = {m: frame_program(m) for m in ("box", "hull")}
+        run = self.check_on_pi(programs)
+        self.assertIn("box", run.stdout)
+        self.assertIn("hull", run.stdout)
+
+    def test_image_designs_frame_accepted_by_pi(self):
+        """JobTools.frame_program (also used by the panel button) frames
+        image objects since the import feature; rotated images at the work
+        area edge must still pass the Pi's op=frame check."""
+        if QApplication is None:
+            self.skipTest("PySide6 not installed")
+        QApplication.instance() or QApplication([])
+        from types import SimpleNamespace
+        from PySide6.QtGui import QColor, QImage
+        from lumacut_canvas import Document, Geometry, Shape
+        from lumacut_canvas.model import ImageSettings, RasterImage
+        from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
+        from lumacut_import.image import grayscale_png
+        from lumacut_job.qt_tools import JobTools
+        img = QImage(40, 20, QImage.Format_RGB32)
+        img.fill(QColor(90, 90, 90))
+        png, pw, ph = grayscale_png(img)
+
+        def image(doc, x, y, w, h, rot=0.0):
+            doc.add_shape(Shape("image", Geometry(x, y, w, h, rot), doc.active_layer_id,
+                                image=RasterImage(png, pw, ph, ImageSettings())))
+        only_image = Document()
+        image(only_image, 100, 100, 30, 10)
+        edge = Document()
+        image(edge, WORK_WIDTH_MM - 40, WORK_HEIGHT_MM - 25, 40, 25, 30.0)
+        image(edge, 0, 0, 25, 25, 45.0)
+        mixed = Document()
+        mixed.add_shape(Shape("rect", Geometry(10, 10, 50, 20), mixed.active_layer_id))
+        image(mixed, 150, 120, 60, 40, 15.0)
+        programs = {}
+        for name, doc in (("image", only_image), ("edge", edge), ("mixed", mixed)):
+            tools = SimpleNamespace(editor=SimpleNamespace(document=doc))
+            for mode in ("box", "hull"):
+                programs[name + "-" + mode] = JobTools.frame_program(tools, mode)
+        run = self.check_on_pi(programs)
+        for key in programs:
+            self.assertIn(key, run.stdout)
+
+    def check_on_pi(self, programs):
+        try:
+            import flask  # noqa: F401
+        except ImportError:  # pragma: no cover
+            self.skipTest("flask not installed (pi400 web.py needs it)")
         script = (
             "import json, sys\n"
             "from marlin import web\n"
@@ -111,8 +158,7 @@ class FrameMatchesPiGuardTests(unittest.TestCase):
             run = subprocess.run([sys.executable, "-c", script], input=json.dumps(programs),
                                  env=env, text=True, capture_output=True, timeout=30)
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn("box", run.stdout)
-        self.assertIn("hull", run.stdout)
+        return run
 
 
 @unittest.skipIf(QApplication is None, "PySide6 not installed")
