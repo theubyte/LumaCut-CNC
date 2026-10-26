@@ -11,6 +11,7 @@ Public integration points for the main window (and other panels):
     MachinePanel.frame_available_changed(bool)    – frame shortcuts enabled state
     MachinePanel.set_user_origin(x, y)            – user origin from the camera scan
     MachinePanel.set_job_origin(origin, anchor)   – preset the start origin (#16)
+    MachinePanel.queue_job()                      – sent job into the Pi queue (#17)
     MachinePanel.shutdown()                       – call from closeEvent
 """
 from __future__ import annotations
@@ -22,7 +23,8 @@ from typing import Callable
 from PySide6.QtCore import Qt, QTimer, Signal, Slot
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-                               QLineEdit, QMessageBox, QProgressBar,
+                               QLineEdit, QListWidget, QListWidgetItem,
+                               QMessageBox, QProgressBar,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 from . import settings as settings_store
@@ -55,6 +57,13 @@ ORIGIN_LABELS = {"absolute": "Absolut", "current": "Aktuelle Position",
 ANCHOR_LABELS = {"tl": "Oben links", "tr": "Oben rechts", "bl": "Unten links",
                  "br": "Unten rechts", "center": "Mitte"}
 OLD_PI_ORIGIN = "Pi-Dienst zu alt: nur absolute Aufträge – Pi aktualisieren"
+OLD_PI_QUEUE = "Pi-Dienst zu alt: keine Warteschlange – Pi aktualisieren"
+QUEUE_ITEM_LABELS = {"queued": "wartet", "running": "läuft", "done": "fertig",
+                     "error": "Fehler", "skipped": "übersprungen",
+                     "aborted": "abgebrochen"}
+QUEUE_STATE_LABELS = {"idle": "bereit", "running": "läuft",
+                      "pausing": "hält nach diesem Auftrag an", "paused": "angehalten",
+                      "stopped": "gestoppt", "complete": "fertig"}
 
 ESTOP_STYLE = ("QPushButton { background: #d7263d; color: white; font-weight: bold;"
                " font-size: 15px; border: 2px solid #ff9b96; border-radius: 8px;"
@@ -301,6 +310,42 @@ class MachinePanel(QWidget):
         jl.addWidget(self.job_label)
         jl.addWidget(self.job_progress)
         root.addWidget(job)
+
+        # Job queue on the Pi (#17): several sent jobs run one after another.
+        queue = QGroupBox("Warteschlange")
+        ql = QVBoxLayout(queue)
+        self.queue_list = QListWidget()
+        self.queue_list.setMaximumHeight(110)
+        self.queue_list.currentRowChanged.connect(lambda _=0: self._update_enabled())
+        ql.addWidget(self.queue_list)
+        qb = QGridLayout()
+        self.queue_add_button = QPushButton("Einreihen")
+        self.queue_add_button.setToolTip("Gesendeten Auftrag mit dem gewählten Ursprung "
+                                         "einreihen (Platzierung wird jetzt festgelegt)")
+        self.queue_run_button = QPushButton("Abarbeiten")
+        self.queue_pause_button = QPushButton("Anhalten")
+        self.queue_pause_button.setToolTip("Nach dem laufenden Auftrag anhalten")
+        self.queue_skip_button = QPushButton("Überspringen")
+        self.queue_remove_button = QPushButton("Entfernen")
+        self.queue_clear_button = QPushButton("Leeren")
+        self.queue_add_button.clicked.connect(lambda _=False: self.queue_job())
+        self.queue_run_button.clicked.connect(lambda _=False: self.queue_run())
+        self.queue_pause_button.clicked.connect(lambda _=False: self._queue_op(
+            "Warteschlange anhalten", lambda c: c.queue_pause()))
+        self.queue_skip_button.clicked.connect(lambda _=False: self._queue_item_op("skip"))
+        self.queue_remove_button.clicked.connect(lambda _=False: self._queue_item_op("remove"))
+        self.queue_clear_button.clicked.connect(lambda _=False: self._queue_op(
+            "Warteschlange leeren", lambda c: c.queue_clear()))
+        for i, b in enumerate((self.queue_add_button, self.queue_run_button,
+                               self.queue_pause_button, self.queue_skip_button,
+                               self.queue_remove_button, self.queue_clear_button)):
+            qb.addWidget(b, i // 2, i % 2)
+        ql.addLayout(qb)
+        self.queue_label = QLabel("")
+        self.queue_label.setWordWrap(True)
+        self.queue_label.setStyleSheet("color: %s;" % MUTED)
+        ql.addWidget(self.queue_label)
+        root.addWidget(queue)
         root.addStretch()
 
         self._control_buttons = [self.home_button, self.park_button,
@@ -308,7 +353,10 @@ class MachinePanel(QWidget):
                                  *self.jog_buttons, self.send_button,
                                  self.start_button, self.autorun_button,
                                  self.abort_button, self.frame_button,
-                                 self.origin_set_button]
+                                 self.origin_set_button, self.queue_add_button,
+                                 self.queue_run_button, self.queue_pause_button,
+                                 self.queue_skip_button, self.queue_remove_button,
+                                 self.queue_clear_button]
 
     # ------------------------------------------------------ connection
     def _current_settings(self) -> settings_store.ConnectionSettings:
@@ -570,7 +618,8 @@ class MachinePanel(QWidget):
                      and not self._stale)
         idle = connected and not self._runner.busy and not self._external
         s = self._status
-        job_active = bool(s and s.job.active)
+        # A running queue counts as a job, also between two of its jobs.
+        job_active = bool(s and (s.job.active or s.queue.active))
         framing = bool(s and s.framing)
         # LightBurn or another client holds the Pi: motion would be refused.
         foreign = bool(s and s.foreign_owner)
@@ -607,6 +656,7 @@ class MachinePanel(QWidget):
             self.start_button.setEnabled(False)
             self.autorun_button.setEnabled(False)
         self._update_origin(s)
+        self._update_queue(s)
         # The emergency stop is never disabled.
         self.estop_button.setEnabled(True)
 
@@ -630,6 +680,119 @@ class MachinePanel(QWidget):
                 p["file"], ORIGIN_LABELS.get(p.get("origin"), p.get("origin")),
                 ANCHOR_LABELS.get(p.get("anchor"), p.get("anchor")))
         self.origin_label.setText(text)
+
+    def _update_queue(self, s: MachineStatus | None) -> None:
+        """Queue list + buttons (called at the end of _update_enabled)."""
+        q = s.queue if s is not None else None
+        supported = q is not None and q.supported
+        if not supported:
+            for b in (self.queue_add_button, self.queue_run_button,
+                      self.queue_pause_button, self.queue_skip_button,
+                      self.queue_remove_button, self.queue_clear_button):
+                b.setEnabled(False)
+            if self.queue_list.count():
+                self.queue_list.clear()
+            self.queue_label.setText("" if s is None else OLD_PI_QUEUE)
+            return
+        self._fill_queue_list(q)
+        idle = self.queue_add_button.isEnabled()   # connected, no command running
+        blocked = bool(s.foreign_owner or s.emergency_latched or s.framing)
+        selected = self._selected_queue_item()
+        self.queue_add_button.setEnabled(idle and bool(self._uploaded) and not blocked
+                                         and len(q.items) < (q.max or 50))
+        self.queue_run_button.setEnabled(idle and q.waiting > 0 and not q.active
+                                         and not s.job.active and s.homed and not blocked)
+        self.queue_pause_button.setEnabled(idle and q.state == "running")
+        self.queue_skip_button.setEnabled(idle and selected is not None
+                                          and selected.state == "queued")
+        self.queue_remove_button.setEnabled(idle and selected is not None
+                                            and selected.state != "running")
+        self.queue_clear_button.setEnabled(idle and bool(q.items))
+        text = "Warteschlange %s · %d wartend" % (
+            QUEUE_STATE_LABELS.get(q.state, q.state), q.waiting)
+        failed = next((i for i in q.items if i.state in ("error", "aborted")), None)
+        if failed is not None and q.state == "stopped":
+            text += " · #%d %s: %s" % (failed.id, failed.file, failed.error or failed.state)
+        self.queue_label.setText(text)
+
+    def _fill_queue_list(self, q) -> None:
+        rows = ["#%d %s – %s%s" % (
+            i.id, i.file, QUEUE_ITEM_LABELS.get(i.state, i.state),
+            "" if i.origin == "absolute" else " (%s, %s)" % (
+                ORIGIN_LABELS.get(i.origin, i.origin), ANCHOR_LABELS.get(i.anchor, i.anchor)))
+            for i in q.items]
+        current = [self.queue_list.item(r).text() for r in range(self.queue_list.count())]
+        if rows == current:
+            return
+        keep = self._selected_queue_item()
+        self.queue_list.blockSignals(True)
+        self.queue_list.clear()
+        for item, text in zip(q.items, rows):
+            entry = QListWidgetItem(text)
+            entry.setData(Qt.ItemDataRole.UserRole, item.id)
+            if item.error:
+                entry.setToolTip(item.error)
+            self.queue_list.addItem(entry)
+            if keep is not None and item.id == keep.id:
+                self.queue_list.setCurrentItem(entry)
+        self.queue_list.blockSignals(False)
+
+    def _selected_queue_item(self):
+        s = self._status
+        entry = self.queue_list.currentItem()
+        if s is None or entry is None:
+            return None
+        wanted = entry.data(Qt.ItemDataRole.UserRole)
+        return next((i for i in s.queue.items if i.id == wanted), None)
+
+    def _queue_ready(self) -> bool:
+        s = self._status
+        if self._client is None or self._state != ConnState.CONNECTED:
+            self._show_message("Nicht mit dem Pi verbunden", WARN)
+            return False
+        if s is None or not s.queue.supported:
+            self._show_message(OLD_PI_QUEUE, WARN)
+            return False
+        return True
+
+    def _queue_op(self, label: str, call: Callable[[LumaCutClient], str]) -> bool:
+        if not self._queue_ready():
+            return False
+        client = self._client
+        return self._run(label, lambda: call(client))
+
+    def _queue_item_op(self, what: str) -> bool:
+        item = self._selected_queue_item()
+        if item is None:
+            self._show_message("Zuerst einen Eintrag der Warteschlange wählen", WARN)
+            return False
+        if what == "skip":
+            return self._queue_op("Überspringen #%d" % item.id,
+                                  lambda c: c.queue_skip(item.id))
+        return self._queue_op("Entfernen #%d" % item.id, lambda c: c.queue_remove(item.id))
+
+    def queue_job(self) -> bool:
+        """Append the sent job with the chosen origin to the Pi queue."""
+        if not self._queue_ready():
+            return False
+        if not self._uploaded:
+            self._show_message("Zuerst einen Auftrag senden", WARN)
+            return False
+        origin, anchor = self.job_origin()
+        client, name = self._client, self._uploaded
+        return self._run("Einreihen", lambda: client.queue_add(name, origin, anchor))
+
+    def queue_run(self) -> bool:
+        if not self._queue_ready():
+            return False
+        s = self._status
+        names = ", ".join(i.file for i in s.queue.items if i.state == "queued")
+        if not self._confirm("Warteschlange abarbeiten",
+                             "Wartende Aufträge nacheinander lasern: %s? Bereich frei, "
+                             "Material eingelegt, Schutzbrille?" % (names or "–")):
+            return False
+        client = self._client
+        return self._run("Warteschlange", lambda: client.queue_run())
 
     # ------------------------------------------------------- commands
     def _run(self, label: str, fn: Callable[[], str]) -> bool:
@@ -836,7 +999,7 @@ class MachinePanel(QWidget):
             self._show_message("Nicht mit dem Pi verbunden", WARN)
             return False
         s = self._status
-        if s is not None and (s.job.active or s.framing):
+        if s is not None and (s.job.active or s.queue.active or s.framing):
             self._show_message("Rahmen erst, wenn %s beendet ist" % (
                 "die Rahmenfahrt" if s.framing else "der Auftrag"), WARN)
             return False
@@ -971,6 +1134,8 @@ class MachinePanel(QWidget):
             return "Rahmenfahrt"
         if s is not None and s.job.active:
             return "Auftrag " + (s.job.file or "")
+        if s is not None and s.queue.active:
+            return "Warteschlange"
         current = self._runner.current
         if current and current != ESTOP_LABEL:
             return current

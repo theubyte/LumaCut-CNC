@@ -334,6 +334,33 @@ gewählt ist. Das ist der Standard und genau das bisherige Verhalten.
   hängt an ihm).
 - ⚠ Hardware: Position nach dem Verschieben am echten Gerät nicht geprüft.
 
+### Auftrags-Warteschlange: `op=queue_add` / `queue_run` / `queue_pause` / `queue_skip` / `queue_remove` / `queue_clear`
+
+- **Auslöser:** Gruppe „Warteschlange“ im Maschinen-Panel: „Einreihen“
+  (gesendeter Auftrag mit dem gewählten Ursprung), „Abarbeiten“ (mit
+  Bestätigung), „Anhalten“ (nach dem laufenden Auftrag), „Überspringen“ /
+  „Entfernen“ (gewählter Eintrag), „Leeren“. Client: `queue_add(name,
+  origin, anchor, placement=False)`, `queue_run()`, `queue_pause()`,
+  `queue_skip(id)`, `queue_remove(id)`, `queue_clear()`.
+- **Payload:** `queue_add`: `name`, `origin`, `anchor` (oder
+  `placement=1` = die Platzierung aus `op=place`); `queue_skip`/`queue_remove`:
+  `id`. **Antwort:** `message`, `queue`.
+- Der Pi friert beim Einreihen Versatz (`dx`/`dy`) und Prüfsumme ein: Ein
+  späteres Tippen verschiebt eingereihte Aufträge nicht, eine geänderte
+  Datei wird beim Abarbeiten abgelehnt („neu einreihen“).
+- Abarbeiten: ein Auftrag nach dem anderen, je wie `op=start` (Parken
+  danach). Fehler, Abbrechen oder NOT-AUS stoppen die Warteschlange; der
+  Rest bleibt „wartet“. Während sie läuft, sind Start/Home/Rahmen/Tippen
+  gesperrt, „Abbrechen“ bleibt aktiv (auch zwischen zwei Aufträgen).
+- **Status:** `queue` = `{items: [{id, file, origin, anchor, dx, dy,
+  target, bounds, state, error}], state, current, max}`. Fehlt der
+  Schlüssel, ist der Pi zu alt: Die Gruppe ist gesperrt mit „Pi-Dienst zu
+  alt: keine Warteschlange – Pi aktualisieren“; Client-Aufrufe melden
+  „Pi-Dienst kennt noch keine Auftrags-Warteschlange (op=… fehlt … – Pi
+  aktualisieren)“.
+- Nicht persistent: Ein Neustart des Pi-Dienstes leert die Liste.
+- ⚠ Hardware: am echten Gerät nicht nachgewiesen.
+
 ### `POST /api/action op=abort`: Auftrag abbrechen
 
 - **Auslöser:** Knopf „Abbrechen“ (nur bei aktivem Auftrag oder Rahmenfahrt).
@@ -487,3 +514,6 @@ Der Software-NOT-AUS ersetzt **nicht** den physischen Not-Aus-Schalter.
     Einstellung im Maschinen-Panel, nicht Teil des Canvas-Dokuments oder
     Exports. Den Kamera-Scan bindet `MachinePanel.set_user_origin(x, y)` /
     `set_job_origin(origin, anchor)` an (noch nicht verdrahtet).
+12. **Warteschlange:** nur im Speicher des Pi (max. 50 Einträge), keine
+    Reihenfolge ändern (entfernen und neu einreihen), keine Ansicht in der
+    Pi-Web-UI.

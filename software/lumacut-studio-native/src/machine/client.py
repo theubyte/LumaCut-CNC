@@ -14,6 +14,7 @@ Endpoints (see docs/PI_BETRIEB.md, derived from pi400/marlin/web.py):
     GET  /api/jobs                   stored jobs
     GET  /api/jobs/<name>/geometry   powered toolpath bounds
     POST /api/action  op=place/origin_set/...  job origin (newer Pi, #16)
+    POST /api/action  op=queue_add/queue_run/...  job queue (newer Pi, #17)
 Errors come back as HTTP 4xx/5xx with {"error": "..."}.
 """
 from __future__ import annotations
@@ -51,6 +52,11 @@ MAX_FRAME_BYTES = 64 * 1024
 ORIGIN_MODES = ("absolute", "current", "user")
 #: Motif point that lands on the origin ("t" = small Y like the Studio canvas).
 ANCHORS = ("tl", "tr", "bl", "br", "center")
+#: Queue item states on the Pi (web.py job_queue, #17).
+QUEUE_ITEM_STATES = ("queued", "running", "done", "error", "skipped", "aborted")
+#: Queue states: idle, running, pausing (stops after the current job),
+#: paused, stopped (abort/error/E-stop), complete.
+QUEUE_ACTIVE_STATES = ("running", "pausing")
 
 # The Pi holds the HTTP request open until the SKR has finished, so motion
 # requests need long timeouts (mirrors the Tauri studio bridge).
@@ -221,6 +227,56 @@ class OriginState:
 
 
 @dataclass
+class QueueItem:
+    id: int
+    file: str
+    origin: str = "absolute"
+    anchor: str = "tl"
+    dx: float = 0.0
+    dy: float = 0.0
+    state: str = "queued"
+    error: str = ""
+
+
+@dataclass
+class QueueState:
+    """Pi job queue (status ``queue``, newer Pi only)."""
+
+    supported: bool = False          # False = older Pi without op=queue_*
+    items: list[QueueItem] = field(default_factory=list)
+    state: str = "idle"
+    current: int | None = None
+    max: int = 0
+
+    @property
+    def active(self) -> bool:
+        return self.state in QUEUE_ACTIVE_STATES
+
+    @property
+    def waiting(self) -> int:
+        return sum(1 for item in self.items if item.state == "queued")
+
+    @classmethod
+    def from_json(cls, data: Any) -> "QueueState":
+        if not isinstance(data, dict):
+            return cls()
+        items = []
+        for raw in data.get("items") or ():
+            if not isinstance(raw, dict) or raw.get("id") is None:
+                continue
+            items.append(QueueItem(
+                id=_int(raw.get("id")), file=str(raw.get("file") or ""),
+                origin=str(raw.get("origin") or "absolute"),
+                anchor=str(raw.get("anchor") or "tl"),
+                dx=_float(raw.get("dx")) or 0.0, dy=_float(raw.get("dy")) or 0.0,
+                state=str(raw.get("state") or "queued"),
+                error=str(raw.get("error") or "")))
+        return cls(supported=True, items=items, state=str(data.get("state") or "idle"),
+                   current=_int(data.get("current")) if data.get("current") is not None else None,
+                   max=_int(data.get("max")) or 0)
+
+
+@dataclass
 class MachineStatus:
     """Subset of GET /api/status the Studio displays."""
 
@@ -243,6 +299,7 @@ class MachineStatus:
     job: JobState = field(default_factory=JobState)
     frame: FrameState = field(default_factory=FrameState)
     origin: OriginState = field(default_factory=OriginState)
+    queue: QueueState = field(default_factory=QueueState)
     #: The Pi answered from its status snapshot because a long move holds
     #: machine.lock (owner/latch/laser/position are live, the rest cached).
     pi_busy: bool = False
@@ -307,6 +364,7 @@ class MachineStatus:
             job=JobState.from_json(data.get("job")),
             frame=FrameState.from_json(data.get("frame")),
             origin=OriginState.from_json(data.get("origin")),
+            queue=QueueState.from_json(data.get("queue")),
             pi_busy=_bool(data.get("busy")),
             stale_ms=_stale_ms(data.get("stale_ms"), data),
             raw=data,
@@ -559,6 +617,41 @@ class LumaCutClient:
 
     def clear_placement(self) -> str:
         return self._newer_op("place_clear", "Ursprungs-Optionen")
+
+    def queue_add(self, name: str, origin: str = "absolute", anchor: str = "tl",
+                  placement: bool = False) -> str:
+        """Append a stored job to the Pi queue (nothing moves).
+
+        The Pi freezes the placement (origin/anchor -> offset) and the file
+        content now; ``placement=True`` reuses the placement from op=place.
+        """
+        _check_job_name(name)
+        if placement:
+            return self._newer_op("queue_add", "Auftrags-Warteschlange",
+                                  name=name, placement="1")
+        if origin not in ORIGIN_MODES:
+            raise ValueError("Ursprung muss absolute, current oder user sein")
+        if anchor not in ANCHORS:
+            raise ValueError("Bezugspunkt muss tl, tr, bl, br oder center sein")
+        return self._newer_op("queue_add", "Auftrags-Warteschlange", name=name,
+                              origin=origin, anchor=anchor)
+
+    def queue_run(self) -> str:
+        """Run all waiting queue items in order (stops on error/abort)."""
+        return self._newer_op("queue_run", "Auftrags-Warteschlange")
+
+    def queue_pause(self) -> str:
+        """Stop the queue after the job that is running now."""
+        return self._newer_op("queue_pause", "Auftrags-Warteschlange")
+
+    def queue_skip(self, item_id: int) -> str:
+        return self._newer_op("queue_skip", "Auftrags-Warteschlange", id=str(int(item_id)))
+
+    def queue_remove(self, item_id: int) -> str:
+        return self._newer_op("queue_remove", "Auftrags-Warteschlange", id=str(int(item_id)))
+
+    def queue_clear(self) -> str:
+        return self._newer_op("queue_clear", "Auftrags-Warteschlange")
 
     def frame(self, gcode: str, mode: str = "box", placement: bool = False,
               name: str | None = None) -> str:

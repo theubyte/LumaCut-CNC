@@ -22,14 +22,21 @@ STATUS = {
     "origin": {"modes": ["absolute", "current", "user"],
                "anchors": ["tl", "tr", "bl", "br", "center"],
                "user": None, "placement": None},
+    # Job queue (#17); a Pi before #17 has no "queue" key.
+    "queue": {"items": [], "state": "idle", "current": None, "max": 50},
     "firmware": "marlin", "config": {"focus_gap_mm": 7.0},
 }
 
 ACTIONS = ("home", "jog", "probe", "light", "exhaust", "start", "autorun",
            "abort", "estop", "estop_reset", "connect", "park", "frame",
-           "origin_set", "origin_clear", "place", "place_clear")
+           "origin_set", "origin_clear", "place", "place_clear",
+           "queue_add", "queue_run", "queue_pause", "queue_skip", "queue_remove",
+           "queue_clear")
 #: Ops an older Pi service (before #16) does not know.
 ORIGIN_ACTIONS = ("origin_set", "origin_clear", "place", "place_clear")
+#: Ops a Pi service before the job queue (#17) does not know.
+QUEUE_ACTIONS = ("queue_add", "queue_run", "queue_pause", "queue_skip",
+                 "queue_remove", "queue_clear")
 
 
 class FakePi:
@@ -162,6 +169,9 @@ class FakePi:
                                                  "frame": fake.status["frame"]})
                     if op in ORIGIN_ACTIONS:
                         return self._reply(200, fake._origin_op(op, form))
+                    if op in QUEUE_ACTIONS:
+                        code, data = fake._queue_op(op, form)
+                        return self._reply(code, data)
                     return self._reply(200, {"message": "ok " + op})
                 if self.path == "/api/upload":
                     if self._hiccup("upload"):
@@ -196,10 +206,67 @@ class FakePi:
         self.server.server_close()
 
     def make_older_pi(self) -> None:
-        """Behave like a Pi service before job origins (#16)."""
+        """Behave like a Pi service before job origins (#16) and the queue (#17)."""
         with self.lock:
             self.status.pop("origin", None)
             self.actions -= set(ORIGIN_ACTIONS)
+        self.make_pre_queue_pi()
+
+    def make_pre_queue_pi(self) -> None:
+        """Behave like a Pi service with origins (#16) but no job queue (#17)."""
+        with self.lock:
+            self.status.pop("queue", None)
+            self.actions -= set(QUEUE_ACTIONS)
+
+    def _queue_op(self, op: str, form: dict) -> tuple[int, dict]:
+        """Simplified web.py queue ops (no placement math, no motion)."""
+        with self.lock:
+            q = self.status["queue"]
+            items = q["items"]
+            if op == "queue_add":
+                ids = [i["id"] for i in items]
+                items.append({"id": max(ids, default=0) + 1, "file": form.get("name"),
+                              "origin": form.get("origin") or "absolute",
+                              "anchor": form.get("anchor") or "tl", "dx": 0.0, "dy": 0.0,
+                              "target": None, "bounds": None, "state": "queued",
+                              "error": ""})
+            elif op == "queue_run":
+                waiting = [i for i in items if i["state"] == "queued"]
+                if not waiting:
+                    return 400, {"error": "Keine wartenden Aufträge in der Warteschlange"}
+                waiting[0]["state"] = "running"
+                q.update(state="running", current=waiting[0]["id"])
+                self.status["owner"] = "job"
+                self.status["activity"] = "job"
+            elif op == "queue_pause":
+                q["state"] = "pausing"
+            elif op == "queue_clear":
+                q["items"] = [i for i in items if i["state"] == "running"]
+            else:
+                item = next((i for i in items if str(i["id"]) == form.get("id")), None)
+                if item is None:
+                    return 400, {"error": "Warteschlangen-Eintrag nicht gefunden"}
+                if op == "queue_skip":
+                    item["state"] = "skipped"
+                else:
+                    items.remove(item)
+            return 200, {"message": "ok " + op, "queue": json.loads(json.dumps(q))}
+
+    def finish_queue(self, state: str = "complete", item_state: str = "done",
+                     error: str = "") -> None:
+        """End the simulated queue run: the running item gets ``item_state``."""
+        with self.lock:
+            q = self.status["queue"]
+            for item in q["items"]:
+                if item["state"] == "running":
+                    item.update(state=item_state, error=error)
+            if state == "complete":
+                for item in q["items"]:
+                    if item["state"] == "queued":
+                        item["state"] = "done"
+            q.update(state=state, current=None)
+            self.status["owner"] = "Frei"
+            self.status["activity"] = "idle"
 
     def _origin_op(self, op: str, form: dict) -> dict:
         """Simplified web.py origin ops (no geometry: dx/dy = target)."""
