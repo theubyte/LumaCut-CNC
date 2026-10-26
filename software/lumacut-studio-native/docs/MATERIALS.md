@@ -23,6 +23,83 @@ Durchgang. Der Kern ist reines Python (kein Qt); nur `dialog.py` nutzt PySide6.
    (weiß = hoch, schwarz = tief) → G-Code an die Maschine senden (ohne Start)
    oder als Datei speichern.
 
+6. **Auf Bild (3D-Tiefe)** (nur *3D-Relief*): übernimmt den Reliefplan in die
+   gewählten Bildobjekte (Modus `depth3d`, s. „Relief und 3D-Tiefe“).
+7. **Testzelle als Preset…**: siehe „Materialtest → Preset“.
+
+Schnellzugriff im Hauptfenster: das Feld *Design → Material* (bisher leer) ist
+jetzt die Bibliothek mit Dicke, Operation, „verknüpfen“ und *Auf aktive Ebene*;
+die Statuszeile zeigt „Material (verknüpft/zugewiesen)“ der aktiven Ebene.
+
+## Verknüpfen vs. Zuweisen (Ebene ↔ Bibliothek)
+
+Wie LightBurn *Link* / *Assign*. Die Ebene speichert `material_ref`
+(`lib:<material>/<operation>/<laser>`) und `material_link` (beide nur in der
+Datei, wenn gesetzt).
+
+* **Verknüpft** (Standard bei Bibliothekswerten, Häkchen „verknüpfen“): Ändert
+  man an der Ebene die **Dicke** (Schneiden) bzw. **Zieltiefe/Dicke**
+  (Gravur/Relief), plant die Bibliothek Leistung, Geschwindigkeit,
+  Durchgänge, Z-Absenkung, Tiefe je Durchgang und Kerf/Stegbreite neu – im
+  **selben Undo-Schritt** wie die Dickenänderung (egal ob aus Ebenen-Panel,
+  Dialog oder Skript).
+* Von Hand geänderte Leistung/Geschwindigkeit/Durchgänge/Z/Tiefe je Durchgang
+  **lösen** die Verknüpfung (Werte bleiben, Status „zugewiesen“). Anderes
+  Material eintragen entfernt den Bezug. Nicht planbare Werte (z. B. Dicke
+  außerhalb des Modells) lösen ebenfalls.
+* **Zugewiesen**: Werte werden einmalig kopiert. Eigene Presets (auch aus dem
+  Materialtest) werden immer nur zugewiesen – sonst würden gemessene Werte
+  bei der nächsten Dickenänderung überschrieben.
+
+Technik: `lumacut_canvas.commands.register_layer_attr_hook` – ein generischer
+Hook liefert zu einer Ebenen-Änderung abgeleitete Attribute, die
+`SetLayerAttr(s)Command` mit in den Undo-Schritt nimmt
+(`lumacut_materials.link.install_link_hook`).
+
+## Materialtest → Preset
+
+1. *Auftrag → Materialtest…* erzeugt das Raster (eine Ebene je Zelle,
+   „Test P…% F…“). Nach dem Lasern die beste Zelle auswählen (aktive Ebene).
+2. *Material → Testzelle als Preset speichern …* (oder im Dialog
+   **Testzelle als Preset…**): Material/Dicke/Operation/Laser aus dem Dialog,
+   Leistung/Geschwindigkeit/Durchgänge/Z aus der Zelle, Zeilenabstand und
+   Hinweise aus der Bibliothek. Ist keine Testzelle aktiv, fragt der Dialog
+   nach der Zelle.
+3. Das Preset (`source: "test"`) erscheint unter „Gespeichert“ und im
+   Preset-Menü des Ebenen-Panels.
+
+API: `lumacut_materials.testgrid.preset_from_test_cell(db, layer, material_id, op, thickness)`.
+
+## Kerf, Haltestege, Anfahrt
+
+Jedes schneidbare Material hat einen `process`-Block (Schätzung, `status:
+"estimate"`): Schnittbreite = Basis · √(Spot/0,08) + k · Dicke, Stegbreite,
+Stegabstand, Anfahrt (`process.py`). Beim Anwenden *Schneiden* setzt die
+Bibliothek an der Ebene (Felder aus `lumacut_job.cutpath`):
+
+* `kerf_mm` = **halbe** Schnittbreite (Versatz zur Abfallseite),
+* `tab_width_mm`,
+* `tab_spacing_mm` und `lead_in_mm` **nur, wenn bereits > 0** – sie schalten
+  Stege/Anfahrt ein, das bleibt Entscheidung des Nutzers.
+
+Bei verknüpften Ebenen werden Kerf/Stegbreite mit der Dicke neu gesetzt,
+außer sie wurden von Hand geändert (z. B. nachgemessener Kerf). Kerf immer mit
+einem Testquadrat nachmessen: (Soll − Ist) / 2 = Versatz.
+
+## Relief und 3D-Tiefe
+
+Zwei Wege, ein Schichtplan (`planner.plan_relief`):
+
+| | `relief.py` (Relief aus Bild…) | Bild-Modus `depth3d` (`raster.sliced_depth_gcode`) |
+|---|---|---|
+| Leistung | variabel je Pixel, gleiche Schichten | konstant, tiefe Pixel in mehr Schichten |
+| Ausgabe | eigene G-Code-Datei / an Maschine | Teil des Canvas-Auftrags (Bildobjekt) |
+| Fokus | Z je Schicht | Z je Stufe (`z_step_mm`), Summe ≤ 3 mm |
+
+`depth3d.depth3d_image_settings(db, material, Tiefe)` liefert die
+`ImageSettings` (Stufen = Reliefschichten, Leistung, mm/min, Zeilenabstand,
+Z je Stufe), damit beide Wege dieselbe Gesamttiefe ergeben.
+
 Nicht laserbare Materialien (PVC/Kunstleder, PC, ABS, klares/weißes/blaues
 Acryl, PTFE, POM, Glasfaser, Carbon, Chromleder, Metall schneiden, …) stehen
 mit ✕ am Ende der Liste und zeigen nur die Warnung (z. B. Chlorgas, giftige

@@ -164,6 +164,11 @@ Done and pushed to `main` (all G-code still checked against `MarlinLaserGuard`):
   ("Projekt wiederherstellen?"); the restored project is marked unsaved. Backups are deleted on
   save, on undo back to the saved state and on normal exit.
 - **Materials** (#8) was completed by the Materials agent (`lumacut_materials`).
+  Follow-up (2026-10-26): link vs assign with automatic re-plan on thickness/depth change (same
+  undo step, generic `register_layer_attr_hook`), main-window Material combo wired, "save test
+  cell as preset" (#4 → #8), per-material kerf/tab-width defaults written into the #12 layer fields
+  (spacing/lead-in only when already enabled), relief plan → image `depth3d` settings (#6).
+  See `software/lumacut-studio-native/docs/MATERIALS.md`.
 - **Dedicated frame op** (Top-10 #6) was completed by the Machine side (`op=frame`).
 
 **Air assist (#15) – not feasible as specified.** The Pi guard does allow M7/M8/M9, but on this
