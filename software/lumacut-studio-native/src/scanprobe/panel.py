@@ -1,14 +1,14 @@
 """Scan-&-Probe-Panel für LumaCut Studio (PySide6).
 
-Hauptansicht (Anforderungen 2026-10-26 §3/§5): nur **Kamera-Scan** (optional),
-Pause/Abbrechen, Fortschritt und eine Statuszeile. Höhenmesh und
+Hauptansicht (Anforderungen 2026-10-26 §3/§5): Pause/Abbrechen, Fortschritt und eine Statuszeile. Höhenmesh und
 Fokuskorrektur laufen automatisch im Auftrag (``job_flow.OneClickJob``); es
-gibt keinen Haken „Fokuskorrektur anwenden“ mehr. Alles Weitere steckt unter
-**„Mehr …“**:
+gibt keinen Haken „Fokuskorrektur anwenden“ mehr. Den Knopf **Kamera-Scan** hat die
+Canvas-Hauptansicht (``lumacut_canvas.main_view``); er ruft :meth:`ScanPanel.start_scan`.
+Alles Weitere steckt unter **„Mehr …“**:
 
 1. Quelle wählen: *Simulation* (ohne Hardware) oder *Maschine (Pi-API)*
    mit Kamera „Pi (Snapshot)“ oder „Lokal (USB/URL)“ und der Kalibrierung vom Pi.
-   „Kamera-Scan“ wechselt bei verbundenem Pi selbst auf *Maschine*.
+   :meth:`ScanPanel.camera_scan` wechselt bei verbundenem Pi selbst auf *Maschine*.
 2. **Kamera-Scan** – Kachel-Scan bei fester Höhe, Stitching, Objekterkennung.
    Das Mosaik wird Hintergrund der Arbeitsfläche, erkannte Werkstücke
    erscheinen als gestrichelte Hilfsformen und in der Liste.
@@ -50,16 +50,20 @@ from .stitch import Mosaic
 from .workflow import ScanProbeWorkflow
 
 # Arbeitsfläche (Canvas) = Maschine X30–390 / Y30–370 (siehe lumacut_canvas.workarea)
+# Bildschirm-mm (Canvas, oben links) <-> Maschinen-mm. Bei Nullpunkt oben rechts
+# (Anforderungen 2026-10-26 §2.3) ist X gespiegelt: Maschine = (390 − x, 30 + y).
+# Umgerechnet wird nur über to_machine/from_machine; Rechtecke aus zwei Ecken
+# deshalb immer mit min/max bilden (siehe :func:`machine_rect`).
 try:
     from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, from_machine, to_machine
 except ImportError:  # pragma: no cover - Panel ohne Canvas-Paket
     WORK_WIDTH_MM, WORK_HEIGHT_MM = 360.0, 340.0
 
     def to_machine(x, y):
-        return x + 30.0, y + 30.0
+        return 390.0 - x, y + 30.0
 
     def from_machine(x, y):
-        return x - 30.0, y - 30.0
+        return 390.0 - x, y - 30.0
 
 MODE_SIM = "sim"
 MODE_PI = "pi"
@@ -71,10 +75,29 @@ MANUAL_PAD_MM = 3.0  # Rand um Bereiche aus Canvas-Formen (wie bei der Design-Bo
 Z_OVERLAY = 5e8  # über allen Ebenen (Rang × 1e6, auch bei vielen Ebenen z. B. Materialtest), unter Auswahlrahmen (1e9)
 
 
+def image_flip_x() -> bool:
+    """Liegt das kleinste Maschinen-X rechts auf dem Bildschirm (Nullpunkt oben rechts)?
+
+    Abgeleitet aus :func:`to_machine` statt aus einem eigenen Schalter, damit
+    Bilder (Mosaik, Höhenkarte) immer zur Platzierung passen.
+    """
+    return to_machine(1.0, 0.0)[0] < to_machine(0.0, 0.0)[0]
+
+
+def machine_rect(x0: float, y0: float, x1: float, y1: float) -> Rect:
+    """Bildschirm-Rechteck (zwei Ecken) -> Maschinen-:class:`Rect` (Ecken sortiert)."""
+    ax, ay = to_machine(x0, y0)
+    bx, by = to_machine(x1, y1)
+    return Rect(min(ax, bx), min(ay, by), max(ax, bx), max(ay, by))
+
+
 def work_rect_machine() -> Rect:
-    x0, y0 = to_machine(0.0, 0.0)
-    x1, y1 = to_machine(WORK_WIDTH_MM, WORK_HEIGHT_MM)
-    return Rect(x0, y0, x1, y1)
+    return machine_rect(0.0, 0.0, WORK_WIDTH_MM, WORK_HEIGHT_MM)
+
+
+def machine_image_to_screen(img: np.ndarray) -> np.ndarray:
+    """Bild in Maschinenrichtung (Spalte 0 = kleinstes X) für die Arbeitsfläche ausrichten."""
+    return np.ascontiguousarray(img[:, ::-1]) if image_flip_x() else img
 
 
 def mosaic_to_work_image(mosaic: Mosaic, mm_per_px: float = 0.5) -> np.ndarray:
@@ -87,8 +110,9 @@ def mosaic_to_work_image(mosaic: Mosaic, mm_per_px: float = 0.5) -> np.ndarray:
     oy = (wr.ymin - mosaic.origin_mm[1]) / mosaic.mm_per_px - 0.5 + 0.5 * s
     m = np.array([[s, 0, ox], [0, s, oy]], np.float64)
     interp = cv2.INTER_AREA if s > 1 else cv2.INTER_LINEAR
-    return cv2.warpAffine(mosaic.image, m, (w, h), flags=cv2.WARP_INVERSE_MAP | interp,
-                          borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+    out = cv2.warpAffine(mosaic.image, m, (w, h), flags=cv2.WARP_INVERSE_MAP | interp,
+                         borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+    return machine_image_to_screen(out)  # Spalte 0 = Bildschirm links
 
 
 def to_qimage(img: np.ndarray) -> QImage:
@@ -169,7 +193,8 @@ class CanvasOverlay:
             label = QGraphicsSimpleTextItem(obj.id)
             label.setBrush(QBrush(QColor("#22d3ee")))
             label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
-            label.setPos(QPointF(*from_machine(obj.bounds.xmin, obj.bounds.ymin)))
+            lx = obj.bounds.xmax if image_flip_x() else obj.bounds.xmin  # linke Bildschirmkante
+            label.setPos(QPointF(*from_machine(lx, obj.bounds.ymin)))
             label.setZValue(Z_OVERLAY + 1)
             label.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             for it in (item, label):
@@ -235,6 +260,7 @@ class CanvasOverlay:
             return None
         wr = work_rect_machine()
         rgba, lo, hi = heatmap_rgba(maps, wr, px_per_mm)
+        rgba = machine_image_to_screen(rgba)  # wie das Mosaik (§2.3)
         item = QGraphicsPixmapItem(QPixmap.fromImage(to_qimage(rgba)))
         item.setScale(1.0 / px_per_mm)
         item.setPos(0.0, 0.0)                 # Arbeitsflächen-Ursprung = wr.xmin/ymin
@@ -318,14 +344,8 @@ class ScanPanel(QWidget):
     def _build(self) -> None:
         main = QVBoxLayout(self)
         main.setContentsMargins(0, 0, 0, 0)
-        # --- Hauptansicht: ein Knopf + Fortschritt ---
-        self.scan_button = QPushButton("Kamera-Scan")
-        self.scan_button.setObjectName("primary")
-        self.scan_button.setMinimumHeight(36)
-        self.scan_button.setToolTip("Optional: Arbeitsfläche fotografieren und als Hintergrund "
-                                    "zum genauen Platzieren legen")
-        self.scan_button.clicked.connect(self.camera_scan)
-        main.addWidget(self.scan_button)
+        # --- Hauptansicht: Fortschritt; der Knopf „Kamera-Scan“ sitzt in der
+        # Canvas-Hauptansicht (lumacut_canvas.main_view) ---
         row = QHBoxLayout()
         self.pause_button = QPushButton("Pause")
         self.pause_button.setCheckable(True)
@@ -549,11 +569,16 @@ class ScanPanel(QWidget):
         self._notify(text)
 
     def camera_scan(self) -> bool:
-        """Der eine Knopf der Hauptansicht: Kamera-Scan als Canvas-Hintergrund.
-        Bei verbundenem Pi wird automatisch die Maschine benutzt."""
+        """Einstieg für den Knopf „Kamera-Scan“ (Canvas-Hauptansicht): wie
+        :meth:`start_scan`, nimmt aber bei verbundenem Pi automatisch die Maschine."""
+        self._auto_mode()
+        return self.start_scan()
+
+    def _auto_mode(self) -> None:
+        """Bei verbundenem Pi automatisch die Maschine benutzen, solange der
+        Nutzer unter „Mehr …“ nicht selbst gewählt hat."""
         if not self._mode_chosen and self.mode == MODE_SIM and self._client() is not None:
             self.set_mode(MODE_PI)
-        return self.start_scan()
 
     @property
     def camera_kind(self) -> str:
@@ -606,7 +631,7 @@ class ScanPanel(QWidget):
 
     def _update_enabled(self) -> None:
         busy = self.busy
-        for w in (self.scan_button, self.full_button, self.mode_combo, self.camera_edit,
+        for w in (self.full_button, self.mode_combo, self.camera_edit,
                   self.cal_button, self.cal_export_button, self.spacing_spin, self.load_button,
                   self.clear_button):
             w.setEnabled(not busy)
@@ -841,9 +866,8 @@ class ScanPanel(QWidget):
                 b = s.bounds()
             except Exception:  # noqa: BLE001
                 continue
-            x0, y0 = to_machine(b.x, b.y)
-            x1, y1 = to_machine(b.x + b.w, b.y + b.h)
-            out.append(Rect(x0, y0, max(x1, x0 + 0.1), max(y1, y0 + 0.1)))
+            r = machine_rect(b.x, b.y, b.x + b.w, b.y + b.h)
+            out.append(Rect(r.xmin, r.ymin, max(r.xmax, r.xmin + 0.1), max(r.ymax, r.ymin + 0.1)))
         return out
 
     def checked_objects(self) -> list[DetectedObject]:
@@ -887,9 +911,7 @@ class ScanPanel(QWidget):
         self._marking = False
         if hasattr(self.canvas, "clear_roi"):
             self.canvas.clear_roi()  # eigene Anzeige über das Overlay
-        x0, y0 = to_machine(x, y)
-        x1, y1 = to_machine(x + w, y + h)
-        self.mark_rect(Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)))
+        self.mark_rect(machine_rect(x, y, x + w, y + h))
 
     def _on_roi_cancelled(self) -> None:
         self._marking = False

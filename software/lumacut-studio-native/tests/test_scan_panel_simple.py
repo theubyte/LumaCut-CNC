@@ -20,14 +20,14 @@ def panel(qapp, editor):
     p.shutdown()
 
 
-def test_main_view_has_one_camera_scan_button(panel):
-    assert panel.scan_button.text() == "Kamera-Scan"
+def test_scan_panel_has_no_own_camera_scan_button(panel):
+    # Der Knopf „Kamera-Scan“ sitzt in der Canvas-Hauptansicht (main_view).
+    assert not hasattr(panel, "scan_button")
     assert panel.advanced.isHidden() and not panel.more_button.isChecked()
     assert not hasattr(panel, "focus_check")
     # Expertenfunktionen liegen im ausgeklappten Bereich
     for w in (panel.probe_button, panel.full_button, panel.export_button, panel.mode_combo):
         assert panel.advanced.isAncestorOf(w)
-    assert not panel.advanced.isAncestorOf(panel.scan_button)
     panel.show_advanced(True)
     assert not panel.advanced.isHidden() and panel.more_button.text() == "Weniger"
     panel.more_button.click()
@@ -68,7 +68,7 @@ class _Run:
 def test_external_run_takes_pause_and_cancel(panel):
     run = _Run()
     panel.attach_external_run(run)
-    assert panel.busy and panel.cancel_button.isEnabled() and not panel.scan_button.isEnabled()
+    assert panel.busy and panel.cancel_button.isEnabled() and not panel.full_button.isEnabled()
     panel.pause()
     panel.resume()
     panel.cancel()
@@ -80,4 +80,4 @@ def test_external_run_takes_pause_and_cancel(panel):
                           "message": "Sonde löst nicht aus"})
     assert panel.last_error == "Sonde löst nicht aus"
     panel.detach_external_run()
-    assert not panel.busy and panel.scan_button.isEnabled()
+    assert not panel.busy and panel.full_button.isEnabled()

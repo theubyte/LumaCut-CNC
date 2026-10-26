@@ -9,6 +9,7 @@ import pytest
 
 from scanprobe import adapters
 from scanprobe.geometry import Rect
+from scan_coords import screen_rect
 
 
 @pytest.fixture()
@@ -40,17 +41,19 @@ def test_jog_steps_cover_distance():
 
 
 def test_mosaic_matches_work_area(qapp):
-    from scanprobe.panel import mosaic_to_work_image
+    from scanprobe.panel import from_machine, mosaic_to_work_image
     from scanprobe.stitch import Mosaic
     img = np.zeros((370 * 2, 390 * 2, 3), np.uint8)
     img[2 * 100:2 * 120, 2 * 200:2 * 220] = 255          # Maschine X200–220 / Y100–120
     out = mosaic_to_work_image(Mosaic(img, 0.5, (0.0, 0.0), np.ones(img.shape[:2], bool)), mm_per_px=1.0)
     assert out.shape[:2] == (340, 360)
-    assert out[110 - 30, 210 - 30].min() > 200              # Arbeitsfläche = Maschine − 30
+    sx, sy = from_machine(210, 110)                         # Bildschirmlage (Nullpunkt oben rechts, §2.3)
+    assert out[int(sy), int(sx)].min() > 200
     assert out[10, 10].max() == 0
 
 
 def test_scan_lists_objects_and_sets_canvas_overlays(panel, editor):
+    from scanprobe.panel import from_machine
     _scan(panel)
     assert panel.objects_list.count() == 2 and len(panel.objects) == 2
     assert "Rechteck" in panel.objects_list.item(0).text() or "Rechteck" in panel.objects_list.item(1).text()
@@ -58,8 +61,10 @@ def test_scan_lists_objects_and_sets_canvas_overlays(panel, editor):
     bd = editor.view.backdrop
     assert bd is not None and bd.width() / bd.height() == pytest.approx(360 / 340, rel=0.01)
     s = bd.width() / 360
-    inside = bd.pixelColor(int((130 - 30) * s), int((125 - 30) * s))
-    outside = bd.pixelColor(int(5 * s), int(320 * s))
+    ix, iy = from_machine(130, 125)
+    ox, oy = from_machine(35, 350)
+    inside = bd.pixelColor(int(ix * s), int(iy * s))
+    outside = bd.pixelColor(int(ox * s), int(oy * s))
     assert inside.lightness() > outside.lightness() + 60
     # Hilfsformen in der Szene, aber nicht im Dokument
     items = panel.overlay.object_items
@@ -68,7 +73,8 @@ def test_scan_lists_objects_and_sets_canvas_overlays(panel, editor):
     rect = [o for o in panel.objects if o.kind == "rectangle"][0]
     path_item = [it for it in items if it.data(0) == rect.id][0]
     br = path_item.sceneBoundingRect()
-    assert br.left() == pytest.approx(70 - 30, abs=3) and br.bottom() == pytest.approx(170 - 30, abs=3)
+    left = min(from_machine(70, 0)[0], from_machine(190, 0)[0])   # Maschine 70–190 / 80–170
+    assert br.left() == pytest.approx(left, abs=3) and br.bottom() == pytest.approx(170 - 30, abs=3)
     panel.show_objects.setChecked(False)
     assert not any(it.isVisible() for it in items)
     panel.show_mosaic.setChecked(False)
@@ -105,8 +111,9 @@ def test_auto_probe_builds_heatmap(panel, editor, tmp_path):
 def test_auto_probe_only_under_design(panel, editor):
     from lumacut_canvas.model import Geometry, Shape
     _scan(panel)
-    # Design auf der Scheibe (Maschine um 285/255 -> Arbeitsfläche 255/225)
-    editor.document.add_shape(Shape("rect", Geometry(240, 210, 30, 30), editor.document.active_layer_id))
+    # Design auf der Scheibe (Maschine 270..300 / 240..270)
+    editor.document.add_shape(Shape("rect", Geometry(*screen_rect(270, 240, 30, 30)),
+                                    editor.document.active_layer_id))
     assert panel.design_bounds()[0].xmin == pytest.approx(270)
     panel.design_only.setChecked(True)
     assert panel.start_probe()
@@ -145,7 +152,7 @@ def test_pause_resume_cancel(qapp, editor):
     panel = ScanPanel(editor, ask=False, sim_delay_s=0.03)
     try:
         assert panel.start_scan()
-        assert panel.busy and not panel.scan_button.isEnabled() and panel.cancel_button.isEnabled()
+        assert panel.busy and not panel.full_button.isEnabled() and panel.cancel_button.isEnabled()
         QTest.qWait(200)
         panel.pause()
         assert panel.pause_button.text() == "Fortsetzen" and panel.workflow.control.paused
@@ -165,7 +172,7 @@ def test_pause_resume_cancel(qapp, editor):
         assert panel.wait(20000)
         QCoreApplication.processEvents()
         assert panel.phase_label.text() == "Abgebrochen."
-        assert panel.scan_button.isEnabled() and not panel.cancel_button.isEnabled()
+        assert panel.full_button.isEnabled() and not panel.cancel_button.isEnabled()
         assert panel.pause_button.text() == "Pause"
         assert panel.mosaic is None
         # nach Abbruch geht ein neuer Lauf
