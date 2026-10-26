@@ -262,6 +262,10 @@ class LumaCutStudio(QMainWindow):
         self.status_label.setStyleSheet("color: %s;" % colours.get(state, "#93a1b5"))
 
     def closeEvent(self, event):
+        # A running job or frame keeps going on the Pi: never close silently.
+        if not self.machine_panel.confirm_close():
+            event.ignore()
+            return
         if not self.canvas.confirm_discard():
             event.ignore()
             return
