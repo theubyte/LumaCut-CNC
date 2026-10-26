@@ -273,6 +273,9 @@ class ScanPanel(QWidget):
         self.client_provider = client_provider
         self.sim_delay_s = sim_delay_s
         self.ask = ask
+        # Liefert (G-Code, Planer-Hinweis) wie „An Pi senden“; None = JobTools des
+        # Hauptfensters (``window().job_tools``, „Nur Auswahl“) oder reiner Planer.
+        self.job_gcode_source: Optional[Callable[[], tuple[str, str]]] = None
         self.calibration: Optional[CameraCalibration] = None
         self.calibration_path: Optional[Path] = None
         # Stand auf dem Pi (Revision/Status); None = noch nicht gelesen/kein Pi
@@ -1216,18 +1219,28 @@ class ScanPanel(QWidget):
                      + (f", {len(res.warnings)} Warnung(en)" if res.warnings else ""))
         return res.gcode
 
-    def _job_gcode(self) -> str:
-        """Gleicher G-Code wie „An Pi senden“ (mit Schnittplaner, falls vorhanden)."""
+    def _job_gcode_with_note(self) -> tuple[str, str]:
+        """Gleicher G-Code wie „An Pi senden“: JobTools („Nur Auswahl“, Planer-Hinweise),
+        sonst Schnittplaner bzw. reiner Canvas-Export. ValueError bei leerem Auftrag."""
+        source = self.job_gcode_source
+        if source is None:
+            tools = getattr(self.window(), "job_tools", None)
+            source = getattr(tools, "job_gcode", None)
+        if source is not None:
+            return source()
         try:
             from lumacut_job.planner import optimized_document_gcode
         except ImportError:  # pragma: no cover - ältere Studio-Version ohne Planer
             from lumacut_canvas.gcode import document_to_gcode as optimized_document_gcode
-        return optimized_document_gcode(self.canvas.document)
+        return optimized_document_gcode(self.canvas.document), ""
+
+    def _job_gcode(self) -> str:
+        return self._job_gcode_with_note()[0]
 
     def export_gcode(self, path: str | Path) -> bool:
         """Canvas → Marlin-G-Code (ggf. fokuskorrigiert) → Datei."""
         try:
-            gcode = self._job_gcode()
+            gcode, note = self._job_gcode_with_note()
         except ValueError as exc:
             self._error(f"Export nicht möglich: {exc}")
             return False
@@ -1236,7 +1249,8 @@ class ScanPanel(QWidget):
             return False
         Path(path).write_text(out, encoding="utf-8")
         self._notify(f"G-Code gespeichert: {Path(path).name}"
-                     + (" (fokuskorrigiert)" if self.last_focus_export else ""))
+                     + (" (fokuskorrigiert)" if self.last_focus_export else "")
+                     + (f" – {note}" if note else ""))
         return True
 
     def _export_dialog(self) -> None:
