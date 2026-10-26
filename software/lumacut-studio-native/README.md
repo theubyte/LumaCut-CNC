@@ -212,6 +212,22 @@ referenziert/parkt selbst), die erste Positionierfahrt zählt wie in der
 Zeitschätzung mit 0 mm. Sehr große Rasterjobs werden vollständig gelesen;
 bei vielen tausend Zeilen kann das Neuberechnen spürbar dauern.
 
+### Anordnen: Ausrichten, Verteilen, Arrays
+
+Knopf „Anordnen“ in der Aktionsleiste (und Untermenü im Kontextmenü), Rechnen in
+`lumacut_canvas/arrange.py` (Qt-frei), Oberfläche in `arrange_ui.py`. Jede Aktion ist ein
+Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
+
+- **Ausrichten** links / mittig / rechts / oben / mittig / unten (Strg+Umschalt+←/H/→/↑/V/↓):
+  mehrere Einheiten an der Auswahl-Hüllbox, ein einzelnes Objekt an der Arbeitsfläche.
+- **Verteilen** waagerecht/senkrecht: gleiche Lücken, die äußeren Einheiten bleiben
+  stehen (ab drei Einheiten).
+- **Raster-Array …**: Spalten × Zeilen, Lücke X/Y in mm (Schritt = Auswahlgröße + Lücke).
+- **Kreis-Array …**: Anzahl inkl. Original, Mitte X/Y, Winkel (360° = geschlossen, sonst
+  Bogen mit Anfang und Ende), „Kopien mitdrehen“ an/aus.
+- Kopien bekommen neue IDs und eigene Gruppen; läge eine Kopie außerhalb der
+  Arbeitsfläche oder wären es mehr als 500, passiert nichts (Meldung in der Statuszeile).
+
 ### Schnittstellen für andere Module (Scan & Probe)
 
 Alle Koordinaten in Arbeitsflächen-mm (0,0 links oben). Getestet in

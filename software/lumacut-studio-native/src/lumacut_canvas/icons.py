@@ -206,6 +206,16 @@ def _path(p, c):
     p.drawEllipse(QPointF(4.5, 19.5), 1.8, 1.8)
 
 
+def _arrange(p, c):
+    """Anordnen: drei links bündige Balken an einer Kante."""
+    _pen(p, c, 1.9)
+    p.drawLine(QPointF(4, 3.5), QPointF(4, 20.5))
+    p.setBrush(QColor(c))
+    p.drawRect(QRectF(7, 5, 13, 3.5))
+    p.drawRect(QRectF(7, 10.25, 8, 3.5))
+    p.drawRect(QRectF(7, 15.5, 11, 3.5))
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "polygon": _polygon, "freehand": _freehand,
@@ -218,7 +228,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "duplicate": _duplicate, "link": _link,
     "group": _group, "ungroup": lambda p, c: _group(p, c, True),
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
-    "touch": _touch, "path": _path,
+    "touch": _touch, "path": _path, "arrange": _arrange,
 }
 
 
