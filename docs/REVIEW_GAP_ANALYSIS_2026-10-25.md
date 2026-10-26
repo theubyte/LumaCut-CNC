@@ -240,6 +240,9 @@ Caveats: the path preview overlay (Canvas) and the scan/probe panel still show t
 not the selection; the thin-ring merge is a heuristic (≤0.5 mm ring width) and can merge a real
 very thin outline frame.
 
-Still open: unit toggle mm/inch, boolean/node/offset/array (#13) – Canvas; origin options (#16) and
-multi-job queue on the Pi (#17) – Machine; raster streaming (#18) – Pi; Windows hardware test of
+Done meanwhile by the Machine agent: origin options (#16; absolute / current position / user
+origin, `op=place`, fd7601c + ed96c63).
+
+Still open: unit toggle mm/inch, boolean/node/offset/array (#13) – Canvas; multi-job queue on the
+Pi (#17) – Machine; raster streaming (#18) – Pi; Windows hardware test of
 cut options, PDF import and the rebuilt exe – needs a Windows machine with the laser.
