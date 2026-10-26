@@ -68,12 +68,46 @@ def has_absolute_z(lines):
     return False
 
 
+def check_first_cut(lines):
+    """Refuse a job whose first laser line starts at an unknown head position.
+
+    Before the first powered G1/G2/G3 (S > 0) an absolute move with X and Y
+    (or G28) must place the head; otherwise that line burns from wherever
+    the head happens to be (after probing, parking, jogging).
+    """
+    absolute, known = True, False
+    for number, raw in enumerate(lines, 1):
+        line = _clean(raw)
+        if line == "G90":
+            absolute = True
+            continue
+        if line == "G91":
+            absolute = False
+            continue
+        if line.startswith("G28"):
+            known = True
+            continue
+        motion = _MOTION.match(line)
+        if not motion:
+            continue
+        values = {k: float(v) for k, v in _WORD.findall(line) if k in "XYS"}
+        if int(motion.group(1)) in (1, 2, 3) and values.get("S", 0.0) > 0:
+            if not known:
+                raise ValueError(
+                    "Zeile %d: Die erste Laserbahn beginnt an einer unbekannten Kopfposition – "
+                    "davor mit G0 X… Y… (Laser aus) an ihren Startpunkt fahren." % number)
+            return
+        if absolute and "X" in values and "Y" in values:
+            known = True
+
+
 def _f(value):
     return "%.3f" % value
 
 
 def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
-               clearance_mm=2.0, max_segment_mm=2.0, z_max_mm_s=9.0, start_z=None):
+               clearance_mm=2.0, max_segment_mm=2.0, z_max_mm_s=9.0, start_z=None,
+               should_stop=None):
     """(compensated lines, Report). Raises ValueError for unsupported input."""
     gap = focus_gap_mm - tip_offset_mm
     if gap < clearance_mm - 1e-9:
@@ -105,6 +139,8 @@ def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
         z = target
 
     for number, raw in enumerate(lines, 1):
+        if should_stop is not None and number % 500 == 0 and should_stop():
+            raise RuntimeError("Abgebrochen")
         line = _clean(raw)
         if not line:
             continue

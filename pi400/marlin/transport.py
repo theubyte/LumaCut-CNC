@@ -62,6 +62,21 @@ class MarlinCommandError(RuntimeError):
     responses: list = []
 
 
+class Aborted(RuntimeError):
+    """The operator stopped the run between two safe steps (laser off)."""
+
+    def __init__(self, message="Abgebrochen"):
+        super().__init__(message)
+
+
+class ProbeFailed(RuntimeError):
+    """One probe point of probe_surface failed; ``cause`` says why."""
+
+    def __init__(self, x, y, cause):
+        super().__init__("Abtasten bei X%.1f Y%.1f fehlgeschlagen: %s" % (x, y, cause))
+        self.x, self.y, self.cause = x, y, cause
+
+
 
 def normalize(line: str) -> str:
     while True:
@@ -772,12 +787,15 @@ class MarlinTransport:
             return self._play_stepper_chime_locked(event)
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
-                  probe_contact_confirmed: bool = False):
+                  probe_contact_confirmed: bool = False, should_stop=None):
         """LightBurn G28: home XY first into EMPTY L-shaped 30mm bed zone.
 
         This explicitly relies on the operator keeping the X0/Y0 strips clear
         of any material, and the physical head/probe travel being collision-free.
         Unlike the old routine, it never attempts Z before XY are referenced.
+        ``should_stop`` is checked after the X/Y homing: an abort then leaves
+        the head in the X0/Y0 park corner, laser off, Z untouched and the
+        machine unhomed (Aborted). A running G28 itself is never cut short.
         """
         with self.lock:
             if self.owner not in (None, owner):
@@ -804,7 +822,10 @@ class MarlinTransport:
                         f"G0 Z{clearance:.2f} F600", "G90", "M400", "M114"]
             result = []
             try:
-                for cmd in commands:
+                for index, cmd in enumerate(commands):
+                    if index == 3 and should_stop is not None and should_stop():
+                        self.last_xy_commanded = (0.0, 0.0)
+                        raise Aborted()
                     result = self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35)
                     if cmd == "G28 Z":
                         self.z_homed = True
@@ -822,6 +843,8 @@ class MarlinTransport:
                 # One upstream G28 must receive exactly one ACK. Sending
                 # internal ACKs would corrupt LightBurn flow control.
                 return result
+            except Aborted:
+                raise
             except Exception as exc:
                 self._close_locked("Referenzfahrt fehlgeschlagen: " + str(exc))
                 raise
@@ -1128,7 +1151,13 @@ class MarlinTransport:
 
             def check_stop():
                 if should_stop is not None and should_stop():
-                    raise RuntimeError("Abgebrochen")
+                    raise Aborted()
+
+            def contact_at(x, y):
+                try:
+                    return self._probe_here_locked(z)
+                except (MarlinCommandError, RuntimeError, ValueError) as exc:
+                    raise ProbeFailed(x, y, exc) from exc
 
             def lift(target):
                 nonlocal z
@@ -1162,7 +1191,7 @@ class MarlinTransport:
                             lift(self.clearance_mm if tallest is None
                                  else max(self.clearance_mm, tallest + hop_mm))
                         go(x, y)
-                        contact = self._probe_here_locked(z)
+                        contact = contact_at(x, y)
                         values[gi][pi] = contact
                         highest = contact if highest is None else max(highest, contact)
                         tallest = highest if tallest is None else max(tallest, highest)
@@ -1180,7 +1209,7 @@ class MarlinTransport:
                 if z > low + 0.001:
                     self._exchange_locked(f"G0 Z{low:.3f} F600", timeout=45)
                     z = low
-                contact = self._probe_here_locked(z)
+                contact = contact_at(x, y)
                 values[gi][pi] = contact
                 z = contact
                 step_done()

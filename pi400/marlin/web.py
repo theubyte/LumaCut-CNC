@@ -16,7 +16,8 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from .transport import MarlinTransport, MarlinLaserGuard, normalize, serve_tcp
+from .transport import (Aborted, MarlinTransport, MarlinLaserGuard, ProbeFailed, normalize,
+                        serve_tcp)
 from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
@@ -71,7 +72,10 @@ if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is no
     machine.probe_xy_offset_mm = (float(config["probe_offset_x_mm"]),
                                   float(config["probe_offset_y_mm"]))
 # probe: {"done", "total"} while op=autorun probes (and afterwards), else None.
-job = {"file": "", "state": "idle", "line": 0, "total": 0, "error": "", "probe": None}
+# phase: finer step while active (homing, probing, focusing, running,
+# finishing, parking), None otherwise.
+job = {"file": "", "state": "idle", "line": 0, "total": 0, "error": "", "probe": None,
+       "phase": None}
 job_lock = threading.Lock()
 stop_job = threading.Event()
 # Framing (op=frame) runs laser-off outline moves from a request payload. It
@@ -777,6 +781,7 @@ def preflight(text):
             raise ValueError("G-Code Zeile %d: %s" % (number, exc))
     if not lines:
         raise ValueError("G-Code ist leer")
+    focus.check_first_cut(text.splitlines())
     # Reject a motif touching the 30 mm home bands before anything moves,
     # instead of stopping half-way through the job.
     bounds = _powered_bounds(text)
@@ -855,6 +860,8 @@ def auto_plan(commands, point=None):
     if machine.probe_xy_offset_mm is None:
         raise ValueError("X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen")
     commands = [c for c in commands if normalize(c) not in WORKFLOW]
+    # Without the file's G28 the head stands wherever probing left it.
+    focus.check_first_cut(commands)
     own_z = focus.has_absolute_z(commands)
     limit = machine.safe_zone_xy_mm
     bounds = heightmap.Box(limit, limit, config["travels"]["x"], config["travels"]["y"])
@@ -869,15 +876,28 @@ def auto_plan(commands, point=None):
             "points": sum(sum(g.reachable) for g in grids)}
 
 
+def _check_stop():
+    if stop_job.is_set():
+        raise Aborted()
+
+
+def _set_phase(phase, state=None):
+    job.update(phase=phase, state=state or job["state"])
+
+
 def _auto_prepare(auto):
-    """op=autorun before lasering: home if needed, probe, compensate."""
+    """op=autorun before lasering: home if needed, probe, compensate.
+
+    Every step starts and ends with the laser off (safe_home and
+    probe_surface send M5 I themselves) and checks for an abort.
+    """
     if not machine.homed:
         # Only when needed: after connecting, a reset or an emergency stop.
-        job["state"] = "homing"
-        machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
-    if stop_job.is_set():
-        raise RuntimeError("Abgebrochen")
-    job["state"] = "probing"
+        _set_phase("homing", "homing")
+        machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"],
+                          should_stop=stop_job.is_set)
+    _check_stop()
+    _set_phase("probing", "probing")
     grids = [dataclasses.replace(g, z=list(g.z)) for g in auto["grids"]]
     order = [[i for i in g.order() if g.reachable[i]] for g in grids]
     job["probe"] = {"done": 0, "total": sum(len(o) for o in order) + 1}
@@ -888,14 +908,18 @@ def _auto_prepare(auto):
     for g, o, measured in zip(grids, order, values):
         for i, z in zip(o, measured):
             g.z[i] = z
+    _check_stop()
     commands = auto["commands"]
     if auto["compensate"]:
+        _set_phase("focusing")
         commands, report = focus.compensate(
             commands, heightmap.HeightMapSet(grids), machine.focus_gap_mm,
             machine.probe_tip_offset_mm,
-            start_z=machine.position[2] if machine.position else None)
+            start_z=machine.position[2] if machine.position else None,
+            should_stop=stop_job.is_set)
         logging.info("Autorun focus compensation: %s", report.as_dict())
-    job.update(state="running", total=len(commands))
+    _check_stop()
+    job.update(state="running", phase="running", total=len(commands))
     return commands
 
 
@@ -907,8 +931,12 @@ def _execute_job(filename, commands, auto=None):
     auto_plan) makes it the automatic run: home if needed, probe the motif
     areas, let the focus follow the surface, laser, park.
     """
-    job.update(file=filename, state="running", line=0, total=len(commands), error="",
-               probe=None)
+    if auto is None:
+        first = "running"
+    else:
+        first = "probing" if machine.homed else "homing"
+    job.update(file=filename, state=first, phase=first, line=0, total=len(commands),
+               error="", probe=None)
     if auto is not None:
         commands = _auto_prepare(auto)
     if _job_sets_focus(commands):
@@ -918,8 +946,7 @@ def _execute_job(filename, commands, auto=None):
     # failing melody never stops the job.
     machine.play_melody("start", owner="job")
     for i, command in enumerate(commands, 1):
-        if stop_job.is_set():
-            raise RuntimeError("Abgebrochen")
+        _check_stop()
         normalized = normalize(command)
         if normalized == "G28":
             machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
@@ -932,14 +959,44 @@ def _execute_job(filename, commands, auto=None):
             # other lines drain it and run one at a time as before.
             machine.stream_command(command, owner="job", timeout=150)
         job["line"]=i
+    _set_phase("finishing")
     machine.drain(owner="job")
+    _set_phase("parking")
     machine.park_safezone(owner="job")
-    job["state"]="complete"
+    # An abort during the last lines or the park: the job is parked like
+    # after any abort, but did not finish as asked.
+    if stop_job.is_set():
+        aborted = Aborted()
+        aborted.parked = True
+        raise aborted
+    job.update(state="complete", phase=None)
+
+
+def job_error_text(exc):
+    """One German sentence with the next step for job.error."""
+    if stop_job.is_set() or isinstance(exc, Aborted):
+        return "Abgebrochen"
+    if isinstance(exc, ProbeFailed):
+        cause = str(exc.cause)
+        where = "bei X%.0f Y%.0f" % (exc.x, exc.y)
+        if "ohne Tasterkontakt" in cause:
+            return ("Der Taster hat %s kein Material gefunden – Material unter das Motiv "
+                    "legen oder den Tasterversatz prüfen, dann neu starten." % where)
+        if "schon beim G30-Start" in cause:
+            return ("Der Taster war %s schon gedrückt – Taster und Kabel prüfen, dann neu "
+                    "starten." % where)
+        return ("Abtasten %s fehlgeschlagen (%s) – Taster prüfen, dann neu starten."
+                % (where, cause.rstrip(".")))
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return ("Verbindung zur Steuerung unterbrochen (%s) – USB-Kabel prüfen, dann neu "
+                "starten." % str(exc).rstrip("."))
+    return str(exc)
 
 
 def _job_failed(exc):
-    job.update(state="aborted" if stop_job.is_set() else "error", error=str(exc))
-    if not machine.emergency_latched:
+    job.update(state="aborted" if stop_job.is_set() or isinstance(exc, Aborted) else "error",
+               error=job_error_text(exc), phase=None)
+    if not machine.emergency_latched and not getattr(exc, "parked", False):
         _stop_after_job_error()
 
 
@@ -993,8 +1050,9 @@ def start_job(automatic=False):
 
 # --- Multi-job queue (gap analysis #17) --------------------------------
 # An in-memory list of stored jobs that run one after another under one
-# "job" ownership, each through the same _execute_job as op=start (homing
-# state, focus, park after every job, laser off between jobs). The placement
+# "job" ownership, each through the same automatic run as op=autorun (home
+# when needed, probe, focus compensation, park after every job, laser off
+# between jobs). The placement
 # (origin/anchor -> dx/dy) is frozen when an item is added, so jogging after
 # queue_add does not move queued work; the file sha is frozen too and a job
 # changed since then is refused. Abort, E-stop or an error stop the queue;
@@ -1108,12 +1166,15 @@ def _queue_worker():
                 job_queue["current"] = item["id"]
             try:
                 job.update(file=item["file"], error="")
-                _execute_job(item["file"], _queue_commands(item))
+                # Same automatic run as op=autorun: home if needed, probe,
+                # focus follows the surface, laser, park.
+                auto = auto_plan(_queue_commands(item))
+                _execute_job(item["file"], auto["commands"], auto)
             except Exception as exc:
                 _job_failed(exc)
                 with queue_lock:
-                    item.update(state="aborted" if stop_job.is_set() else "error",
-                                error=str(exc))
+                    item.update(state="aborted" if job["state"] == "aborted" else "error",
+                                error=job["error"])
                 final = "stopped"
                 break
             with queue_lock:
@@ -1132,14 +1193,20 @@ def _queue_worker():
 def queue_run():
     """op=queue_run: run the waiting items in order (stops on error/abort)."""
     local_owner()
-    if not machine.homed:
-        raise RuntimeError("Vor der Warteschlange referenzieren")
     with queue_lock:
         if job_queue["state"] in QUEUE_ACTIVE:
             raise RuntimeError("Warteschlange läuft bereits")
-        waiting = sum(1 for i in job_queue["items"] if i["state"] == "queued")
+        queued = [dict(i) for i in job_queue["items"] if i["state"] == "queued"]
+    waiting = len(queued)
     if not waiting:
         raise RuntimeError("Keine wartenden Aufträge in der Warteschlange")
+    # Every item runs automatically (homing only when needed); refuse what
+    # cannot run before anything moves.
+    for item in queued:
+        try:
+            auto_plan(_queue_commands(item))
+        except (ValueError, RuntimeError) as exc:
+            raise ValueError("Warteschlange #%d (%s): %s" % (item["id"], item["file"], exc))
     if not job_lock.acquire(blocking=False):
         raise RuntimeError("Ein Auftrag oder Rahmen läuft bereits")
     stop_job.clear()

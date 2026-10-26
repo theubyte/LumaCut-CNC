@@ -44,12 +44,17 @@ assert r.get_json()["queue"]["items"][-1]["dx"] == -40.0
 # Queued files cannot be deleted.
 r = c.post("/api/jobs/A.gcode/delete")
 assert r.status_code == 400 and "Warteschlange" in r.get_json()["error"], r.data
-# Not homed: nothing runs.
+# Every item runs automatically (probing): without the probe offset nothing runs.
+m.probe_xy_offset_mm = None
+r = post(op="queue_run")
+assert r.status_code == 400 and "Tasterversatz" in r.get_json()["error"], r.data
+assert "#1" in r.get_json()["error"]
+m.probe_xy_offset_mm = (0.0, 0.0)
+# Not homed is fine: the automatic run homes itself when needed.
 m.homed = False
-r = post(op="queue_run"); assert r.status_code == 400 and "referenzieren" in r.get_json()["error"]
-m.homed = True
 r = post(op="queue_run"); assert r.status_code == 200, r.data
 wait()
+assert all(a is not None and a["grids"] for a in autos), autos
 q = c.get("/api/status").get_json()["queue"]
 assert q["state"] == "complete" and q["current"] is None, q
 assert [i["state"] for i in q["items"]] == ["done", "done", "done"], q
@@ -91,9 +96,11 @@ assert c.get("/api/status").get_json()["queue"]["items"] == []
 assert post(op="queue_add", name="A.gcode").status_code == 200
 import io
 c.post("/api/upload", data={"file": (io.BytesIO(JOB.replace("S80", "S90").encode()), "A.gcode")})
-assert post(op="queue_run").status_code == 200; wait()
+# (checked before anything moves, the item keeps waiting)
+r = post(op="queue_run")
+assert r.status_code == 400 and "neu einreihen" in r.get_json()["error"], r.data
 q = c.get("/api/status").get_json()["queue"]
-assert q["items"][0]["state"] == "error" and "neu einreihen" in q["items"][0]["error"], q
+assert q["items"][0]["state"] == "queued" and q["state"] != "running", q
 assert len(ran) == 1
 """)
 
@@ -142,7 +149,10 @@ m.command = lambda cmd, **k: sent.append(cmd)
 ran, fail_on = [], set()
 block, started = threading.Event(), threading.Event()
 block.set()
-def fake_execute(filename, commands, probe_point=None):
+autos = []
+m.probe_xy_offset_mm = (0.0, 0.0)
+def fake_execute(filename, commands, auto=None):
+    autos.append(auto)
     web.job.update(file=filename, state="running")
     started.set()
     block.wait(5)

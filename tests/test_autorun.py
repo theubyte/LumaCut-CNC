@@ -175,11 +175,15 @@ class MarlinSim:
         self.absolute = True
         self.out = []
         self.writes = []
+        self.hook = None          # called with every command (test hooks)
+        self.no_contact = False   # G30 finds no material
     def report(self):
         return "X:%.3f Y:%.3f Z:%.3f E:0.00 Count X:0 Y:0 Z:0" % tuple(self.pos)
     def write(self, raw):
         cmd = raw.decode().strip()
         self.writes.append(cmd)
+        if self.hook is not None:
+            self.hook(cmd)
         words = dict((k, float(v)) for k, v in re.findall(r"([XYZ])([-+]?[0-9.]+)", cmd))
         reply = []
         if cmd == "M115":
@@ -196,6 +200,11 @@ class MarlinSim:
                     self.pos[i] = words[axis] if self.absolute else self.pos[i] + words[axis]
         elif cmd == "M114":
             reply.append(self.report())
+        elif cmd.startswith("G30") and self.no_contact:
+            self.pos[2] = -2.0 if self.pos[2] > 1 else self.pos[2]
+            reply += ["Error:Probing Failed"]
+        elif cmd == "M119":
+            reply += ["Reporting endstop status", "z_min: open"]
         elif cmd.startswith("G30"):
             contact = self.surface(self.pos[0] + OFFSET[0], self.pos[1] + OFFSET[1])
             assert contact < self.pos[2] - 0.5, ("switch would already touch", self.pos, contact)
@@ -366,6 +375,139 @@ w = sim.writes
 assert w.count("G30 E0") == 2 and "M402" in w and "M3 I" not in w, w
 assert w.index("M402") < w.index("G0 X0.000 Y0.000 F9000")
 assert m.surface_z is None and "M112" not in w
+assert web.job["error"] == "Abgebrochen" and web.job["phase"] is None, web.job
+assert "M5 I" in w[w.index("M402"):], "laser off after the abort"
+""")
+
+    def test_abort_during_homing_stops_in_park_corner_without_m112(self):
+        self._run(r"""
+OFFSET = (10.0, 5.0)
+sim, m = connect(lambda x, y: 3.0)
+auto = web.auto_plan(["G0 X100 Y100", "M3 I", "G1 X150 Y100 F1500 S80", "M5 I"])
+def hook(cmd):
+    if cmd == "G28 X Y":
+        web.stop_job.set()
+sim.hook = hook
+web.job_lock.acquire()
+web.stop_job.clear()
+m.owner = "job"
+web._job_worker("a.gcode", auto["commands"], auto)
+w = sim.writes
+assert web.job["state"] == "aborted" and web.job["error"] == "Abgebrochen", web.job
+assert "G28 Z" not in w and "G30 E0" not in w and "M3 I" not in w, w
+assert w[-1] == "M5 I" and "M112" not in w, w
+assert sim.pos[:2] == [0.0, 0.0] and not m.homed and m.serial is not None
+""")
+
+    def test_abort_during_parking_finishes_park_once(self):
+        self._run(r"""
+OFFSET = (10.0, 5.0)
+sim, m = connect(lambda x, y: 3.0)
+auto = web.auto_plan(["G0 X100 Y100", "M3 I", "G1 X104 Y100 F1500 S80", "M5 I"])
+phases = []
+def hook(cmd):
+    phases.append(web.job["phase"])
+    if cmd == "G0 X0.000 Y0.000 F9000":
+        web.stop_job.set()
+sim.hook = hook
+web.job_lock.acquire()
+web.stop_job.clear()
+m.owner = "job"
+web._job_worker("a.gcode", auto["commands"], auto)
+w = sim.writes
+assert web.job["state"] == "aborted" and web.job["error"] == "Abgebrochen", web.job
+assert w.count("G0 X0.000 Y0.000 F9000") == 1 and "M112" not in w, w
+seen = [p for i, p in enumerate(phases) if i == 0 or p != phases[i - 1]]
+# focusing/finishing send nothing to Marlin here (instant), so they may not show.
+assert seen == ["homing", "probing", "running", "parking"], seen
+""")
+
+    def test_probe_without_material_is_one_sentence_error(self):
+        self._run(r"""
+OFFSET = (10.0, 5.0)
+sim, m = connect(lambda x, y: 3.0)
+sim.no_contact = True
+auto = web.auto_plan(["G0 X100 Y100", "M3 I", "G1 X150 Y100 F1500 S80", "M5 I"])
+web.job_lock.acquire()
+web.stop_job.clear()
+m.owner = "job"
+web._job_worker("a.gcode", auto["commands"], auto)
+w = sim.writes
+assert web.job["state"] == "error", web.job
+err = web.job["error"]
+assert err.startswith("Der Taster hat bei X") and "kein Material gefunden" in err, err
+assert err.endswith("dann neu starten.") and err.count(".") == 1, err
+assert "M402" in w and "M3 I" not in w and "M112" not in w, w
+assert "G0 X0.000 Y0.000 F9000" in w[w.index("M402"):], "parked after the error"
+""")
+
+    def test_first_cut_needs_a_known_start_point(self):
+        self._run(r"""
+OFFSET = (10.0, 5.0)
+sim, m = connect(lambda x, y: 3.0)
+import io
+c = web.app.test_client()
+NL = chr(10)
+bad = NL.join(["G21", "G90", "M3 I", "G1 X150 Y100 F1500 S80", "M5 I"])
+r = c.post("/api/upload", data={"file": (io.BytesIO(bad.encode()), "bad.gcode")})
+assert r.status_code == 400 and "unbekannten Kopfposition" in r.get_json()["error"], r.data
+assert "Zeile 4" in r.get_json()["error"]
+for ok in (["M3 I", "G0 X100 Y100", "G1 X150 Y100 S80"],
+           ["M3 I", "G1 X100 Y100 S0 F600", "G1 X150 Y100 S80"]):
+    web.preflight(NL.join(ok))
+web.focus.check_first_cut(["G28", "M3 I", "G1 X150 Y100 S80"])   # G28 = X0/Y0
+# G28 of the file is dropped in the automatic run: the head stands elsewhere.
+try:
+    web.auto_plan(["G28", "M3 I", "G1 X150 Y100 S80"])
+except ValueError as exc:
+    assert "unbekannten Kopfposition" in str(exc), exc
+else:
+    raise AssertionError("autorun accepted a cut from an unknown position")
+# Relative positioning does not count as a known point.
+try:
+    web.preflight(NL.join(["G91", "G0 X10 Y10", "G90", "M3 I", "G1 X150 Y100 S80"]))
+except ValueError as exc:
+    assert "Zeile 5" in str(exc), exc
+else:
+    raise AssertionError("relative move accepted as start point")
+assert sim.writes.count("G28 X Y") == 0
+""")
+
+    def test_queue_runs_every_item_automatically(self):
+        self._run(r"""
+import time
+OFFSET = (10.0, 5.0)
+sim, m = connect(lambda x, y: 3.0)
+c = web.app.test_client()
+job = chr(10).join(["M3 I", "G0 X100 Y100", "G1 X104 Y100 F1500 S80",
+                     "G91", "G0 Z-0.500 F600", "G90",
+                     "G0 X100 Y100", "G1 X104 Y100 F1500 S80", "M5 I"])
+(web.JOBS / "A.gcode").write_text(job, encoding="utf-8")
+(web.JOBS / "B.gcode").write_text(job.replace("X100", "X200").replace("X104", "X204"), encoding="utf-8")
+states = []
+sim.hook = lambda cmd: states.append((web.job["file"], web.job["state"]))
+assert c.post("/api/action", data={"op": "queue_add", "name": "A.gcode"}).status_code == 200
+assert c.post("/api/action", data={"op": "queue_add", "name": "B.gcode"}).status_code == 200
+assert not m.homed
+r = c.post("/api/action", data={"op": "queue_run"})
+assert r.status_code == 200, r.data
+for _ in range(3000):
+    if not web.job_lock.locked():
+        break
+    time.sleep(0.005)
+q = c.get("/api/status").get_json()["queue"]
+assert q["state"] == "complete" and [i["state"] for i in q["items"]] == ["done", "done"], q
+w = sim.writes
+assert w.count("G28 X Y") == 1, "homing only once, when needed"
+assert w.count("M402") == 2, "every item probed"
+for name in ("A.gcode", "B.gcode"):
+    seq = [s for f, s in states if f == name]
+    seen = [s for i, s in enumerate(seq) if i == 0 or s != seq[i - 1]]
+    assert seen[-2:] == ["probing", "running"] and "complete" not in seen[:-1], (name, seen)
+# Two passes with a 0.5 mm focus drop: compensated, no G91 sent.
+assert "G91" not in w[w.index("M402"):], "relative drop became a Z offset"
+assert "G0 Z8.500 F600" in w and "G0 Z8.000 F600" in w, [c for c in w if c.startswith("G0 Z")]
+assert "M112" not in w
 """)
 
 

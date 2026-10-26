@@ -219,7 +219,7 @@ Felder aus `web.py` (`status()`):
 | `busy` | bool | Status aus Cache (Abschnitt 3.1) |
 | `stale_ms` | int \| null | Alter des Cache-Anteils |
 | `activity` | string | `"framing"` (Rahmen läuft), `"job"` (Auftrag `homing`/`probing`/`running` oder Warteschlange `running`/`pausing`), sonst `"idle"`. Achtung: Firmware-Update, LightBurn und kurze Web-Fahrten erscheinen hier als `"idle"`; dafür `owner` lesen. |
-| `job` | object | `{file, state, line, total, error, probe}`; `probe` = `{done, total}` der Abtastpunkte bei `autorun` (ab `probing`, bleibt danach stehen), sonst `null`; `state` ∈ `idle`, `homing`, `probing`, `running`, `complete`, `aborted`, `error`. Bleibt nach dem Ende auf `complete`/`aborted`/`error` stehen. |
+| `job` | object | `{file, state, line, total, error, probe, phase}`; `phase` = genauerer Schritt solange aktiv: `homing`, `probing`, `focusing` (Höhenkorrektur rechnen), `running`, `finishing` (letzte gepufferte Bahnen), `parking`; sonst `null`. Ein `autorun` beginnt direkt mit `homing`/`probing`, nie mit `running`/`line=0`. `error` ist ein deutscher Satz mit dem nächsten Schritt (Abbruch: `Abgebrochen`); `probe` = `{done, total}` der Abtastpunkte bei `autorun` (ab `probing`, bleibt danach stehen), sonst `null`; `state` ∈ `idle`, `homing`, `probing`, `running`, `complete`, `aborted`, `error`. Bleibt nach dem Ende auf `complete`/`aborted`/`error` stehen. |
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
 | `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
@@ -479,7 +479,7 @@ Keine Parameter, keine Vorbedingung. 200 `{"message": "Platzierung aufgehoben: A
 | Vorbedingungen | **frei**, **referenziert** (`Vor dem Job referenzieren`), **freigegeben** (`Mechanik noch nicht freigegeben`), kein anderer Auftrag/Rahmen (`Ein Auftrag läuft bereits`), LightBurn darf nicht dazwischenkommen (`LightBurn hat inzwischen die Steuerung`) |
 | Wirkung | asynchron: Worker-Thread unter Besitzer `job`. `M5 I`, dann Zeilen streamen (G0/G1 im Fenster `stream_window`, alles andere einzeln); `G28` → sichere Referenzfahrt, `G30` → Abtastung, `M2` ignoriert; am Ende `drain`, Parken. Status über `job`. |
 | Erfolg | 200 `Job gestartet: <name>` (sofort) |
-| Fehler (Start) | 400 `Unbekannte Auftragsdatei`, `Keine gültige Platzierung für … – neu platzieren (op=place)`, `Auftrag seit dem Platzieren geändert – neu platzieren`, `G-Code Zeile N: …`, `Motiv … liegt außerhalb …` |
+| Fehler (Start) | 400 `Unbekannte Auftragsdatei`, `Keine gültige Platzierung für … – neu platzieren (op=place)`, `Auftrag seit dem Platzieren geändert – neu platzieren`, `G-Code Zeile N: …`, `Motiv … liegt außerhalb …`, `Zeile N: Die erste Laserbahn beginnt an einer unbekannten Kopfposition – davor mit G0 X… Y… (Laser aus) an ihren Startpunkt fahren.` (gilt auch für Upload, `autorun` und Warteschlange: vor der ersten Bahn mit S>0 muss eine absolute X/Y-Fahrt oder G28 stehen; bei `autorun` zählt das G28 der Datei nicht, es entfällt) |
 | Fehler (Lauf) | `job.state = "error"` + `job.error`; Laser aus, Parken ohne M112. Scheitert das, M112. ⚠ Hardware |
 
 #### `op=autorun` (automatischer Auftrag)
@@ -500,7 +500,9 @@ Abschnitt 4): Auftrag in Maschinenkoordinaten **ohne Z** hochladen, dann
 | Status | `job.state`: `homing` → `probing` → `running` → `complete`; `job.probe` = `{done, total}` (total = Punkte + 1 Nachmessung) |
 | Erfolg | 200 `Automatischer Ablauf gestartet: [Referenzieren → ]Abtasten (N Punkte) → Höhenkorrektur → <name> → Parken` (bzw. `eigenes Z des Auftrags`) |
 | Fehler (Start) | 400 `Auftrag ohne Laserbahnen: nichts abzutasten`, `Kein Abtastpunkt erreichbar: …`, `Zeile N: Bögen (G2/G3) – in der App als Linien ausgeben`, `Zeile N: relative X/Y-Fahrten (G91) …`, `Fokushöhe läge näher als 2 mm …`, `Fokus-Absenkung führt unter Oberfläche + 2 mm` |
-| Fehler (Lauf) | wie `start`; ein Abbruch beim Abtasten verstaut den Taster (`M402`) und parkt. ⚠ Hardware |
+| Relatives Z | `G91`/`G0 Z-…`/`G90` (Fokus-Absenkung je Durchgang) wird nur hier und in der Warteschlange (Auftrag ohne eigenes Z) als Versatz auf die Kartenhöhe gerechnet, höchstens bis Oberfläche + 2 mm. Bei `op=start` und bei Aufträgen mit eigenem Z gehen die Zeilen unverändert an Marlin. |
+| Abbruch / Not-Aus | `op=abort` wirkt in jeder Phase: `homing` nach der X/Y-Referenzfahrt (Kopf steht dann in der Parkecke X0/Y0, Z unverändert, Maschine nicht referenziert), `probing` vor jedem Punkt (Taster wird mit `M402` verstaut), `focusing` alle 500 Zeilen, `running` vor jeder Zeile, `finishing`/`parking` nach dem Parken. Danach `M5 I` und Parken ohne M112, `job.state = aborted`, `job.error = Abgebrochen`. Zwischen allen Phasen ist der Laser aus (`M5 I`). `op=estop` (M112) wirkt sofort. ⚠ Hardware |
+| Fehler (Lauf) | `job.state = error`, `job.error` ein Satz mit nächstem Schritt, z. B. `Der Taster hat bei X… Y… kein Material gefunden – Material unter das Motiv legen oder den Tasterversatz prüfen, dann neu starten.`, `Der Taster war bei X… Y… schon gedrückt – Taster und Kabel prüfen, dann neu starten.`, `Abtasten bei X… Y… fehlgeschlagen (…) – Taster prüfen, dann neu starten.`, `Verbindung zur Steuerung unterbrochen (…) – USB-Kabel prüfen, dann neu starten.`; danach Laser aus und Parken (ohne M112). ⚠ Hardware |
 
 #### `op=abort`
 
@@ -566,10 +568,10 @@ Einträge. Platzierung und Datei-SHA werden beim Einreihen eingefroren.
 | | |
 | --- | --- |
 | Parameter | keine |
-| Vorbedingungen | **frei**, **referenziert** (`Vor der Warteschlange referenzieren`), nicht schon aktiv (`Warteschlange läuft bereits`), mindestens ein `queued` (`Keine wartenden Aufträge in der Warteschlange`), kein Auftrag/Rahmen (`Ein Auftrag oder Rahmen läuft bereits`) |
-| Wirkung | asynchron unter Besitzer `job`: arbeitet alle `queued` der Reihe nach ab, jeder wie `op=start` (Parken nach jedem Auftrag, Laser aus dazwischen). Vor jedem Eintrag erneute Prüfung (Datei vorhanden, SHA gleich, Grenzen, Wächter). Erster Fehler/Abbruch → Eintrag `error`/`aborted`, Warteschlange `stopped`. Setzt nach `paused`/`stopped` fort. |
+| Vorbedingungen | **frei**, Tasterversatz gesetzt; jeder `queued`-Eintrag wird vorab wie `autorun` geplant, sonst 400 `Warteschlange #<id> (<datei>): <Grund>` und nichts bewegt sich; nicht schon aktiv (`Warteschlange läuft bereits`), mindestens ein `queued` (`Keine wartenden Aufträge in der Warteschlange`), kein Auftrag/Rahmen (`Ein Auftrag oder Rahmen läuft bereits`) |
+| Wirkung | asynchron unter Besitzer `job`: arbeitet alle `queued` der Reihe nach ab, jeder durch denselben automatischen Ablauf wie `op=autorun`: referenzieren nur wenn nötig, abtasten (`job.probe`), Höhenkorrektur inkl. relativer Fokus-Absenkungen, lasern, parken; Laser aus zwischen den Phasen und Aufträgen. Vor jedem Eintrag erneute Prüfung (Datei vorhanden, SHA gleich, Grenzen, Wächter). Erster Fehler/Abbruch → Eintrag `error`/`aborted`, Warteschlange `stopped`. Setzt nach `paused`/`stopped` fort. |
 | Erfolg | 200 `{"message": "Warteschlange gestartet: N Auftrag/Aufträge", "queue": {…}}` |
-| Fehler (Lauf) | `<datei> seit dem Einreihen geändert – neu einreihen` am Eintrag |
+| Fehler (Lauf) | `job.error` am Eintrag (`items[].error`), z. B. Abtastfehler |
 
 #### `op=queue_pause`
 
@@ -822,7 +824,7 @@ Zwischenspeicher für den Fall ohne Verbindung.
 | `activity == "job"` | wie oben; **erlaubt**: E-Stop, `abort`, `queue_pause` (wenn `running`), `queue_add`/`skip`/`remove`/`clear`, Upload, Einstellungen (mit Vorsicht) |
 | `activity == "framing"` | wie oben; erlaubt: E-Stop, `abort` |
 | `firmware_update.state` ∈ `uploading`, `rebooting` | alles außer E-Stop |
-| nicht `homed` | `jog`, `park`, `moveto`, `probe`, `frame`, `start`, `queue_run`, `origin_set`, Platzierung `current`/`user` (`autorun` und `home` bleiben) |
+| nicht `homed` | `jog`, `park`, `moveto`, `probe`, `frame`, `start`, `origin_set`, Platzierung `current`/`user` (`autorun`, `queue_run` und `home` bleiben) |
 | nicht `config.validated` | `home`, `jog`, Fahrten, `frame`, `start`/`autorun`/`queue_run`, Upload |
 | `probe_xy_offset_mm == null` | `probe`, `autorun` |
 | `z_probe_supported == false` | `probe`, `autorun` |

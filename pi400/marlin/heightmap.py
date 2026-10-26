@@ -274,5 +274,5 @@ def _mark_reachable(grids, reachable):
     grids = [g for g in grids if any(g.reachable)] or grids
     if not any(any(g.reachable) for g in grids):
         raise ValueError("Kein Abtastpunkt erreichbar: der Taster kommt an keine Stelle "
-                         "des Motivs (Motiv weiter in die Mitte schieben)")
+                         "des Motivs – Motiv weiter in die Mitte schieben, dann neu starten.")
     return grids
