@@ -25,9 +25,10 @@ pyinstaller --windowed --name LumaCutStudio src/main.py
 Code: `src/lumacut_canvas/` (eigenes Paket, Modell ohne Qt-Abhängigkeit).
 Eigenständig testen: `python src/canvas_demo.py`.
 
-- **Werkzeuge:** Auswahl (V), Rechteck (R), Ellipse (E), Linie (L), Text (T).
+- **Werkzeuge:** Auswahl (V), Rechteck (R), Ellipse (E), Linie (L), Polygon (P), Text (T).
   *Umschalt* beim Zeichnen = Quadrat/Kreis/45°-Linie; Klick ohne Ziehen legt
-  ein 20-mm-Objekt an. Doppelklick auf Text = Text ändern.
+  ein 20-mm-Objekt an. Doppelklick auf Text = Text ändern. Polygon: Klick = Punkt,
+  Doppelklick/Enter oder Klick auf den ersten Punkt = schließen, Rücktaste = Punkt weg.
 - **Bearbeiten:** Verschieben (Maus oder Pfeiltasten 1 mm, *Umschalt* 10 mm),
   Skalieren über 8 Griffe (*Umschalt* = Seitenverhältnis halten), Entf,
   Strg+D duplizieren, Strg+C/V, Strg+Z/Strg+Y, X/Y/B/H in mm in der Eigenschaftsleiste.
@@ -39,15 +40,17 @@ Eigenständig testen: `python src/canvas_demo.py`.
   (verschachtelte Gruppen möglich). Ein Klick wählt immer die ganze Gruppe;
   Verschieben, Skalieren, Drehen, Löschen und Duplizieren wirken auf die Gruppe.
   Gruppenmitglieder bleiben auf ihren Ebenen (Laserparameter je Ebene).
-- **Ansicht:** Mausrad = Zoom, mittlere Maustaste oder Leertaste+Ziehen = Verschieben,
+- **Ansicht:** Mausrad = Zoom (ohne Auswahl um den Cursor, mit Auswahl auf die
+  Auswahlmitte zu – sie bleibt stehen bzw. wird zentriert; 0,4–60 px/mm), mittlere Maustaste oder Leertaste+Ziehen = Verschieben,
   Strg+0 = Fläche einpassen, Raster und Fangen (1 mm) umschaltbar, Lineale in mm,
   Cursorposition in mm in der Statusleiste.
 - **Ebenen:** Farbe, Name, sichtbar, gesperrt, Reihenfolge; je Ebene
-  Leistung (1–100 %), Geschwindigkeit (1–6000 mm/min) und Durchgänge (1–30).
+  Leistung (1–100 %), Geschwindigkeit (1–6000 mm/min) und Durchgänge (1–30),
+  optional Material/Dicke/Tiefe je Durchgang (siehe „Material-Grundlage“).
   Objekte übernehmen Farbe und Parameter ihrer Ebene. Ausgeblendete Ebenen
   werden nicht gelasert; die unterste Ebene läuft zuerst.
-- **Dateien:** Speichern/Öffnen als `*.lumacut.json` (Format `lumacut-canvas`, v2, mm;
-  v1-Dateien werden weiter gelesen),
+- **Dateien:** Speichern/Öffnen als `*.lumacut.json` (Format `lumacut-canvas`, v3, mm;
+  v1/v2-Dateien werden weiter gelesen; Material-Felder werden nur gespeichert, wenn gesetzt),
   Export als SVG oder PNG (Strg+E).
 - **An die Maschine:** „Design senden“ (Toolbar) erzeugt Marlin-G-Code
   (`lumacut_canvas/gcode.py`, Regeln wie `marlin-postprocessor.mjs`) und lädt
@@ -58,6 +61,32 @@ Eigenständig testen: `python src/canvas_demo.py`.
 - **Bekannte Grenzen:** Ungleichmäßiges Skalieren einer Mehrfachauswahl/Gruppe mit
   gedrehten Objekten skaliert diese ohne Scherung (Näherung; gleichmäßig mit
   *Umschalt* ist exakt). Gesperrte/ausgeblendete Gruppenmitglieder werden nicht mitbewegt.
+
+### Material-Grundlage (Durchgänge aus Dicke und Tiefe je Durchgang)
+
+`lumacut_canvas/material.py` (Qt-frei, Tests: `tests/test_material.py`). Feldnamen wie
+`lumacut_materials.presets.Preset` (`thickness_mm`, `depth_per_pass_mm`); die
+Materialbibliothek bleibt die Quelle für geplante Werte, dieses Modul ist die
+schlanke Rechenbasis an der Ebene.
+
+```python
+from lumacut_canvas.material import (BUILTIN_MATERIALS, Material, plan_passes,
+                                     layer_pass_plan, material_from_preset)
+plan_passes(3.0, 0.8)            # passes 4, pass_depths (0.8, 0.8, 0.8, 0.6), total_mm 3.0
+ed.apply_material(Material("Birke", 4.0, depth_per_pass_mm=1.0))   # 1 Undo-Schritt, passes = 4
+ed.apply_material(m, target_depth_mm=1.5)   # Gravurtiefe statt Durchschnitt
+layer_pass_plan(layer)           # mit den eingestellten layer.passes (Override), .reaches_target
+```
+
+- Tiefe = `target_depth_mm` oder (wenn 0) `thickness_mm`; `passes = ceil(Tiefe / depth_per_pass_mm)`,
+  begrenzt auf 1–30. Abgeleitet, aber überschreibbar: von Hand gesetzte Durchgänge gelten.
+- `BUILTIN_MATERIALS` sind **editierbare Startwerte, keine geprüften Empfehlungen** –
+  immer erst einen Materialtest machen.
+- **G-Code-Hook:** `document_to_gcode(doc, pass_hook=f)` ruft je Durchgang einer geplanten
+  Ebene `f(job_layer, index, depth_mm, cumulative_mm)` und fügt die Zeilen nach
+  `; PASS i OF n` ein (`gcode.depth_comment_hook` = nur Kommentare). Ohne Hook ist die
+  Ausgabe unverändert; die Fokus-Absenkung bleibt `z_step`.
+- UI: derzeit nur API (kein Dialog im Ebenen-Panel).
 
 ### Schnittstellen für andere Module (Scan & Probe)
 
