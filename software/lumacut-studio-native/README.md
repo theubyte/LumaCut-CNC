@@ -90,6 +90,27 @@ Eigenständig testen: `python src/canvas_demo.py`.
   (*Alt+Umschalt+F*, konvexe Hülle) oder der Knopf „Rahmen“ im Maschinen-Panel
   fahren den Umriss mit ausgeschaltetem Laser ab (`op=frame`). Der gesendete
   Auftrag bleibt geladen: senden → Rahmen → starten, ohne neu zu senden.
+- **Schnittoptionen je Ebene** („Schnittoptionen…“, *Alt+K*, aktive Ebene, ein Undo-Schritt;
+  wirken beim Senden, Schätzen, Rahmen und „G-Code speichern“, nur auf geschlossene Konturen):
+  - *Kerf-Versatz* (`kerf_mm`, −2…2 mm): positiv verschiebt den Schnitt zur Abfallseite –
+    Außenkonturen wachsen, Löcher schrumpfen (Polygon-Versatz mit `shapely`, spitze Ecken).
+  - *Haltestege* (`tab_count` 0–24 bzw. `tab_spacing_mm` = ein Steg je … mm Umfang,
+    `tab_width_mm`): Lücken mit Laser aus, gleichmäßig verteilt und nicht in Ecken;
+    Konturen unter 10 mm Umfang bekommen keine Stege.
+  - *Anfahrt/Abfahrt* (`lead_in_mm`, `lead_in_arc`, `lead_out_mm`, 0–10 mm): auf der
+    Abfallseite (außen bei Teilen, innen bei Löchern), 45°-Gerade oder tangentialer Viertelkreis;
+    der Konturstart wird dafür von einer Ecke in die Kantenmitte verlegt. Passt die Anfahrt nicht
+    (Arbeitsfläche, kleines Loch), wird sie gekürzt, senkrecht gesetzt oder weggelassen.
+    Kollisionen mit benachbarten Teilen werden nicht geprüft.
+  Code: `src/lumacut_job/cutpath.py`; die Art jedes Teilpfads (`cut`, `lead_in`, `lead_out`,
+  `tab`) steht in `JobLayer.poly_kinds` (z. B. für eine Pfadvorschau).
+- **G-Code speichern…** (*Alt+G*): optimierter G-Code des Designs als Datei (ohne
+  Scan-Fokuskorrektur, die nur beim Senden über das Scan-Panel dazukommt).
+- **Verlauf…** (*Strg+H*): die letzten 20 gesendeten Aufträge (alle Sendewege) mit Zeit und
+  Schätzung; *Erneut senden* lädt den Auftrag wieder hoch (gestartet wird über „Start“),
+  *Als Datei speichern*, *Entfernen*. Ablage: `%APPDATA%\LumaCut\LumaCut Studio\history`
+  (`LUMACUT_HISTORY_DIR`).
+- **Hilfe › Tastenkürzel** (*F1*): alle Kürzel des Fensters mit Suche.
 - Die Arbeitsfläche zeigt 0–360 × 0–340 mm. Objekte werden still in der Fläche
   gehalten; der interne Safezone-Versatz wird nur beim Export für die Maschine
   addiert (`lumacut_canvas/workarea.py`).
