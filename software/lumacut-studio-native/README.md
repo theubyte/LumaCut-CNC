@@ -56,6 +56,26 @@ oben in der Leiste.
 Code: `src/lumacut_canvas/` (eigenes Paket, Modell ohne Qt-Abhängigkeit).
 Eigenständig testen: `python src/canvas_demo.py`.
 
+### Koordinaten: Nullpunkt oben rechts
+
+Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, **+Y nach vorne zur Tür**
+(`docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md` §2.1, §2.3). Umgerechnet wird nur in
+`lumacut_canvas/workarea.py`; der Schalter ist `ORIGIN_TOP_RIGHT`.
+
+| Art | Wo | Ursprung / Richtung | Umrechnung |
+|---|---|---|---|
+| Bildschirm | Dokument, Szene, Overlays, SVG/PNG, `.lumacut.json` | oben links, x → rechts, y ↓ | – (Szene ungespiegelt, Text lesbar) |
+| Anzeige | Lineale, Statusleiste, X/Y-Felder | oben rechts, X ← links, Y ↓ | `screen_to_user(x, y) = (360 − x, y)` |
+| Maschine | G-Code, Rahmen, Schätzung, Raster/Bilder | oben rechts + 30-mm-Safezone | `screen_to_machine(x, y) = (390 − x, 30 + y)` |
+
+- X-Feld der Eigenschaftsleiste = Abstand der **rechten** Kante vom Nullpunkt (`user_x_of`).
+- `to_machine`/`from_machine` sind Aliase für `screen_to_machine`/`machine_to_screen` (Eingabe in Bildschirm-mm).
+  Rechtecke aus zwei Ecken immer über `machine_rect_to_screen()` oder mit `min`/`max` bilden.
+- Bilder in Maschinenrichtung (Kameramosaik, Höhenkarte: Spalte 0 = kleinstes Maschinen-X) für den
+  Bildschirm waagerecht spiegeln (`IMAGE_FLIP_X`).
+- Dateien speichern Bildschirm-mm und das Feld `"coords": "screen-tl/machine-tr-v2"`. Alte Dateien ohne Feld
+  liegen an derselben sichtbaren Stelle; unbekannte Werte werden abgelehnt.
+
 - **Werkzeuge:** Auswahl (V), Rechteck (R), Ellipse (E), Linie (L), Polygon (P), Freihand (F), Text (T).
   *Umschalt* beim Zeichnen = Quadrat/Kreis/45°-Linie; Klick ohne Ziehen legt
   ein 20-mm-Objekt an. Doppelklick auf Text = Text ändern. Polygon: Klick = Punkt,
@@ -312,7 +332,8 @@ Drehung, Ellipsen und Text werden berücksichtigt.
 
 ### Schnittstellen für andere Module (Scan & Probe)
 
-Alle Koordinaten in Arbeitsflächen-mm (0,0 links oben). Getestet in
+Alle Koordinaten in Bildschirm-mm der Arbeitsfläche (0,0 links oben; Anzeige und Maschine
+haben den Nullpunkt oben rechts, siehe „Koordinaten“ oben). Getestet in
 `tests/test_integration_hooks.py`.
 
 ```python

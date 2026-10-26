@@ -21,7 +21,8 @@ from typing import Callable, Iterable
 
 from . import hatch as _hatch
 from .material import DEPTH_PER_PASS_RANGE, THICKNESS_RANGE
-from .workarea import Rect, clamp_offset, fit_scale, is_inside_work_area
+from .workarea import (COORD_CONVENTION, KNOWN_COORD_CONVENTIONS, Rect, clamp_offset, fit_scale,
+                       is_inside_work_area)
 
 # Gültige Parameterbereiche, abgestimmt mit software/lumacut-studio (studio.js).
 POWER_RANGE = (1.0, 100.0)          # Prozent
@@ -780,6 +781,11 @@ class Document:
             "version": (self.VERSION if any(s.kind == "image" for s in self.shapes)
                         else self.VERSION_WITHOUT_IMAGES),
             "units": "mm",
+            # Koordinaten-Konvention (workarea.py, Anforderungen 2026-10-26 §2.1):
+            # gespeichert wird immer Bildschirm-mm (oben links, x nach rechts);
+            # die Maschine hat den Nullpunkt oben rechts. Fehlt das Feld (Dateien
+            # vor 2026-10-26), ist es dieselbe Speicherung → nichts umzurechnen.
+            "coords": COORD_CONVENTION,
             "work_area": {"width": 360.0, "height": 340.0},
             "active_layer": self.active_layer_id,
             "layers": [l.to_dict() for l in self.layers],
@@ -792,6 +798,9 @@ class Document:
             raise ValueError("Keine LumaCut-Canvas-Datei")
         if int(d.get("version", 0)) > self.VERSION:
             raise ValueError("Datei stammt aus einer neueren Version")
+        coords = d.get("coords", COORD_CONVENTION)
+        if coords not in KNOWN_COORD_CONVENTIONS:
+            raise ValueError(f"Unbekannte Koordinaten-Konvention: {coords}")
         layers = [Layer.from_dict(x) for x in d.get("layers", [])]
         if not layers:
             layers = [Layer(name="Schneiden")]

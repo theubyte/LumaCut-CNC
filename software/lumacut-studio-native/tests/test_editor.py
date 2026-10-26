@@ -122,13 +122,16 @@ def test_delete_duplicate_paste_and_nudge(qapp):
 
 def test_property_bar_sets_mm_geometry(qapp):
     ed = editor(qapp)
-    ed.undo_stack.push(AddShapesCommand(ed.document, [Shape("rect", Geometry(10, 10, 20, 10), ed.document.active_layer_id)]))
+    ed.undo_stack.push(AddShapesCommand(ed.document, [Shape("rect", Geometry(100, 10, 20, 10), ed.document.active_layer_id)]))
     ed.select_all()
     pb = ed.property_bar
+    # Nullpunkt oben rechts (Anforderungen 2026-10-26 §2.1): X = Abstand der
+    # rechten Kante vom rechten Rand; Größe ändern hält die Nullpunkt-Seite fest.
+    assert pb.x.value() == 360 - 120 and pb.y.value() == 10
     pb.w.setValue(40)  # Seitenverhältnis gekoppelt
-    assert ed.document.shapes[0].geom.as_tuple() == (10, 10, 40, 20)
+    assert ed.document.shapes[0].geom.as_tuple() == (80, 10, 40, 20)
     pb.x.setValue(100)
-    assert ed.document.shapes[0].geom.x == 100
+    assert ed.document.shapes[0].geom.x == 360 - 100 - 40
 
 
 def test_text_tool_api(qapp):
@@ -189,7 +192,9 @@ def test_export_and_job_layers(qapp, tmp_path):
     jobs = job_layers(doc)
     assert len(jobs) == 1 and jobs[0].speed_mm_min == doc.layer(lid).speed
     first = jobs[0].polylines[0]
-    assert min(p[0] for p in first) == 30 and min(p[1] for p in first) == 30  # Safezone-Versatz
+    # Safezone-Versatz + Nullpunkt oben rechts: Bildschirm-x 0..10 → Maschinen-X 390..380
+    assert max(p[0] for p in first) == 390 and min(p[0] for p in first) == 380
+    assert min(p[1] for p in first) == 30
 
 
 def test_save_load_through_editor(qapp, tmp_path):

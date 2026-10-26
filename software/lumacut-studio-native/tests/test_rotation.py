@@ -172,13 +172,13 @@ def test_export_and_gcode_respect_rotation(qapp, tmp_path):
     d.add_shape(Shape("rect", Geometry(100, 100, 40, 20, 90), lid))
     d.add_shape(Shape("line", Geometry(10, 10, 20, 0, 90), lid))
     rect_poly, line_poly = (jl for jl in job_layers(d)[0].polylines)
-    xs = [p[0] - 30 for p in rect_poly]
+    xs = [390 - p[0] for p in rect_poly]  # Maschine → Bildschirm (Nullpunkt oben rechts)
     ys = [p[1] - 30 for p in rect_poly]
     assert min(xs) == pytest.approx(110) and max(xs) == pytest.approx(130)
     assert min(ys) == pytest.approx(90) and max(ys) == pytest.approx(130)
-    assert [(round(x - 30, 6), round(y - 30, 6)) for x, y in line_poly] == [(20, 0), (20, 20)]
+    assert [(round(390 - x, 6), round(y - 30, 6)) for x, y in line_poly] == [(20, 0), (20, 20)]
     gcode = document_to_gcode(d)
-    assert "G0 X160.000 Y120.000" in gcode and "G1 X140.000 Y160.000 F600" in gcode
+    assert "G0 X260.000 Y120.000" in gcode and "G1 X280.000 Y160.000 F600" in gcode
     svg = tmp_path / "r.svg"
     export_svg(d, svg)
     assert svg.read_text(encoding="utf-8").count("<path") >= 1

@@ -111,8 +111,7 @@ def test_rotated_image_stays_inside_bbox(qapp):
     g = optimized_document_gcode(d)
     pi_check(g)
     xs = [float(v) for v in re.findall(r"G1 X([\d.]+)", g)]
-    mx0, _ = to_machine(b.x, b.y)
-    mx1, _ = to_machine(b.right, b.bottom)
+    mx0, mx1 = sorted((to_machine(b.x, b.y)[0], to_machine(b.right, b.bottom)[0]))  # X gespiegelt
     assert min(xs) >= mx0 - 3.001 and max(xs) <= mx1 + 3.001
 
 
@@ -152,7 +151,7 @@ def test_frame_includes_images(qapp):
     assert job_layers(d) == []
     g = frame_gcode(image_outline_layers(d))
     pi_check(g)
-    assert "X130.000" in g or "X160.000" in g  # 100+30 (+30 Safezone)
+    assert "X260.000" in g and "X290.000" in g  # 390 − (100 … 130), Nullpunkt oben rechts
 
 
 # ------------------------------------------------------------- SVG

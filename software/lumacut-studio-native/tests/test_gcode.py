@@ -22,7 +22,8 @@ def test_gcode_matches_pi_rules(qapp):
     lines = g.splitlines()
     assert all(ALLOWED.match(l) for l in lines), [l for l in lines if not ALLOWED.match(l)]
     assert lines.count("M3 I") == 1 and lines[-2:] == ["M5 I", "M400"]
-    assert "G0 X30.000 Y30.000" in lines  # Safezone-Versatz
+    # Safezone-Versatz, Nullpunkt oben rechts: Bildschirm (0, 0) = Maschine (390, 30)
+    assert "G0 X390.000 Y30.000" in lines
     assert g.index("; LAYER Schneiden") < g.index("; LAYER Gravur")  # unterste Ebene zuerst
     assert "S255" in g and "S128" in g and "; LAYER Aus" not in g
     assert g.count("; PASS") == 3

@@ -67,12 +67,13 @@ def test_group_scale_rotate_delete_and_undo(qapp):
     ed.set_selection([a])
     assert set(ed.selection) == {a, b}
     ed.property_bar.w.setValue(120)  # 60 -> 120, Seitenverhältnis gekoppelt
-    assert d.shape(a).geom.as_tuple() == (10, 10, 40, 40)
-    assert d.shape(b).geom.as_tuple() == (90, 10, 40, 40)
+    # Rechte Kante (Nullpunkt oben rechts) bleibt bei 70 → links −50, in die Fläche geschoben.
+    assert d.shape(a).geom.as_tuple() == (0, 10, 40, 40)
+    assert d.shape(b).geom.as_tuple() == (80, 10, 40, 40)
     ed.rotate_selection(90)
     assert d.shape(a).geom.rot == d.shape(b).geom.rot == 90
-    # Mitten um die gemeinsame Mitte (70, 30) gedreht und dann nach unten in die Fläche geschoben.
-    assert d.shape(a).geom.center() == pytest.approx((70, 20)) and d.shape(b).geom.center() == pytest.approx((70, 100))
+    # Mitten um die gemeinsame Mitte (60, 30) gedreht und dann nach unten in die Fläche geschoben.
+    assert d.shape(a).geom.center() == pytest.approx((60, 20)) and d.shape(b).geom.center() == pytest.approx((60, 100))
     assert d.selection_bounds([a, b]).y >= 0  # gemeinsam in der Fläche gehalten
     ed.delete_selection()
     assert [s.id for s in d.shapes] == [c]

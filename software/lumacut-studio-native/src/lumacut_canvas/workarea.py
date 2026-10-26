@@ -22,9 +22,6 @@ Darum gibt es drei Koordinatenarten, umgerechnet *nur* in diesem Modul:
 
 Der einzige Schalter ist :data:`ORIGIN_TOP_RIGHT`. Bis 2026-10-26 lief X
 ungespiegelt (``machine_x = 30 + screen_x``) – Aufträge kamen seitenverkehrt.
-Der Schalter steht vorerst noch auf ``False`` (alte Richtung), bis Scan & Probe
-seine Umrechnung nachgezogen hat (docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md
-§2.3); aller Canvas-/Job-Code geht aber schon über diese Helfer.
 
 Die Maschine hat eine L-förmige 30-mm-Safezone (X < 30 oder Y < 30), in der
 nicht geschnitten werden darf (siehe docs/MASCHINE.md). Diese Zone wird in der
@@ -53,7 +50,11 @@ _SAFEZONE_Y_MM: float = 30.0
 
 #: Einziger Schalter der Konvention: True = Nullpunkt oben rechts (Maschine,
 #: §2.1), X wächst nach links. False = alte Konvention (X nach rechts).
-ORIGIN_TOP_RIGHT: bool = False
+ORIGIN_TOP_RIGHT: bool = True
+#: Versionsmarke der Konvention in .lumacut.json (``"coords"``).
+COORD_CONVENTION: str = "screen-tl/machine-tr-v2"
+# Fehlt das Feld (Dateien bis 2026-10-25), ist die Speicherung identisch.
+KNOWN_COORD_CONVENTIONS: frozenset[str] = frozenset({COORD_CONVENTION})
 #: Bilder mit Spalte 0 = kleinstes Maschinen-X waagerecht spiegeln?
 IMAGE_FLIP_X: bool = ORIGIN_TOP_RIGHT
 

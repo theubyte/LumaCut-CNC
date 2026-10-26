@@ -75,6 +75,7 @@ def test_listener_called_once_per_batch():
 
 
 def test_machine_mapping_applies_hidden_safezone_offset():
-    assert to_machine(0, 0) == (30, 30)
-    assert to_machine(WORK_WIDTH_MM, WORK_HEIGHT_MM) == (390, 370)
+    # Nullpunkt oben rechts (Anforderungen 2026-10-26 §2.1): X = 390 − x, Y = 30 + y
+    assert to_machine(0, 0) == (390, 30)
+    assert to_machine(WORK_WIDTH_MM, WORK_HEIGHT_MM) == (30, 370)
     assert from_machine(*to_machine(12.5, 7)) == (12.5, 7)

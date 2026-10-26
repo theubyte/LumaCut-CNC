@@ -102,11 +102,12 @@ def test_polygon_scale_rotate_round_trip_export_gcode(qapp, tmp_path):
     d = ed.document
     sid = d.shapes[0].id
     ed.property_bar.w.setValue(40)                   # Seitenverhältnis gekoppelt
-    assert d.shape(sid).abs_points() == pytest.approx([(10, 10), (50, 10), (10, 50)])
-    ed.rotate_selection(90)                          # um die Mitte (30, 30)
+    # Rechte Kante (Nullpunkt-Seite) bleibt bei 30 → links −10, in die Fläche geschoben.
+    assert d.shape(sid).abs_points() == pytest.approx([(0, 10), (40, 10), (0, 50)])
+    ed.rotate_selection(90)                          # um die Mitte (20, 30)
     path = shape_path(d.shape(sid))
     pts = [(path.elementAt(i).x, path.elementAt(i).y) for i in range(3)]
-    assert pts == pytest.approx([(50, 10), (50, 50), (10, 10)])
+    assert pts == pytest.approx([(40, 10), (40, 50), (0, 10)])
     # Speichern/Laden
     data = d.to_dict()
     assert data["objects"][0]["points"] == [[0, 0], [1, 0], [0, 1]]
@@ -119,9 +120,9 @@ def test_polygon_scale_rotate_round_trip_export_gcode(qapp, tmp_path):
     # Export und G-Code: geschlossener Zug (Startpunkt am Ende wiederholt)
     polys = job_layers(d)[0].polylines
     assert len(polys) == 1 and len(polys[0]) == 4 and polys[0][0] == pytest.approx(polys[0][-1])
-    assert polys[0][0] == pytest.approx((80, 40))    # +30/+30 Maschinenversatz
+    assert polys[0][0] == pytest.approx((350, 40))   # Maschine: X = 390 − x, Y = 30 + y
     g = document_to_gcode(d)
-    assert "G0 X80.000 Y40.000" in g and "G1 X80.000 Y80.000" in g
+    assert "G0 X350.000 Y40.000" in g and "G1 X350.000 Y80.000" in g
     out = tmp_path / "poly.svg"
     export_svg(d, out)
     assert "<path" in out.read_text(encoding="utf-8")
