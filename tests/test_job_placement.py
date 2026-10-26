@@ -37,9 +37,11 @@ class PlacementMathTests(unittest.TestCase):
         self.assertEqual((powered.xmin, powered.ymin, powered.xmax, powered.ymax),
                          (100.0, 100.0, 150.0, 120.0))
         self.assertEqual((motion.xmin, motion.ymin), (0.0, 0.0))
-        self.assertEqual(placing.anchor_point(powered, "tl"), (100.0, 100.0))
-        self.assertEqual(placing.anchor_point(powered, "br"), (150.0, 120.0))
-        self.assertEqual(placing.anchor_point(powered, "tr"), (150.0, 100.0))
+        # Visible corners, endstops top right: "r" = small X, "t" = small Y.
+        self.assertEqual(placing.anchor_point(powered, "tr"), (100.0, 100.0))
+        self.assertEqual(placing.anchor_point(powered, "bl"), (150.0, 120.0))
+        self.assertEqual(placing.anchor_point(powered, "tl"), (150.0, 100.0))
+        self.assertEqual(placing.anchor_point(powered, "br"), (100.0, 120.0))
         self.assertEqual(placing.anchor_point(powered, "center"), (125.0, 110.0))
         with self.assertRaises(ValueError):
             placing.anchor_point(powered, "middle")
@@ -114,13 +116,15 @@ post = lambda **d: c.post("/api/action", data=d)
         self._run(self.PRELUDE + r"""
 s = c.get("/api/status").get_json()
 assert s["origin"]["modes"] == ["absolute", "current", "user"], s["origin"]
+# Anchor semantics are versioned: "tr" = visible top right = endstop corner.
+assert s["coord_convention"] == "origin_top_right" == s["origin"]["coord_convention"], s
 assert s["origin"]["user"] is None and s["origin"]["placement"] is None
 # Default (LightBurn/web UI/older Studio): runs exactly as stored.
 r = post(op="start", name="Schild.gcode"); wait()
 assert r.status_code == 200, r.data
 assert ran[-1][1] == JOB.splitlines(), ran[-1]
 # Current head position = top-left of the motif.
-r = post(op="start", name="Schild.gcode", origin="current", anchor="tl"); wait()
+r = post(op="start", name="Schild.gcode", origin="current", anchor="tr"); wait()
 assert r.status_code == 200, r.data
 lines = ran[-1][1]
 assert "G0 X200 Y150" in lines and "G1 X250 Y170 F1500 S80" in lines, lines
@@ -183,12 +187,12 @@ assert r.status_code == 400 and "Platzierung" in r.get_json()["error"], r.data
 n = len(ran)
 r = post(op="origin_set", x="30", y="30")
 assert r.status_code == 200, r.data
-r = post(op="place", name="Schild.gcode", origin="user", anchor="br")
+r = post(op="place", name="Schild.gcode", origin="user", anchor="bl")
 assert r.status_code == 400 and "außerhalb" in r.get_json()["error"], r.data
-r = post(op="start", name="Schild.gcode", origin="user", anchor="br")
+r = post(op="start", name="Schild.gcode", origin="user", anchor="bl")
 assert r.status_code == 400 and len(ran) == n, r.data
 m.position = [389.0, 369.0, 20.0]
-r = post(op="start", name="Schild.gcode", origin="current", anchor="tl")
+r = post(op="start", name="Schild.gcode", origin="current", anchor="tr")
 assert r.status_code == 400 and "außerhalb" in r.get_json()["error"], r.data
 assert len(ran) == n
 r = post(op="place", name="Schild.gcode", origin="moon")

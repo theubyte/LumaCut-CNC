@@ -65,7 +65,7 @@ class QueueClientTests(unittest.TestCase):
         self.client.queue_pause()
         self.client.queue_clear()
         self.assertEqual(ops(self.pi), [
-            {"op": "queue_add", "name": "a.gcode", "origin": "absolute", "anchor": "tl"},
+            {"op": "queue_add", "name": "a.gcode", "origin": "absolute", "anchor": "tr"},
             {"op": "queue_add", "name": "b.gcode", "origin": "user", "anchor": "center"},
             {"op": "queue_add", "name": "c.gcode", "placement": "1"},
             {"op": "queue_skip", "id": "2"},

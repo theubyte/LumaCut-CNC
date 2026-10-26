@@ -186,6 +186,7 @@ def status():
                                       job_queue["state"] in QUEUE_ACTIVE)
                             else "idle"),
                   firmware="marlin",
+                  coord_convention=placing.COORD_CONVENTION,
                   busy=busy, stale_ms=stale_ms,
                   expected_pwm="PA1 / M3 I / S0..255",
                   io={"laser_supply_switch":"FAN1 / PC6 (M106/M107, low-side)",
@@ -444,6 +445,7 @@ def action():
 
 def _origin_status():
     return {"modes": list(placing.ORIGIN_MODES), "anchors": list(placing.ANCHORS),
+            "coord_convention": placing.COORD_CONVENTION,
             "user": config.get("user_origin"),
             "placement": None if job_placement is None else
             {k: v for k, v in job_placement.items() if k != "sha"}}
@@ -529,7 +531,7 @@ def _apply_offset(lines, dx, dy):
 def make_placement(filename, content, origin, anchor):
     """Placement dict + translated lines for a stored job (no motion)."""
     origin = origin or "absolute"
-    anchor = anchor or "tl"
+    anchor = anchor or placing.DEFAULT_ANCHOR
     if origin not in placing.ORIGIN_MODES:
         raise ValueError("Ursprung muss absolute, current oder user sein")
     if anchor not in placing.ANCHORS:

@@ -297,8 +297,17 @@ gewählt ist. Das ist der Standard und genau das bisherige Verhalten.
   - `current`: Bezugspunkt auf die aktuelle Kopfposition.
   - `user`: Bezugspunkt auf den auf dem Pi gespeicherten Benutzer-Ursprung.
 - **Bezugspunkt** (`anchor`): `tl`/`tr`/`bl`/`br`/`center` der
-  **Laserbahnen** (nicht der Leerfahrten). „Oben“ = kleines Y wie im
-  Canvas.
+  **Laserbahnen** (nicht der Leerfahrten), benannt nach der **sichtbaren
+  Ecke von vorne**: X0/Y0 (Endschalter) liegt oben rechts, X wächst nach
+  links, Y nach vorne. `tr` (Standard) = kleinstes X/kleinstes Y.
+  - Ein Pi ab 2026-10-26 meldet `coord_convention` = `origin_top_right`.
+    Fehlt das Feld (älterer Pi, dort hieß „l“ kleines X), tauscht
+    `client.wire_anchor()` links/rechts. Die gewählte sichtbare Ecke stimmt
+    also mit beiden Pi-Ständen; die Liste zeigt die Namen zurückübersetzt.
+- **Joggen** (`machine/panel.py`): Kreuz wie von vorne gesehen:
+  „← X +“ links, „X − →“ rechts, „↑ Y −“ oben (Schalterseite),
+  „↓ Y +“ unten (Tür). Die Positionsanzeige zeigt Maschinen-mm (Tooltip
+  erklärt Nullpunkt und Richtungen).
 - `op=origin_set` (optional `x`, `y` in Maschinen-mm, sonst Kopf-XY per
   M114): Knopf „Ursprung = Kopf“ bzw. `MachinePanel.set_user_origin(x, y)`
   (Haken für den Kamera-Scan). Braucht Referenzfahrt; der Punkt muss in

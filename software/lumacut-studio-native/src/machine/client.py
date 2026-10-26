@@ -52,6 +52,24 @@ MAX_FRAME_BYTES = 64 * 1024
 ORIGIN_MODES = ("absolute", "current", "user")
 #: Motif point that lands on the origin ("t" = small Y like the Studio canvas).
 ANCHORS = ("tl", "tr", "bl", "br", "center")
+#: Anchor names are visible corners (endstops top right, machine X grows to
+#: the left). A Pi that reports this in ``coord_convention`` uses the same
+#: names; an older Pi (field missing) used "l" = small X, see wire_anchor().
+COORD_CONVENTION = "origin_top_right"
+DEFAULT_ANCHOR = "tr"
+
+
+def wire_anchor(anchor: str, convention: str | None) -> str:
+    """Visible anchor name -> name the Pi expects (and back: an involution).
+
+    Pi releases before 2026-10-26 report no ``coord_convention`` and map
+    "l" to the small-X corner, which is physically on the right. For them
+    left and right are swapped so the motif still lands on the visible
+    corner the user picked.
+    """
+    if convention == COORD_CONVENTION or anchor not in ("tl", "tr", "bl", "br"):
+        return anchor
+    return anchor[0] + ("r" if anchor[1] == "l" else "l")
 #: Queue item states on the Pi (web.py job_queue, #17).
 QUEUE_ITEM_STATES = ("queued", "running", "done", "error", "skipped", "aborted")
 #: Queue states: idle, running, pausing (stops after the current job),
@@ -231,7 +249,7 @@ class QueueItem:
     id: int
     file: str
     origin: str = "absolute"
-    anchor: str = "tl"
+    anchor: str = DEFAULT_ANCHOR
     dx: float = 0.0
     dy: float = 0.0
     state: str = "queued"
@@ -267,7 +285,7 @@ class QueueState:
             items.append(QueueItem(
                 id=_int(raw.get("id")), file=str(raw.get("file") or ""),
                 origin=str(raw.get("origin") or "absolute"),
-                anchor=str(raw.get("anchor") or "tl"),
+                anchor=str(raw.get("anchor") or DEFAULT_ANCHOR),
                 dx=_float(raw.get("dx")) or 0.0, dy=_float(raw.get("dy")) or 0.0,
                 state=str(raw.get("state") or "queued"),
                 error=str(raw.get("error") or "")))
@@ -305,6 +323,8 @@ class MachineStatus:
     pi_busy: bool = False
     #: Age of the cached part in ms (0 = fully fresh, None = unknown/old Pi).
     stale_ms: int | None = 0
+    #: Anchor/axis convention of the Pi (None = older Pi, see wire_anchor).
+    coord_convention: str | None = None
     raw: dict = field(default_factory=dict, repr=False)
 
     @property
@@ -367,6 +387,8 @@ class MachineStatus:
             queue=QueueState.from_json(data.get("queue")),
             pi_busy=_bool(data.get("busy")),
             stale_ms=_stale_ms(data.get("stale_ms"), data),
+            coord_convention=(data.get("coord_convention")
+                              if isinstance(data.get("coord_convention"), str) else None),
             raw=data,
         )
 
@@ -601,7 +623,7 @@ class LumaCutClient:
     def clear_user_origin(self) -> str:
         return self._newer_op("origin_clear", "Ursprungs-Optionen")
 
-    def place_job(self, name: str, origin: str, anchor: str = "tl") -> str:
+    def place_job(self, name: str, origin: str, anchor: str = DEFAULT_ANCHOR) -> str:
         """Let the Pi place a stored job on an origin (nothing moves).
 
         The Pi checks homed state, travel and safe zone on the moved job and
@@ -618,7 +640,7 @@ class LumaCutClient:
     def clear_placement(self) -> str:
         return self._newer_op("place_clear", "Ursprungs-Optionen")
 
-    def queue_add(self, name: str, origin: str = "absolute", anchor: str = "tl",
+    def queue_add(self, name: str, origin: str = "absolute", anchor: str = DEFAULT_ANCHOR,
                   placement: bool = False) -> str:
         """Append a stored job to the Pi queue (nothing moves).
 

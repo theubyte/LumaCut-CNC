@@ -218,7 +218,8 @@ Felder aus `web.py` (`status()`):
 | `job` | object | `{file, state, line, total, error}`; `state` ∈ `idle`, `homing`, `probing`, `running`, `complete`, `aborted`, `error`. Bleibt nach dem Ende auf `complete`/`aborted`/`error` stehen. |
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
-| `origin` | object | `{modes, anchors, user, placement}` (siehe unten) |
+| `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
+| `coord_convention` | string | `"origin_top_right"`: Bedeutung der Ankernamen (siehe `op=place`). Fehlt bei Pi-Ständen vor 2026-10-26; Studio tauscht dann links/rechts. |
 | `estimated_tip_gap_mm` | number \| null | geschätzter Abstand Spitze ↔ Werkstück (nur wenn referenziert, Position und Oberfläche bekannt). Schätzung, keine Messung. |
 | `estimated_focus_adjust_mm` | number \| null | Fokusabstand − `estimated_tip_gap_mm` (nur Anzeige) |
 | `firmware` | string | immer `"marlin"` |
@@ -257,7 +258,8 @@ gilt nur `job.state == "complete"`. ⚠ Hardware
 | Feld | Typ | Bedeutung |
 | --- | --- | --- |
 | `modes` | string[] | `["absolute", "current", "user"]` |
-| `anchors` | string[] | `["tl", "tr", "bl", "br", "center"]` (Studio-Leinwand: oben = kleines Y, links = kleines X) |
+| `anchors` | string[] | `["tl", "tr", "bl", "br", "center"]`, Ecken **wie von vorne gesehen**: X0/Y0 (Endschalter) liegt oben rechts, Maschinen-X wächst nach links, Y nach vorne. `tr` = (kleinstes X, kleinstes Y) = Schalterecke, `tl` = (größtes X, kleinstes Y), `br` = (kleinstes X, größtes Y), `bl` = (größtes X, größtes Y). Seit 2026-10-26, erkennbar an `coord_convention` = `origin_top_right`; davor bedeutete `l` kleines X. |
+| `coord_convention` | string | wie oben im Status |
 | `user` | [x, y] \| null | gespeicherter Benutzer-Ursprung |
 | `placement` | object \| null | aktive Platzierung `{file, origin, anchor, dx, dy, target, bounds, travel}` |
 
@@ -411,7 +413,7 @@ Platzierung verschiebt einen gespeicherten Auftrag so, dass sein Bezugspunkt
 - `origin`: `absolute` (Koordinaten wie im G-Code), `current` (aktuelle
   Kopf-XY per frischem M114), `user` (gespeicherter Benutzer-Ursprung).
 - `anchor`: `tl`, `tr`, `bl`, `br`, `center` der **geschnittenen** Bahnen
-  (Standard `tl`).
+  (Standard `tr` = Schalterecke). Ecken **wie von vorne gesehen**: X0/Y0 (Endschalter) liegt oben rechts, Maschinen-X wächst nach links, Y nach vorne. `tr` = (kleinstes X, kleinstes Y) = Schalterecke, `tl` = (größtes X, kleinstes Y), `br` = (kleinstes X, größtes Y), `bl` = (größtes X, größtes Y). Seit 2026-10-26, erkennbar an `coord_convention` = `origin_top_right`; davor bedeutete `l` kleines X.
 - Prüfung auf die tatsächlich gesendeten Zeilen: alle Fahrten in X0..390 /
   Y0..370, alle Laserbahnen in X30..390 / Y30..370, G-Code-Wächter.
 - Eine gespeicherte Platzierung verfällt bei: neuem Upload der Datei, Löschen,
@@ -443,7 +445,7 @@ eine Platzierung `user`. 200 `{"message": "Benutzer-Ursprung gelöscht", "origin
 | --- | --- | --- |
 | `name` | string | gespeicherte Auftragsdatei |
 | `origin` | string | `absolute` (Standard), `current`, `user` |
-| `anchor` | string | `tl` (Standard), `tr`, `bl`, `br`, `center` |
+| `anchor` | string | `tr` (Standard), `tl`, `bl`, `br`, `center` (sichtbare Ecke, siehe oben) |
 
 | | |
 | --- | --- |
@@ -540,7 +542,7 @@ Einträge. Platzierung und Datei-SHA werden beim Einreihen eingefroren.
 | Parameter | Typ | Erlaubt |
 | --- | --- | --- |
 | `name` | string | gespeicherte Auftragsdatei |
-| `origin` / `anchor` | string, optional | wie `op=place` (Standard `absolute` / `tl`) |
+| `origin` / `anchor` | string, optional | wie `op=place` (Standard `absolute` / `tr`) |
 | `placement` | string, optional | `1` = gespeicherte Platzierung übernehmen |
 
 | | |

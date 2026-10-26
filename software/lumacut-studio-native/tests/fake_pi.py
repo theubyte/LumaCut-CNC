@@ -21,10 +21,13 @@ STATUS = {
     # Job origin support (#16); an older Pi has no "origin" key.
     "origin": {"modes": ["absolute", "current", "user"],
                "anchors": ["tl", "tr", "bl", "br", "center"],
+               "coord_convention": "origin_top_right",
                "user": None, "placement": None},
     # Job queue (#17); a Pi before #17 has no "queue" key.
     "queue": {"items": [], "state": "idle", "current": None, "max": 50},
     "firmware": "marlin", "config": {"focus_gap_mm": 7.0},
+    # Anchor semantics (2026-10-26): "tr" = endstop corner. Older Pi: missing.
+    "coord_convention": "origin_top_right",
 }
 
 ACTIONS = ("home", "jog", "probe", "light", "exhaust", "start", "autorun",
@@ -227,7 +230,7 @@ class FakePi:
                 ids = [i["id"] for i in items]
                 items.append({"id": max(ids, default=0) + 1, "file": form.get("name"),
                               "origin": form.get("origin") or "absolute",
-                              "anchor": form.get("anchor") or "tl", "dx": 0.0, "dy": 0.0,
+                              "anchor": form.get("anchor") or "tr", "dx": 0.0, "dy": 0.0,
                               "target": None, "bounds": None, "state": "queued",
                               "error": ""})
             elif op == "queue_run":
@@ -282,7 +285,7 @@ class FakePi:
             elif op == "place":
                 origin["placement"] = {"file": form.get("name"),
                                        "origin": form.get("origin"),
-                                       "anchor": form.get("anchor") or "tl",
+                                       "anchor": form.get("anchor") or "tr",
                                        "dx": 0.0, "dy": 0.0}
             else:
                 origin["placement"] = None

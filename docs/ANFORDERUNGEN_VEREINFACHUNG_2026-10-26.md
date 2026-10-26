@@ -87,6 +87,37 @@ Gespiegelt werden muss nur die Darstellung in den Apps, und zwar nur X.**
 
 Die Apps bilden einfach die echte Maschine ab.
 
+### 2.2 Umgesetzt (Maschinenseite) und Übergabe an den Canvas-Agent
+
+**Status: erledigt** auf der Maschinenseite. ⚠ Hardware: Die Jog-Richtungen müssen einmal am Gerät geprüft werden.
+
+**Pi (`placement.py`, `web.py`):**
+- Die Ankernamen bezeichnen jetzt die **sichtbare Ecke von vorne**:
+  - `tr` = (kleinstes X, kleinstes Y) = Schalterecke; das ist auch der neue Standard.
+  - `tl` = (größtes X, kleinstes Y).
+  - `br` = (kleinstes X, größtes Y).
+  - `bl` = (größtes X, größtes Y).
+- `/api/status` und `status.origin` melden `coord_convention: "origin_top_right"`.
+
+**Studio-Machine-Panel:**
+- Das Jog-Kreuz entspricht der Ansicht von vorne: „← X +“ links, „X − →“ rechts, „↑ Y −“ oben, „↓ Y +“ unten.
+- Die Positionsanzeige zeigt Maschinen-mm. Ein Tooltip erklärt Nullpunkt und Richtungen.
+- Standardanker ist „Oben rechts“.
+
+**Versionierung (Entscheidung):** Es gibt keine allgemeine `api_version`, sondern das gezielte Feld `coord_convention`.
+- Fehlt das Feld, kennt Studio die alte Bedeutung („l“ = kleines X). `machine.client.wire_anchor()` tauscht dann links/rechts, also passt neues Studio auch zu altem Pi.
+- Altes Studio und neuer Pi vertauschen dagegen die Ecken links/rechts. Deshalb gilt der **Pi-Update-Hinweis: Studio und Pi gemeinsam aktualisieren.**
+
+**Übergabe an den Canvas-Agent (Ankernamen):**
+- Wenn Canvas, Kamera-Scan oder Motiv-Ausrichtung einen Bezugspunkt an `MachinePanel.set_job_origin(origin, anchor)` geben, ist der Name die **sichtbare Ecke im neuen Canvas**: oben rechts = `tr` = Nullpunkt-Ecke.
+- Umrechnen müsst ihr nichts: Panel und Client übersetzen für ältere Pis selbst.
+- Für Maschinenpunkte (`set_user_origin(x, y)`) bleibt es bei Maschinen-mm. Aus Canvas-Koordinaten (u nach links, v nach unten) ist das `to_machine(u, v) = (u + 30, v + 30)`.
+- Tests: `software/lumacut-studio-native/tests/test_machine_orientation.py`, `tests/test_job_placement.py`.
+
+**Übergaben an andere Agents:**
+- **Web-UI-Agent (Pi-Web-UI):** Jog-Kreuz und Tastatur spiegeln, Bett-SVG mit Ursprung oben rechts, siehe 2.1 (3).
+- **Android-Agent:** Ankernamen als sichtbare Ecke senden; neue Pis melden `coord_convention`.
+
 ## 3. Kamera-Scan
 
 - Optional, ausgelöst durch einen **einzigen Button** in beiden Apps.

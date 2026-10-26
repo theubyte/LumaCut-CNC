@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 from . import settings as settings_store
-from .client import (ANCHORS, FRAME_MODES, JOB_SUFFIXES, JOG_STEPS, ORIGIN_MODES,
+from .client import (ANCHORS, DEFAULT_ANCHOR, wire_anchor, FRAME_MODES, JOB_SUFFIXES, JOG_STEPS, ORIGIN_MODES,
                      TRANSIENT_OWNERS, ApiError, LumaCutClient,
                      MachineStatus, normalize_base_url)
 from .worker import CommandRunner, ConnState, StatusPoller
@@ -56,6 +56,8 @@ ORIGIN_LABELS = {"absolute": "Absolut", "current": "Aktuelle Position",
                  "user": "Benutzer-Ursprung"}
 ANCHOR_LABELS = {"tl": "Oben links", "tr": "Oben rechts", "bl": "Unten links",
                  "br": "Unten rechts", "center": "Mitte"}
+POSITION_HINT = ("Maschinenkoordinaten in mm: X0/Y0 = Endschalter-Ecke oben rechts, "
+                 "X wächst nach links, Y nach vorne (Tür). Arbeitsfläche = X30–390 / Y30–370.")
 OLD_PI_ORIGIN = "Pi-Dienst zu alt: nur absolute Aufträge – Pi aktualisieren"
 OLD_PI_QUEUE = "Pi-Dienst zu alt: keine Warteschlange – Pi aktualisieren"
 QUEUE_ITEM_LABELS = {"queued": "wartet", "running": "läuft", "done": "fertig",
@@ -174,6 +176,7 @@ class MachinePanel(QWidget):
         self.skr_label = QLabel("—")
         self.pos_label = QLabel("X: —   Y: —   Z: —")
         self.pos_label.setStyleSheet("font-family: monospace; font-size: 14px;")
+        self.pos_label.setToolTip(POSITION_HINT)
         self.homed_label = QLabel("—")
         self.laser_label = QLabel("—")
         self.owner_label = QLabel("—")
@@ -224,10 +227,14 @@ class MachinePanel(QWidget):
         mv.addLayout(step_row)
         jog = QGridLayout()
         self.jog_buttons: list[QPushButton] = []
-        layout = [("Y", 1, 0, 1), ("X", -1, 1, 0), ("X", 1, 1, 2),
-                  ("Y", -1, 2, 1), ("Z", 1, 0, 3), ("Z", -1, 2, 3)]
+        # Seen from the front, endstops (X0/Y0) top right: X+ moves the head
+        # left (away from the X switch), Y+ towards the front/door.
+        layout = [("Y", -1, 0, 1), ("X", 1, 1, 0), ("X", -1, 1, 2),
+                  ("Y", 1, 2, 1), ("Z", 1, 0, 3), ("Z", -1, 2, 3)]
+        arrows = {("X", 1): "← X +", ("X", -1): "X − →", ("Y", -1): "↑ Y −",
+                  ("Y", 1): "↓ Y +", ("Z", 1): "Z +", ("Z", -1): "Z −"}
         for axis, direction, r, c in layout:
-            b = QPushButton("%s %s" % (axis, "+" if direction > 0 else "−"))
+            b = QPushButton(arrows[(axis, direction)])
             b.setProperty("axis", axis)
             b.setProperty("direction", direction)
             b.clicked.connect(lambda _=False, a=axis, d=direction: self.jog(a, d))
@@ -288,7 +295,10 @@ class MachinePanel(QWidget):
         self.anchor_combo = QComboBox()
         for anchor in ANCHORS:
             self.anchor_combo.addItem(ANCHOR_LABELS[anchor], anchor)
-        self.anchor_combo.setToolTip("Welcher Punkt des Motivs auf dem Ursprung liegt")
+        self.anchor_combo.setCurrentIndex(self.anchor_combo.findData(DEFAULT_ANCHOR))
+        self.anchor_combo.setToolTip("Welcher Punkt des Motivs auf dem Ursprung liegt "
+                                     "(Ecken wie von vorne gesehen; oben rechts = "
+                                     "Endschalter-Ecke X0/Y0)")
         self.origin_set_button = QPushButton("Ursprung = Kopf")
         self.origin_set_button.setToolTip("Aktuelle Kopfposition als Benutzer-Ursprung "
                                           "auf dem Pi speichern")
@@ -678,7 +688,7 @@ class MachinePanel(QWidget):
         if p and p.get("file"):
             text += " · platziert: %s (%s, %s)" % (
                 p["file"], ORIGIN_LABELS.get(p.get("origin"), p.get("origin")),
-                ANCHOR_LABELS.get(p.get("anchor"), p.get("anchor")))
+                self._anchor_label(p.get("anchor")))
         self.origin_label.setText(text)
 
     def _update_queue(self, s: MachineStatus | None) -> None:
@@ -719,7 +729,7 @@ class MachinePanel(QWidget):
         rows = ["#%d %s – %s%s" % (
             i.id, i.file, QUEUE_ITEM_LABELS.get(i.state, i.state),
             "" if i.origin == "absolute" else " (%s, %s)" % (
-                ORIGIN_LABELS.get(i.origin, i.origin), ANCHOR_LABELS.get(i.anchor, i.anchor)))
+                ORIGIN_LABELS.get(i.origin, i.origin), self._anchor_label(i.anchor)))
             for i in q.items]
         current = [self.queue_list.item(r).text() for r in range(self.queue_list.count())]
         if rows == current:
@@ -1033,11 +1043,19 @@ class MachinePanel(QWidget):
         """(origin, anchor) chosen for start/frame; absolute on an older Pi."""
         s = self._status
         if s is None or not s.origin.supported:
-            return "absolute", "tl"
+            return "absolute", DEFAULT_ANCHOR
+        # The combo holds visible corners; translate for an older Pi.
         return (self.origin_combo.currentData() or "absolute",
-                self.anchor_combo.currentData() or "tl")
+                wire_anchor(self.anchor_combo.currentData() or DEFAULT_ANCHOR,
+                            s.coord_convention))
 
-    def set_job_origin(self, origin: str, anchor: str = "tl") -> None:
+    def _anchor_label(self, anchor: str | None) -> str:
+        """Label of an anchor name the Pi uses (visible corner)."""
+        s = self._status
+        visible = wire_anchor(anchor or "", s.coord_convention if s else None)
+        return ANCHOR_LABELS.get(visible, anchor or "")
+
+    def set_job_origin(self, origin: str, anchor: str = DEFAULT_ANCHOR) -> None:
         """Preset the origin choice (e.g. after a camera scan)."""
         if origin not in ORIGIN_MODES or anchor not in ANCHORS:
             raise ValueError("Ursprung/Bezugspunkt unbekannt")
@@ -1094,7 +1112,7 @@ class MachinePanel(QWidget):
         if origin != "absolute" and not self._origin_ready():
             return
         where = "" if origin == "absolute" else " am Ursprung „%s“ (%s)" % (
-            ORIGIN_LABELS[origin], ANCHOR_LABELS[anchor])
+            ORIGIN_LABELS[origin], self._anchor_label(anchor))
         if not self._confirm("Auftrag starten",
                              "Auftrag %s%s starten? Bereich frei, Material eingelegt, "
                              "Schutzbrille?" % (self._uploaded, where)):

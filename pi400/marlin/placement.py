@@ -25,9 +25,15 @@ from dataclasses import dataclass
 from .transport import normalize
 
 ORIGIN_MODES = ("absolute", "current", "user")
-#: Anchor names in Studio canvas terms: "oben" = small Y, "links" = small X
-#: (lumacut_canvas.workarea.to_machine maps the canvas without mirroring).
+#: Anchor names by the *visible* corner of the bed, seen from the front with
+#: the X/Y endstops top right (docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md
+#: §2.1): "oben" = small Y (switch/back side), "rechts" = small X (switch
+#: side), so "tr" is the corner nearest X0/Y0. Machine X grows to the left.
+#: Changed 2026-10-26 (COORD_CONVENTION): before, "l" meant small X.
 ANCHORS = ("tl", "tr", "bl", "br", "center")
+#: Reported in /api/status so clients can detect the anchor semantics.
+COORD_CONVENTION = "origin_top_right"
+DEFAULT_ANCHOR = "tr"
 
 _WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 _XY = re.compile(r"([XY])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
@@ -159,7 +165,7 @@ def anchor_point(box: Box, anchor: str) -> tuple[float, float]:
         raise ValueError("Bezugspunkt muss einer von %s sein" % ", ".join(ANCHORS))
     if anchor == "center":
         return (box.xmin + box.xmax) / 2, (box.ymin + box.ymax) / 2
-    return (box.xmin if anchor[1] == "l" else box.xmax,
+    return (box.xmin if anchor[1] == "r" else box.xmax,
             box.ymin if anchor[0] == "t" else box.ymax)
 
 

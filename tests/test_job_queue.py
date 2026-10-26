@@ -24,7 +24,7 @@ class JobQueueWebTests(unittest.TestCase):
 s = c.get("/api/status").get_json()
 assert s["queue"] == {"items": [], "state": "idle", "current": None, "max": 50}, s["queue"]
 r = post(op="queue_add", name="A.gcode"); assert r.status_code == 200, r.data
-r = post(op="queue_add", name="B.gcode", origin="current", anchor="tl")
+r = post(op="queue_add", name="B.gcode", origin="current", anchor="tr")
 assert r.status_code == 200, r.data
 items = r.get_json()["queue"]["items"]
 assert [i["file"] for i in items] == ["A.gcode", "B.gcode"]
@@ -34,11 +34,11 @@ assert all(i["state"] == "queued" and "sha" not in i for i in items)
 # Moving the head later does not move the queued item (frozen at add).
 m.position = [60.0, 60.0, 20.0]
 r = post(op="queue_add", name="Nope.gcode"); assert r.status_code == 400
-r = post(op="queue_add", name="A.gcode", origin="current", anchor="br")
+r = post(op="queue_add", name="A.gcode", origin="current", anchor="bl")
 assert r.status_code == 400 and "außerhalb" in r.get_json()["error"], r.data
 r = post(op="queue_add", name="A.gcode", placement="1")
 assert r.status_code == 400 and "neu platzieren" in r.get_json()["error"], r.data
-r = post(op="place", name="A.gcode", origin="current", anchor="tl"); assert r.status_code == 200
+r = post(op="place", name="A.gcode", origin="current", anchor="tr"); assert r.status_code == 200
 r = post(op="queue_add", name="A.gcode", placement="1"); assert r.status_code == 200, r.data
 assert r.get_json()["queue"]["items"][-1]["dx"] == -40.0
 # Queued files cannot be deleted.

@@ -131,7 +131,7 @@ class OriginPanelTests(unittest.TestCase):
 
     def test_absolute_default_sends_no_origin_fields(self):
         panel = self.panel()
-        self.assertEqual(panel.job_origin(), ("absolute", "tl"))
+        self.assertEqual(panel.job_origin(), ("absolute", "tr"))
         self.assertFalse(panel.anchor_combo.isEnabled())
         panel.start_job()
         self.assertTrue(wait_until(lambda: "ok start" in panel.error_label.text()))
@@ -187,7 +187,7 @@ class OriginPanelTests(unittest.TestCase):
         self.assertTrue(wait_until(lambda: not panel.origin_combo.isEnabled()))
         self.assertIn("Pi aktualisieren", panel.origin_label.text())
         self.assertFalse(panel.origin_set_button.isEnabled())
-        self.assertEqual(panel.job_origin(), ("absolute", "tl"))
+        self.assertEqual(panel.job_origin(), ("absolute", "tr"))
         self.assertFalse(panel.set_user_origin(100, 100))
         self.assertIn("Pi aktualisieren", panel.error_label.text())
         panel.start_job()   # falls back to the absolute start the old Pi knows

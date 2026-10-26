@@ -149,6 +149,12 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
 - Der Benutzer-Ursprung steht in `marlin.json` (`user_origin`).
 - Ohne Platzierung bleibt alles absolut (LightBurn, Web-UI, ältere Studio).
   Die Pi-Web-UI hat keinen Ursprungs-Knopf.
+- **Ankernamen seit 2026-10-26 = sichtbare Ecke** (Schalter oben rechts):
+  `tr` = kleinstes X/Y (Standard), `tl` = größtes X. Status
+  `coord_convention` = `origin_top_right`.
+  - Neues Studio + alter Pi: Studio tauscht links/rechts, das Ergebnis ist richtig.
+  - **Altes Studio + neuer Pi:** Die Ecken sind links/rechts vertauscht, weil das alte
+    Studio X ungespiegelt zeichnet. Studio und Pi deshalb gemeinsam aktualisieren.
 - ⚠ Hardware.
 
 ### Auftrags-Warteschlange (`op=queue_*`)
@@ -271,6 +277,7 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
 | Status-Snapshot (`busy`, `stale_ms`) | fix(pi400): /api/status blockiert nicht mehr hinter langen Fahrten (siehe `git log --grep="blockiert nicht mehr"`) | `pi400/marlin/web.py`, `tests/test_marlin_gateway.py` |
 | `op=moveto`, `/api/camera/snapshot`, `camera` im Status | `2c61b8a` (Kamera-Scan) | `pi400/marlin/web.py`, `pi400/marlin/transport.py` |
 | Auftrags-Ursprung (`op=place`, `origin_set`, `origin_clear`, `place_clear`, `placement=1`, Status `origin`) | „feat(pi400): Auftrags-Ursprung …“ (`git log --grep="Auftrags-Ursprung"`) | `pi400/marlin/placement.py`, `pi400/marlin/web.py`, `tests/test_job_placement.py` |
+| Ankernamen = sichtbare Ecke, Status `coord_convention` | „feat: Nullpunkt oben rechts …“ (`git log --grep="Nullpunkt oben rechts"`) | `pi400/marlin/placement.py`, `pi400/marlin/web.py` |
 | Auftrags-Warteschlange (`op=queue_add/run/pause/skip/remove/clear`, Status `queue`) | „feat(pi400): Auftrags-Warteschlange …“ (`git log --grep="Auftrags-Warteschlange"`) | `pi400/marlin/web.py`, `tests/test_job_queue.py` |
 | Job-Streaming zum SKR (Status `stream_window`, `streamed_count`) | „feat(pi400): Job-Streaming …“ (`git log --grep="Job-Streaming"`) | `pi400/marlin/transport.py`, `pi400/marlin/web.py`, `tests/test_marlin_streaming.py` |
 
