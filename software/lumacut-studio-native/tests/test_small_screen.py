@@ -96,8 +96,28 @@ def test_panels_fit_inside_small_windows(make_win, size):
     assert win.canvas.view.width() >= 200
 
 
+@pytest.mark.parametrize("width", [1024, 1280])
+def test_sidebar_fits_with_wide_windows_fonts(make_win, qapp, width):
+    """Windows-CI (offscreen) misst Text ~1,9× breiter als Linux. Mit gleich
+    breiter Schrift muss die rechte Leiste trotzdem ohne Seitwärts-Scrollen passen."""
+    from PySide6.QtGui import QFont
+    old = QFont(qapp.font())
+    wide = QFont(old)
+    wide.setLetterSpacing(QFont.PercentageSpacing, 187)
+    qapp.setFont(wide)
+    try:
+        win = make_win(width, width * 9 // 16)
+        r = win.right_scroll
+        need, cap = fit.sidebar_needed_width(r), fit.sidebar_cap(width)
+        info = f"need={need} cap={cap} sizes={win.splitter.sizes()} {_widest(r)}"
+        assert need <= cap, info
+        assert not r.horizontalScrollBar().isVisible(), info
+    finally:
+        qapp.setFont(old)
+
+
 def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
-    from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel,
+    from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QGridLayout, QHBoxLayout, QLabel,
                                    QPushButton, QVBoxLayout, QWidget)
     root = QWidget()
     lay = QVBoxLayout(root)
@@ -120,6 +140,16 @@ def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
     text = "Geladenes Mesh nach Kontrollmessung wiederverwenden (lang)"
     check = QCheckBox(text)
     lay.addWidget(check)
+    grid = QGridLayout()  # Panel-eigenes 2×2-Knopfraster mit breiten Knöpfen
+    gbtns = [QPushButton(t * 3) for t in ("Home ", "Park ", "Fokus (G30) ", "Notstopp quittieren ")]
+    for n, b in enumerate(gbtns):
+        grid.addWidget(b, n // 2, n % 2)
+    lay.addLayout(grid)
+    status = QLabel("Nicht verbunden – Pi 400 antwortet nicht auf der Adresse")
+    srow = QHBoxLayout()
+    srow.addWidget(QPushButton("Verbinden"))
+    srow.addWidget(status)
+    lay.addLayout(srow)
     before = root.minimumSizeHint().width()
     combo_before = combo.minimumSizeHint().width()
     assert fit.compact_sidebar(root)
@@ -142,6 +172,9 @@ def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
     check.click()
     assert check.isChecked()
     root.grab()  # eigener Paint-Pfad läuft ohne Fehler
+    # Breites Knopfraster einspaltig in Lesereihenfolge, Statuszeile bricht um.
+    assert [grid.getItemPosition(grid.indexOf(b))[:2] for b in gbtns] == [(0, 0), (1, 0), (2, 0), (3, 0)]
+    assert status.wordWrap()
     root.close()
 
 

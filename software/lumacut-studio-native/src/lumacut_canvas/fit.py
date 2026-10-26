@@ -10,7 +10,8 @@
 * :func:`compact_sidebar` – schmale Spalte statt Seitwärts-Scrollen: kompaktere
   Knöpfe (Höhe bleibt touch-tauglich), Formularzeilen brechen um, lange
   Knopfreihen werden zweispaltig, breite Auswahllisten werden schmal (die
-  aufgeklappte Liste bleibt breit), lange Häkchen-Texte brechen um. Generisch – die Panels selbst bleiben unberührt.
+  aufgeklappte Liste bleibt breit), lange Häkchen-Texte und
+  Statuszeilen brechen um, reine Knopfraster werden bei breiter Schrift einspaltig. Generisch – die Panels selbst bleiben unberührt.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (QAbstractButton, QAbstractScrollArea, QApplication, QCheckBox,
-                               QComboBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout,
+                               QComboBox, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QScrollArea, QScroller, QSizePolicy, QStyle, QStyleOptionButton,
                                QWidget)
 
@@ -36,6 +37,7 @@ COMPACT_COMBO_PX = 240       # breitere Auswahllisten werden schmal (Popup bleib
 COMPACT_COMBO_CHARS = 14
 COMPACT_CHECK_PX = 220       # längere Häkchen-Texte brechen um (max. 3 Zeilen)
 COMPACT_CHECK_LINES = 3
+COMPACT_LABEL_PX = 180       # breitere Textzeilen in Knopf-/Feldreihen brechen um
 # Nur das Polster – Schrift und Mindesthöhe 40 px (Touch) aus dem Fenster-Stil bleiben.
 COMPACT_QSS = "QPushButton { padding: 6px 10px; }"
 _COMPACT_MARK = "_lumacut_compact"
@@ -115,10 +117,46 @@ def sidebar_needed_width(area: QScrollArea) -> int:
     return content.minimumSizeHint().width() + bar + 2 * area.frameWidth() + 2
 
 
+def _eff_min(w: QWidget) -> int:
+    return w.minimumWidth() or w.minimumSizeHint().width()
+
+
+def _grid_cols(buttons: list, spacing: int) -> int:
+    """2 Spalten, wenn sie in COMPACT_ROW_PX passen, sonst untereinander."""
+    if len(buttons) >= 2:
+        widths = [_eff_min(b) for b in buttons]
+        two = max(widths[0::2]) + max(widths[1::2]) + spacing
+        if two <= COMPACT_ROW_PX:
+            return 2
+    return 1
+
+
+def _fill_grid(grid: QGridLayout, buttons: list, cols: int) -> None:
+    while grid.count():
+        grid.takeAt(0)
+    for n, b in enumerate(buttons):
+        grid.addWidget(b, n // cols, n % cols)
+    for c in range(2):
+        grid.setColumnStretch(c, 1 if c < cols else 0)
+    grid.setProperty("_lumacut_cols", cols)
+
+
 def _wrap_button_row(row: QHBoxLayout) -> bool:
-    """Lange Knopfreihe in ein 2-spaltiges Raster umbauen. Die Reihe selbst bleibt
-    an ihrem Platz im Panel (nur ihr Inhalt wandert in ein inneres Raster)."""
-    if row.property(_COMPACT_MARK) or row.count() < 3:
+    """Lange Knopfreihe in ein Raster umbauen (2 Spalten, bei breiter Schrift
+    untereinander). Die Reihe selbst bleibt an ihrem Platz im Panel (nur ihr
+    Inhalt wandert in ein inneres Raster). Erneut aufgerufen, wird das Raster
+    einspaltig, wenn die Knöpfe inzwischen breiter sind (Schrift/DPI)."""
+    if row.property(_COMPACT_MARK):
+        grid = row.itemAt(0).layout() if row.count() else None
+        if not isinstance(grid, QGridLayout):
+            return False
+        buttons = [grid.itemAt(i).widget() for i in range(grid.count())]
+        cols = _grid_cols(buttons, grid.spacing())
+        if cols >= (grid.property("_lumacut_cols") or 2):
+            return False
+        _fill_grid(grid, buttons, cols)
+        return True
+    if row.count() < 2:
         return False
     buttons = []
     for i in range(row.count()):
@@ -128,19 +166,59 @@ def _wrap_button_row(row: QHBoxLayout) -> bool:
             buttons.append(w)
         elif w is not None or item.layout() is not None:
             return False  # gemischte Reihe (Felder, Beschriftungen): nicht anfassen
-    if len(buttons) < 3 or row.minimumSize().width() <= COMPACT_ROW_PX:
+    if len(buttons) < 2 or row.minimumSize().width() <= COMPACT_ROW_PX:
         return False
+    spacing = max(0, row.spacing())
+    cols = _grid_cols(buttons, spacing)
+    if len(buttons) == 2 and cols == 2:
+        return False  # wäre dieselbe Reihe
     while row.count():
         row.takeAt(0)  # Abstandshalter verwerfen, Knöpfe behalten ihr Eltern-Widget
     grid = QGridLayout()
     grid.setContentsMargins(0, 0, 0, 0)
-    grid.setSpacing(max(0, row.spacing()))
-    for n, b in enumerate(buttons):
-        grid.addWidget(b, n // 2, n % 2)
-    grid.setColumnStretch(0, 1)
-    grid.setColumnStretch(1, 1)
+    grid.setSpacing(spacing)
+    _fill_grid(grid, buttons, cols)
     row.addLayout(grid)
     row.setProperty(_COMPACT_MARK, True)
+    return True
+
+
+def _reflow_button_grid(grid: QGridLayout) -> bool:
+    """Ein Panel-eigenes Knopfraster (z. B. Home/Park/Fokus/Quittieren), das breiter
+    als COMPACT_ROW_PX ist, auf 2 bzw. 1 Spalte umbrechen. Nur reine Knopfraster
+    ohne Zellen über mehrere Spalten; die Lesereihenfolge bleibt erhalten."""
+    if grid.property(_COMPACT_MARK) or grid.property("_lumacut_cols"):
+        return False
+    if grid.count() < 2 or grid.minimumSize().width() <= COMPACT_ROW_PX:
+        return False
+    cells = []
+    for i in range(grid.count()):
+        w = grid.itemAt(i).widget()
+        r, c, rs, cs = grid.getItemPosition(i)
+        if not isinstance(w, QAbstractButton) or rs != 1 or cs != 1:
+            return False
+        cells.append((r, c, w))
+    old_cols = max(c for _, c, _ in cells) + 1
+    buttons = [w for _, _, w in sorted(cells, key=lambda t: (t[0], t[1]))]
+    cols = _grid_cols(buttons, max(0, grid.horizontalSpacing()))
+    if cols >= old_cols:
+        return False
+    for c in range(old_cols):
+        grid.setColumnStretch(c, 0)
+        grid.setColumnMinimumWidth(c, 0)
+    _fill_grid(grid, buttons, cols)
+    grid.setProperty(_COMPACT_MARK, True)
+    return True
+
+
+def _wrap_label(label: QLabel) -> bool:
+    """Lange Statuszeile neben Knöpfen/Feldern: umbrechen statt Leiste verbreitern."""
+    if (label.property(_COMPACT_MARK) or label.wordWrap()
+            or label.minimumSizeHint().width() <= COMPACT_LABEL_PX
+            or label.textFormat() == Qt.RichText or not label.text().strip()):
+        return False
+    label.setWordWrap(True)
+    label.setProperty(_COMPACT_MARK, True)
     return True
 
 
@@ -253,6 +331,10 @@ def compact_sidebar(content: QWidget | None) -> bool:
         changed |= _narrow_combo(combo)
     for box in content.findChildren(QCheckBox):
         changed |= _wrap_check(box)
+    for grid in content.findChildren(QGridLayout):
+        changed |= _reflow_button_grid(grid)
+    for label in content.findChildren(QLabel):
+        changed |= _wrap_label(label)
     return changed
 
 
