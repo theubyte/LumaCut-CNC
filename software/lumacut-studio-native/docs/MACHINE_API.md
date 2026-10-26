@@ -57,7 +57,7 @@ Einstellungen aus der Umgebung oder der Windows-Registry würden Anfragen an
 den Pi im LAN umleiten oder verzögern, auch den NOT-AUS.
 | `LONG_TIMEOUT_S` | 240 s | `op=home`, `op=probe`, `op=park` |
 | `DEFAULT_TIMEOUT_S` | 60 s | alle anderen Aktionen, `GET /api/jobs…` |
-| `UPLOAD_TIMEOUT_S` | 120 s | `POST /api/upload` |
+| `UPLOAD_TIMEOUT_S` + `UPLOAD_TIMEOUT_PER_MB_S` | 120 s + 10 s je angefangenes MB (`upload_timeout(size)`, bei 32 MB also 440 s) | `POST /api/upload` |
 
 Der Pi hält Bewegungsanfragen offen, bis der SKR fertig ist. Deshalb sind
 die Zeitlimits für Bewegungen lang.
@@ -91,6 +91,8 @@ die Zeitlimits für Bewegungen lang.
   | `job.file`, `job.state`, `job.line`, `job.total`, `job.error` | | Auftragsanzeige mit Fortschritt; `homing`/`probing`/`running` = aktiv |
   | `frame.state`, `frame.mode`, `frame.line`, `frame.total`, `frame.error` | `FrameState` | Rahmenfahrt: `running` = aktiv (sperrt wie ein Auftrag), danach `complete`/`aborted`/`error`; fehlt bei älteren Pis → `idle` |
   | `activity` | str | `idle` / `job` / `framing` (nur geparst über `raw`; die App nutzt `frame.state` bzw. `owner == "frame"`) |
+  | `busy` | bool → `pi_busy` | `true`: Der Pi fährt gerade (Sperre belegt), der Status ist ein Snapshot. Badge „ · Pi fährt“. Fehlt bei älteren Pis → `false` |
+  | `stale_ms` | int oder `null` → `stale_ms` | Alter des gecachten Teils in ms (`0` = frisch). Fehlt bei älteren Pis → `0`, ungültig → `null` |
 
 - **Robustheit:** Kein Objekt → `ProtocolError`. Ohne `firmware` und ohne
   eines der Kernfelder `connected`, `homed`, `position`, `owner`,
@@ -98,10 +100,20 @@ die Zeitlimits für Bewegungen lang.
   falsch typisierte Einzelfelder fallen auf sichere Werte zurück (nicht
   gehomed, keine Position, Laser unbekannt). Bools werden auch aus `1`,
   `"true"`, `"ja"` usw. gelesen.
-- **Wichtig:** `machine.status()` auf dem Pi nimmt `machine.lock`. Während
-  Home, Park, Abtasten oder ein einzelner Jog-Befehl läuft, hält der Pi
-  diese Sperre, und `/api/status` antwortet erst danach. Die App erkennt
-  das als `StatusTimeout` und behandelt es tolerant (siehe unten).
+- **Snapshot statt Blockieren (Pi ab „fix(pi400): /api/status blockiert
+  nicht mehr hinter langen Fahrten“):** `machine.status()` braucht
+  `machine.lock`, das Home, Park, Abtasten und jede Rahmenkante (`M400`)
+  für die ganze Fahrt halten. `web.machine_snapshot()` wartet darauf
+  höchstens 0,25 s (`STATUS_LOCK_WAIT_S`). Ist die Sperre belegt, kommt
+  der letzte vollständige Status mit live gelesenen Feldern (`state`,
+  `owner`, `homed`, `z_homed`, `emergency_latched`, `laser_armed`,
+  `laser_cooling_fan_on`, `position`, `fault`, `workpiece_surface_z`,
+  `connected`), dazu `busy: true` und `stale_ms`. Die Position ist dann
+  die zuletzt von Marlin gemeldete, nicht die Live-Position während der
+  Fahrt.
+- **Ältere Pi-Dienste** ohne Snapshot halten `/api/status` bis zum Ende
+  der Fahrt an. Die App erkennt das als `StatusTimeout` und behandelt es
+  tolerant (siehe unten).
 
 ### `POST /api/action op=estop`: NOT-AUS (M112)
 
@@ -312,6 +324,15 @@ beliebig --Trennen / Beenden--> disconnected
 - Der Poller läuft in einem eigenen Daemon-Thread und blockiert die
   Oberfläche nie. Signale gehen per Queued Connection in den GUI-Thread.
   Signale eines alten Pollers werden verworfen (`sender()`-Prüfung).
+- **Fremdbelegung:** `owner` „Frei“, leer und `monitor` (Heartbeat) gelten
+  als frei (`client.TRANSIENT_OWNERS`). Jeder andere Besitzer außer `job`
+  und `frame` (z. B. `lightburn`, `web`, `firmware`) ist
+  `MachineStatus.foreign_owner` und sperrt Home, Park, Fokus, Start,
+  Ein-Klick, Rahmen und Jog. NOT-AUS bleibt bedienbar.
+- **Senden/Start:** Vor jedem Upload vergisst das Panel den zuletzt
+  gesendeten Auftrag (`_uploaded`). Er wird erst nach erfolgreichem
+  Upload neu gesetzt (mit Generationszähler). Ein fehlgeschlagener oder
+  überholter Upload kann also nie einen alten Auftrag starten.
 - **Backoff:** nach Fehlern Intervall × (1 + Fehlerzahl), höchstens 5 s.
   Nach einem Erfolg gilt wieder das normale Intervall.
 - **Veraltete Daten:** Ist der letzte gute Status älter als 3 s
@@ -323,6 +344,14 @@ beliebig --Trennen / Beenden--> disconnected
   einer gleichzeitig („Es läuft noch ein Befehl“). Während ein Befehl läuft,
   teilt das Panel das dem Poller mit (`set_command_running`), damit
   Zeitüberschreitungen durch die Pi-Sperre nicht als Fehler gelten.
+- **Fremde Vorgänge** (z. B. Scan-Modul): `MachinePanel.client` liefert
+  den Client, `set_external_operation("Scan")` meldet einen laufenden
+  Vorgang an (Poller toleriert Timeouts, Badge nennt ihn, Bedienknöpfe
+  gesperrt), `set_external_operation(None)` beendet ihn.
+- **Fenster schließen:** `MachinePanel.confirm_close()` fragt nach,
+  solange Auftrag, Rahmenfahrt, ein Befehl oder ein fremder Vorgang läuft
+  („Schließen stoppt die Maschine NICHT“). Bei „Nein“ bleibt das Fenster
+  offen (`main.py` `closeEvent`).
 - **Trennen** stoppt den Poller nach höchstens 200 ms (danach kein Signal
   mehr). **Beenden** wartet höchstens 1 s auf laufende Anfragen (z. B. die
   Antwort eines NOT-AUS) und hängt nie an einem langen Home.
@@ -368,16 +397,15 @@ Der Software-NOT-AUS ersetzt **nicht** den physischen Not-Aus-Schalter.
 
 ## Bekannte Lücken (geprüft gegen den Pi-Code)
 
-1. **Keine Schlüsselprüfung auf dem Pi:** `web.py` wertet `X-LumaCut-Key`
-   nirgends aus. Jeder im Netz kann die API bedienen. Die App sendet den
-   Schlüssel trotzdem und zeigt 401/403 als „Schlüssel abgelehnt“ an,
-   sobald der Pi ihn prüft.
-2. **Status blockiert während Bewegungen:** `/api/status` wartet auf
-   `machine.lock`, das `safe_home`, `park_safezone`, `probe_workpiece` und
-   jeder einzelne `command` halten. Während Home, Park und Abtasten gibt es
-   deshalb keine Live-Position. Die App überbrückt das (Toleranz und
-   Anzeige „Status alt“). Eine echte Lösung wäre ein Status-Snapshot ohne
-   Sperre auf dem Pi.
+1. **Keine Schlüsselprüfung auf dem Pi (bewusst):** `web.py` wertet
+   `X-LumaCut-Key` nirgends aus. Die Pi-Weboberfläche ist absichtlich ohne
+   Anmeldung (Commit 78ce258, Test in `tests/test_marlin_gateway.py`).
+   Jeder im LAN kann die API bedienen. Die App sendet den Schlüssel
+   trotzdem und zeigt 401/403 als „Schlüssel abgelehnt“ an, falls der Pi
+   ihn einmal prüft.
+2. **Status während Bewegungen: gelöst** durch den Snapshot (`busy`,
+   `stale_ms`, siehe `GET /api/status`). Nur ältere Pi-Dienste blockieren
+   noch; dafür bleibt die Toleranz („Status alt“) in der App.
 3. **Keine eigene Fokus-Aktion:** „Fokus (G30)“ ist `op=probe`. Die
    Fokushöhe fährt der Pi erst beim nächsten Auftrag an.
 4. **NOT-AUS ohne USB:** Der Pi setzt die Verriegelung und antwortet mit 503.
@@ -388,9 +416,9 @@ Der Software-NOT-AUS ersetzt **nicht** den physischen Not-Aus-Schalter.
    „feat(pi400): op=park in /api/action“. Ältere Pis melden das klar (siehe
    oben).
 7. **Rahmenfahrt:** `op=frame` gibt es erst ab „feat(pi400): op=frame …“.
-   Während jeder Kante hält der Pi `machine.lock` (wegen `M400`), lange
-   Kanten lassen den Status daher kurz „alt“ werden; Abbrechen und NOT-AUS
-   bleiben bedienbar. Abbrechen wirkt an der nächsten Ecke, nicht mitten
+   Während jeder Kante hält der Pi `machine.lock` (wegen `M400`). Ein
+   aktueller Pi liefert dann den Snapshot (`busy: true`), ein älterer lässt
+   den Status kurz „alt“ werden; Abbrechen und NOT-AUS bleiben bedienbar. Abbrechen wirkt an der nächsten Ecke, nicht mitten
    in der Kante. Die Pi-Weboberfläche hat keinen eigenen Rahmen-Knopf.
 8. **Kein HTTPS:** Die Verbindung läuft unverschlüsselt im LAN.
 9. **Tests:** Die Maschinen-Tests (`tests/test_machine_*.py`) laufen gegen
@@ -402,3 +430,5 @@ Der Software-NOT-AUS ersetzt **nicht** den physischen Not-Aus-Schalter.
    es wird auf Bedingungen gewartet (bis 15 s), und Zeitvergleiche haben
    großen Abstand zur simulierten Verzögerung, damit sie auch auf
    langsamen Windows-Runnern stabil sind.
+10. **Pi-Seite im Überblick:** Was der Pi-Dienst kann, wie man ihn
+    aktualisiert und was offen ist: [PI_STATUS_UND_OFFENE_PUNKTE.md](../../../docs/PI_STATUS_UND_OFFENE_PUNKTE.md).

@@ -255,13 +255,21 @@ Zustandsautomat, NOT-AUS-Verhalten und Einstellungen:
 **[docs/MACHINE_API.md](docs/MACHINE_API.md)**.
 
 **Hinweise / offene Punkte im Pi-Dienst**
-- Der Pi prüft `X-LumaCut-Key` derzeit nicht. Die App sendet ihn trotzdem und
-  zeigt HTTP 401/403 als „Schlüssel abgelehnt“ an, sobald der Pi ihn prüft.
+- Der Pi prüft `X-LumaCut-Key` bewusst nicht (Weboberfläche ohne Anmeldung).
+  Die App sendet ihn trotzdem und zeigt HTTP 401/403 als „Schlüssel
+  abgelehnt“ an, falls der Pi ihn einmal prüft.
 - `op=park` und `op=frame` sind jetzt in `pi400/marlin/web.py` enthalten.
   Ein älterer Pi-Dienst meldet „bietet noch kein Parken über die API“ bzw.
   „bietet noch keine Rahmenfahrt über die API“, bis er aktualisiert ist.
-- `/api/status` wartet auf die Maschinensperre und liefert deshalb während
-  Home/Park/Abtasten keine Live-Position.
+- `/api/status` blockiert auf einem aktuellen Pi nicht mehr hinter
+  Home/Park/Abtasten/Rahmen, sondern liefert einen Snapshot mit `busy` und
+  `stale_ms` (Badge „Pi fährt“). Ein älterer Pi antwortet erst nach der
+  Fahrt; die App toleriert das („Status alt“).
+- Fremdbelegung (z. B. LightBurn) sperrt alle Fahrknöpfe außer NOT-AUS.
+  Schließen der App während einer Fahrt fragt nach; die Maschine wird
+  dadurch nicht gestoppt.
+- Pi-Stand, Update-Anleitung und offene Punkte:
+  [docs/PI_STATUS_UND_OFFENE_PUNKTE.md](../../docs/PI_STATUS_UND_OFFENE_PUNKTE.md).
 
 ## Kamera-Scan und Höhenmesh
 
