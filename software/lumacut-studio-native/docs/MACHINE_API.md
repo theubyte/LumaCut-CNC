@@ -50,6 +50,11 @@ Für den Grund wird `error`, ersatzweise `message` aus der Antwort benutzt.
 | `STATUS_TIMEOUT_S` | 4 s | `GET /api/status` |
 | `ESTOP_TIMEOUT_S` | 3 s **pro Versuch** | `op=estop` |
 | `ESTOP_RETRIES` / `ESTOP_RETRY_PAUSE_S` | 2 weitere Versuche / 0,2 s | `op=estop` |
+| `ESTOP_DEADLINE_S` / `ESTOP_MIN_ATTEMPT_S` | 4 s für alle Versuche / min. 0,5 s je Versuch | `op=estop` |
+
+Der Client nutzt **keinen System-Proxy** (`ProxyHandler({})`): Proxy-
+Einstellungen aus der Umgebung oder der Windows-Registry würden Anfragen an
+den Pi im LAN umleiten oder verzögern, auch den NOT-AUS.
 | `LONG_TIMEOUT_S` | 240 s | `op=home`, `op=probe`, `op=park` |
 | `DEFAULT_TIMEOUT_S` | 60 s | alle anderen Aktionen, `GET /api/jobs…` |
 | `UPLOAD_TIMEOUT_S` | 120 s | `POST /api/upload` |
@@ -112,11 +117,16 @@ die Zeitlimits für Bewegungen lang.
 - **Antwortfelder:** `message`.
 - **Zeitlimit / Wiederholung:** 3 s pro Versuch, bis zu 3 Versuche mit
   0,2 s Pause, **nur** bei Netzfehlern (`ConnectionFailed`/`StatusTimeout`).
+  Alle Versuche zusammen sind auf etwa 4 s begrenzt: Nach Ablauf startet
+  kein neuer Versuch, ein späterer Versuch wird auf die Restzeit gekürzt
+  (mindestens 0,5 s). Windows lehnt einen geschlossenen Port nicht sofort
+  ab (≈ 2 s SYN-Wiederholungen); ohne die Grenze dauerte die Fehlermeldung
+  dort 6–10 s.
   Jede Antwort des Pi, auch ein Fehler wie 503, ist endgültig und wird nicht
   wiederholt. M112 doppelt zu senden ist unkritisch. Klappt ein späterer
   Versuch, erhält die Meldung den Zusatz „(Versuch n)“. Nach dem letzten
-  Fehlversuch kommt „NOT-AUS nicht bestätigt nach 3 Versuchen – physischen
-  Not-Aus benutzen! (…)“.
+  Fehlversuch kommt „NOT-AUS nicht bestätigt nach n Versuchen – physischen
+  Not-Aus benutzen! (…)“ (n = 3, bei langsamer Ablehnung auch 2).
 - **Ablauf in der App:** siehe Abschnitt „NOT-AUS-Verhalten“.
 
 ### `POST /api/action op=estop_reset`: Notstopp quittieren
@@ -387,4 +397,8 @@ Der Software-NOT-AUS ersetzt **nicht** den physischen Not-Aus-Schalter.
    den Fake-Pi (`tests/fake_pi.py`) und im Workflow
    `lumacut-studio-native.yml` headless vor dem .exe-Build. Gegen einen
    echten Pi ist die Anbindung noch nicht getestet. Lokal:
-   `QT_QPA_PLATFORM=offscreen python -m pytest tests`.
+   `QT_QPA_PLATFORM=offscreen python -m pytest tests`. Die Tests prüfen
+   keine knappen Zeitgrenzen: Netzfehler werden deterministisch simuliert,
+   es wird auf Bedingungen gewartet (bis 15 s), und Zeitvergleiche haben
+   großen Abstand zur simulierten Verzögerung, damit sie auch auf
+   langsamen Windows-Runnern stabil sind.
