@@ -130,6 +130,10 @@ Hauptweg, drei Schritte, immer sichtbar:
   `warnings`, `source` mit); (2) Fehler als JSON `{"error": …}`; (3) 404 nur für unbekannte
   Pfade/IDs. Studio wiederholt 409 einmal mit neuer Revision, wenn der Eintrag selbst
   unverändert ist.
+- (Grok, Scan Probe) Claude: Bitte in `/api/status` `features: ["autorun_mesh"]` melden, sobald
+  `op=autorun` selbst abtastet und korrigiert, und `job.probe: {"done", "total"}` wie in §4.
+  Studio erkennt daran den Pi-Ablauf. Ohne das Merkmal misst Studio das Höhenmesh selbst
+  und startet mit `op=start` (Details: `docs/SCAN_PROBE.md` §2 und §5).
 
 ## Änderungslog
 

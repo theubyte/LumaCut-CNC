@@ -19,6 +19,40 @@ Der Rest läuft automatisch:
 
 **Kein** manueller Schritt für Referenzieren oder „mit/ohne Probing“. Probing ist immer dabei und soll schnell sein.
 
+### 1.1 Ein-Klick-Auftrag: Schnittstelle Scan Probe <-> Machine (Scan Probe, 2026-10-26)
+
+Details und JSON-Nachrichten: `docs/SCAN_PROBE.md`. Getestet nur mit Simulation und Fakes, **nicht an der echten Maschine**.
+
+**Umgesetzt (Studio, `scanprobe/job_flow.py`, `job_flow_qt.py`):**
+- Der Ablauf Referenzfahrt (nur wenn nötig) → Höhenmesh → Fokus → Job → Parken läuft nach einer Bestätigung ohne weitere Rückfragen.
+- Pause und Abbrechen gehen über das Scan-&-Probe-Panel.
+- Meldungen sind deutsch, jeder Fehler steht in einem Satz.
+- Die Messbereiche kommen aus der Brennstrecke des Auftrags, nicht aus einer Auswahl. Das Raster ist grob und wird adaptiv verfeinert.
+- Ein frisches, passendes Mesh wird nach 3 Kontrollpunkten je Bereich wiederverwendet.
+- G30 läuft am niedrigsten Messpunkt. Damit stört die Pi-Sperre nicht.
+- Alle bisherigen Sicherheitsprüfungen bleiben: keine Bögen, kein absolutes Z, Material nicht bewegt, Pi-Sperre, Notstopp, Abdeckung.
+- Der Haken „Fokuskorrektur“ ist entfernt. Liegt ein Mesh vor, wird **jeder** gesendete oder exportierte Auftrag korrigiert.
+- Heute erreichbar: „Mehr …“ → „Ein-Klick-Auftrag starten“ und `self.one_click.start()` in `main.py`.
+
+**Scan Probe liefert an Machine:**
+- `OneClickController.start()` als Ziel für den Start-Knopf.
+- Ereignisse `job_state` und `job_result`.
+- `ScanPanel.prepare_job_gcode` für „Design senden“: Es korrigiert automatisch oder gibt bei Fehlern `None` zurück.
+
+**Scan Probe erwartet von Machine** (Schnittstelle `MachinePort`, abgebildet auf `LumaCutClient`, unverändert):
+- `status`, `home`, `focus(x, y)`, `upload_job`, `start_job`, `abort_job`, `park`, optional `autorun_job`.
+- `machine_panel.client`, `job_origin()` und `set_external_operation()`. Damit sperrt das Panel während des Ablaufs die Fahrknöpfe.
+
+**Pi (Claude, ZUSAMMENARBEIT §4):**
+- Meldet der Pi in `/api/status` `features: ["autorun_mesh"]`, lädt Studio den unkorrigierten Auftrag hoch und startet `op=autorun`. Den Fortschritt spiegelt Studio aus `job.state`/`job.probe`.
+- Ohne das Merkmal (heutiger Pi: autorun macht nur ein G30) misst Studio das Mesh selbst und schickt korrigierten G-Code mit `op=start`.
+
+**Offene Fragen:**
+1. Machine: Den Start-Knopf der Werkzeugleiste auf `self.one_click.start` umstellen? Das ist eine Zeile im Machine-Block von `main.py`; Scan Probe hat sie bewusst nicht angefasst.
+2. Machine: Platzierung (Ursprung ≠ „Absolut“) zusammen mit Mesh. Heute lehnt der Ein-Klick-Auftrag das mit Hinweis ab, weil das Mesh in Maschinen-mm liegt. Mit `autorun_mesh` tastet der Pi nach der Platzierung ab, dann entfällt die Einschränkung.
+3. Machine: `op=park` fehlt auf älteren Pi-Diensten. Nach einem Abbruch vor dem Lasern erscheint dann nur ein Hinweis.
+4. Claude: Merkmal `autorun_mesh` und `job.probe` in `/api/status` (Wunsch in ZUSAMMENARBEIT §6).
+
 ## 2. Nullpunkt und Achsen
 
 - **X/Y 0,0 ist oben rechts** (Seite der Endschalter / Tür auf der anderen Seite).
@@ -124,6 +158,12 @@ Die Apps bilden einfach die echte Maschine ab.
 - Kein Pflicht-Schritt im normalen Auftrag.
 - Scan bei fester Höhe, Kachelweise, Ergebnis als Hintergrund zum genauen Platzieren.
 
+**Umsetzung Studio (Scan Probe, 2026-10-26):**
+- Die Hauptansicht des Scan-&-Probe-Panels hat nur noch den Knopf **„Kamera-Scan“** mit Pause, Abbrechen und Fortschritt.
+- Alles andere liegt eingeklappt unter **„Mehr …“**.
+- Bei verbundenem Pi scannt der Knopf automatisch mit der Maschine.
+- **Android:** Es gibt keinen Code. Vorbereitet ist ein Qt-freier JSON-Vertrag (`scanprobe/contract.py`, `lumacut-scanprobe/1`) mit vorgeschlagenen HTTP-Endpunkten, siehe `docs/SCAN_PROBE.md`.
+
 ## 4. Materialdatenbank auf dem Pi
 
 - Materialliste und Einstellungen (Leistung, Geschwindigkeit, Durchgänge, Z-Schritt) liegen auf dem Pi.
@@ -183,9 +223,10 @@ API an; die eingebaute Datenbank ist in Studio nur lesbar (bearbeitet werden Pre
 
 | Thema | Zuständig | Status |
 |---|---|---|
-| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Start-Knopf in Studio: Machine | in Arbeit (Pi) |
+| Ein-Klick-Auftrag (Homing + Probing + Fokus + Job) | Pi-Ablauf (`op=autorun`, Abtastraster, Höhenkorrektur auf dem Pi): **Claude, Session pi-automatik**; Studio-Ablauf/Orchestrierung: Scan Probe; Start-Knopf in Studio: Machine | Studio-Ablauf fertig (Simulation, §1.1), Start-Knopf offen (Machine), Pi in Arbeit |
 | Nullpunkt oben rechts | Canvas + Machine | Maschinenseite erledigt (`ce7da00`: Anker = sichtbare Ecke, `coord_convention`, Jog-Kreuz gespiegelt, siehe §2.2); Canvas (`workarea.py`, Absprache §2) offen |
-| Kamera-Scan als Button | Scan Probe | offen |
+| Kamera-Scan als Button | Scan Probe | Studio erledigt (§3); Android: Vertrag vorbereitet, kein Code |
+| Probing immer im Auftrag (keine Auswahl) | Scan Probe | Studio erledigt (§1.1) |
 | Materialdatenbank auf dem Pi | Pi-API `/api/materials`: **Claude, Session pi-automatik** (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` Abschnitt 3); Anbindung in Studio: Materials | Studio-Client fertig (beide API-Varianten, offline, Konflikte; §4.1), Pi-Endpunkte in Arbeit |
 | Cleaner UI Windows | Canvas | offen |
 | Cleaner UI Android | Claude, Session android | in Arbeit |
