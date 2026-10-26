@@ -14,6 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _hard_exit import hard_exit  # noqa: E402
+
 
 @pytest.fixture(scope="session")
 def qapp():
@@ -53,14 +56,11 @@ def pytest_unconfigure(config):
     obwohl alle Tests bestanden hatten. Ergebnis und Zusammenfassung sind zu
     diesem Zeitpunkt bereits ausgegeben.
 
-    Nur außerhalb von Windows: Dort stürzt ``os._exit`` mit einer Access
-    Violation ab (Exit 1 trotz grüner Tests) und das Segfault-Problem
-    existiert nicht, der normale pytest-Exit ist dort sauber.
+    Unter Windows mit ``TerminateProcess`` statt ``os._exit`` (siehe
+    ``_hard_exit``): Der DLL-Abbau von ``os._exit`` löste dort eine Access
+    Violation aus (Exit 1 trotz grüner Tests). ``TerminateProcess`` überspringt
+    ihn und auch den PySide6-Abbau beim Interpreter-Ende.
     """
-    if sys.platform == "win32":
-        return
     if "PySide6.QtWidgets" not in sys.modules or os.environ.get("LUMACUT_TEST_NO_HARD_EXIT"):
         return
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(_EXIT_STATUS)
+    hard_exit(_EXIT_STATUS)
