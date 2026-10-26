@@ -37,6 +37,7 @@ class Preset:
     air_assist: str = "on"
     notes: str = ""
     warnings: list[str] = field(default_factory=list)
+    source: str = "planner"  # planner | test (aus dem Materialtest-Raster übernommen)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

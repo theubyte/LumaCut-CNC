@@ -63,6 +63,8 @@ class Material:
     engrave: dict | None
     relief: dict | None
     settings: tuple[dict, ...] = field(default=(), compare=False, repr=False)
+    # Schnittfuge/Haltestege/Anschnitt-Startwerte, s. :mod:`.process`
+    process: dict | None = field(default=None, compare=False, repr=False)
 
     @staticmethod
     def from_dict(d: dict[str, Any]) -> "Material":
@@ -73,7 +75,7 @@ class Material:
                         sources=tuple(d.get("sources", ())),
                         thicknesses_mm=tuple(float(t) for t in d.get("thicknesses_mm", ())),
                         cut=d.get("cut"), engrave=d.get("engrave"), relief=d.get("relief"),
-                        settings=tuple(d.get("settings", ())))
+                        settings=tuple(d.get("settings", ())), process=d.get("process"))
 
     @property
     def can_cut(self) -> bool:

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .db import DATA_PATH, MaterialDB, MaterialError
 from .planner import plan_cut, plan_engrave
+from .process import process_block
 
 
 def settings_for(db: MaterialDB, material_id: str) -> list[dict]:
@@ -52,6 +53,11 @@ def build(path: Path = DATA_PATH) -> dict:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     for m in data["materials"]:
         m["settings"] = []
+        block = process_block(m["id"]) if m.get("compatible") and m.get("cut") else None
+        if block:
+            m["process"] = block
+        else:
+            m.pop("process", None)
     db = MaterialDB(data)
     for m in data["materials"]:
         m["settings"] = settings_for(db, m["id"])

@@ -928,7 +928,16 @@
      "depth_per_pass_mm": 1.0,
      "z_step_mm": 0.0
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.025,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.06,
+    "tab_spacing_mm": 40.0,
+    "lead_in_mm": 1.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "birch_plywood",
@@ -1643,7 +1652,16 @@
      "depth_per_pass_mm": 0.5,
      "z_step_mm": 0.35
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.025,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.06,
+    "tab_spacing_mm": 40.0,
+    "lead_in_mm": 1.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "basswood_solid",
@@ -2359,7 +2377,16 @@
      "depth_per_pass_mm": 1.0,
      "z_step_mm": 0.0
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.025,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.06,
+    "tab_spacing_mm": 40.0,
+    "lead_in_mm": 1.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "mdf",
@@ -3016,7 +3043,16 @@
      "depth_per_pass_mm": 1.0,
      "z_step_mm": 0.0
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.03,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.06,
+    "tab_spacing_mm": 40.0,
+    "lead_in_mm": 1.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "hardwood",
@@ -3669,7 +3705,16 @@
      "depth_per_pass_mm": 0.5,
      "z_step_mm": 0.35
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.03,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.06,
+    "tab_spacing_mm": 40.0,
+    "lead_in_mm": 1.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "softwood",
@@ -4324,7 +4369,16 @@
      "depth_per_pass_mm": 1.0,
      "z_step_mm": 0.0
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.025,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.06,
+    "tab_spacing_mm": 40.0,
+    "lead_in_mm": 1.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "balsa",
@@ -4972,7 +5026,16 @@
      "depth_per_pass_mm": 1.0,
      "z_step_mm": 0.0
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.02,
+    "tab_base_mm": 0.4,
+    "tab_per_mm": 0.08,
+    "tab_spacing_mm": 30.0,
+    "lead_in_mm": 0.5,
+    "status": "estimate"
+   }
   },
   {
    "id": "bamboo",
@@ -5502,7 +5565,16 @@
      "depth_per_pass_mm": 0.5,
      "z_step_mm": 0.35
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.025,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.06,
+    "tab_spacing_mm": 40.0,
+    "lead_in_mm": 1.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "cork",
@@ -6030,7 +6102,16 @@
      "depth_per_pass_mm": 1.0,
      "z_step_mm": 0.0
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.15,
+    "kerf_per_mm": 0.03,
+    "tab_base_mm": 0.5,
+    "tab_per_mm": 0.08,
+    "tab_spacing_mm": 30.0,
+    "lead_in_mm": 0.5,
+    "status": "estimate"
+   }
   },
   {
    "id": "cardboard",
@@ -6558,7 +6639,16 @@
      "depth_per_pass_mm": 0.5,
      "z_step_mm": 0.35
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.02,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.05,
+    "tab_spacing_mm": 30.0,
+    "lead_in_mm": 0.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "paper",
@@ -7147,7 +7237,16 @@
      "depth_per_pass_mm": 0.2,
      "z_step_mm": 0.13
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.08,
+    "kerf_per_mm": 0.02,
+    "tab_base_mm": 0.2,
+    "tab_per_mm": 0.0,
+    "tab_spacing_mm": 25.0,
+    "lead_in_mm": 0.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "leather_veg",
@@ -7676,7 +7775,16 @@
      "depth_per_pass_mm": 0.5,
      "z_step_mm": 0.35
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.12,
+    "kerf_per_mm": 0.03,
+    "tab_base_mm": 0.4,
+    "tab_per_mm": 0.05,
+    "tab_spacing_mm": 30.0,
+    "lead_in_mm": 0.5,
+    "status": "estimate"
+   }
   },
   {
    "id": "felt_wool",
@@ -8201,7 +8309,16 @@
      "depth_per_pass_mm": 1.0,
      "z_step_mm": 0.0
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.15,
+    "kerf_per_mm": 0.02,
+    "tab_base_mm": 0.5,
+    "tab_per_mm": 0.05,
+    "tab_spacing_mm": 30.0,
+    "lead_in_mm": 0.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "cotton_fabric",
@@ -8665,7 +8782,16 @@
      "depth_per_pass_mm": 0.2,
      "z_step_mm": 0.13
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.12,
+    "kerf_per_mm": 0.02,
+    "tab_base_mm": 0.5,
+    "tab_per_mm": 0.0,
+    "tab_spacing_mm": 25.0,
+    "lead_in_mm": 0.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "acrylic_black",
@@ -9196,7 +9322,16 @@
      "depth_per_pass_mm": 0.5,
      "z_step_mm": 0.35
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.02,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.05,
+    "tab_spacing_mm": 50.0,
+    "lead_in_mm": 1.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "acrylic_color_opaque",
@@ -9663,7 +9798,16 @@
      "depth_per_pass_mm": 0.333,
      "z_step_mm": 0.23
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.1,
+    "kerf_per_mm": 0.02,
+    "tab_base_mm": 0.3,
+    "tab_per_mm": 0.05,
+    "tab_spacing_mm": 50.0,
+    "lead_in_mm": 1.0,
+    "status": "estimate"
+   }
   },
   {
    "id": "eva_foam",
@@ -10191,7 +10335,16 @@
      "depth_per_pass_mm": 1.0,
      "z_step_mm": 0.0
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.2,
+    "kerf_per_mm": 0.03,
+    "tab_base_mm": 0.8,
+    "tab_per_mm": 0.1,
+    "tab_spacing_mm": 30.0,
+    "lead_in_mm": 0.5,
+    "status": "estimate"
+   }
   },
   {
    "id": "laser_rubber",
@@ -10658,7 +10811,16 @@
      "depth_per_pass_mm": 0.5,
      "z_step_mm": 0.35
     }
-   ]
+   ],
+   "process": {
+    "kerf_base_mm": 0.15,
+    "kerf_per_mm": 0.03,
+    "tab_base_mm": 0.5,
+    "tab_per_mm": 0.08,
+    "tab_spacing_mm": 30.0,
+    "lead_in_mm": 0.5,
+    "status": "estimate"
+   }
   },
   {
    "id": "anodized_aluminum",
