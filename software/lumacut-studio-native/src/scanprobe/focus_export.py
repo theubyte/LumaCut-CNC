@@ -8,9 +8,10 @@ geht; das Ergebnis trennt **Fehler** (Export gesperrt) von **Warnungen**
 
 Fehler
   * G2/G3-Bögen im Eingang (der Canvas-Export erzeugt nur Linien; Bögen kämen
-    nur aus fremdem G-Code) und eigene Z-Wörter, z. B. Ebenen mit
-    „Fokus-Absenkung je Durchgang" (``z_step``) – beides lässt sich nicht mit
-    der Mesh-Korrektur kombinieren.
+    nur aus fremdem G-Code) und absolute Z-Wörter – beides lässt sich nicht
+    mit der Mesh-Korrektur kombinieren. Die relative „Fokus-Absenkung je
+    Durchgang" (``z_step``, ``G91``/``G0 Z-…``/``G90``) wird dagegen
+    unterstützt: sie wird auf das Mesh-Z aufgerechnet.
   * Material laut Fingerabdruck seit dem Proben verschoben/verändert
     (Vergleich mit dem aktuellen Scan).
   * Keine brennende Strecke liegt in einem Höhenmesh.
@@ -34,10 +35,10 @@ from typing import Optional
 
 import numpy as np
 
-from .compensation import CompensationReport, FocusSettings, apply_focus_compensation
+from .compensation import (_WORD, CompensationReport, FocusSettings, apply_focus_compensation,
+                           is_relative_z_only)
 from .heightmap import HeightMapSet
 
-_WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 MAX_AGE_H = 8.0
 
 
@@ -70,7 +71,9 @@ class FocusExport:
             return "Fokuskorrektur nicht möglich:\n• " + "\n• ".join(self.errors)
         r = self.report
         text = (f"Fokuskorrektur angewendet: Z {r.z_min:.2f} … {r.z_max:.2f} mm, "
-                f"{r.segments_added} Zusatzsegmente.")
+                f"{r.segments_added} Zusatzsegmente"
+                + (f", Fokus-Absenkung je Durchgang bis {-r.focus_offset_min:.2f} mm"
+                   if r.focus_offset_min < 0 else "") + ".")
         if self.warnings:
             text += "\n\nBitte prüfen:\n• " + "\n• ".join(self.warnings)
         return text
@@ -78,9 +81,13 @@ class FocusExport:
 
 # ---------------------------------------------------------------- Prüfungen
 def precheck_gcode(gcode: str) -> list[str]:
-    """Fehler, die eine Kompensation ausschließen (Bögen, Z-Wörter)."""
+    """Fehler, die eine Kompensation ausschließen (Bögen, absolute Z-Wörter).
+
+    Relative reine Z-Fahrten (Fokus-Absenkung je Durchgang) sind erlaubt.
+    """
     errors: list[str] = []
     arcs = z_lines = 0
+    absolute = True
     first_arc = first_z = 0
     for n, raw in enumerate(gcode.splitlines(), 1):
         code = re.sub(r"\([^)]*\)", "", raw.split(";", 1)[0]).strip().upper()
@@ -90,7 +97,10 @@ def precheck_gcode(gcode: str) -> list[str]:
         if any(k == "G" and float(v) in (2, 3) for k, v in words):
             arcs += 1
             first_arc = first_arc or n
-        if any(k == "Z" for k, _ in words):
+        for k, v in words:
+            if k == "G" and float(v) in (90, 91):
+                absolute = float(v) == 90
+        if any(k == "Z" for k, _ in words) and not is_relative_z_only(words, absolute):
             z_lines += 1
             first_z = first_z or n
     if arcs:
@@ -98,9 +108,9 @@ def precheck_gcode(gcode: str) -> list[str]:
                       "braucht Linien – Bögen vorher in Liniensegmente auflösen (der Canvas-Export "
                       "tut das automatisch; betroffen ist nur fremder G-Code).")
     if z_lines:
-        errors.append(f"{z_lines} Zeile(n) mit eigener Z-Angabe (erstmals Zeile {first_z}), z. B. "
-                      "Ebenen mit „Fokus-Absenkung je Durchgang“. Mit Fokuskorrektur kommt Z nur aus "
-                      "dem Höhenmesh – Fokus-Absenkung auf 0 setzen oder ohne Korrektur exportieren.")
+        errors.append(f"{z_lines} Zeile(n) mit absoluter Z-Angabe (erstmals Zeile {first_z}). Mit "
+                      "Fokuskorrektur kommt Z aus dem Höhenmesh (plus ggf. „Fokus-Absenkung je "
+                      "Durchgang“) – absolute Z-Fahrten entfernen oder ohne Korrektur exportieren.")
     return errors
 
 

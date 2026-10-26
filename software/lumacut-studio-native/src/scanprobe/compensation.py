@@ -11,7 +11,12 @@ absoluten G-Code mit Z je Segment:
 * Z-Achse max. 9 mm/s: wird die Steigung zu groß, sinkt der Vorschub für
   dieses Stück (gemeldet in ``CompensationReport.feed_limited``).
 * Z-Untergrenze: nie unter Oberfläche + ``min_clearance_mm`` (2 mm).
-* Bögen (G2/G3) und eigene Z-Wörter im Eingang werden abgelehnt.
+* Fokus-Absenkung je Durchgang (``z_step``): reine relative Z-Fahrten
+  (``G91`` / ``G0 Z-0.5`` / ``G90``) werden nicht ausgegeben, sondern als
+  Versatz auf das Mesh-Z aufgerechnet (Z = Fokus-Z + Versatz). Der Versatz darf
+  das Z nicht unter Oberfläche + ``min_clearance_mm`` bringen.
+* Bögen (G2/G3) und absolute bzw. mit X/Y kombinierte Z-Wörter im Eingang
+  werden abgelehnt.
 
 Langfristig rechnet der Pi die Korrektur (Plan Punkt 4); diese Funktion ist
 identisch nutzbar in Studio (Vorschau/Export) und auf dem Pi.
@@ -63,7 +68,16 @@ class CompensationReport:
     z_max: float = -math.inf
     outside_points: int = 0
     feed_limited: int = 0
+    focus_offset_min: float = 0.0      # tiefste Fokus-Absenkung (z_step), ≤ 0
     warnings: list[str] = field(default_factory=list)
+
+
+def is_relative_z_only(words, absolute: bool) -> bool:
+    """``G0/G1 Z…`` ohne X/Y im relativen Modus (Fokus-Absenkung je Durchgang)."""
+    keys = {k for k, _ in words}
+    gs = {float(v) for k, v in words if k == "G"}
+    return (not absolute or 91 in gs) and "Z" in keys and not keys & {"X", "Y", "S"} \
+        and gs <= {0, 1, 91}
 
 
 def _fmt(v: float) -> str:
@@ -85,6 +99,8 @@ def apply_focus_compensation(gcode: str, maps: HeightMapSet,
     feed: Optional[float] = None
     motion = 0
     out_feed: Optional[float] = None   # modaler Vorschub im Ausgang
+    offset = 0.0                       # Fokus-Absenkung je Durchgang (≤ 0)
+    max_drop = settings.focus_distance_mm - settings.switch_to_tip_mm - settings.min_clearance_mm
 
     def target_z(px: float, py: float) -> Optional[float]:
         surf = maps.surface_z(px, py, settings.method)
@@ -96,7 +112,7 @@ def apply_focus_compensation(gcode: str, maps: HeightMapSet,
                 surf = settings.default_surface_z
             else:
                 return None
-        return settings.focus_z(surf)
+        return settings.focus_z(surf) + offset
 
     def emit_z_only(nz: float):
         nonlocal z, out_feed
@@ -130,6 +146,17 @@ def apply_focus_compensation(gcode: str, maps: HeightMapSet,
             motion = int(motion_words[-1])
         vals = {k: float(v) for k, v in words if k in "XYZFS"}
         has_xy = "X" in vals or "Y" in vals
+        if "Z" in vals and is_relative_z_only(words, absolute):
+            offset += vals["Z"] * scale
+            if offset > 1e-6:
+                raise ValueError(f"Zeile {number}: Fokus-Versatz über Fokushöhe ({offset:+.2f} mm)")
+            if -offset > max_drop + 1e-6:
+                raise ValueError(f"Zeile {number}: Fokus-Absenkung {-offset:.2f} mm würde unter "
+                                 f"Oberfläche + {settings.min_clearance_mm:g} mm führen "
+                                 f"(max. {max_drop:.2f} mm)")
+            offset = round(offset, 6)
+            rep.focus_offset_min = min(rep.focus_offset_min, offset)
+            continue  # Z kommt beim nächsten Segment aus Mesh + Versatz
         if "Z" in vals:
             raise ValueError(f"Zeile {number}: Z im Eingang – der Fokus kommt aus dem Höhenmesh")
         is_motion = has_xy and (motion_words or not gs or set(gs) <= {0, 1, 20, 21, 90, 91})
