@@ -48,10 +48,12 @@ from .compensation import _WORD
 from .control import Cancelled, Progress, RunControl
 from .focus_export import (MAX_AGE_H, FocusExport, compensate_for_export, job_coverage,
                            precheck_gcode)
-from .geometry import Rect
+from .geometry import PROBE_OFFSET_MM, Rect
 from .heightmap import HeightMapSet
 from .probe_plan import ProbeArea, ProbeSettings, areas_from_design_bounds
 from .probing import ProbeResult
+from .reach import (DANGER_NOTE, PI_UNREACHABLE, check_gcode as check_reach, explain_pi_error,
+                    pi_offset)
 
 #: Zustände in Ablaufreihenfolge, dann Endzustände.
 STEPS = ("referenzieren", "probing", "fokus", "job", "parken")
@@ -107,7 +109,7 @@ class MachinePort(Protocol):
     def start_job(self, name: str) -> str: ...
     def abort_job(self) -> str: ...
     def park(self) -> str: ...
-    # optional (Pi mit ``autorun_mesh``): def autorun(self, name: str) -> str
+    # optional (Pi mit ``autorun_mesh``): def autorun(self, name, x=None, y=None) -> str
 
 
 #: Merkmal in ``/api/status`` (``features``-Liste oder -Objekt), mit dem ein Pi
@@ -168,8 +170,9 @@ class ClientMachinePort:
     def park(self) -> str:
         return self.client.park()
 
-    def autorun(self, name: str) -> str:
-        return self.client.autorun_job(name)
+    def autorun(self, name: str, x: Optional[float] = None, y: Optional[float] = None) -> str:
+        # x/y: Ersatzpunkt, wenn der Taster keinen Rasterpunkt erreicht (§2.4)
+        return self.client.autorun_job(name, x, y)
 
 
 class FlowError(RuntimeError):
@@ -400,7 +403,15 @@ class OneClickJob:
                 and hasattr(self.machine, "autorun")
             if pi_mesh:
                 res.pi_mesh = True
-                self._run_on_pi(gcode, name)
+                self._probe_offset = pi_offset(st)
+                rep = None
+                if not getattr(self.machine, "placed", False):
+                    # Gleiche Rechnung wie der Pi (reach.py). Nicht erreichbare Punkte
+                    # sind kein Abbruch (Anforderungen §2.4): Ersatzpunkt + Warnung.
+                    rep = check_reach(gcode, self._probe_offset)
+                    if rep.warning:
+                        res.notes.append(rep.warning)
+                self._run_on_pi(gcode, name, rep)
                 self._finish_park()
                 self._enter("fertig", "Auftrag fertig, Kopf geparkt")
                 return self._finish(res, t0)
@@ -502,6 +513,9 @@ class OneClickJob:
             res.notes += notes
             job = wf.plan_probe(areas, (0.0, 0.0))
             res.notes += job.warnings
+            for w in job.warnings:
+                if w.startswith("Achtung"):   # Ersatzpunkte (§2.4): warnen, weitermachen
+                    self._emit(w, 0.0, warning=True)
             if not job.points:
                 raise FlowError("probe_failed", "Keine erreichbaren Messpunkte unter dem Motiv"
                                 + (" (" + "; ".join(job.warnings) + ")" if job.warnings else ""))
@@ -564,20 +578,57 @@ class OneClickJob:
         self._emit(f"{name} läuft", 0.0)
         self._poll_job(name, pi_mesh=False)
 
-    def _run_on_pi(self, gcode: str, name: str) -> None:
-        """Pi mit ``autorun_mesh``: hochladen, ``op=autorun``, Pi-Zustände spiegeln."""
+    def _run_on_pi(self, gcode: str, name: str, rep=None) -> None:
+        """Pi mit ``autorun_mesh``: hochladen, ``op=autorun``, Pi-Zustände spiegeln.
+
+        Erreicht der Taster keinen Rasterpunkt des Pi, misst der Pi über
+        ``op=autorun`` mit ``x``/``y`` einmal am nächsten erreichbaren Punkt
+        (Ersatzpunkt, Warnung, Auftrag läuft weiter – Anforderungen §2.4).
+        """
         self._enter("referenzieren", f"Lade {name} hoch – der Pi referenziert, tastet ab und lasert")
+        if rep is not None and rep.warning:
+            self._emit(rep.warning, 0.0, warning=True)
         self._checkpoint()
         try:
             self.machine.upload_job(name, gcode)
             self._checkpoint()
-            self.machine.autorun(name)
+            if rep is not None and rep.fallback_point is not None:
+                self._autorun_at(name, rep.fallback_point)
+            else:
+                self.machine.autorun(name)
         except Cancelled:
             raise
         except Exception as exc:  # noqa: BLE001
-            raise FlowError("upload_failed", f"Auftrag abgelehnt: {exc}") from exc
+            text = str(exc)
+            if PI_UNREACHABLE not in text:
+                raise FlowError("upload_failed", f"Auftrag abgelehnt: {exc}") from exc
+            point = rep.nearest_point if rep is not None else None
+            if point is None or rep.fallback_point is not None:
+                # platziert (Ort nur dem Pi bekannt) oder Ersatzpunkt schon abgelehnt
+                raise FlowError("unreachable", explain_pi_error(
+                    text, None if rep is None else gcode,
+                    getattr(self, "_probe_offset", None) or PROBE_OFFSET_MM)
+                    + " (Pi-Software kennt die Ersatzpunkt-Regel noch nicht, "
+                      "Anforderungen §2.4.)") from exc
+            note = ("Achtung: Der Pi erreicht keinen Abtastpunkt des Motivs – stattdessen "
+                    f"einmal bei X{point[0]:.1f} Y{point[1]:.1f} gemessen. {DANGER_NOTE}")
+            self.result.notes.append(note)
+            self._emit(note, 0.0, warning=True)
+            try:
+                self._autorun_at(name, point)
+            except Cancelled:
+                raise
+            except Exception as exc2:  # noqa: BLE001
+                raise FlowError("upload_failed", f"Auftrag abgelehnt: {exc2}") from exc2
         self._job_started = True
         self._poll_job(name, pi_mesh=True)
+
+    def _autorun_at(self, name: str, point) -> None:
+        try:
+            self.machine.autorun(name, x=float(point[0]), y=float(point[1]))
+        except TypeError as exc:   # alter Port ohne x/y
+            raise FlowError("unreachable", "Ersatzpunkt nicht möglich: Maschinen-Anbindung "
+                            "kennt op=autorun mit x/y nicht") from exc
 
     def _poll_job(self, name: str, pi_mesh: bool) -> None:
         errors = 0

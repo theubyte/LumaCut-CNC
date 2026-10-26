@@ -44,6 +44,8 @@ class _PlacedAutorunPort:
     """Wie der normale Port, aber ``autorun`` platziert vorher am gewählten
     Ursprung (``machine_panel.autorun_task``, Machine-Agent)."""
 
+    placed = True   # job_flow: G-Code-Koordinaten ≠ Ort auf dem Pi (keine Vorab-Reichweite)
+
     def __init__(self, port, task: Callable[[], str]):
         self._port = port
         self._task = task
@@ -105,6 +107,7 @@ class OneClickController(QObject):
         self.job_kwargs = dict(job_kwargs or {})
         self.runner: Optional[OneClickRunner] = None
         self.last_result: Optional[FlowResult] = None
+        self.confirm_text = CONFIRM_TEXT
         self.last_message = ""
 
     @property
@@ -151,6 +154,19 @@ class OneClickController(QObject):
         from .job_flow import pi_runs_mesh
         return hasattr(mp, "autorun_task") and pi_runs_mesh(getattr(mp, "_status", None))
 
+    @staticmethod
+    def _reach_warning(mp, gcode: str, placed: bool) -> str:
+        """Ersatzpunkt-Warnung für die Bestätigung (gleiche Rechnung wie der Pi, §2.4).
+        Platziert kennt nur der Pi den Ort – dann keine Vorabwarnung."""
+        if placed:
+            return ""
+        try:
+            from .reach import check_gcode, pi_offset
+            rep = check_gcode(gcode, pi_offset(getattr(mp, "_status", None)))
+        except Exception:  # noqa: BLE001 - nur Hinweis
+            return ""
+        return "\n\n" + rep.warning if rep.warning else ""
+
     # ------------------------------------------------------------ start
     def start(self) -> bool:
         if self.busy:
@@ -179,8 +195,9 @@ class OneClickController(QObject):
             gcode, _note = tools.job_gcode()
         except ValueError as exc:
             return self._refuse(str(exc))
+        self.confirm_text = CONFIRM_TEXT + self._reach_warning(mp, gcode, placed)
         if self.ask and QMessageBox.question(
-                None, "Auftrag starten", CONFIRM_TEXT) != QMessageBox.StandardButton.Yes:
+                None, "Auftrag starten", self.confirm_text) != QMessageBox.StandardButton.Yes:
             return False
         name = self._job_name()
         port = self.port_factory(client)
@@ -248,6 +265,9 @@ class OneClickController(QObject):
             text = "Auftrag fertig, Kopf geparkt"
             if res.notes:
                 text += f" ({len(res.notes)} Hinweis(e))"
+            warn = next((n for n in res.notes if n.startswith("Achtung")), "")
+            if warn:
+                text += " – " + warn
         elif res.state == "abgebrochen":
             text = "Auftrag abgebrochen"
         else:

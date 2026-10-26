@@ -28,8 +28,12 @@ RETRIED = 2
 INTERPOLATED = 3
 FAILED = 4
 OUTLIER = 5
+#: Punkt nicht erreichbar, am nächsten erreichbaren Punkt gemessen („ersetzt/
+#: Nachbarmessung“, Anforderungen §2.4). Zählt als Messung, wird aber markiert.
+SUBSTITUTED = 6
 STATUS_NAMES = {0: "not_probed", 1: "measured", 2: "retried", 3: "interpolated",
-                4: "failed", 5: "outlier"}
+                4: "failed", 5: "outlier", 6: "substituted"}
+VALID_STATUS = (MEASURED, RETRIED, SUBSTITUTED)
 
 
 @dataclass
@@ -63,7 +67,7 @@ class HeightMap:
 
     @property
     def valid(self) -> np.ndarray:
-        return np.isin(self.status, (MEASURED, RETRIED)) & np.isfinite(self.z)
+        return np.isin(self.status, VALID_STATUS) & np.isfinite(self.z)
 
     @property
     def measured_count(self) -> int:
@@ -73,7 +77,7 @@ class HeightMap:
         """Raster ohne Lücken: Lücken per inverser Distanzgewichtung (k=4)."""
         if self._filled is not None:
             return self._filled
-        v = np.isin(self.status, (MEASURED, RETRIED, INTERPOLATED)) & np.isfinite(self.z)
+        v = np.isin(self.status, VALID_STATUS + (INTERPOLATED,)) & np.isfinite(self.z)
         if not v.any():
             raise ValueError(f"Bereich {self.area_id}: keine gültige Messung")
         X, Y = np.meshgrid(self.xs, self.ys)
@@ -118,7 +122,8 @@ class HeightMap:
                "mean": float(zz.mean()), "range": float(zz.max() - zz.min()),
                "failed": int((self.status == FAILED).sum()),
                "outliers": int((self.status == OUTLIER).sum()),
-               "interpolated": int((self.status == INTERPOLATED).sum())}
+               "interpolated": int((self.status == INTERPOLATED).sum()),
+               "substituted": int((self.status == SUBSTITUTED).sum())}
         if v.sum() >= 3:
             A = np.c_[X[v], Y[v], np.ones(v.sum())]
             coef, *_ = np.linalg.lstsq(A, zz, rcond=None)

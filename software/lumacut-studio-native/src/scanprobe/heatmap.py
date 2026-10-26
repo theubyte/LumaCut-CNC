@@ -8,7 +8,7 @@ import numpy as np
 import cv2
 
 from .geometry import Rect
-from .heightmap import HeightMapSet, MEASURED, RETRIED, FAILED, OUTLIER
+from .heightmap import HeightMapSet, MEASURED, RETRIED, FAILED, OUTLIER, SUBSTITUTED
 
 
 def render_heatmap(maps: HeightMapSet, path: Optional[str | Path] = None,
@@ -52,6 +52,8 @@ def render_heatmap(maps: HeightMapSet, path: Optional[str | Path] = None,
                     s = m.status[j, i]
                     if s in (MEASURED, RETRIED):
                         cv2.circle(out, p, 2, (255, 255, 255), -1, cv2.LINE_AA)
+                    elif s == SUBSTITUTED:   # Ersatzpunkt (§2.4): orange Raute
+                        cv2.drawMarker(out, p, (0, 165, 255), cv2.MARKER_DIAMOND, 8, 2)
                     elif s in (FAILED, OUTLIER):
                         cv2.drawMarker(out, p, (0, 0, 255), cv2.MARKER_TILTED_CROSS, 7, 2)
     out = _legend(out, lo, hi)
@@ -129,4 +131,32 @@ def heatmap_rgba(maps: HeightMapSet, bounds: Rect, px_per_mm: float = 2.0,
     rgba = np.zeros(zall.shape + (4,), np.uint8)
     rgba[..., :3] = bgr[..., ::-1]
     rgba[..., 3] = np.where(valid, int(255 * alpha), 0).astype(np.uint8)
+    mark_substituted(rgba, maps, bounds, px_per_mm)
     return rgba, lo, hi
+
+
+#: Farbe der Ersatzpunkte (§2.4, „ersetzt/Nachbarmessung“), RGBA
+SUBSTITUTED_RGBA = (255, 140, 0, 255)
+
+
+def mark_substituted(rgba: np.ndarray, maps: HeightMapSet, bounds: Rect, px_per_mm: float) -> int:
+    """Ersatzpunkte als deckende orange Raute einzeichnen; Rückgabe = Anzahl."""
+    n = 0
+    H, W = rgba.shape[:2]
+    r = max(3, int(round(2.5 * px_per_mm)))
+    for m in maps.maps:
+        for j, y in enumerate(m.ys):
+            for i, x in enumerate(m.xs):
+                if m.status[j, i] != SUBSTITUTED:
+                    continue
+                cx = int(round((x - bounds.xmin) * px_per_mm))
+                cy = int(round((y - bounds.ymin) * px_per_mm))
+                for dy in range(-r, r + 1):
+                    w = r - abs(dy)
+                    yy = cy + dy
+                    if 0 <= yy < H:
+                        x0, x1 = max(0, cx - w), min(W, cx + w + 1)
+                        if x0 < x1:
+                            rgba[yy, x0:x1] = SUBSTITUTED_RGBA
+                n += 1
+    return n

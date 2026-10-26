@@ -338,6 +338,7 @@ class ScanPanel(QWidget):
         self.maps: Optional[HeightMapSet] = None
         self.last_focus_export: Optional[FocusExport] = None
         self.last_notes: list[str] = []
+        self.last_warning = ""
         self.last_error = ""
         self._kind = ""
         self.manual_areas: list[ProbeArea] = []
@@ -589,6 +590,10 @@ class ScanPanel(QWidget):
         if ev.get("state") == "fehler":
             self.last_error = ev.get("message", "")
             text = f"Fehler: {ev.get('message', '')}"
+        elif ev.get("warning"):   # Ersatzpunkte (§2.4): warnen, Auftrag läuft weiter
+            self.last_warning = ev.get("message", "")
+            text = ev.get("message", "")
+            self.heat_label.setText(text)
         self._notify(text)
 
     def camera_scan(self) -> bool:
@@ -1265,7 +1270,9 @@ class ScanPanel(QWidget):
             notes = list(payload.get("notes", []))
             if res.failures:
                 notes.append(f"{len(res.failures)} Punkt(e) ohne Kontakt – interpoliert")
-            self._notify(f"Proben fertig: {res.probes} Messungen in {res.duration_s:.0f} s.")
+            warn = next((n for n in notes if n.startswith("Achtung")), "")
+            self._notify(f"Proben fertig: {res.probes} Messungen in {res.duration_s:.0f} s."
+                         + (" " + warn if warn else ""))
         self.last_notes = notes
         if notes:
             self.heat_label.setText(self.heat_label.text() + "\n" + "\n".join(notes))
@@ -1325,7 +1332,10 @@ class ScanPanel(QWidget):
             lines = [f"Höhenkarte: Z {rng[0]:.2f} … {rng[1]:.2f} mm (blau tief, rot hoch)"]
             for m in maps.maps:
                 st = m.stats()
-                lines.append(f"{m.area_id}: {m.measured_count} Punkte, Spanne {st.get('range', 0):.2f} mm")
+                extra = (f", {st['substituted']} ersetzt (orange Raute = Nachbarmessung, §2.4)"
+                         if st.get("substituted") else "")
+                lines.append(f"{m.area_id}: {m.measured_count} Punkte, Spanne "
+                             f"{st.get('range', 0):.2f} mm{extra}")
             self.heat_label.setText("\n".join(lines))
         self._update_enabled()
 

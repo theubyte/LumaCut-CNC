@@ -13,6 +13,8 @@ Point = tuple[float, float]
 
 #: Tasterspitze relativ zum Laserpunkt (docs/MASCHINE.md, Stand 25.10.2026).
 PROBE_OFFSET_MM: Point = (-23.0, 15.0)
+#: Marlin lässt G30 nur bis ``BED_SIZE − PROBING_MARGIN`` zu (Kopf X380/Y360).
+PROBING_MARGIN_MM = 10.0
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,20 @@ class MachineLimits:
     def reachable(self, x: float, y: float, eps: float = 1e-6) -> bool:
         return (self.x_min - eps <= x <= self.x_max + eps
                 and self.y_min - eps <= y <= self.y_max + eps)
+
+    def probe_head_ok(self, x: float, y: float, eps: float = 1e-6) -> bool:
+        """Kopfposition, an der der Pi ``G30`` zulässt (``transport._probe_head_ok``):
+        X/Y ab Safezone 30 bis 380/360 (Marlin ``PROBING_MARGIN`` 10 mm, Anf. §2.4)."""
+        return (self.safezone - eps <= x <= self.x_max - PROBING_MARGIN_MM + eps
+                and self.safezone - eps <= y <= self.y_max - PROBING_MARGIN_MM + eps)
+
+    def probe_laser_rect(self, offset: tuple[float, float]) -> "Rect":
+        """Laserpunkte, die der Taster abtasten kann (Kopf = Punkt − Versatz),
+        geschnitten mit der Bearbeitungszone. Mit −23/+15: X30–357, Y45–370."""
+        dx, dy = offset
+        return Rect(max(self.safezone + dx, self.safezone), max(self.safezone + dy, self.safezone),
+                    min(self.x_max - PROBING_MARGIN_MM + dx, self.x_max),
+                    min(self.y_max - PROBING_MARGIN_MM + dy, self.y_max))
 
     def in_work_zone(self, x: float, y: float, eps: float = 1e-6) -> bool:
         """Bearbeitungszone (außerhalb der Safezone)."""

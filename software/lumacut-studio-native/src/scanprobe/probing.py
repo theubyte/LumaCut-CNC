@@ -19,9 +19,9 @@ import numpy as np
 
 from .control import RunControl, Progress, EtaEstimator
 from .heightmap import (HeightMap, HeightMapSet, MEASURED, RETRIED, INTERPOLATED, FAILED,
-                        OUTLIER, NOT_PROBED)
+                        OUTLIER, NOT_PROBED, SUBSTITUTED)
 from .interfaces import ProbeInterface
-from .probe_plan import ProbeJob, ProbeSettings, AreaGrid
+from .probe_plan import ProbeJob, ProbeSettings, AreaGrid, clamp_to, substitution_note
 
 
 @dataclass
@@ -31,12 +31,21 @@ class ProbeResult:
     failures: list[tuple[str, float, float]] = field(default_factory=list)
     outliers: list[tuple[str, float, float, float]] = field(default_factory=list)
     adaptive_points: int = 0
+    #: Ersatzpunkte (§2.4): (Bereich, x, y, gemessen_x, gemessen_y)
+    substituted: list[tuple[str, float, float, float, float]] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     duration_s: float = 0.0
     log: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return all(m.measured_count > 0 for m in self.maps.maps)
+
+
+def _reachable(grid: AreaGrid, x: float, y: float) -> bool:
+    if grid.reach is None:
+        return True
+    return clamp_to(grid.reach, x, y) == (x, y)
 
 
 class ProbeRunner:
@@ -71,6 +80,10 @@ class ProbeRunner:
             if hm.measured_count == 0:
                 result.log.append(f"{grid.area.id}: keine gültige Messung – Bereich nicht kompensierbar")
             result.maps.maps.append(hm)
+        note = substitution_note(job.grids)
+        if note:
+            result.warnings.append(note)
+            result.log.append(note)
         # zurück auf Rückzughöhe
         result.duration_s = time.monotonic() - t0
         return result
@@ -87,9 +100,14 @@ class ProbeRunner:
         offsets = [(0.0, 0.0), (r, 0.0), (0.0, r), (-r, 0.0), (0.0, -r)][: s.retries + 1]
         poly = grid.area.polygon
         attempt = 0
+        # Nicht erreichbar -> am nächsten erreichbaren Punkt messen (§2.4)
+        bx, by = clamp_to(grid.reach, x, y) if grid.reach is not None else (x, y)
+        subst = abs(bx - x) > 1e-6 or abs(by - y) > 1e-6
         for dx, dy in offsets:
-            px, py = x + dx, y + dy
-            if attempt and not poly.contains_with_margin(px, py, s.margin_mm / 2):
+            px, py = bx + dx, by + dy
+            if grid.reach is not None:
+                px, py = clamp_to(grid.reach, px, py)
+            if attempt and (subst or not poly.contains_with_margin(px, py, s.margin_mm / 2)):
                 continue
             self.control.checkpoint()
             z = self.probe.probe_z(px, py, safe_z=self._z_travel(s), feed=s.probe_feed,
@@ -99,6 +117,11 @@ class ProbeRunner:
             if z is not None and math.isfinite(z) and s.max_depth < z < s.safe_z:
                 self._top = z if self._top is None else max(self._top, z)
                 self._progress(grid, count)
+                if subst:
+                    result.substituted.append((grid.area.id, x, y, bx, by))
+                    result.log.append(f"{grid.area.id}: X{x:.2f} Y{y:.2f} nicht erreichbar – "
+                                      f"Ersatzmessung bei X{bx:.2f} Y{by:.2f}")
+                    return z, SUBSTITUTED
                 return z, (MEASURED if attempt == 1 else RETRIED)
         result.failures.append((grid.area.id, x, y))
         result.log.append(f"{grid.area.id}: kein Kontakt bei X{x:.2f} Y{y:.2f} nach {attempt} Versuch(en)")
@@ -159,8 +182,8 @@ class ProbeRunner:
             if budget <= 0 or rng < s.adaptive_threshold_mm:
                 break
             cx, cy = (hm.xs[i] + hm.xs[i + 1]) / 2, (hm.ys[j] + hm.ys[j + 1]) / 2
-            if not poly.contains_with_margin(cx, cy, s.margin_mm):
-                continue
+            if not poly.contains_with_margin(cx, cy, s.margin_mm) or not _reachable(grid, cx, cy):
+                continue   # Verfeinern nur, wo der Taster wirklich hinkommt
             z, st = self._measure(grid, cx, cy, s, result, count=False)
             budget -= 1
             result.adaptive_points += 1
@@ -190,10 +213,10 @@ class ProbeRunner:
             fine.status[2 * j + 1, 2 * i + 1] = MEASURED
         for (i, j) in refine:
             for (fi, fj) in ((2 * i + 1, 2 * j), (2 * i + 1, 2 * j + 2), (2 * i, 2 * j + 1), (2 * i + 2, 2 * j + 1)):
-                if fine.status[fj, fi] in (MEASURED, RETRIED) or budget <= 0:
+                if fine.status[fj, fi] in (MEASURED, RETRIED, SUBSTITUTED) or budget <= 0:
                     continue
                 x, y = xs2[fi], ys2[fj]
-                if not poly.contains_with_margin(x, y, s.margin_mm):
+                if not poly.contains_with_margin(x, y, s.margin_mm) or not _reachable(grid, x, y):
                     continue
                 z, st = self._measure(grid, x, y, s, result, count=False)
                 budget -= 1
@@ -205,7 +228,7 @@ class ProbeRunner:
         # Residuen der neuen Messungen in der Nähe (glatt statt Stufen)
         new_meas = [(xs2[fi], ys2[fj], float(fine.z[fj, fi]) - hm.z_at(xs2[fi], ys2[fj], "bicubic"))
                     for fj in range(len(ys2)) for fi in range(len(xs2))
-                    if (fi % 2 or fj % 2) and fine.status[fj, fi] in (MEASURED, RETRIED)]
+                    if (fi % 2 or fj % 2) and fine.status[fj, fi] in (MEASURED, RETRIED, SUBSTITUTED)]
         reach = float(max(np.diff(hm.xs).max() if nx > 1 else 0, np.diff(hm.ys).max() if ny > 1 else 0))
         for fj in range(len(ys2)):
             for fi in range(len(xs2)):

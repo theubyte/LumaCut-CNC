@@ -2,7 +2,8 @@
 
 * Raster je Bereich mit Randabstand (Tasterspitze fährt nie über die Kante)
 * Tasterversatz X −23 / Y +15: Punkte, deren Kopfposition außerhalb des
-  Fahrbereichs läge, werden übersprungen und gemeldet
+  Abtastbereichs läge, werden am nächsten erreichbaren Punkt gemessen
+  (Ersatzpunkt, Warnung, kein Abbruch – Anforderungen §2.4)
 * Reihenfolge: Bereiche per Nächster-Nachbar, innerhalb eines Bereichs eine
   Serpentine mit der günstigsten Einstiegsecke -> minimale Leerfahrt
 """
@@ -70,6 +71,17 @@ class ProbePoint:
     j: int          # Zeile im Raster
     x: float
     y: float
+    probe_x: Optional[float] = None   # Ersatzpunkt (nicht erreichbar, §2.4)
+    probe_y: Optional[float] = None
+
+    @property
+    def substituted(self) -> bool:
+        return self.probe_x is not None
+
+    @property
+    def at(self) -> tuple[float, float]:
+        """Wo der Taster tatsächlich misst."""
+        return (self.x, self.y) if self.probe_x is None else (self.probe_x, self.probe_y)
 
 
 @dataclass
@@ -79,6 +91,11 @@ class AreaGrid:
     ys: list[float]
     points: list[ProbePoint]          # in Fahrreihenfolge
     skipped: list[tuple[float, float, str]] = field(default_factory=list)
+    reach: Optional[Rect] = None      # erreichbare Laserpunkte (Ersatzpunkte klemmen hierhin)
+
+    @property
+    def substituted(self) -> list[ProbePoint]:
+        return [p for p in self.points if p.substituted]
 
 
 @dataclass
@@ -92,7 +109,7 @@ class ProbeJob:
         return [p for g in self.grids for p in g.points]
 
     def travel_mm(self, start=(0.0, 0.0)) -> float:
-        return path_length([(p.x, p.y) for p in self.points], start)
+        return path_length([p.at for p in self.points], start)
 
     def estimate_seconds(self, start=(0.0, 0.0), expected_surface_z: float = 3.0) -> float:
         """Dauer: XY-Fahrten + Z-Hub + G30 (schnell 432, langsam 216 mm/min)."""
@@ -102,14 +119,14 @@ class ProbeJob:
         for g in self.grids:
             first = True
             for p in g.points:
-                d = math.hypot(p.x - prev[0], p.y - prev[1])
+                d = math.hypot(p.at[0] - prev[0], p.at[1] - prev[1])
                 t += d / s.xy_speed_mm_s + 0.2  # Beschleunigung
                 lift = (s.safe_z - expected_surface_z) if first else s.hop_mm
                 t += lift / s.z_speed_mm_s            # anheben
                 t += lift / (432 / 60)                # G30 schnell runter
                 t += 2.0 / (s.z_speed_mm_s) + 2.0 / (s.probe_feed / 60)  # zurück + langsam
                 t += 2 * 23.0 / s.xy_speed_mm_s * 0.5  # Tasterversatz hin/zurück
-                prev = (p.x, p.y)
+                prev = p.at
                 first = False
         return t
 
@@ -171,24 +188,34 @@ def grid_for_area(area: ProbeArea, settings: ProbeSettings,
         spacing *= 1.25
         xs = _grid_axis(inner.xmin, inner.xmax, spacing)
         ys = _grid_axis(inner.ymin, inner.ymax, spacing)
-    ox, oy = settings.probe_offset_mm
+    reach = limits.probe_laser_rect(settings.probe_offset_mm)
     pts: dict[tuple[int, int], ProbePoint] = {}
     skipped: list[tuple[float, float, str]] = []
     for j, y in enumerate(ys):
         for i, x in enumerate(xs):
             if not poly.contains_with_margin(x, y, margin):
                 continue
-            head = (x - ox, y - oy)
-            if not limits.reachable(*head):
-                skipped.append((x, y, "Taster erreicht Punkt nicht (Versatz)"))
-                continue
-            pts[(i, j)] = ProbePoint(area.id, i, j, x, y)
+            pts[(i, j)] = _point(area.id, i, j, x, y, reach)
     if not pts:
         cx, cy = poly.centroid
-        if poly.contains(cx, cy) and limits.reachable(cx - ox, cy - oy):
+        if poly.contains(cx, cy):
             xs, ys = [cx], [cy]
-            pts[(0, 0)] = ProbePoint(area.id, 0, 0, cx, cy)
-    return AreaGrid(area, xs, ys, list(pts.values()), skipped)
+            pts[(0, 0)] = _point(area.id, 0, 0, cx, cy, reach)
+    return AreaGrid(area, xs, ys, list(pts.values()), skipped, reach)
+
+
+def _point(area_id: str, i: int, j: int, x: float, y: float, reach: Optional[Rect]) -> ProbePoint:
+    """Rasterpunkt; außerhalb des Abtastbereichs mit Ersatzpunkt (geklemmt)."""
+    if reach is None:
+        return ProbePoint(area_id, i, j, x, y)
+    px, py = clamp_to(reach, x, y)
+    if abs(px - x) <= 1e-6 and abs(py - y) <= 1e-6:
+        return ProbePoint(area_id, i, j, x, y)
+    return ProbePoint(area_id, i, j, x, y, px, py)
+
+
+def clamp_to(r: Rect, x: float, y: float) -> tuple[float, float]:
+    return (min(max(x, r.xmin), r.xmax), min(max(y, r.ymin), r.ymax))
 
 
 def _serpentine(grid: AreaGrid, start: tuple[float, float]) -> list[ProbePoint]:
@@ -216,7 +243,7 @@ def _serpentine(grid: AreaGrid, start: tuple[float, float]) -> list[ProbePoint]:
                             j = nj - 1 - j
                         if (i, j) in by:
                             order.append(by[(i, j)])
-                ln = path_length([(p.x, p.y) for p in order], start)
+                ln = path_length([p.at for p in order], start)
                 if ln < best_len:
                     best, best_len = order, ln
     return best
@@ -233,16 +260,30 @@ def plan_probe_job(areas: Sequence[ProbeArea], settings: Optional[ProbeSettings]
         if not g.points:
             warnings.append(f"Bereich {g.area.id}: kein abtastbarer Punkt (zu klein oder außer Reichweite).")
         elif g.skipped:
-            warnings.append(f"Bereich {g.area.id}: {len(g.skipped)} Punkt(e) wegen Tasterversatz übersprungen.")
+            warnings.append(f"Bereich {g.area.id}: {len(g.skipped)} Punkt(e) übersprungen.")
+    warn = substitution_note(grids)
+    if warn:
+        warnings.append(warn)
     remaining = [g for g in grids if g.points]
     ordered: list[AreaGrid] = []
     pos = start
     while remaining:
         # nächster Bereich = kleinste Distanz zu irgendeinem seiner Punkte
-        g = min(remaining, key=lambda g: min(math.hypot(p.x - pos[0], p.y - pos[1]) for p in g.points))
+        g = min(remaining, key=lambda g: min(math.hypot(p.at[0] - pos[0], p.at[1] - pos[1]) for p in g.points))
         remaining.remove(g)
         g.points = _serpentine(g, pos)
-        pos = (g.points[-1].x, g.points[-1].y)
+        pos = g.points[-1].at
         ordered.append(g)
     ordered += [g for g in grids if not g.points]
     return ProbeJob(settings, ordered, warnings)
+
+
+def substitution_note(grids: Sequence[AreaGrid]) -> str:
+    """Warnsatz für alle Ersatzpunkte (gleicher Wortlaut wie Pi/Android, §2.4)."""
+    from .reach import Box, Substitute, substitution_warning
+    subs = [Substitute(p.x, p.y, p.probe_x, p.probe_y) for g in grids for p in g.points
+            if p.substituted]
+    if not subs:
+        return ""
+    r = next(g.reach for g in grids if g.reach is not None)
+    return substitution_warning(subs, Box(r.xmin, r.ymin, r.xmax, r.ymax))
