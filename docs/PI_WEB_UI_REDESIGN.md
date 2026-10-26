@@ -157,3 +157,20 @@ Not-Aus-Bestätigung, Jog-Sperre ohne Homing, Rahmen fahren mit Laser **getrennt
 - **Rahmen pro Queue-Eintrag:** wäre ein eigener Op oder `queue_frame` sinnvoll? → Machine Agent.
 - Optional: Bett-Ansicht klickbar machen (Zielposition per `moveto`) – erst nach Sicherheitsreview.
 - Optional: E2E-Browser-Test (Playwright ist auf der Box nicht installiert; derzeit nur Screenshot-Prüfung).
+
+## 10. Phase 2 (2026-10-26): Nullpunkt oben rechts, Material-API, Phasen
+
+**Koordinaten:** X0/Y0 oben rechts (Endschalter), +X → links, +Y → unten/Tür. API-Werte bleiben rohe Maschinen-mm.
+- `#bedFlip` nutzt `translate(W,0) scale(-1,1)` (nur X gespiegelt); Texte liegen ungespiegelt in `#bedLabels`/`#bedAxes` (Bildschirm-x = W − x). Marker „0/0“ oben rechts, Pfeile „+X ←“, „+Y ↓“.
+- Jog-Kreuz: links X+, rechts X−, oben Y−, unten Y+. Tastatur: ← X+, → X−, ↑ Y−, ↓ Y+.
+- Safezone/Park/Probe-Punkte bleiben in Maschinen-mm im Flip-Group → erscheinen rechts/oben korrekt.
+- Kamera/Bild-Overlays: aktuell keine Kamera-UI. Wenn ergänzt: ebenfalls horizontal spiegeln (`scale(-1,1)`), Texte außerhalb.
+
+**Material (nur lesen, `GET /api/materials`):** `#materialSection` mit `#materialName`, `#materialThickness`, `#materialProcess` (Schneiden/Gravieren/Markieren), `#materialSettings` (Leistung % + S/255, mm/min + mm/s, Durchgänge = ceil(Dicke/Tiefe), Art, Zeilenabstand, Z je Durchgang), `#materialNote`, `#materialCompare` (liest `GET /api/jobs/<f>/content`, vergleicht häufigstes S/F der Laserbahnen), `#materialReload`, `#materialUnavailable`. Auswahl in `localStorage["lumacut.material"]`.
+Fallback: `features` ohne `"materials"` oder GET-Fehler/404 → Picker ausgeblendet, Hinweis auf `update.sh`.
+
+**Phasen:** `#phaseSteps` (home→probe→focus→job→park). Nutzt `s.phase`, falls vorhanden; sonst abgeleitet aus `job.state` + `job.probe` (probe done==total → Fokus).
+
+**TODO / API-Lücken:** (1) kein Endpunkt/Feld, um ein Material auf Auftrag/Warteschlange anzuwenden (Vorschlag: `op=autorun material_id=…` bzw. Queue-Feld) – Werte werden weiterhin in Studio/Android in den G-Code gebacken. (2) kein Status-Feld `phase` (Park nicht erkennbar). (3) Material anlegen/ändern (POST/PUT mit `base_revision`, 409) nicht in der Pi-UI. (4) Machine Agent empfiehlt Not-Aus ohne `confirm()` + Auto-Retry – bewusst nicht umgesetzt.
+
+**Tests/Mock:** `tests/test_pi_web_ui.py`; `tests/ui_mock_server.py` Szenarien `autorun`, `oldpi`, `/shot?material=…&thickness=…&process=…&compare=1`.

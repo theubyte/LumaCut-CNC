@@ -164,6 +164,8 @@ details.more>div{padding:0 14px 12px}
 .jogwrap{display:grid;grid-template-columns:3fr 1fr;gap:12px;margin-top:12px}
 .jog{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:8px;aspect-ratio:1/1;max-width:300px;width:100%}
 .jog button,.zjog button{font:750 17px var(--sans);min-height:64px;padding:4px;background:var(--surface-2)}
+.jog button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+.jog button small{font:600 10.5px var(--sans);color:var(--text-faint);letter-spacing:.2px}
 .jog .center{display:grid;place-items:center;border-radius:var(--radius-sm);border:1px dashed var(--border);
  color:var(--text-faint);font:700 13px var(--mono);text-align:center}
 .zjog{display:grid;grid-template-rows:1fr auto 1fr;gap:8px}
@@ -176,6 +178,19 @@ details.more>div{padding:0 14px 12px}
 
 /* Aufträge */
 .filebar{display:grid;grid-template-columns:1fr auto;gap:10px}
+.material{margin-top:4px}
+.matgrid{display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:8px}
+.matgrid label{display:grid;gap:4px;font-size:12px;color:var(--text-dim)}
+.matvals{margin-top:10px;grid-template-columns:repeat(auto-fit,minmax(98px,1fr));gap:8px}
+.matvals .metric{padding:9px 10px}
+.matvals .metric strong{font:700 16px var(--mono)}
+.matvals .metric em{display:block;font-style:normal;font-size:11px;color:var(--text-faint);margin-top:2px}
+.phases{grid-column:1/-1;display:flex;gap:6px;list-style:none;margin:2px 0 0;padding:0;flex-wrap:wrap}
+.phases li{flex:1 1 0;min-width:84px;text-align:center;font:650 12px var(--sans);padding:6px 8px;border-radius:999px;
+ border:1px solid var(--border);color:var(--text-faint);background:var(--surface)}
+.phases li.done{color:var(--accent);border-color:var(--accent-bg);background:var(--accent-bg)}
+.phases li.current{color:var(--accent-text);background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 3px rgba(76,212,176,.18)}
+.phases.is-error li{border-color:var(--danger-bg)}
 .queue{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
 .queue li{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;background:var(--surface);
  border:1px solid var(--border);border-radius:9px;padding:6px 6px 6px 12px;font-size:13.5px}
@@ -196,7 +211,7 @@ details.more>div{padding:0 14px 12px}
 .tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:transparent;color:var(--text-dim);
  white-space:nowrap;min-height:50px;padding:8px 16px}
 .tabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--accent)}
-.tabpanel[hidden]{display:none}
+.tabpanel[hidden],[hidden]{display:none!important}
 .split{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:20px;align-items:start}
 #zSettings{display:grid;gap:12px}
 #zSettings .muted{margin:0}
@@ -246,6 +261,9 @@ details.more>div{padding:0 14px 12px}
   <div class="bar" id="jobBar"><span id="jobProgress"></span></div>
   <span class="percent" id="jobPercent">—</span>
   <button class="danger small" id="abortJob" type="button">Abbrechen</button>
+  <ol class="phases" id="phaseSteps" hidden aria-label="Ein-Klick-Ablauf">
+   <li data-phase="home">Referenzieren</li><li data-phase="probe">Abtasten</li><li data-phase="focus">Fokus</li><li data-phase="job">Lasern</li><li data-phase="park">Parken</li>
+  </ol>
   <small id="jobDetails" style="grid-column:1/-1"></small>
  </div>
  <div class="banner estop-latched" id="estopBanner">
@@ -267,7 +285,7 @@ details.more>div{padding:0 14px 12px}
   <button class="primary" data-action="home" data-motion type="button">XYZ referenzieren (X/Y zuerst)</button>
   <div class="row">
    <button data-action="probe" data-motion data-needs-home type="button">Werkstück abtasten (G30)</button>
-   <button data-action="park" data-motion data-needs-home type="button">Parken (X0/Y0)</button>
+   <button data-action="park" data-motion data-needs-home type="button">Parken (X0/Y0 oben rechts)</button>
   </div>
  </div>
  <h3>Joggen · Schrittweite</h3>
@@ -279,9 +297,9 @@ details.more>div{padding:0 14px 12px}
  </div>
  <div class="jogwrap">
   <div class="jog">
-   <div></div><button data-axis="Y" data-direction="1" type="button" aria-label="Y plus">Y +</button><div></div>
-   <button data-axis="X" data-direction="-1" type="button" aria-label="X minus">X −</button><span class="center" id="jogInfo">XY<br>1 mm</span><button data-axis="X" data-direction="1" type="button" aria-label="X plus">X +</button>
-   <div></div><button data-axis="Y" data-direction="-1" type="button" aria-label="Y minus">Y −</button><div></div>
+   <div></div><button data-axis="Y" data-direction="-1" type="button" aria-label="Y minus (nach hinten, zu den Endschaltern)">Y −<small>↑ hinten</small></button><div></div>
+   <button data-axis="X" data-direction="1" type="button" aria-label="X plus (nach links)">X +<small>← links</small></button><span class="center" id="jogInfo">XY<br>1 mm</span><button data-axis="X" data-direction="-1" type="button" aria-label="X minus (nach rechts, zu den Endschaltern)">X −<small>rechts →</small></button>
+   <div></div><button data-axis="Y" data-direction="1" type="button" aria-label="Y plus (nach vorne, zur Tür)">Y +<small>↓ Tür</small></button><div></div>
   </div>
   <div class="zjog">
    <button data-axis="Z" data-direction="1" type="button" aria-label="Z plus">Z +</button>
@@ -289,7 +307,7 @@ details.more>div{padding:0 14px 12px}
    <button data-axis="Z" data-direction="-1" type="button" aria-label="Z minus">Z −</button>
   </div>
  </div>
- <p class="kbd">Tastatur: ← → X · ↑ ↓ Y · Bild↑/Bild↓ Z · 1/2/3 Schrittweite</p>
+ <p class="kbd">Nullpunkt X0/Y0 oben rechts (Endschalter) · +X fährt nach links, +Y zur Tür.<br>Tastatur: ← X+ · → X− · ↓ Y+ · ↑ Y− · Bild↑/Bild↓ Z · 1/2/3 Schrittweite</p>
  <p class="muted" id="jogHint" style="margin-top:6px">Joggen erst nach dem Referenzieren.</p>
  <h3>Zubehör über SKR</h3>
  <div class="row">
@@ -315,11 +333,12 @@ details.more>div{padding:0 14px 12px}
  </div>
  <p class="muted" id="board">Firmware noch nicht identifiziert</p>
  <div class="bed" aria-label="Arbeitsfläche">
-  <svg id="bed" viewBox="-14 -8 424 402" role="img" aria-label="Maschinenbett mit Safezone, Motiv und Kopfposition">
+  <svg id="bed" viewBox="-14 -18 438 410" role="img" aria-label="Maschinenbett von vorne gesehen: Nullpunkt oben rechts, mit Safezone, Motiv und Kopfposition">
    <defs>
     <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
      <rect width="8" height="8" fill="#1b1714"/><line x1="0" y1="0" x2="0" y2="8" stroke="#4a3b22" stroke-width="3"/></pattern>
     <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M10 0H0V10" fill="none" stroke="#18202b" stroke-width=".6"/></pattern>
+    <marker id="arrowHead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#93a1b5"/></marker>
     <pattern id="grid50" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0H0V50" fill="none" stroke="#243041" stroke-width=".9"/></pattern>
    </defs>
    <g id="bedFlip">
@@ -334,7 +353,9 @@ details.more>div{padding:0 14px 12px}
      <path d="M-14 0H14M0 -14V14" stroke="#f36b73" stroke-width="1.4"/>
     </g>
    </g>
+   <!-- Beschriftungen ungespiegelt (eigene Gruppe außerhalb von #bedFlip) -->
    <g id="bedLabels" fill="#66748a" font-size="11" font-family="ui-monospace,monospace"></g>
+   <g id="bedAxes" font-size="12" font-family="ui-monospace,monospace" font-weight="700"></g>
   </svg>
   <div class="legend">
    <span><i style="background:#4a3b22"></i>30-mm-Safezone</span>
@@ -357,6 +378,28 @@ details.more>div{padding:0 14px 12px}
   <select id="jobSelect" aria-label="Gespeicherte Aufträge"><option>Keine Dateien</option></select>
   <button class="ghost" id="deleteJob" type="button" title="Ausgewählten Auftrag löschen">Löschen</button>
  </div>
+ <section id="materialSection" class="material" aria-labelledby="hMaterial">
+  <h3 id="hMaterial">Material <small id="materialRevision" class="muted" style="text-transform:none;letter-spacing:0;font-weight:500"></small></h3>
+  <div id="materialUnavailable" class="hint" hidden>Materialdatenbank auf diesem Pi nicht verfügbar.</div>
+  <div id="materialPicker">
+   <div class="matgrid">
+    <label>Material<select id="materialName" aria-label="Material"></select></label>
+    <label>Dicke<select id="materialThickness" aria-label="Dicke"></select></label>
+   </div>
+   <div class="segmented" role="group" aria-label="Modus" id="materialProcess">
+    <button type="button" data-process="Schneiden" aria-pressed="true">Schneiden</button>
+    <button type="button" data-process="Gravieren" aria-pressed="false">Gravieren</button>
+    <button type="button" data-process="Markieren" aria-pressed="false">Markieren</button>
+   </div>
+   <div class="metrics matvals" id="materialSettings" aria-live="polite"></div>
+   <p class="muted" id="materialNote" style="margin-top:8px"></p>
+   <div class="row" style="margin-top:8px">
+    <button id="materialCompare" class="small" type="button" title="Leistung und Vorschub im ausgewählten G-Code mit dem Material vergleichen">Mit Auftrag abgleichen</button>
+    <button id="materialReload" class="small ghost" type="button">Liste neu laden</button>
+   </div>
+   <pre id="materialCheck" class="console" style="margin-top:8px;min-height:0" hidden></pre>
+  </div>
+ </section>
  <div class="stack" style="margin-top:10px">
   <div class="row">
    <button id="previewGeometry" type="button">Motiv analysieren</button>
@@ -476,8 +519,8 @@ details.more>div{padding:0 14px 12px}
     <p class="muted">Der native Marlin-Gateway ist absichtlich kein GRBL-Emulator. GRBL-Befehle wie <code>$$</code>, <code>$H</code> oder <code>?</code> sind hier ungültig.</p>
    </div>
    <div>
-    <div class="hint">LightBurn: zuerst <code>G28</code> referenzieren, danach nur über einer geeigneten Werkstückstelle <code>G30</code> ausführen. Ohne eingemessenen X/Y-Tasterversatz keine automatische Abtastung. „Job-Ende“ auf <code>M2</code> setzen: Laser aus → Z nur nach oben bis mindestens 20 mm → X0/Y0 in die L-förmige Safezone. <code>M5 I</code> bleibt der normale Laser-Aus-Befehl für Pausen zwischen Schnitten. Beide Aktionen benötigen kein Webinterface.</div>
-    <div class="hint warning">30-mm-Homing-Sicherheitszone: X=0–30 mm und Y=0–30 mm bleiben werkstückfrei. Schnittbewegungen sind nur bei X≥30 und Y≥30 erlaubt (nutzbar 360 × 340 mm bei Maschinenkoordinaten 390 × 370 mm). Maschinenreferenz G28 ausschließlich in frei zugänglicher Parkposition starten. Nach Einschalten ist die tatsächliche Kopfposition bis zum Homing unbekannt.</div>
+    <div class="hint">LightBurn: zuerst <code>G28</code> referenzieren, danach nur über einer geeigneten Werkstückstelle <code>G30</code> ausführen. Ohne eingemessenen X/Y-Tasterversatz keine automatische Abtastung. „Job-Ende“ auf <code>M2</code> setzen: Laser aus → Z nur nach oben bis mindestens 20 mm → X0/Y0 in die L-förmige Safezone (Schalterecke oben rechts). <code>M5 I</code> bleibt der normale Laser-Aus-Befehl für Pausen zwischen Schnitten. Beide Aktionen benötigen kein Webinterface.</div>
+    <div class="hint warning">30-mm-Homing-Sicherheitszone: X=0–30 mm (rechter Rand) und Y=0–30 mm (hinterer/oberer Rand) bleiben werkstückfrei. Nullpunkt X0/Y0 liegt oben rechts an den Endschaltern, +X fährt nach links, +Y zur Tür. Schnittbewegungen sind nur bei X≥30 und Y≥30 erlaubt (nutzbar 360 × 340 mm bei Maschinenkoordinaten 390 × 370 mm). Maschinenreferenz G28 ausschließlich in frei zugänglicher Parkposition starten. Nach Einschalten ist die tatsächliche Kopfposition bis zum Homing unbekannt.</div>
    </div>
   </div>
  </div>
@@ -660,6 +703,12 @@ function refreshUI(s){
  $("jobBar").className="bar "+cls;
  $("jobPercent").textContent=total>0||jobState==="complete"?Math.round(pct)+" %":"—";
  $("jobDetails").textContent=detail+(total>0?"  ·  Zeile "+line+" / "+total:"");
+ renderPhase(s);
+ if(Array.isArray(s.features)&&!s.features.includes("materials")&&materialState!=="off")
+  materialUnavailable("dieser Pi-Stand meldet kein Merkmal „materials“");
+ else if(Array.isArray(s.features)&&s.features.includes("materials")&&materialState==="off"&&!materialRetry){
+  materialRetry=true;loadMaterials().finally(()=>{materialRetry=false});
+ }
  $("activity").textContent={idle:"Bereit",job:"Auftrag aktiv",framing:"Rahmenfahrt"}[s.activity]||s.activity||"—";
  renderQueue(q,valid);
  $("queuePause").disabled=q.state!=="running";
@@ -728,24 +777,193 @@ $("queueAdd").onclick=ev=>{
 $("queuePause").onclick=ev=>call("queue_pause",{},ev.currentTarget);
 $("queueClear").onclick=ev=>{if(confirm("Alle nicht laufenden Einträge aus der Warteschlange entfernen?"))call("queue_clear",{},ev.currentTarget)};
 
+/* ---------- Ein-Klick-Phasen (home → probe → focus → job → park) ---------- */
+const PHASES=["home","probe","focus","job","park"];
+const PHASE_ALIAS={home:"home",homing:"home",probe:"probe",probing:"probe",focus:"focus",focusing:"focus",
+ job:"job",running:"job",laser:"job",park:"park",parking:"park",complete:"done",done:"done",
+ error:"error",aborted:"error",idle:null,"":null};
+function currentPhase(s){
+ // Bevorzugt ein vom Pi geliefertes Feld `phase` (falls künftig vorhanden),
+ // sonst aus job.state + job.probe abgeleitet (op=autorun meldet homing → probing → running).
+ if(typeof s?.phase==="string")return s.phase.toLowerCase() in PHASE_ALIAS?PHASE_ALIAS[s.phase.toLowerCase()]:null;
+ const st=s?.job?.state||"idle",probe=s?.job?.probe,auto=probe!=null&&typeof probe==="object";
+ if(st==="homing")return "home";
+ if(st==="probing")return probe&&probe.total>0&&probe.done>=probe.total?"focus":"probe";
+ if(!auto)return null;
+ return {running:"job",complete:"done",error:"error",aborted:"error"}[st]||null;
+}
+function renderPhase(s){
+ const ph=currentPhase(s),box=$("phaseSteps");
+ box.hidden=!ph;
+ if(!ph)return;
+ const idx=ph==="done"?PHASES.length:PHASES.indexOf(ph);
+ for(const li of box.children){
+  const i=PHASES.indexOf(li.dataset.phase);
+  li.classList.toggle("done",idx>=0&&i<idx);
+  li.classList.toggle("current",i===idx);
+  li.removeAttribute("aria-current");if(i===idx)li.setAttribute("aria-current","step");
+ }
+ const pr=s?.job?.probe;
+ const probeLi=box.querySelector('[data-phase="probe"]');
+ probeLi.textContent="Abtasten"+(pr&&pr.total?" "+Math.min(pr.done,pr.total)+"/"+pr.total:"");
+ box.classList.toggle("is-error",ph==="error");
+}
+
+/* ---------- Materialdatenbank (/api/materials, nur lesen) ---------- */
+let materials=null,materialRevision=null,materialState="unknown",materialRetry=false,fileSizes={};
+const MAT_KEY="lumacut.material";
+const MAT_MODE={line:"Linie",fill:"Füllen"};
+function materialPasses(m){
+ const d=Number(m.depth_per_pass_mm)||0,t=Number(m.thickness_mm)||0;
+ return d>0&&t>0?{n:Math.max(1,Math.ceil(t/d-1e-9)),auto:true}:{n:Math.max(1,Number(m.passes)||1),auto:false};
+}
+function materialUnavailable(reason){
+ materialState="off";materials=null;
+ $("materialPicker").hidden=true;
+ const box=$("materialUnavailable");box.hidden=false;
+ box.textContent="Materialdatenbank nicht verfügbar: "+reason+". Pi-Dienst ggf. aktualisieren (sudo bash /opt/lumacut/pi400/update.sh). Aufträge funktionieren weiterhin.";
+ $("materialRevision").textContent="";
+}
+async function loadMaterials(button=null){
+ try{
+  const r=await withPending(button,()=>api("/api/materials"));
+  if(!Array.isArray(r.materials))throw Error("Antwort ohne Liste „materials“");
+  materials=r.materials.filter(m=>m&&typeof m.name==="string"&&m.name.trim());
+  materialRevision=r.revision??null;materialState="on";
+  $("materialUnavailable").hidden=true;$("materialPicker").hidden=false;
+  $("materialRevision").textContent=materials.length+" Einträge"+(materialRevision!=null?" · Rev. "+materialRevision:"");
+  renderMaterials();
+ }catch(e){
+  const msg=String(e.message||"");
+  materialUnavailable(/^\s*</.test(msg)||/404|Not Found/i.test(msg)?"Endpunkt /api/materials fehlt (älterer Pi-Stand)":msg.slice(0,160));
+ }
+}
+function matSel(){try{return JSON.parse(localStorage.getItem(MAT_KEY)||"{}")||{}}catch{return {}}}
+function saveMatSel(v){try{localStorage.setItem(MAT_KEY,JSON.stringify(v))}catch{}}
+const thick=m=>Number(m.thickness_mm);
+function fillSelect(sel,values,current,label){
+ sel.replaceChildren();for(const v of values)sel.append(new Option(label(v),String(v)));
+ if(values.map(String).includes(String(current)))sel.value=String(current);
+}
+function renderMaterials(){
+ if(!materials)return;
+ const want=matSel();
+ const names=[...new Set(materials.map(m=>m.name.trim()))].sort((a,b)=>a.localeCompare(b,"de"));
+ if(!names.length){$("materialSettings").replaceChildren();$("materialNote").textContent="Keine Materialien auf dem Pi gespeichert.";return}
+ fillSelect($("materialName"),names,want.name,v=>v);
+ const name=$("materialName").value;
+ const ofName=materials.filter(m=>m.name.trim()===name);
+ const ts=[...new Set(ofName.map(thick))].filter(isFinite).sort((a,b)=>a-b);
+ fillSelect($("materialThickness"),ts,want.thickness,v=>String(v).replace(".",",")+" mm");
+ const t=Number($("materialThickness").value);
+ const ofT=ofName.filter(m=>thick(m)===t);
+ const procs=new Set(ofT.map(m=>m.process));
+ let proc=want.process&&procs.has(want.process)?want.process:(procs.has("Schneiden")?"Schneiden":[...procs][0]);
+ for(const b of $$("#materialProcess [data-process]")){
+  b.disabled=!procs.has(b.dataset.process);
+  b.setAttribute("aria-pressed",String(b.dataset.process===proc));
+ }
+ saveMatSel({name,thickness:t,process:proc});
+ showMaterial(ofT.find(m=>m.process===proc)||null);
+}
+let currentMaterial=null;
+function showMaterial(m){
+ currentMaterial=m;$("materialCheck").hidden=true;
+ const box=$("materialSettings");box.replaceChildren();
+ if(!m){$("materialNote").textContent="Für diese Kombination ist kein Eintrag vorhanden.";return}
+ const p=materialPasses(m),z=Number(m.z_step_mm)||0,pw=Number(m.power_pct),sp=Number(m.speed_mm_min);
+ const vals=[
+  ["Leistung",fmt(pw,0)+" %","S "+Math.round(pw*2.55)+" / 255"],
+  ["Geschwindigkeit",fmt(sp,0),"mm/min · "+fmt(sp/60,1)+" mm/s"],
+  ["Durchgänge",String(p.n),p.auto?"Dicke ÷ "+fmt(m.depth_per_pass_mm,2)+" mm":"fest"],
+  ["Art",MAT_MODE[m.mode]||m.mode||"—",m.process||""]];
+ if(m.mode==="fill")vals.push(["Zeilenabstand",fmt(m.interval_mm,2)+" mm",fmt(25.4/(Number(m.interval_mm)||0.1),0)+" LPI"]);
+ if(z>0)vals.push(["Z je Durchgang",fmt(z,2)+" mm","gesamt "+fmt((p.n-1)*z,2)+" mm"]);
+ for(const [k,v,sub] of vals){
+  const d=document.createElement("div");d.className="metric";
+  d.innerHTML="<small></small><strong></strong><em></em>";
+  d.children[0].textContent=k;d.children[1].textContent=v;d.children[2].textContent=sub;box.append(d);
+ }
+ $("materialNote").textContent=(m.builtin?"Startwert – auf der Maschine testen. ":"")+
+  "Die Werte steuern die G-Code-Erzeugung in LumaCut Studio/Android. Der Pi wendet sie nicht auf hochgeladenen G-Code an; „Mit Auftrag abgleichen“ prüft die Datei.";
+}
+$("materialName").onchange=()=>{const v=matSel();saveMatSel({...v,name:$("materialName").value,thickness:null});renderMaterials()};
+$("materialThickness").onchange=()=>{saveMatSel({...matSel(),thickness:Number($("materialThickness").value)});renderMaterials()};
+for(const b of $$("#materialProcess [data-process]"))
+ b.onclick=()=>{saveMatSel({...matSel(),process:b.dataset.process});renderMaterials()};
+$("materialReload").onclick=ev=>loadMaterials(ev.currentTarget);
+function analyseGcode(text){
+ // Laserleistung (S) und Vorschub (F) der Laserbahnen: G1 mit S>0, modale Werte wie Marlin.
+ let mode=0,F=null,S=0,cut=0;const sv=new Map(),fv=new Map();
+ for(let raw of text.split(/\r?\n/)){
+  const line=raw.replace(/\(.*?\)/g,"").split(";")[0].toUpperCase();
+  if(!line.trim())continue;
+  for(const [,l,v] of line.matchAll(/([GFS])\s*(-?[\d.]+)/g)){
+   const n=Number(v);if(l==="G"&&(n===0||n===1))mode=n;else if(l==="F")F=n;else if(l==="S")S=n;
+  }
+  if(/M5\b/.test(line))S=0;
+  if(mode===1&&S>0&&/[XY]/.test(line)){cut++;sv.set(S,(sv.get(S)||0)+1);if(F!=null)fv.set(F,(fv.get(F)||0)+1)}
+ }
+ const top=m=>[...m.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null;
+ return {cut,sMax:sv.size?Math.max(...sv.keys()):null,sTop:top(sv),fTop:top(fv),fCount:fv.size,sCount:sv.size};
+}
+$("materialCompare").onclick=async ev=>{
+ const name=selectedJob(),m=currentMaterial,out=$("materialCheck");
+ if(!name){show("Erst G-Code hochladen und auswählen",true);return}
+ if(!m){show("Kein Material ausgewählt",true);return}
+ if((fileSizes[name]||0)>8*1024*1024){show("Datei zu groß für den Abgleich im Browser (> 8 MB)",true);return}
+ try{
+  const text=await withPending(ev.currentTarget,async()=>{
+   const r=await fetch("/api/jobs/"+encodeURIComponent(name)+"/content",{cache:"no-store"});
+   if(!r.ok){let t=await r.text();try{t=JSON.parse(t).error||t}catch{};throw Error(String(t).slice(0,200))}
+   return r.text();
+  });
+  const a=analyseGcode(text);
+  if(!a.cut){out.hidden=false;out.textContent="Keine Laserbahnen (G1 mit S>0) gefunden.";return}
+  const pct=a.sTop/255*100,okP=Math.abs(pct-Number(m.power_pct))<=2,okF=a.fTop!=null&&Math.abs(a.fTop-Number(m.speed_mm_min))<=Number(m.speed_mm_min)*0.05;
+  out.hidden=false;
+  out.textContent=
+   name+" · "+a.cut+" Laserbahnen\n"+
+   "Leistung: meist S "+fmt(a.sTop,0)+" ("+fmt(pct,0)+" %)"+(a.sCount>1?", max S "+fmt(a.sMax,0):"")+
+     "  →  Material "+fmt(m.power_pct,0)+" %  "+(okP?"✓ passt":"≠ weicht ab")+"\n"+
+   "Vorschub: meist F "+(a.fTop==null?"—":fmt(a.fTop,0))+" mm/min"+
+     "  →  Material "+fmt(m.speed_mm_min,0)+"  "+(okF?"✓ passt":"≠ weicht ab")+"\n"+
+   "Durchgänge laut Material: "+materialPasses(m).n+" (im G-Code nicht sicher erkennbar)";
+ }catch(e){out.hidden=false;out.textContent=e.message;show(e.message,true)}
+};
+
 /* ---------- Arbeitsfläche ---------- */
 function drawBed(s){
+ // Ansicht von vorne: X0/Y0 (Endschalter) oben rechts, +X nach links, +Y nach unten (Tür).
+ // #bedFlip enthält alles in rohen Maschinen-mm; nur dort wird X gespiegelt.
+ // Texte/Pfeile liegen in #bedLabels/#bedAxes in Bildschirmkoordinaten (sx = W − x).
  const tr=s?.config?.travels||{x:390,y:370};
  const W=Number(tr.x)||390,H=Number(tr.y)||370,safe=Number(s?.safe_zone_xy_mm)||30;
  const svg=$("bed");
- svg.setAttribute("viewBox",(-14)+" "+(-8)+" "+(W+34)+" "+(H+32));
- $("bedFlip").setAttribute("transform","translate(0,"+H+") scale(1,-1)");
+ svg.setAttribute("viewBox",(-14)+" "+(-18)+" "+(W+48)+" "+(H+40));
+ $("bedFlip").setAttribute("transform","translate("+W+",0) scale(-1,1)");
  for(const id of ["bedArea","bedGrid","bedGrid50"]){$(id).setAttribute("width",W);$(id).setAttribute("height",H)}
+ // Sperrzone X<safe oder Y<safe in Maschinen-mm → erscheint als Streifen rechts und oben.
  $("bedSafe").setAttribute("d","M0 0H"+W+"V"+safe+"H"+safe+"V"+H+"H0Z");
- $("bedInfo").textContent="Nutzbar X"+safe+"–"+W+" · Y"+safe+"–"+H+" mm";
- const labels=$("bedLabels");
- if(labels.dataset.size!==W+"x"+H){
-  labels.dataset.size=W+"x"+H;labels.replaceChildren();
-  const add=(x,y,t,anchor="middle")=>{const el=document.createElementNS("http://www.w3.org/2000/svg","text");
-   el.setAttribute("x",x);el.setAttribute("y",y);el.setAttribute("text-anchor",anchor);el.textContent=t;labels.append(el)};
-  for(let x=0;x<=W;x+=100)add(x,H+14,String(x));
-  for(let y=100;y<=H;y+=100)add(-3,H-y+4,String(y),"end");
-  add(W+2,H+14,"X","start");add(-3,-1,"Y","end");
+ $("bedInfo").textContent="Nutzbar X"+safe+"–"+W+" · Y"+safe+"–"+H+" mm · 0/0 oben rechts";
+ const labels=$("bedLabels"),axes=$("bedAxes");
+ if(labels.dataset.size!==W+"x"+H+"/"+safe){
+  labels.dataset.size=W+"x"+H+"/"+safe;labels.replaceChildren();axes.replaceChildren();
+  const NS="http://www.w3.org/2000/svg";
+  const el=(tag,attrs,parent,text)=>{const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;parent.append(e);return e};
+  const add=(x,y,t,anchor="middle")=>el("text",{x,y,"text-anchor":anchor},labels,t);
+  for(let x=100;x<=W;x+=100)add(W-x,H+14,String(x));          // X-Skala unten, wächst nach links
+  for(let y=100;y<=H;y+=100)add(W+4,y+4,String(y),"start");    // Y-Skala rechts, wächst nach unten
+  add(W,H+14,"0","middle");
+  // Nullpunkt-Marker oben rechts
+  el("circle",{cx:W,cy:0,r:4.5,fill:"#4cd4b0",stroke:"#0b0e13","stroke-width":1.5},axes);
+  el("text",{x:W-7,y:-6,"text-anchor":"end",fill:"#4cd4b0"},axes,"0/0");
+  // Richtungspfeile im Bett, innerhalb der Safezone-Ecke beginnend
+  const ox=W-safe-8,oy=safe+8;
+  el("line",{x1:ox,y1:oy,x2:ox-52,y2:oy,stroke:"#93a1b5","stroke-width":1.6,"marker-end":"url(#arrowHead)"},axes);
+  el("line",{x1:ox,y1:oy,x2:ox,y2:oy+52,stroke:"#93a1b5","stroke-width":1.6,"marker-end":"url(#arrowHead)"},axes);
+  el("text",{x:ox-66,y:oy+4,"text-anchor":"end",fill:"#93a1b5"},axes,"+X ←");
+  el("text",{x:ox,y:oy+72,"text-anchor":"middle",fill:"#93a1b5"},axes,"+Y ↓");
  }
  const head=$("bedHead"),pos=s?.position;
  if(Array.isArray(pos)&&s.homed){head.setAttribute("visibility","visible");head.setAttribute("transform","translate("+pos[0]+","+pos[1]+")")}
@@ -775,6 +993,7 @@ async function files(){
   sel.replaceChildren();
   for(const item of r.files){
    const kb=item.bytes!=null?" ("+Math.max(1,Math.round(item.bytes/1024))+" KB)":"";
+   fileSizes[item.name]=item.bytes||0;
    const opt=new Option(item.name+kb,item.name);sel.append(opt)}
   if(!r.files.length)sel.append(new Option("Keine Dateien","Keine Dateien"));
   if(r.files.some(o=>o.name===current))sel.value=current;
@@ -884,7 +1103,8 @@ async function jog(b){
 }
 for(const b of document.querySelectorAll("[data-axis]"))
  b.onclick=()=>jog(b);
-const KEYS={ArrowLeft:["X",-1],ArrowRight:["X",1],ArrowUp:["Y",1],ArrowDown:["Y",-1],PageUp:["Z",1],PageDown:["Z",-1]};
+// Nullpunkt oben rechts: Pfeil zeigt die Fahrtrichtung des Kopfes (← = X+, ↓ = Y+ zur Tür).
+const KEYS={ArrowLeft:["X",1],ArrowRight:["X",-1],ArrowUp:["Y",-1],ArrowDown:["Y",1],PageUp:["Z",1],PageDown:["Z",-1]};
 document.addEventListener("keydown",ev=>{
  const t=ev.target;
  if(ev.altKey||ev.ctrlKey||ev.metaKey||t.closest?.("input,select,textarea,[role=tab]"))return;
@@ -942,7 +1162,8 @@ const hashTab=tabs.find(t=>"#"+t.getAttribute("aria-controls")===location.hash);
 if(hashTab)openTab(hashTab);
 
 drawBed(null);
-refresh();files()
+refresh();files();loadMaterials();
+setInterval(()=>{if(materialState==="on")loadMaterials()},60000);
 setInterval(refresh,1800);
 setInterval(files,12000);
 </script>
