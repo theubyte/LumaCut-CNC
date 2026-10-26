@@ -371,3 +371,78 @@ def test_relief_raster_with_layer_step_down():
     assert res.report.focus_offset_min == pytest.approx(-drop, abs=1e-3)
     assert res.report.z_min == pytest.approx(3 + FOCUS - drop, abs=0.01)
     assert "G91" not in res.gcode
+
+
+# ------------------------------------------------------- Bildobjekte (Raster/3D)
+def _image(doc, x, y, w, h, **settings):
+    from PySide6.QtGui import QColor, QImage
+    from lumacut_canvas.model import Geometry, ImageSettings, RasterImage, Shape
+    from lumacut_import.image import grayscale_png
+    img = QImage(40, 20, QImage.Format_RGB32)
+    for px in range(40):
+        for py in range(20):
+            v = int(255 * px / 39)
+            img.setPixelColor(px, py, QColor(v, v, v))
+    png, pw, ph = grayscale_png(img)
+    sh = Shape("image", Geometry(x, y, w, h), doc.active_layer_id,
+               image=RasterImage(png, pw, ph, ImageSettings(**settings)))
+    doc.add_shape(sh)
+    return sh
+
+
+def _union_mesh_rect(doc):
+    from lumacut_canvas.workarea import to_machine
+    bs = [s.bounds() for s in doc.shapes]
+    x0, y0 = to_machine(min(b.x for b in bs), min(b.y for b in bs))
+    x1, y1 = to_machine(max(b.x + b.w for b in bs), max(b.y + b.h for b in bs))
+    return Rect(x0 - 1, y0 - 1, x1 + 1, y1 + 1)
+
+
+@pytest.mark.parametrize("mode", ["grayscale", "floyd", "depth3d"])
+def test_image_jobs_through_focus_compensation(qapp, mode):
+    """Bild-Raster/3D-Tiefe aus dem Planer: S0-Overscan zählt nicht als Brennstrecke,
+    3D-Fokusabsenkung wird auf das Mesh-Z aufgerechnet, Vektorebene startet wieder im Fokus."""
+    from lumacut_canvas.model import Document, Geometry, Layer, Shape
+    from lumacut_job.planner import optimized_document_gcode
+    d = Document()
+    d.add_layer(Layer("Ebene 1"))
+    extra = {"z_step_mm": 0.3, "depth_levels": 4} if mode == "depth3d" else {}
+    _image(d, 80, 80, 40, 20, mode=mode, line_interval_mm=0.5, overscan_mm=5, **extra)
+    d.add_shape(Shape("rect", Geometry(90, 110, 20, 20), d.active_layer_id))
+    src = optimized_document_gcode(d)
+    assert precheck_gcode(src) == []
+    flat = fake_maps(rect=_union_mesh_rect(d), z_fn=lambda x, y: 3.0)
+    res = compensate_for_export(src, flat)
+    assert res.ok, res.errors
+    assert res.coverage.outside_mm == 0          # Overscan (S0) liegt außerhalb, zählt aber nicht
+    out = res.gcode
+    assert "G91" not in out and out.index("; IMAGE") < out.index("; LAYER")
+    drop = 0.3 * 3 if mode == "depth3d" else 0.0
+    assert res.report.focus_offset_min == pytest.approx(-drop, abs=1e-3)
+    assert res.report.z_min == pytest.approx(3 + FOCUS - drop, abs=0.01)
+    after = zs(out.split("; LAYER")[1])   # Z wird nur bei Änderung ausgegeben
+    assert all(z == pytest.approx(3 + FOCUS, abs=0.01) for z in after)
+    assert after or mode != "depth3d"
+
+
+def test_scan_overlay_with_image_object(panel, editor):
+    """Bildobjekt: Probe-Bereich aus seinen Grenzen, Overlay darüber, Klick/Touch trifft das Bild."""
+    from PySide6.QtCore import QPointF
+    sh = _image(editor.document, 80, 80, 40, 20, mode="grayscale", line_interval_mm=0.5)
+    editor.documentChanged.emit()
+    (b,) = panel.design_bounds()
+    assert b.xmax - b.xmin == pytest.approx(40, abs=0.01) and b.ymax - b.ymin == pytest.approx(20, abs=0.01)
+    panel.design_only.setChecked(True)
+    assert panel.start_scan() and panel.wait(60000)
+    assert panel.start_probe() and panel.wait(60000) and panel.last_error == ""
+    assert panel.maps is not None and panel.maps.map_for((b.xmin + b.xmax) / 2, (b.ymin + b.ymax) / 2)
+    img_item = editor.scene.items_by_id[sh.id]
+    assert panel.overlay.heat_item.zValue() > img_item.zValue()
+    centre = QPointF(100, 90)
+    assert editor.scene.editable_shape_at(centre) == sh.id
+    editor.set_touch_mode(True, persist=False)
+    try:
+        assert editor.scene.editable_shape_at(centre) == sh.id
+        assert not editor.view._empty_background(QPointF(editor.view.mapFromScene(centre)))
+    finally:
+        editor.set_touch_mode(False, persist=False)
