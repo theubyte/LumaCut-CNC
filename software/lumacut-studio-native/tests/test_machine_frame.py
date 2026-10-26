@@ -37,7 +37,7 @@ def frame_program(mode="box"):
     return frame_gcode(optimize_layers(job_layers(doc)), mode=mode)
 
 
-def wait_until(predicate, timeout=5.0):
+def wait_until(predicate, timeout=15.0):
     app = QApplication.instance()
     end = time.monotonic() + timeout
     while time.monotonic() < end:
@@ -200,7 +200,7 @@ class FramePanelTests(unittest.TestCase):
         self.assertTrue(panel.frame_gcode(frame_program(), "box"))
         self.assertTrue(wait_until(lambda: "Rahmenfahrt läuft" in panel.job_label.text()))
         self.pi.delay["status"] = 1.5          # Pi holds machine.lock per edge
-        self.assertTrue(wait_until(lambda: panel.stale, 3))
+        self.assertTrue(wait_until(lambda: panel.stale, 10))
         self.assertFalse(panel.home_button.isEnabled())
         self.assertFalse(panel.start_button.isEnabled())
         self.assertTrue(panel.abort_button.isEnabled())

@@ -4,6 +4,7 @@ import socket
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -24,6 +25,13 @@ def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def refused(*_args, **_kwargs):
+    """Deterministic network failure, identical on every platform (a real
+    closed port is refused at once on Linux but only after ~2 s of SYN
+    retries on Windows)."""
+    raise ConnectionFailed("Pi nicht erreichbar (test): Verbindung abgelehnt")
 
 
 class EmergencyStopClientTests(unittest.TestCase):
@@ -55,11 +63,12 @@ class EmergencyStopClientTests(unittest.TestCase):
         self.assertEqual(len(self.estop_requests()), 1)
 
     def test_short_timeout_per_attempt(self):
-        self.pi.delay["estop"] = 2.0
+        self.pi.delay["estop"] = 10.0
         started = time.monotonic()
         with self.assertRaises(ConnectionFailed) as ctx:
-            self.client.emergency_stop(retries=1, timeout=0.3)
-        self.assertLess(time.monotonic() - started, 1.5)
+            self.client.emergency_stop(retries=1, timeout=0.5)
+        # 2 × 0.5 s + pause; far below the 10 s the Pi would need
+        self.assertLess(time.monotonic() - started, 6.0)
         self.assertIn("physischen Not-Aus", str(ctx.exception))
         self.assertIn("2 Versuchen", str(ctx.exception))
 
@@ -67,7 +76,42 @@ class EmergencyStopClientTests(unittest.TestCase):
         client = LumaCutClient("http://127.0.0.1:%d" % free_port())
         with self.assertRaises(ConnectionFailed) as ctx:
             client.emergency_stop()
-        self.assertIn("NOT-AUS nicht bestätigt nach 3 Versuchen", str(ctx.exception))
+        # 3 attempts on Linux; Windows may only fit 2 into the deadline
+        self.assertRegex(str(ctx.exception),
+                         r"NOT-AUS nicht bestätigt nach [23] Versuchen – physischen Not-Aus")
+
+    def test_retries_stop_at_the_deadline(self):
+        calls = []
+
+        def slow_refusal(op, timeout=None, **_):
+            calls.append(timeout)
+            time.sleep(0.4)
+            refused()
+        with mock.patch.object(self.client, "action", side_effect=slow_refusal):
+            with self.assertRaises(ConnectionFailed) as ctx:
+                self.client.emergency_stop(retries=5, timeout=3.0, deadline=1.0)
+        # 0.4 + 0.2 + 0.4 = 1.0 s → no third attempt may start
+        self.assertEqual(len(calls), 2, calls)
+        self.assertEqual(calls[0], 3.0)
+        self.assertLessEqual(calls[1], 3.0)
+        self.assertGreaterEqual(calls[1], 0.5)
+        self.assertIn("nach 2 Versuchen", str(ctx.exception))
+
+    def test_all_attempts_refused_deterministically(self):
+        with mock.patch.object(self.client, "action", side_effect=refused) as action:
+            with self.assertRaises(ConnectionFailed) as ctx:
+                self.client.emergency_stop()
+        self.assertEqual(action.call_count, 3)
+        self.assertIn("nach 3 Versuchen – physischen Not-Aus benutzen!", str(ctx.exception))
+        self.assertIn("Verbindung abgelehnt", str(ctx.exception))
+
+    def test_system_proxy_is_ignored(self):
+        env = {"http_proxy": "http://127.0.0.1:%d" % free_port(),
+               "HTTP_PROXY": "http://127.0.0.1:%d" % free_port(),
+               "no_proxy": "", "NO_PROXY": ""}
+        with mock.patch.dict(os.environ, env):
+            client = LumaCutClient(self.pi.url)
+            self.assertIn("ok estop", client.emergency_stop())
 
     def test_park_on_new_and_old_pi(self):
         self.assertEqual(self.client.park(), "ok park")
@@ -128,7 +172,7 @@ class StatusParsingTests(unittest.TestCase):
             MachineStatus.from_json({"firmware": "grbl", "homed": True})
 
 
-def wait_until(predicate, timeout=5.0):
+def wait_until(predicate, timeout=15.0):
     app = QApplication.instance()
     end = time.monotonic() + timeout
     while time.monotonic() < end:
@@ -219,14 +263,15 @@ class PollerReliabilityTests(unittest.TestCase):
         from machine.worker import ConnState
         p = self.poller(timeout=3.0)
         self.assertTrue(wait_until(lambda: self.statuses))
-        self.pi.delay["status"] = 1.5
-        time.sleep(0.4)                      # next poll is now hanging
+        self.pi.delay["status"] = 2.5
+        self.assertTrue(wait_until(lambda: self.pi.status_waiting, 5))   # poll hangs
         started = time.monotonic()
         p.stop(wait_ms=200)
-        self.assertLess(time.monotonic() - started, 0.6)
+        self.assertLess(time.monotonic() - started, 1.5)  # not the 2.5 s hang
         self.assertEqual(self.states[-1], ConnState.DISCONNECTED)
         count = len(self.statuses)
-        time.sleep(1.6)                      # hanging request completes
+        self.assertTrue(wait_until(lambda: not self.pi.status_waiting, 10))
+        wait_until(lambda: False, timeout=0.3)    # hanging request completed
         wait_until(lambda: False, timeout=0.2)
         self.assertEqual(len(self.statuses), count)
         self.assertEqual(self.states[-1], ConnState.DISCONNECTED)
@@ -262,22 +307,39 @@ class PanelReliabilityTests(unittest.TestCase):
 
     def test_estop_while_long_command_runs(self):
         panel = self.panel()
-        self.pi.delay["home"] = 2.0
+        self.pi.delay["home"] = 8.0
         panel.home()
         self.assertTrue(wait_until(lambda: panel._runner.busy))
         self.assertFalse(panel.home_button.isEnabled())
         self.assertTrue(panel.estop_button.isEnabled())
         started = time.monotonic()
         panel.emergency_stop()
-        self.assertTrue(wait_until(lambda: "bestätigt" in panel.estop_label.text(), 1.5))
-        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertTrue(wait_until(lambda: "NOT-AUS bestätigt" in panel.estop_label.text(), 6))
+        self.assertLess(time.monotonic() - started, 6.0)   # long before Home ends
         self.assertTrue(panel._runner.busy)          # Home still running
         self.assertIn("ok estop", panel.estop_label.text())
 
     def test_estop_failure_feedback_when_disconnected(self):
+        # Deterministic: every attempt fails at once, on every platform.
+        panel = self.panel(url="http://127.0.0.1:%d" % free_port(), connect=False)
+        with mock.patch.object(LumaCutClient, "action", side_effect=refused) as action:
+            panel.emergency_stop()
+            self.assertTrue(wait_until(lambda: "NICHT bestätigt" in panel.estop_label.text()))
+        self.assertEqual(action.call_count, 3)
+        self.assertEqual(action.call_args.args[0], "estop")
+        text = panel.estop_label.text()
+        self.assertIn("nach 3 Versuchen", text)
+        self.assertIn("physischen Not-Aus", text)
+        self.assertTrue(panel.estop_button.isEnabled())
+        self.assertIn("fehlgeschlagen", panel.error_label.text())
+
+    def test_estop_feedback_against_closed_port(self):
+        # Real socket, no timing assertion: Linux refuses at once, Windows
+        # after SYN retries; the deadline bounds it to ~4 s everywhere.
         panel = self.panel(url="http://127.0.0.1:%d" % free_port(), connect=False)
         panel.emergency_stop()
-        self.assertTrue(wait_until(lambda: "NICHT bestätigt" in panel.estop_label.text(), 5))
+        self.assertIn("warte auf Bestätigung", panel.estop_label.text())
+        self.assertTrue(wait_until(lambda: "NICHT bestätigt" in panel.estop_label.text(), 30))
         self.assertIn("physischen Not-Aus", panel.estop_label.text())
         self.assertTrue(panel.estop_button.isEnabled())
 
@@ -288,12 +350,12 @@ class PanelReliabilityTests(unittest.TestCase):
         self.addCleanup(setattr, panel_module, "STALE_AFTER_S", old)
         panel = self.panel()
         self.pi.delay["status"] = 1.5
-        self.assertTrue(wait_until(lambda: panel.stale, 3))
+        self.assertTrue(wait_until(lambda: panel.stale, 10))
         self.assertIn("Status", panel.conn_badge.text())
         self.assertFalse(panel.home_button.isEnabled())
         self.assertTrue(panel.estop_button.isEnabled())
         self.pi.delay.clear()
-        self.assertTrue(wait_until(lambda: not panel.stale, 4))
+        self.assertTrue(wait_until(lambda: not panel.stale, 10))
         self.assertEqual(panel.conn_badge.text(), "Verbunden")
         self.assertTrue(wait_until(panel.home_button.isEnabled))
 

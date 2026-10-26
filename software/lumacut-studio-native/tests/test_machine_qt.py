@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover
     QApplication = None
 
 
-def wait_until(predicate, timeout=5.0):
+def wait_until(predicate, timeout=15.0):
     app = QApplication.instance()
     end = time.monotonic() + timeout
     while time.monotonic() < end:

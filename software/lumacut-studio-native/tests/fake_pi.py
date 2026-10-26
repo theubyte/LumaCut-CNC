@@ -36,6 +36,8 @@ class FakePi:
         #: seconds to sleep before answering, keyed by "status" or an op
         #: (simulates the Pi holding machine.lock during home/park/probe)
         self.delay: dict[str, float] = {}
+        #: requests currently held back by ``delay``, keyed like delay
+        self.waiting: dict[str, int] = {}
         #: number of requests to drop without any answer, keyed like delay
         self.drop: dict[str, int] = {}
         #: raw bytes to send instead of the status JSON (malformed answers)
@@ -74,7 +76,13 @@ class FakePi:
                     if dropped:
                         fake.drop[key] -= 1
                 if delay:
-                    time.sleep(delay)
+                    with fake.lock:
+                        fake.waiting[key] = fake.waiting.get(key, 0) + 1
+                    try:
+                        time.sleep(delay)
+                    finally:
+                        with fake.lock:
+                            fake.waiting[key] -= 1
                 if dropped:
                     self.close_connection = True
                     try:
@@ -165,6 +173,12 @@ class FakePi:
     def __enter__(self):
         self.thread.start()
         return self
+
+    @property
+    def status_waiting(self) -> bool:
+        """True while a /api/status request is held back by ``delay``."""
+        with self.lock:
+            return self.waiting.get("status", 0) > 0
 
     def __exit__(self, *exc):
         self.server.shutdown()
