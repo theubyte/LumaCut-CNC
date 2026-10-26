@@ -448,3 +448,52 @@ def test_scan_overlay_with_image_object(panel, editor):
         assert not editor.view._empty_background(QPointF(editor.view.mapFromScene(centre)))
     finally:
         editor.set_touch_mode(False, persist=False)
+
+
+def test_scan_export_matches_send_with_selection_only(qapp, monkeypatch, tmp_path):
+    """Scan-Export nutzt dieselbe Auftragsquelle wie „An Pi senden“ (Nur Auswahl)."""
+    from PySide6.QtCore import QSettings
+    from lumacut_canvas.model import Geometry, Shape
+    from lumacut_job.estimate import estimate_gcode
+    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(tmp_path))
+    QSettings.setDefaultFormat(QSettings.IniFormat)
+    main = pytest.importorskip("main")
+    win = main.LumaCutStudio()
+    panel = win.scan_panel
+    panel.ask = False
+    doc = win.canvas.document
+    lid = doc.active_layer_id
+    a = doc.add_shape(Shape("rect", Geometry(80, 80, 40, 30), lid))
+    doc.add_shape(Shape("rect", Geometry(140, 80, 40, 30), lid))
+    sent = []
+    monkeypatch.setattr(win.machine_panel, "send_gcode",
+                        lambda n, g, start=False: sent.append(g))
+    win.job_tools.set_selection_only(True)
+    win.canvas.set_selection([a.id])
+    out = tmp_path / "auswahl.gcode"
+    assert panel.export_gcode(out)
+    assert estimate_gcode(out.read_text()).cut_length_mm == pytest.approx(140, rel=0.01)
+    win._send_canvas_job()
+    assert sent and sent[-1] == out.read_text()          # Datei == gesendeter Auftrag
+    # Mit Fokuskorrektur: ebenfalls nur die Auswahl, identisch zum Senden
+    panel.set_maps(fake_maps())
+    panel.focus_check.setChecked(True)
+    assert panel.export_gcode(out)
+    corrected = out.read_text()
+    assert "Fokuskorrektur" in corrected and zs(corrected)
+    win._send_canvas_job()
+    assert sent[-1] == corrected
+    # Nur Auswahl ohne Auswahl: Export bricht mit Meldung ab
+    win.canvas.set_selection([])
+    assert not panel.export_gcode(tmp_path / "leer.gcode")
+    assert not (tmp_path / "leer.gcode").exists()
+    win.job_tools.set_selection_only(False)
+    win.canvas.undo_stack.setClean()
+    win.close()
+
+
+def test_scan_export_custom_job_source(panel, editor, tmp_path):
+    calls = []
+    panel.job_gcode_source = lambda: (calls.append(1) or "G21\nG90\n", "Hinweis")
+    p = tmp_path / "q.gcode"
+    assert panel.export_gcode(p) and p.read_text() == "G21\nG90\n" and calls == [1]
