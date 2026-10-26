@@ -79,12 +79,75 @@ def test_arcs_are_rejected_with_clear_message():
     assert "nicht möglich" in res.summary()
 
 
-def test_z_words_rejected_e_g_focus_drop_layers():
-    src = job([(110, 110), (190, 110)], passes=2).replace(
-        "; PASS 2 OF 2", "G91\nG0 Z-0.500 F600\nG90\n; PASS 2 OF 2")
+def test_focus_step_down_is_added_to_mesh_z():
+    """z_step (Fokus-Absenkung je Durchgang) wird auf das Mesh-Z aufgerechnet."""
+    flat = fake_maps(z_fn=lambda x, y: 3.0)
+    src = layers_to_gcode([JobLayer("l1", "Tief", 80, 600, 3, [[(110, 110), (150, 110)]], z_step_mm=0.5)])
+    assert "G0 Z-0.500 F600" in src and precheck_gcode(src) == []
+    res = compensate_for_export(src, flat)
+    assert res.ok, res.errors
+    out = res.gcode
+    assert "G91" not in out and "Z-0.5" not in out          # nur absolute Z
+    passes = out.split("; PASS ")[1:]
+    first_z = [zs(p)[0] if zs(p) else None for p in passes]
+    # Durchgang 1: Fokus, 2: −0,5, 3: −1,0 (ab erster Fahrt des Durchgangs)
+    assert first_z == pytest.approx([3 + FOCUS, 3 + FOCUS - 0.5, 3 + FOCUS - 1.0], abs=0.01)
+    assert res.report.focus_offset_min == pytest.approx(-1.0)
+    assert "Fokus-Absenkung je Durchgang bis 1.00 mm" in res.summary()
+    # Nächste Ebene startet wieder auf Fokushöhe
+    two = layers_to_gcode([
+        JobLayer("l1", "Tief", 80, 600, 2, [[(110, 110), (150, 110)]], z_step_mm=1.0),
+        JobLayer("l2", "Gravur", 20, 3000, 1, [[(110, 150), (150, 150)]])])
+    out2 = compensate_for_export(two, flat).gcode
+    assert zs(out2.split("; LAYER Gravur")[1])[0] == pytest.approx(3 + FOCUS, abs=0.01)
+
+
+def test_focus_step_down_never_below_clearance():
+    src = layers_to_gcode([JobLayer("l1", "Tief", 80, 600, 4, [[(110, 110), (150, 110)]], z_step_mm=1.0)])
+    res = compensate_for_export(src, fake_maps(), settings=FocusSettings(min_clearance_mm=4.0))
+    assert not res.ok and any("unter Oberfläche + 4 mm" in e for e in res.errors)
+
+
+def test_absolute_z_words_rejected():
+    src = job([(110, 110), (190, 110)]).replace("G0 X110", "G0 Z12\nG0 X110", 1)
     res = compensate_for_export(src, fake_maps())
     assert not res.ok
-    assert any("Fokus-Absenkung" in e for e in res.errors)
+    assert any("absoluter Z-Angabe" in e for e in res.errors)
+
+
+def test_layers_with_different_power_speed_and_planner_order():
+    """Aktueller Exporter mit Schnittplaner: S/F je Ebene bleiben erhalten."""
+    from lumacut_job.planner import optimize_layers
+    layers = [JobLayer("a", "Schnitt", 100, 300, 1, [[(110, 110), (190, 110), (190, 190), (110, 110)],
+                                                      [(140, 140), (160, 140), (160, 160), (140, 140)]]),
+              JobLayer("b", "Gravur", 25, 3000, 1, [[(120, 180), (180, 180)]])]
+    src = layers_to_gcode(optimize_layers(layers))
+    res = compensate_for_export(src, fake_maps())
+    assert res.ok, res.errors
+    out = res.gcode
+    cut, engrave = out.split("; LAYER Gravur")
+    assert {m for m in re.findall(r" S(\d+)", cut)} == {"255"}
+    assert {m for m in re.findall(r" S(\d+)", engrave)} == {str(round(0.25 * 255))}
+    assert "F300" in cut and "F3000" in engrave
+    # Reihenfolge der Ebenen/Polylinien unverändert (Startpunkte der G0)
+    starts = lambda g: [tuple(float(v) for v in re.findall(r"[XY](-?[\d.]+)", l))
+                        for l in g.splitlines() if l.startswith("G0 X")]
+    assert starts(out) == starts(src)
+
+
+def test_material_test_grid_with_hatch(qapp):
+    from lumacut_canvas.gcode import document_to_gcode
+    from lumacut_canvas.model import Document
+    from lumacut_job.material_test import MaterialTestSpec, add_material_test
+    doc = Document()
+    add_material_test(doc, MaterialTestSpec(columns=3, rows=2, line_interval_mm=1.0))
+    src = document_to_gcode(doc)
+    maps = fake_maps(rect=Rect(40, 40, 140, 120), z_fn=lambda x, y: 4.0)
+    res = compensate_for_export(src, maps)
+    assert res.ok, res.errors
+    assert res.coverage.outside_mm == 0
+    assert all(z == pytest.approx(4 + FOCUS) for z in zs(res.gcode))
+    assert len(set(re.findall(r" S(\d+)", res.gcode))) >= 3       # Leistung je Zelle erhalten
 
 
 def test_outside_mesh_uses_highest_surface_and_warns():
@@ -176,7 +239,7 @@ def _add_rect(editor, x, y, w, h):
 
 
 def test_focus_option_disabled_without_mesh(panel, editor, tmp_path):
-    from lumacut_canvas.gcode import document_to_gcode
+    from lumacut_job.planner import optimized_document_gcode as document_to_gcode
     assert not panel.focus_check.isEnabled() and not panel.focus_check.isChecked()
     assert "Auto-Probe" in panel.focus_hint.text()
     _add_rect(editor, 80, 80, 40, 30)   # Maschine 110..150 / 110..140
@@ -230,7 +293,7 @@ def test_main_window_send_uses_focus_option(qapp, tmp_path, monkeypatch):
     QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, str(tmp_path))
     QSettings.setDefaultFormat(QSettings.IniFormat)
     main = pytest.importorskip("main")
-    from lumacut_canvas.gcode import document_to_gcode
+    from lumacut_job.planner import optimized_document_gcode as document_to_gcode
     win = main.LumaCutStudio()
     sent = []
     monkeypatch.setattr(win.machine_panel, "send_gcode",
@@ -250,3 +313,61 @@ def test_main_window_send_uses_focus_option(qapp, tmp_path, monkeypatch):
     assert len(sent) == 2                               # Fehler -> nichts gesendet
     win.canvas.undo_stack.setClean()
     win.close()
+
+
+def test_scan_overlay_with_current_canvas(panel, editor):
+    """Overlay über vielen Ebenen (Materialtest), nicht anwählbar, ohne Undo-Einträge, Zoom ok."""
+    from PySide6.QtCore import QPointF
+    from lumacut_job.material_test import MaterialTestSpec
+    from lumacut_job.qt_tools import insert_material_test
+    from scanprobe.panel import Z_OVERLAY
+    insert_material_test(editor, MaterialTestSpec(columns=5, rows=5))
+    undo_before = editor.undo_stack.count()
+    panel.design_only.setChecked(False)
+    assert panel.start_scan() and panel.wait(60000)
+    assert panel.start_probe() and panel.wait(60000) and panel.last_error == ""
+    assert editor.undo_stack.count() == undo_before          # Scan/Probe ändert das Dokument nicht
+    shape_z = max(it.zValue() for it in editor.scene.items_by_id.values())
+    heat = panel.overlay.heat_item
+    assert heat is not None and heat.zValue() > shape_z
+    assert all(it.zValue() > shape_z for it in panel.overlay.object_items)
+    assert Z_OVERLAY < 1e9                                      # Auswahlrahmen bleibt oben
+    # Klick auf ein Objekt unter dem Overlay trifft das Objekt, nicht die Heatmap
+    shape = editor.document.shapes[-1]
+    g = shape.geom
+    sid = editor.scene.editable_shape_at(QPointF(g.x + g.w / 2, g.y + g.h / 2))
+    assert sid is not None and editor.document.has_shape(sid)
+    editor.select_all()
+    assert set(editor.selection) == {s.id for s in editor.document.shapes}
+    # Zoom (Auswahl-Anker) und Einpassen lassen das Overlay an Ort und Stelle
+    before = heat.sceneBoundingRect()
+    editor.view.zoom_wheel(1.5, QPointF(50, 50))
+    editor.fit_selection()
+    assert heat.sceneBoundingRect() == before and heat.scene() is editor.scene
+    # Undo/Redo entfernt bzw. erneuert Formen, Overlay bleibt
+    editor.undo_stack.undo()
+    assert heat.scene() is editor.scene and editor.document.shapes == []
+    editor.undo_stack.redo()
+    assert heat.scene() is editor.scene and editor.document.shapes
+
+
+def test_relief_raster_with_layer_step_down():
+    """Schichten-Relief (Raster, S0-Lücken, z_step) aus lumacut_materials läuft durch die Korrektur."""
+    pytest.importorskip("lumacut_materials")
+    from lumacut_materials.db import load_db
+    from lumacut_materials.heightmap import HeightmapOptions, heightmap_from_gray
+    from lumacut_materials.planner import plan_relief
+    from lumacut_materials.relief import job_from_plan, relief_to_gcode
+    yy, xx = np.mgrid[0:60, 0:60]
+    dome = np.clip(np.hypot(xx - 30, yy - 30) / 30, 0, 1)
+    hm = heightmap_from_gray(dome, HeightmapOptions(width_mm=12, line_interval_mm=0.2,
+                                                    depth_mm=2.0, blur_mm=0.2))
+    rjob = job_from_plan(plan_relief(load_db(), "basswood_solid", 2.0), hm, 80.0, 80.0)
+    assert rjob.z_step_mm > 0
+    code, _ = relief_to_gcode(rjob)
+    res = compensate_for_export(code, fake_maps(z_fn=lambda x, y: 3.0))
+    assert res.ok, res.errors
+    drop = rjob.z_step_mm * (rjob.layers - 1)
+    assert res.report.focus_offset_min == pytest.approx(-drop, abs=1e-3)
+    assert res.report.z_min == pytest.approx(3 + FOCUS - drop, abs=0.01)
+    assert "G91" not in res.gcode
