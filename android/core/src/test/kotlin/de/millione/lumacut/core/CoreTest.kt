@@ -110,6 +110,20 @@ class MarlinWriterTest {
     private fun doc(vararg elements: Element, layers: List<Layer> = Document.defaultLayers()) =
         Document(title = "Test", layers = layers, elements = elements.toList())
 
+    @Test fun `shape starting in the work-area corner still begins with a rapid`() {
+        // A rectangle dragged from outside is clamped to work (0,0). The head
+        // position is unknown, so the first burn must not start from wherever it is.
+        val layers = Document.defaultLayers()
+        val line = layers.first { it.mode == LayerMode.LINE }
+        val rect = Element(layerId = line.id, kind = "Rechteck", paths = listOf(Shapes.rect(360.0, 340.0)))
+        val gcode = MarlinWriter().write(doc(rect, layers = layers))
+        val moves = gcode.lines().filter { it.startsWith("G0 ") || it.startsWith("G1 ") }
+        assertTrue(moves.first().startsWith("G0 X390.000 Y30.000"), moves.first())
+        val tp = Toolpath.parse(gcode)
+        assertTrue(tp.stats.warnings.isEmpty(), tp.stats.warnings.toString())
+        assertEquals(Box(30.0, 30.0, 390.0, 370.0), tp.bounds)
+    }
+
     private fun rect(layer: Layer, x: Double, y: Double, w: Double = 20.0, h: Double = 10.0) =
         Element(layerId = layer.id, kind = "Rechteck", transform = Transform(x, y), paths = listOf(Shapes.rect(w, h)))
 

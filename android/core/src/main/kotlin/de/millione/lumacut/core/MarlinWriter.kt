@@ -22,11 +22,13 @@ class JobBuildException(message: String) : IllegalArgumentException(message)
 class MarlinWriter(private val appVersion: String = "dev") {
 
     private val out = StringBuilder()
-    private var at = Pt(0.0, 0.0)          // work coordinates
+    // Last commanded point in work coordinates. Unknown at the start: the head
+    // can be anywhere (parked, after probing), so the first move is always a rapid.
+    private var at: Pt? = null
 
     fun write(doc: Document): String {
         out.setLength(0)
-        at = Pt(0.0, 0.0)
+        at = null
         val active = doc.layers.filter { it.output && it.visible }.map { it.id }.toSet()
         val content = doc.elements.filter { it.layerId in active }
         if (content.isEmpty()) throw JobBuildException("Nichts zu lasern: keine Elemente auf sichtbaren Ebenen")
@@ -76,7 +78,8 @@ class MarlinWriter(private val appVersion: String = "dev") {
     private fun clampX(x: Double) = x.coerceIn(0.0, Work.WIDTH)
 
     private fun rapid(p: Pt) {
-        if (p.dist(at) > 1e-6) line("G0 ${xy(p)}")
+        val last = at
+        if (last == null || p.dist(last) > 1e-6) line("G0 ${xy(p)}")
         at = p
     }
 
@@ -87,7 +90,7 @@ class MarlinWriter(private val appVersion: String = "dev") {
 
     private fun lines(paths: List<Poly>, layer: Layer) {
         val power = s(layer.powerPct)
-        for (path in orderPaths(paths, at)) {
+        for (path in orderPaths(paths, at ?: Pt(0.0, 0.0))) {
             rapid(path.first())
             for (p in path.drop(1)) burn(p, power, layer)
         }
@@ -115,10 +118,10 @@ class MarlinWriter(private val appVersion: String = "dev") {
         rapid(Pt(start, y))
         if (start != runs.first().x0) burn(Pt(runs.first().x0, y), 0, layer)
         for (run in runs) {
-            if (abs(at.x - run.x0) > 1e-6) burn(Pt(run.x0, y), 0, layer)
+            if (abs(at!!.x - run.x0) > 1e-6) burn(Pt(run.x0, y), 0, layer)
             burn(Pt(run.x1, y), run.power, layer)
         }
-        if (end != at.x) burn(Pt(end, y), 0, layer)
+        if (end != at!!.x) burn(Pt(end, y), 0, layer)
     }
 
     /**
