@@ -308,3 +308,55 @@ def test_preview_on_large_noisy_image_stays_responsive(win):
     assert dlg.info.text()
     dlg.deleteLater()
 
+
+# --- Auto-Schwellwert (Otsu) ----------------------------------------------
+
+def _bimodal(dark=60, light=100):
+    rng = np.random.default_rng(3)
+    g = np.full((100, 100), light, np.int16)
+    g[30:70, 20:60] = dark
+    g = g + rng.integers(-5, 6, g.shape)
+    return np.clip(g, 0, 255).astype(np.uint8)
+
+
+def test_otsu_threshold_and_auto_setting():
+    from lumacut_import.trace import effective_threshold, otsu_threshold
+    g = _bimodal()
+    t = otsu_threshold(g)
+    assert 65 < t <= 95                          # zwischen den beiden Gipfeln
+    assert TraceSettings().auto_threshold is False
+    auto = TraceSettings(threshold=30, smoothing_px=0, tolerance_mm=0, min_area_mm2=0,
+                         auto_threshold=True)
+    assert auto.normalized().auto_threshold
+    assert effective_threshold(g, auto) == t
+    assert effective_threshold(g, RAW) == RAW.threshold
+    # fester Schwellwert 30 findet nichts, Auto findet genau das dunkle Rechteck
+    assert trace_gray(g, TraceSettings(threshold=30, smoothing_px=0, tolerance_mm=0,
+                                       min_area_mm2=0)).parts == []
+    res = trace_gray(g, auto)
+    assert res.threshold == t
+    assert len(res.parts) == 1 and _bbox(res.parts[0].outer) == pytest.approx((20, 30, 60, 70))
+    # Invertieren mit Auto: der helle Rest (Rahmen mit Loch)
+    inv = trace_gray(g, TraceSettings(**{**auto.__dict__, "invert": True}))
+    assert len(inv.parts) == 1 and len(inv.parts[0].holes) == 1
+    # einfarbiges Bild: kein Absturz
+    flat = trace_gray(np.full((20, 20), 128, np.uint8), auto)
+    assert flat.parts == [] or len(flat.parts) == 1
+
+
+def test_trace_dialog_auto_threshold(win):
+    from lumacut_import.trace_qt import TraceDialog
+    dlg = TraceDialog(_image_shape(_bimodal(), w=50.0, h=50.0))
+    dlg.threshold.setValue(30)
+    dlg.update_preview()
+    assert "Keine Konturen" in dlg.info.text() and dlg.threshold.isEnabled()
+    dlg.auto_threshold.setChecked(True)
+    dlg.update_preview()
+    assert not dlg.threshold.isEnabled()
+    assert "automatisch" in dlg.info.text() and "1 Kontur" in dlg.info.text()
+    assert 65 < dlg.threshold.value() <= 95
+    st = dlg.settings()
+    assert st.auto_threshold
+    dlg.auto_threshold.setChecked(False)
+    assert dlg.threshold.isEnabled() and not dlg.settings().auto_threshold
+    dlg.deleteLater()

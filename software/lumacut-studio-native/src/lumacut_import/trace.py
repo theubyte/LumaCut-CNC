@@ -7,6 +7,8 @@ Ablauf je Bildobjekt (``Shape.kind == "image"``):
    das nimmt Treppenstufen und JPEG-Rauschen vor dem Schwellwert weg;
 3. Schwellwert: Pixel **dunkler** als ``threshold`` sind Vordergrund
    (``invert`` kehrt das um, z. B. für helle Schrift auf dunklem Grund);
+   ``auto_threshold`` bestimmt den Wert nach dem Glätten selbst (Otsu,
+   für Fotos und Scans mit unbekannter Helligkeit);
 4. Konturen mit Löchern (``cv2.RETR_CCOMP``: Außenkontur + Löcher, Inseln in
    Löchern werden wieder eigene Teile);
 5. Flecken entfernen (``min_area_mm2``) und vereinfachen
@@ -60,6 +62,7 @@ class TraceSettings:
     smoothing_px: float = 1.0       # Weichzeichnen vor dem Schwellwert (0 = aus)
     tolerance_mm: float = 0.05      # Vereinfachung (0 = jeder Randpixel)
     min_area_mm2: float = 0.2       # kleinere Flecken/Löcher fallen weg
+    auto_threshold: bool = False    # Schwellwert automatisch (Otsu) statt ``threshold``
 
     def normalized(self) -> "TraceSettings":
         return TraceSettings(
@@ -67,7 +70,8 @@ class TraceSettings:
             invert=bool(self.invert),
             smoothing_px=round(_clamp(float(self.smoothing_px), *SMOOTHING_RANGE), 2),
             tolerance_mm=round(_clamp(float(self.tolerance_mm), *TOLERANCE_RANGE), 3),
-            min_area_mm2=round(_clamp(float(self.min_area_mm2), *MIN_AREA_RANGE), 3))
+            min_area_mm2=round(_clamp(float(self.min_area_mm2), *MIN_AREA_RANGE), 3),
+            auto_threshold=bool(self.auto_threshold))
 
     @staticmethod
     def for_image(shape: Shape) -> "TraceSettings":
@@ -91,6 +95,7 @@ class TracedPart:
 class TraceResult:
     parts: list[TracedPart]          # in Bildpixeln (x nach rechts, y nach unten)
     removed: int = 0                 # entfernte Flecken/Löcher
+    threshold: int | None = None     # verwendeter Schwellwert (bei „Auto“: Otsu)
 
     @property
     def point_count(self) -> int:
@@ -105,15 +110,42 @@ def decode_gray(png: bytes) -> np.ndarray:
     return arr
 
 
-def foreground_mask(gray: np.ndarray, settings: TraceSettings) -> np.ndarray:
-    """uint8-Maske (255 = nachzeichnen) nach Glätten und Schwellwert."""
+def _smoothed(gray: np.ndarray, st: TraceSettings) -> np.ndarray:
     import cv2
-    st = settings.normalized()
     g = np.ascontiguousarray(gray, dtype=np.uint8)
     if st.smoothing_px > 0:
         g = cv2.GaussianBlur(g, (0, 0), st.smoothing_px, borderType=cv2.BORDER_REPLICATE)
-    mask = g >= st.threshold if st.invert else g < st.threshold
-    return mask.astype(np.uint8) * 255
+    return g
+
+
+def otsu_threshold(gray: np.ndarray) -> int:
+    """Automatischer Schwellwert (Otsu) im Sinne von ``threshold``: Pixel
+    **dunkler** als der Wert sind Vordergrund (1…255)."""
+    import cv2
+    g = np.ascontiguousarray(gray, dtype=np.uint8)
+    if g.size == 0:
+        return 128
+    t, _ = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    # OpenCV: Vordergrund (dunkel) ist ``g <= t`` → „dunkler als t + 1“
+    return int(_clamp(int(t) + 1, *THRESHOLD_RANGE))
+
+
+def effective_threshold(gray: np.ndarray, settings: TraceSettings) -> int:
+    """Tatsächlich verwendeter Schwellwert (Otsu nach dem Glätten bei „Auto“)."""
+    st = settings.normalized()
+    return otsu_threshold(_smoothed(gray, st)) if st.auto_threshold else st.threshold
+
+
+def _mask_and_threshold(gray: np.ndarray, st: TraceSettings) -> tuple[np.ndarray, int]:
+    g = _smoothed(gray, st)
+    thr = otsu_threshold(g) if st.auto_threshold else st.threshold
+    mask = g >= thr if st.invert else g < thr
+    return mask.astype(np.uint8) * 255, thr
+
+
+def foreground_mask(gray: np.ndarray, settings: TraceSettings) -> np.ndarray:
+    """uint8-Maske (255 = nachzeichnen) nach Glätten und Schwellwert."""
+    return _mask_and_threshold(gray, settings.normalized())[0]
 
 
 def _shoelace(pts: Ring) -> float:
@@ -300,13 +332,13 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
     # 2× hochgerechnet (nächster Nachbar): auch 1 Pixel breite Linien haben
     # dann eine Fläche zwischen den Randpixel-Mitten; ¼ Pixel nach außen ergibt
     # die echte Pixelkante. Rand mit Hintergrund auffüllen (geschlossene Konturen).
-    mask = foreground_mask(gray, st)
+    mask, thr = _mask_and_threshold(gray, st)
     mask = np.repeat(np.repeat(mask, 2, axis=0), 2, axis=1)
     mask = cv2.copyMakeBorder(mask, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
     found = cv2.findContours(mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     contours, hierarchy = found[-2], found[-1]
     if hierarchy is None or not len(contours):
-        return TraceResult([])
+        return TraceResult([], threshold=thr)
     if len(contours) > 8 * MAX_PARTS:
         raise ValueError(f"Zu viele Konturen ({len(contours)}) – Schwellwert, Glättung "
                          f"oder Mindestfläche anpassen")
@@ -386,7 +418,7 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
             if len(parts) > MAX_PARTS:
                 raise ValueError(f"Zu viele Konturen (> {MAX_PARTS}) – Schwellwert, Glättung "
                                  f"oder Mindestfläche anpassen")
-    return TraceResult(parts, removed)
+    return TraceResult(parts, removed, thr)
 
 
 def image_mm_per_px(shape: Shape) -> tuple[float, float]:
@@ -434,4 +466,4 @@ def trace_to_shapes(shape: Shape, settings: TraceSettings, layer_id: str) -> lis
 
 __all__ = ["TraceSettings", "TraceResult", "TracedPart", "trace_gray", "trace_image",
            "traced_shapes", "trace_to_shapes", "decode_gray", "foreground_mask",
-           "image_mm_per_px", "to_canvas"]
+           "image_mm_per_px", "to_canvas", "otsu_threshold", "effective_threshold"]
