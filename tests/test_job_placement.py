@@ -173,10 +173,13 @@ assert "G1 X85 Y80 F3000 S0" in sent and not any(x.startswith("M3") for x in sen
 r = post(op="start", name="Schild.gcode", placement="1"); wait()
 assert r.status_code == 200, r.data
 assert "G1 X85 Y60 F1500 S80" in ran[-1][1], ran[-1]
-# Autorun probes at the placed motif centre.
+# Autorun probes over the placed motif (X35..85 / Y60..80 plus margin).
 m.probe_xy_offset_mm = (10.0, 5.0)
 r = post(op="autorun", name="Schild.gcode", placement="1"); wait()
-assert r.status_code == 200 and ran[-1][2] == (60.0, 70.0), (r.data, ran[-1][2])
+regions = [g.region for g in ran[-1][2]["grids"]]
+assert r.status_code == 200 and len(regions) == 1, (r.data, regions)
+assert (regions[0].xmin, regions[0].ymin, regions[0].xmax, regions[0].ymax) == (33, 58, 87, 82), regions
+assert "G1 X85 Y60 F1500 S80" in ran[-1][1], ran[-1][1]
 # A changed file invalidates the placement.
 import io
 r = c.post("/api/upload", data={"file": (io.BytesIO(JOB.replace("S80", "S90").encode()), "Schild.gcode")})

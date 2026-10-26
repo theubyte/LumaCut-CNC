@@ -980,11 +980,19 @@ assert not web._job_sets_focus(relative_only)
 from marlin import web
 calls = []
 m = web.machine
-m.safe_home = lambda **k: calls.append("home")
-m.probe_workpiece = lambda **k: calls.append("probe")
+def home(**k):
+    calls.append("home")
+    m.homed = True
+def probe(groups, **k):
+    calls.append("probe")
+    return [[3.0] * len(g) for g in groups]
+m.safe_home = home
+m.probe_surface = probe
 m.park_safezone = lambda **k: calls.append("park")
 m.emergency_stop = lambda: calls.append("M112")
-m.homed = True
+m.probe_xy_offset_mm = (0.0, 0.0)
+m.position = [0.0, 0.0, 20.0]
+m.homed = False
 def command(cmd, **k):
     if cmd.startswith("G1 X99"):
         raise ValueError("rejected")
@@ -992,11 +1000,18 @@ def command(cmd, **k):
 m.command = command
 m.stream_command = command  # job lines use the streaming path (#18)
 m.drain = lambda **k: None
+auto = web.auto_plan(["G28", "G0 X40 Y40", "M3 I", "G1 X44 Y40 S10", "M5 I", "M2"])
 web.job_lock.acquire()
-web._job_worker("a.gcode", ["G0 X40 Y40", "M3 I", "G1 X60 S10", "M5 I"], (50.0, 50.0))
-assert calls == ["home", "G0 X50.000 Y50.000", "probe", "M5 I",
-                 "G0 X40 Y40", "M3 I", "G1 X60 S10", "M5 I", "park"], calls
+web._job_worker("a.gcode", auto["commands"], auto)
+# Surface 3 + focus 7 - switch offset 1.5 = Z8.5; G28/M2 of the file dropped.
+assert calls == ["home", "probe", "M5 I", "G90", "G0 X40.000 Y40.000",
+                 "G0 Z8.500 F600", "M3 I", "G1 X42.000 Y40.000 S10",
+                 "G1 X44.000 Y40.000 S10", "M5 I", "park"], calls
 assert web.job["state"] == "complete"
+calls.clear()
+web.job_lock.acquire()
+web._job_worker("a.gcode", auto["commands"], auto)
+assert calls[:2] == ["probe", "M5 I"], "already homed: no homing again"
 calls.clear()
 web.job_lock.acquire()
 web._job_worker("b.gcode", ["M3 I", "G1 X99 S10"])
@@ -1271,9 +1286,10 @@ class MarlinSim:
                     self.pos[i] = words[axis] if self.absolute else self.pos[i] + words[axis]
         elif cmd == "M114":
             reply.append(self.report())
-        elif cmd == "G30":
-            self.pos[2] = 3.0
-            reply.append("Bed X: %.2f Y: %.2f Z: 3.00" % tuple(self.pos[:2]))
+        elif cmd == "G30 E0":
+            # The switch tip sits at head + offset on a tilted sheet.
+            self.pos[2] = surface(self.pos[0] + 10.0, self.pos[1] + 5.0)
+            reply.append("Bed X: %.2f Y: %.2f Z: %.3f" % tuple(self.pos))
             reply.append(self.report())
         elif cmd == "M119":
             reply += ["Reporting endstop status", "z_min: open"]
@@ -1286,6 +1302,9 @@ class MarlinSim:
     def close(self):
         pass
 
+def surface(x, y):
+    return 3.0 + (x - 250.0) * 0.004 + (y - 280.0) * 0.002
+
 sim = MarlinSim()
 web.machine = m = MarlinTransport("/dev/null", serial_factory=lambda *a, **k: sim)
 m.homing_verified = True
@@ -1295,35 +1314,55 @@ gcode = ("G21\nG90\nM5 I\nM3 I\n; LAYER engrave\nG0 X279.094 Y276.357\n"
          "G1 X388.781 Y276.357 F2000 S77\nG1 X388.781 Y354.412 F2000 S77\n"
          "G1 X279.094 Y354.412 F2000 S77\nG1 X279.094 Y276.357 F2000 S77\nM5 I\nM400\n")
 web.preflight(gcode)
-center = web._powered_bounds(gcode).center
+auto = web.auto_plan(gcode.splitlines())
 web.job_lock.acquire()
 m.owner = "job"
-web._job_worker("studio.gcode", gcode.splitlines(), center)
+web._job_worker("studio.gcode", auto["commands"], auto)
 assert web.job["state"] == "complete", web.job
+assert web.job["probe"] == {"done": 7, "total": 7}, web.job["probe"]   # 3 x 2 + lowest again
 w = sim.writes
-# Focus (surface 3 + gap 7 - switch offset 1.5) right before the first cut.
-order = [w.index(c) for c in ("G28 X Y", "G28 Z", "G30", "M3 I", "G0 Z8.500 F600")]
+probes = [i for i, c in enumerate(w) if c == "G30 E0"]
+assert len(probes) == 7 and "G30" not in w, "one measurement per point, no stow/deploy raise"
+stow = w.index("M402")
+order = [w.index("G28 X Y"), w.index("G28 Z"), probes[0], probes[-1], stow, w.index("M3 I")]
 assert order == sorted(order), order
 assert w.index("G0 Z20.00 F600") > w.index("G28 Z")
-# Switch tip lands on the motif centre: head moved by the X/Y probe offset.
-approach = [c for c in w[:w.index("G30")] if c.startswith("G0 X")][-1]
-px, py = map(float, re.findall(r"[XY]([-+]?[0-9.]+)", approach))
-assert abs(px - (center[0] - 10)) < 0.02 and abs(py - (center[1] - 5)) < 0.02, approach
-cuts = [i for i, c in enumerate(w) if c.startswith("G1 X") and "S77" in c]
-assert len(cuts) == 4 and cuts == list(range(cuts[0], cuts[0] + 4)), w[cuts[0]:cuts[-1] + 1]
-assert w.index("G0 Z8.500 F600") < cuts[0]
+# Fast: between the points only a low hop (contact + 3 mm), never the 20 mm retract.
+hops = [float(c.split("Z")[1].split()[0]) for c in w[probes[0]:stow] if c.startswith("G0 Z")]
+assert hops and max(hops) < 7.0, hops
+# The switch tip probes the planned laser points: head = point - offset.
+first = auto["grids"][0].point(0)
+approach = [c for c in w[:probes[0]] if c.startswith("G0 X")][-1]
+assert approach == "G0 X%.3f Y%.3f F9000" % (first[0] - 10, first[1] - 5), (approach, first)
+# The lowest point is probed last, so the Z floor fits every focus height.
+contacts = [surface(*auto["grids"][0].point(i)) for i in range(6)]
+assert abs(m.surface_z - min(contacts)) < 0.002, (m.surface_z, contacts)
+# Focus follows the tilted surface: Z = surface + 7 - 1.5 at every piece.
+z = None
+cuts = 0
+for c in w[w.index("M3 I"):]:
+    words = dict(re.findall(r"([XYZS])([-+]?[0-9.]+)", c))
+    if c.startswith("G0 Z") or (c.startswith("G1") and "Z" in words):
+        z = float(words["Z"])
+        assert z >= m.surface_z + 2.0
+    if c.startswith("G1 X") and "S77" in c:
+        cuts += 1
+        expected = surface(float(words["X"]), float(words["Y"])) + 5.5
+        assert abs(z - expected) < 0.05, (c, z, expected)
+    if c == "M5 I":
+        break
+assert cuts > 100, "lines split into <= 2 mm pieces"
 assert w.index("G4 P800") < w.index("M3 I")
 park = w.index("G0 X0.000 Y0.000 F9000")
-assert park > cuts[-1] and w[park - 2].startswith("G0 Z20.000")
+assert park > w.index("M3 I") and w[park - 2].startswith("G0 Z20.000")
 from marlin.transport import MELODIES
 tones = [c for c in w if c.startswith("M300 ")]
 assert len(tones) == sum(len(MELODIES[e]) for e in ("home", "start", "done")), tones
-first_cut = cuts[0]
-start_tones = [i for i, c in enumerate(w) if c.startswith("M300 ") and w.index("G30") < i < first_cut]
+start_tones = [i for i, c in enumerate(w) if c.startswith("M300 ") and stow < i < w.index("M3 I")]
 assert len(start_tones) == len(MELODIES["start"]), "start melody after probing, before the first cut"
 assert "M569 S0 X" not in w, "no driver mode switching from the Pi any more"
 assert "M112" not in w
-assert m.surface_z == 3.0 and abs(m.position[0]) < 0.01 and abs(m.position[1]) < 0.01
+assert abs(m.position[0]) < 0.01 and abs(m.position[1]) < 0.01
 """)
 
     def test_idle_service_shutdown_does_not_automatically_send_m112(self):

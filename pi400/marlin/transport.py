@@ -49,6 +49,11 @@ def _stream_window_setting(raw) -> int:
 STREAM_MAX_LINES = _stream_window_setting(os.environ.get("LUMACUT_STREAM_WINDOW", "4"))
 STREAM_MAX_BYTES = 200
 STREAMABLE = re.compile(r"^G0?[01]\s")
+# Marlin refuses G30 ("Z Probe Past Bounds") when the head is within
+# PROBING_MARGIN (10 mm in the BTT example config) of X_BED_SIZE/Y_BED_SIZE.
+PROBE_HEAD_MAX = (380.0, 360.0)
+# Fast multi-point probing: low hop between the points of one area.
+PROBE_HOP_MM = 3.0
 
 
 class MarlinCommandError(RuntimeError):
@@ -959,9 +964,10 @@ class MarlinTransport:
             # Offset is (probe-tip minus laser-point) in machine XY.
             # Reposition head so probe reaches the selected laser XY point.
             x, y = laser_x - dx, laser_y - dy
-            if not (self.safe_zone_xy_mm <= x <= 390 and
-                    self.safe_zone_xy_mm <= y <= 370):
-                raise ValueError("Werkstück-Abtastpunkt außerhalb X30..390/Y30..370")
+            if not self._probe_head_ok(x, y):
+                raise ValueError("Werkstück-Abtastpunkt außerhalb X%g..%g/Y%g..%g" % (
+                    self.safe_zone_xy_mm, PROBE_HEAD_MAX[0],
+                    self.safe_zone_xy_mm, PROBE_HEAD_MAX[1]))
             if z < self.clearance_mm:
                 self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F600", timeout=45)
                 self._exchange_locked("M400", timeout=45)
@@ -1042,6 +1048,165 @@ class MarlinTransport:
         if stop_z < 0.0:
             raise RuntimeError(f"G30-Kontakt Z{stop_z:.2f} unter Maschinenboden: Z-Referenz prüfen")
         return stop_z
+
+    def _probe_head_ok(self, x: float, y: float) -> bool:
+        return (self.safe_zone_xy_mm <= x <= PROBE_HEAD_MAX[0] and
+                self.safe_zone_xy_mm <= y <= PROBE_HEAD_MAX[1])
+
+    def probe_reachable(self, x: float, y: float) -> bool:
+        """True when the switch can probe laser point X/Y (head = point - offset)."""
+        if self.probe_xy_offset_mm is None:
+            return False
+        dx, dy = self.probe_xy_offset_mm
+        return self._probe_head_ok(x - dx, y - dy)
+
+    def _probe_here_locked(self, start_z: float) -> float:
+        """G30 E0 at the current head XY: contact Z, the switch stays deployed.
+
+        A plain G30 stows the fixed probe afterwards, so the next G30 deploys
+        it again and Marlin first raises to Z_CLEARANCE_BETWEEN_PROBES (16 mm)
+        before it descends. E0 skips the stow; probe_surface() stows once
+        with M402 at the end. One measurement per point (no MULTIPLE_PROBING).
+        """
+        contact = None
+        try:
+            for line in self._exchange_locked("G30 E0", timeout=120):
+                match = PROBE_RESULT_RE.search(line)
+                if match:
+                    contact = float(match.group(1))
+        except MarlinCommandError as exc:
+            if "probing failed" not in str(exc).lower():
+                raise
+            contact = self._early_trigger_contact_locked(start_z)
+        if contact is None or not 0.0 <= contact <= 90.0:
+            raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
+        return contact
+
+    def probe_surface(self, groups, owner: str = "job", progress=None,
+                      should_stop=None, hop_mm: float = PROBE_HOP_MM):
+        """Probe several laser X/Y points quickly; returns the contacts per group.
+
+        ``groups`` are lists of laser points, one list per motif area. Inside
+        an area the head only hops to the highest contact of that area plus
+        ``hop_mm``; between areas it travels at the Z clearance (unknown
+        height there). The lowest point is probed once more at the end, so
+        the measured surface (and with it the Z floor surface + 2 mm) is the
+        lowest one: every focus height of the job is then allowed. Laser stays
+        off; the switch is stowed (M402) and Z raised whatever happens.
+        """
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if not self.homed or not self.homing_verified:
+                raise RuntimeError("Abtasten benötigt Maschinenreferenz")
+            if self.serial is None or self.emergency_latched:
+                raise RuntimeError("SKR nicht verbunden / Notstopp aktiv")
+            if self.laser_enabled:
+                raise RuntimeError("Werkstückabtastung bei aktivem Laser unzulässig")
+            if self.cap_z_probe is False:
+                raise RuntimeError("SKR meldet Cap:Z_PROBE:0: G30 nicht installiert")
+            if self.probe_xy_offset_mm is None:
+                raise ValueError("X/Y-Tasterversatz muss zuerst kalibriert sein")
+            if not groups or any(not g for g in groups):
+                raise ValueError("Keine Abtastpunkte")
+            for group in groups:
+                for x, y in group:
+                    if not self.probe_reachable(x, y):
+                        raise ValueError("Abtastpunkt X%.1f Y%.1f für den Taster nicht erreichbar" % (x, y))
+            dx, dy = self.probe_xy_offset_mm
+            self.surface_z = None
+            self.focused_this_job = False
+            values = [[None] * len(g) for g in groups]
+            total = sum(len(g) for g in groups) + 1
+            done = 0
+
+            def step_done():
+                nonlocal done
+                done += 1
+                if progress is not None:
+                    progress(done, total)
+
+            def check_stop():
+                if should_stop is not None and should_stop():
+                    raise RuntimeError("Abgebrochen")
+
+            def lift(target):
+                nonlocal z
+                if z < target - 0.001:
+                    self._exchange_locked(f"G0 Z{target:.3f} F600", timeout=45)
+                    z = target
+
+            def go(x, y):
+                hx, hy = x - dx, y - dy
+                self._exchange_locked(f"G0 X{hx:.3f} Y{hy:.3f} F9000", timeout=60)
+                self.last_xy_commanded = (hx, hy)
+
+            try:
+                self._exchange_locked("M5 I", timeout=8)
+                self._exchange_locked("M400", timeout=20)
+                self._exchange_locked("M114", timeout=8)
+                if self.position is None:
+                    raise RuntimeError("Ausgangsposition für das Abtasten unbekannt")
+                if not self.absolute_mode:
+                    self._exchange_locked("G90", timeout=8)
+                    self.absolute_mode = True
+                z = self.position[2]
+                tallest = None
+                for gi, group in enumerate(groups):
+                    highest = None
+                    for pi, (x, y) in enumerate(group):
+                        check_stop()
+                        if highest is not None:
+                            lift(highest + hop_mm)
+                        else:   # new area: height unknown, travel high
+                            lift(self.clearance_mm if tallest is None
+                                 else max(self.clearance_mm, tallest + hop_mm))
+                        go(x, y)
+                        contact = self._probe_here_locked(z)
+                        values[gi][pi] = contact
+                        highest = contact if highest is None else max(highest, contact)
+                        tallest = highest if tallest is None else max(tallest, highest)
+                        z = contact
+                        lift(highest + hop_mm)
+                        step_done()
+                check_stop()
+                gi, pi = min(((g, p) for g in range(len(groups)) for p in range(len(groups[g]))),
+                             key=lambda gp: values[gp[0]][gp[1]])
+                if gi != len(groups) - 1:
+                    lift(max(self.clearance_mm, tallest + hop_mm))
+                x, y = groups[gi][pi]
+                go(x, y)
+                low = values[gi][pi] + hop_mm
+                if z > low + 0.001:
+                    self._exchange_locked(f"G0 Z{low:.3f} F600", timeout=45)
+                    z = low
+                contact = self._probe_here_locked(z)
+                values[gi][pi] = contact
+                z = contact
+                step_done()
+                self._stow_probe_locked()
+                lift(max(self.clearance_mm, tallest + self.probe_clearance_mm))
+                self._exchange_locked("M400", timeout=45)
+                self._exchange_locked("M114", timeout=8)
+                self.surface_z = min(v for g in values for v in g)
+                self.last_probe_laser_xy = (x, y)
+                self.focused_this_job = False
+                self.fault = ""
+                return values
+            except Exception:
+                if self.serial is not None:
+                    try:
+                        self._stow_probe_locked()
+                    except Exception:
+                        LOG.warning("M402 after failed probing not confirmed", exc_info=True)
+                raise
+
+    def _stow_probe_locked(self):
+        """M402: stow the switch after G30 E0 (no Z move on a fixed probe)."""
+        try:
+            self._exchange_locked("M402", timeout=20)
+        except MarlinCommandError:
+            LOG.warning("M402 rejected by firmware")
 
     def clear_emergency(self):
         """Release the M112 latch once the SKR has demonstrably restarted.

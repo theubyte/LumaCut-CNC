@@ -123,6 +123,13 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     # runtime M203 Z9 on connection; keep firmware's 9mm/s hard cap too.
     cfg = replace_active(cfg, "HOMING_FEEDRATE_MM_M",
                          "{ (50*60), (50*60), 432 }")
+    # Fast automatic probing (Pi op=autorun) needs no firmware change:
+    # MULTIPLE_PROBING stays off (one measurement per point at the SLOW
+    # feedrate, keeps the switch repeatable), and the Pi sends "G30 E0"
+    # so the fixed probe is not stowed, which skips the raise to
+    # Z_CLEARANCE_BETWEEN_PROBES (16 mm) Marlin does on every deploy; the Pi
+    # hops only 3 mm between points and stows once with M402. Keeping 16 mm
+    # here keeps the early-trigger handling in transport.py unchanged.
     cfg = replace_active(cfg, "Z_PROBE_FEEDRATE_FAST", "432")
     cfg = replace_active(cfg, "Z_PROBE_FEEDRATE_SLOW", "216")
     cfg = replace_active(cfg, "DEFAULT_MAX_FEEDRATE", "{ 150, 150, 9 }")

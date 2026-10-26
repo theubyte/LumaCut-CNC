@@ -124,6 +124,10 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 | GET | `/api/camera/snapshot` | – | ein JPEG der Kopfkamera |
 | GET | `/api/camera/calibration` | – | Kamera-Kalibrierung lesen |
 | PUT | `/api/camera/calibration` | JSON | Kamera-Kalibrierung schreiben (mit Revision) |
+| GET | `/api/materials` | – | Material-Datenbank lesen (Abschnitt 4.14) |
+| POST | `/api/materials` | JSON | Material anlegen (mit `base_revision`) |
+| PUT | `/api/materials/<name>` | JSON | Material ändern (`<name>` = Material-`id`) |
+| DELETE | `/api/materials/<name>` | Query | Material löschen (`?base_revision=n`) |
 
 `<name>` ist ein reiner Dateiname (`Path(name).name == name`, kein `/`, kein
 `..`), in URLs mit `encodeURIComponent` kodieren.
@@ -215,7 +219,7 @@ Felder aus `web.py` (`status()`):
 | `busy` | bool | Status aus Cache (Abschnitt 3.1) |
 | `stale_ms` | int \| null | Alter des Cache-Anteils |
 | `activity` | string | `"framing"` (Rahmen läuft), `"job"` (Auftrag `homing`/`probing`/`running` oder Warteschlange `running`/`pausing`), sonst `"idle"`. Achtung: Firmware-Update, LightBurn und kurze Web-Fahrten erscheinen hier als `"idle"`; dafür `owner` lesen. |
-| `job` | object | `{file, state, line, total, error}`; `state` ∈ `idle`, `homing`, `probing`, `running`, `complete`, `aborted`, `error`. Bleibt nach dem Ende auf `complete`/`aborted`/`error` stehen. |
+| `job` | object | `{file, state, line, total, error, probe}`; `probe` = `{done, total}` der Abtastpunkte bei `autorun` (ab `probing`, bleibt danach stehen), sonst `null`; `state` ∈ `idle`, `homing`, `probing`, `running`, `complete`, `aborted`, `error`. Bleibt nach dem Ende auf `complete`/`aborted`/`error` stehen. |
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
 | `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
@@ -477,20 +481,25 @@ Keine Parameter, keine Vorbedingung. 200 `{"message": "Platzierung aufgehoben: A
 | Fehler (Start) | 400 `Unbekannte Auftragsdatei`, `Keine gültige Platzierung für … – neu platzieren (op=place)`, `Auftrag seit dem Platzieren geändert – neu platzieren`, `G-Code Zeile N: …`, `Motiv … liegt außerhalb …` |
 | Fehler (Lauf) | `job.state = "error"` + `job.error`; Laser aus, Parken ohne M112. Scheitert das, M112. ⚠ Hardware |
 
-#### `op=autorun` (Ein-Klick)
+#### `op=autorun` (automatischer Auftrag)
 
-Wie `start`, plus:
+Der Hauptweg aller Apps (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md`
+Abschnitt 4): Auftrag in Maschinenkoordinaten **ohne Z** hochladen, dann
+`autorun`. Wie `start`, plus:
 
 | Parameter | Typ | Erlaubt |
 | --- | --- | --- |
-| `x`, `y` | number, optional | Abtastpunkt 30..390 / 30..370; Standard = Motivmitte |
+| `x`, `y` | number, optional | nur diesen einen Punkt abtasten (30..390 / 30..370); Standard = Raster über den Motivbereichen |
 
 | | |
 | --- | --- |
-| Vorbedingungen | wie `start`, aber **nicht referenziert nötig** (referenziert selbst); Tasterversatz gesetzt (`X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen`) |
-| Wirkung | `job.state`: `homing` → `probing` → `running`; Fokus automatisch vor der ersten Laserbahn (außer der Auftrag setzt sein eigenes absolutes Z) |
-| Erfolg | 200 `Ein-Klick-Ablauf gestartet: Homing → Abtasten bei X… Y… → Fokus → <name> → Park` |
-| Fehler | 400 `Motivmitte nicht bestimmbar: Abtastpunkt X/Y angeben` |
+| Vorbedingungen | wie `start`, aber **nicht referenziert nötig**; Tasterversatz gesetzt (`X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen`) |
+| Planung (vor jeder Bewegung) | `G28`/`G30`/`M2` aus der Datei entfallen. Motivbereiche = Laserwege (G1 mit S>0) in 5-mm-Zellen, Teile mit < 10 mm Abstand bilden einen Bereich, Bereich = Umriss + 2 mm (max. 12 Bereiche, sonst einer). Raster je Bereich 1×1 bis 4×4 (ca. ein Punkt je 90 mm, 5 mm vom Rand), höchstens 36 Punkte je Auftrag. Erreichbar ist ein Punkt, wenn der Kopf (Punkt − Tasterversatz) in X30..380 / Y30..360 liegt (Marlin `PROBING_MARGIN` 10 mm); andere Punkte werden aus Nachbarn ergänzt, ein ganz unerreichbarer Bereich bekommt die höchste gemessene Oberfläche. Höhenkorrektur einmal gegen eine ebene Testfläche, damit Bögen/relative X/Y sofort abgelehnt werden. |
+| Ablauf | 1. `homing` nur wenn `homed` false ist (nach Verbinden, Reset, Not-Aus). 2. `probing`: je Punkt `G0 X Y` und `G30 E0` (eine Messung, Taster bleibt ausgefahren, kein 16-mm-Anheben durch Marlin), dazwischen nur Hub auf höchste Oberfläche des Bereichs + 3 mm; zwischen Bereichen Z-Rückzug. Der **tiefste Punkt wird zuletzt nochmal** angetastet, `workpiece_surface_z` = tiefster Kontakt, dann `M402` (Taster verstauen) und Z-Rückzug. 3. Höhenkorrektur auf dem Pi (`focus_compensation.py`): Z = Oberfläche + `focus_gap_mm` − `z_switch_tip_offset_mm`, nie unter Oberfläche + 2 mm, Laserlinien in ≤ 2-mm-Stücke, Leerfahrten erst hoch, am Ziel runter, `G91`/`G0 Z-…`/`G90` als Versatz, Vorschub sinkt, wenn Z (9 mm/s) nicht folgt. Ein Auftrag mit **eigenem absolutem Z** wird nur abgetastet, nicht nochmal korrigiert. 4. `running`: Startmelodie, lasern, parken, Melodie. |
+| Status | `job.state`: `homing` → `probing` → `running` → `complete`; `job.probe` = `{done, total}` (total = Punkte + 1 Nachmessung) |
+| Erfolg | 200 `Automatischer Ablauf gestartet: [Referenzieren → ]Abtasten (N Punkte) → Höhenkorrektur → <name> → Parken` (bzw. `eigenes Z des Auftrags`) |
+| Fehler (Start) | 400 `Auftrag ohne Laserbahnen: nichts abzutasten`, `Kein Abtastpunkt erreichbar: …`, `Zeile N: Bögen (G2/G3) – in der App als Linien ausgeben`, `Zeile N: relative X/Y-Fahrten (G91) …`, `Fokushöhe läge näher als 2 mm …`, `Fokus-Absenkung führt unter Oberfläche + 2 mm` |
+| Fehler (Lauf) | wie `start`; ein Abbruch beim Abtasten verstaut den Taster (`M402`) und parkt. ⚠ Hardware |
 
 #### `op=abort`
 
@@ -717,6 +726,46 @@ write_path, writable, error}`.
 | Bereiche | `image_width` 160..8192, `image_height` 120..8192, `px_per_mm` 0.5..100, `scan_z` 0..90, `rotation_deg` -180..180, `crop_fraction` 0..<0.4, `offset_mm` je ±200, `notes` ≤2000 Zeichen, `updated_by` ≤80 |
 | Erfolg | 200 gespeicherte Kalibrierung + `message`, `revision` +1 |
 | Fehler | **403** `Fremde Webseite darf die Kalibrierung nicht ändern` (Origin ≠ Host), **415** `Content-Type application/json erwartet`, **413** `Kalibrierung zu groß (max. 64 KB)`, **409** `Kalibrierung wurde inzwischen geändert …` + `current` (aktuelle Daten), 400 `revision fehlt: …`, `Kalibrierung ungültig: …`, `Unbekannte Felder: …` |
+
+### 4.14 Material-Datenbank
+
+Eine Liste für alle Programme (Vertrag: `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md`
+Abschnitt 3), gespeichert in `/var/lib/lumacut/materials.json`
+(`$LUMACUT_DATA/materials.json`), atomar geschrieben (temporäre Datei, fsync,
+`os.replace`). Beim ersten Start legt der Pi die Startwerte an (`builtin: true`,
+Revision 1). Jede Änderung erhöht `revision` um 1. Ist die Datei kaputt, wird
+sie als `materials.corrupt` aufbewahrt und die Startwerte kommen zurück.
+
+Material (JSON):
+
+| Feld | Typ | Bereich |
+| --- | --- | --- |
+| `id` | string | vom Pi vergeben (UUID) |
+| `name` | string | 1..80 Zeichen |
+| `thickness_mm` | number | 0..50 |
+| `process` | string | `Schneiden`, `Gravieren`, `Markieren` |
+| `mode` | string | `line`, `fill` |
+| `power_pct` | number | 0..100 |
+| `speed_mm_min` | number | 1..6000 |
+| `passes` | int | 1..30 (Standard 1) |
+| `interval_mm` | number | 0.01..5 (Standard 0.1) |
+| `depth_per_pass_mm` | number | 0..50 (Standard 0); > 0: Durchgänge = aufgerundet Dicke / Tiefe |
+| `z_step_mm` | number | 0..2 (Standard 0); (Durchgänge − 1) × `z_step_mm` ≤ 3 mm |
+| `builtin` | bool | vom Pi gesetzt (Startwert), bleibt beim Ändern erhalten |
+| `updated` | string | vom Pi gesetzt, UTC `2026-10-26T15:00:00Z` |
+
+| Anfrage | Erfolg (200) |
+| --- | --- |
+| `GET /api/materials` | `{"revision": n, "materials": [Material, …]}` |
+| `POST /api/materials`, JSON = Material ohne `id` + `base_revision` | `{"revision": n+1, "material": Material}` |
+| `PUT /api/materials/<id>`, JSON = geänderte Felder + `base_revision` (fehlende Felder bleiben) | `{"revision": n+1, "material": Material}` |
+| `DELETE /api/materials/<id>?base_revision=n` | `{"revision": n+1}` |
+
+Fehler: **409** `{"error": "Materialliste wurde inzwischen geändert (Revision n) – neu laden und erneut versuchen", "revision": n}`
+bei veralteter `base_revision` (neu laden, erneut versuchen); **404**
+`Material nicht gefunden`; 400 `base_revision fehlt`, `JSON-Objekt erwartet …`,
+`power_pct muss zwischen 0 und 100 liegen` usw. Die Apps halten nur einen
+Zwischenspeicher für den Fall ohne Verbindung.
 
 ---
 

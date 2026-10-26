@@ -46,7 +46,8 @@ Die SKR-Firmware wird nie automatisch aktualisiert, siehe [FIRMWARE.md](FIRMWARE
 - **Werkstück abtasten (G30):** unter der aktuellen Laserposition.
 - **Aufträge:** `.gcode` hochladen. Beim Hochladen prüft der Pi jede Zeile und ob das Motiv in der Safezone liegt.
   - „Auftrag starten“ setzt voraus, dass schon referenziert und abgetastet ist.
-  - **„Ein-Klick“** macht alles: Homing, Abtasten unter der Motivmitte (dort muss Material liegen), Fokus, Auftrag, Parken, Melodie.
+  - **Automatischer Auftrag (`op=autorun`, „Starten“ in den Apps)** macht alles: Referenzieren nur wenn nötig, Abtasten mit kleinem Raster über allen Motivbereichen (niedriger 3-mm-Hub zwischen den Punkten, tiefster Punkt zuletzt nochmal), Höhenkorrektur auf dem Pi (der Fokus folgt der Oberfläche), Auftrag, Parken, Melodie. Unter dem Motiv muss Material liegen; Punkte, die der Taster nicht erreicht, ergänzt der Pi aus den Nachbarn. Details: [PI_API_REFERENZ.md](PI_API_REFERENZ.md) `op=autorun`.
+- **Material-Datenbank:** `/var/lib/lumacut/materials.json`, eine Liste für alle Programme (`/api/materials`). Beim ersten Start legt der Pi Startwerte an. Sicherung: die Datei mitkopieren.
   - **„Auftrag abbrechen“** schaltet den Laser aus und parkt. M112 kommt nur, wenn das nicht mehr klappt.
 - **Rahmenfahrt (aus LumaCut Studio, `op=frame`):** fährt den Umriss des Designs mit ausgeschaltetem Laser ab. Rechteck oder Gummiband (konvexe Hülle).
   - Setzt Referenzfahrt und Leerlauf voraus. Wird abgelehnt, während ein Auftrag läuft oder LightBurn verbunden ist.

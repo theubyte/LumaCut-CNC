@@ -5,6 +5,7 @@ TCP 23 remains for LightBurn (Marlin device) until Studio replaces it.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -18,10 +19,15 @@ from flask import Flask, jsonify, request, send_from_directory
 from .transport import MarlinTransport, MarlinLaserGuard, normalize, serve_tcp
 from .smart_cam import analyze_job
 from . import placement as placing
+from . import heightmap
+from . import focus_compensation as focus
+from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import create_blueprint as camera_calibration_api
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "marlin"
+# Shared by every program (docs/ZUSAMMENARBEIT_CLAUDE_GROK.md §3).
+MATERIALS = MaterialStore(DATA.parent / "materials.json")
 JOBS = DATA / "jobs"
 USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
 # Head camera (USB/UVC or CSI via V4L2) for the workspace scan.
@@ -60,7 +66,8 @@ machine.focus_gap_mm = float(config["focus_gap_mm"])
 if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is not None:
     machine.probe_xy_offset_mm = (float(config["probe_offset_x_mm"]),
                                   float(config["probe_offset_y_mm"]))
-job = {"file": "", "state": "idle", "line": 0, "total": 0, "error": ""}
+# probe: {"done", "total"} while op=autorun probes (and afterwards), else None.
+job = {"file": "", "state": "idle", "line": 0, "total": 0, "error": "", "probe": None}
 job_lock = threading.Lock()
 stop_job = threading.Event()
 # Framing (op=frame) runs laser-off outline moves from a request payload. It
@@ -100,6 +107,10 @@ def handle_error(exc):
     from werkzeug.exceptions import HTTPException
     if isinstance(exc, HTTPException):
         return exc
+    if isinstance(exc, ConflictError):
+        return jsonify(error=str(exc), revision=exc.revision), 409
+    if isinstance(exc, NotFoundError):
+        return jsonify(error="Material nicht gefunden"), 404
     logging.exception("Marlin Control server request failed: %s", exc)
     if isinstance(exc, (ValueError, RuntimeError, PermissionError)):
         return jsonify(error=str(exc)), 400
@@ -271,6 +282,33 @@ def settings():
                    z_switch_tip_offset_mm=offset,
                    probe_offset_x_mm=probe_x, probe_offset_y_mm=probe_y,
                    note="LightBurn G28 referenziert Boden, G30 tastet Werkstück über X/Y-Tasterversatz ab, ohne Maschinen-Z0 zu verändern.")
+
+def _json_body():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise ValueError("JSON-Objekt erwartet (Content-Type: application/json)")
+    return body
+
+
+@app.get("/api/materials")
+def materials_list():
+    return jsonify(MATERIALS.list())
+
+
+@app.post("/api/materials")
+def materials_create():
+    return jsonify(MATERIALS.create(_json_body()))
+
+
+@app.put("/api/materials/<material_id>")
+def materials_update(material_id):
+    return jsonify(MATERIALS.update(material_id, _json_body()))
+
+
+@app.delete("/api/materials/<material_id>")
+def materials_delete(material_id):
+    return jsonify(MATERIALS.delete(material_id, request.args.get("base_revision")))
+
 
 @app.post("/api/commission")
 def commission():
@@ -800,24 +838,74 @@ def _job_sets_focus(commands):
     return False
 
 
-def _execute_job(filename, commands, probe_point=None):
+def auto_plan(commands, point=None):
+    """Plan op=autorun without moving: probe grids and whether to compensate.
+
+    Workflow lines (G28/G30/M2) are dropped, the automatic run does that
+    itself. A job with its own absolute Z is already compensated and only
+    gets the surface probed (for the Z floor), never compensated again.
+    Unsupported jobs (arcs, relative X/Y) are refused here, before anything
+    moves, by compensating once against a flat test surface.
+    """
+    if machine.probe_xy_offset_mm is None:
+        raise ValueError("X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen")
+    commands = [c for c in commands if normalize(c) not in WORKFLOW]
+    own_z = focus.has_absolute_z(commands)
+    limit = machine.safe_zone_xy_mm
+    bounds = heightmap.Box(limit, limit, config["travels"]["x"], config["travels"]["y"])
+    if point is not None:
+        grids = heightmap.single_point_plan(point[0], point[1], machine.probe_reachable)
+    else:
+        grids = heightmap.plan_probe(commands, bounds, machine.probe_reachable)
+    if not own_z:
+        flat = heightmap.HeightMapSet([dataclasses.replace(g, z=[0.0] * len(g.z)) for g in grids])
+        focus.compensate(commands, flat, machine.focus_gap_mm, machine.probe_tip_offset_mm)
+    return {"commands": commands, "grids": grids, "compensate": not own_z,
+            "points": sum(sum(g.reachable) for g in grids)}
+
+
+def _auto_prepare(auto):
+    """op=autorun before lasering: home if needed, probe, compensate."""
+    if not machine.homed:
+        # Only when needed: after connecting, a reset or an emergency stop.
+        job["state"] = "homing"
+        machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
+    if stop_job.is_set():
+        raise RuntimeError("Abgebrochen")
+    job["state"] = "probing"
+    grids = [dataclasses.replace(g, z=list(g.z)) for g in auto["grids"]]
+    order = [[i for i in g.order() if g.reachable[i]] for g in grids]
+    job["probe"] = {"done": 0, "total": sum(len(o) for o in order) + 1}
+    values = machine.probe_surface(
+        [[g.point(i) for i in o] for g, o in zip(grids, order)], owner="job",
+        progress=lambda done, total: job["probe"].update(done=done, total=total),
+        should_stop=stop_job.is_set)
+    for g, o, measured in zip(grids, order, values):
+        for i, z in zip(o, measured):
+            g.z[i] = z
+    commands = auto["commands"]
+    if auto["compensate"]:
+        commands, report = focus.compensate(
+            commands, heightmap.HeightMapSet(grids), machine.focus_gap_mm,
+            machine.probe_tip_offset_mm,
+            start_z=machine.position[2] if machine.position else None)
+        logging.info("Autorun focus compensation: %s", report.as_dict())
+    job.update(state="running", total=len(commands))
+    return commands
+
+
+def _execute_job(filename, commands, auto=None):
     """Run one job under the "job" ownership; raises on error/abort.
 
     Shared by the single-job worker and the queue worker (#17), so both
-    use exactly the same homing/probe/focus/park sequence.
+    use exactly the same homing/probe/focus/park sequence. ``auto`` (from
+    auto_plan) makes it the automatic run: home if needed, probe the motif
+    areas, let the focus follow the surface, laser, park.
     """
-    job.update(file=filename, state="running", line=0, total=len(commands), error="")
-    if probe_point is not None:
-        # One-click: home XY then Z, probe the material under the motif,
-        # focus happens automatically before the first powered G1.
-        job["state"] = "homing"
-        machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
-        if stop_job.is_set():
-            raise RuntimeError("Abgebrochen")
-        job["state"] = "probing"
-        machine.command("G0 X%.3f Y%.3f" % probe_point, owner="job", timeout=60)
-        machine.probe_workpiece(owner="job")
-        job["state"] = "running"
+    job.update(file=filename, state="running", line=0, total=len(commands), error="",
+               probe=None)
+    if auto is not None:
+        commands = _auto_prepare(auto)
     if _job_sets_focus(commands):
         machine.focused_this_job = True
     machine.command("M5 I", owner="job")
@@ -850,9 +938,9 @@ def _job_failed(exc):
         _stop_after_job_error()
 
 
-def _job_worker(filename, commands, probe_point=None):
+def _job_worker(filename, commands, auto=None):
     try:
-        _execute_job(filename, commands, probe_point)
+        _execute_job(filename, commands, auto)
     except Exception as exc:
         _job_failed(exc)
     finally:
@@ -871,18 +959,12 @@ def start_job(automatic=False):
     # placement=1 or origin=current|user (Studio #16). Bounds and guard
     # are checked on the lines that will actually be sent.
     commands = _job_lines(filename, content, request.form)
-    probe_point = None
+    auto = None
     if automatic:
-        if machine.probe_xy_offset_mm is None:
-            raise ValueError("X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen")
-        probe_point = _optional_point(request.form)
-        if probe_point is None:
-            bounds = _powered_bounds("\n".join(commands))
-            if bounds is None:
-                raise ValueError("Motivmitte nicht bestimmbar: Abtastpunkt X/Y angeben")
-            # The material lies under the motif; its centre is the most
-            # likely point with material below the switch.
-            probe_point = bounds.center
+        # x/y: probe only that one point (old one-click behaviour).
+        auto = auto_plan(commands, _optional_point(request.form))
+        commands = auto["commands"]
+    needs_home = not machine.homed
     if not job_lock.acquire(blocking=False):
         raise RuntimeError("Ein Auftrag läuft bereits")
     stop_job.clear()
@@ -892,12 +974,15 @@ def start_job(automatic=False):
             raise RuntimeError("LightBurn hat inzwischen die Steuerung")
         machine.owner="job"
     thread = threading.Thread(target=_job_worker,
-                              args=(filename,commands,probe_point), daemon=True,
+                              args=(filename,commands,auto), daemon=True,
                               name="marlin-gcode-job")
     thread.start()
     if automatic:
-        return jsonify(message="Ein-Klick-Ablauf gestartet: Homing → Abtasten bei X%.1f Y%.1f "
-                       "→ Fokus → %s → Park" % (probe_point[0], probe_point[1], filename))
+        return jsonify(message="Automatischer Ablauf gestartet: %sAbtasten (%d Punkte) → %s → "
+                       "%s → Parken" % ("Referenzieren → " if needs_home else "",
+                                        auto["points"] + 1,
+                                        "Höhenkorrektur" if auto["compensate"]
+                                        else "eigenes Z des Auftrags", filename))
     return jsonify(message="Job gestartet: " + filename)
 
 
