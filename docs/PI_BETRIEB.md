@@ -47,6 +47,11 @@ Die SKR-Firmware wird nie automatisch aktualisiert, siehe [FIRMWARE.md](FIRMWARE
   - „Auftrag starten“ setzt voraus, dass schon referenziert und abgetastet ist.
   - **„Ein-Klick“** macht alles: Homing, Abtasten unter der Motivmitte (dort muss Material liegen), Fokus, Auftrag, Parken, Melodie.
   - **„Auftrag abbrechen“** schaltet den Laser aus und parkt. M112 kommt nur, wenn das nicht mehr klappt.
+- **Rahmenfahrt (aus LumaCut Studio, `op=frame`):** fährt den Umriss des Designs mit ausgeschaltetem Laser ab. Rechteck oder Gummiband (konvexe Hülle).
+  - Setzt Referenzfahrt und Leerlauf voraus. Wird abgelehnt, während ein Auftrag läuft oder LightBurn verbunden ist.
+  - Der hochgeladene Auftrag, die Auftragsliste und der Auftragsstatus bleiben unverändert. Danach also direkt „Auftrag starten“, ohne neu zu senden.
+  - Der Pi nimmt nur `G0`/`G1` mit X/Y (Leistung höchstens `S0`), `G21`, `G90`, `M5 I`, `M400` an. Kein `M3`, kein Z, nur Punkte im Verfahrbereich.
+  - „Auftrag abbrechen“ stoppt an der nächsten Ecke, M112 stoppt sofort. Es wird nicht geparkt.
 - **Software-Notstopp M112:** Danach das SKR zurücksetzen (Reset-Taste oder kurz stromlos) und „Notstopp quittieren“ drücken. Der Pi gibt erst frei, wenn das SKR wieder antwortet.
 - **SKR-Firmware:** `.bin` auswählen, „Flashen“ (siehe [FIRMWARE.md](FIRMWARE.md)).
 
@@ -64,8 +69,8 @@ Bis LumaCut Studio alles kann, funktioniert LightBurn weiter:
 
 | Methode | Pfad | Zweck |
 |---|---|---|
-| GET | `/api/status` | Zustand: Verbindung, Besitzer, Position, homed, Werkstück-Z, Fokus-Z, Job, Firmware-Update, Konfiguration |
-| POST | `/api/action` `op=…` | `home`, `park`, `jog` (`axis`, `distance` ∈ ±0,1/1/10), `probe` (optional `x`,`y`), `light`/`exhaust` (`on`), `start`/`autorun` (`name`, optional `x`,`y` als Abtastpunkt), `abort`, `estop`, `estop_reset`, `connect`, `info`/`position`/`endstops` |
+| GET | `/api/status` | Zustand: Verbindung, Besitzer, Position, homed, Werkstück-Z, Fokus-Z, Job, Rahmen (`frame`), Tätigkeit (`activity`: `idle`/`job`/`framing`), Firmware-Update, Konfiguration |
+| POST | `/api/action` `op=…` | `home`, `park`, `jog` (`axis`, `distance` ∈ ±0,1/1/10), `probe` (optional `x`,`y`), `light`/`exhaust` (`on`), `start`/`autorun` (`name`, optional `x`,`y` als Abtastpunkt), `frame` (`gcode`, `mode`=`box`/`hull`), `abort`, `estop`, `estop_reset`, `connect`, `info`/`position`/`endstops` |
 | POST | `/api/upload` | Auftrag (`file`, `.gcode`/`.gc`/`.nc`), wird vorab geprüft |
 | GET | `/api/jobs`, `/api/jobs/<name>/geometry` | Aufträge, Motivgrenzen |
 | POST | `/api/settings` | Fokus, Rückzug, Schalter→Spitze, Tasterversatz |
