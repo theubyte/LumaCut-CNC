@@ -19,7 +19,7 @@ from lumacut_canvas.export import job_layers
 
 from .estimate import estimate_gcode, frame_gcode
 from .material_test import MaterialTestSpec, build_material_test
-from .planner import optimize_layers, optimized_document_gcode
+from .planner import PlanReport, optimize_layers, optimized_document_gcode
 
 
 def _spin(lo, hi, value, step=1.0, decimals=0, suffix=""):
@@ -112,6 +112,10 @@ class JobTools(QObject):
                                      "Leistung × Geschwindigkeit-Testraster einfügen")
         self.cut_action = self._add("Schnittoptionen…", self.cut_options, "Alt+K",
                                     "Kerf-Versatz, Haltestege und An-/Abfahrt der aktiven Ebene")
+        self.selection_action = self._add("Nur Auswahl", self._selection_toggled, None,
+                                          "Senden, Schätzen, Rahmen und Speichern nur mit den "
+                                          "ausgewählten Objekten (wie „Cut Selected Graphics“)")
+        self.selection_action.setCheckable(True)
         self.save_action = self._add("G-Code speichern…", self.save_gcode, "Alt+G",
                                      "Optimierten G-Code des Designs als Datei speichern")
         self.history_action = self._add("Verlauf…", self.show_history, "Ctrl+H",
@@ -148,22 +152,62 @@ class JobTools(QObject):
     def _msg(self, text, ms=8000):
         self.status.showMessage(text, ms)
 
+    # --- Auftrag (ganzes Design oder nur Auswahl) ---------------------------
+    @property
+    def selection_only(self) -> bool:
+        return self.selection_action.isChecked()
+
+    def set_selection_only(self, on: bool) -> None:
+        self.selection_action.setChecked(bool(on))
+        self._selection_toggled()
+
+    def _selection_toggled(self) -> None:
+        self._msg("Auftrag: nur ausgewählte Objekte" if self.selection_only
+                  else "Auftrag: ganzes Design")
+
+    def job_document(self):
+        """Dokument für den Auftrag; ValueError bei „Nur Auswahl“ ohne Auswahl."""
+        doc = self.editor.document
+        if not getattr(self, "selection_only", False):
+            return doc
+        from .selection import selection_document
+        return selection_document(doc, getattr(self.editor, "selection", ()) or ())
+
+    def job_gcode(self) -> tuple[str, str]:
+        """(optimierter G-Code, Hinweis des Planers) – wie beim Senden.
+
+        Der Hinweis meldet z. B. weggelassene An-/Abfahrten (Kollision mit
+        anderen Teilen) und ist leer, wenn nichts zu melden ist.
+        """
+        report = PlanReport()
+        g = optimized_document_gcode(self.job_document(), report=report)
+        note = report.message()
+        if self.selection_only:
+            note = ("Nur Auswahl. " + note).strip()
+        return g, note
+
     def estimate(self):
-        return estimate_gcode(optimized_document_gcode(self.editor.document))
+        return estimate_gcode(self.job_gcode()[0])
 
     def show_estimate(self):
         try:
-            est = self.estimate()
+            g, note = self.job_gcode()
         except ValueError as exc:
             self._msg(f"Keine Schätzung: {exc}")
             return None
-        self._msg(f"Auftrag {est.summary()} (ohne Referenzfahrt/Fokus/Parken)", 15000)
+        est = estimate_gcode(g)
+        text = f"Auftrag {est.summary()} (ohne Referenzfahrt/Fokus/Parken)"
+        if est.layer_summary():
+            text += f" – {est.layer_summary()}"
+        if note:
+            text += f" – {note}"
+        self._msg(text, 15000)
         return est
 
     def frame_program(self, mode: str = "box") -> str:
         """Frame G-code (laser off) of the current design; ValueError if empty."""
         from .images import image_outline_layers
-        doc = self.editor.document
+        doc = JobTools.job_document(self)
         return frame_gcode(optimize_layers(job_layers(doc)) + image_outline_layers(doc), mode=mode)
 
     def frame_job(self, mode: str = "box", confirm: bool = True):
@@ -223,7 +267,7 @@ class JobTools(QObject):
         """Optimierten G-Code (wie beim Senden, ohne Scan-Fokuskorrektur) speichern."""
         from .history_qt import save_gcode_file
         try:
-            g = optimized_document_gcode(self.editor.document)
+            g, note = self.job_gcode()
         except ValueError as exc:
             self._msg(f"Speichern nicht möglich: {exc}")
             return ""
@@ -235,7 +279,7 @@ class JobTools(QObject):
             from pathlib import Path
             Path(path).write_text(g, encoding="utf-8", newline="\n")
         if path:
-            self._msg(f"G-Code gespeichert: {path}")
+            self._msg(f"G-Code gespeichert: {path}" + (f" – {note}" if note else ""))
         return path
 
     def show_history(self, modal: bool = True):

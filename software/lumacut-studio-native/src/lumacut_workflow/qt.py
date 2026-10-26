@@ -146,8 +146,10 @@ class WindowWorkflowAdapter(QObject):
         """Wie „Design senden“ + „Start Job“ in einem Schritt (mit Rückfrage)."""
         from lumacut_job.planner import optimized_document_gcode
         from lumacut_job.estimate import estimate_gcode
+        tools = getattr(self.win, "job_tools", None)
         try:
-            gcode = optimized_document_gcode(self.win.canvas.document)
+            gcode, note = (tools.job_gcode() if tools is not None
+                           else (optimized_document_gcode(self.win.canvas.document), ""))
         except ValueError as exc:
             self.message.emit(f"Auftrag nicht möglich: {exc}")
             return False
@@ -158,7 +160,8 @@ class WindowWorkflowAdapter(QObject):
         stem = path.name.split(".")[0] if path else "canvas"
         if not self.confirm("Auftrag starten",
                             f"{stem}.gcode senden und starten ({estimate_gcode(gcode).summary()})? "
-                            "Bereich frei, Material eingelegt, Schutzbrille?"):
+                            "Bereich frei, Material eingelegt, Schutzbrille?"
+                            + (f"\n\nHinweis: {note}" if note else "")):
             return False
         self.win.machine_panel.send_gcode(f"{stem}.gcode", gcode, start=True)
         self.changed.emit()

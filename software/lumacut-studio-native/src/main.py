@@ -277,8 +277,11 @@ class LumaCutStudio(QMainWindow):
 
     # --- canvas integration (canvas agent) ---
     def _send_canvas_job(self):
+        tools = getattr(self, "job_tools", None)
         try:
-            gcode = optimized_document_gcode(self.canvas.document)
+            # job_tools: „Nur Auswahl“ und Planer-Hinweise (z. B. weggelassene Anfahrten)
+            gcode, note = (tools.job_gcode() if tools is not None
+                           else (optimized_document_gcode(self.canvas.document), ""))
         except ValueError as exc:
             self.statusBar().showMessage(f"Senden nicht möglich: {exc}", 6000)
             return
@@ -287,7 +290,8 @@ class LumaCutStudio(QMainWindow):
             return
         stem = self.canvas.file_path.name.split(".")[0] if self.canvas.file_path else "canvas"
         self.machine_panel.send_gcode(f"{stem}.gcode", gcode, start=False)
-        self.statusBar().showMessage(f"Gesendet: {stem}.gcode {estimate_gcode(gcode).summary()}", 10000)
+        msg = f"Gesendet: {stem}.gcode {estimate_gcode(gcode).summary()}"
+        self.statusBar().showMessage(msg + (f" – {note}" if note else ""), 15000 if note else 10000)
     # --- end canvas integration ---
 
 

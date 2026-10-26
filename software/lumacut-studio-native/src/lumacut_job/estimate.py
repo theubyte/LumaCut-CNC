@@ -45,6 +45,10 @@ class JobEstimate:
     dwell_time_s: float = 0.0
     moves: int = 0
     bounds: tuple[float, float, float, float] | None = None  # laser-on, machine mm
+    # Zeit je Ebene (Reihenfolge wie im Auftrag) aus den Kommentaren
+    # ``; LAYER <Name>`` bzw. ``; IMAGE <id> <MODUS>`` – wie LightBurns
+    # Zeit pro Ebene in der Vorschau. Leer bei G-Code ohne solche Kommentare.
+    layers: list[tuple[str, float]] = field(default_factory=list)
 
     @property
     def total_time_s(self) -> float:
@@ -53,6 +57,12 @@ class JobEstimate:
     def summary(self) -> str:
         return (f"≈ {format_duration(self.total_time_s)} · Schnitt {self.cut_length_mm / 1000:.2f} m "
                 f"· Leerfahrt {self.travel_length_mm / 1000:.2f} m")
+
+    def layer_summary(self) -> str:
+        """``Schneiden 1 min 20 s · Gravur 3 min 05 s`` (leer bei < 2 Ebenen)."""
+        if len(self.layers) < 2:
+            return ""
+        return " · ".join(f"{name} {format_duration(t)}" for name, t in self.layers)
 
 
 def format_duration(seconds: float) -> str:
@@ -114,8 +124,17 @@ def estimate_gcode(gcode: str, accel: float = ACCEL_XY, max_xy: float = MAX_XY,
     segs: list[_Seg] = []
     xs: list[float] = []
     ys: list[float] = []
+    section = ""
+    dwell: dict[str, float] = {}
 
     for raw in gcode.splitlines():
+        if raw.startswith("; LAYER "):
+            section = raw[8:].strip() or "Ebene"
+            continue
+        if raw.startswith("; IMAGE "):
+            parts = raw.split()
+            section = f"Bild {parts[3].capitalize()}" if len(parts) > 3 else "Bild"
+            continue
         line = raw.split(";", 1)[0].strip().upper()
         if not line:
             continue
@@ -137,7 +156,9 @@ def estimate_gcode(gcode: str, accel: float = ACCEL_XY, max_xy: float = MAX_XY,
             continue
         g = int(float(g))
         if g == 4:
-            est.dwell_time_s += float(words.get("P", 0)) / 1000.0 + float(words.get("S", 0))
+            t = float(words.get("P", 0)) / 1000.0 + float(words.get("S", 0))
+            est.dwell_time_s += t
+            dwell[section] = dwell.get(section, 0.0) + t
             continue
         if g not in (0, 1):
             continue
@@ -165,7 +186,8 @@ def estimate_gcode(gcode: str, accel: float = ACCEL_XY, max_xy: float = MAX_XY,
             vmax = min(vmax, max_z * L / abs(d[2]))
         power = float(words.get("S", 0)) if g == 1 else 0.0
         cutting = g == 1 and inline and power > 0
-        segs.append(_Seg(L, vmax, (d[0] / L, d[1] / L, d[2] / L), cutting))
+        segs.append(_Seg(L, vmax, (d[0] / L, d[1] / L, d[2] / L), cutting,
+                         extra={"section": section}))
         if cutting:
             xs += [tgt[0] - d[0], tgt[0]]
             ys += [tgt[1] - d[1], tgt[1]]
@@ -183,11 +205,13 @@ def estimate_gcode(gcode: str, accel: float = ACCEL_XY, max_xy: float = MAX_XY,
         s.entry = min(s.entry_max, math.sqrt(nxt_entry ** 2 + 2 * accel * s.length))
         nxt_entry = s.entry
     v = 0.0
+    per: dict[str, float] = {}
     for i in range(n):
         s = segs[i]
         s.entry = min(s.entry, v)
         v_exit = min(exit_v[i], math.sqrt(s.entry ** 2 + 2 * accel * s.length))
         t = _seg_time(s.length, s.entry, v_exit, s.vmax, accel)
+        per[s.extra["section"]] = per.get(s.extra["section"], 0.0) + t
         if s.cutting:
             est.cut_length_mm += s.length
             est.cut_time_s += t
@@ -198,6 +222,14 @@ def estimate_gcode(gcode: str, accel: float = ACCEL_XY, max_xy: float = MAX_XY,
         if i + 1 < n:
             exit_v[i] = v_exit
     est.moves = n
+    for name, t in dwell.items():
+        per[name] = per.get(name, 0.0) + t
+    # Leerfahrten vor der ersten Ebene zählen zur ersten Ebene
+    if "" in per and len(per) > 1:
+        head = per.pop("")
+        first = next(iter(per))
+        per[first] += head
+    est.layers = [(name or "Auftrag", t) for name, t in per.items()]
     if xs:
         est.bounds = (min(xs), min(ys), max(xs), max(ys))
     return est
