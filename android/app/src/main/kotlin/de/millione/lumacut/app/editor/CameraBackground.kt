@@ -66,6 +66,7 @@ import de.millione.lumacut.core.MarlinWriter
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Shapes
 import de.millione.lumacut.core.Transform
+import de.millione.lumacut.core.Work
 import de.millione.lumacut.core.boundsOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -79,11 +80,11 @@ private val labelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIA
 }
 
 @Composable
-fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, originBottom: Boolean, onClose: () -> Unit) {
+fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, onClose: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var x0 by remember { mutableStateOf("60") }; var y0 by remember { mutableStateOf("50") }
-    var x1 by remember { mutableStateOf("360") }; var y1 by remember { mutableStateOf("350") }
+    var x0 by remember { mutableStateOf("20") }; var y0 by remember { mutableStateOf("20") }
+    var x1 by remember { mutableStateOf("340") }; var y1 by remember { mutableStateOf("320") }
     var photo by remember { mutableStateOf<Bitmap?>(null) }
     val markers = remember { mutableStateListOf<Offset>() }   // in photo pixels
     var working by remember { mutableStateOf(false) }
@@ -93,7 +94,8 @@ fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, o
     fun reference(): List<Pt>? {
         val a = x0.toDoubleOrNull(); val b = y0.toDoubleOrNull(); val c = x1.toDoubleOrNull(); val d = y1.toDoubleOrNull()
         if (a == null || b == null || c == null || d == null || c - a < 50 || d - b < 50) return null
-        return listOf(Pt(a, b), Pt(c, b), Pt(c, d), Pt(a, d))
+        val corners = listOf(Pt(a, b), Pt(c, b), Pt(c, d), Pt(a, d))
+        return corners.takeIf { it.all(Work::contains) }
     }
 
     fun usePhoto(bmp: Bitmap?) {
@@ -118,7 +120,7 @@ fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, o
                 Spacer(Modifier.height(8.dp))
                 SmallText("1. Kalibrier-Rechteck lasern (einmalig, z. B. auf die Opferplatte).\n2. Arbeitsfläche möglichst senkrecht von oben fotografieren.\n3. Die vier Marker auf die nummerierten Ecken ziehen.\n4. Übernehmen – das Foto liegt maßgenau unter dem Editor.")
                 Spacer(Modifier.height(14.dp))
-                Text("Rechteck (Maschinen-mm)", style = LcTypography.titleMedium)
+                Text("Rechteck (Arbeitsbereich, mm)", style = LcTypography.titleMedium)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     NumberField("X1", x0, { x0 = it }, Modifier.weight(1f)); NumberField("Y1", y0, { y0 = it }, Modifier.weight(1f))
@@ -129,8 +131,8 @@ fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, o
                 }
                 Spacer(Modifier.height(10.dp))
                 LcButton("Kalibrier-Rechteck an Laser senden", {
-                    val ref = reference() ?: run { editor.notify("Rechteck mindestens 50 × 50 mm, X/Y ab 30", true); return@LcButton }
-                    machine.uploadJob("kamera-kalibrierung.gcode", calibrationJob(ref, originBottom, imageTopAtMaxY = originBottom))
+                    val ref = reference() ?: run { editor.notify("Rechteck mindestens 50 × 50 mm, ganz im Arbeitsbereich 360 × 340", true); return@LcButton }
+                    machine.uploadJob("kamera-kalibrierung.gcode", calibrationJob(ref))
                     editor.notify("Kalibrier-Rechteck gesendet: unter Aufträge starten")
                 }, Modifier.fillMaxWidth(), LcIcons.send)
                 Spacer(Modifier.height(10.dp))
@@ -146,7 +148,7 @@ fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, o
                     scope.launch {
                         try {
                             val bmp = withContext(Dispatchers.Default) {
-                                CameraRectify.rectify(p, markers.map { Pt(it.x.toDouble(), it.y.toDouble()) }, ref, originBottom)
+                                CameraRectify.rectify(p, markers.map { Pt(it.x.toDouble(), it.y.toDouble()) }, ref)
                             }
                             editor.setBackground(bmp); editor.notify("Kamera-Hintergrund übernommen"); onClose()
                         } catch (e: Exception) { editor.notify(e.message ?: "Entzerren fehlgeschlagen", true) }
@@ -166,7 +168,7 @@ fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, o
 }
 
 @Composable
-private fun MarkerCanvas(photo: Bitmap, markers: MutableList<Offset>) {
+internal fun MarkerCanvas(photo: Bitmap, markers: MutableList<Offset>) {
     val image = remember(photo) { photo.asImageBitmap() }
     var size by remember { mutableStateOf(IntSize.Zero) }
     fun scale() = min(size.width / photo.width.toFloat(), size.height / photo.height.toFloat())
@@ -227,17 +229,17 @@ private fun loadUpright(file: File): Bitmap? {
 }
 
 /** Rectangle with numbered corners and crosses, engraved lightly for the camera calibration. */
-private fun calibrationJob(ref: List<Pt>, originBottom: Boolean, imageTopAtMaxY: Boolean): String {
+internal fun calibrationJob(ref: List<Pt>): String {
     val layer = Layer(name = "Kalibrierung", color = 0xFF4FD8B4, mode = LayerMode.LINE, powerPct = 30.0, speed = 1500.0)
     val elements = mutableListOf<Element>()
     elements += Element(layerId = layer.id, kind = "Rahmen", paths = listOf(ref + ref.first()))
     ref.forEachIndexed { i, c ->
         elements += Element(layerId = layer.id, kind = "Kreuz", paths = listOf(
             listOf(Pt(c.x - 6, c.y), Pt(c.x + 6, c.y)), listOf(Pt(c.x, c.y - 6), Pt(c.x, c.y + 6))))
-        val glyphs = orientForScreen(TextPaths.build("${i + 1}", 8.0, true, "sans-serif"), originBottom)
+        val glyphs = TextPaths.build("${i + 1}", 8.0, true, "sans-serif")
         val b = boundsOf(glyphs) ?: return@forEachIndexed
         val inward = Pt(if (i == 0 || i == 3) c.x + 4 else c.x - 4 - b.width, if (i < 2) c.y + 4 else c.y - 4 - b.height)
         elements += Element(layerId = layer.id, kind = "Nummer", transform = Transform(inward.x - b.minX, inward.y - b.minY), paths = glyphs)
     }
-    return MarlinWriter("kalibrierung", imageTopAtMaxY).write(Document("Kamera-Kalibrierung", listOf(layer), elements))
+    return MarlinWriter("kalibrierung").write(Document("Kamera-Kalibrierung", listOf(layer), elements))
 }

@@ -52,11 +52,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.millione.lumacut.app.machine.JobView
 import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.app.machine.canControl
-import de.millione.lumacut.core.Bed
 import de.millione.lumacut.core.Frame
 import de.millione.lumacut.core.PiClient
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Toolpath
+import de.millione.lumacut.core.Work
 import de.millione.lumacut.core.formatDuration
 import java.text.DateFormat
 import java.util.Date
@@ -120,7 +120,6 @@ fun JobsScreen(machine: MachineViewModel) {
 private fun JobDetail(machine: MachineViewModel, view: JobView, busy: Set<String>) {
     val status by machine.status.collectAsStateWithLifecycle()
     val online by machine.online.collectAsStateWithLifecycle()
-    val originBottom by machine.originBottom.collectAsStateWithLifecycle()
     var confirm by rememberConfirm()
     val tp = view.toolpath
     val running = status?.job?.let { it.active && it.file == view.name } == true
@@ -139,7 +138,7 @@ private fun JobDetail(machine: MachineViewModel, view: JobView, busy: Set<String
                 view.error != null -> Banner("Vorschau nicht möglich: ${view.error}", Lc.bad, Modifier.padding(20.dp))
                 tp == null -> CircularProgressIndicator(color = Lc.accent)
                 else -> ToolpathCanvas(
-                    tp, view.probe, status?.position, if (running) status?.job?.line ?: 0 else 0, originBottom,
+                    tp, view.probe, status?.position, if (running) status?.job?.line ?: 0 else 0,
                     Modifier.fillMaxSize(), onTap = { if (!running) machine.setProbe(it) },
                 )
             }
@@ -158,14 +157,12 @@ private fun JobDetail(machine: MachineViewModel, view: JobView, busy: Set<String
                 Tile("Laserweg", st?.let { "%.2f m".format(it.cutMm / 1000) } ?: "—", Modifier.weight(1f))
                 Tile("Leerweg", st?.let { "%.2f m".format(it.travelMm / 1000) } ?: "—", Modifier.weight(1f))
             }
-            Tile("Größe · Position", tp?.bounds?.let { "%.1f × %.1f mm · ab X %.0f Y %.0f".format(it.width, it.height, it.minX, it.minY) } ?: "—", Modifier.fillMaxWidth())
+            Tile("Größe · Position", tp?.bounds?.let { val o = Work.fromMachine(it.minX, it.minY); "%.1f × %.1f mm · ab X %.0f Y %.0f".format(it.width, it.height, o.x, o.y) } ?: "—", Modifier.fillMaxWidth())
             Tile("Abtastpunkt", view.probe?.let { "X %.1f · Y %.1f · %s".format(it.x, it.y, if (view.probeChosen) "gewählt" else "Motivmitte") } ?: "—", Modifier.fillMaxWidth())
             st?.warnings?.forEach { Banner(it) }
             view.probe?.let { p ->
-                machine.probeHeadPosition(p)?.let { head ->
-                    if (!Bed.inWorkArea(head.x, head.y) && head.x <= Bed.WIDTH)
-                        Banner("Für diesen Punkt müsste der Kopf auf X %.1f / Y %.1f fahren. Anderen Punkt antippen.".format(head.x, head.y))
-                }
+                if (machine.probeReachable(p) == false)
+                    Banner("Den Punkt X %.1f / Y %.1f erreicht der Taster nicht (er sitzt versetzt zum Laser). Anderen Punkt antippen.".format(p.x, p.y))
             }
             Spacer(Modifier.height(6.dp))
             val jobState = status?.job
@@ -223,17 +220,18 @@ private fun Legend(color: Color, label: String, dot: Boolean = false) {
 
 /** Toolpath on the bed. Cut lines get more opaque with higher power; done part turns accent. */
 @Composable
-fun ToolpathCanvas(tp: Toolpath, probe: Pt?, head: List<Double>?, doneLine: Int, originBottom: Boolean,
+fun ToolpathCanvas(tp: Toolpath, probe: Pt?, head: List<Double>?, doneLine: Int,
                    modifier: Modifier = Modifier, onTap: (Pt) -> Unit = {}) {
     val buckets = remember(tp) { List(4) { b -> tp.segments.filter { it.cut && it.power * 4 / 256 == b } } }
     val travel = remember(tp) { tp.segments.filter { !it.cut } }
-    Canvas(modifier.pointerInput(originBottom) {
-        detectTapGestures { o -> onTap(BedMapper.fit(androidx.compose.ui.geometry.Size(size.width.toFloat(), size.height.toFloat()), originBottom).toBed(o)) }
+    Canvas(modifier.pointerInput(Unit) {
+        detectTapGestures { o -> onTap(WorkMapper.fit(androidx.compose.ui.geometry.Size(size.width.toFloat(), size.height.toFloat())).toWork(o)) }
     }) {
-        val m = BedMapper.fit(size, originBottom)
-        drawBed(m)
+        val m = WorkMapper.fit(size)
+        drawWorkArea(m)
+        // G-code is in machine mm; everything on screen is the work area.
         fun path(list: List<de.millione.lumacut.core.Segment>) = Path().apply {
-            for (s in list) { moveTo(m.at(s.x0, s.y0).x, m.at(s.x0, s.y0).y); val e = m.at(s.x1, s.y1); lineTo(e.x, e.y) }
+            for (s in list) { val a = m.machine(s.x0, s.y0); moveTo(a.x, a.y); val e = m.machine(s.x1, s.y1); lineTo(e.x, e.y) }
         }
         drawPath(path(travel), Color(0x735A6E87), style = Stroke(1f))
         val width = (m.scale * 0.3f).coerceIn(1f, 2.4f)
@@ -242,7 +240,7 @@ fun ToolpathCanvas(tp: Toolpath, probe: Pt?, head: List<Double>?, doneLine: Int,
         }
         if (doneLine > 0) drawPath(path(tp.segments.filter { it.cut && it.line <= doneLine }), Lc.accent, style = Stroke(width + .6f, cap = StrokeCap.Round))
         tp.bounds?.let { b ->
-            val a = m.at(Pt(b.minX, b.minY)); val c = m.at(Pt(b.maxX, b.maxY))
+            val a = m.machine(b.minX, b.minY); val c = m.machine(b.maxX, b.maxY)
             drawRect(Color(0x40EEF3F8), Offset(minOf(a.x, c.x), minOf(a.y, c.y)),
                 androidx.compose.ui.geometry.Size(kotlin.math.abs(c.x - a.x), kotlin.math.abs(c.y - a.y)),
                 style = Stroke(1.2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f))))
@@ -253,10 +251,7 @@ fun ToolpathCanvas(tp: Toolpath, probe: Pt?, head: List<Double>?, doneLine: Int,
             drawLine(Lc.info, Offset(c.x - 24f, c.y), Offset(c.x + 24f, c.y), 3f)
             drawLine(Lc.info, Offset(c.x, c.y - 24f), Offset(c.x, c.y + 24f), 3f)
         }
-        head?.takeIf { it.size >= 2 }?.let {
-            val c = m.at(Pt(it[0], it[1]))
-            drawCircle(Color.White, 8f, c); drawCircle(Lc.bg, 8f, c, style = Stroke(3f))
-        }
+        drawHead(m, head)
     }
 }
 

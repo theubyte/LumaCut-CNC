@@ -34,6 +34,22 @@ class PiClientTest {
         srv.shutdown()
     }
 
+    @Test fun `moveto and camera snapshot`() = runBlocking {
+        val srv = MockWebServer().apply {
+            enqueue(MockResponse().setBody("""{"message":"Kopf auf X60.0 Y45.5"}"""))
+            enqueue(MockResponse().setBody(okio.Buffer().write(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 2))))
+            enqueue(MockResponse().setResponseCode(503).setBody("""{"error":"Keine Kamera am Pi"}"""))
+            start()
+        }
+        val pi = PiClient("127.0.0.1", srv.port)
+        pi.moveTo(60.0, 45.5)
+        assertEquals("op=moveto&x=60.000&y=45.500", srv.takeRequest().body.readUtf8())
+        assertEquals(4, pi.cameraSnapshot(640, 480).size)
+        assertEquals("/api/camera/snapshot?w=640&h=480", srv.takeRequest().path)
+        assertEquals("Keine Kamera am Pi", assertFailsWith<PiException> { pi.cameraSnapshot() }.message)
+        srv.shutdown()
+    }
+
     @Test fun `action posts form and returns the message, errors carry the Pi text`() = runBlocking {
         val srv = server(200 to """{"message":"Bewegung ausgeführt"}""", 400 to """{"error":"Maschine nicht referenziert"}""")
         val pi = PiClient("127.0.0.1", srv.port)

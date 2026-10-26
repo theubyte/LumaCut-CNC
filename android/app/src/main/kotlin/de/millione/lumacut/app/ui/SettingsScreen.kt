@@ -34,7 +34,6 @@ fun SettingsScreen(machine: MachineViewModel) {
     val status by machine.status.collectAsStateWithLifecycle()
     val online by machine.online.collectAsStateWithLifecycle()
     val busy by machine.busy.collectAsStateWithLifecycle()
-    val originBottom by machine.originBottom.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var confirm by rememberConfirm()
     var ip by remember { mutableStateOf(host) }
@@ -78,10 +77,8 @@ fun SettingsScreen(machine: MachineViewModel) {
                 })
             }
             LcCard {
-                CardTitle("Ansicht")
-                Segmented(listOf(false to "X0/Y0 oben links", true to "X0/Y0 unten links"), originBottom, machine::setOriginBottom)
-                Spacer(Modifier.height(10.dp))
-                SmallText("Einmal so einstellen, dass die Arbeitsfläche auf dem Tablet aussieht wie die echte Maschine von vorn. Maschinenkoordinaten ändern sich dadurch nicht.")
+                CardTitle("Arbeitsbereich")
+                SmallText("360 × 340 mm, Nullpunkt oben links. Der 30-mm-Rand der Maschine ist für den Laser reserviert (Parken, Referenzieren) und wird nicht angezeigt – dort wird nie gelasert, auch kein Überlauf.")
             }
             LcCard {
                 CardTitle("Über")

@@ -66,11 +66,15 @@ data class MachineStatus(
     val job: JobProgress = JobProgress(),
     val frame: FrameProgress = FrameProgress(),
     val config: PiConfig = PiConfig(),
+    val camera: CameraInfo = CameraInfo(),
     val recent: List<String> = emptyList(),
 ) {
     val ownerFree get() = owner == "Frei" || owner.isBlank()
     val probeOffset: Pt? get() = probe_xy_offset_mm?.takeIf { it.size == 2 }?.let { Pt(it[0], it[1]) }
 }
+
+@Serializable
+data class CameraInfo(val device: String = "", val available: Boolean = false)
 
 @Serializable
 data class JobFile(val name: String, val bytes: Long = 0, val modified: Long = 0)
@@ -137,12 +141,30 @@ class PiClient(
     suspend fun action(op: String, fields: Map<String, String> = emptyMap()): String {
         require(op in ACTIONS) { "Aktion nicht vorgesehen: $op" }
         val form = FormBody.Builder().add("op", op).apply { fields.forEach { (k, v) -> add(k, v) } }.build()
-        val long = op in setOf("home", "probe", "park")
+        val long = op in setOf("home", "probe", "park", "moveto")
         return message(call(Request.Builder().url(url("api", "action")).post(form).build(), longRunning = long))
     }
 
     /** Traces [program] (from [Frame.program]) with the laser off. */
     suspend fun frame(program: String, mode: Frame.Mode): String = action("frame", mapOf("gcode" to program, "mode" to mode.api))
+
+    /** Laser-off move of the head to machine X/Y; Z only goes up (camera scan). */
+    suspend fun moveTo(machineX: Double, machineY: Double): String = action("moveto", mapOf(
+        "x" to "%.3f".format(java.util.Locale.ROOT, machineX), "y" to "%.3f".format(java.util.Locale.ROOT, machineY)))
+
+    /** JPEG from the head camera on the Pi. */
+    suspend fun cameraSnapshot(width: Int = 1280, height: Int = 720): ByteArray = withContext(Dispatchers.IO) {
+        val u = url("api", "camera", "snapshot").newBuilder()
+            .addQueryParameter("w", width.toString()).addQueryParameter("h", height.toString()).build()
+        try {
+            http.newBuilder().readTimeout(20, TimeUnit.SECONDS).build().newCall(Request.Builder().url(u).build()).execute().use { r ->
+                val bytes = r.body?.bytes() ?: ByteArray(0)
+                if (!r.isSuccessful) throw PiException(errorText(bytes.toString(Charsets.UTF_8)) ?: "Kamera: HTTP ${r.code}")
+                if (bytes.size < 2 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) throw PiException("Kamera liefert kein JPEG")
+                bytes
+            }
+        } catch (e: PiException) { throw e } catch (e: IOException) { throw PiException("Pi nicht erreichbar (${e.message ?: e.javaClass.simpleName})") }
+    }
 
     suspend fun settings(values: Map<String, String>): String {
         val form = FormBody.Builder().apply { values.forEach { (k, v) -> add(k, v) } }.build()
@@ -164,7 +186,7 @@ class PiClient(
     }
 
     companion object {
-        val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame",
+        val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame", "moveto",
                             "abort", "estop", "estop_reset")
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

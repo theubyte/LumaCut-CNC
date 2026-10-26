@@ -51,11 +51,13 @@ import de.millione.lumacut.app.editor.EditorViewModel
 import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.app.machine.Notice
 import de.millione.lumacut.app.machine.headline
+import de.millione.lumacut.app.workspace.WorkspaceScreen
 
 enum class Dest(val label: String, val icon: ImageVector) {
     WERKSTATT("Werkstatt", LcIcons.machine),
     AUFTRAEGE("Aufträge", LcIcons.jobs),
     EDITOR("Editor", LcIcons.editor),
+    ARBEITSPLATZ("Arbeitsplatz", LcIcons.scan),
     MATERIAL("Material", LcIcons.material),
     EINSTELLUNGEN("Einstellungen", LcIcons.settings),
 }
@@ -82,6 +84,7 @@ fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
                             Dest.WERKSTATT -> WerkstattScreen(machine)
                             Dest.AUFTRAEGE -> JobsScreen(machine)
                             Dest.EDITOR -> EditorScreen(editor, machine)
+                            Dest.ARBEITSPLATZ -> WorkspaceScreen(machine, editor)
                             Dest.MATERIAL -> MaterialScreen(editor)
                             Dest.EINSTELLUNGEN -> SettingsScreen(machine)
                         }
@@ -125,7 +128,8 @@ private fun TopBar(machine: MachineViewModel) {
         ToneChip(head.title, head.tone, Modifier.weight(1f, fill = false))
         Spacer(Modifier.weight(1f))
         status?.position?.takeIf { it.size == 3 }?.let { p ->
-            for ((axis, v) in listOf("X" to p[0], "Y" to p[1], "Z" to p[2])) {
+            // Work-area coordinates like the editor; negative = head in the laser's reserved border (parked).
+            for ((axis, v) in listOf("X" to p[0] - de.millione.lumacut.core.Bed.SAFE, "Y" to p[1] - de.millione.lumacut.core.Bed.SAFE, "Z" to p[2])) {
                 Text(axis, style = LcTypography.labelMedium, color = Lc.faint)
                 Text("%.2f".format(v), style = LcTypography.titleMedium.merge(NumberStyle), color = Lc.text,
                      textAlign = TextAlign.End, modifier = Modifier.width(66.dp))

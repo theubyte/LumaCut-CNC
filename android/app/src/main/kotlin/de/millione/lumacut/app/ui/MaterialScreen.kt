@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.millione.lumacut.app.editor.EditorViewModel
 import de.millione.lumacut.core.LayerMode
+import de.millione.lumacut.core.Limits
 import de.millione.lumacut.core.Material
 import kotlin.math.roundToInt
 
@@ -62,7 +63,14 @@ fun MaterialScreen(editor: EditorViewModel) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Tile("Leistung", "${m.powerPct.roundToInt()} %", Modifier.weight(1f))
                         Tile("Tempo", "${m.speed.roundToInt()}", Modifier.weight(1f))
-                        Tile(if (m.mode == LayerMode.FILL) "Abstand" else "Durchg.", if (m.mode == LayerMode.FILL) "${m.intervalMm} mm" else "${m.passes}×", Modifier.weight(1f))
+                        Tile(if (m.mode == LayerMode.FILL) "Abstand" else "Durchg.", if (m.mode == LayerMode.FILL) "${m.intervalMm} mm" else "${m.effectivePasses}×", Modifier.weight(1f))
+                    }
+                    if (m.depthPerPassMm > 0 || m.zStepMm > 0) {
+                        Spacer(Modifier.height(6.dp))
+                        SmallText(buildString {
+                            if (m.depthPerPassMm > 0) append("%.2f mm pro Durchgang".format(m.depthPerPassMm))
+                            if (m.zStepMm > 0) { if (isNotEmpty()) append(" · "); append("Fokus −%.2f mm je Durchgang".format(m.zStepMm)) }
+                        }, Lc.faint)
                     }
                 }
             }
@@ -88,6 +96,9 @@ private fun MaterialDialog(m: Material, onDismiss: () -> Unit, onSave: (Material
     var speed by remember { mutableStateOf(m.speed.toString()) }
     var passes by remember { mutableStateOf(m.passes.toString()) }
     var interval by remember { mutableStateOf(m.intervalMm.toString()) }
+    var depth by remember { mutableStateOf(m.depthPerPassMm.toString()) }
+    var zStep by remember { mutableStateOf(m.zStepMm.toString()) }
+    fun d(s: String) = s.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
         title = { Text(if (m.name.isBlank()) "Neues Material" else "Material bearbeiten", style = LcTypography.titleLarge) },
@@ -107,15 +118,22 @@ private fun MaterialDialog(m: Material, onDismiss: () -> Unit, onSave: (Material
                     NumberField("Durchgänge", passes, { passes = it }, Modifier.weight(1f))
                     NumberField("Zeilenabstand", interval, { interval = it }, Modifier.weight(1f), "mm")
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NumberField("Tiefe/Durchgang", depth, { depth = it }, Modifier.weight(1f), "mm")
+                    NumberField("Z-Absenkung/Durchg.", zStep, { zStep = it }, Modifier.weight(1f), "mm")
+                }
+                SmallText("Mit Tiefe pro Durchgang ergeben sich die Durchgänge aus der Stärke. Die Z-Absenkung bleibt insgesamt ≤ 3 mm.")
             }
         },
         confirmButton = {
-            val valid = name.isNotBlank() && thick.toDoubleOrNull() != null && power.toDoubleOrNull()?.let { it in 0.0..100.0 } == true &&
-                speed.toDoubleOrNull()?.let { it in 10.0..9000.0 } == true && passes.toIntOrNull()?.let { it in 1..50 } == true &&
-                interval.toDoubleOrNull()?.let { it in 0.03..2.0 } == true
+            val valid = name.isNotBlank() && d(thick)?.let { it in Limits.THICKNESS } == true && d(power)?.let { it in Limits.POWER } == true &&
+                d(speed)?.let { it in Limits.SPEED } == true && passes.toIntOrNull()?.let { it in Limits.PASSES } == true &&
+                d(interval)?.let { it in 0.03..2.0 } == true && d(depth)?.let { it in Limits.DEPTH_PER_PASS } == true &&
+                d(zStep)?.let { it in Limits.Z_STEP } == true
             LcButton("Speichern", {
-                onSave(m.copy(name = name.trim(), thicknessMm = thick.toDouble(), process = process.trim().ifEmpty { "Schneiden" }, mode = mode,
-                    powerPct = power.toDouble(), speed = speed.toDouble(), passes = passes.toInt(), intervalMm = interval.toDouble()))
+                onSave(m.copy(name = name.trim(), thicknessMm = d(thick)!!, process = process.trim().ifEmpty { "Schneiden" }, mode = mode,
+                    powerPct = d(power)!!, speed = d(speed)!!, passes = passes.toInt(), intervalMm = d(interval)!!,
+                    depthPerPassMm = d(depth)!!, zStepMm = d(zStep)!!))
             }, kind = BtnKind.PRIMARY, enabled = valid)
         },
         dismissButton = {

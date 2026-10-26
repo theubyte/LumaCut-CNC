@@ -4,12 +4,13 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import de.millione.lumacut.core.Bed
 import de.millione.lumacut.core.JobFile
 import de.millione.lumacut.core.MachineStatus
 import de.millione.lumacut.core.PiClient
 import de.millione.lumacut.core.Pt
+import de.millione.lumacut.core.Scan
 import de.millione.lumacut.core.Toolpath
+import de.millione.lumacut.core.Work
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -25,7 +26,7 @@ import kotlinx.coroutines.withContext
 
 data class Notice(val text: String, val error: Boolean = false)
 
-/** Selected job with its parsed toolpath and the probe point for one-click runs. */
+/** Selected job with its parsed toolpath and the probe point (work-area mm) for one-click runs. */
 data class JobView(val name: String, val toolpath: Toolpath?, val probe: Pt?, val probeChosen: Boolean, val error: String? = null)
 
 class MachineViewModel(app: Application) : AndroidViewModel(app) {
@@ -49,10 +50,6 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _job = MutableStateFlow<JobView?>(null)
     val job: StateFlow<JobView?> = _job.asStateFlow()
-
-    /** View preference: where X0/Y0 appears on screen. Machine coordinates never change. */
-    private val _originBottom = MutableStateFlow(prefs.getBoolean("originBottom", false))
-    val originBottom: StateFlow<Boolean> = _originBottom.asStateFlow()
 
     private val _notices = MutableSharedFlow<Notice>(extraBufferCapacity = 8)
     val notices: SharedFlow<Notice> = _notices
@@ -82,10 +79,11 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
         refreshJobs()
     }
 
-    fun setOriginBottom(bottom: Boolean) {
-        _originBottom.value = bottom
-        prefs.edit().putBoolean("originBottom", bottom).apply()
-    }
+    /** The Pi client, or null with a notice when no address is set. */
+    fun clientOrNotify(): PiClient? = client ?: run { notify("Erst die Pi-Adresse unter Einstellungen eintragen", true); null }
+
+    /** Fresh status right now (scan and probe runs wait on it). */
+    suspend fun refreshStatus(): MachineStatus? { poll(); return _status.value }
 
     private suspend fun poll() {
         val c = client ?: return
@@ -150,7 +148,8 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val text = c.jobContent(name)
                 val tp = withContext(Dispatchers.Default) { Toolpath.parse(text) }
-                val probe = tp.bounds?.center?.let { Pt(it.x.coerceIn(Bed.SAFE, Bed.WIDTH), it.y.coerceIn(Bed.SAFE, Bed.HEIGHT)) }
+                // Toolpath is in machine mm; the probe point lives in the work area like everything the user sees.
+                val probe = tp.bounds?.center?.let { Work.fromMachine(it).let { w -> Pt(w.x.coerceIn(0.0, Work.WIDTH), w.y.coerceIn(0.0, Work.HEIGHT)) } }
                 if (_job.value?.name == name) _job.value = JobView(name, tp, probe, false)
             } catch (e: Exception) {
                 if (_job.value?.name == name) _job.value = JobView(name, null, null, false, e.message)
@@ -161,14 +160,14 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
     fun clearJob() { _job.value = null }
 
     fun setProbe(p: Pt) {
-        if (!Bed.inWorkArea(p.x, p.y)) { notify("Abtastpunkt muss außerhalb der 30-mm-Safezone liegen", true); return }
+        if (!Work.contains(p)) { notify("Abtastpunkt muss im Arbeitsbereich liegen", true); return }
         _job.update { it?.copy(probe = Pt(Math.round(p.x * 10) / 10.0, Math.round(p.y * 10) / 10.0), probeChosen = true) }
     }
 
     fun startJob(oneClick: Boolean) {
         val view = _job.value ?: return
         val fields = mutableMapOf("name" to view.name)
-        if (oneClick) view.probe?.let { fields["x"] = "%.2f".format(java.util.Locale.ROOT, it.x); fields["y"] = "%.2f".format(java.util.Locale.ROOT, it.y) }
+        if (oneClick) view.probe?.let { Work.toMachine(it) }?.let { fields["x"] = "%.2f".format(java.util.Locale.ROOT, it.x); fields["y"] = "%.2f".format(java.util.Locale.ROOT, it.y) }
         action(if (oneClick) "autorun" else "start", fields, key = "start")
     }
 
@@ -197,6 +196,6 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
 
     fun saveSettings(values: Map<String, String>) = request("settings") { it.settings(values) }
 
-    /** Head position the Pi would need for probing at [p] (probe tip lands on p). */
-    fun probeHeadPosition(p: Pt): Pt? = _status.value?.probeOffset?.let { Pt(p.x - it.x, p.y - it.y) }
+    /** False when the switch cannot reach work point [p] (head would leave X30..390/Y30..370); null without offset. */
+    fun probeReachable(p: Pt): Boolean? = _status.value?.probeOffset?.let { Scan.reachable(p, it) }
 }

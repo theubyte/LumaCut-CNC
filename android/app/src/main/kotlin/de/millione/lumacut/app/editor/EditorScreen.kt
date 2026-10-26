@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -63,7 +65,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,7 +73,8 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.millione.lumacut.app.machine.MachineViewModel
-import de.millione.lumacut.app.ui.BedMapper
+import de.millione.lumacut.app.machine.canControl
+import de.millione.lumacut.app.ui.Banner
 import de.millione.lumacut.app.ui.BtnKind
 import de.millione.lumacut.app.ui.Confirm
 import de.millione.lumacut.app.ui.ConfirmDialog
@@ -86,32 +88,37 @@ import de.millione.lumacut.app.ui.NumberField
 import de.millione.lumacut.app.ui.Segmented
 import de.millione.lumacut.app.ui.SmallText
 import de.millione.lumacut.app.ui.TextInput
-import de.millione.lumacut.app.ui.drawBed
-import de.millione.lumacut.app.ui.rememberConfirm
-import de.millione.lumacut.core.Bed
-import de.millione.lumacut.core.Frame
-import de.millione.lumacut.core.MaterialTest
-import de.millione.lumacut.core.Toolpath
-import de.millione.lumacut.core.formatDuration
-import de.millione.lumacut.app.machine.canControl
-import de.millione.lumacut.app.ui.Banner
 import de.millione.lumacut.app.ui.Tile
+import de.millione.lumacut.app.ui.WorkMapper
+import de.millione.lumacut.app.ui.drawHead
+import de.millione.lumacut.app.ui.drawWorkArea
+import de.millione.lumacut.app.ui.rememberConfirm
+import de.millione.lumacut.core.Box as WBox
+import de.millione.lumacut.core.Document
+import de.millione.lumacut.core.DxfImport
 import de.millione.lumacut.core.Element
+import de.millione.lumacut.core.Frame
 import de.millione.lumacut.core.ImageMode
-import de.millione.lumacut.core.JobBuildException
 import de.millione.lumacut.core.Layer
 import de.millione.lumacut.core.LayerMode
+import de.millione.lumacut.core.Limits
+import de.millione.lumacut.core.MaterialTest
 import de.millione.lumacut.core.PiClient
 import de.millione.lumacut.core.Poly
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Shapes
 import de.millione.lumacut.core.SvgImport
+import de.millione.lumacut.core.Toolpath
 import de.millione.lumacut.core.Transform
+import de.millione.lumacut.core.Work
+import de.millione.lumacut.core.formatDuration
 import de.millione.lumacut.core.simplify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 @Composable
@@ -119,7 +126,8 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
     val doc by editor.doc.collectAsStateWithLifecycle()
     val selected by editor.selected.collectAsStateWithLifecycle()
     val tool by editor.tool.collectAsStateWithLifecycle()
-    val originBottom by machine.originBottom.collectAsStateWithLifecycle()
+    val multi by editor.multi.collectAsStateWithLifecycle()
+    val heights by editor.heights.collectAsStateWithLifecycle()
     val canUndo by editor.canUndo.collectAsStateWithLifecycle()
     val canRedo by editor.canRedo.collectAsStateWithLifecycle()
     val busy by machine.busy.collectAsStateWithLifecycle()
@@ -133,28 +141,38 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
     val machineStatus by machine.status.collectAsStateWithLifecycle()
     val machineOnline by machine.online.collectAsStateWithLifecycle()
 
-    val svgPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    val vectorPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
             try {
                 val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } } ?: return@launch
-                val polys = withContext(Dispatchers.Default) { SvgImport.parse(bytes) }
-                val (placed, shrunk) = placeInWorkArea(orientForScreen(polys, originBottom))
-                editor.addVector("SVG", placed)
-                editor.notify(if (shrunk) "SVG verkleinert, damit es in die Arbeitsfläche passt" else "SVG importiert (${polys.size} Pfade)")
-            } catch (e: Exception) { editor.notify(e.message ?: "SVG-Import fehlgeschlagen", true) }
+                val head = String(bytes, 0, minOf(bytes.size, 512), Charsets.UTF_8)
+                val svg = head.trimStart().startsWith("<") || head.contains("<svg")
+                val polys = withContext(Dispatchers.Default) { if (svg) SvgImport.parse(bytes) else DxfImport.parse(bytes) }
+                val kind = if (svg) "SVG" else "DXF"
+                val (placed, shrunk) = placeInWorkArea(polys)
+                editor.addVector(kind, placed)
+                editor.notify(if (shrunk) "$kind verkleinert, damit es in den Arbeitsbereich passt" else "$kind importiert (${polys.size} Pfade)")
+            } catch (e: Exception) { editor.notify(e.message ?: "Import fehlgeschlagen", true) }
         }
     }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
         scope.launch {
-            val raster = withContext(Dispatchers.Default) { Images.decode(context, uri)?.let { Images.toRaster(it) } }
+            val (raster, original, dpi) = withContext(Dispatchers.Default) {
+                val bmp = Images.decode(context, uri)
+                Triple(bmp?.let { Images.toRaster(it) }, Images.originalSize(context, uri), Images.dpi(context, uri))
+            }
             if (raster == null) { editor.notify("Bild konnte nicht gelesen werden", true); return@launch }
-            val w = 80.0; val h = w * raster.height / raster.width
-            val x = (Bed.SAFE + Bed.WIDTH) / 2 - w / 2; val y = (Bed.SAFE + Bed.HEIGHT) / 2 - h / 2
+            // With a resolution in the file the picture keeps its print size; otherwise 80 mm wide.
+            var w = if (dpi != null && original != null) original.first / dpi * 25.4 else 80.0
+            var h = w * raster.height / raster.width
+            val k = minOf(1.0, (Work.WIDTH - 10) / w, (Work.HEIGHT - 10) / h); w *= k; h *= k
+            val x = Work.center.x - w / 2; val y = Work.center.y - h / 2
             editor.addElement(Element(layerId = editor.activeLayer.value, kind = "Bild", transform = Transform(x, y),
                 raster = raster, imageWidthMm = w, imageHeightMm = h))
-            editor.notify("Bild eingefügt: ${raster.width} × ${raster.height} px auf 80 mm Breite")
+            editor.notify(if (dpi != null && k == 1.0) "Bild eingefügt: %.0f × %.0f mm (%.0f dpi aus der Datei)".format(w, h, dpi)
+                          else "Bild eingefügt: %.0f × %.0f mm".format(w, h))
         }
     }
     val projectSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
@@ -175,37 +193,44 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // action bar
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            var title by remember(doc.title) { mutableStateOf(doc.title) }
-            OutlinedTextField(title, { title = it; editor.rename(it) }, singleLine = true, modifier = Modifier.width(260.dp),
-                textStyle = LcTypography.titleMedium, shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Lc.accent, unfocusedBorderColor = Lc.line))
-            IconBtn(LcIcons.undo, "Rückgängig", editor::undo, enabled = canUndo)
-            IconBtn(LcIcons.redo, "Wiederholen", editor::redo, enabled = canRedo)
-            IconBtn(LcIcons.copy, "Duplizieren", editor::duplicateSelected, enabled = selected != null)
-            IconBtn(LcIcons.trash, "Löschen", editor::deleteSelected, tint = Lc.bad, enabled = selected != null)
-            IconBtn(LcIcons.center, "Zentrieren", editor::centerInWorkArea)
-            Box(Modifier.width(1.dp).height(36.dp).background(Lc.line))
-            IconBtn(LcIcons.svg, "SVG importieren", { svgPicker.launch(arrayOf("image/svg+xml", "*/*")) })
-            IconBtn(LcIcons.image, "Bild importieren", { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
-            IconBtn(LcIcons.camera, "Kamera-Hintergrund", { cameraOpen = true })
-            IconBtn(LcIcons.material, "Materialtest", {
-                confirm = Confirm("Materialtest erstellen?", "Das aktuelle Projekt wird durch ein Testraster ersetzt (Rückgängig holt es zurück).", "Weiter") { materialTest = true }
-            })
-            Box(Modifier.width(1.dp).height(36.dp).background(Lc.line))
-            IconBtn(LcIcons.plus, "Neues Projekt", { confirm = Confirm("Neues Projekt?", "Alle Elemente werden entfernt. Ebenen bleiben.", "Neu", danger = true) { editor.newDocument() } })
-            IconBtn(LcIcons.folder, "Projekt öffnen", { projectOpener.launch(arrayOf("application/json", "*/*")) })
-            IconBtn(LcIcons.save, "Projekt speichern", { projectSaver.launch(PiClient.jobNameFrom(doc.title).removeSuffix(".gcode") + ".lumacut.json") })
-            Spacer(Modifier.weight(1f))
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                var title by remember(doc.title) { mutableStateOf(doc.title) }
+                OutlinedTextField(title, { title = it; editor.rename(it) }, singleLine = true, modifier = Modifier.width(220.dp),
+                    textStyle = LcTypography.titleMedium, shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Lc.accent, unfocusedBorderColor = Lc.line))
+                IconBtn(LcIcons.undo, "Rückgängig", editor::undo, enabled = canUndo)
+                IconBtn(LcIcons.redo, "Wiederholen", editor::redo, enabled = canRedo)
+                IconBtn(LcIcons.multi, "Mehrfachauswahl", { editor.setMulti(!multi) }, tint = if (multi) Lc.accent else Lc.text)
+                IconBtn(LcIcons.group, "Gruppieren", editor::groupSelected, enabled = selected.size >= 2)
+                IconBtn(LcIcons.ungroup, "Gruppe auflösen", editor::ungroupSelected,
+                        enabled = doc.elements.any { it.id in selected && it.groupId != null })
+                IconBtn(LcIcons.copy, "Duplizieren", editor::duplicateSelected, enabled = selected.isNotEmpty())
+                IconBtn(LcIcons.trash, "Löschen", editor::deleteSelected, tint = Lc.bad, enabled = selected.isNotEmpty())
+                IconBtn(LcIcons.center, "Zentrieren", editor::centerInWorkArea)
+                Box(Modifier.width(1.dp).height(36.dp).background(Lc.line))
+                IconBtn(LcIcons.svg, "SVG/DXF importieren", { vectorPicker.launch(arrayOf("image/svg+xml", "image/vnd.dxf", "application/dxf", "*/*")) })
+                IconBtn(LcIcons.image, "Bild importieren", { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+                IconBtn(LcIcons.camera, "Kamera-Hintergrund (Foto)", { cameraOpen = true })
+                IconBtn(LcIcons.material, "Materialtest", {
+                    confirm = Confirm("Materialtest erstellen?", "Das aktuelle Projekt wird durch ein Testraster ersetzt (Rückgängig holt es zurück).", "Weiter") { materialTest = true }
+                })
+                Box(Modifier.width(1.dp).height(36.dp).background(Lc.line))
+                IconBtn(LcIcons.plus, "Neues Projekt", { confirm = Confirm("Neues Projekt?", "Alle Elemente werden entfernt. Ebenen bleiben.", "Neu", danger = true) { editor.newDocument() } })
+                IconBtn(LcIcons.folder, "Projekt öffnen", { projectOpener.launch(arrayOf("application/json", "*/*")) })
+                IconBtn(LcIcons.save, "Projekt speichern", { projectSaver.launch(PiClient.jobNameFrom(doc.title).removeSuffix(".gcode") + ".lumacut.json") })
+            }
             LcButton("An Laser senden", { sending = true }, icon = LcIcons.send, kind = BtnKind.PRIMARY, busy = "upload" in busy,
                      enabled = doc.elements.isNotEmpty())
         }
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ToolColumn(tool, editor::setTool)
             Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(18.dp))) {
-                EditorCanvas(editor, originBottom, onText = { textAt = it })
+                EditorCanvas(editor, machineStatus?.position, onText = { textAt = it })
                 SmallText(
                     when (tool) {
-                        Tool.SELECT -> "Antippen wählt aus · ziehen verschiebt · zwei Finger zoomen und schwenken"
+                        Tool.SELECT -> if (multi) "Mehrfachauswahl: Antippen fügt hinzu oder entfernt · Rahmen ziehen wählt mehrere"
+                                       else "Antippen wählt · ziehen verschiebt · auf leerer Fläche Rahmen ziehen · ⟳-Griff dreht · Eckgriff skaliert · zwei Finger zoomen"
                         Tool.PEN -> "Mit dem Finger zeichnen"
                         Tool.TEXT -> "Antippen, wo der Text beginnen soll"
                         else -> "Ziehen, um ${tool.label.lowercase()} aufzuziehen · zwei Finger zoomen"
@@ -213,7 +238,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
                     Lc.faint, Modifier.align(Alignment.BottomStart).padding(12.dp),
                 )
             }
-            Inspector(editor, Modifier.width(340.dp).fillMaxHeight())
+            Inspector(editor, Modifier.width(350.dp).fillMaxHeight())
         }
     }
 
@@ -221,30 +246,34 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel) {
         textAt = null
         val raw = TextPaths.build(text, size, bold, family)
         if (raw.isEmpty()) { editor.notify("Kein darstellbarer Text", true); return@TextDialog }
-        val oriented = orientForScreen(raw, originBottom)
-        val b = de.millione.lumacut.core.boundsOf(oriented)!!
-        editor.addVector("Text", oriented.map { p -> p.map { Pt(it.x - b.minX + at.x, it.y - b.minY + at.y) } }, text, size, bold, family)
+        val b = de.millione.lumacut.core.boundsOf(raw)!!
+        editor.addVector("Text", raw.map { p -> p.map { Pt(it.x - b.minX + at.x, it.y - b.minY + at.y) } }, text, size, bold, family)
+        editor.moveSelected(0.0, 0.0, "text")
     } }
 
-    if (sending) SendDialog(
-        title = doc.title,
-        build = { editor.buildGcode(imageTopAtMaxY = originBottom) },
-        onFrame = { tp, mode -> machine.frame(Frame.cutPoints(tp), mode) },
-        canFrame = machineStatus.canControl(machineOnline) && machineStatus?.homed == true,
-        onDismiss = { sending = false },
-    ) { name, gcode ->
-        sending = false
-        machine.uploadJob(name, gcode)
-        editor.jobSent()
+    if (sending) {
+        val cfg = machineStatus?.config
+        SendDialog(
+            title = doc.title,
+            hasHeights = heights != null,
+            build = { comp -> editor.buildJob(comp, cfg?.focus_gap_mm ?: 7.0, cfg?.z_switch_tip_offset_mm ?: 1.5) },
+            onFrame = { tp, mode -> machine.frame(Frame.cutPoints(tp), mode) },
+            canFrame = machineStatus.canControl(machineOnline) && machineStatus?.homed == true,
+            onDismiss = { sending = false },
+        ) { name, gcode ->
+            sending = false
+            machine.uploadJob(name, gcode)
+            editor.jobSent()
+        }
     }
     if (materialTest) MaterialTestDialog(onDismiss = { materialTest = false }) { spec ->
         materialTest = false
-        val generated = MaterialTest.build(spec) { t, h -> orientForScreen(TextPaths.build(t, h, true, "sans-serif"), originBottom) }
+        val generated = MaterialTest.build(spec) { t, h -> TextPaths.build(t, h, true, "sans-serif") }
         editor.replaceDocument(generated)
         editor.notify("Materialtest mit ${spec.powerSteps * spec.speedSteps} Feldern erstellt")
     }
 
-    if (cameraOpen) CameraBackgroundDialog(editor, machine, originBottom) { cameraOpen = false }
+    if (cameraOpen) CameraBackgroundDialog(editor, machine) { cameraOpen = false }
     ConfirmDialog(confirm) { confirm = null }
 }
 
@@ -273,8 +302,22 @@ private fun ToolColumn(tool: Tool, onTool: (Tool) -> Unit) {
 
 /* ---------- canvas ---------- */
 
+private enum class Drag { NONE, MOVE, BAND, ROTATE, SCALE, PAN }
+
+/** Screen positions of the selection frame and its handles. */
+private class Handles(val topLeft: Offset, val size: Size) {
+    val rotate get() = Offset(topLeft.x + size.width / 2, topLeft.y - 44f)
+    val scale get() = topLeft + Offset(size.width, size.height)
+    companion object {
+        fun of(m: WorkMapper, b: WBox): Handles {
+            val a = m.at(Pt(b.minX, b.minY)); val c = m.at(Pt(b.maxX, b.maxY))
+            return Handles(Offset(minOf(a.x, c.x) - 6, minOf(a.y, c.y) - 6), Size(abs(c.x - a.x) + 12, abs(c.y - a.y) + 12))
+        }
+    }
+}
+
 @Composable
-private fun EditorCanvas(editor: EditorViewModel, originBottom: Boolean, onText: (Pt) -> Unit) {
+private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (Pt) -> Unit) {
     val doc by editor.doc.collectAsStateWithLifecycle()
     val selected by editor.selected.collectAsStateWithLifecycle()
     val tool by editor.tool.collectAsStateWithLifecycle()
@@ -285,60 +328,87 @@ private fun EditorCanvas(editor: EditorViewModel, originBottom: Boolean, onText:
     var pan by remember { mutableStateOf(Offset.Zero) }
     var draftStart by remember { mutableStateOf<Pt?>(null) }
     var draftEnd by remember { mutableStateOf<Pt?>(null) }
+    var band by remember { mutableStateOf<Pair<Pt, Pt>?>(null) }
+    var angleHint by remember { mutableStateOf<String?>(null) }
     val pen = remember { mutableStateListOf<Pt>() }
     val images = remember { HashMap<String, ImageBitmap>() }
 
-    fun mapper() = BedMapper.fit(Size(size.width.toFloat(), size.height.toFloat()), originBottom, zoom = zoom, pan = pan)
+    fun mapper() = WorkMapper.fit(Size(size.width.toFloat(), size.height.toFloat()), zoom = zoom, pan = pan)
 
-    val gestures = Modifier.pointerInput(tool, originBottom) {
+    val gestures = Modifier.pointerInput(tool) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val start = down.position
             var mode = 0          // 0 undecided, 1 single-finger action, 2 pinch/pan
+            var drag = Drag.NONE
             var last = start
-            var moveKey: String? = null
+            val key = "g" + System.nanoTime()
             val slop = viewConfiguration.touchSlop
+            // Handles are decided at touch-down so they win over moving the shape underneath.
+            val startHandles = editor.selectionBounds()?.takeIf { tool == Tool.SELECT }?.let { Handles.of(mapper(), it) }
+            val pivot = editor.selectionBounds()?.center
+            val anchor = editor.selectionBounds()?.let { Pt(it.minX, it.minY) }
             do {
                 val event = awaitPointerEvent()
                 val pressed = event.changes.filter { it.pressed }
                 if (pressed.size >= 2) {
-                    if (mode == 1) { draftStart = null; draftEnd = null; pen.clear() }
+                    if (mode == 1) { draftStart = null; draftEnd = null; pen.clear(); band = null; angleHint = null }
                     mode = 2
                     val m = mapper()
                     val z = event.calculateZoom(); val p = event.calculatePan(); val c = event.calculateCentroid()
-                    val newZoom = (zoom * z).coerceIn(0.6f, 10f); val k = newZoom / zoom
+                    val newZoom = (zoom * z).coerceIn(0.6f, 12f); val k = newZoom / zoom
                     val ox2 = c.x - (c.x - m.ox) * k + p.x; val oy2 = c.y - (c.y - m.oy) * k + p.y
-                    val base = BedMapper.fit(Size(size.width.toFloat(), size.height.toFloat()), originBottom, zoom = newZoom)
+                    val base = WorkMapper.fit(Size(size.width.toFloat(), size.height.toFloat()), zoom = newZoom)
                     zoom = newZoom
                     pan = Offset(ox2 - base.ox, oy2 - base.oy)
                     event.changes.forEach { it.consume() }
-                } else if (pressed.size == 1) {
+                } else if (pressed.size == 1 && mode != 2) {
                     val pos = pressed.first().position
                     if (mode == 0 && (pos - start).getDistance() > slop) {
                         mode = 1
-                        val m = mapper(); val p0 = m.toBed(start)
+                        val m = mapper(); val p0 = m.toWork(start)
                         when (tool) {
                             Tool.SELECT -> {
-                                val hit = editor.hit(p0, m.mm(28f).toDouble())
-                                if (hit != null) { editor.select(hit.id); moveKey = "drag" + System.nanoTime() } else moveKey = null
+                                drag = when {
+                                    startHandles != null && (start - startHandles.rotate).getDistance() < 40f -> Drag.ROTATE
+                                    startHandles != null && (start - startHandles.scale).getDistance() < 40f -> Drag.SCALE
+                                    else -> {
+                                        val hit = editor.hit(p0, m.mm(24f).toDouble())
+                                        if (hit != null) {
+                                            if (hit.id !in editor.selected.value) editor.select(hit.id)
+                                            Drag.MOVE
+                                        } else { band = p0 to p0; Drag.BAND }
+                                    }
+                                }
                             }
                             Tool.PEN -> { pen.clear(); pen.add(p0) }
-                            Tool.TEXT -> {}
+                            Tool.TEXT -> drag = Drag.PAN
                             else -> { draftStart = p0; draftEnd = p0 }
                         }
                     }
                     if (mode == 1) {
                         val m = mapper()
+                        val a = m.toWork(last); val b = m.toWork(pos)
                         when (tool) {
-                            Tool.SELECT -> {
-                                if (moveKey != null) {
-                                    val a = m.toBed(last); val b = m.toBed(pos)
-                                    editor.moveSelected(b.x - a.x, b.y - a.y, moveKey!!)
-                                } else pan += pos - last
-                            }
-                            Tool.PEN -> pen.add(m.toBed(pos))
-                            Tool.TEXT -> {}
-                            else -> draftEnd = m.toBed(pos)
+                            Tool.SELECT -> { when (drag) {
+                                Drag.MOVE -> editor.moveSelected(b.x - a.x, b.y - a.y, key)
+                                Drag.BAND -> band = band?.first?.let { it to b }
+                                Drag.ROTATE -> if (pivot != null) {
+                                    var d = Math.toDegrees(atan2(b.y - pivot.y, b.x - pivot.x) - atan2(a.y - pivot.y, a.x - pivot.x))
+                                    if (d > 180) d -= 360; if (d < -180) d += 360
+                                    editor.rotateSelectionBy(d, pivot, key)
+                                    angleHint = editor.selectedElement()?.let { "%.1f°".format(it.transform.rotation) }
+                                }
+                                Drag.SCALE -> if (anchor != null) {
+                                    val d0 = hypot(a.x - anchor.x, a.y - anchor.y); val d1 = hypot(b.x - anchor.x, b.y - anchor.y)
+                                    if (d0 > 0.5) editor.scaleSelectionBy(d1 / d0, anchor, key)
+                                    angleHint = editor.selectionBounds()?.let { "%.1f × %.1f mm".format(it.width, it.height) }
+                                }
+                                else -> pan += pos - last
+                            } }
+                            Tool.PEN -> pen.add(b)
+                            Tool.TEXT -> pan += pos - last
+                            else -> draftEnd = b
                         }
                         pressed.first().consume()
                     }
@@ -347,22 +417,26 @@ private fun EditorCanvas(editor: EditorViewModel, originBottom: Boolean, onText:
             } while (event.changes.any { it.pressed })
             val m = mapper()
             if (mode == 0) {
-                val p = m.toBed(start)
+                val p = m.toWork(start)
                 when (tool) {
-                    Tool.SELECT -> editor.select(editor.hit(p, m.mm(28f).toDouble())?.id)
-                    Tool.TEXT -> if (Bed.inWorkArea(p.x, p.y)) onText(p) else editor.notify("Text bitte außerhalb der Safezone beginnen", true)
+                    Tool.SELECT -> editor.select(editor.hit(p, m.mm(24f).toDouble())?.id)
+                    Tool.TEXT -> if (Work.contains(p)) onText(p) else editor.notify("Text bitte im Arbeitsbereich beginnen", true)
                     else -> {}
                 }
             } else if (mode == 1) {
                 when (tool) {
                     Tool.PEN -> if (pen.size > 2) editor.addVector("Freihand", listOf(simplify(pen.toList(), 0.15)))
-                    Tool.SELECT, Tool.TEXT -> {}
+                    Tool.SELECT -> {
+                        band?.let { (a, b) -> editor.selectIn(WBox(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y))) }
+                        if (drag == Drag.ROTATE || drag == Drag.SCALE) editor.keepInside(key)
+                    }
+                    Tool.TEXT -> {}
                     else -> {
                         val a = draftStart; val b = draftEnd
-                        if (a != null && b != null) shapeFromDrag(tool, a, b)?.let { editor.addVector(tool.label, listOf(it)) }
+                        if (a != null && b != null) shapeFromDrag(tool, clampWork(a), clampWork(b))?.let { editor.addVector(tool.label, listOf(it)) }
                     }
                 }
-                draftStart = null; draftEnd = null; pen.clear()
+                draftStart = null; draftEnd = null; pen.clear(); band = null; angleHint = null
             }
         }
     }
@@ -370,22 +444,24 @@ private fun EditorCanvas(editor: EditorViewModel, originBottom: Boolean, onText:
     Canvas(Modifier.fillMaxSize().onSizeChanged { size = it }.then(gestures)) {
         if (size == IntSize.Zero) return@Canvas
         val m = mapper()
-        drawBed(m)
+        drawWorkArea(m)
         background?.let { bmp ->
-            val a = m.at(Pt(0.0, 0.0)); val b = m.at(Pt(Bed.WIDTH, Bed.HEIGHT))
-            drawImage(bmp, dstOffset = IntOffset(minOf(a.x, b.x).roundToInt(), minOf(a.y, b.y).roundToInt()),
-                dstSize = IntSize(abs(b.x - a.x).roundToInt(), abs(b.y - a.y).roundToInt()), alpha = bgAlpha)
+            val a = m.at(Pt(0.0, 0.0)); val b = m.at(Pt(Work.WIDTH, Work.HEIGHT))
+            drawImage(bmp, dstOffset = IntOffset(a.x.roundToInt(), a.y.roundToInt()),
+                dstSize = IntSize((b.x - a.x).roundToInt(), (b.y - a.y).roundToInt()), alpha = bgAlpha)
         }
         for (e in doc.elements) {
             val layer = doc.layer(e.layerId) ?: continue
-            val color = Color(layer.color.toInt()).copy(alpha = if (layer.output) 1f else .35f)
+            if (!layer.visible) continue
+            val alpha = when { !layer.output -> .35f; layer.locked -> .6f; else -> 1f }
+            val color = Color(layer.color.toInt()).copy(alpha = alpha)
             if (e.isImage) {
                 val r = e.raster ?: continue
                 val img = images.getOrPut(e.id + r.hashCode()) { Images.toBitmap(r).asImageBitmap() }
                 val bx = e.worldBounds() ?: continue
                 val a = m.at(Pt(bx.minX, bx.minY)); val c = m.at(Pt(bx.maxX, bx.maxY))
-                drawImage(img, dstOffset = IntOffset(minOf(a.x, c.x).roundToInt(), minOf(a.y, c.y).roundToInt()),
-                    dstSize = IntSize(abs(c.x - a.x).roundToInt().coerceAtLeast(1), abs(c.y - a.y).roundToInt().coerceAtLeast(1)), alpha = .9f)
+                drawImage(img, dstOffset = IntOffset(a.x.roundToInt(), a.y.roundToInt()),
+                    dstSize = IntSize((c.x - a.x).roundToInt().coerceAtLeast(1), (c.y - a.y).roundToInt().coerceAtLeast(1)), alpha = .9f * alpha)
                 continue
             }
             val path = Path().apply {
@@ -398,15 +474,32 @@ private fun EditorCanvas(editor: EditorViewModel, originBottom: Boolean, onText:
             if (layer.mode == LayerMode.FILL) drawPath(path, color.copy(alpha = color.alpha * .22f))
             drawPath(path, color, style = Stroke(2f, cap = StrokeCap.Round))
         }
-        doc.elements.firstOrNull { it.id == selected }?.worldBounds()?.let { b ->
-            val a = m.at(Pt(b.minX, b.minY)); val c = m.at(Pt(b.maxX, b.maxY))
-            val tl = Offset(minOf(a.x, c.x) - 6, minOf(a.y, c.y) - 6); val sz = Size(abs(c.x - a.x) + 12, abs(c.y - a.y) + 12)
-            drawRect(Lc.accent, tl, sz, style = Stroke(2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))))
-            for (corner in listOf(tl, tl + Offset(sz.width, 0f), tl + Offset(0f, sz.height), tl + Offset(sz.width, sz.height)))
-                drawCircle(Lc.accent, 7f, corner)
+        // selection: frame per element, handles on the whole selection
+        val sel = doc.elements.filter { it.id in selected }
+        if (sel.size > 1) for (e in sel) e.worldBounds()?.let { b ->
+            val h = Handles.of(m, b)
+            drawRect(Lc.accent.copy(alpha = .45f), h.topLeft, h.size, style = Stroke(1f))
+        }
+        sel.mapNotNull { it.worldBounds() }.reduceOrNull { a, b -> a.union(b) }?.let { b ->
+            val h = Handles.of(m, b)
+            val outside = !Work.contains(b)
+            val c = if (outside) Lc.bad else Lc.accent
+            drawRect(c, h.topLeft, h.size, style = Stroke(2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))))
+            for (corner in listOf(h.topLeft, h.topLeft + Offset(h.size.width, 0f), h.topLeft + Offset(0f, h.size.height))) drawCircle(c, 6f, corner)
+            drawRect(c, h.scale - Offset(11f, 11f), Size(22f, 22f))
+            if (sel.any { !it.isImage }) {
+                drawLine(c, Offset(h.rotate.x, h.topLeft.y), h.rotate, 2f)
+                drawCircle(Lc.bg, 14f, h.rotate); drawCircle(c, 14f, h.rotate, style = Stroke(3f))
+            }
+        }
+        band?.let { (a0, b0) ->
+            val a = m.at(a0); val b = m.at(b0)
+            val tl = Offset(minOf(a.x, b.x), minOf(a.y, b.y)); val sz = Size(abs(b.x - a.x), abs(b.y - a.y))
+            drawRect(Lc.accent.copy(alpha = .1f), tl, sz)
+            drawRect(Lc.accent, tl, sz, style = Stroke(1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))))
         }
         val a = draftStart; val b = draftEnd
-        if (a != null && b != null) shapeFromDrag(tool, a, b)?.let { poly ->
+        if (a != null && b != null) shapeFromDrag(tool, clampWork(a), clampWork(b))?.let { poly ->
             val path = Path().apply { val p0 = m.at(poly.first()); moveTo(p0.x, p0.y); poly.drop(1).forEach { val q = m.at(it); lineTo(q.x, q.y) } }
             drawPath(path, Lc.accent, style = Stroke(2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f))))
         }
@@ -414,8 +507,12 @@ private fun EditorCanvas(editor: EditorViewModel, originBottom: Boolean, onText:
             val path = Path().apply { val p0 = m.at(pen.first()); moveTo(p0.x, p0.y); pen.drop(1).forEach { val q = m.at(it); lineTo(q.x, q.y) } }
             drawPath(path, Lc.accent, style = Stroke(2.5f, cap = StrokeCap.Round))
         }
+        drawHead(m, head)
     }
+    angleHint?.let { Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) { Banner(it, Lc.accent, Modifier.padding(12.dp)) } }
 }
+
+private fun clampWork(p: Pt) = Pt(p.x.coerceIn(0.0, Work.WIDTH), p.y.coerceIn(0.0, Work.HEIGHT))
 
 /** World polygon for a drag from [a] to [b]. */
 private fun shapeFromDrag(tool: Tool, a: Pt, b: Pt): Poly? {
@@ -436,23 +533,27 @@ private fun shapeFromDrag(tool: Tool, a: Pt, b: Pt): Poly? {
 @Composable
 private fun Inspector(editor: EditorViewModel, modifier: Modifier) {
     val doc by editor.doc.collectAsStateWithLifecycle()
-    val selectedId by editor.selected.collectAsStateWithLifecycle()
+    val selected by editor.selected.collectAsStateWithLifecycle()
     val active by editor.activeLayer.collectAsStateWithLifecycle()
     val materials by editor.materials.collectAsStateWithLifecycle()
     val background by editor.background.collectAsStateWithLifecycle()
     val bgAlpha by editor.backgroundAlpha.collectAsStateWithLifecycle()
     Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        val sel = doc.elements.firstOrNull { it.id == selectedId }
-        if (sel != null) SelectionCard(editor, sel)
+        val sel = doc.elements.filter { it.id in selected }
+        when {
+            sel.size == 1 -> SelectionCard(editor, sel.first())
+            sel.size > 1 -> MultiCard(editor, sel)
+        }
         LcCard(padding = 16.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Ebenen", style = LcTypography.titleLarge, modifier = Modifier.weight(1f))
                 IconBtn(LcIcons.plus, "Ebene hinzufügen", editor::addLayer)
             }
             Spacer(Modifier.height(10.dp))
-            SmallText(if (sel != null) "Antippen legt die Auswahl auf die Ebene." else "Neue Formen landen auf der aktiven Ebene. Reihenfolge = Bearbeitungsreihenfolge.")
+            SmallText(if (sel.isNotEmpty()) "Antippen legt die Auswahl auf die Ebene." else "Neue Formen landen auf der aktiven Ebene. Reihenfolge = Bearbeitungsreihenfolge. Auge = sichtbar und gelasert, Schloss = gesperrt.")
             Spacer(Modifier.height(10.dp))
-            for (layer in doc.layers) LayerRow(editor, layer, layer.id == (sel?.layerId ?: active), materials, doc.elements.count { it.layerId == layer.id })
+            val focus = sel.firstOrNull()?.layerId ?: active
+            for (layer in doc.layers) LayerRow(editor, layer, layer.id == focus, materials, doc.elements.count { it.layerId == layer.id })
         }
         if (background != null) LcCard(padding = 16.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -466,10 +567,23 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier) {
 }
 
 @Composable
+private fun NudgePad(editor: EditorViewModel) {
+    var step by remember { mutableStateOf(1.0) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        IconBtn(LcIcons.left, "Links", { editor.nudge(-step, 0.0) })
+        IconBtn(LcIcons.up, "Hoch", { editor.nudge(0.0, -step) })
+        IconBtn(LcIcons.down, "Runter", { editor.nudge(0.0, step) })
+        IconBtn(LcIcons.right, "Rechts", { editor.nudge(step, 0.0) })
+        Segmented(listOf(0.1 to "0,1", 1.0 to "1", 10.0 to "10"), step, { step = it }, Modifier.weight(1f))
+    }
+}
+
+@Composable
 private fun SelectionCard(editor: EditorViewModel, e: Element) {
     val b = e.worldBounds() ?: return
     LcCard(padding = 16.dp, accent = Lc.accent) {
         Text(e.text?.let { "Text: $it" } ?: e.kind, style = LcTypography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (e.groupId != null) SmallText("Teil einer Gruppe", Lc.faint)
         Spacer(Modifier.height(12.dp))
         var keep by remember { mutableStateOf(true) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -487,16 +601,48 @@ private fun SelectionCard(editor: EditorViewModel, e: Element) {
             SmallText("Seitenverhältnis beibehalten")
         }
         if (!e.isImage) {
-            Num("Drehung", e.transform.rotation, Modifier.fillMaxWidth(), suffix = "°") { editor.rotateSelected(it) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Num("Drehung", e.transform.rotation, Modifier.weight(1f), suffix = "°") { editor.rotateSelected(it) }
+                IconBtn(LcIcons.rotate, "90° drehen", { editor.rotateSelected((e.transform.rotation + 90) % 360) })
+            }
         } else {
+            val r = e.raster
+            if (r != null) {
+                val dpi = r.width / (e.imageWidthMm * e.transform.scaleX / 25.4)
+                Num("Auflösung", dpi, Modifier.fillMaxWidth(), suffix = "dpi") { editor.setImageDpi(e.id, it) }
+                SmallText("${r.width} × ${r.height} px · Größe folgt der Auflösung. Gelasert wird im Zeilenabstand der Ebene.", Lc.faint)
+            }
             Spacer(Modifier.height(4.dp))
             Segmented(listOf(ImageMode.GRAYSCALE to "Graustufen", ImageMode.DITHER to "Dither", ImageMode.THRESHOLD to "S/W"), e.imageMode,
                 { mode -> editor.updateElement(e.id) { it.copy(imageMode = mode) } })
-            Spacer(Modifier.height(6.dp))
-            SmallText("Bilder werden zeilenweise graviert; Zeilenabstand und Leistung kommen von der Ebene.")
         }
-        val outside = b.minX < Bed.SAFE || b.minY < Bed.SAFE || b.maxX > Bed.WIDTH || b.maxY > Bed.HEIGHT
-        if (outside) { Spacer(Modifier.height(8.dp)); SmallText("Liegt nicht vollständig in der Arbeitsfläche (ab X/Y 30 mm).", Lc.warn) }
+        Spacer(Modifier.height(8.dp))
+        NudgePad(editor)
+        if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (360 × 340 mm) – so wird nicht gelasert.", Lc.bad) }
+    }
+}
+
+@Composable
+private fun MultiCard(editor: EditorViewModel, sel: List<Element>) {
+    val b = sel.mapNotNull { it.worldBounds() }.reduceOrNull { x, y -> x.union(y) } ?: return
+    val grouped = sel.all { it.groupId != null } && sel.map { it.groupId }.distinct().size == 1
+    LcCard(padding = 16.dp, accent = Lc.accent) {
+        Text(if (grouped) "Gruppe · ${sel.size} Elemente" else "${sel.size} Elemente", style = LcTypography.titleLarge)
+        SmallText("%.1f × %.1f mm".format(b.width, b.height), Lc.faint)
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Num("X", b.minX, Modifier.weight(1f)) { editor.placeSelected(it, null) }
+            Num("Y", b.minY, Modifier.weight(1f)) { editor.placeSelected(null, it) }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (grouped) LcButton("Gruppe auflösen", editor::ungroupSelected, Modifier.weight(1f), LcIcons.ungroup)
+            else LcButton("Gruppieren", editor::groupSelected, Modifier.weight(1f), LcIcons.group)
+            LcButton("90°", { b.center.let { editor.rotateSelectionBy(90.0, it, "r90"); editor.keepInside("r90") } }, Modifier.weight(1f), LcIcons.rotate)
+        }
+        Spacer(Modifier.height(8.dp))
+        NudgePad(editor)
+        if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (360 × 340 mm).", Lc.bad) }
     }
 }
 
@@ -508,9 +654,13 @@ private fun Num(label: String, value: Double, modifier: Modifier, suffix: String
     var focused by remember { mutableStateOf(false) }
     // Follow outside changes (dragging, undo) but never overwrite what is being typed.
     LaunchedEffect(value) { if (!focused) text = fmt(value) }
-    NumberField(label, text, { t -> text = t; t.toDoubleOrNull()?.let(onValue) },
+    NumberField(label, text, { t -> text = t; t.replace(',', '.').toDoubleOrNull()?.let(onValue) },
         modifier.onFocusChanged { focused = it.isFocused }, suffix)
 }
+
+/** Keeps the per-pass focus drop within [Limits.MAX_FOCUS_DROP_MM]. */
+private fun Layer.withSafeZStep(): Layer =
+    if (passes > 1) copy(zStepMm = zStepMm.coerceIn(0.0, minOf(Limits.Z_STEP.endInclusive, Limits.MAX_FOCUS_DROP_MM / (passes - 1)))) else copy(zStepMm = 0.0)
 
 @Composable
 private fun LayerRow(editor: EditorViewModel, layer: Layer, active: Boolean, materials: List<de.millione.lumacut.core.Material>, count: Int) {
@@ -523,39 +673,67 @@ private fun LayerRow(editor: EditorViewModel, layer: Layer, active: Boolean, mat
     ) {
         Row(Modifier.fillMaxWidth().clickable { editor.setActiveLayer(layer.id) }.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(14.dp).clip(CircleShape).background(Color(layer.color.toInt())))
+            Box(Modifier.size(14.dp).clip(CircleShape).background(Color(layer.color.toInt()).copy(alpha = if (layer.visible) 1f else .3f)))
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(layer.name, style = LcTypography.titleMedium, maxLines = 1)
-                SmallText("${if (layer.mode == LayerMode.FILL) "Füllen" else "Linie"} · ${layer.powerPct.roundToInt()} % · ${layer.speed.roundToInt()} mm/min${if (layer.passes > 1) " · ${layer.passes}×" else ""} · $count")
+                Text(layer.name, style = LcTypography.titleMedium, maxLines = 1, color = if (layer.visible) Lc.text else Lc.faint)
+                SmallText(buildString {
+                    append(if (layer.mode == LayerMode.FILL) "Füllen" else "Linie")
+                    append(" · ${layer.powerPct.roundToInt()} % · ${layer.speed.roundToInt()} mm/min")
+                    if (layer.passes > 1) append(" · ${layer.passes}×")
+                    if (layer.focusDropMm > 0) append(" · Z −%.1f".format(layer.focusDropMm))
+                    if (!layer.output) append(" · nicht lasern")
+                    append(" · $count")
+                })
             }
-            IconBtn(if (layer.output) LcIcons.eye else LcIcons.eyeOff, "Ausgabe", { editor.updateLayer(layer.id) { it.copy(output = !it.output) } },
-                    tint = if (layer.output) Lc.text else Lc.faint)
-            Spacer(Modifier.width(6.dp))
+            IconBtn(if (layer.visible) LcIcons.eye else LcIcons.eyeOff, if (layer.visible) "Ausblenden" else "Einblenden",
+                    { editor.updateLayer(layer.id) { it.copy(visible = !it.visible) } }, tint = if (layer.visible) Lc.text else Lc.faint)
+            IconBtn(if (layer.locked) LcIcons.lock else LcIcons.unlock, if (layer.locked) "Entsperren" else "Sperren",
+                    { editor.updateLayer(layer.id) { it.copy(locked = !it.locked) } }, tint = if (layer.locked) Lc.warn else Lc.faint)
             IconBtn(if (open) LcIcons.up else LcIcons.down, "Einstellungen", { open = !open })
         }
         if (open) Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TextInput("Name", layer.name, { n -> editor.updateLayer(layer.id, "name") { it.copy(name = n) } }, Modifier.fillMaxWidth())
+            Segmented(listOf(true to "Lasern", false to "Nicht lasern"), layer.output, { on -> editor.updateLayer(layer.id) { it.copy(output = on) } })
             Segmented(listOf(LayerMode.LINE to "Linie / Schneiden", LayerMode.FILL to "Füllen / Gravieren"), layer.mode,
                 { m -> editor.updateLayer(layer.id) { it.copy(mode = m) } })
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Num("Leistung", layer.powerPct, Modifier.weight(1f), "%") { v -> editor.updateLayer(layer.id, "power") { it.copy(powerPct = v.coerceIn(0.0, 100.0)) } }
-                Num("Tempo", layer.speed, Modifier.weight(1f), "mm/min") { v -> editor.updateLayer(layer.id, "speed") { it.copy(speed = v.coerceIn(10.0, 9000.0)) } }
+                Num("Leistung", layer.powerPct, Modifier.weight(1f), "%") { v -> editor.updateLayer(layer.id, "power") { it.copy(powerPct = v.coerceIn(Limits.POWER)) } }
+                Num("Tempo", layer.speed, Modifier.weight(1f), "mm/min") { v -> editor.updateLayer(layer.id, "speed") { it.copy(speed = v.coerceIn(Limits.SPEED)) } }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Num("Durchgänge", layer.passes.toDouble(), Modifier.weight(1f), "×") { v -> editor.updateLayer(layer.id, "passes") { it.copy(passes = v.toInt().coerceIn(1, 50)) } }
+                Num("Durchgänge", layer.passes.toDouble(), Modifier.weight(1f), "×") { v ->
+                    editor.updateLayer(layer.id, "passes") { it.copy(passes = v.toInt().coerceIn(Limits.PASSES)).withSafeZStep() } }
                 Num("Zeilenabstand", layer.intervalMm, Modifier.weight(1f)) { v -> editor.updateLayer(layer.id, "interval") { it.copy(intervalMm = v.coerceIn(0.03, 2.0)) } }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Num("Min. Leistung (Bild)", layer.minPowerPct, Modifier.weight(1f), "%") { v -> editor.updateLayer(layer.id, "minpower") { it.copy(minPowerPct = v.coerceIn(0.0, 100.0)) } }
+                Num("Min. Leistung (Bild)", layer.minPowerPct, Modifier.weight(1f), "%") { v -> editor.updateLayer(layer.id, "minpower") { it.copy(minPowerPct = v.coerceIn(Limits.POWER)) } }
                 Num("Überlauf", layer.overscanMm, Modifier.weight(1f)) { v -> editor.updateLayer(layer.id, "overscan") { it.copy(overscanMm = v.coerceIn(0.0, 10.0)) } }
             }
+            Text("Material & Tiefe", style = LcTypography.labelMedium, color = Lc.faint)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Num("Stärke", layer.thicknessMm, Modifier.weight(1f)) { v -> editor.updateLayer(layer.id, "thick") { l ->
+                    val t = v.coerceIn(Limits.THICKNESS)
+                    (if (l.depthPerPassMm > 0 && t > 0) l.copy(thicknessMm = t, passes = Document.passesFor(t, l.depthPerPassMm)) else l.copy(thicknessMm = t)).withSafeZStep()
+                } }
+                Num("Tiefe/Durchgang", layer.depthPerPassMm, Modifier.weight(1f)) { v -> editor.updateLayer(layer.id, "depth") { l ->
+                    val d = v.coerceIn(Limits.DEPTH_PER_PASS)
+                    (if (d > 0 && l.thicknessMm > 0) l.copy(depthPerPassMm = d, passes = Document.passesFor(l.thicknessMm, d)) else l.copy(depthPerPassMm = d)).withSafeZStep()
+                } }
+            }
+            Num("Z-Absenkung je Durchgang", layer.zStepMm, Modifier.fillMaxWidth()) { v ->
+                editor.updateLayer(layer.id, "zstep") { it.copy(zStepMm = v).withSafeZStep() } }
+            SmallText(when {
+                layer.passes <= 1 -> "Ein Durchgang: kein Nachfokussieren."
+                layer.zStepMm > 0 -> "Fokus sinkt pro Durchgang um %.2f mm, insgesamt %.2f mm (max. %.0f mm), danach zurück.".format(layer.zStepMm, layer.focusDropMm, Limits.MAX_FOCUS_DROP_MM)
+                else -> "Alle ${layer.passes} Durchgänge auf derselben Fokushöhe."
+            }, Lc.faint)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     LcButton("Material …", { menu = true }, icon = LcIcons.material)
                     DropdownMenu(menu, { menu = false }, containerColor = Lc.surface2) {
                         for (m in materials) DropdownMenuItem(
-                            text = { Text("${m.name} ${m.thicknessMm} mm · ${m.process}") },
+                            text = { Text("${m.name} ${m.thicknessMm} mm · ${m.process}" + if (m.effectivePasses > 1) " · ${m.effectivePasses}×" else "") },
                             onClick = { menu = false; editor.applyMaterial(layer.id, m) })
                     }
                 }
@@ -589,7 +767,7 @@ private fun TextDialog(onDismiss: () -> Unit, onOk: (String, Double, Boolean, St
                 }
             }
         },
-        confirmButton = { LcButton("Einfügen", { size.toDoubleOrNull()?.takeIf { it in 1.0..300.0 }?.let { onOk(text, it, bold, family) } }, kind = BtnKind.PRIMARY, enabled = text.isNotBlank()) },
+        confirmButton = { LcButton("Einfügen", { size.replace(',', '.').toDoubleOrNull()?.takeIf { it in 1.0..300.0 }?.let { onOk(text, it, bold, family) } }, kind = BtnKind.PRIMARY, enabled = text.isNotBlank()) },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) } },
     )
 }
@@ -597,22 +775,25 @@ private fun TextDialog(onDismiss: () -> Unit, onOk: (String, Double, Boolean, St
 @Composable
 private fun SendDialog(
     title: String,
-    build: suspend () -> String,
+    hasHeights: Boolean,
+    build: suspend (Boolean) -> BuiltJob,
     onFrame: (Toolpath, Frame.Mode) -> Unit,
     canFrame: Boolean,
     onDismiss: () -> Unit,
     onSend: (String, String) -> Unit,
 ) {
     var name by remember { mutableStateOf(PiClient.jobNameFrom(title).removeSuffix(".gcode")) }
-    var gcode by remember { mutableStateOf<String?>(null) }
+    var compensate by remember { mutableStateOf(hasHeights) }
+    var job by remember { mutableStateOf<BuiltJob?>(null) }
     var toolpath by remember { mutableStateOf<Toolpath?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    // Build and check the job before it leaves the tablet: time, size, warnings.
-    LaunchedEffect(Unit) {
+    // Build and check the job before it leaves the tablet: time, size, warnings, focus heights.
+    LaunchedEffect(compensate) {
+        job = null; toolpath = null; error = null
         try {
-            val g = build()
-            toolpath = withContext(Dispatchers.Default) { Toolpath.parse(g) }
-            gcode = g
+            val j = build(compensate)
+            toolpath = withContext(Dispatchers.Default) { Toolpath.parse(j.gcode) }
+            job = j
         } catch (e: Exception) { error = e.message ?: "Auftrag nicht erzeugbar" }
     }
     AlertDialog(
@@ -621,6 +802,10 @@ private fun SendDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 TextInput("Auftragsname", name, { name = it }, Modifier.fillMaxWidth())
+                if (hasHeights) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(compensate, { compensate = it }, colors = CheckboxDefaults.colors(checkedColor = Lc.accent, checkmarkColor = Lc.accentInk))
+                    SmallText("Höhenkorrektur aus dem Höhenmesh (Fokus folgt der Oberfläche)")
+                }
                 val tp = toolpath
                 val failure = error
                 when {
@@ -632,6 +817,10 @@ private fun SendDialog(
                             Tile("Laserweg", "%.2f m".format(tp.stats.cutMm / 1000), Modifier.weight(1f))
                         }
                         Tile("Größe", tp.bounds?.let { "%.1f × %.1f mm".format(it.width, it.height) } ?: "—", Modifier.fillMaxWidth())
+                        job?.focus?.let { f ->
+                            Tile("Fokus Z", if (f.minZ.isNaN()) "—" else "%.2f … %.2f mm · %d Stücke".format(f.minZ, f.maxZ, f.segments), Modifier.fillMaxWidth())
+                            f.warnings.forEach { Banner(it) }
+                        }
                         tp.stats.warnings.forEach { Banner(it) }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             LcButton("Rahmen", { onFrame(tp, Frame.Mode.BOX) }, Modifier.weight(1f), LcIcons.rect, enabled = canFrame)
@@ -643,8 +832,8 @@ private fun SendDialog(
             }
         },
         confirmButton = {
-            LcButton("Senden", { gcode?.let { onSend(PiClient.jobNameFrom(name), it) } }, icon = LcIcons.send, kind = BtnKind.PRIMARY,
-                enabled = name.isNotBlank() && gcode != null)
+            LcButton("Senden", { job?.let { onSend(PiClient.jobNameFrom(name), it.gcode) } }, icon = LcIcons.send, kind = BtnKind.PRIMARY,
+                enabled = name.isNotBlank() && job != null)
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) } },
     )
@@ -661,21 +850,22 @@ private fun MaterialTestDialog(onDismiss: () -> Unit, onCreate: (MaterialTest.Sp
     var mode by remember { mutableStateOf(LayerMode.FILL) }
     var cell by remember { mutableStateOf("10") }
     var interval by remember { mutableStateOf("0.1") }
+    fun d(s: String) = s.replace(',', '.').toDouble()
     val spec = runCatching {
         MaterialTest.Spec(
-            powerFrom = pFrom.toDouble(), powerTo = pTo.toDouble(), powerSteps = pSteps.toInt(),
-            speedFrom = sFrom.toDouble(), speedTo = sTo.toDouble(), speedSteps = sSteps.toInt(),
-            mode = mode, cellMm = cell.toDouble().coerceIn(3.0, 40.0), intervalMm = interval.toDouble().coerceIn(0.03, 2.0),
+            powerFrom = d(pFrom), powerTo = d(pTo), powerSteps = pSteps.toInt(),
+            speedFrom = d(sFrom), speedTo = d(sTo), speedSteps = sSteps.toInt(),
+            mode = mode, cellMm = d(cell).coerceIn(3.0, 40.0), intervalMm = d(interval).coerceIn(0.03, 2.0),
         )
     }.getOrNull()
     val valid = spec != null && spec.powerSteps in 1..10 && spec.speedSteps in 1..10 &&
-        spec.powerFrom in 0.0..100.0 && spec.powerTo in 0.0..100.0 && spec.speedFrom in 10.0..9000.0 && spec.speedTo in 10.0..9000.0
+        spec.powerFrom in Limits.POWER && spec.powerTo in Limits.POWER && spec.speedFrom in Limits.SPEED && spec.speedTo in Limits.SPEED
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
         title = { Text("Materialtest", style = LcTypography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SmallText("Raster aus Leistung (Spalten) × Tempo (Zeilen). Jedes Feld bekommt eine eigene Ebene, die Beschriftung wird leicht graviert.")
+                SmallText("Raster aus Leistung (Spalten) × Tempo (Zeilen, bis 6000 mm/min). Jedes Feld bekommt eine eigene Ebene, die Beschriftung wird leicht graviert.")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     NumberField("Leistung von", pFrom, { pFrom = it }, Modifier.weight(1f), "%")
                     NumberField("bis", pTo, { pTo = it }, Modifier.weight(1f), "%")
