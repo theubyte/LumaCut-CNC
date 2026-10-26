@@ -16,6 +16,9 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Release the signed APK so the Pi can fetch it (owner approved public releases, 2026-10-27).
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: android
@@ -37,6 +40,7 @@ jobs:
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > "$KS"
             echo "LUMACUT_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "LUMACUT_SIGNED=1" >> "$GITHUB_ENV"
           else
             keytool -genkeypair -keystore "$KS" -storepass ci-temporary -keypass ci-temporary -alias lumacut \
               -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=LumaCut CI"
@@ -65,6 +69,30 @@ jobs:
           path: android/LumaCut-*.apk
           if-no-files-found: error
           retention-days: 30
+      # Only APKs signed with the fixed key are released: the Pi serves them as
+      # updates, and Android installs an update only with the same key.
+      - name: Publish GitHub release for the Pi
+        if: env.LUMACUT_SIGNED == '1' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          N=${{ github.run_number }}
+          test "$LUMACUT_VERSION_CODE" = "$N"
+          cp "LumaCut-1.0.$N.apk" LumaCut-Android.apk
+          python3 - "$N" <<'PY'
+          import hashlib, json, os, sys
+          n = int(sys.argv[1])
+          data = open("LumaCut-Android.apk", "rb").read()
+          json.dump({"version_code": n, "version_name": "1.0.%d" % n,
+                     "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
+                     "commit": os.environ["GITHUB_SHA"]}, open("LumaCut-Android.json", "w"))
+          PY
+          cat LumaCut-Android.json
+          gh release create "android-1.0.$N" LumaCut-Android.apk LumaCut-Android.json \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" --latest \
+            --title "LumaCut Android 1.0.$N" \
+            --notes "Signierte Android-App, Build $N (${{ github.sha }}). Der Pi holt sie automatisch; die App bietet das Update an."
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
