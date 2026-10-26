@@ -234,10 +234,12 @@ def test_empty_or_bad_files(tmp_path):
     p.write_text('<svg xmlns="http://www.w3.org/2000/svg"><text>x</text></svg>')
     with pytest.raises(ValueError, match="keine"):
         import_file(p, "L1")
-    q = tmp_path / "x.ai"
+    q = tmp_path / "x.cdr"  # .ai ist seit Anforderungen §9.2 unterstützt
     q.write_text("x")
     with pytest.raises(ValueError, match="nicht unterstützt"):
         import_file(q, "L1")
+    with pytest.raises(ValueError, match="Keine gültige AI-Datei"):
+        import_file(q.rename(tmp_path / "x.ai"), "L1")
     r = tmp_path / "broken.png"
     r.write_bytes(b"nope")
     with pytest.raises(ValueError):

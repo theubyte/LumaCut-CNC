@@ -497,6 +497,58 @@ gemerkt (`QSettings material/choice`).
 
 **Fremde Dateien (minimal):** `tests/test_materials_testgrid.py` (Materials-Agent): der
 Hauptfenster-Test prüfte die entfernte Schnellwahl, jetzt dieselbe Bibliotheksverknüpfung über
-die neue Wahl. `lumacut_materials/dialog.py` unverändert (`MaterialQuickPanel` bleibt im Code,
+die neue Wahl. Ebenso angepasst (nachgetragen): `tests/test_materials_dialog.py`
+(Materials-Agent) und `tests/test_import_qt.py` (Import-Agent), weil sie die entfernte
+Schnellwahl bzw. das entfernte Menü „Material“ ansprachen. `lumacut_materials/dialog.py` unverändert (`MaterialQuickPanel` bleibt im Code,
 wird mangels „Design“-Gruppe nicht mehr angelegt – kann der Materials-Agent entfernen).
 Tests: `tests/test_material_picker.py`, `tests/test_main_view.py`.
+
+### 9.2 Mehr Importformate (Canvas, 2026-10-26)
+
+Ein Weg für alle: *Datei › Importieren…* (Strg+I), Drag-and-drop auf die Arbeitsfläche und der
+Dateidialog-Filter nutzen dieselbe Endungsliste (`ALL_SUFFIXES`). Filter: „Alle unterstützten“,
+„Vektor (SVG, DXF, PDF, AI, EPS)“, „PDF / Illustrator“, „EPS“, „xTool-Projekt (*.xcs *.xs)“, „Bilder“.
+Jeder Import = **ein** Rückgängig-Schritt; mehrere Objekte werden gruppiert. Fehler erscheinen
+immer als deutscher Hinweis (nie stilles Scheitern), übersprungene Objekte werden in der
+Statuszeile gezählt (z. B. „1× QRCODE übersprungen“).
+
+**Import-Formate: unterstuetzt / teilweise / nicht**
+
+| Format | Status | Wie / Einschränkungen |
+|---|---|---|
+| SVG | unterstützt | wie bisher (Pfade, Grundformen, Transformationen, Einheiten) |
+| DXF | unterstützt | wie bisher (`ezdxf`, Blöcke, `$INSUNITS`) |
+| PDF | unterstützt | wie bisher (`pypdf`, Vektorpfade einer Seite, Seitenwahl) – ohne eingebettete Bilder/Text-Glyphen |
+| AI (Illustrator ≥ 9, „PDF-kompatibel“, Standard) | unterstützt | AI-Dateien enthalten einen PDF-Kern → derselbe PDF-Import inkl. Seitenwahl; kein Zusatzprogramm |
+| AI (Illustrator ≤ 8 / ohne PDF-Kern) | teilweise | reines PostScript → nur mit installiertem Ghostscript (wie EPS), sonst klarer Hinweis |
+| EPS / PS | teilweise | über **Ghostscript**, falls installiert (`gswin64c`/`gswin32c`/`gs` im PATH, `C:\Program Files\gs\*\bin` oder Umgebungsvariable `LUMACUT_GHOSTSCRIPT`): `-dSAFER -dEPSCrop -sDEVICE=pdfwrite` → PDF-Import. Ohne Ghostscript: „EPS-Import braucht Ghostscript … oder als SVG/PDF exportieren“. Ghostscript wird **nicht** mitgeliefert (AGPL). |
+| PNG / JPG / BMP | unterstützt | wie bisher als Bildobjekt |
+| xTool `.xcs` (XCS ≤ 2.x, JSON) | teilweise | Vektoren/Pfade (`dPath`, `points`), Rechteck (auch mit Eckenradius → echte Bögen, Sehnenfehler ≤ 0,02 mm), Kreis/Ellipse, Linie, Polygon/Stern, Text (als Glyphenkonturen aus `charJSONs`, sonst als Textobjekt mit Schriftname), Bitmaps (Base64) |
+| xTool `.xs` (Studio ≥ 1.7, ZIP-Bündel) | teilweise | wie `.xcs`; Teildateien `canvases/<id>/displays-*.json`, Vektor-Verweise `vectors/*/data-*.json` und Bilder `resources/*.png` werden aufgelöst |
+| CorelDRAW `.cdr`, LightBurn `.lbrn`, `.dwg` | nicht | Hinweis „wird nicht unterstützt (…)“ mit Liste der Formate |
+
+**xTool – Grenzen (bewusst):** nur die **erste Arbeitsfläche** (Canvas) des Projekts; Laserwerte
+(Leistung, Tempo, Durchgänge aus `device.data`) werden **nicht** übernommen – Material/Ebene
+bestimmen sie (siehe 9.1); ausgeblendete Objekte und unbekannte Typen (QR-/Barcode, Gruppen-
+Sonderobjekte) werden übersprungen und gezählt; Koordinaten = mm, Nullpunkt oben links wie in
+xTool, danach wie jeder Import in die Arbeitsfläche eingepasst (Maßstab 1, wenn es passt).
+Drehung wird um die linke obere Ecke `(x, y)` angewandt (an Linien in echten Dateien geprüft; für
+gedrehte Pfade/Bitmaps und Scherung nicht verifiziert). PEN-Kontrollpunkte (Bezier-Griffe) werden
+ignoriert, nur die Stützpunkte verbunden. Text ohne Glyphen kann mit anderer Schrift erscheinen,
+wenn die xTool-Schrift unter Windows fehlt. Schutz: max. 200 MB, Bilder auf
+`MAX_PIXELS_LONG_SIDE` verkleinert. Ohne importierbare Objekte: „… nichts importierbar … – in
+xTool Studio als SVG exportieren“. Format wurde an öffentlichen Beispieldateien (XCS 2.x JSON und
+`.xs`-ZIP, Studio 1.7) nachvollzogen; xTool dokumentiert es nicht, neue Versionen können abweichen.
+
+**Abhängigkeiten:** keine neuen Pakete (`json`, `zipfile`, `subprocess` aus der Standardbibliothek,
+`svgelements`/`pypdf` waren schon da) → `requirements.txt` unverändert; `build_exe.py` sammelt
+`lumacut_import` bereits per `--collect-submodules`, die neuen Module `xtool.py`/`postscript.py`
+sind damit in der EXE.
+
+**Code:** `src/lumacut_import/xtool.py` (neu), `src/lumacut_import/postscript.py` (neu),
+`placement.py` (Endungen, `place_shapes`), `qt.py` (Filter, Tooltip, Seitenfrage auch für AI).
+**Fremde Dateien (Import-Agent, minimal):** die genannten Dateien in `lumacut_import/` sowie
+`tests/test_import.py` (dort galt `.ai` als „nicht unterstützt“ – jetzt `.cdr`, plus Prüfung des
+AI-Fehlertexts). Tests: `tests/test_import_formats.py` mit kleinen Fixtures in
+`tests/fixtures/import/` (`xtool_sample.xcs`, `rechteck.eps`; `.xs` und AI werden im Test gebaut,
+Ghostscript wird gemockt, echter Lauf nur wenn installiert).

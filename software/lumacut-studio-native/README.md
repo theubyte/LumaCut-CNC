@@ -445,7 +445,7 @@ Presets speichern, 3D-Relief aus Graustufenbild. Warnliste für nicht
 laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
 (`src/lumacut_materials/`).
 
-## Import (SVG, DXF, PDF, Bilder)
+## Import (SVG, DXF, PDF, AI, EPS, xTool, Bilder)
 
 *Datei › Importieren…* (Strg+I) oder Datei per Drag-and-drop auf die Arbeitsfläche ziehen.
 
@@ -455,6 +455,14 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   (1 pt = 25,4/72 mm), Seitendrehung berücksichtigt. Als dünne Ringe gespeicherte Linien
   (Qt, Word) werden zu einer Kontur zusammengefasst. Text nur, wenn in Pfade umgewandelt;
   eingebettete Bilder, Beschneidungspfade und verschlüsselte PDFs werden nicht übernommen.
+- **AI** (Illustrator): normale AI-Dateien sind PDF-kompatibel → PDF-Import (Seitenwahl).
+  Alte AI (≤ 8, reines PostScript) nur mit Ghostscript.
+- **EPS**: über Ghostscript, falls installiert (PATH, `C:\Program Files\gs\…` oder
+  `LUMACUT_GHOSTSCRIPT`); sonst klarer Hinweis „als SVG/PDF exportieren“. Nicht mitgeliefert.
+- **xTool `.xcs` / `.xs`**: Pfade, Rechtecke (mit Eckenradius), Kreise/Ellipsen, Linien,
+  Polygone, Text (als Glyphenkonturen, sonst Textobjekt) und Bitmaps der ersten Arbeitsfläche;
+  Laserwerte werden nicht übernommen, unbekannte/ausgeblendete Objekte gezählt und übersprungen.
+  Tabelle und Grenzen: [Anforderungen §9.2](../../docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md).
 - **PNG/JPG/BMP**: wird als **Bildobjekt** eingefügt (Größe aus der DPI-Angabe, sonst 96 dpi).
   *Datei › Bildeinstellungen…* (Strg+Umschalt+I) öffnet den Dialog (Modus Schwellwert / Floyd-Steinberg /
   Atkinson / Bayer / Graustufen / 3D-Tiefe, Linienabstand, Leistung max./min., Geschwindigkeit,

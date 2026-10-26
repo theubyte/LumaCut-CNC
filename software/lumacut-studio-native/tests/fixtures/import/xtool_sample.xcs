@@ -1,0 +1,320 @@
+{
+ "canvasId": "c1",
+ "version": "1.6.6",
+ "extId": "D1",
+ "extName": "D1",
+ "canvas": [
+  {
+   "id": "c1",
+   "title": "{panel}1",
+   "displays": [
+    {
+     "id": "id-RECT-8",
+     "type": "RECT",
+     "angle": 0,
+     "scale": {
+      "x": 1,
+      "y": 1
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 10,
+     "y": 20,
+     "width": 30,
+     "height": 15,
+     "offsetX": 10,
+     "offsetY": 20,
+     "radius": 0,
+     "zOrder": 1
+    },
+    {
+     "id": "id-RECT-8",
+     "type": "RECT",
+     "angle": 0,
+     "scale": {
+      "x": 1,
+      "y": 1
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 50,
+     "y": 20,
+     "width": 20,
+     "height": 20,
+     "offsetX": 50,
+     "offsetY": 20,
+     "radius": 5,
+     "zOrder": 2
+    },
+    {
+     "id": "id-CIRCLE-9",
+     "type": "CIRCLE",
+     "angle": 90,
+     "scale": {
+      "x": 0.006779661016949152,
+      "y": 0.003389830508474576
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 100,
+     "y": 10,
+     "width": 40,
+     "height": 20,
+     "offsetX": 100,
+     "offsetY": 10,
+     "zOrder": 3
+    },
+    {
+     "id": "id-LINE-7",
+     "type": "LINE",
+     "angle": 90,
+     "scale": {
+      "x": 1,
+      "y": 1
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 10,
+     "y": 60,
+     "width": 50,
+     "height": 0.001,
+     "endPoint": {
+      "x": 50,
+      "y": 0
+     },
+     "zOrder": 4
+    },
+    {
+     "id": "id-PATH-12",
+     "type": "PATH",
+     "angle": 0,
+     "scale": {
+      "x": 2,
+      "y": 2
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 60,
+     "y": 100,
+     "width": 40,
+     "height": 40,
+     "offsetX": 20,
+     "offsetY": 100,
+     "graphicX": 20,
+     "graphicY": 100,
+     "isClosePath": true,
+     "dPath": "M20,0 L40,0 L40,20 L20,20 Z M25,5 L35,5 L35,15 L25,15 Z",
+     "zOrder": 5
+    },
+    {
+     "id": "id-TEXT-8",
+     "type": "TEXT",
+     "angle": 0,
+     "scale": {
+      "x": 1,
+      "y": 1
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 150,
+     "y": 100,
+     "width": 10,
+     "height": 10,
+     "text": "O",
+     "style": {
+      "fontFamily": "Pacifico",
+      "fontSize": 20,
+      "fontSubfamily": "Regular"
+     },
+     "charJSONs": [
+      {
+       "id": "id-PATH-8",
+       "type": "PATH",
+       "angle": 0,
+       "scale": {
+        "x": 0.5,
+        "y": 0.5
+       },
+       "pivot": {
+        "x": 0,
+        "y": 0
+       },
+       "visible": true,
+       "isFill": false,
+       "x": 150,
+       "y": 100,
+       "width": 20,
+       "height": 20,
+       "offsetX": 150,
+       "offsetY": 110,
+       "dPath": "M0,-20 L20,-20 L20,0 L0,0 Z"
+      }
+     ],
+     "zOrder": 6
+    },
+    {
+     "id": "id-TEXT-7",
+     "type": "TEXT",
+     "angle": 0,
+     "scale": {
+      "x": 1,
+      "y": 1
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 150,
+     "y": 150,
+     "width": 40,
+     "height": 10,
+     "text": "Hallo",
+     "style": {
+      "fontFamily": "Arial",
+      "fontSize": 20,
+      "fontSubfamily": "Bold"
+     },
+     "zOrder": 7
+    },
+    {
+     "id": "id-BITMAP-11",
+     "type": "BITMAP",
+     "angle": 0,
+     "scale": {
+      "x": 5,
+      "y": 5
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 200,
+     "y": 10,
+     "width": 40,
+     "height": 20,
+     "originWidth": 8,
+     "originHeight": 4,
+     "offsetX": 200,
+     "offsetY": 10,
+     "base64": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAECAIAAAA8r+mnAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAADElEQVQImWNgoD0AAABkAAHTeRGDAAAAAElFTkSuQmCC",
+     "zOrder": 8
+    },
+    {
+     "id": "id-PEN-7",
+     "type": "PEN",
+     "angle": 0,
+     "scale": {
+      "x": 1,
+      "y": 1
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 200,
+     "y": 200,
+     "width": 20,
+     "height": 5,
+     "points": [
+      {
+       "x": 200,
+       "y": 200
+      },
+      {
+       "x": 210,
+       "y": 205
+      },
+      {
+       "x": 220,
+       "y": 200
+      }
+     ],
+     "isClosePath": false,
+     "zOrder": 9
+    },
+    {
+     "id": "id-RECT-6",
+     "type": "RECT",
+     "angle": 0,
+     "scale": {
+      "x": 1,
+      "y": 1
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": false,
+     "isFill": false,
+     "x": 0,
+     "y": 0,
+     "width": 5,
+     "height": 5,
+     "zOrder": 10
+    },
+    {
+     "id": "id-QRCODE-5",
+     "type": "QRCODE",
+     "angle": 0,
+     "scale": {
+      "x": 1,
+      "y": 1
+     },
+     "pivot": {
+      "x": 0,
+      "y": 0
+     },
+     "visible": true,
+     "isFill": false,
+     "x": 0,
+     "y": 0,
+     "width": 5,
+     "height": 5,
+     "zOrder": 11
+    }
+   ],
+   "layerData": {}
+  }
+ ],
+ "device": {
+  "id": "D1",
+  "power": 10,
+  "data": {
+   "dataType": "Map",
+   "value": []
+  },
+  "materialList": []
+ },
+ "cover": "",
+ "meta": []
+}

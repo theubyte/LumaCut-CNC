@@ -20,7 +20,8 @@ from pathlib import Path
 from lumacut_canvas.model import Geometry, Shape, new_id
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
-VECTOR_SUFFIXES = (".svg", ".dxf", ".pdf")
+VECTOR_SUFFIXES = (".svg", ".dxf", ".pdf", ".ai", ".eps", ".xcs", ".xs")
+PDF_LIKE_SUFFIXES = (".pdf", ".ai")  # mehrseitig möglich → Seite wählen
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp")
 ALL_SUFFIXES = VECTOR_SUFFIXES + IMAGE_SUFFIXES
 MAX_OBJECTS = 20000
@@ -87,6 +88,24 @@ def vector_shapes(polylines, layer_id: str, drop=None) -> ImportResult:
     return ImportResult(shapes, s)
 
 
+def place_shapes(shapes: list[Shape], drop=None) -> tuple[list[Shape], float]:
+    """Fertige Objekte gemeinsam platzieren (gleiche Regeln wie Vektoren)."""
+    boxes = [sh.bounds() for sh in shapes]
+    x0 = min(b.x for b in boxes)
+    y0 = min(b.y for b in boxes)
+    x1 = max(b.x + b.w for b in boxes)
+    y1 = max(b.y + b.h for b in boxes)
+    s, dx, dy, _ = placement(x0, y0, x1 - x0, y1 - y0, drop)
+    gid = new_id() if len(shapes) > 1 else None
+    for sh in shapes:
+        g = sh.geom
+        # Drehung um die Boxmitte bleibt erhalten: Mitte wandert mit, Box skaliert.
+        g.x, g.y, g.w, g.h = g.x * s + dx, g.y * s + dy, g.w * s, g.h * s
+        if gid:
+            sh.groups = (gid,) + tuple(sh.groups)
+    return shapes, s
+
+
 def image_shape(image, w_mm: float, h_mm: float, layer_id: str, drop=None) -> ImportResult:
     s, dx, dy, _ = placement(0.0, 0.0, w_mm, h_mm, drop)
     if drop is None:
@@ -136,9 +155,35 @@ def import_file(path, layer_id: str, drop: tuple[float, float] | None = None,
         res = vector_shapes(vi.polylines, layer_id, drop)
         res.notes = vi.notes()
         return res
+    if suffix in (".ai", ".eps"):
+        from .postscript import load_postscript
+        kind = suffix[1:].upper()
+        try:
+            vi = load_postscript(p, page, kind)
+        except ValueError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(f"{kind} nicht lesbar: {exc}") from exc
+        res = vector_shapes(vi.polylines, layer_id, drop)
+        res.notes = vi.notes()
+        return res
+    if suffix in (".xcs", ".xs"):
+        from .xtool import load_xtool
+        try:
+            xi = load_xtool(p, layer_id)
+        except ValueError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - unbekannte xTool-Version
+            raise ValueError(f"xTool-Datei nicht lesbar ({exc}) – bitte in xTool "
+                             f"als SVG exportieren und das SVG importieren") from exc
+        if len(xi.shapes) > MAX_OBJECTS:
+            raise ValueError(f"Zu viele Objekte ({len(xi.shapes)} > {MAX_OBJECTS})")
+        shapes, s = place_shapes(xi.shapes, drop)
+        kind = "image" if all(sh.kind == "image" for sh in shapes) else "vector"
+        return ImportResult(shapes, s, xi.notes(), kind)
     if suffix in IMAGE_SUFFIXES:
         from .image import load_image
         img, w, h = load_image(p)
         return image_shape(img, w, h, layer_id, drop)
     raise ValueError(f"Dateityp {suffix or '?'} wird nicht unterstützt "
-                     f"(SVG, DXF, PDF, PNG, JPG, BMP)")
+                     f"(SVG, DXF, PDF, AI, EPS, xTool .xcs/.xs, PNG, JPG, BMP)")
