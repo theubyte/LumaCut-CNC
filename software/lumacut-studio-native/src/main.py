@@ -212,6 +212,8 @@ class LumaCutStudio(QMainWindow):
         self.touch_mode_box.toggled.connect(self.canvas.set_touch_mode)
         self.canvas.touchModeChanged.connect(self.touch_mode_box.setChecked)
         status.addPermanentWidget(self.touch_mode_box)
+        self.layers_panel.set_touch_mode(self.canvas.touch_mode)
+        self.canvas.touchModeChanged.connect(self.layers_panel.set_touch_mode)
         self.canvas.statusMessage.connect(lambda text: status.showMessage(text, 5000))
         # --- scan integration (scan agent) ---
         self.scan_panel.statusMessage.connect(lambda text: status.showMessage(text, 6000))

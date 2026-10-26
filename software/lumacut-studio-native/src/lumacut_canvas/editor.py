@@ -420,6 +420,7 @@ class CanvasEditor(QWidget):
         self._extension_separator = None
 
         strip = self._toolbar("ToolStrip", Qt.Vertical)
+        self.tool_strip = strip
         for t in Tool:
             strip.addAction(a[f"tool_{t.value}"])
 
@@ -473,7 +474,17 @@ class CanvasEditor(QWidget):
             return
         self.touch_mode = on
         self.view.set_touch_mode(on)
+        self._apply_touch_style()
         self.touchModeChanged.emit(on)
+
+    def _apply_touch_style(self) -> None:
+        """Werkzeug- und Aktionsleiste: 32-px-Icons in ≥ 48-px-Knöpfen mit Abstand."""
+        px = self.view.metrics.icon_px
+        for tb in (self.action_bar, self.tool_strip):
+            tb.setIconSize(QSize(px, px))
+        self.setProperty("touch", "true" if self.touch_mode else "false")
+        self.setStyleSheet("")
+        self.setStyleSheet(theme.CANVAS_QSS)
 
     def _on_touch_detected(self) -> None:
         if not self.touch_mode and touch.load_setting(self._settings) is None:

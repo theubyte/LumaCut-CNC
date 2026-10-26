@@ -101,4 +101,16 @@ CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
 }}
 #LayersPanel QPushButton#AutoPasses:hover {{ border-color: {ACCENT}; }}
 #LayersPanel QPushButton#AutoPasses:disabled {{ color: #4a5566; }}
+
+/* --- Touch-Modus (dynamische Eigenschaft touch="true", siehe touch.py) --- */
+#CanvasEditor[touch="true"] QToolBar {{ spacing: 6px; padding: 6px; }}
+#CanvasEditor[touch="true"] QToolBar#ToolStrip {{ padding: 8px 6px; }}
+#CanvasEditor[touch="true"] QToolButton {{ min-width: 40px; min-height: 40px; padding: 7px; border-radius: 8px; }}
+#CanvasEditor[touch="true"] QDoubleSpinBox, #CanvasEditor[touch="true"] QLineEdit,
+#CanvasEditor[touch="true"] QComboBox {{ min-height: 34px; }}
+#LayersPanel[touch="true"] QToolButton {{ min-width: 40px; min-height: 40px; padding: 6px; }}
+#LayersPanel[touch="true"] QDoubleSpinBox, #LayersPanel[touch="true"] QSpinBox,
+#LayersPanel[touch="true"] QLineEdit, #LayersPanel[touch="true"] QComboBox {{ min-height: 34px; }}
+#LayersPanel[touch="true"] QPushButton#ColorButton {{ min-height: 34px; max-height: 34px; }}
+#LayersPanel[touch="true"] QPushButton#AutoPasses {{ min-height: 34px; padding: 2px 12px; }}
 """

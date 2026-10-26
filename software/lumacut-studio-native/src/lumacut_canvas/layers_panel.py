@@ -121,7 +121,7 @@ class _LayerRow(QWidget):
     def _toggle(self, icon_name: str, tip: str, slot) -> QToolButton:
         b = QToolButton()
         b.setIcon(icons.icon(icon_name))
-        b.setIconSize(QSize(18, 18))
+        b.setIconSize(QSize(24, 24) if self.panel.touch_mode else QSize(18, 18))
         b.setToolTip(tip)
         b.setAutoRaise(True)
         b.clicked.connect(slot)
@@ -143,6 +143,7 @@ class LayersPanel(QWidget):
         self._updating = False
         self._preset_source = presets or _default_presets
         self._presets: list = []
+        self.touch_mode = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
@@ -282,6 +283,22 @@ class LayersPanel(QWidget):
         if hasattr(self, "pass_plan"):
             self.refresh()
 
+    def set_touch_mode(self, on: bool) -> None:
+        """Größere Zeilen, Knöpfe und Eingabefelder für Finger (Theme-QSS mit
+        ``touch="true"``); vgl. :meth:`CanvasEditor.set_touch_mode`."""
+        on = bool(on)
+        if on == self.touch_mode:
+            return
+        self.touch_mode = on
+        self.setProperty("touch", "true" if on else "false")
+        self.setStyleSheet("")
+        self.setStyleSheet(theme.CANVAS_QSS)
+        size = QSize(24, 24) if on else QSize(18, 18)
+        for b in self.findChildren(QToolButton):
+            b.setIconSize(size)
+        self._signature = None
+        self.refresh()
+
     def showEvent(self, event) -> None:  # noqa: N802
         # Ein Hauptfenster mit setPalette() vererbt seine Palette beim
         # Einhängen und überschreibt damit die QSS-Farben der Kinder. Einmal
@@ -316,7 +333,7 @@ class LayersPanel(QWidget):
             item = QListWidgetItem()
             item.setData(Qt.UserRole, layer.id)
             row = _LayerRow(self, layer, counts[layer.id])
-            item.setSizeHint(QSize(0, 46))
+            item.setSizeHint(QSize(0, 56 if self.touch_mode else 46))
             self.list.addItem(item)
             self.list.setItemWidget(item, row)
         active = self.doc.active_layer

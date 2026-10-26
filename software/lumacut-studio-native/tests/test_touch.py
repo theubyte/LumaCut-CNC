@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtCore import QEvent, QPointF, QSettings, Qt
+from PySide6.QtWidgets import QApplication
 
 from lumacut_canvas import touch
 from lumacut_canvas.editor import CanvasEditor
@@ -344,3 +345,46 @@ def test_double_tap_acts_as_double_click(ed, monkeypatch):
         _touch(ed, QEvent.TouchBegin, [(0, p, "p")])
         _touch(ed, QEvent.TouchEnd, [(0, p, "r")])
     assert len(calls) == 1
+
+
+# --- Schritt 4: große Werkzeugknöpfe / Ebenen-Panel -----------------------
+def _strip_buttons(ed):
+    from PySide6.QtWidgets import QToolButton
+    return [b for b in ed.tool_strip.findChildren(QToolButton) if b.defaultAction() is not None]
+
+
+def test_tool_buttons_grow_in_touch_mode(ed):
+    ed.show()
+    QApplication.processEvents()
+    small = [b.sizeHint() for b in _strip_buttons(ed)]
+    assert small and max(s.height() for s in small) < 44
+    ed.set_touch_mode(True)
+    QApplication.processEvents()
+    assert ed.tool_strip.iconSize().width() == touch.TOUCH.icon_px
+    assert ed.action_bar.iconSize().width() == touch.TOUCH.icon_px
+    big = [b.sizeHint() for b in _strip_buttons(ed)]
+    assert min(s.height() for s in big) >= 48 and min(s.width() for s in big) >= 48
+    ed.set_touch_mode(False)
+    QApplication.processEvents()
+    again = [b.sizeHint() for b in _strip_buttons(ed)]
+    assert max(s.height() for s in again) < 44
+    ed.close()
+
+
+def test_layers_panel_touch_mode(ed):
+    from PySide6.QtWidgets import QToolButton
+    from lumacut_canvas.layers_panel import LayersPanel
+    panel = LayersPanel(ed.document, ed.undo_stack)
+    panel.show()
+    QApplication.processEvents()
+    assert panel.list.item(0).sizeHint().height() == 46
+    panel.set_touch_mode(True)
+    QApplication.processEvents()
+    assert panel.property("touch") == "true"
+    assert panel.list.item(0).sizeHint().height() == 56
+    buttons = panel.findChildren(QToolButton)
+    assert buttons and min(b.sizeHint().height() for b in buttons if b.isVisible()) >= 40
+    assert panel.name.sizeHint().height() >= 34
+    panel.set_touch_mode(False)
+    assert panel.list.item(0).sizeHint().height() == 46
+    panel.close()
