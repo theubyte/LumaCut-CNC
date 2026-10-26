@@ -28,6 +28,10 @@ ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "marlin"
 # Shared by every program (docs/ZUSAMMENARBEIT_CLAUDE_GROK.md §3).
 MATERIALS = MaterialStore(DATA.parent / "materials.json")
+# /api/status "features": clients switch on Pi-side behaviour by these names.
+# autorun_mesh: op=autorun probes the motif areas and compensates the focus
+# itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
+FEATURES = ("autorun_mesh", "materials")
 JOBS = DATA / "jobs"
 USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
 # Head camera (USB/UVC or CSI via V4L2) for the workspace scan.
@@ -198,6 +202,7 @@ def status():
                             else "idle"),
                   firmware="marlin",
                   coord_convention=placing.COORD_CONVENTION,
+                  features=list(FEATURES),
                   busy=busy, stale_ms=stale_ms,
                   expected_pwm="PA1 / M3 I / S0..255",
                   io={"laser_supply_switch":"FAN1 / PC6 (M106/M107, low-side)",

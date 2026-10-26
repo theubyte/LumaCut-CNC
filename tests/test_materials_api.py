@@ -62,6 +62,19 @@ class MaterialStoreTests(unittest.TestCase):
         with self.assertRaises(ConflictError):
             self.store.delete(self.store.list()["materials"][0]["id"], 3)
 
+    def test_fields_of_other_programs_are_kept(self):
+        studio = {"material_id": "pappel-3", "laser_id": "diode-10w", "air_assist": True,
+                  "focus_start_mm": 0.0, "notes": "Test", "warnings": ["Rauch"],
+                  "source": "studio", "op": "cut"}
+        created = self.store.create(dict(NEW, base_revision=1, **studio))["material"]
+        for key, value in studio.items():
+            self.assertEqual(created[key], value)
+        updated = self.store.update(created["id"], {"power_pct": 70, "base_revision": 2})
+        self.assertEqual(updated["material"]["notes"], "Test")
+        self.assertEqual(MaterialStore(self.path).list()["materials"][-1]["laser_id"], "diode-10w")
+        with self.assertRaises(ValueError):
+            self.store.create(dict(NEW, base_revision=3, notes="x" * 20000))
+
     def test_builtin_stays_builtin_when_edited(self):
         first = self.store.list()["materials"][0]
         result = self.store.update(first["id"], {"builtin": False, "speed_mm_min": 300,
@@ -118,6 +131,7 @@ class MaterialHttpTests(unittest.TestCase):
 import json
 from marlin import web
 c = web.app.test_client()
+assert {"autorun_mesh", "materials"} <= set(c.get("/api/status").get_json()["features"])
 r = c.get("/api/materials")
 assert r.status_code == 200, r.data
 data = r.get_json()

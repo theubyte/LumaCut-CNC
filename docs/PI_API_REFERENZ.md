@@ -223,6 +223,7 @@ Felder aus `web.py` (`status()`):
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
 | `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
+| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden. Fehlt bei älteren Pi-Ständen. |
 | `coord_convention` | string | `"origin_top_right"`: Bedeutung der Ankernamen (siehe `op=place`). Fehlt bei Pi-Ständen vor 2026-10-26; Studio tauscht dann links/rechts. |
 | `estimated_tip_gap_mm` | number \| null | geschätzter Abstand Spitze ↔ Werkstück (nur wenn referenziert, Position und Oberfläche bekannt). Schätzung, keine Messung. |
 | `estimated_focus_adjust_mm` | number \| null | Fokusabstand − `estimated_tip_gap_mm` (nur Anzeige) |
@@ -753,6 +754,7 @@ Material (JSON):
 | `z_step_mm` | number | 0..2 (Standard 0); (Durchgänge − 1) × `z_step_mm` ≤ 3 mm |
 | `builtin` | bool | vom Pi gesetzt (Startwert), bleibt beim Ändern erhalten |
 | `updated` | string | vom Pi gesetzt, UTC `2026-10-26T15:00:00Z` |
+| weitere Felder | beliebig (JSON) | werden unverändert gespeichert und zurückgegeben (z. B. Studio `material_id`, `laser_id`, `notes`); höchstens 32 Felder, zusammen 16 KB |
 
 | Anfrage | Erfolg (200) |
 | --- | --- |

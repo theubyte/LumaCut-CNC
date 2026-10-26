@@ -22,6 +22,8 @@ PROCESSES = ("Schneiden", "Gravieren", "Markieren")
 MODES = ("line", "fill")
 MAX_FOCUS_DROP_MM = 3.0      # all passes together (Z floor surface + 2 mm)
 MAX_Z_STEP_MM = 2.0
+MAX_EXTRA_FIELDS = 32
+MAX_EXTRA_BYTES = 16 * 1024
 FIELDS = ("id", "name", "thickness_mm", "process", "mode", "power_pct",
           "speed_mm_min", "passes", "interval_mm", "depth_per_pass_mm",
           "z_step_mm", "builtin", "updated")
@@ -107,6 +109,14 @@ def validate(data, *, material_id=None, builtin=False):
         "builtin": bool(builtin),
         "updated": _now(),
     }
+    # Fields of other programs (Studio: material_id, laser_id, notes, ...)
+    # are kept unchanged and returned as sent.
+    extras = {k: v for k, v in data.items() if k not in FIELDS and k != "base_revision"}
+    if len(extras) > MAX_EXTRA_FIELDS or not all(isinstance(k, str) and len(k) <= 64 for k in extras):
+        raise ValueError("Zu viele oder zu lange Zusatzfelder")
+    if len(json.dumps(extras, ensure_ascii=False)) > MAX_EXTRA_BYTES:
+        raise ValueError("Zusatzfelder größer als %d KB" % (MAX_EXTRA_BYTES // 1024))
+    material.update(extras)
     # The apps derive the passes from thickness / depth per pass when set.
     passes = material["passes"]
     if material["depth_per_pass_mm"] > 0 and material["thickness_mm"] > 0:
@@ -201,7 +211,7 @@ class MaterialStore:
             self._check_revision_locked(body.get("base_revision") if isinstance(body, dict) else None)
             index = self._index_locked(material_id)
             old = self._data["materials"][index]
-            merged = {**old, **{k: v for k, v in body.items() if k in FIELDS}}
+            merged = {**old, **body}
             material = validate(merged, material_id=material_id, builtin=old.get("builtin", False))
             self._data["materials"][index] = material
             return self._commit_locked(material=material)
