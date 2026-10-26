@@ -24,7 +24,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 from . import settings as settings_store
-from .client import (FRAME_MODES, JOB_SUFFIXES, JOG_STEPS, LumaCutClient,
+from .client import (FRAME_MODES, JOB_SUFFIXES, JOG_STEPS, TRANSIENT_OWNERS,
+                     LumaCutClient,
                      MachineStatus, normalize_base_url)
 from .worker import CommandRunner, ConnState, StatusPoller
 
@@ -84,6 +85,12 @@ class MachinePanel(QWidget):
         self._stale = False
         self._job_path: Path | None = None
         self._uploaded: str = ""
+        # Bumped by every upload and file choice: a late worker result of
+        # an older upload must not mark a file as ready to start.
+        self._upload_gen = 0
+        # Label of an operation another module (scan/probe) runs with this
+        # panel's client outside the CommandRunner ("" = none).
+        self._external = ""
         self._frame_provider: Callable[[str], str] | None = None
         self._frame_available = False
         self._last_frame_state = ""
@@ -301,7 +308,7 @@ class MachinePanel(QWidget):
         self._poller = StatusPoller(self._client, new.poll_ms)
         self._poller.state_changed.connect(self._on_poller_state)
         self._poller.status_received.connect(self._on_poller_status)
-        self._poller.set_command_running(self._runner.busy)
+        self._poller.set_command_running(self._runner.busy or bool(self._external))
         self._poller.start()
 
     def disconnect_from_pi(self) -> None:
@@ -337,6 +344,22 @@ class MachinePanel(QWidget):
         return self._status if self._state == ConnState.CONNECTED else None
 
     @property
+    def client(self) -> LumaCutClient | None:
+        """Client of the current connection (None when disconnected). It is
+        stateless and thread-safe; use set_external_operation() while
+        driving the machine with it outside this panel."""
+        return self._client
+
+    def set_external_operation(self, label: str) -> None:
+        """Another module (e.g. scan/probe) moves the machine with
+        ``client``: lock the motion buttons and tolerate slow status like
+        during an own command. ``""`` ends it. E-Stop stays usable."""
+        self._external = label or ""
+        if self._poller is not None:
+            self._poller.set_command_running(self._runner.busy or bool(self._external))
+        self._update_enabled()
+
+    @property
     def command_running(self) -> str:
         """Label of the command currently running ("" if none)."""
         return self._runner.current or ""
@@ -359,7 +382,7 @@ class MachinePanel(QWidget):
     @Slot(bool)
     def _on_busy_changed(self, busy: bool) -> None:
         if self._poller is not None:
-            self._poller.set_command_running(busy)
+            self._poller.set_command_running(busy or bool(self._external))
         self._update_enabled()
 
     @Slot()
@@ -369,7 +392,7 @@ class MachinePanel(QWidget):
         stale = (self._state == ConnState.CONNECTED and
                  (age is None or age > STALE_AFTER_S))
         if stale:
-            busy = self._runner.current
+            busy = self._runner.current or self._external
             text = ("Pi beschäftigt (%s)" % busy) if busy else "Keine Statusdaten"
             if age is not None:
                 text += " · Status %.0f s alt" % age
@@ -439,9 +462,12 @@ class MachinePanel(QWidget):
         else:
             badge(self.laser_label, "Aus" + (" · Lüfter nachlaufend"
                                              if status.laser_fan_on else ""), OK)
-        free = status.owner in ("Frei", "")
-        badge(self.owner_label, "Frei" if free else "Belegt: " + status.owner,
-              OK if free else WARN)
+        free = status.owner in TRANSIENT_OWNERS
+        owner_text = "Frei" if free else "Belegt: " + status.owner
+        if status.pi_busy:
+            # Pi answered from its snapshot while a move holds the lock.
+            owner_text += " · Pi fährt"
+        badge(self.owner_label, owner_text, OK if free else WARN)
         self.focus_label.setText("%s / %s mm" % (_mm(status.workpiece_surface_z),
                                                   _mm(status.laser_focus_z))
                                  if status.workpiece_surface_z is not None
@@ -511,10 +537,12 @@ class MachinePanel(QWidget):
     def _update_enabled(self) -> None:
         connected = (self._state == ConnState.CONNECTED and self._client is not None
                      and not self._stale)
-        idle = connected and not self._runner.busy
+        idle = connected and not self._runner.busy and not self._external
         s = self._status
         job_active = bool(s and s.job.active)
         framing = bool(s and s.framing)
+        # LightBurn or another client holds the Pi: motion would be refused.
+        foreign = bool(s and s.foreign_owner)
         for b in self._control_buttons:
             b.setEnabled(idle)
         if idle and s is not None:
@@ -523,7 +551,8 @@ class MachinePanel(QWidget):
             for b in (self.home_button, self.park_button, self.focus_button,
                       self.start_button, self.autorun_button, self.frame_button,
                       *self.jog_buttons):
-                b.setEnabled(not job_active and not framing and not s.emergency_latched)
+                b.setEnabled(not job_active and not framing and not foreign
+                             and not s.emergency_latched)
             for b in (self.park_button, self.focus_button, self.frame_button,
                       *self.jog_buttons):
                 b.setEnabled(b.isEnabled() and s.homed)
@@ -531,7 +560,7 @@ class MachinePanel(QWidget):
             self.frame_button.setEnabled(False)
         elif (self._stale and self._state == ConnState.CONNECTED and
               self._client is not None and not self._runner.busy and
-              (job_active or framing)):
+              not self._external and (job_active or framing)):
             # During a frame the Pi holds machine.lock for each edge (M400),
             # so status can go stale. Aborting only stops, so keep it usable.
             self.abort_button.setEnabled(True)
@@ -659,6 +688,7 @@ class MachinePanel(QWidget):
 
     def set_job_file(self, path: str | Path) -> None:
         self._job_path = Path(path)
+        self._upload_gen += 1
         self._uploaded = ""
         self.file_label.setText(self._job_path.name)
         self.file_label.setStyleSheet("")
@@ -670,11 +700,11 @@ class MachinePanel(QWidget):
             return
         client, path = self._client, self._job_path
 
-        def task() -> str:
+        def task(gen: int) -> str:
             name, message = client.upload_job_file(path)
-            self._uploaded = name
+            self._mark_uploaded(gen, name)
             return message
-        self._run("Senden", task)
+        self._run_upload("Senden", task)
 
     def send_gcode(self, name: str, gcode: str, start: bool = False) -> None:
         """Upload generated G-code (e.g. from the canvas) and optionally start."""
@@ -683,14 +713,37 @@ class MachinePanel(QWidget):
             return
         client = self._client
 
-        def task() -> str:
+        def task(gen: int) -> str:
             message = client.upload_job(name, gcode)
-            self._uploaded = name
+            if not self._mark_uploaded(gen, name):
+                return message + " (inzwischen anderer Auftrag gewählt)"
             if start:
                 message = client.start_job(name)
             return message
-        self.file_label.setText(name)
-        self._run("Senden & Starten" if start else "Senden", task)
+        if self._run_upload("Senden & Starten" if start else "Senden", task):
+            self.file_label.setText(name)
+
+    def _run_upload(self, label: str, task: Callable[[int], str]) -> bool:
+        """Dispatch an upload. Until it succeeds nothing counts as sent, so
+        Start can never run the previous job after a failed or newer
+        upload (same file name included: the Pi would still hold the old
+        content)."""
+        previous, previous_gen = self._uploaded, self._upload_gen
+        self._upload_gen = gen = previous_gen + 1
+        self._uploaded = ""
+        if self._run(label, lambda: task(gen)):
+            self._update_enabled()
+            return True
+        self._uploaded, self._upload_gen = previous, previous_gen
+        return False
+
+    def _mark_uploaded(self, gen: int, name: str) -> bool:
+        """Worker thread: record a finished upload unless a newer upload or
+        file choice superseded it. Returns True if recorded."""
+        if gen != self._upload_gen:
+            return False
+        self._uploaded = name
+        return True
 
     # ---------------------------------------------------------- frame
     @property
@@ -767,6 +820,31 @@ class MachinePanel(QWidget):
             return
         client, name = self._client, self._uploaded
         self._run("Ein-Klick", lambda: client.autorun_job(name))
+
+    def active_operation(self) -> str:
+        """What the machine is doing that closing the app would not stop
+        ("" if nothing): a running command, a Pi job or a frame run."""
+        s = self._status if self._state == ConnState.CONNECTED else None
+        if s is not None and s.framing:
+            return "Rahmenfahrt"
+        if s is not None and s.job.active:
+            return "Auftrag " + (s.job.file or "")
+        current = self._runner.current
+        if current and current != ESTOP_LABEL:
+            return current
+        return self._external
+
+    def confirm_close(self) -> bool:
+        """Ask before closing while the Pi works. Closing never stops the
+        machine; the dialog says so and points to NOT-AUS / Abbrechen."""
+        active = self.active_operation().strip()
+        if not active:
+            return True
+        return self._confirm(
+            "LumaCut Studio schließen",
+            "%s läuft noch auf dem Pi. Schließen stoppt die Maschine NICHT – "
+            "sie arbeitet ohne Überwachung weiter. Vorher „Abbrechen“ oder "
+            "NOT-AUS benutzen. Trotzdem schließen?" % active)
 
     @Slot()
     def abort_job(self) -> None:

@@ -51,6 +51,12 @@ STATUS_TIMEOUT_S = 4.0
 DEFAULT_TIMEOUT_S = 60.0
 LONG_TIMEOUT_S = 240.0
 UPLOAD_TIMEOUT_S = 120.0
+#: The Pi answers an upload only after preflight checked every line; a
+#: Pi 400 needs seconds per MB. Added per started MB on top of the base.
+UPLOAD_TIMEOUT_PER_MB_S = 10.0
+#: Short Pi-internal owners that do not block the operator: the USB
+#: heartbeat (M114 every 2 s) holds owner "monitor" for milliseconds.
+TRANSIENT_OWNERS = ("Frei", "", "monitor")
 #: Per attempt. The Pi answers estop without taking machine.lock, so a
 #: healthy Pi replies within milliseconds even during a running move.
 ESTOP_TIMEOUT_S = 3.0
@@ -194,6 +200,11 @@ class MachineStatus:
     probe_offset_set: bool = False
     job: JobState = field(default_factory=JobState)
     frame: FrameState = field(default_factory=FrameState)
+    #: The Pi answered from its status snapshot because a long move holds
+    #: machine.lock (owner/latch/laser/position are live, the rest cached).
+    pi_busy: bool = False
+    #: Age of the cached part in ms (0 = fully fresh, None = unknown/old Pi).
+    stale_ms: int | None = 0
     raw: dict = field(default_factory=dict, repr=False)
 
     @property
@@ -203,7 +214,16 @@ class MachineStatus:
 
     @property
     def busy(self) -> bool:
-        return self.owner not in ("Frei", "") or self.job.active or self.frame.active
+        return (self.owner not in TRANSIENT_OWNERS or self.job.active
+                or self.frame.active)
+
+    @property
+    def foreign_owner(self) -> str:
+        """Owner that holds the Pi besides job/frame (e.g. "lightburn"),
+        or "" when the controls are free."""
+        if self.owner in TRANSIENT_OWNERS or self.owner in ("job", "frame"):
+            return ""
+        return self.owner
 
     @classmethod
     def from_json(cls, data: Any) -> "MachineStatus":
@@ -243,11 +263,27 @@ class MachineStatus:
             probe_offset_set=data.get("probe_xy_offset_mm") is not None,
             job=JobState.from_json(data.get("job")),
             frame=FrameState.from_json(data.get("frame")),
+            pi_busy=_bool(data.get("busy")),
+            stale_ms=_stale_ms(data.get("stale_ms"), data),
             raw=data,
         )
 
 
 _CORE_FIELDS = ("connected", "homed", "position", "owner", "emergency_latched")
+
+
+def _stale_ms(value: Any, data: dict) -> int | None:
+    if "stale_ms" not in data:
+        return 0          # older Pi: every answer is a full status
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0, int(value))
+
+
+def upload_timeout(size: int) -> float:
+    """Upload timeout for ``size`` bytes (Pi preflight scales with size)."""
+    megabytes = -(-max(0, int(size)) // (1024 * 1024))
+    return UPLOAD_TIMEOUT_S + UPLOAD_TIMEOUT_PER_MB_S * megabytes
 
 
 def _bool(value: Any) -> bool:
@@ -521,7 +557,7 @@ class LumaCutClient:
             content, b"\r\n--", boundary.encode(), b"--\r\n"))
         data = self._request("POST", "/api/upload", body=body,
                              content_type="multipart/form-data; boundary=" + boundary,
-                             timeout=UPLOAD_TIMEOUT_S)
+                             timeout=upload_timeout(len(content)))
         return str(data.get("message") or "Hochgeladen")
 
     def upload_job_file(self, path: str | Path) -> tuple[str, str]:

@@ -155,6 +155,8 @@ class FakePi:
                                                  "frame": fake.status["frame"]})
                     return self._reply(200, {"message": "ok " + op})
                 if self.path == "/api/upload":
+                    if self._hiccup("upload"):
+                        return
                     if "upload" in fake.fail:
                         code, data = fake.fail["upload"]
                         return self._reply(code, data)
