@@ -141,8 +141,9 @@ def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
         mixed.addWidget(QPushButton(t))
     lay.addLayout(mixed)
     text = "Geladenes Mesh nach Kontrollmessung wiederverwenden (lang)"
-    check = QCheckBox(text)
-    lay.addWidget(check)
+    holder = QWidget()  # eigener Halter: Breite unabhängig von den Knöpfen
+    QVBoxLayout(holder).addWidget(check := QCheckBox(text))
+    lay.addWidget(holder)
     grid = QGridLayout()  # Panel-eigenes 2×2-Knopfraster mit breiten Knöpfen
     gbtns = [QPushButton(t * 3) for t in ("Home ", "Park ", "Fokus (G30) ", "Notstopp quittieren ")]
     for n, b in enumerate(gbtns):
@@ -170,12 +171,16 @@ def test_compact_sidebar_wraps_rows_narrows_combos(qapp):
     # Langes Häkchen: schmal im Minimum, Text unverändert, bricht um.
     assert check.text() == text and check.toolTip() == text
     assert check.minimumWidth() == fit.COMPACT_CHECK_PX  # Layout-Minimum (qSmartMinSize)
-    root.resize(fit.COMPACT_CHECK_PX + 30, root.height())
+    holder.setParent(None)
+    holder.resize(fit.COMPACT_CHECK_PX + 30, 40)
+    holder.show()
     settle(qapp)
+    assert check.width() < check.sizeHint().width()
     assert check.height() > check.fontMetrics().lineSpacing() * 1.5
     check.click()
     assert check.isChecked()
-    root.grab()  # eigener Paint-Pfad läuft ohne Fehler
+    holder.grab()  # eigener Paint-Pfad läuft ohne Fehler
+    holder.close()
     # Breites Knopfraster einspaltig in Lesereihenfolge, Statuszeile bricht um.
     assert [grid.getItemPosition(grid.indexOf(b))[:2] for b in gbtns] == [(0, 0), (1, 0), (2, 0), (3, 0)]
     assert status.wordWrap()
