@@ -50,6 +50,7 @@ Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrec
 - [docs/ANDROID_APP.md](docs/ANDROID_APP.md) – Tablet-App: Bereiche, Aufbau, APK bauen und installieren
 - [docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md) – Tests, CI, Arbeitsweise, Stolperfallen
 - [docs/LUMACUT_STUDIO_PLAN_2026-10-25.md](docs/LUMACUT_STUDIO_PLAN_2026-10-25.md) – Ziel und Fahrplan für Studio
+- [docs/GROK_ANALYSE_2026-10-25.md](docs/GROK_ANALYSE_2026-10-25.md) – Grok-Analyse (Sicherheit, Firmware, Pi) mit aktuellem Stand je Punkt; offen: Not-Aus/Interlock, PWM-Messprotokoll, Z-Schritte/mm
 - [CHANGELOG.md](CHANGELOG.md) – Was wann warum geändert wurde
 
 ## Schnellstart
