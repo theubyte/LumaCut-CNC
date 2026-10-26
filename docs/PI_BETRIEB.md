@@ -77,6 +77,7 @@ Bis LumaCut Studio alles kann, funktioniert LightBurn weiter:
 | POST | `/api/settings` | Fokus, Rückzug, Schalter→Spitze, Tasterversatz |
 | POST | `/api/commission` | Mechanik-Freigabe (einmalig nach Inbetriebnahme) |
 | GET | `/api/camera/snapshot?w=&h=` | JPEG von der Kopfkamera (`LUMACUT_CAMERA`, Standard `/dev/video0`); ohne Kamera 503. Verfügbarkeit in `/api/status` → `camera` |
+| GET/PUT | `/api/camera/calibration` | Kamera-Kalibrierung der Maschine (`/etc/lumacut/camera_calibration.json`, überschreibbar mit `LUMACUT_CAMERA_CALIBRATION`); PUT nur JSON mit `revision`, 409 bei Konflikt – Details: [KAMERA_STATUS_UND_KALIBRIERUNG.md](../software/lumacut-studio-native/docs/KAMERA_STATUS_UND_KALIBRIERUNG.md#3a-kalibrierung-auf-dem-pi-speichern) |
 | POST | `/api/firmware` | SKR-Firmware (`file`), Fortschritt in `/api/status` → `firmware_update` |
 
 Fehler kommen als HTTP 4xx/5xx mit `{"error": "…"}` in Klartext zurück.

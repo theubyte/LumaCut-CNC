@@ -2,9 +2,13 @@
 
 Der Scan setzt viele Kamerabilder bei **fester Höhe** zu einem vermessenen Bettbild
 zusammen. Damit das Mosaik millimetergenau auf dem Canvas liegt, braucht Studio
-einmalig die Kalibrierwerte der Kopf-Kamera. Sie stehen in `camera.json` und werden
-im Scan-Panel über **„Laden …"** neben „Kalibrierung" geladen (Modus „Maschine (Pi-API + Kamera)").
-Im Modus „Simulation (ohne Hardware)" wird eine eingebaute Beispielkalibrierung benutzt.
+einmalig die Kalibrierwerte der Kopf-Kamera. Sie gehören zur Maschine und liegen **auf dem Pi**
+(`/etc/lumacut/camera_calibration.json`, `GET/PUT /api/camera/calibration`, Details in
+[KAMERA_STATUS_UND_KALIBRIERUNG.md](KAMERA_STATUS_UND_KALIBRIERUNG.md#3a-kalibrierung-auf-dem-pi-speichern)).
+Gemessen wird in eine `camera.json` (gleiches Format), die im Scan-Panel über **„Importieren …"**
+geladen und mit **„Auf Pi speichern"** auf die Maschine übertragen wird (Modus „Maschine (Pi-API + Kamera)").
+Im Modus „Simulation (ohne Hardware)" wird eine eingebaute Beispielkalibrierung oder eine importierte
+`camera.json` benutzt.
 
 Zurück zur Übersicht: [SCAN_PROBE.md](SCAN_PROBE.md)
 
@@ -123,7 +127,7 @@ Schutzbrille bei Laserbetrieb.
 7. **Belichtung.** Hellstes und dunkelstes Material aufs Bett legen, `exposure` so wählen,
    dass beide Zeichnung haben. Eintragen.
 8. **Prüfen.** In Studio Modus „Maschine (Pi-API + Kamera)", Kamera-Quelle eintragen (USB-Index `0`
-   oder Stream-URL), `camera.json` laden, „Scan starten". Das Mosaik muss auf dem Canvas
+   oder Stream-URL), `camera.json` importieren und „Auf Pi speichern", „Scan starten". Das Mosaik muss auf dem Canvas
    deckungsgleich mit einem gelaserten Testmuster liegen (Abweichung < 0,5 mm). Bei
    konstantem Versatz `offset_mm` korrigieren, bei wachsendem Fehler zum Rand `px_per_mm`
    oder Verzeichnung.

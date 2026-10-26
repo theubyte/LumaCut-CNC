@@ -90,7 +90,8 @@ Rechte Spalte, Gruppe **„Scan & Probe"** (`src/scanprobe/panel.py`, eingebunde
 1. **Modus** wählen: „Simulation (ohne Hardware)" (eingebautes Testbett, keine Hardware – zum Ausprobieren
    und für Tests) oder „Maschine (Pi-API + Kamera)" (nutzt die Verbindung aus dem Maschinen-Panel).
 2. Nur Pi-Modus: **Kamera-Quelle** (USB-Index `0` oder Stream-URL) eintragen und
-   bei „Kalibrierung" **„Laden …"** → `camera.json`, siehe
+   bei „Kalibrierung" den Stand vom Pi prüfen (wird automatisch geholt; sonst **„Importieren …"** →
+   `camera.json` und **„Auf Pi speichern"**), siehe
    **[KAMERA_KALIBRIERUNG.md](KAMERA_KALIBRIERUNG.md)** (Werte, Format, Ablauf).
 3. **„Scan starten"**: Kachel-Scan + Objekterkennung. Das Mosaik wird Canvas-Hintergrund,
    erkannte Objekte erscheinen in der Liste und als gestrichelte Hilfsformen auf dem Canvas

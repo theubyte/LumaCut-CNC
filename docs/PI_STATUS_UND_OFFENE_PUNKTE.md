@@ -28,6 +28,7 @@ Dienst `lumacut-marlin.service` (`python3 -m marlin.web`, Benutzer
 | POST | `/api/action` | `op=` siehe unten |
 | POST | `/api/upload` | G-Code-Auftrag (`file`), mit Preflight |
 | GET | `/api/camera/snapshot?w=&h=` | ein JPEG der Kopfkamera (`LUMACUT_CAMERA`, Standard `/dev/video0`, per `ffmpeg`), fährt nie; ohne Kamera 503 |
+| GET/PUT | `/api/camera/calibration` | Kamera-Kalibrierung (Datei `/etc/lumacut/camera_calibration.json`, Rückfall `/var/lib/lumacut`), PUT mit `revision`, 409 bei Konflikt |
 | GET | `/api/jobs` | gespeicherte Aufträge |
 | GET | `/api/jobs/<name>/content` | Roh-G-Code (Vorschau) |
 | POST | `/api/jobs/<name>/delete` | Auftrag löschen (nicht den laufenden) |
@@ -163,6 +164,10 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
 - Der Kamera-Snapshot liest per `ffmpeg -f v4l2` mehrere Bilder (wegen der
   Belichtung) und gibt das letzte als JPEG zurück. Timeout 15 s.
 - `/api/status` → `camera` zeigt nur, ob das Gerät existiert.
+- Kalibrierung (`camera_calibration.py`): JSON-Datei auf dem Pi, atomar
+  geschrieben, Revision gegen gleichzeitiges Speichern. Bei alten
+  Installationen (Dienstdatei ohne `ReadWritePaths=-/etc/lumacut`) landet
+  sie in `/var/lib/lumacut`, bis `install.sh` erneut läuft.
 - ⚠ Hardware.
 
 ### Hintergrund
