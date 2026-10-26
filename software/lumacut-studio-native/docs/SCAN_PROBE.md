@@ -152,8 +152,11 @@ Ist sie an, wird der normale Marlin-G-Code des Canvas (`document_to_gcode`) per
 
 * **„An Pi senden"** (`main.py`, `_send_canvas_job`) schickt den korrigierten G-Code.
 * **„G-Code exportieren …"** im Scan-Panel speichert ihn als Datei (mit Korrektur, wenn angehakt,
-  sonst unverändert) – mit demselben Schnittplaner (`lumacut_job.planner.optimized_document_gcode`)
-  wie „An Pi senden", Datei und gesendeter Auftrag sind also identisch.
+  sonst unverändert) – aus derselben Auftragsquelle wie „An Pi senden" (`window().job_tools.job_gcode()`:
+  Schnittplaner, **„Nur Auswahl"** und Planer-Hinweise wie weggelassene Anfahrten; ohne JobTools
+  `lumacut_job.planner.optimized_document_gcode`). Datei und gesendeter Auftrag sind also identisch,
+  auch bei „Nur Auswahl" (ohne Auswahl bricht der Export mit Meldung ab). Eine eigene Quelle lässt
+  sich über `ScanPanel.job_gcode_source` setzen.
 * Z je Segment = Oberfläche (bilinear aus dem Mesh) + 5,5 mm (Fokus 7,0 − Tasterumschaltung 1,5);
   lange Linien werden in ≤ 2 mm-Stücke geteilt. Die erste Brennbewegung bekommt ein explizites Z.
 * **Fokus-Absenkung je Durchgang** (`z_step` der Ebene, auch Schichten-Relief aus
