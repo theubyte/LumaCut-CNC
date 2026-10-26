@@ -183,6 +183,15 @@ def test_panel_fetches_from_pi_and_never_uses_placeholder(panel):
     assert "camera.json importieren" in panel.last_error
 
 
+def test_probing_without_camera_calibration(panel):
+    """Ein-Klick-Auftrag/„Nur Höhenmesh“ braucht keine Kamera-Kalibrierung (Anf. §1.1)."""
+    wf = panel._ensure_workflow(False)
+    assert wf is not None and panel.hardware.camera is None and not panel.hardware.simulated
+    assert panel.calibration is None                    # Platzhalter bleibt unbenutzt
+    # der Kamera-Scan bleibt gesperrt, auch nach dem Proben-Aufbau
+    assert not panel.start_scan() and "keine Kalibrierung gespeichert" in panel.last_error
+
+
 def test_panel_import_then_save_to_pi_and_reload(panel, tmp_path):
     p = tmp_path / "camera.json"
     measured_cal().save(p)

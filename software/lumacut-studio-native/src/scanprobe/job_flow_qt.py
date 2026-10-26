@@ -4,14 +4,12 @@ Startet :class:`~scanprobe.job_flow.OneClickJob` in einem Hintergrund-Thread,
 zeigt Fortschritt/Pause/Abbrechen im Scan-&-Probe-Panel und sperrt solange die
 Fahrknöpfe des Machine-Panels (``set_external_operation``).
 
-Der Start-Knopf der Werkzeugleiste gehört dem Machine-Agent
-(Anforderungen 2026-10-26 §7). Er schaltet ihn mit einer Zeile auf den
-Ein-Klick-Auftrag um::
+Der Start-Knopf der Hauptansicht ruft ``window.one_click.start`` auf
+(Canvas, 285d8b0); zusätzlich unter „Mehr …“ → „Ein-Klick-Auftrag starten“.
 
-    start_btn.clicked.connect(self.one_click.start)
-
-Bis dahin ist der Ablauf über „Mehr …“ → „Ein-Klick-Auftrag starten“ im
-Scan-&-Probe-Panel erreichbar.
+Ursprung ≠ „Absolut“ geht nur mit einem Pi, der ``autorun_mesh`` meldet: dann
+platziert ``machine_panel.autorun_task`` den Auftrag und der Pi tastet am
+platzierten Ort ab. Eine Kamera-Kalibrierung braucht der Auftrag nicht.
 """
 from __future__ import annotations
 
@@ -40,6 +38,21 @@ class _NoWorkflow:
         raise RuntimeError(f"Taster/Maschine für das Proben nicht bereit: {self.why}")
 
     try_reuse = plan_probe = probe_areas = _fail
+
+
+class _PlacedAutorunPort:
+    """Wie der normale Port, aber ``autorun`` platziert vorher am gewählten
+    Ursprung (``machine_panel.autorun_task``, Machine-Agent)."""
+
+    def __init__(self, port, task: Callable[[], str]):
+        self._port = port
+        self._task = task
+
+    def __getattr__(self, item):
+        return getattr(self._port, item)
+
+    def autorun(self, name: str) -> str:
+        return self._task()
 
 
 class OneClickRunner(QThread):
@@ -132,6 +145,12 @@ class OneClickController(QObject):
         except Exception as exc:  # noqa: BLE001 - erst nötig, wenn Studio probt
             return _NoWorkflow(str(exc))
 
+    @staticmethod
+    def _pi_places_with_mesh(mp) -> bool:
+        """Pi meldet ``autorun_mesh`` und das Machine-Panel kann platziert starten."""
+        from .job_flow import pi_runs_mesh
+        return hasattr(mp, "autorun_task") and pi_runs_mesh(getattr(mp, "_status", None))
+
     # ------------------------------------------------------------ start
     def start(self) -> bool:
         if self.busy:
@@ -144,11 +163,15 @@ class OneClickController(QObject):
         if panel.busy:
             return self._refuse("Scan/Probing läuft noch – erst abwarten oder abbrechen.")
         origin, _anchor = mp.job_origin()
-        if origin != "absolute":
-            # Das Höhenmesh liegt in Maschinen-mm; eine Pi-Platzierung würde den
-            # Auftrag gegen das Mesh verschieben (offene Frage an Machine).
-            return self._refuse("Der Ein-Klick-Auftrag braucht Ursprung „Absolut“ "
-                                "(Motiv so lasern, wie es im Canvas liegt).")
+        placed = origin != "absolute"
+        if placed and not self._pi_places_with_mesh(mp):
+            # Studio misst das Höhenmesh in Maschinen-mm; eine Pi-Platzierung würde
+            # den Auftrag dagegen verschieben. Ein Pi mit ``autorun_mesh`` tastet
+            # erst nach dem Platzieren ab – dann geht jeder Ursprung.
+            return self._refuse("Ursprung „%s“ geht nur, wenn der Pi selbst abtastet "
+                                "(Pi-Software mit „autorun_mesh“ aktualisieren). Bis dahin "
+                                "Ursprung „Absolut“ wählen (Motiv so lasern, wie es im "
+                                "Canvas liegt)." % origin)
         tools = getattr(self.win, "job_tools", None)
         try:
             if tools is None:
@@ -159,9 +182,20 @@ class OneClickController(QObject):
         if self.ask and QMessageBox.question(
                 None, "Auftrag starten", CONFIRM_TEXT) != QMessageBox.StandardButton.Yes:
             return False
-        job = OneClickJob(self.port_factory(client), self._workflow(panel), **self.job_kwargs)
+        name = self._job_name()
+        port = self.port_factory(client)
+        kwargs = dict(self.job_kwargs)
+        if placed:
+            try:
+                task = mp.autorun_task(name)   # GUI-Thread: liest Ursprung/Bezugspunkt
+            except RuntimeError as exc:
+                return self._refuse(str(exc))
+            port = _PlacedAutorunPort(port, task)
+            kwargs["use_pi_mesh"] = True      # nur der Pi kann platziert abtasten
+        job = OneClickJob(port, self._workflow(panel) if not placed else _NoWorkflow(
+            "Pi tastet selbst ab"), **kwargs)
         maps = panel.maps if getattr(panel, "has_maps", False) else None
-        self.runner = OneClickRunner(job, gcode, self._job_name(),
+        self.runner = OneClickRunner(job, gcode, name,
                                      objects=panel.checked_objects(), mosaic=panel.mosaic,
                                      saved_maps=maps, parent=self)
         self.runner.event.connect(self._on_event)

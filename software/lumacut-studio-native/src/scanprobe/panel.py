@@ -802,7 +802,7 @@ class ScanPanel(QWidget):
                 self._error(f"Export fehlgeschlagen: {exc}")
 
     # ---------------------------------------------------------- Hardware
-    def _build_hardware(self) -> adapters.Hardware:
+    def _build_hardware(self, need_camera: bool = True) -> adapters.Hardware:
         if self.mode == MODE_SIM:
             hw = adapters.simulated_setup(self.sim_delay_s)
             if self.calibration is not None:  # Simulation mit eigener Kalibrierung
@@ -815,6 +815,15 @@ class ScanPanel(QWidget):
             raise adapters.HardwareNotReady("Nicht mit dem Pi verbunden – unten unter „Maschine“ verbinden")
         if self.calibration is None and not self.calibration_dirty:
             self.refresh_pi_calibration()
+        if self.calibration is None and not need_camera:
+            # Nur Proben (Ein-Klick-Auftrag, „Nur Höhenmesh“): der Taster braucht
+            # keine Kamera-Kalibrierung – ohne Kamera, mit Standardwerten.
+            if self.pi_features is None:
+                self.refresh_pi_features()
+            hw = adapters.pi_setup(client, adapters.default_calibration(), None,
+                                   adapters.CAMERA_LOCAL, self.pi_features)
+            hw.camera = None
+            return hw
         if self.calibration is None:
             why = self.pi_calibration_error or (
                 "Auf dem Pi ist noch keine Kalibrierung gespeichert (Platzhalter)")
@@ -827,8 +836,11 @@ class ScanPanel(QWidget):
                                  self.camera_kind, self.pi_features)
 
     def _ensure_workflow(self, need_camera: bool) -> ScanProbeWorkflow:
+        if self.hardware is not None and need_camera and self.hardware.camera is None \
+                and not self.hardware.simulated:
+            self.hardware = self.workflow = None   # vorher nur fürs Proben gebaut
         if self.hardware is None or self.workflow is None:
-            self.hardware = self._build_hardware()
+            self.hardware = self._build_hardware(need_camera)
             self.workflow = ScanProbeWorkflow(
                 self.hardware.machine, self.hardware.camera, self.hardware.probe,
                 self.hardware.calibration, self._probe_settings(),

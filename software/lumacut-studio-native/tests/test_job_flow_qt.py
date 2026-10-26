@@ -66,7 +66,7 @@ def test_one_click_refuses_without_connection_or_relative_origin(setup):
     assert not ctrl.start() and "verbunden" in ctrl.last_message
     win.machine_panel.client = object()
     win.machine_panel.origin = "head"
-    assert not ctrl.start() and "Absolut" in ctrl.last_message
+    assert not ctrl.start() and "Absolut" in ctrl.last_message and "autorun_mesh" in ctrl.last_message
     assert not ctrl.busy and win.machine_panel.ops == []
 
 
@@ -87,3 +87,33 @@ def test_one_click_cancel_from_panel(setup):
     assert ctrl.wait() and ctrl.last_result.state == "abgebrochen"
     assert "start" not in port.calls and "upload" not in port.calls
     assert win.machine_panel.ops[-1] == "" and not win.scan_panel.busy
+
+
+def test_one_click_relative_origin_with_pi_mesh_uses_autorun_task(setup):
+    """Pi mit ``autorun_mesh``: Ursprung ≠ Absolut wird über
+    ``machine_panel.autorun_task`` platziert, der Pi tastet selbst ab."""
+    from test_job_flow import PiAutorunPort
+    ctrl, win, _ = setup
+    hw = adapters.simulated_setup()
+    port = PiAutorunPort(hw.machine)
+    ctrl.port_factory = lambda client: port
+    mp = win.machine_panel
+    mp.origin = "user"
+    mp._status = SimpleNamespace(raw={"features": ["autorun_mesh"]})
+    placed = []
+
+    def autorun_task(name):
+        def call():
+            placed.append((name, mp.origin))
+            return port.autorun(name)
+        return call
+    mp.autorun_task = autorun_task
+    assert ctrl.start() and ctrl.wait(), ctrl.last_message
+    res = ctrl.last_result
+    assert res.ok and res.pi_mesh, res.error
+    assert placed == [("canvas.gcode", "user")] and "start" not in port.calls
+    # Machine-Panel lehnt ab (alter Pi ohne Platzierung) -> klare Meldung
+    def refuse(_name):
+        raise RuntimeError("Pi-Software zu alt für Ursprung")
+    mp.autorun_task = refuse
+    assert not ctrl.start() and "zu alt" in ctrl.last_message and not ctrl.busy
