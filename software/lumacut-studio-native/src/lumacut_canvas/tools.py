@@ -580,6 +580,11 @@ class ToolController:
         if self.tool != Tool.SELECT:
             return
         hit = self.ed.scene.editable_shape_at(pos)
+        if hit and self.doc.shape(hit).kind == "image":
+            handler = getattr(self.ed, "image_settings_handler", None)  # lumacut_import.qt
+            if handler is not None:
+                handler(hit)
+            return
         if hit and self.doc.shape(hit).kind == "text":
             old = self.doc.shape(hit).text
             text, ok = QInputDialog.getText(self.ed, "Text bearbeiten", "Text:", text=old)

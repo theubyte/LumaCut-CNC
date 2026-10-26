@@ -30,6 +30,9 @@ from lumacut_job.qt_tools import install_job_tools
 # --- materials integration (materials agent) ---
 from lumacut_materials.dialog import install_materials
 # --- end materials integration ---
+# --- import integration (review agent) ---
+from lumacut_import.qt import install_import
+# --- end import integration ---
 
 
 class LumaCutStudio(QMainWindow):
@@ -184,6 +187,9 @@ class LumaCutStudio(QMainWindow):
         # --- materials integration (materials agent) ---
         install_materials(self)  # Menü Material → Materialbibliothek
         # --- end materials integration ---
+        # --- import integration (review agent) ---
+        install_import(self)  # Menü Datei, Importieren (Strg+I), Drag & Drop, Bildeinstellungen
+        # --- end import integration ---
 
 
     # --- machine integration (machine agent) ---
