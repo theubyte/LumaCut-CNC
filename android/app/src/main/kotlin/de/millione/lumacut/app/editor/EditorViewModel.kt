@@ -9,6 +9,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.millione.lumacut.app.machine.Notice
+import de.millione.lumacut.core.Arrange
 import de.millione.lumacut.core.Box
 import de.millione.lumacut.core.Document
 import de.millione.lumacut.core.Element
@@ -203,6 +204,56 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         change { it.copy(elements = it.elements + e) }
         _selected.value = setOf(e.id)
         return e
+    }
+
+    /** Vector content on the layer named [layerName] (Gravieren, Linie, Schneiden), moved to the middle of the work area. */
+    fun addShape(kind: String, paths: List<Poly>, layerName: String): Element? {
+        val box = boundsOf(paths) ?: return null
+        val dx = Work.center.x - box.center.x; val dy = Work.center.y - box.center.y
+        val local = paths.map { poly -> poly.map { Pt(it.x - box.minX, it.y - box.minY) } }
+        val e = Element(layerId = layerIdByName(layerName), kind = kind, transform = Transform(box.minX + dx, box.minY + dy), paths = local)
+        change { it.copy(elements = it.elements + e) }
+        _selected.value = setOf(e.id)
+        if (box.width > Work.WIDTH || box.height > Work.HEIGHT) notify("Größer als der Arbeitsbereich 360 × 340 mm – bitte verkleinern", true)
+        return e
+    }
+
+    /**
+     * Cut outline ([polys], work mm) on the Schneiden layer. Around a picture it is grouped with it and the
+     * picture moves to Gravieren; with [removeSource] only the outline remains.
+     */
+    fun addContour(source: Element?, polys: List<Poly>, removeSource: Boolean) {
+        val box = boundsOf(polys) ?: run { notify("Keine Kontur gefunden", true); return }
+        val gid: String? = when {
+            removeSource || source == null -> null
+            else -> source.groupId ?: UUID.randomUUID().toString()
+        }
+        val local = polys.map { poly -> poly.map { Pt(it.x - box.minX, it.y - box.minY) } }
+        val contour = Element(layerId = layerIdByName("Schneiden"), kind = "Kontur", transform = Transform(box.minX, box.minY), paths = local, groupId = gid)
+        val engrave = layerIdByName("Gravieren")
+        change { d ->
+            val rest = if (removeSource && source != null) d.elements.filterNot { it.id == source.id }
+                       else d.elements.map { if (source != null && it.id == source.id) it.copy(groupId = gid, layerId = if (it.isImage) engrave else it.layerId) else it }
+            d.copy(elements = rest + contour)
+        }
+        _selected.value = if (gid != null) _doc.value.elements.filter { it.groupId == gid }.map { it.id }.toSet() else setOf(contour.id)
+        keepInside("contour")
+    }
+
+    /** Copies the selection in a grid; copies that would leave the work area are left out. Returns how many were left out. */
+    fun duplicateGrid(nx: Int, ny: Int, gapX: Double, gapY: Double): Int {
+        val items = selectedElements()
+        val box = selectionBounds() ?: return 0
+        val all = Arrange.gridOffsets(box, nx, ny, gapX, gapY)
+        val ok = Arrange.inside(box, all)
+        val copies = ArrayList<Element>()
+        for (o in ok) {
+            val groups = items.mapNotNull { it.groupId }.distinct().associateWith { UUID.randomUUID().toString() }
+            for (e in items) copies += e.copy(id = UUID.randomUUID().toString(), groupId = e.groupId?.let(groups::get),
+                transform = e.transform.copy(x = e.transform.x + o.x, y = e.transform.y + o.y))
+        }
+        if (copies.isNotEmpty()) change { d -> d.copy(elements = d.elements + copies) }
+        return all.size - ok.size
     }
 
     fun addElement(e: Element) { change { it.copy(elements = it.elements + e.copy(layerId = writableLayer())) }; _selected.value = setOf(e.id) }

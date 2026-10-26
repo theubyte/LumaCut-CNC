@@ -99,6 +99,7 @@ import de.millione.lumacut.core.DxfImport
 import de.millione.lumacut.core.Element
 import de.millione.lumacut.core.Frame
 import de.millione.lumacut.core.ImageMode
+import de.millione.lumacut.core.ShapeLib
 import de.millione.lumacut.core.Layer
 import de.millione.lumacut.core.LayerMode
 import de.millione.lumacut.core.Limits
@@ -123,6 +124,11 @@ import kotlin.math.roundToInt
 
 @Composable
 fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () -> Unit, onScan: () -> Unit) {
+    var contourOpen by remember { mutableStateOf(false) }
+    var adjustOpen by remember { mutableStateOf(false) }
+    var qrOpen by remember { mutableStateOf(false) }
+    var gridOpen by remember { mutableStateOf(false) }
+    var shapesMenu by remember { mutableStateOf(false) }
     val doc by editor.doc.collectAsStateWithLifecycle()
     val selected by editor.selected.collectAsStateWithLifecycle()
     val tool by editor.tool.collectAsStateWithLifecycle()
@@ -141,39 +147,9 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     val machineStatus by machine.status.collectAsStateWithLifecycle()
     val machineOnline by machine.online.collectAsStateWithLifecycle()
 
-    val vectorPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
-        scope.launch {
-            try {
-                val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } } ?: return@launch
-                val head = String(bytes, 0, minOf(bytes.size, 512), Charsets.UTF_8)
-                val svg = head.trimStart().startsWith("<") || head.contains("<svg")
-                val polys = withContext(Dispatchers.Default) { if (svg) SvgImport.parse(bytes) else DxfImport.parse(bytes) }
-                val kind = if (svg) "SVG" else "DXF"
-                val (placed, shrunk) = placeInWorkArea(polys)
-                editor.addVector(kind, placed)
-                editor.notify(if (shrunk) "$kind verkleinert, damit es in den Arbeitsbereich passt" else "$kind importiert (${polys.size} Pfade)")
-            } catch (e: Exception) { editor.notify(e.message ?: "Import fehlgeschlagen", true) }
-        }
-    }
-    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-        uri ?: return@rememberLauncherForActivityResult
-        scope.launch {
-            val (raster, original, dpi) = withContext(Dispatchers.Default) {
-                val bmp = Images.decode(context, uri)
-                Triple(bmp?.let { Images.toRaster(it) }, Images.originalSize(context, uri), Images.dpi(context, uri))
-            }
-            if (raster == null) { editor.notify("Bild konnte nicht gelesen werden", true); return@launch }
-            // With a resolution in the file the picture keeps its print size; otherwise 80 mm wide.
-            var w = if (dpi != null && original != null) original.first / dpi * 25.4 else 80.0
-            var h = w * raster.height / raster.width
-            val k = minOf(1.0, (Work.WIDTH - 10) / w, (Work.HEIGHT - 10) / h); w *= k; h *= k
-            val x = Work.center.x - w / 2; val y = Work.center.y - h / 2
-            editor.addElement(Element(layerId = editor.layerIdByName("Gravieren"), kind = "Bild", transform = Transform(x, y),
-                raster = raster, imageWidthMm = w, imageHeightMm = h))
-            editor.notify(if (dpi != null && k == 1.0) "Bild eingefügt: %.0f × %.0f mm (%.0f dpi aus der Datei)".format(w, h, dpi)
-                          else "Bild eingefügt: %.0f × %.0f mm".format(w, h))
-        }
+        scope.launch { importFile(context, uri, editor) }
     }
     val projectSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
@@ -205,8 +181,20 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                 IconBtn(LcIcons.trash, "Löschen", editor::deleteSelected, tint = Lc.bad, enabled = selected.isNotEmpty())
                 IconBtn(LcIcons.center, "Zentrieren", editor::centerInWorkArea)
                 Box(Modifier.width(1.dp).height(36.dp).background(Lc.line))
-                LcButton("Bild", { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, icon = LcIcons.image)
-                LcButton("SVG / DXF", { vectorPicker.launch(arrayOf("image/svg+xml", "image/vnd.dxf", "application/dxf", "*/*")) }, icon = LcIcons.svg)
+                LcButton("Importieren", { importPicker.launch(arrayOf("*/*")) }, icon = LcIcons.upload)
+                LcButton("Kontur", { contourOpen = true }, icon = LcIcons.polygon, enabled = selected.isNotEmpty())
+                LcButton("QR-Code", { qrOpen = true }, icon = LcIcons.rect)
+                Box {
+                    LcButton("Formen", { shapesMenu = true }, icon = LcIcons.plus)
+                    DropdownMenu(shapesMenu, { shapesMenu = false }, containerColor = Lc.surface2) {
+                        @Composable fun shape(label: String, kind: String, paths: () -> List<List<Pt>>) =
+                            DropdownMenuItem(text = { Text(label) }, onClick = { shapesMenu = false; editor.addShape(kind, paths(), "Schneiden") })
+                        shape("Herz", "Herz") { listOf(ShapeLib.heart(60.0, 54.0)) }
+                        shape("Stern", "Stern") { listOf(ShapeLib.star(5, 60.0, 57.0)) }
+                        shape("Abgerundetes Rechteck", "Rechteck") { listOf(Shapes.rect(60.0, 40.0, 8.0)) }
+                        shape("Anhänger mit Loch", "Anhänger") { ShapeLib.pendant(50.0, 30.0, 4.0) }
+                    }
+                }
                 LcButton("Arbeitsplatz scannen", onScan, icon = LcIcons.camera)
                 Box {
                     LcButton("Mehr", { moreMenu = true }, kind = BtnKind.GHOST)
@@ -214,6 +202,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         @Composable fun item(label: String, enabled: Boolean = true, action: () -> Unit) =
                             DropdownMenuItem(text = { Text(label) }, enabled = enabled, onClick = { moreMenu = false; action() })
                         item(if (multi) "Mehrfachauswahl aus" else "Mehrfachauswahl an") { editor.setMulti(!multi) }
+                        item("Vervielfältigen …", selected.isNotEmpty()) { gridOpen = true }
                         item("Gruppieren", selected.size >= 2) { editor.groupSelected() }
                         item("Gruppe auflösen", doc.elements.any { it.id in selected && it.groupId != null }) { editor.ungroupSelected() }
                         item("Kamerafoto als Hintergrund") { cameraOpen = true }
@@ -244,13 +233,14 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                     Lc.faint, Modifier.align(Alignment.BottomStart).padding(12.dp),
                 )
             }
-            Inspector(editor, Modifier.width(350.dp).fillMaxHeight())
+            Inspector(editor, Modifier.width(350.dp).fillMaxHeight(), onAdjust = { adjustOpen = true })
         }
     }
 
-    textAt?.let { at -> TextDialog(onDismiss = { textAt = null }) { text, size, bold, family ->
+    textAt?.let { at -> TextDialog(onDismiss = { textAt = null }) { text, size, bold, family, radius ->
         textAt = null
-        val raw = TextPaths.build(text, size, bold, family)
+        val flat = TextPaths.build(text, size, bold, family)
+        val raw = if (radius != 0.0 && flat.isNotEmpty()) de.millione.lumacut.core.ArcText.bend(flat, radius) else flat
         if (raw.isEmpty()) { editor.notify("Kein darstellbarer Text", true); return@TextDialog }
         val b = de.millione.lumacut.core.boundsOf(raw)!!
         editor.addVector("Text", raw.map { p -> p.map { Pt(it.x - b.minX + at.x, it.y - b.minY + at.y) } }, text, size, bold, family)
@@ -265,6 +255,13 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     }
 
     if (cameraOpen) CameraBackgroundDialog(editor, machine) { cameraOpen = false }
+    if (contourOpen) ContourDialog(editor) { contourOpen = false }
+    if (qrOpen) QrDialog(editor) { qrOpen = false }
+    if (gridOpen) GridDialog(editor) { gridOpen = false }
+    if (adjustOpen) {
+        val picture = doc.elements.firstOrNull { it.id in selected && it.isImage }
+        if (picture != null) ImageAdjustDialog(editor, picture) { adjustOpen = false } else adjustOpen = false
+    }
     ConfirmDialog(confirm) { confirm = null }
 }
 
@@ -522,7 +519,7 @@ private fun shapeFromDrag(tool: Tool, a: Pt, b: Pt): Poly? {
 /* ---------- inspector ---------- */
 
 @Composable
-private fun Inspector(editor: EditorViewModel, modifier: Modifier) {
+private fun Inspector(editor: EditorViewModel, modifier: Modifier, onAdjust: () -> Unit) {
     val doc by editor.doc.collectAsStateWithLifecycle()
     val selected by editor.selected.collectAsStateWithLifecycle()
     val active by editor.activeLayer.collectAsStateWithLifecycle()
@@ -532,7 +529,7 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier) {
     Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val sel = doc.elements.filter { it.id in selected }
         when {
-            sel.size == 1 -> SelectionCard(editor, sel.first())
+            sel.size == 1 -> SelectionCard(editor, sel.first(), onAdjust)
             sel.size > 1 -> MultiCard(editor, sel)
         }
         EffectCard(editor, doc, sel, active)
@@ -589,7 +586,7 @@ private fun NudgePad(editor: EditorViewModel) {
 }
 
 @Composable
-private fun SelectionCard(editor: EditorViewModel, e: Element) {
+private fun SelectionCard(editor: EditorViewModel, e: Element, onAdjust: () -> Unit) {
     val b = e.worldBounds() ?: return
     LcCard(padding = 16.dp, accent = Lc.accent) {
         Text(e.text?.let { "Text: $it" } ?: e.kind, style = LcTypography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -623,8 +620,10 @@ private fun SelectionCard(editor: EditorViewModel, e: Element) {
                 SmallText("${r.width} × ${r.height} px · Größe folgt der Auflösung. Gelasert wird im Zeilenabstand der Ebene.", Lc.faint)
             }
             Spacer(Modifier.height(4.dp))
-            Segmented(listOf(ImageMode.GRAYSCALE to "Graustufen", ImageMode.DITHER to "Dither", ImageMode.THRESHOLD to "S/W"), e.imageMode,
-                { mode -> editor.updateElement(e.id) { it.copy(imageMode = mode) } })
+            LcButton("Bild anpassen …", onAdjust, Modifier.fillMaxWidth(), icon = LcIcons.image)
+            SmallText("Aktuell: " + when (e.imageMode) {
+                ImageMode.GRAYSCALE -> "Graustufen"; ImageMode.DITHER -> "Floyd-Steinberg"; ImageMode.DITHER_JARVIS -> "Jarvis"
+                ImageMode.DITHER_STUCKI -> "Stucki"; ImageMode.THRESHOLD -> "Schwarz/Weiß" }, Lc.faint)
         }
         Spacer(Modifier.height(8.dp))
         NudgePad(editor)
@@ -758,11 +757,13 @@ private fun LayerRow(editor: EditorViewModel, layer: Layer, active: Boolean, mat
 /* ---------- dialogs ---------- */
 
 @Composable
-private fun TextDialog(onDismiss: () -> Unit, onOk: (String, Double, Boolean, String) -> Unit) {
+private fun TextDialog(onDismiss: () -> Unit, onOk: (String, Double, Boolean, String, Double) -> Unit) {
     var text by remember { mutableStateOf("LumaCut") }
     var size by remember { mutableStateOf("15") }
     var bold by remember { mutableStateOf(true) }
     var family by remember { mutableStateOf("sans-serif") }
+    var radius by remember { mutableStateOf("0") }
+    val radiusMm = radius.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
         title = { Text("Text einfügen", style = LcTypography.titleLarge) },
@@ -772,12 +773,13 @@ private fun TextDialog(onDismiss: () -> Unit, onOk: (String, Double, Boolean, St
                     shape = RoundedCornerShape(12.dp), colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Lc.accent))
                 NumberField("Schriftgröße", size, { size = it }, Modifier.fillMaxWidth(), "mm")
                 Segmented(Fonts.families, family, { family = it })
+                NumberField("Auf dem Bogen: Radius (0 = gerade, minus = unten)", radius, { radius = it }, Modifier.fillMaxWidth(), "mm")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(bold, { bold = it }, colors = CheckboxDefaults.colors(checkedColor = Lc.accent, checkmarkColor = Lc.accentInk)); Text("Fett")
                 }
             }
         },
-        confirmButton = { LcButton("Einfügen", { size.replace(',', '.').toDoubleOrNull()?.takeIf { it in 1.0..300.0 }?.let { onOk(text, it, bold, family) } }, kind = BtnKind.PRIMARY, enabled = text.isNotBlank()) },
+        confirmButton = { LcButton("Einfügen", { size.replace(',', '.').toDoubleOrNull()?.takeIf { it in 1.0..300.0 }?.let { s -> radiusMm?.let { r -> onOk(text, s, bold, family, r) } } }, kind = BtnKind.PRIMARY, enabled = text.isNotBlank() && radiusMm != null && (radiusMm == 0.0 || kotlin.math.abs(radiusMm) >= 1.0)) },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen", color = Lc.muted) } },
     )
 }
