@@ -127,16 +127,25 @@ Ist sie an, wird der normale Marlin-G-Code des Canvas (`document_to_gcode`) per
 
 * **„An Pi senden"** (`main.py`, `_send_canvas_job`) schickt den korrigierten G-Code.
 * **„G-Code exportieren …"** im Scan-Panel speichert ihn als Datei (mit Korrektur, wenn angehakt,
-  sonst unverändert).
+  sonst unverändert) – mit demselben Schnittplaner (`lumacut_job.planner.optimized_document_gcode`)
+  wie „An Pi senden", Datei und gesendeter Auftrag sind also identisch.
 * Z je Segment = Oberfläche (bilinear aus dem Mesh) + 5,5 mm (Fokus 7,0 − Tasterumschaltung 1,5);
   lange Linien werden in ≤ 2 mm-Stücke geteilt. Die erste Brennbewegung bekommt ein explizites Z.
+* **Fokus-Absenkung je Durchgang** (`z_step` der Ebene, auch Schichten-Relief aus
+  `lumacut_materials`): die relativen Blöcke `G91` / `G0 Z-… F600` / `G90` werden nicht
+  ausgegeben, sondern als Versatz auf das Mesh-Z gerechnet (Durchgang 2 = Mesh-Z − z_step usw.,
+  nach der Ebene wieder Fokushöhe). Der Versatz darf nie unter Oberfläche + 2 mm führen
+  (bei Fokus 5,5 mm also max. 3,5 mm; das Canvas begrenzt ohnehin auf 3 mm) – sonst Fehler.
+* Leistung (S) und Vorschub (F) je Ebene, Reihenfolge aus dem Schnittplaner, Materialtest-Raster
+  und Schraffuren bleiben unverändert; nur Z kommt hinzu, Linien werden geteilt.
 
 Prüfungen (deutsche Meldungen; **Fehler** blockieren, **Warnungen** müssen bestätigt werden):
 
 | Fall | Verhalten |
 |---|---|
 | G2/G3-Bögen im G-Code | Fehler – Bögen vorher in Liniensegmente auflösen (Canvas-Export erzeugt nur Linien). |
-| Z-Wörter im G-Code (z. B. „Fokus-Absenkung je Durchgang") | Fehler – Absenkung auf 0 setzen oder ohne Korrektur exportieren. |
+| Absolute Z-Wörter oder Z zusammen mit X/Y im G-Code | Fehler – entfernen oder ohne Korrektur exportieren. (Relative Fokus-Absenkung je Durchgang ist erlaubt, s. o.) |
+| Fokus-Absenkung würde unter Oberfläche + 2 mm führen | Fehler. |
 | Kein Höhenmesh / keine Brennstrecke im Mesh | Fehler. |
 | Teile des Jobs außerhalb der geprobten Bereiche | Warnung mit Länge in mm und Beispielpunkt. **Fallback:** dort gilt die *höchste gemessene Oberfläche* (Fokus eher zu hoch, nie zu tief / keine Kollision). |
 | Bild-Fingerabdruck passt nicht zum aktuellen Scan (Material bewegt) | Fehler – neu proben. |
@@ -146,8 +155,12 @@ Prüfungen (deutsche Meldungen; **Fehler** blockieren, **Warnungen** müssen bes
 
 Grenzen:
 
-* Nur absoluter G-Code in mm (G21/G90); keine Bögen, keine eigenen Z-Werte (Z-Schritt-Ebenen
-  sind mit der Korrektur nicht kombinierbar).
+* Nur G-Code in mm mit absoluten X/Y (G21/G90); keine Bögen, keine absoluten Z-Werte. Erlaubt ist
+  nur die relative Fokus-Absenkung je Durchgang.
+* Der Relief-Export im Material-Dialog (`lumacut_materials`) sendet/speichert selbst und nutzt die
+  Checkbox (noch) nicht. Die Kernfunktion kann Relief-G-Code korrigieren (getestet); die
+  UI-Anbindung dort steht aus. Der optionale Tiefen-Hook (`gcode.pass_hook`) ist in Studio aus;
+  Hook-Zeilen mit eigenem Z würden abgelehnt.
 * Der Pi fokussiert vor der ersten Brennbewegung auf *seine* gemessene Oberfläche und prüft Z
   nur gegen diese eine Oberfläche (≥ Oberfläche + 2 mm).
 * Der Pi hängt an jede Bewegung mit Z ein `M400`/`M114` an. Bei der Korrektur hat fast jedes
@@ -155,6 +168,10 @@ Grenzen:
   möglich). Empfehlung: Pi-seitig Z-Prüfung ohne `M400` für Folgezeilen. Bis dahin vorsichtig mit
   niedriger Leistung testen.
 * Noch nicht auf echter Hardware getestet.
+
+Canvas-Overlays (Scanbild, Werkstück-Umrisse, Heatmap) liegen auf Z 5·10⁸ – über allen Ebenen
+(Ebenen nutzen Rang × 10⁶, ein 5×5-Materialtest hat schon 26 Ebenen), aber unter Auswahlrahmen
+und Gummiband. Sie sind nicht anklickbar, nicht Teil des Dokuments und erzeugen keine Undo-Einträge.
 
 ## Schnittstellen für die anderen Teile
 
