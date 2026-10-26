@@ -283,6 +283,57 @@ die Zeitlimits für Bewegungen lang.
   „LightBurn hat inzwischen die Steuerung“, Belegt-/USB-Fehler.
 - Fortschritt danach über `job.*` in `/api/status`.
 
+### Auftrags-Ursprung: `op=origin_set` / `origin_clear` / `place` / `place_clear`
+
+Neuer Pi-Dienst (ab „feat(pi400): Auftrags-Ursprung …“). Ein Auftrag läuft
+**absolut** (wie gezeichnet), solange in „Auftrag“ der Ursprung „Absolut“
+gewählt ist. Das ist der Standard und genau das bisherige Verhalten.
+
+- **Ursprung** (Auswahl im Panel):
+  - `absolute`: wie gezeichnet.
+  - `current`: Bezugspunkt auf die aktuelle Kopfposition.
+  - `user`: Bezugspunkt auf den auf dem Pi gespeicherten Benutzer-Ursprung.
+- **Bezugspunkt** (`anchor`): `tl`/`tr`/`bl`/`br`/`center` der
+  **Laserbahnen** (nicht der Leerfahrten). „Oben“ = kleines Y wie im
+  Canvas.
+- `op=origin_set` (optional `x`, `y` in Maschinen-mm, sonst Kopf-XY per
+  M114): Knopf „Ursprung = Kopf“ bzw. `MachinePanel.set_user_origin(x, y)`
+  (Haken für den Kamera-Scan). Braucht Referenzfahrt; der Punkt muss in
+  X30..390 / Y30..370 liegen. Wird in `/var/lib/lumacut/marlin.json`
+  gespeichert. `op=origin_clear` löscht ihn.
+- `op=place name=… origin=… anchor=…`: Der Pi verschiebt den gespeicherten
+  Auftrag (nichts fährt) und prüft auf den **verschobenen** Zeilen:
+  - Referenzfahrt;
+  - alle Fahrten in 0..Verfahrweg;
+  - alle Laserbahnen in 30..Verfahrweg (Safezone);
+  - Laser-Guard/Preflight;
+  - keine relativen X/Y-Bewegungen (`G91` mit X/Y ist nicht platzierbar).
+
+  Antwort: `message`, `placement` (`file`, `origin`, `anchor`, `dx`, `dy`,
+  `target`, `bounds`, `travel`). Fehler 400 mit Klartext, z. B.
+  „Platziertes Motiv … außerhalb des Schneidbereichs …“.
+- `op=start` / `op=autorun` / `op=frame` mit `placement=1` (bei `frame`
+  zusätzlich `name`) nutzen genau diese Platzierung. Der Rahmen fährt also
+  dieselbe Verschiebung wie der Auftrag, auch wenn er den Kopf bewegt hat.
+- **Verfall einer Platzierung:**
+  - neuer Upload oder Löschen der Datei (Prüfsumme);
+  - bei `current` zusätzlich `home`, `jog`, `moveto`;
+  - bei `user` ein neuer Benutzer-Ursprung.
+
+  Dann antwortet der Pi „… neu platzieren“, und die App platziert einmal
+  neu.
+- Ohne `placement`/`origin` laufen `start`/`autorun` unverändert absolut
+  (LightBurn, Pi-Web-UI, ältere Studio-Versionen).
+- **Status:** `origin` = `{modes, anchors, user, placement}`. Fehlt der
+  Schlüssel, ist der Pi zu alt: Die App sperrt die Auswahl, zeigt „Pi-Dienst
+  zu alt: nur absolute Aufträge – Pi aktualisieren“ und schickt **nie**
+  Ursprungsfelder (ein alter Pi würde sie ignorieren und absolut lasern).
+  Direkte Client-Aufrufe melden „Pi-Dienst kennt noch keine
+  Ursprungs-Optionen (op=… fehlt … – Pi aktualisieren)“.
+- Rahmen mit Ursprung braucht einen gesendeten Auftrag (die Verschiebung
+  hängt an ihm).
+- ⚠ Hardware: Position nach dem Verschieben am echten Gerät nicht geprüft.
+
 ### `POST /api/action op=abort`: Auftrag abbrechen
 
 - **Auslöser:** Knopf „Abbrechen“ (nur bei aktivem Auftrag oder Rahmenfahrt).
@@ -432,3 +483,7 @@ Der Software-NOT-AUS ersetzt **nicht** den physischen Not-Aus-Schalter.
    langsamen Windows-Runnern stabil sind.
 10. **Pi-Seite im Überblick:** Was der Pi-Dienst kann, wie man ihn
     aktualisiert und was offen ist: [PI_STATUS_UND_OFFENE_PUNKTE.md](../../../docs/PI_STATUS_UND_OFFENE_PUNKTE.md).
+11. **Ursprung nicht im Dokument:** Ursprung und Bezugspunkt sind eine
+    Einstellung im Maschinen-Panel, nicht Teil des Canvas-Dokuments oder
+    Exports. Den Kamera-Scan bindet `MachinePanel.set_user_origin(x, y)` /
+    `set_job_origin(origin, anchor)` an (noch nicht verdrahtet).

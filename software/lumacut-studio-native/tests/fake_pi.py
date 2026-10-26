@@ -18,11 +18,18 @@ STATUS = {
     "job": {"file": "", "state": "idle", "line": 0, "total": 0, "error": ""},
     "frame": {"state": "idle", "mode": "", "line": 0, "total": 0, "error": ""},
     "activity": "idle",
+    # Job origin support (#16); an older Pi has no "origin" key.
+    "origin": {"modes": ["absolute", "current", "user"],
+               "anchors": ["tl", "tr", "bl", "br", "center"],
+               "user": None, "placement": None},
     "firmware": "marlin", "config": {"focus_gap_mm": 7.0},
 }
 
 ACTIONS = ("home", "jog", "probe", "light", "exhaust", "start", "autorun",
-           "abort", "estop", "estop_reset", "connect", "park", "frame")
+           "abort", "estop", "estop_reset", "connect", "park", "frame",
+           "origin_set", "origin_clear", "place", "place_clear")
+#: Ops an older Pi service (before #16) does not know.
+ORIGIN_ACTIONS = ("origin_set", "origin_clear", "place", "place_clear")
 
 
 class FakePi:
@@ -153,6 +160,8 @@ class FakePi:
                             fake.status["activity"] = "framing"
                         return self._reply(200, {"message": "Rahmenfahrt gestartet",
                                                  "frame": fake.status["frame"]})
+                    if op in ORIGIN_ACTIONS:
+                        return self._reply(200, fake._origin_op(op, form))
                     return self._reply(200, {"message": "ok " + op})
                 if self.path == "/api/upload":
                     if self._hiccup("upload"):
@@ -185,6 +194,32 @@ class FakePi:
     def __exit__(self, *exc):
         self.server.shutdown()
         self.server.server_close()
+
+    def make_older_pi(self) -> None:
+        """Behave like a Pi service before job origins (#16)."""
+        with self.lock:
+            self.status.pop("origin", None)
+            self.actions -= set(ORIGIN_ACTIONS)
+
+    def _origin_op(self, op: str, form: dict) -> dict:
+        """Simplified web.py origin ops (no geometry: dx/dy = target)."""
+        with self.lock:
+            origin = self.status["origin"]
+            if op == "origin_set":
+                x = form.get("x"); y = form.get("y")
+                pos = self.status["position"]
+                origin["user"] = [float(x), float(y)] if x else [pos[0], pos[1]]
+                origin["placement"] = None
+            elif op == "origin_clear":
+                origin["user"] = None
+            elif op == "place":
+                origin["placement"] = {"file": form.get("name"),
+                                       "origin": form.get("origin"),
+                                       "anchor": form.get("anchor") or "tl",
+                                       "dx": 0.0, "dy": 0.0}
+            else:
+                origin["placement"] = None
+            return {"message": "ok " + op, "origin": json.loads(json.dumps(origin))}
 
     def finish_frame(self, state: str = "complete", error: str = "") -> None:
         """End the simulated frame run (complete/aborted/error)."""

@@ -13,6 +13,7 @@ Endpoints (see docs/PI_BETRIEB.md, derived from pi400/marlin/web.py):
     POST /api/upload  file=...       multipart G-code upload (preflighted)
     GET  /api/jobs                   stored jobs
     GET  /api/jobs/<name>/geometry   powered toolpath bounds
+    POST /api/action  op=place/origin_set/...  job origin (newer Pi, #16)
 Errors come back as HTTP 4xx/5xx with {"error": "..."}.
 """
 from __future__ import annotations
@@ -44,6 +45,12 @@ JOB_ACTIVE_STATES = ("homing", "probing", "running")
 FRAME_MODES = ("box", "hull")
 #: Pi limit for one frame program (web.py FRAME_MAX_BYTES).
 MAX_FRAME_BYTES = 64 * 1024
+#: Job start modes (Pi op=place / op=start origin=..., pi400/marlin/placement.py):
+#: absolute = as drawn, current = anchor on the head, user = anchor on the
+#: stored user origin.
+ORIGIN_MODES = ("absolute", "current", "user")
+#: Motif point that lands on the origin ("t" = small Y like the Studio canvas).
+ANCHORS = ("tl", "tr", "bl", "br", "center")
 
 # The Pi holds the HTTP request open until the SKR has finished, so motion
 # requests need long timeouts (mirrors the Tauri studio bridge).
@@ -186,6 +193,34 @@ class FrameState:
 
 
 @dataclass
+class OriginState:
+    """Job origin support of the Pi (status ``origin``, newer Pi only)."""
+
+    supported: bool = False          # False = older Pi: absolute only
+    user: tuple[float, float] | None = None
+    placement: dict | None = None    # file/origin/anchor/dx/dy/bounds
+
+    @classmethod
+    def from_json(cls, data: Any) -> "OriginState":
+        if not isinstance(data, dict):
+            return cls()
+        user = data.get("user")
+        point = None
+        if isinstance(user, (list, tuple)) and len(user) >= 2:
+            x, y = _float(user[0]), _float(user[1])
+            point = None if x is None or y is None else (x, y)
+        placement = data.get("placement")
+        return cls(supported="current" in (data.get("modes") or ()), user=point,
+                   placement=placement if isinstance(placement, dict) else None)
+
+    def placed(self, name: str, origin: str, anchor: str) -> bool:
+        """True if the Pi holds a placement for exactly this job and choice."""
+        p = self.placement or {}
+        return (p.get("file") == name and p.get("origin") == origin
+                and p.get("anchor") == anchor)
+
+
+@dataclass
 class MachineStatus:
     """Subset of GET /api/status the Studio displays."""
 
@@ -207,6 +242,7 @@ class MachineStatus:
     probe_offset_set: bool = False
     job: JobState = field(default_factory=JobState)
     frame: FrameState = field(default_factory=FrameState)
+    origin: OriginState = field(default_factory=OriginState)
     #: The Pi answered from its status snapshot because a long move holds
     #: machine.lock (owner/latch/laser/position are live, the rest cached).
     pi_busy: bool = False
@@ -270,6 +306,7 @@ class MachineStatus:
             probe_offset_set=data.get("probe_xy_offset_mm") is not None,
             job=JobState.from_json(data.get("job")),
             frame=FrameState.from_json(data.get("frame")),
+            origin=OriginState.from_json(data.get("origin")),
             pi_busy=_bool(data.get("busy")),
             stale_ms=_stale_ms(data.get("stale_ms"), data),
             raw=data,
@@ -484,7 +521,47 @@ class LumaCutClient:
                                exc.status) from None
             raise
 
-    def frame(self, gcode: str, mode: str = "box") -> str:
+    def _newer_op(self, op: str, feature: str, **fields) -> str:
+        """Action that older Pi services do not know: clear update hint."""
+        try:
+            return self.action(op, **fields)
+        except ApiError as exc:
+            if "Unbekannte Marlin-Aktion" in str(exc):
+                raise ApiError("Pi-Dienst kennt noch keine %s (op=%s fehlt in "
+                               "pi400/marlin/web.py – Pi aktualisieren)" % (feature, op),
+                               exc.status) from None
+            raise
+
+    def set_user_origin(self, x: float | None = None, y: float | None = None) -> str:
+        """Store the user origin on the Pi: the head XY, or a given machine point
+        (e.g. from the camera scan). Must lie inside X30..390 / Y30..370."""
+        if (x is None) != (y is None):
+            raise ValueError("Ursprung: X und Y gemeinsam angeben")
+        point = {} if x is None else {"x": "%.3f" % x, "y": "%.3f" % y}
+        return self._newer_op("origin_set", "Ursprungs-Optionen", **point)
+
+    def clear_user_origin(self) -> str:
+        return self._newer_op("origin_clear", "Ursprungs-Optionen")
+
+    def place_job(self, name: str, origin: str, anchor: str = "tl") -> str:
+        """Let the Pi place a stored job on an origin (nothing moves).
+
+        The Pi checks homed state, travel and safe zone on the moved job and
+        keeps the placement for op=start/autorun/frame with ``placement``.
+        """
+        _check_job_name(name)
+        if origin not in ORIGIN_MODES:
+            raise ValueError("Ursprung muss absolute, current oder user sein")
+        if anchor not in ANCHORS:
+            raise ValueError("Bezugspunkt muss tl, tr, bl, br oder center sein")
+        return self._newer_op("place", "Ursprungs-Optionen", name=name,
+                              origin=origin, anchor=anchor)
+
+    def clear_placement(self) -> str:
+        return self._newer_op("place_clear", "Ursprungs-Optionen")
+
+    def frame(self, gcode: str, mode: str = "box", placement: bool = False,
+              name: str | None = None) -> str:
         """Trace the design outline with the laser off (Pi ``op=frame``).
 
         The Pi checks the program (only G0/G1 X/Y with S0, no M3, no Z),
@@ -500,8 +577,9 @@ class LumaCutClient:
             raise ValueError("Kein Rahmen: Design ist leer")
         if len(gcode.encode("utf-8")) > MAX_FRAME_BYTES:
             raise ValueError("Rahmenprogramm zu groß (max. 64 KB)")
+        extra = {"placement": "1", "name": name} if placement else {}
         try:
-            return self.action("frame", gcode=gcode, mode=mode)
+            return self.action("frame", gcode=gcode, mode=mode, **extra)
         except ApiError as exc:
             if "Unbekannte Marlin-Aktion" in str(exc):
                 raise ApiError("Pi-Dienst bietet noch keine Rahmenfahrt über die API "
@@ -569,18 +647,25 @@ class LumaCutClient:
     def abort_job(self) -> str:
         return self.action("abort")
 
-    def start_job(self, name: str) -> str:
-        """Start a stored job. The Pi requires a homed machine."""
+    def start_job(self, name: str, placement: bool = False) -> str:
+        """Start a stored job. The Pi requires a homed machine.
+
+        ``placement=True`` runs it where :meth:`place_job` put it. Only use it
+        after a successful ``place_job``: an older Pi ignores the field.
+        """
         _check_job_name(name)
-        return self.action("start", name=name)
+        extra = {"placement": "1"} if placement else {}
+        return self.action("start", name=name, **extra)
 
     def autorun_job(self, name: str, x: float | None = None,
-                    y: float | None = None) -> str:
+                    y: float | None = None, placement: bool = False) -> str:
         """One-click: home → probe under motif centre → focus → job → park."""
         _check_job_name(name)
         if (x is None) != (y is None):
             raise ValueError("Abtastpunkt: X und Y gemeinsam angeben")
         point = {} if x is None else {"x": "%.3f" % x, "y": "%.3f" % y}
+        if placement:
+            point["placement"] = "1"
         return self.action("autorun", name=name, **point)
 
     def upload_job(self, name: str, content: bytes | str) -> str:

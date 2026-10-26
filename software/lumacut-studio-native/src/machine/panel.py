@@ -9,6 +9,8 @@ Public integration points for the main window (and other panels):
     MachinePanel.frame_gcode(text, mode)          – laser-off outline (op=frame)
     MachinePanel.set_frame_provider(fn)           – mode -> frame G-code for the button
     MachinePanel.frame_available_changed(bool)    – frame shortcuts enabled state
+    MachinePanel.set_user_origin(x, y)            – user origin from the camera scan
+    MachinePanel.set_job_origin(origin, anchor)   – preset the start origin (#16)
     MachinePanel.shutdown()                       – call from closeEvent
 """
 from __future__ import annotations
@@ -24,8 +26,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
 from . import settings as settings_store
-from .client import (FRAME_MODES, JOB_SUFFIXES, JOG_STEPS, TRANSIENT_OWNERS,
-                     LumaCutClient,
+from .client import (ANCHORS, FRAME_MODES, JOB_SUFFIXES, JOG_STEPS, ORIGIN_MODES,
+                     TRANSIENT_OWNERS, ApiError, LumaCutClient,
                      MachineStatus, normalize_base_url)
 from .worker import CommandRunner, ConnState, StatusPoller
 
@@ -48,6 +50,11 @@ STATE_TEXT = {
 STALE_AFTER_S = 3.0
 ESTOP_LABEL = "NOT-AUS"
 FRAME_LABELS = {"box": "Rechteck", "hull": "Gummiband"}
+ORIGIN_LABELS = {"absolute": "Absolut", "current": "Aktuelle Position",
+                 "user": "Benutzer-Ursprung"}
+ANCHOR_LABELS = {"tl": "Oben links", "tr": "Oben rechts", "bl": "Unten links",
+                 "br": "Unten rechts", "center": "Mitte"}
+OLD_PI_ORIGIN = "Pi-Dienst zu alt: nur absolute Aufträge – Pi aktualisieren"
 
 ESTOP_STYLE = ("QPushButton { background: #d7263d; color: white; font-weight: bold;"
                " font-size: 15px; border: 2px solid #ff9b96; border-radius: 8px;"
@@ -262,6 +269,29 @@ class MachinePanel(QWidget):
         frame_row.addWidget(self.frame_button, 1)
         frame_row.addWidget(self.frame_mode_combo)
         jl.addLayout(frame_row)
+        # Job origin (#16): where the motif runs. Absolute = as drawn.
+        self.origin_combo = QComboBox()
+        for mode in ORIGIN_MODES:
+            self.origin_combo.addItem(ORIGIN_LABELS[mode], mode)
+        self.origin_combo.setToolTip(
+            "Absolut = wie gezeichnet; Aktuelle Position = Bezugspunkt auf den Kopf; "
+            "Benutzer-Ursprung = Bezugspunkt auf den gespeicherten Ursprung")
+        self.anchor_combo = QComboBox()
+        for anchor in ANCHORS:
+            self.anchor_combo.addItem(ANCHOR_LABELS[anchor], anchor)
+        self.anchor_combo.setToolTip("Welcher Punkt des Motivs auf dem Ursprung liegt")
+        self.origin_set_button = QPushButton("Ursprung = Kopf")
+        self.origin_set_button.setToolTip("Aktuelle Kopfposition als Benutzer-Ursprung "
+                                          "auf dem Pi speichern")
+        self.origin_set_button.clicked.connect(lambda _=False: self.set_user_origin())
+        # Stacked (not side by side): the sidebar must fit 1024-px screens.
+        for w in (self.origin_combo, self.anchor_combo, self.origin_set_button):
+            jl.addWidget(w)
+        self.origin_label = QLabel("")
+        self.origin_label.setWordWrap(True)
+        self.origin_label.setStyleSheet("color: %s;" % MUTED)
+        jl.addWidget(self.origin_label)
+        self.origin_combo.currentIndexChanged.connect(lambda _=0: self._update_enabled())
         self.job_label = QLabel("Kein Auftrag")
         self.job_label.setWordWrap(True)
         self.job_progress = QProgressBar()
@@ -277,7 +307,8 @@ class MachinePanel(QWidget):
                                  self.focus_button, self.reset_button,
                                  *self.jog_buttons, self.send_button,
                                  self.start_button, self.autorun_button,
-                                 self.abort_button, self.frame_button]
+                                 self.abort_button, self.frame_button,
+                                 self.origin_set_button]
 
     # ------------------------------------------------------ connection
     def _current_settings(self) -> settings_store.ConnectionSettings:
@@ -575,8 +606,30 @@ class MachinePanel(QWidget):
         if not self._uploaded:
             self.start_button.setEnabled(False)
             self.autorun_button.setEnabled(False)
+        self._update_origin(s)
         # The emergency stop is never disabled.
         self.estop_button.setEnabled(True)
+
+    def _update_origin(self, s: MachineStatus | None) -> None:
+        supported = s is not None and s.origin.supported
+        self.origin_combo.setEnabled(supported)
+        self.anchor_combo.setEnabled(supported and self.origin_combo.currentData() != "absolute")
+        if not supported:
+            self.origin_set_button.setEnabled(False)
+            self.origin_label.setText("" if s is None else OLD_PI_ORIGIN)
+            return
+        self.origin_set_button.setEnabled(
+            self.origin_set_button.isEnabled() and s.homed and not s.job.active
+            and not s.framing and not s.foreign_owner and not s.emergency_latched)
+        user = s.origin.user
+        text = "Benutzer-Ursprung: %s" % (
+            "nicht gesetzt" if user is None else "X%.1f Y%.1f" % user)
+        p = s.origin.placement
+        if p and p.get("file"):
+            text += " · platziert: %s (%s, %s)" % (
+                p["file"], ORIGIN_LABELS.get(p.get("origin"), p.get("origin")),
+                ANCHOR_LABELS.get(p.get("anchor"), p.get("anchor")))
+        self.origin_label.setText(text)
 
     # ------------------------------------------------------- commands
     def _run(self, label: str, fn: Callable[[], str]) -> bool:
@@ -794,24 +847,108 @@ class MachinePanel(QWidget):
             self._show_message("Vor dem Rahmen referenzieren (Home)", WARN)
             return False
         client = self._client
-        return self._run("Rahmen (%s)" % FRAME_LABELS.get(mode, mode),
-                         lambda: client.frame(gcode, mode))
+        origin, anchor = self.job_origin()
+        if origin == "absolute":
+            return self._run("Rahmen (%s)" % FRAME_LABELS.get(mode, mode),
+                             lambda: client.frame(gcode, mode))
+        if not self._origin_ready():
+            return False
+        if not self._uploaded:
+            self._show_message("Rahmen am Ursprung: zuerst den Auftrag senden "
+                               "(der Pi verschiebt den Rahmen wie den Auftrag)", WARN)
+            return False
+        name = self._uploaded
+
+        def task() -> str:
+            self._ensure_placement(client, name, origin, anchor)
+            return client.frame(gcode, mode, placement=True, name=name)
+        return self._run("Rahmen (%s, %s)" % (FRAME_LABELS.get(mode, mode),
+                                             ORIGIN_LABELS[origin]), task)
+
+    # ------------------------------------------------------- origin (#16)
+    def job_origin(self) -> tuple[str, str]:
+        """(origin, anchor) chosen for start/frame; absolute on an older Pi."""
+        s = self._status
+        if s is None or not s.origin.supported:
+            return "absolute", "tl"
+        return (self.origin_combo.currentData() or "absolute",
+                self.anchor_combo.currentData() or "tl")
+
+    def set_job_origin(self, origin: str, anchor: str = "tl") -> None:
+        """Preset the origin choice (e.g. after a camera scan)."""
+        if origin not in ORIGIN_MODES or anchor not in ANCHORS:
+            raise ValueError("Ursprung/Bezugspunkt unbekannt")
+        self.origin_combo.setCurrentIndex(self.origin_combo.findData(origin))
+        self.anchor_combo.setCurrentIndex(self.anchor_combo.findData(anchor))
+        self._update_enabled()
+
+    def _origin_ready(self) -> bool:
+        s = self._status
+        if s is None or not s.origin.supported:
+            # Never send origin fields to an older Pi: it would ignore them
+            # and run the job absolute.
+            self._show_message(OLD_PI_ORIGIN, WARN)
+            return False
+        return True
+
+    def _ensure_placement(self, client: LumaCutClient, name: str, origin: str,
+                          anchor: str) -> None:
+        """Worker thread: let the Pi place the job unless it already holds
+        exactly this placement (the frame must not shift a "current" one)."""
+        s = self._status
+        if s is None or not s.origin.placed(name, origin, anchor):
+            client.place_job(name, origin, anchor)
+
+    def _placed_call(self, client: LumaCutClient, name: str, origin: str,
+                     anchor: str, call: Callable[[], str]) -> str:
+        self._ensure_placement(client, name, origin, anchor)
+        try:
+            return call()
+        except ApiError as exc:
+            # The Pi dropped the placement meanwhile (jog/home/new upload).
+            if "neu platzieren" not in str(exc):
+                raise
+            client.place_job(name, origin, anchor)
+            return call()
+
+    def set_user_origin(self, x: float | None = None, y: float | None = None) -> bool:
+        """Store the user origin on the Pi: head XY, or a machine point (mm,
+        e.g. the camera scan). The Pi checks homed state and the safe zone."""
+        if self._client is None or self._state != ConnState.CONNECTED:
+            self._show_message("Nicht mit dem Pi verbunden", WARN)
+            return False
+        if not self._origin_ready():
+            return False
+        client = self._client
+        return self._run("Ursprung setzen", lambda: client.set_user_origin(x, y))
 
     @Slot()
     def start_job(self) -> None:
         if self._client is None or not self._uploaded:
             self._show_message("Zuerst einen Auftrag senden", WARN)
             return
+        origin, anchor = self.job_origin()
+        if origin != "absolute" and not self._origin_ready():
+            return
+        where = "" if origin == "absolute" else " am Ursprung „%s“ (%s)" % (
+            ORIGIN_LABELS[origin], ANCHOR_LABELS[anchor])
         if not self._confirm("Auftrag starten",
-                             "Auftrag %s starten? Bereich frei, Material eingelegt, "
-                             "Schutzbrille?" % self._uploaded):
+                             "Auftrag %s%s starten? Bereich frei, Material eingelegt, "
+                             "Schutzbrille?" % (self._uploaded, where)):
             return
         client, name = self._client, self._uploaded
-        self._run("Start", lambda: client.start_job(name))
+        if origin == "absolute":
+            self._run("Start", lambda: client.start_job(name))
+            return
+        self._run("Start", lambda: self._placed_call(
+            client, name, origin, anchor, lambda: client.start_job(name, placement=True)))
 
     @Slot()
     def autorun_job(self) -> None:
         if self._client is None or not self._uploaded:
+            return
+        origin, anchor = self.job_origin()
+        if origin != "absolute" and not self._origin_ready():
             return
         if not self._confirm("Ein-Klick-Start",
                              "Maschine fährt Homing, tastet unter der Motivmitte ab "
@@ -819,7 +956,12 @@ class MachinePanel(QWidget):
                              % self._uploaded):
             return
         client, name = self._client, self._uploaded
-        self._run("Ein-Klick", lambda: client.autorun_job(name))
+        if origin == "absolute":
+            self._run("Ein-Klick", lambda: client.autorun_job(name))
+            return
+        # Placed before the run homes, so "current" keeps the head position.
+        self._run("Ein-Klick", lambda: self._placed_call(
+            client, name, origin, anchor, lambda: client.autorun_job(name, placement=True)))
 
     def active_operation(self) -> str:
         """What the machine is doing that closing the app would not stop
