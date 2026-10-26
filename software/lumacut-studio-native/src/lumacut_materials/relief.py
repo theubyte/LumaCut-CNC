@@ -28,13 +28,15 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
+from lumacut_canvas.workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine,
+    MACHINE_X_MAX, MACHINE_X_MIN, MACHINE_Y_MAX, MACHINE_Y_MIN)
 
 from .heightmap import Heightmap
 
 MAX_FOCUS_DROP_MM = 3.0
-_MIN_X, _MIN_Y = to_machine(0.0, 0.0)
-_MAX_X, _MAX_Y = to_machine(WORK_WIDTH_MM, WORK_HEIGHT_MM)
+# Erlaubter Bereich in Maschinen-mm (Nullpunkt oben rechts: to_machine(0, 0)
+# ist jetzt die *größte* X-Koordinate, darum feste Grenzen statt Ecken).
+_MIN_X, _MIN_Y, _MAX_X, _MAX_Y = MACHINE_X_MIN, MACHINE_Y_MIN, MACHINE_X_MAX, MACHINE_Y_MAX
 _EPS = 1e-6
 FLAVORS = ("marlin_inline", "grbl_m4")
 

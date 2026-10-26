@@ -19,6 +19,7 @@ from lumacut_canvas.editor import CanvasEditor
 from lumacut_canvas.gcode import document_to_gcode
 from lumacut_canvas.layers_panel import LayersPanel
 from lumacut_canvas.fit import install_screen_fit
+from lumacut_canvas.workarea import screen_to_user
 from lumacut_canvas.main_view import MainActions, MoreToggle, install_main_view
 # --- end canvas integration ---
 # --- scan integration (scan agent) ---
@@ -239,7 +240,8 @@ class LumaCutStudio(QMainWindow):
         self.cursor_label.setMinimumWidth(140)
         status.addPermanentWidget(self.cursor_label)
         self.canvas.cursorMoved.connect(
-            lambda x, y: self.cursor_label.setText(f"X {x:6.1f}  Y {y:6.1f}"))
+            # Anzeige-mm: Nullpunkt oben rechts, X nach links (workarea.screen_to_user)
+            lambda x, y: self.cursor_label.setText("X {:6.1f}  Y {:6.1f}".format(*screen_to_user(x, y))))
         self.canvas.statusMessage.connect(lambda text: status.showMessage(text, 5000))
         self.scan_panel.statusMessage.connect(lambda text: status.showMessage(text, 6000))
         self.canvas.fileChanged.connect(lambda t: self.setWindowTitle(f"{t} – LumaCut Studio"))

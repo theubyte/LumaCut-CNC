@@ -23,7 +23,7 @@ import numpy as np
 
 from lumacut_canvas.export import JobLayer
 from lumacut_canvas.model import Document, Shape
-from lumacut_canvas.workarea import to_machine
+from lumacut_canvas.workarea import IMAGE_FLIP_X, to_machine
 
 from .raster import _MAX_X, _MIN_X, RasterSettings, power_map, scanlines, sliced_depth_gcode
 
@@ -95,8 +95,14 @@ def _strip(program: str) -> list[str]:
 def image_job(shape: Shape, layer_name: str = "") -> ImageJob:
     st = shape.image.settings.normalized()
     gray, (cx, cy) = render_gray(shape, st.line_interval_mm)
-    ox, oy = to_machine(cx, cy)
     width = gray.shape[1] * st.line_interval_mm
+    if IMAGE_FLIP_X:
+        # Nullpunkt oben rechts (Anforderungen 2026-10-26 §2.1): Maschinen-X wächst
+        # nach links. Raster laufen in +X ab Spalte 0 → Spalte 0 = rechte Bildkante.
+        gray = np.ascontiguousarray(gray[:, ::-1])
+        ox, oy = to_machine(cx + width, cy)
+    else:
+        ox, oy = to_machine(cx, cy)
     # Overscan am Rand der Arbeitsfläche kürzen statt den Auftrag abzulehnen.
     room = min(ox - _MIN_X, _MAX_X - (ox + width))
     s = raster_settings(shape, max(0.0, min(st.overscan_mm, room)))

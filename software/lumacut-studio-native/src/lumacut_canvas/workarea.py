@@ -1,14 +1,39 @@
 """Arbeitsfläche und (unsichtbare) Safezone.
 
-Die Benutzeroberfläche arbeitet ausschließlich in Arbeitsflächen-Koordinaten:
-Ursprung oben links, X nach rechts, Y nach unten, Einheit Millimeter,
-0..360 × 0..340 mm.
+Koordinaten-Konvention (docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md §2.1)
+==========================================================================
+
+Die Maschine homt an die MIN-Endschalter **oben rechts**: X0 Y0 liegt dort,
+**+X fährt nach links**, **+Y nach unten/vorne zur Tür**. Pi, Status, Joggen,
+Park, Abtasten, Höhenmesh und Kameramosaik sind rohe Maschinen-mm.
+
+Darum gibt es drei Koordinatenarten, umgerechnet *nur* in diesem Modul:
+
+* **Bildschirm** (intern, Dokument, Szene, Overlays, SVG/PNG-Export):
+  Ursprung oben links, x nach rechts, y nach unten, 0..360 × 0..340 mm.
+  So bleibt die Qt-Szene ungespiegelt (kein ``scale(-1, 1)`` – das würde Text
+  und Bilder spiegeln) und alte Dateien liegen an derselben Stelle.
+* **Anzeige** (Lineale, Statusleiste, X/Y-Felder): Nullpunkt **oben rechts**,
+  X wächst nach links, Y nach unten – wie an der Maschine
+  (:func:`screen_to_user` / :func:`user_to_screen`).
+* **Maschine** (G-Code, Jobplanung): ``Maschine = Anzeige + 30 mm`` Safezone,
+  also ``machine_x = 390 − screen_x``, ``machine_y = 30 + screen_y``
+  (:func:`screen_to_machine` / :func:`machine_to_screen`).
+
+Der einzige Schalter ist :data:`ORIGIN_TOP_RIGHT`. Bis 2026-10-26 lief X
+ungespiegelt (``machine_x = 30 + screen_x``) – Aufträge kamen seitenverkehrt.
+Der Schalter steht vorerst noch auf ``False`` (alte Richtung), bis Scan & Probe
+seine Umrechnung nachgezogen hat (docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md
+§2.3); aller Canvas-/Job-Code geht aber schon über diese Helfer.
 
 Die Maschine hat eine L-förmige 30-mm-Safezone (X < 30 oder Y < 30), in der
 nicht geschnitten werden darf (siehe docs/MASCHINE.md). Diese Zone wird in der
 UI bewusst nicht gezeigt: Die sichtbare Arbeitsfläche *ist* bereits der
 erlaubte Schneidbereich X 30–390 / Y 30–370. Die Umrechnung in
 Maschinenkoordinaten passiert nur an dieser einen Stelle.
+Bilder in Maschinenrichtung (Kameramosaik, Höhenkarte: Spalte 0 = kleinstes
+Maschinen-X) müssen für die Bildschirm-Darstellung waagerecht gespiegelt
+werden (:data:`IMAGE_FLIP_X`).
 
 Dieses Modul ist Qt-frei, damit es auch von Job-/Export-Code ohne GUI
 benutzt werden kann.
@@ -25,6 +50,18 @@ WORK_HEIGHT_MM: float = 340.0
 # Interne Safezone: Versatz der Arbeitsfläche im Maschinenkoordinatensystem.
 _SAFEZONE_X_MM: float = 30.0
 _SAFEZONE_Y_MM: float = 30.0
+
+#: Einziger Schalter der Konvention: True = Nullpunkt oben rechts (Maschine,
+#: §2.1), X wächst nach links. False = alte Konvention (X nach rechts).
+ORIGIN_TOP_RIGHT: bool = False
+#: Bilder mit Spalte 0 = kleinstes Maschinen-X waagerecht spiegeln?
+IMAGE_FLIP_X: bool = ORIGIN_TOP_RIGHT
+
+#: Erlaubter Schneidbereich in Maschinen-mm (unabhängig von der Richtung).
+MACHINE_X_MIN: float = _SAFEZONE_X_MM
+MACHINE_Y_MIN: float = _SAFEZONE_Y_MM
+MACHINE_X_MAX: float = _SAFEZONE_X_MM + WORK_WIDTH_MM
+MACHINE_Y_MAX: float = _SAFEZONE_Y_MM + WORK_HEIGHT_MM
 
 
 @dataclass(frozen=True)
@@ -90,16 +127,53 @@ def fit_scale(r: Rect) -> float:
     return min(sx, sy)
 
 
-def to_machine(x: float, y: float) -> tuple[float, float]:
-    """Arbeitsflächen-mm → Maschinen-mm (Safezone-Versatz).
-
-    Annahme: Die Maschinen-Y-Achse läuft in dieselbe Richtung wie die
-    Canvas-Y-Achse. Das ist an der echten Maschine noch nicht verifiziert;
-    falls Y gespiegelt werden muss, ist das ausschließlich hier zu ändern.
-    """
-    return x + _SAFEZONE_X_MM, y + _SAFEZONE_Y_MM
+def screen_to_user(x: float, y: float) -> tuple[float, float]:
+    """Bildschirm-mm → Anzeige-mm (Nullpunkt oben rechts, X nach links)."""
+    return (WORK_WIDTH_MM - x if ORIGIN_TOP_RIGHT else x), y
 
 
-def from_machine(x: float, y: float) -> tuple[float, float]:
-    """Maschinen-mm → Arbeitsflächen-mm (Umkehrung von :func:`to_machine`)."""
-    return x - _SAFEZONE_X_MM, y - _SAFEZONE_Y_MM
+def user_to_screen(u: float, v: float) -> tuple[float, float]:
+    """Anzeige-mm → Bildschirm-mm (Umkehrung; die Spiegelung ist selbstinvers)."""
+    return screen_to_user(u, v)
+
+
+def axis_tooltips() -> tuple[str, str]:
+    """Tooltips der X/Y-Felder passend zum Nullpunkt (kein zweiter Schalter in der UI)."""
+    if ORIGIN_TOP_RIGHT:
+        return ("Abstand der rechten Kante vom Nullpunkt oben rechts",
+                "Abstand der oberen Kante vom Nullpunkt oben rechts")
+    return "Linke Kante", "Obere Kante"
+
+
+def user_x_of(r: Rect) -> float:
+    """Angezeigtes X eines Rechtecks: Abstand der Kante am Nullpunkt
+    (oben rechts → rechte Kante)."""
+    return WORK_WIDTH_MM - r.right if ORIGIN_TOP_RIGHT else r.x
+
+
+def screen_left_for_user_x(u: float, w: float) -> float:
+    """Bildschirm-links eines Rechtecks der Breite ``w`` mit angezeigtem X ``u``."""
+    return WORK_WIDTH_MM - u - w if ORIGIN_TOP_RIGHT else u
+
+
+def screen_to_machine(x: float, y: float) -> tuple[float, float]:
+    """Bildschirm-mm → Maschinen-mm: ``(390 − x, 30 + y)`` bei Nullpunkt oben rechts."""
+    u, v = screen_to_user(x, y)
+    return u + _SAFEZONE_X_MM, v + _SAFEZONE_Y_MM
+
+
+def machine_to_screen(x: float, y: float) -> tuple[float, float]:
+    """Maschinen-mm → Bildschirm-mm (Umkehrung von :func:`screen_to_machine`)."""
+    return user_to_screen(x - _SAFEZONE_X_MM, y - _SAFEZONE_Y_MM)
+
+
+def machine_rect_to_screen(x0: float, y0: float, x1: float, y1: float) -> Rect:
+    """Maschinen-Rechteck (zwei Ecken) → Bildschirm-:class:`Rect`."""
+    ax, ay = machine_to_screen(x0, y0)
+    bx, by = machine_to_screen(x1, y1)
+    return Rect.from_points(ax, ay, bx, by)
+
+
+#: Ältere Namen (Job-, Materials-, Scan-Code): Bildschirm ↔ Maschine.
+to_machine = screen_to_machine
+from_machine = machine_to_screen

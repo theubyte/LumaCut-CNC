@@ -42,7 +42,8 @@ from .export import export_png, export_svg
 from .material import Material, material_layer_attrs
 from .model import Document, Geometry, Shape, keep_inside_together, new_id, normalize_angle
 from .tools import TOOL_LABELS, TOOL_SHORTCUTS, Tool, ToolController
-from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, clamp_offset
+from .workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, axis_tooltips, clamp_offset,
+                       screen_left_for_user_x, user_x_of)
 
 PASTE_OFFSET_MM = 5.0
 ROTATE_STEP_DEG = 15.0
@@ -92,7 +93,8 @@ class PropertyBar(QWidget):
         self.y = _mm_spin(-1000, 1000)
         self.w = _mm_spin(0, WORK_WIDTH_MM)
         self.h = _mm_spin(0, WORK_HEIGHT_MM)
-        for label, spin, tip in (("X", self.x, "Linke Kante"), ("Y", self.y, "Obere Kante"),
+        x_tip, y_tip = axis_tooltips()  # je nach Nullpunkt (workarea)
+        for label, spin, tip in (("X", self.x, x_tip), ("Y", self.y, y_tip),
                                  ("B", self.w, "Breite"), ("H", self.h, "Höhe")):
             lab = QLabel(label)
             lab.setToolTip(tip)
@@ -167,7 +169,7 @@ class PropertyBar(QWidget):
                 self.title.setText(f"Gruppe ({len(sel)})")
             else:
                 self.title.setText(f"{len(sel)} Objekte")
-            self.x.setValue(b.x)
+            self.x.setValue(user_x_of(b))  # Nullpunkt oben rechts (workarea)
             self.y.setValue(b.y)
             g = doc.shape(sel[0]).geom
             if len(sel) == 1 and g.rot:
@@ -215,7 +217,12 @@ class PropertyBar(QWidget):
             w = 0.0
         if ob.h == 0:
             h = 0.0
-        nb = Rect(self.x.value(), self.y.value(), w, h)
+        nb = Rect(screen_left_for_user_x(self.x.value(), w), self.y.value(), w, h)
+        # Größer machen wächst vom Nullpunkt (oben rechts) weg nach links; am
+        # linken Rand die ganze Auswahl gemeinsam zurückschieben, damit eine
+        # Gruppe nicht Objekt für Objekt am Rand gestaucht wird.
+        dx, dy = clamp_offset(nb)
+        nb = Rect(nb.x + dx, nb.y + dy, w, h)
         old = {i: doc.shape(i).geom.copy() for i in sel}
         new = {i: g.mapped(ob, nb) for i, g in old.items()}
         ed.undo_stack.push(SetGeometryCommand(doc, old, new, "Maße ändern"))
@@ -224,7 +231,7 @@ class PropertyBar(QWidget):
         """Maße eines gedrehten Objekts: X/Y verschieben die Hüllbox, B/H ändern
         die eigene Größe um die Mitte."""
         if sender in (self.x, self.y):
-            ng = g.translated(self.x.value() - ob.x, self.y.value() - ob.y)
+            ng = g.translated(screen_left_for_user_x(self.x.value(), ob.w) - ob.x, self.y.value() - ob.y)
         else:
             w, h = self.w.value(), self.h.value()
             aw, ah = abs(g.w), abs(g.h)
@@ -707,7 +714,7 @@ class CanvasEditor(QWidget):
 
     def _roi_finished(self, r: Rect) -> None:
         self.set_roi(r)
-        self.notify(f"Bereich: {r.w:.1f} × {r.h:.1f} mm bei X {r.x:.1f} / Y {r.y:.1f}")
+        self.notify(f"Bereich: {r.w:.1f} × {r.h:.1f} mm bei X {user_x_of(r):.1f} / Y {r.y:.1f}")
         self.roiSelected.emit(r.x, r.y, r.w, r.h)
 
     def set_roi(self, r: Rect | None) -> None:

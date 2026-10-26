@@ -21,7 +21,8 @@ import math
 import re
 from dataclasses import dataclass, field
 
-from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
+from lumacut_canvas.workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine,
+    MACHINE_X_MAX, MACHINE_X_MIN, MACHINE_Y_MAX, MACHINE_Y_MIN)
 
 _WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 
@@ -32,8 +33,9 @@ RAPID_FEED = 9000.0       # mm/min, Pi default for G0 without F
 JUNCTION_DEVIATION = 0.013  # mm (Marlin default)
 FRAME_FEED = 3000.0       # mm/min
 
-_MIN_X, _MIN_Y = to_machine(0.0, 0.0)
-_MAX_X, _MAX_Y = to_machine(WORK_WIDTH_MM, WORK_HEIGHT_MM)
+# Erlaubter Bereich in Maschinen-mm (Nullpunkt oben rechts: to_machine(0, 0)
+# ist jetzt die *größte* X-Koordinate, darum feste Grenzen statt Ecken).
+_MIN_X, _MIN_Y, _MAX_X, _MAX_Y = MACHINE_X_MIN, MACHINE_Y_MIN, MACHINE_X_MAX, MACHINE_Y_MAX
 
 
 @dataclass

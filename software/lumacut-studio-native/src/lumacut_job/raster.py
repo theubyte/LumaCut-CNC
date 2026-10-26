@@ -29,14 +29,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
+from lumacut_canvas.workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine,
+    MACHINE_X_MAX, MACHINE_X_MIN, MACHINE_Y_MAX, MACHINE_Y_MIN)
 
 PWM_MAX = 255
 MODES = ("threshold", "floyd", "atkinson", "ordered", "grayscale")
 MAX_DEPTH_DROP_MM = 3.0  # same budget as the canvas focus drop limit
 
-_MIN_X, _MIN_Y = to_machine(0.0, 0.0)
-_MAX_X, _MAX_Y = to_machine(WORK_WIDTH_MM, WORK_HEIGHT_MM)
+# Erlaubter Bereich in Maschinen-mm (Nullpunkt oben rechts: to_machine(0, 0)
+# ist jetzt die *größte* X-Koordinate, darum feste Grenzen statt Ecken).
+_MIN_X, _MIN_Y, _MAX_X, _MAX_Y = MACHINE_X_MIN, MACHINE_Y_MIN, MACHINE_X_MAX, MACHINE_Y_MAX
 
 _BAYER4 = np.array([[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]],
                    dtype=np.float32)

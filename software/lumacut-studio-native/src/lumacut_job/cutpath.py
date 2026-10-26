@@ -35,15 +35,17 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
+from lumacut_canvas.workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine,
+    MACHINE_X_MAX, MACHINE_X_MIN, MACHINE_Y_MAX, MACHINE_Y_MIN)
 
 from .planner import containment, is_closed, point_in_polygon
 
 Point = tuple[float, float]
 Poly = list[Point]
 
-_MIN_X, _MIN_Y = to_machine(0.0, 0.0)
-_MAX_X, _MAX_Y = to_machine(WORK_WIDTH_MM, WORK_HEIGHT_MM)
+# Erlaubter Bereich in Maschinen-mm (Nullpunkt oben rechts: to_machine(0, 0)
+# ist jetzt die *größte* X-Koordinate, darum feste Grenzen statt Ecken).
+_MIN_X, _MIN_Y, _MAX_X, _MAX_Y = MACHINE_X_MIN, MACHINE_Y_MIN, MACHINE_X_MAX, MACHINE_Y_MAX
 CORNER_DEG = 30.0        # Richtungswechsel ab dem ein Punkt als Ecke gilt
 MIN_TAB_PERIMETER = 10.0  # mm: kürzere Konturen bekommen keine Stege
 ARC_SEGMENTS = 8

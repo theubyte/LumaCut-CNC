@@ -10,7 +10,11 @@ Andere Module (z. B. Scan & Probe) können Bilder oder eigene Zeichnungen
     editor.add_overlay("raster", PainterOverlay(lambda p, work: ...), z=20)
     editor.remove_overlay("scan")
 
-Alle Koordinaten sind Arbeitsflächen-mm (0,0 = links oben, 360 × 340 mm).
+Alle Koordinaten sind Bildschirm-mm der Arbeitsfläche (0,0 = links oben,
+360 × 340 mm; das ist die interne Speicherung, *nicht* der angezeigte
+Nullpunkt oben rechts). Bilder in Maschinen-Reihenfolge (Spalte 0 = kleinstes
+Maschinen-X = rechter Rand) vorher horizontal spiegeln (workarea.IMAGE_FLIP_X)
+und ``Rect`` über ``workarea.machine_rect_to_screen`` bilden.
 Overlays werden nach dem Flächenhintergrund und vor dem Raster gezeichnet,
 aufsteigend nach ``z``; sie sind nie anklickbar und landen nicht in Export
 oder G-Code.

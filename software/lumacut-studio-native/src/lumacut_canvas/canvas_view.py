@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QApplication, QGraphicsScene, QGraphicsView, QHBo
 from . import icons, theme, touch
 from .items import SelectionOverlay, ShapeItem
 from .model import Document
-from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
+from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, screen_to_user
 
 _log = logging.getLogger(__name__)
 
@@ -759,7 +759,10 @@ class CanvasView(QGraphicsView):
 
 
 class Ruler(QWidget):
-    """mm-Lineal oben oder links, folgt Zoom und Pan der View."""
+    """mm-Lineal oben oder links, folgt Zoom und Pan der View.
+
+    Beschriftung in Anzeige-mm (workarea.screen_to_user): oben läuft X vom
+    Nullpunkt oben rechts nach links."""
 
     THICKNESS = 22
 
@@ -813,7 +816,8 @@ class Ruler(QWidget):
         start = math.floor(-SCENE_MARGIN_MM / minor) * minor
         v = start
         while v <= limit + SCENE_MARGIN_MM:
-            px = self._to_px(v)
+            # v = angezeigter Wert (Nullpunkt oben rechts: X wächst nach links).
+            px = self._to_px(screen_to_user(v, 0)[0] if horiz else v)
             if 0 <= px <= length:
                 is_major = abs((v / major) - round(v / major)) < 1e-6
                 inside = 0 <= v <= limit
