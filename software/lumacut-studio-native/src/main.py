@@ -62,20 +62,33 @@ class LumaCutStudio(QMainWindow):
         self.setPalette(palette)
         self.setStyleSheet("""
             QMainWindow, QWidget { background: #0b0e13; color: #edf2f7; }
-            QPushButton { background: #1a212b; border: 1px solid #28303d; padding: 8px 14px; border-radius: 6px; }
+            QPushButton {
+                background: #1a212b; border: 1px solid #28303d;
+                padding: 10px 16px; border-radius: 8px;
+                min-height: 36px; font-size: 14px;
+            }
             QPushButton:hover { border-color: #526275; }
-            QPushButton#primary { background: #4cd4b0; color: #09251f; font-weight: bold; border: none; }
-            QPushButton#danger { background: #f36b73; color: white; border: none; }
+            QPushButton#primary { background: #4cd4b0; color: #09251f; font-weight: bold; border: none; min-height: 40px; }
+            QPushButton#danger { background: #f36b73; color: white; border: none; min-height: 40px; }
             QGroupBox { border: 1px solid #28303d; border-radius: 8px; margin-top: 12px; padding-top: 8px; }
             QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-            QListWidget { background: #131820; border: 1px solid #28303d; }
-            QStatusBar { background: #10141b; color: #93a1b5; }
+            QListWidget { background: #131820; border: 1px solid #28303d; font-size: 14px; }
+            QListWidget::item { min-height: 40px; padding: 6px; }
+            QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit {
+                min-height: 36px; font-size: 14px; padding: 4px 8px;
+            }
+            QStatusBar { background: #10141b; color: #93a1b5; font-size: 13px; }
+            QSplitter::handle { background: #28303d; width: 6px; }
+            QSplitter::handle:hover { background: #526275; }
+            QToolBar { spacing: 8px; }
+            QScrollArea { border: none; }
         """)
 
     def _build_ui(self):
         # Toolbar
         toolbar = QToolBar()
         toolbar.setMovable(False)
+        toolbar.setIconSize(QSize(24, 24))
         self.addToolBar(toolbar)
         toolbar.addWidget(QLabel("  LumaCut Studio   "))
         toolbar.addSeparator()
@@ -84,6 +97,7 @@ class LumaCutStudio(QMainWindow):
         toolbar.addWidget(QLabel("   "))
         start_btn = QPushButton("Start Job")
         start_btn.setObjectName("primary")
+        start_btn.setMinimumHeight(40)
         toolbar.addWidget(start_btn)
         # --- machine integration (machine agent) ---
         # The machine panel owns connection, status and job control; the
@@ -93,7 +107,7 @@ class LumaCutStudio(QMainWindow):
         start_btn.clicked.connect(self.machine_panel.start_job)
         toolbar.addWidget(QLabel("   "))
         estop_btn = QPushButton("NOT-AUS")
-        estop_btn.setStyleSheet(ESTOP_STYLE)
+        estop_btn.setStyleSheet(ESTOP_STYLE + " min-height: 40px; font-size: 15px; font-weight: bold;")
         estop_btn.setToolTip("Software-Notstopp M112 (Pause/Untbr-Taste)")
         estop_btn.clicked.connect(self.machine_panel.emergency_stop)
         toolbar.addWidget(estop_btn)
@@ -109,6 +123,7 @@ class LumaCutStudio(QMainWindow):
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setChildrenCollapsible(True)
+        splitter.setHandleWidth(8)
         layout.addWidget(splitter)
 
         # --- canvas integration (canvas agent) ---
@@ -120,6 +135,7 @@ class LumaCutStudio(QMainWindow):
         splitter.addWidget(self.canvas)
         send_btn = QPushButton("Design senden")
         send_btn.setToolTip("Sichtbare Ebenen als G-Code an den Pi übertragen (startet nicht)")
+        send_btn.setMinimumHeight(40)
         send_btn.clicked.connect(self._send_canvas_job)
         start_action = next(a for a in toolbar.actions() if toolbar.widgetForAction(a) is start_btn)
         toolbar.insertWidget(start_action, send_btn)  # Ablauf: senden, dann starten
@@ -129,7 +145,8 @@ class LumaCutStudio(QMainWindow):
         # Right: Controls (scrollable)
         right = QWidget()
         right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(6, 6, 6, 6)
+        right_layout.setContentsMargins(8, 8, 8, 8)
+        right_layout.setSpacing(10)
 
         # Design group
         design = QGroupBox("Design")
@@ -161,6 +178,8 @@ class LumaCutStudio(QMainWindow):
         right_scroll.setFrameShape(QFrame.NoFrame)
         right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         right_scroll.setMinimumWidth(220)
+        # Touch-Scrolling
+        right_scroll.viewport().setAttribute(Qt.WA_AcceptTouchEvents, True)
         right_scroll.setWidget(right)
         splitter.addWidget(right_scroll)
         # --- end machine integration ---
@@ -256,6 +275,8 @@ def main():
     app = QApplication(sys.argv)
     app.setOrganizationName("LumaCut")  # QSettings scope (machine settings)
     app.setApplicationName("LumaCut Studio")
+    # Touch-Gesten aktivieren
+    app.setAttribute(Qt.AA_SynthesizeTouchForUnhandledMouseEvents, True)
     win = LumaCutStudio()
     win.show()
     sys.exit(app.exec())
