@@ -32,6 +32,7 @@ from lumacut_materials.dialog import install_materials
 # --- end materials integration ---
 # --- import integration (review agent) ---
 from lumacut_import.qt import install_import
+from lumacut_workflow.qt import install_workflow
 # --- end import integration ---
 
 
@@ -190,6 +191,9 @@ class LumaCutStudio(QMainWindow):
         # --- import integration (review agent) ---
         install_import(self)  # Menü Datei, Importieren (Strg+I), Drag & Drop, Bildeinstellungen
         # --- end import integration ---
+        # --- workflow integration (review agent) ---
+        install_workflow(self)  # Ablauf: Home → Scan → Markieren → Probe → Fokus → Rahmen → Auftrag → Parken
+        # --- end workflow integration ---
 
 
     # --- machine integration (machine agent) ---

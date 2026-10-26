@@ -67,6 +67,8 @@ def _mm(value: float | None) -> str:
 class MachinePanel(QWidget):
     connection_changed = Signal(str, str)   # ConnState, display text
     frame_available_changed = Signal(bool)  # a frame run may be requested now
+    status_changed = Signal(object)         # MachineStatus after each poll (workflow panel)
+    command_finished = Signal(str, bool)    # label, success (workflow panel)
 
     def __init__(self, parent: QWidget | None = None, *,
                  store=None, confirm: Callable[[str, str], bool] | None = None):
@@ -330,6 +332,16 @@ class MachinePanel(QWidget):
         return self._state
 
     @property
+    def last_status(self) -> MachineStatus | None:
+        """Most recent status from the Pi (None when disconnected)."""
+        return self._status if self._state == ConnState.CONNECTED else None
+
+    @property
+    def command_running(self) -> str:
+        """Label of the command currently running ("" if none)."""
+        return self._runner.current or ""
+
+    @property
     def stale(self) -> bool:
         """True while connected but the last status is older than STALE_AFTER_S."""
         return self._stale
@@ -400,6 +412,7 @@ class MachinePanel(QWidget):
     def _apply_status(self, status: MachineStatus) -> None:
         self._status = status
         self._status_at = time.monotonic()
+        self.status_changed.emit(status)
         if self._stale:
             self._check_stale()
         if status.emergency_latched:
@@ -564,10 +577,12 @@ class MachinePanel(QWidget):
             self._estop_feedback("NOT-AUS bestätigt: " + message, OK)
         if self._poller:
             self._poller.poll_now()
+        self.command_finished.emit(label, True)
 
     @Slot(str, str, str)
     def _on_command_failed(self, label: str, kind: str, message: str) -> None:
         self._show_message("%s fehlgeschlagen: %s" % (label, message), BAD)
+        self.command_finished.emit(label, False)
         if label == ESTOP_LABEL:
             hint = "" if "physischen Not-Aus" in message else " – physischen Not-Aus benutzen!"
             self._estop_feedback("NOT-AUS NICHT bestätigt: " + message + hint, BAD)
