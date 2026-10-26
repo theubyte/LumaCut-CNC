@@ -19,7 +19,14 @@ id lumacut >/dev/null 2>&1 || useradd --system --home /var/lib/lumacut \
   --shell /usr/sbin/nologin --user-group lumacut
 usermod -aG dialout lumacut
 install -d -o lumacut -g lumacut -m 750 /var/lib/lumacut
+# /etc/lumacut: root-owned config, plus the machine's camera calibration
+# (camera_calibration.json, written atomically by the service as user lumacut).
+# Sticky bit: lumacut may create/replace only its own files, never root's env files.
 install -d -m 755 /etc/lumacut
+chown root:lumacut /etc/lumacut
+chmod 1775 /etc/lumacut
+# Pre-create the optional port file so the service cannot inject one.
+[[ -e "$PORT_ENV" ]] || install -m 600 /dev/null "$PORT_ENV"
 
 if [[ "$REPO" != "$TARGET" ]]; then
   [[ ! -e "$TARGET" ]] || { echo "FEHLER: $TARGET existiert bereits (Update: pi400/update.sh)" >&2; exit 1; }

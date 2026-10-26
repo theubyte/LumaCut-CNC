@@ -1,0 +1,3 @@
+# Lokale Kamerakalibrierung (Fallback ohne /etc/lumacut), gehört zur Maschine, nicht ins Repo
+camera_calibration.json
+.camera_calibration.json.*

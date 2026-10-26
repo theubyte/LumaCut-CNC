@@ -17,6 +17,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import MarlinTransport, MarlinLaserGuard, normalize, serve_tcp
 from .smart_cam import analyze_job
+from .camera_calibration import create_blueprint as camera_calibration_api
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "marlin"
@@ -29,6 +30,7 @@ HTTP = int(os.environ.get("LUMACUT_HTTP", "8080"))
 TCP = int(os.environ.get("LUMACUT_TCP", "23"))
 machine = MarlinTransport(USB)
 app = Flask(__name__, static_folder=None)
+app.register_blueprint(camera_calibration_api())  # GET/PUT /api/camera/calibration
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
 config = {
     "validated": False,        # mechanics confirmed once via /api/commission

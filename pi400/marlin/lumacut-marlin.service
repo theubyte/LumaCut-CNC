@@ -20,7 +20,8 @@ NoNewPrivileges=yes
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ProtectSystem=strict
-ReadWritePaths=/var/lib/lumacut
+# /etc/lumacut: camera_calibration.json (machine calibration, see camera_calibration.py)
+ReadWritePaths=/var/lib/lumacut -/etc/lumacut
 ProtectHome=true
 PrivateTmp=true
 
