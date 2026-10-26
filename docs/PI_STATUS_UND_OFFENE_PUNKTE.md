@@ -56,7 +56,11 @@ Sonstiges → 500 „Interner Fehler – Pi-Protokoll ansehen“.
 | `park` | Laser aus, Z nie abwärts, X0/Y0 (`park_safezone`) | gehomed, frei |
 | `moveto` | `x`/`y` absolut (X0..390/Y0..370), Laser aus, Z wird nur angehoben (Kamera-Scan) | gehomed, frei, Laser aus |
 | `frame` | Rahmenfahrt mit Laser aus (`gcode`, `mode=box\|hull`) | gehomed, frei, kein Notstopp |
-| `start` | Auftrag `name` abarbeiten, danach Parken | gehomed, frei |
+| `origin_set` | Benutzer-Ursprung speichern (`x`/`y` oder Kopf-XY), muss in X30..390/Y30..370 liegen | gehomed, frei |
+| `origin_clear` | Benutzer-Ursprung löschen | frei |
+| `place` | Auftrag `name` auf `origin` (`absolute`/`current`/`user`) mit `anchor` verschieben und prüfen, nichts fährt | gehomed (außer `absolute`), frei |
+| `place_clear` | Platzierung verwerfen | frei |
+| `start` | Auftrag `name` abarbeiten, danach Parken; mit `placement=1` (oder `origin`/`anchor`) platziert | gehomed, frei |
 | `autorun` | Ein-Klick: Homing → Abtasten unter Motivmitte (oder `x`/`y`) → Fokus → Auftrag → Parken | Tasterversatz gesetzt |
 | `abort` | Rahmen: Stopp an der nächsten Ecke. Auftrag: Laser aus, Parken | läuft etwas |
 
@@ -122,6 +126,25 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
 - Es wird nicht geparkt.
 - ⚠ Hardware.
 
+### Auftrags-Ursprung (`op=place`, `origin_set`)
+
+- Reine Rechnung in `pi400/marlin/placement.py`: verschiebt X/Y absoluter
+  `G0`–`G3`; Bögen (I/J relativ) bleiben gültig. Grenzen inkl.
+  Bogenextreme.
+- Geprüft wird auf den verschobenen Zeilen:
+  - Fahrten in 0..Verfahrweg;
+  - Laserbahnen in der 30-mm-Safezone;
+  - danach der normale Preflight (Laser-Guard).
+
+  Relative X/Y-Aufträge werden nicht verschoben.
+- Die Platzierung liegt im Speicher (nicht persistent). Sie gilt für
+  `start`/`autorun`/`frame` mit `placement=1`. Sie verfällt bei neuem
+  Upload oder Löschen, bei `current` auch nach `home`/`jog`/`moveto`.
+- Der Benutzer-Ursprung steht in `marlin.json` (`user_origin`).
+- Ohne Platzierung bleibt alles absolut (LightBurn, Web-UI, ältere Studio).
+  Die Pi-Web-UI hat keinen Ursprungs-Knopf.
+- ⚠ Hardware.
+
 ### Parken (`op=park`)
 
 - Dieselbe Routine wie LightBurn `M2` und das Auftragsende: Laser aus,
@@ -185,6 +208,7 @@ Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
 | `op=frame` | `65a22b4` feat(pi400): op=frame Rahmenfahrt ohne Laser, ohne den hochgeladenen Auftrag zu ersetzen. Tests: `f5b8ab2` | `pi400/marlin/web.py`, `tests/test_marlin_gateway.py`, `docs/PI_BETRIEB.md` |
 | Status-Snapshot (`busy`, `stale_ms`) | fix(pi400): /api/status blockiert nicht mehr hinter langen Fahrten (siehe `git log --grep="blockiert nicht mehr"`) | `pi400/marlin/web.py`, `tests/test_marlin_gateway.py` |
 | `op=moveto`, `/api/camera/snapshot`, `camera` im Status | `2c61b8a` (Kamera-Scan) | `pi400/marlin/web.py`, `pi400/marlin/transport.py` |
+| Auftrags-Ursprung (`op=place`, `origin_set`, `origin_clear`, `place_clear`, `placement=1`, Status `origin`) | „feat(pi400): Auftrags-Ursprung …“ (`git log --grep="Auftrags-Ursprung"`) | `pi400/marlin/placement.py`, `pi400/marlin/web.py`, `tests/test_job_placement.py` |
 
 Es reicht, den Pi-Dienst zu aktualisieren (Python-Code). SKR-Firmware,
 `/etc/lumacut` und die Daten bleiben gleich.
@@ -194,6 +218,8 @@ Es reicht, den Pi-Dienst zu aktualisieren (Python-Code). SKR-Firmware,
 - `frame` und `activity` fehlen: kein `op=frame`.
 - `busy` und `stale_ms` fehlen: kein Status-Snapshot; der Status hängt
   während Home/Park/Abtasten.
+- `origin` fehlt: keine Ursprungs-Optionen. Studio sperrt die Auswahl und
+  startet nur absolut.
 - `op=park` lässt sich am Status nicht erkennen. Ein Pi ohne `frame` ist
   aber älter als `65a22b4` und kann auch älter als `eaa3f38` sein.
 
@@ -203,7 +229,10 @@ Es reicht, den Pi-Dienst zu aktualisieren (Python-Code). SKR-Firmware,
   in pi400/marlin/web.py)“.
 - Rahmen: „Pi-Dienst bietet noch keine Rahmenfahrt über die API (op=frame
   fehlt in pi400/marlin/web.py – Pi aktualisieren)“.
-- Beide werden aus der Pi-Antwort 400 „Unbekannte Marlin-Aktion: …“
+- Ursprung: „Pi-Dienst kennt noch keine Ursprungs-Optionen (op=place
+  fehlt in pi400/marlin/web.py – Pi aktualisieren)“. Im Panel steht „Pi-Dienst
+  zu alt: nur absolute Aufträge – Pi aktualisieren“.
+- Alle werden aus der Pi-Antwort 400 „Unbekannte Marlin-Aktion: …“
   übersetzt.
 - Ohne Snapshot zeigt Studio „Status N s alt“ statt „Pi fährt“ und sperrt
   so lange alle Knöpfe außer NOT-AUS.
@@ -232,10 +261,10 @@ sudo systemctl restart lumacut-marlin.service
 # 3) Prüfen
 systemctl is-active lumacut-marlin.service
 sudo journalctl -u lumacut-marlin.service -n 50 --no-pager
-curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(frame|activity|busy|stale_ms|owner)"'
+curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(frame|activity|busy|stale_ms|owner|origin)"'
 ```
 
-- Erwartet: `frame`, `activity`, `busy` und `stale_ms` sind vorhanden,
+- Erwartet: `frame`, `activity`, `busy`, `stale_ms` und `origin` sind vorhanden,
   `owner` ist „Frei“.
 - Danach in Studio „Verbinden“ und einmal Rahmen und Parken probieren
   (vorher referenzieren, Laser getrennt).
@@ -295,6 +324,8 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
    - Die Studio-Anbindung insgesamt gegen den echten Pi.
    - Firmware-Flash über USB (kein Nachweis im Repo).
    - Kamera-Snapshot und `op=moveto`.
+   - Platzierte Aufträge (`op=place`): Lage auf dem Material und Rahmen am
+     Ursprung.
 7. **Prüfergebnisse (Audit, kein akuter Fehler):**
    - `/api/settings` nimmt `machine.lock` und wartet daher hinter einer
      laufenden Fahrt. Die Antwort kommt erst danach; das ist harmlos, aber

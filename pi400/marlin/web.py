@@ -17,6 +17,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import MarlinTransport, MarlinLaserGuard, normalize, serve_tcp
 from .smart_cam import analyze_job
+from . import placement as placing
 from .camera_calibration import create_blueprint as camera_calibration_api
 
 ROOT = Path(__file__).resolve().parent
@@ -40,6 +41,7 @@ config = {
     "probe_offset_x_mm": None,
     "probe_offset_y_mm": None,  # tip height above reference plane at switch trigger
     "travels": {"x": 390.0, "y": 370.0, "z": 90.0},
+    "user_origin": None,        # [x, y] machine mm, op=origin_set (job placement)
 }
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
@@ -72,6 +74,12 @@ _FRAME_SETUP = ("G21", "G90", "M5", "M5 I", "M400")
 _FRAME_MOVE = re.compile(r"^G0?[01](?:\s*[XYFS]\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+))+$")
 _FRAME_WORD = re.compile(r"([XYFS])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 running = False
+# Job placement (op=place, gap analysis #16): the offset that moves the
+# stored job so its anchor lands on the chosen origin. Kept until the job
+# file changes (sha), another job is placed or op=place_clear; a placement
+# on the "current" head position is dropped as soon as the head is moved
+# by hand (jog/moveto/home), so Start never uses a stale position.
+job_placement = None
 
 
 def persist():
@@ -186,6 +194,7 @@ def status():
                       "lights":"HE0 PC8 M7",
                       "aux":"FAN2 PC7 unused"},
                   config=dict(config),
+                  origin=_origin_status(),
                   camera={"device": CAMERA, "available": os.path.exists(CAMERA)})
     return jsonify(result)
 
@@ -319,6 +328,7 @@ def action():
         machine.ensure_ready()
         return jsonify(message="Marlin M115 + LumaCut-Kennung bestätigt")
     if op == "home":
+        _forget_current_placement()
         home_z_first()
         return jsonify(message="X/Y zuerst, danach Maschinenboden Z=0 und Z-Rückzug: referenziert.")
     if op in ("info","position","endstops"):
@@ -334,6 +344,7 @@ def action():
                 -10.0,-1.0,-0.1,0.1,1.0,10.0):
             raise ValueError("Ungültige Achse oder Schrittweite")
         local_owner()
+        _forget_current_placement()
         # Stage a finite move and synchronize before accepting another jog.
         machine.command("M5 I", owner="web")
         machine.command("G91", owner="web")
@@ -386,9 +397,23 @@ def action():
     if op == "moveto":
         # Laser-off absolute move for the camera scan (machine mm).
         local_owner()
+        _forget_current_placement()
         x = float(request.form.get("x", "nan")); y = float(request.form.get("y", "nan"))
         machine.move_to(x, y, owner="web")
         return jsonify(message="Kopf auf X%.1f Y%.1f" % (x, y), position=machine.position)
+    if op == "origin_set":
+        return set_user_origin()
+    if op == "origin_clear":
+        config["user_origin"] = None
+        persist()
+        _forget_placement(lambda p: p["origin"] == "user")
+        return jsonify(message="Benutzer-Ursprung gelöscht", origin=_origin_status())
+    if op == "place":
+        return place_job()
+    if op == "place_clear":
+        _forget_placement(lambda p: True)
+        return jsonify(message="Platzierung aufgehoben: Aufträge laufen absolut",
+                       origin=_origin_status())
     if op == "frame":
         return start_frame()
     if op == "start":
@@ -404,6 +429,166 @@ def action():
         stop_job.set()
         return jsonify(message="Abbruch angefordert: Laser aus, danach Parkposition")
     raise ValueError("Unbekannte Marlin-Aktion: " + op)
+
+
+def _origin_status():
+    return {"modes": list(placing.ORIGIN_MODES), "anchors": list(placing.ANCHORS),
+            "user": config.get("user_origin"),
+            "placement": None if job_placement is None else
+            {k: v for k, v in job_placement.items() if k != "sha"}}
+
+
+def _forget_placement(predicate):
+    global job_placement
+    if job_placement is not None and predicate(job_placement):
+        job_placement = None
+
+
+def _forget_current_placement():
+    _forget_placement(lambda p: p["origin"] == "current")
+
+
+def _content_sha(content):
+    import hashlib
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _cut_point(x, y, what):
+    import math
+    travels = config["travels"]
+    limit = machine.safe_zone_xy_mm
+    if not (math.isfinite(x) and math.isfinite(y) and
+            limit <= x <= travels["x"] and limit <= y <= travels["y"]):
+        raise ValueError("%s X%.1f Y%.1f außerhalb des Schneidbereichs X%g..%g / Y%g..%g" % (
+            what, x, y, limit, travels["x"], limit, travels["y"]))
+    return x, y
+
+
+def set_user_origin():
+    """op=origin_set: store a user origin (explicit x/y, else the head XY)."""
+    local_owner()
+    if not machine.homed:
+        raise RuntimeError("Vor dem Setzen des Ursprungs referenzieren")
+    raw_x = request.form.get("x", "").strip()
+    raw_y = request.form.get("y", "").strip()
+    if raw_x or raw_y:
+        x, y = float(raw_x), float(raw_y)
+    else:
+        x, y = _head_xy()
+    x, y = _cut_point(x, y, "Ursprung")
+    config["user_origin"] = [round(x, 3), round(y, 3)]
+    persist()
+    _forget_placement(lambda p: p["origin"] == "user")
+    return jsonify(message="Benutzer-Ursprung gesetzt: X%.1f Y%.1f" % (x, y),
+                   origin=_origin_status())
+
+
+def _head_xy():
+    """Fresh head XY via M114 (caller holds the web ownership)."""
+    machine.command("M114", owner="web", timeout=10)
+    pos = machine.position
+    if not pos:
+        raise RuntimeError("Kopfposition unbekannt – Position abfragen")
+    return float(pos[0]), float(pos[1])
+
+
+def _origin_target(origin):
+    if not machine.homed:
+        raise RuntimeError("Vor dem Platzieren referenzieren (Ursprung braucht Maschinenkoordinaten)")
+    if origin == "current":
+        return _cut_point(*_head_xy(), "Kopfposition")
+    if origin == "user":
+        user = config.get("user_origin")
+        if not user:
+            raise RuntimeError("Kein Benutzer-Ursprung gesetzt (op=origin_set)")
+        return _cut_point(float(user[0]), float(user[1]), "Benutzer-Ursprung")
+    raise ValueError("Ursprung muss absolute, current oder user sein")
+
+
+def _apply_offset(lines, dx, dy):
+    """Translated job lines after bounds + guard checks (raises ValueError)."""
+    if (dx or dy) and placing.has_relative_xy(lines):
+        raise ValueError("Auftrag enthält relative X/Y-Bewegungen (G91) – nur absolut platzierbar")
+    placed = placing.translate(lines, dx, dy)
+    placing.check_extent(placed, config["travels"], machine.safe_zone_xy_mm)
+    preflight("\n".join(placed))
+    return placed
+
+
+def make_placement(filename, content, origin, anchor):
+    """Placement dict + translated lines for a stored job (no motion)."""
+    origin = origin or "absolute"
+    anchor = anchor or "tl"
+    if origin not in placing.ORIGIN_MODES:
+        raise ValueError("Ursprung muss absolute, current oder user sein")
+    if anchor not in placing.ANCHORS:
+        raise ValueError("Bezugspunkt muss tl, tr, bl, br oder center sein")
+    lines = content.splitlines()
+    dx = dy = 0.0
+    target = None
+    if origin != "absolute":
+        target = _origin_target(origin)
+        _, powered = placing.scan(lines)
+        if powered is None:
+            raise ValueError("Auftrag ohne Laserbahnen: Bezugspunkt nicht bestimmbar")
+        ax, ay = placing.anchor_point(powered, anchor)
+        dx, dy = round(target[0] - ax, 3), round(target[1] - ay, 3)
+    placed = _apply_offset(lines, dx, dy)
+    motion, powered = placing.scan(placed)
+    result = {"file": filename, "origin": origin, "anchor": anchor,
+              "dx": dx, "dy": dy, "target": None if target is None else [round(v, 3) for v in target],
+              "bounds": None if powered is None else powered.as_dict(),
+              "travel": None if motion is None else motion.as_dict(),
+              "sha": _content_sha(content)}
+    return result, placed
+
+
+def _job_file(filename):
+    if filename != Path(filename).name or not (JOBS / filename).is_file():
+        raise ValueError("Unbekannte Auftragsdatei")
+    return (JOBS / filename).read_text(encoding="utf-8")
+
+
+def place_job():
+    """op=place: compute and store where a job will run (nothing moves)."""
+    global job_placement
+    local_owner()
+    filename = request.form.get("name", "")
+    content = _job_file(filename)
+    result, _ = make_placement(filename, content, request.form.get("origin", ""),
+                               request.form.get("anchor", ""))
+    job_placement = None if result["origin"] == "absolute" else result
+    box = result["bounds"]
+    where = ("" if box is None else " – Motiv X%.1f..%.1f / Y%.1f..%.1f" % (
+        box["xmin"], box["xmax"], box["ymin"], box["ymax"]))
+    return jsonify(message="Platziert: %s (%s, Versatz X%+.1f Y%+.1f)%s" % (
+        filename, result["origin"], result["dx"], result["dy"], where),
+        placement={k: v for k, v in result.items() if k != "sha"})
+
+
+def _stored_placement(filename, content):
+    p = job_placement
+    if p is None or (filename and p["file"] != filename):
+        raise RuntimeError("Keine gültige Platzierung für %s – neu platzieren (op=place)" % (
+            filename or "den Rahmen"))
+    if content is not None and p["sha"] != _content_sha(content):
+        raise RuntimeError("Auftrag seit dem Platzieren geändert – neu platzieren")
+    return p
+
+
+def _job_lines(filename, content, form):
+    """Lines to run: as stored, placed (placement=1) or freshly placed (origin=)."""
+    global job_placement
+    if form.get("placement") == "1":
+        p = _stored_placement(filename, content)
+        return _apply_offset(content.splitlines(), p["dx"], p["dy"])
+    origin = form.get("origin", "").strip()
+    if origin and origin != "absolute":
+        result, placed = make_placement(filename, content, origin, form.get("anchor", ""))
+        job_placement = result
+        return placed
+    preflight(content)
+    return content.splitlines()
 
 
 def _optional_point(form):
@@ -473,6 +658,7 @@ def job_delete(filename):
     if job["state"] in ("homing", "probing", "running") and job["file"] == path.name:
         raise RuntimeError("Laufender Auftrag kann nicht gelöscht werden")
     path.unlink()
+    _forget_placement(lambda p: p["file"] == path.name)
     return jsonify(message="Auftrag gelöscht: " + path.name)
 
 
@@ -509,6 +695,7 @@ def upload():
     temporary = JOBS / (basename + ".partial")
     temporary.write_text(text, encoding="utf-8")
     temporary.replace(JOBS / basename)
+    _forget_placement(lambda p: p["file"] == basename)
     return jsonify(message="Marlin-Auftrag geprüft und gespeichert: " + basename)
 
 
@@ -645,17 +832,18 @@ def start_job(automatic=False):
     if not machine.homed and not automatic:
         raise RuntimeError("Vor dem Job referenzieren")
     filename = request.form.get("name","")
-    if filename != Path(filename).name or not (JOBS / filename).is_file():
-        raise ValueError("Unbekannte Auftragsdatei")
-    content = (JOBS / filename).read_text(encoding="utf-8")
-    preflight(content)
+    content = _job_file(filename)
+    # Absolute by default (LightBurn/web UI/older Studio); placed with
+    # placement=1 or origin=current|user (Studio #16). Bounds and guard
+    # are checked on the lines that will actually be sent.
+    commands = _job_lines(filename, content, request.form)
     probe_point = None
     if automatic:
         if machine.probe_xy_offset_mm is None:
             raise ValueError("X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen")
         probe_point = _optional_point(request.form)
         if probe_point is None:
-            bounds = _powered_bounds(content)
+            bounds = _powered_bounds("\n".join(commands))
             if bounds is None:
                 raise ValueError("Motivmitte nicht bestimmbar: Abtastpunkt X/Y angeben")
             # The material lies under the motif; its centre is the most
@@ -669,7 +857,6 @@ def start_job(automatic=False):
             job_lock.release()
             raise RuntimeError("LightBurn hat inzwischen die Steuerung")
         machine.owner="job"
-    commands = content.splitlines()
     thread = threading.Thread(target=_job_worker,
                               args=(filename,commands,probe_point), daemon=True,
                               name="marlin-gcode-job")
@@ -775,7 +962,13 @@ def start_frame():
     mode = request.form.get("mode", "box") or "box"
     if mode not in FRAME_MODES:
         raise ValueError("Rahmenart muss box oder hull sein")
-    commands = frame_program(request.form.get("gcode", ""))
+    text = request.form.get("gcode", "")
+    if request.form.get("placement") == "1":
+        # Same offset as the placed job, so the frame shows where it will run.
+        p = _stored_placement(request.form.get("name", ""), None)
+        if isinstance(text, str) and len(text.encode("utf-8")) <= FRAME_MAX_BYTES:
+            text = "\n".join(placing.translate(text.splitlines(), p["dx"], p["dy"]))
+    commands = frame_program(text)
     if not job_lock.acquire(blocking=False):
         raise RuntimeError("Ein Auftrag oder Rahmen läuft bereits")
     stop_job.clear()

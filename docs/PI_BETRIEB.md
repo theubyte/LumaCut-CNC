@@ -69,8 +69,8 @@ Bis LumaCut Studio alles kann, funktioniert LightBurn weiter:
 
 | Methode | Pfad | Zweck |
 |---|---|---|
-| GET | `/api/status` | Zustand: Verbindung, Besitzer, Position, homed, Werkstück-Z, Fokus-Z, Job, Rahmen (`frame`), Tätigkeit (`activity`: `idle`/`job`/`framing`), `busy`/`stale_ms` (Snapshot, blockiert nicht hinter Fahrten), Firmware-Update, Konfiguration |
-| POST | `/api/action` `op=…` | `home`, `park`, `jog` (`axis`, `distance` ∈ ±0,1/1/10), `probe` (optional `x`,`y`), `light`/`exhaust` (`on`), `start`/`autorun` (`name`, optional `x`,`y` als Abtastpunkt), `frame` (`gcode`, `mode`=`box`/`hull`), `moveto` (`x`,`y` Maschinen-mm; Laser aus, hebt Z nur an – für den Kamera-Scan), `abort`, `estop`, `estop_reset`, `connect`, `info`/`position`/`endstops` |
+| GET | `/api/status` | Zustand: Verbindung, Besitzer, Position, homed, Ursprung (`origin`), Werkstück-Z, Fokus-Z, Job, Rahmen (`frame`), Tätigkeit (`activity`: `idle`/`job`/`framing`), `busy`/`stale_ms` (Snapshot, blockiert nicht hinter Fahrten), Firmware-Update, Konfiguration |
+| POST | `/api/action` `op=…` | `home`, `park`, `jog` (`axis`, `distance` ∈ ±0,1/1/10), `probe` (optional `x`,`y`), `light`/`exhaust` (`on`), `start`/`autorun` (`name`, optional `x`,`y` als Abtastpunkt), `frame` (`gcode`, `mode`=`box`/`hull`), `moveto` (`x`,`y` Maschinen-mm; Laser aus, hebt Z nur an – für den Kamera-Scan), Ursprung: `origin_set` (`x`,`y` oder Kopf), `origin_clear`, `place` (`name`, `origin`=`absolute`/`current`/`user`, `anchor`=`tl`/`tr`/`bl`/`br`/`center`), `place_clear`; `start`/`autorun`/`frame` mit `placement=1` laufen platziert, ohne absolut, `abort`, `estop`, `estop_reset`, `connect`, `info`/`position`/`endstops` |
 | POST | `/api/upload` | Auftrag (`file`, `.gcode`/`.gc`/`.nc`), wird vorab geprüft |
 | GET | `/api/jobs`, `/api/jobs/<name>/geometry`, `/api/jobs/<name>/content` | Aufträge, Motivgrenzen, Roh-G-Code |
 | POST | `/api/jobs/<name>/delete` | Auftrag löschen (nicht den laufenden) |
