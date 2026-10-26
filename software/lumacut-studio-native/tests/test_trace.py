@@ -231,3 +231,80 @@ def test_trace_dialog_preview(win, tmp_path):
     dlg.update_preview()
     assert not dlg.ok_button.isEnabled() and "Keine Konturen" in dlg.info.text()
     dlg.deleteLater()
+
+
+# --- Laufzeit (Review Runde 6): kein Hängen bei unruhigen Bildern ----------
+
+def _dot_grid(n=1000, step=8):
+    """Schwarze Fläche mit vielen 2×2-Pixel-Löchern (ein Teil, ~15 000 Löcher)."""
+    g = np.zeros((n, n), np.uint8)
+    yy, xx = np.mgrid[0:n, 0:n]
+    g[((yy % step) < 2) & ((xx % step) < 2) & (yy > 4) & (xx > 4)
+      & (yy < n - 5) & (xx < n - 5)] = 255
+    return g
+
+
+def test_many_holes_is_fast_and_exact():
+    import time
+    from shapely.geometry import Polygon
+    g = _dot_grid()
+    t0 = time.perf_counter()
+    res = trace_gray(g, TraceSettings(smoothing_px=0, min_area_mm2=0), (0.1, 0.1))
+    dt = time.perf_counter() - t0
+    assert dt < 8.0                              # alter Pfad: ~15 s (quadratisch)
+    assert len(res.parts) == 1
+    part = res.parts[0]
+    assert len(part.holes) == 124 * 124
+    assert _bbox(part.outer) == pytest.approx((0, 0, 1000, 1000))
+    # Löcher liegen auf den Pixelkanten und das Polygon ist gültig
+    assert _bbox(part.holes[0])[2] - _bbox(part.holes[0])[0] == pytest.approx(2, abs=0.3)
+    assert Polygon(part.outer, part.holes).is_valid
+
+
+def test_smooth_noise_finishes_or_refuses_quickly():
+    import time
+    import cv2
+    rng = np.random.default_rng(1)
+    for n, sigma in ((1000, 4), (1000, 8), (2000, 8)):
+        g = (rng.random((n, n)) * 255).astype(np.uint8)
+        g = cv2.normalize(cv2.GaussianBlur(g, (0, 0), sigma), None, 0, 255, cv2.NORM_MINMAX)
+        for st in (TraceSettings(), TraceSettings(smoothing_px=0, min_area_mm2=0)):
+            t0 = time.perf_counter()
+            try:
+                res = trace_gray(g, st, (0.085, 0.085))
+                assert res.parts
+            except ValueError as exc:
+                assert "Konturen" in str(exc) or "detailreich" in str(exc)
+            assert time.perf_counter() - t0 < 15.0, (n, sigma, st)
+
+
+def test_time_limit_and_size_cap(monkeypatch):
+    import lumacut_import.trace as tr
+    g = _blank()
+    g[10:30, 10:30] = 0
+    g[50:70, 50:70] = 0
+    with pytest.raises(ValueError, match="dauert zu lange"):
+        trace_gray(g, RAW, time_limit_s=0.0)
+    assert len(trace_gray(g, RAW, time_limit_s=None).parts) == 2
+    monkeypatch.setattr(tr, "MAX_PIXELS", 5000)
+    with pytest.raises(ValueError, match="zu groß"):
+        trace_gray(g, RAW)
+
+
+def test_preview_on_large_noisy_image_stays_responsive(win):
+    import time
+    import cv2
+    from lumacut_import.trace_qt import TraceDialog
+    rng = np.random.default_rng(2)
+    g = (rng.random((3000, 3000)) * 255).astype(np.uint8)
+    g = cv2.normalize(cv2.GaussianBlur(g, (0, 0), 3), None, 0, 255, cv2.NORM_MINMAX)
+    sh = _image_shape(g, w=250.0, h=250.0)
+    t0 = time.perf_counter()
+    dlg = TraceDialog(sh)
+    dlg.smoothing.setValue(0)
+    dlg.min_area.setValue(0)
+    dlg.update_preview()
+    assert time.perf_counter() - t0 < 10.0
+    assert dlg.info.text()
+    dlg.deleteLater()
+

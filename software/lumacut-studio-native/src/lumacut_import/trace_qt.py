@@ -1,7 +1,9 @@
 """Dialog „Bild nachzeichnen“ (Alt+T, wie LightBurn „Trace Image“).
 
 Schwellwert, Invertieren, Glättung, Toleranz und Mindestfläche mit
-Live-Vorschau (verkleinertes Bild, Konturen rot). Übernehmen legt die
+Live-Vorschau (verkleinertes Bild, Konturen rot). Die Vorschau rechnet auf
+höchstens ``PREVIEW_PX`` Pixeln mit kurzer Zeitgrenze, damit der Dialog auch
+bei großen, unruhigen Bildern nicht hängt. Übernehmen legt die
 Konturen als Polygone (Löcher als Ringe, mehrere Teile gruppiert) deckungsgleich
 über das Bild in die aktive Ebene – ein Rückgängig-Schritt, auf Wunsch
 einschließlich Löschen des Bildes.
@@ -19,6 +21,7 @@ from .trace import (MIN_AREA_RANGE, SMOOTHING_RANGE, THRESHOLD_RANGE, TOLERANCE_
                     TraceSettings, decode_gray, image_mm_per_px, trace_gray)
 
 PREVIEW_PX = 420
+PREVIEW_TIME_LIMIT_S = 2.0
 
 
 class TraceDialog(QDialog):
@@ -115,7 +118,7 @@ class TraceDialog(QDialog):
             f = pw / self.shape.image.px_width
             res = trace_gray(gray, TraceSettings(st.threshold, st.invert, st.smoothing_px * f,
                                                  st.tolerance_mm, st.min_area_mm2),
-                             self._mm_per_px)
+                             self._mm_per_px, time_limit_s=PREVIEW_TIME_LIMIT_S)
             err = None
         except ValueError as exc:
             res, err = None, str(exc)

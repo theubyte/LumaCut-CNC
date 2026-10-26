@@ -12,11 +12,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QPointF
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt
 from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-                               QFileDialog, QFormLayout, QInputDialog, QLabel, QMessageBox, QSpinBox,
-                               QVBoxLayout)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+                               QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog, QLabel,
+                               QMessageBox, QSpinBox, QVBoxLayout)
 
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand, SetImageSettingsCommand
 from lumacut_canvas.document_io import FILE_SUFFIX
@@ -378,10 +378,15 @@ class ImportTools(QObject):
             settings = dlg.settings()
             if delete_image is None:
                 delete_image = dlg.delete_image.isChecked()
+        QApplication.setOverrideCursor(Qt.WaitCursor)   # Laufzeit begrenzt (TIME_LIMIT_S)
         try:
             shapes = trace_to_shapes(sh, settings, layer.id)
         except ValueError as exc:
-            self._error("Nachzeichnen fehlgeschlagen", str(exc))
+            shapes, error = None, str(exc)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if shapes is None:
+            self._error("Nachzeichnen fehlgeschlagen", error)
             return []
         if not shapes:
             self._error("Nachzeichnen", "Keine Konturen gefunden – Schwellwert oder Invertieren ändern")

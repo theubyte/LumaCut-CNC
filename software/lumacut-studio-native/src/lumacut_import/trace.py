@@ -22,6 +22,12 @@ Die Konturen liegen auf den Pixelkanten: die Maske wird 2× hochgerechnet
 (damit auch 1 Pixel breite Linien eine Fläche haben), OpenCV liefert die
 Randpixel-Mitten, shapely legt sie ¼ Bildpixel nach außen (Gehrung). Der Bildrand wird mit
 Weiß aufgefüllt, damit Flächen am Rand geschlossene Konturen ergeben.
+
+Laufzeit: Bilder über ``MAX_PIXELS`` und Masken mit zu vielen Randpunkten oder
+Teilen werden vor jeder shapely-Arbeit abgelehnt. Teile mit vielen Löchern
+(> ``MANY_HOLES``) werden Ring für Ring verbreitert und vereinfacht (STRtree
+statt der in GEOS etwa quadratischen Lochzuordnung); ``time_limit_s`` ist die
+Notbremse dazu.
 """
 
 from __future__ import annotations
@@ -35,6 +41,8 @@ from lumacut_canvas.model import Shape, new_id, rotate_point
 MAX_PARTS = 20000
 MAX_POINTS = 400_000
 MAX_RAW_POINTS = 400_000           # Randpunkte vor dem Vereinfachen (Rauschschutz)
+MAX_PIXELS = 40_000_000            # größere Bilder vorher verkleinern (Maske wird 2× hochgerechnet)
+TIME_LIMIT_S = 60.0                # Notbremse je Nachzeichnen (zwischen den Teilen geprüft)
 THRESHOLD_RANGE = (1, 255)
 SMOOTHING_RANGE = (0.0, 10.0)      # Sigma in Bildpixeln
 TOLERANCE_RANGE = (0.0, 2.0)       # mm
@@ -115,30 +123,179 @@ def _shoelace(pts: Ring) -> float:
     return abs(a) / 2
 
 
+_MITRE = dict(join_style="mitre", mitre_limit=2.0)
+# Ab so vielen Löchern je Teil wird nicht mehr das ganze Polygon auf einmal
+# verbreitert/vereinfacht (GEOS wächst dort etwa quadratisch mit der Lochzahl),
+# sondern jeder Ring einzeln – mit Konfliktprüfung über einen STRtree.
+MANY_HOLES = 64
+
+
+def _polys(geom) -> list:
+    if geom.is_empty:
+        return []
+    if geom.geom_type == "Polygon":
+        return [geom]
+    return [g for g in getattr(geom, "geoms", []) if g.geom_type == "Polygon" and not g.is_empty]
+
+
 def _pixel_polygons(outer: Ring, holes: list[Ring], grow: float):
     """Kontur durch Randpixel-Mitten → Polygon(e), um ``grow`` nach außen
     (Gehrung) auf die echte Pixelkante gelegt."""
     from shapely.geometry import Polygon
 
-    geom = Polygon(outer, [h for h in holes if len(h) >= 3]).buffer(0)
+    holes = [h for h in holes if len(h) >= 3]
+    if len(holes) > MANY_HOLES:
+        return _pixel_polygons_many(outer, holes, grow)
+    geom = Polygon(outer, holes).buffer(0)
     if geom.is_empty:
         return []
-    geom = geom.buffer(grow, join_style="mitre", mitre_limit=2.0)
-    if geom.geom_type == "Polygon":
-        return [geom] if not geom.is_empty else []
-    return [g for g in getattr(geom, "geoms", []) if g.geom_type == "Polygon"]
+    return _polys(geom.buffer(grow, **_MITRE))
+
+
+def _pixel_polygons_many(outer: Ring, holes: list[Ring], grow: float):
+    """Wie :func:`_pixel_polygons`, aber Außenkontur und Löcher getrennt:
+    Außenkontur verbreitern, Löcher um ``grow`` schrumpfen und einsetzen.
+
+    Löcher, die sich berühren (Diagonalkontakt), werden vorher in kleinen
+    Gruppen vereinigt; Löcher sauber innerhalb der Außenkontur werden direkt
+    eingesetzt, nur die übrigen gehen durch die Differenz. So bleibt der
+    Aufwand etwa linear statt quadratisch in der Lochzahl."""
+    import shapely
+    from shapely.geometry import MultiPolygon, Polygon
+
+    shells = _polys(Polygon(outer).buffer(0).buffer(grow, **_MITRE))
+    if not shells:
+        return []
+    hp = shapely.polygons([shapely.linearrings(h) for h in holes])
+    hp = shapely.buffer(shapely.buffer(hp, 0), -grow, **_MITRE)
+    hp = [g for h in hp for g in _polys(h)]
+    if not hp:
+        return shells
+    hp = _merge_touching(hp)
+    hp_arr = np.array(hp, dtype=object)
+    plain = np.array([len(g.interiors) == 0 for g in hp])
+    tree = shapely.STRtree(hp_arr)
+    out = []
+    for shell in shells:
+        cand = tree.query(shell, predicate="intersects")
+        if not len(cand):
+            out.append(shell)
+            continue
+        if len(shell.interiors) == 0:
+            shapely.prepare(shell)
+            inside = shapely.contains_properly(shell, hp_arr[cand]) & plain[cand]
+            direct, rest = cand[inside], cand[~inside]
+        else:
+            direct, rest = cand[:0], cand
+        if len(direct):
+            # disjunkte, einfache Löcher sauber innen: gültig ohne weitere Prüfung
+            shell = Polygon(shell.exterior.coords, [hp[k].exterior.coords for k in direct])
+        if len(rest):
+            shell = shell.difference(MultiPolygon([hp[k] for k in rest]))
+        out.extend(_polys(shell))
+    return out
+
+
+def _merge_touching(polys: list) -> list:
+    """Sich berührende/überlappende Polygone gruppenweise vereinigen
+    (Union-Find über STRtree-Paare) → paarweise disjunkte Polygone."""
+    import shapely
+
+    arr = np.array(polys, dtype=object)
+    a, b = shapely.STRtree(arr).query(arr, predicate="intersects")
+    keep = a < b
+    a, b = a[keep], b[keep]
+    if not len(a):
+        return polys
+    parent = list(range(len(polys)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, j in zip(a.tolist(), b.tolist()):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[max(ri, rj)] = min(ri, rj)
+    groups: dict[int, list[int]] = {}
+    for i in range(len(polys)):
+        groups.setdefault(find(i), []).append(i)
+    out = []
+    for idx in groups.values():
+        if len(idx) == 1:
+            out.append(polys[idx[0]])
+        else:
+            out.extend(_polys(shapely.union_all(arr[idx])))
+    return out
+
+
+def _simplify(poly, eps: float):
+    """Douglas-Peucker mit Topologieerhalt. Bei vielen Löchern jeden Ring einzeln
+    vereinfachen und nur Ringe, die sich danach schneiden, unvereinfacht lassen
+    (die topologieerhaltende Vereinfachung des ganzen Polygons wächst etwa
+    quadratisch mit der Lochzahl)."""
+    if len(poly.interiors) <= MANY_HOLES:
+        return poly.simplify(eps, preserve_topology=True)
+    import shapely
+    from shapely.geometry import Polygon
+
+    rings = [poly.exterior, *poly.interiors]
+    raw_polys = shapely.polygons(np.array([shapely.linearrings(r.coords) for r in rings],
+                                          dtype=object))
+    simp = shapely.simplify(raw_polys, eps, preserve_topology=True)
+    ok = np.array([g.geom_type == "Polygon" and not g.is_empty for g in simp])
+    ok[ok] = shapely.is_valid(simp[ok])
+    use_raw = ~ok
+    final = np.where(ok, simp, raw_polys)
+    for _ in range(3):
+        # Außenkontur vorbereitet gegen alle Löcher, Löcher untereinander per STRtree
+        # (die riesige Außenkontur nie als Baumelement – sonst O(Löcher × Punkte))
+        lines = shapely.boundary(final)
+        shell_line = lines[0]
+        shapely.prepare(shell_line)
+        bad_hole = shapely.intersects(shell_line, lines[1:])
+        bad = np.zeros(len(final), bool)
+        bad[1:] = bad_hole            # erst das Loch zurücksetzen …
+        bad[0] = (bad_hole & use_raw[1:]).any()   # … dann erst die Außenkontur
+        tree = shapely.STRtree(lines[1:])
+        a, b = tree.query(lines[1:], predicate="intersects")
+        bad[1 + a[a != b]] = True
+        changed = np.nonzero(bad & ~use_raw)[0]
+        if not len(changed):
+            break
+        use_raw[changed] = True
+        final[changed] = raw_polys[changed]
+    # Nur noch unvereinfachte Ringe berühren sich (wie im gültigen Original);
+    # liegt jedes Loch in der Außenkontur, ist das Ergebnis gültig
+    shell = final[0]
+    shapely.prepare(shell)
+    if len(changed) or not shapely.covers(shell, final[1:]).all():
+        return poly
+    return Polygon(shell.exterior.coords, [g.exterior.coords for g in final[1:]])
 
 
 def trace_gray(gray: np.ndarray, settings: TraceSettings,
-               mm_per_px: tuple[float, float] = (1.0, 1.0)) -> TraceResult:
+               mm_per_px: tuple[float, float] = (1.0, 1.0),
+               time_limit_s: float | None = TIME_LIMIT_S) -> TraceResult:
     """Graustufen-Array → Teile in Bildpixel-Koordinaten (Pixelmitte = i + 0,5).
 
     ``mm_per_px`` dient nur zum Umrechnen von Toleranz und Mindestfläche.
+    Die Laufzeit ist begrenzt: zu große oder zu detailreiche Bilder werden vor
+    der Geometriearbeit abgelehnt, und nach ``time_limit_s`` Sekunden bricht
+    das Nachzeichnen mit ``ValueError`` ab (Vorschau: kurze Grenze).
     """
+    import time
+
     import cv2
     st = settings.normalized()
     if gray.ndim != 2 or gray.size == 0:
         raise ValueError("Bild ist leer")
+    if gray.size > MAX_PIXELS:
+        raise ValueError(f"Bild zu groß ({gray.shape[1]}×{gray.shape[0]} Pixel) – vorher "
+                         f"auf höchstens {MAX_PIXELS // 1_000_000} Megapixel verkleinern")
+    deadline = None if time_limit_s is None else time.monotonic() + float(time_limit_s)
     mx, my = (abs(float(v)) or 1.0 for v in mm_per_px)
     # 2× hochgerechnet (nächster Nachbar): auch 1 Pixel breite Linien haben
     # dann eine Fläche zwischen den Randpixel-Mitten; ¼ Pixel nach außen ergibt
@@ -166,7 +323,7 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
 
     def raw(i: int) -> list[tuple[float, float]]:
         # Subpixel-Mitte (2k+1 inkl. Pad) → Bildpixel: (x - 1 + 0,5) / 2
-        return [((float(x) - 0.5) / 2, (float(y) - 0.5) / 2) for x, y in contours[i][:, 0, :]]
+        return list(map(tuple, ((contours[i][:, 0, :] - 0.5) / 2).tolist()))
 
     def too_small(i: int) -> bool:
         # obere Schranke der Fläche nach dem Verbreitern (in Subpixeln, ¼ = 1 Bildpixel²)
@@ -174,16 +331,26 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
         upper = abs(cv2.contourArea(c)) + 0.5 * cv2.arcLength(c, True) + 1.0
         return upper / 4 < min_area
 
+    # Vorab-Budget (billig, vor jeder shapely-Arbeit): zu viele Teile → sofort ablehnen
+    small = np.fromiter((too_small(i) for i in range(len(contours))), bool, len(contours))
+    n_top = int(np.count_nonzero((hier[:, 3] < 0) & ~small))
+    if n_top > MAX_PARTS:
+        raise ValueError(f"Zu viele Konturen ({n_top}) – Schwellwert, Glättung "
+                         f"oder Mindestfläche anpassen")
+
     for i, (_nxt, _prev, child, parent) in enumerate(hier):
         if parent >= 0:
             continue
-        if too_small(i):
+        if deadline is not None and time.monotonic() > deadline:
+            raise ValueError("Nachzeichnen dauert zu lange – Glättung, Schwellwert oder "
+                             "Mindestfläche erhöhen")
+        if small[i]:
             removed += 1
             continue
         holes = []
         j = child
         while j >= 0:
-            if too_small(j):
+            if small[j]:
                 removed += 1
             else:
                 holes.append(raw(j))
@@ -196,7 +363,7 @@ def trace_gray(gray: np.ndarray, settings: TraceSettings,
                 removed += 1
                 continue
             if eps_px > 0:
-                poly = poly.simplify(eps_px, preserve_topology=True)
+                poly = _simplify(poly, eps_px)
             if poly.is_empty or poly.geom_type != "Polygon":
                 removed += 1
                 continue
