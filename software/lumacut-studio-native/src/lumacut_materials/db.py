@@ -117,6 +117,7 @@ class MaterialDB:
         if data.get("format") != "lumacut-materials":
             raise ValueError("Keine LumaCut-Materialdatei")
         self.raw = data
+        self.version: str = str(data.get("version", ""))
         self.model: dict[str, Any] = data["model"]
         self.disclaimer: str = data.get("disclaimer", "")
         self.relief_guide: dict[str, Any] = data.get("relief_guide", {})
@@ -125,6 +126,13 @@ class MaterialDB:
         ids = [m.id for m in self.materials]
         if len(ids) != len(set(ids)):
             raise ValueError("Doppelte Material-IDs")
+
+    def replace(self, data: dict[str, Any]) -> None:
+        """Inhalt an Ort und Stelle austauschen (z. B. neue Pi-Datenbank), damit alle
+        Halter dieses Objekts (Dialog, Schnellfeld, Verknüpfungs-Hook) sie sehen.
+        Prüft zuerst vollständig; bei Fehler bleibt der alte Inhalt."""
+        fresh = MaterialDB(data)
+        self.__dict__.update(fresh.__dict__)
 
     # --- Abfragen -------------------------------------------------------------
     def material(self, material_id: str) -> Material:

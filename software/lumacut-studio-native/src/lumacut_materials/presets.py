@@ -9,7 +9,9 @@ und Luftunterstützung sind Hinweise (die Ebene kennt sie noch nicht).
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
@@ -38,6 +40,7 @@ class Preset:
     notes: str = ""
     warnings: list[str] = field(default_factory=list)
     source: str = "planner"  # planner | test (aus dem Materialtest-Raster übernommen)
+    id: str = ""  # stabile ID auf dem Pi (``/api/materials/presets/<id>``), s. preset_id()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -64,6 +67,17 @@ class Preset:
             parts.append(f"Zeilenabstand {self.line_interval_mm:g} mm")
         parts.append(f"Luft {self.air_assist}")
         return ", ".join(parts)
+
+
+def preset_id(name: str) -> str:
+    """Stabile, URL-sichere ID aus dem Namen: ``<slug>-<6 hex>`` (max. 64 Zeichen).
+
+    Gleicher Name ergibt auf jedem Gerät dieselbe ID (Windows, Android, Web)."""
+    folded = name.strip().lower()
+    for a, b in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")):
+        folded = folded.replace(a, b)
+    slug = re.sub(r"[^a-z0-9]+", "-", folded).strip("-")[:56] or "preset"
+    return f"{slug}-{hashlib.sha1(name.strip().encode('utf-8')).hexdigest()[:6]}"
 
 
 def make_preset(db: MaterialDB, material_id: str, op: str, thickness_mm: float | None = None,
@@ -121,9 +135,13 @@ class PresetStore:
                 return p
         raise KeyError(name)
 
+    def by_id(self, pid: str) -> Preset | None:
+        return next((p for p in self.presets if pid and p.id == pid), None)
+
     def put(self, preset: Preset) -> None:
-        """Hinzufügen oder gleichnamiges Preset ersetzen."""
-        self.presets = [p for p in self.presets if p.name != preset.name] + [preset]
+        """Hinzufügen oder gleichnamiges (bzw. gleiche ID) Preset ersetzen."""
+        self.presets = [p for p in self.presets
+                        if p.name != preset.name and not (preset.id and p.id == preset.id)] + [preset]
 
     def remove(self, name: str) -> None:
         self.presets = [p for p in self.presets if p.name != name]
