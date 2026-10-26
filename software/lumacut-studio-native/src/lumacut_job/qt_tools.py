@@ -112,7 +112,16 @@ class JobTools(QObject):
                                      "Leistung × Geschwindigkeit-Testraster einfügen")
         self.cut_action = self._add("Schnittoptionen…", self.cut_options, "Alt+K",
                                     "Kerf-Versatz, Haltestege und An-/Abfahrt der aktiven Ebene")
+        self.save_action = self._add("G-Code speichern…", self.save_gcode, "Alt+G",
+                                     "Optimierten G-Code des Designs als Datei speichern")
+        self.history_action = self._add("Verlauf…", self.show_history, "Ctrl+H",
+                                        "Zuletzt gesendete Aufträge erneut senden oder speichern")
         window.addToolBar(self.toolbar)
+        from .history import JobHistory
+        from .history_qt import attach_history, default_dir
+        self.history = JobHistory(default_dir())
+        self._send_without_history = (attach_history(machine_panel, self.history)
+                                      if hasattr(machine_panel, "send_gcode") else None)
         if hasattr(machine_panel, "set_frame_provider"):
             machine_panel.set_frame_provider(self.frame_program)
         signal = getattr(machine_panel, "frame_available_changed", None)
@@ -208,6 +217,39 @@ class JobTools(QObject):
         self._msg(f"Schnittoptionen „{layer.name}“: {text}" if changed
                   else "Schnittoptionen unverändert")
         return changed
+
+
+    def save_gcode(self, path: str | None = None) -> str:
+        """Optimierten G-Code (wie beim Senden, ohne Scan-Fokuskorrektur) speichern."""
+        from .history_qt import save_gcode_file
+        try:
+            g = optimized_document_gcode(self.editor.document)
+        except ValueError as exc:
+            self._msg(f"Speichern nicht möglich: {exc}")
+            return ""
+        fp = getattr(self.editor, "file_path", None)
+        name = (fp.name.split(".")[0] if fp else "auftrag") + ".gcode"
+        if path is None:
+            path = save_gcode_file(self.window, g, name)
+        else:
+            from pathlib import Path
+            Path(path).write_text(g, encoding="utf-8", newline="\n")
+        if path:
+            self._msg(f"G-Code gespeichert: {path}")
+        return path
+
+    def show_history(self, modal: bool = True):
+        from .history_qt import HistoryDialog
+
+        def send(name, gcode):
+            if self._send_without_history is None:
+                return
+            self._send_without_history(name, gcode, start=False)
+            self._msg(f"Erneut gesendet: {name} – mit „Start“ ausführen")
+        dlg = HistoryDialog(self.history, send, self.window)
+        if modal:
+            dlg.exec()
+        return dlg
 
 
 def install_job_tools(window) -> JobTools:
