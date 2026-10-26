@@ -46,9 +46,9 @@ Eigenständig testen: `python src/canvas_demo.py`.
   Auswahlmitte zu – sie bleibt stehen bzw. wird zentriert; 0,4–60 px/mm), mittlere Maustaste oder Leertaste+Ziehen = Verschieben,
   Strg+0 = Fläche einpassen, Raster und Fangen (1 mm) umschaltbar, Lineale in mm,
   Cursorposition in mm in der Statusleiste.
-- **Touch (z. B. Surface Pro):** „Touch-Modus“ in der Canvas-Aktionsleiste bzw. in der
-  Statusleiste. Er schaltet sich bei einem Touchscreen (oder beim ersten Fingertipp)
-  selbst ein; eine manuelle Wahl wird in QSettings (`canvas/touch_mode`) gespeichert und
+- **Touch (z. B. Surface Pro):** „Touch-Modus“ in der Canvas-Aktionsleiste. Er schaltet
+  sich bei einem Touchscreen, auf kleinen Bildschirmen (< 1500 × 950 logische px, z. B.
+  Surface Pro mit 150–200 % Skalierung) oder beim ersten Fingertipp selbst ein; eine manuelle Wahl wird in QSettings (`canvas/touch_mode`) gespeichert und
   hat dann Vorrang. Im Touch-Modus (Werte in `lumacut_canvas/touch.py`, `TouchMetrics`):
   - Griffe 16 px gezeichnet, Trefferfläche 32 × 32 px, Dreh-Griff 44 px über dem Rahmen;
     konstant in Bildschirm-Pixeln bei jedem Zoom (Maus-Modus unverändert 9 px).
@@ -64,7 +64,15 @@ Eigenständig testen: `python src/canvas_demo.py`.
     Ein Gummiband-Rahmen geht nur mit Maus oder Stift.
   - Zoom-Knöpfe unten rechts im Canvas (−, +, Einpassen, 100 %), 52 px.
   - Werkzeugleisten mit 32-px-Icons in ≥ 48-px-Knöpfen; im Ebenen-Panel 56 px hohe Zeilen,
-    40-px-Knöpfe und 34 px hohe Eingabefelder.
+    ≥ 40-px-Knöpfe und 34 px hohe Eingabefelder.
+- **Kleine Bildschirme** (`lumacut_canvas/fit.py`): Die senkrechte Werkzeugleiste hat immer
+  ≥ 44 × 44-px-Knöpfe mit Abstand. Das Fenster startet in der Größe des verfügbaren
+  Bildschirms (max. 1400 × 900) und wird zentriert; die Mindestgröße wird nie größer als der
+  Bildschirm. Eigenschaftsleiste über dem Canvas scrollt waagerecht statt Felder
+  abzuschneiden; Ebenen-Panel und rechte Seitenleiste scrollen senkrecht (auch per Finger)
+  und bekommen beim Öffnen die Breite, die ihr Inhalt braucht (höchstens 26 % bzw. 42 % der
+  Fensterbreite, sonst zusätzlich waagerechter Bildlauf). Formulare im Ebenen-Panel brechen
+  bei schmaler Breite unter die Beschriftung um.
   - Vom System aus Touch erzeugte Maus-Ereignisse werden während und 0,6 s nach einer
     Berührung ignoriert (keine doppelte Ausführung); Touchpad-Gesten bleiben beim System.
 - **Ebenen:** Farbe, Name, sichtbar, gesperrt, Reihenfolge; je Ebene
