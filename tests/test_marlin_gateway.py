@@ -221,27 +221,28 @@ class USBProtocolTests(unittest.TestCase):
             bridge.command("G28 Z")
         self.assertFalse(bridge.homed)
         bridge.homing_verified=True
-        bridge.serial=FakeSerial([
-            "ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n",
+        bridge.serial=FakeSerial(["ok\n"] * 12 + [
             "X:0 Y:0 Z:20\n", "ok\n", "x_min: TRIGGERED\n", "y_min: TRIGGERED\n", "z_min: open\n", "ok\n"
         ])
         bridge.homing_chime_enabled = False
+        bridge.last_known_z = 20.0            # Z unknown to Marlin: lift relative from the last known height
         response = bridge.safe_home()
         self.assertEqual(response[-1],"ok")
         self.assertTrue(bridge.homed)
         self.assertTrue(bridge.z_homed)
-        self.assertEqual(bridge.serial.writes[0], b"M5 I\n")
-        self.assertEqual(bridge.serial.writes[1], b"G28 X Y\n")
-        self.assertEqual(bridge.serial.writes[3], b"G28 Z\n")
-        self.assertEqual(bridge.serial.writes[6], b"G0 Z20.00 F600\n")
+        w = [x.decode().strip() for x in bridge.serial.writes]
+        self.assertEqual(w[:5], ["M5 I", "G91", "G0 Z5.00 F600", "G90", "G28 X Y R0"])
+        self.assertEqual(w[6], "G28 Z")
+        self.assertEqual(w[9], "G0 Z20.00 F600")
 
     def test_lightburn_g28_has_one_ack_and_real_marlin_usb_sequence(self):
-        responses=["ok\n"] * 9 + ["X:0 Y:0 Z:20\n","ok\n","x_min: TRIGGERED\n","y_min: TRIGGERED\n","ok\n"]
+        responses=["ok\n"] * 12 + ["X:0 Y:0 Z:20\n","ok\n","x_min: TRIGGERED\n","y_min: TRIGGERED\n","ok\n"]
         serial=FakeSerial(responses)
         controller=MarlinTransport("/dev/null")
         controller.serial=serial
         controller.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
         controller.homing_verified=True
+        controller.last_known_z=20.0
         class FakeTCP:
             def __init__(self):
                 self.payloads=[b"G28\r\n",b""]
@@ -265,13 +266,14 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(parse_endstops(["Reporting endstop status", "x_min: open", "y_min: TRIGGERED", "z_min: open", "ok"]),
                          {"x_min": False, "y_min": True, "z_min": False})
         def homed_bridge(after_home):
-            serial = FakeSerial(["ok\n"] * 9 + ["X:0 Y:0 Z:20\n", "ok\n"] + after_home)
+            serial = FakeSerial(["ok\n"] * 12 + ["X:0 Y:0 Z:20\n", "ok\n"] + after_home)
             b = MarlinTransport("/dev/null")
             b.serial = serial
             b.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
             b.homing_verified = True
             b.homing_chime_enabled = False
             b.light_effects = False
+            b.last_known_z = 20.0
             b.safe_home()
             return b, serial
         # switches pressed after homing: check active, still pressed = still homed
@@ -302,6 +304,34 @@ class USBProtocolTests(unittest.TestCase):
         b, _ = homed_bridge(["x_min: TRIGGERED\n", "y_min: TRIGGERED\n", "ok\n"])
         b.owner = "job"
         self.assertIsNone(b.check_reference())
+
+    def test_travel_height_and_lift_before_homing(self):
+        b = MarlinTransport("/dev/null")
+        self.assertEqual(b.travel_z, 20.0)                     # no material: the clearance
+        b.material_mm = 12.0
+        self.assertEqual(b.travel_z, 32.0)                     # material + 20 mm
+        b.material_mm = 70.0
+        self.assertEqual(b.travel_z, 80.0)                     # never above the rail limit
+        b.material_mm = 3.0
+        # Z unknown (emergency stop), last known 8.5 mm (focus height): up to 23 mm
+        b.last_known_z = 8.5
+        self.assertEqual(b._lift_before_home_locked(False), ["G91", "G0 Z14.50 F600", "G90"])
+        # already high: at least 5 mm, but never past Z80
+        b.last_known_z = 60.0
+        self.assertEqual(b._lift_before_home_locked(False), ["G91", "G0 Z5.00 F600", "G90"])
+        b.last_known_z = 78.0
+        self.assertEqual(b._lift_before_home_locked(False), ["G91", "G0 Z2.00 F600", "G90"])
+        # nothing known: only with the operator's confirmation
+        b.last_known_z = None
+        with self.assertRaisesRegex(RuntimeError, "Kopfhöhe unbekannt"):
+            b._lift_before_home_locked(False)
+        self.assertEqual(b._lift_before_home_locked(True), [])
+        # Z known: absolute to the travel height
+        b.z_homed = True
+        b.position = [100.0, 100.0, 10.0]
+        self.assertEqual(b._lift_before_home_locked(False), ["G0 Z23.00 F600"])
+        b.position = [100.0, 100.0, 40.0]
+        self.assertEqual(b._lift_before_home_locked(False), [])
 
     def test_park_requires_home_and_moves_z_up_before_xy(self):
         serial=FakeSerial([
@@ -1448,7 +1478,7 @@ class MarlinSim:
         if cmd == "M115":
             reply.append("FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin")
             reply.append("Cap:Z_PROBE:1")
-        elif cmd == "G28 X Y":
+        elif cmd.startswith("G28 X Y"):
             self.pos[0] = self.pos[1] = 0.0
         elif cmd == "G28 Z":
             self.pos[2] = 0.0
@@ -1484,6 +1514,10 @@ web.machine = m = MarlinTransport("/dev/null", serial_factory=lambda *a, **k: si
 m.homing_verified = True
 m.probe_xy_offset_mm = (10.0, 5.0)
 m.ensure_ready()
+m.last_known_z = sim.pos[2]
+web.WORKSPACE.put_state({"material": {"name": "Testplatte", "thickness_mm": 0.0}}, None)
+web.config["thickness_tolerance_mm"] = 50.0
+
 gcode = ("G21\nG90\nM5 I\nM3 I\n; LAYER engrave\nG0 X279.094 Y276.357\n"
          "G1 X388.781 Y276.357 F2000 S77\nG1 X388.781 Y354.412 F2000 S77\n"
          "G1 X279.094 Y354.412 F2000 S77\nG1 X279.094 Y276.357 F2000 S77\nM5 I\nM400\n")
@@ -1498,7 +1532,7 @@ w = sim.writes
 probes = [i for i, c in enumerate(w) if c == "G30 E0"]
 assert len(probes) == 7 and "G30" not in w, "one measurement per point, no stow/deploy raise"
 stow = w.index("M402")
-order = [w.index("G28 X Y"), w.index("G28 Z"), probes[0], probes[-1], stow, w.index("M3 I")]
+order = [w.index("G28 X Y R0"), w.index("G28 Z"), probes[0], probes[-1], stow, w.index("M3 I")]
 assert order == sorted(order), order
 assert w.index("G0 Z20.00 F600") > w.index("G28 Z")
 # Fast: between the points only a low hop (contact + 3 mm), never the 20 mm retract.

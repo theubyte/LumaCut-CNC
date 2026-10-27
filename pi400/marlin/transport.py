@@ -72,6 +72,12 @@ PROBE_HOP_MM = 3.0
 # of the Z linear rail. Firmware Z_MAX_POS is the same; the Pi checks it too
 # because a SKR with older firmware still allows 90 mm.
 Z_MAX_MM = 80.0
+# Travel height over unknown ground = material thickness + this (owner's
+# rule): the probe tip, the lowest part of the head, clears everything.
+TRAVEL_GAP_MM = 20.0
+# Least relative lift before homing when Z is unknown (the head may stand
+# just above the workpiece after an emergency stop).
+MIN_BLIND_LIFT_MM = 5.0
 
 
 class MarlinCommandError(RuntimeError):
@@ -240,6 +246,12 @@ class MarlinTransport:
         self.homing_verified = False
         self.emergency_latched = False
         self.clearance_mm = 20.0
+        # Thickness of the chosen material (Pi workspace), None = not chosen.
+        self.material_mm = None
+        # Last Z the head is known to be at (machine Z, also commanded job Z),
+        # kept by the web layer in a file: it decides how far to lift before
+        # homing when Marlin lost its position (emergency stop, reset).
+        self.last_known_z = None
         self.position = None
         self.fault = ""
         self.lines = deque(maxlen=80)
@@ -340,6 +352,8 @@ class MarlinTransport:
                 p = POSITION_RE.search(line)
                 if p:
                     self.position = [float(p.group(i)) for i in (1, 2, 3)]
+                    if self.z_homed:
+                        self.last_known_z = self.position[2]
                 if "FIRMWARE_NAME:Marlin" in line:
                     self.identity = line
                 return line
@@ -525,6 +539,8 @@ class MarlinTransport:
             raise ValueError(
                 f"Z-Sperre: Ziel {target:.3f} mm über der Höchstgrenze Z{Z_MAX_MM:g} "
                 "(darüber läuft der Kopf aus der Linearschiene).")
+        if self.z_homed:
+            self.last_known_z = target
 
     def _xy_cut_guard_locked(self, cmd: str):
         """Reject any armed linear cut touching the 30mm X/Y home bands.
@@ -920,8 +936,36 @@ class MarlinTransport:
                 return False
             return self._light_effect_locked(event)
 
+    @property
+    def travel_z(self) -> float:
+        """Height for every move over unknown ground: material + 20 mm, at
+        least the clearance, never above Z_MAX_MM."""
+        h = self.clearance_mm if self.material_mm is None else max(self.clearance_mm, self.material_mm + TRAVEL_GAP_MM)
+        return min(h, Z_MAX_MM)
+
+    def _lift_before_home_locked(self, operator_clear: bool) -> list:
+        """Commands that bring the head up before X/Y homing crosses the bed.
+
+        Z known (homed): absolute to the travel height. Z unknown (emergency
+        stop, SKR reset): relative by travel height minus the last known Z,
+        at least 5 mm, never above the rail (Z_MAX_MM). Without a last known
+        Z only the operator can say the head stands clear (operator_clear).
+        """
+        if self.z_homed and self.position is not None:
+            if self.position[2] < self.travel_z - 0.01:
+                return [f"G0 Z{self.travel_z:.2f} F600"]
+            return []
+        if self.last_known_z is not None:
+            last = self.last_known_z
+            lift = min(max(self.travel_z - last, MIN_BLIND_LIFT_MM), Z_MAX_MM - last)
+            return ["G91", f"G0 Z{lift:.2f} F600", "G90"] if lift > 0.05 else []
+        if operator_clear:
+            return []
+        raise RuntimeError("Kopfhöhe unbekannt: Steht der Kopf frei über allem auf dem Bett? "
+                           "Dann das Referenzieren bestätigen.")
+
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
-                  probe_contact_confirmed: bool = False, should_stop=None):
+                  probe_contact_confirmed: bool = False, should_stop=None, operator_clear: bool = False):
         """LightBurn G28: home XY first into EMPTY L-shaped 30mm bed zone.
 
         This explicitly relies on the operator keeping the X0/Y0 strips clear
@@ -951,13 +995,18 @@ class MarlinTransport:
             self.last_probe_laser_xy = None
             self.last_xy_commanded = None
             self.focused_this_job = False
-            commands = ["M5 I", "G28 X Y", "M400",
+            # Up to the travel height before X/Y cross the bed; G28 R0: Marlin
+            # itself does not lift again (its blind 16 mm could hit the rail top).
+            lift = self._lift_before_home_locked(operator_clear)
+            final = min(Z_MAX_MM, max(clearance, self.travel_z))
+            commands = ["M5 I"] + lift + ["G28 X Y R0", "M400",
                         "G28 Z", "M400", "G91",
-                        f"G0 Z{clearance:.2f} F600", "G90", "M400", "M114"]
+                        f"G0 Z{final:.2f} F600", "G90", "M400", "M114"]
             result = []
             try:
-                for index, cmd in enumerate(commands):
-                    if index == 3 and should_stop is not None and should_stop():
+                for cmd in commands:
+                    # an abort after X/Y homing: stop before Z leaves the park corner
+                    if cmd == "G28 Z" and should_stop is not None and should_stop():
                         self.last_xy_commanded = (0.0, 0.0)
                         raise Aborted()
                     result = self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35)
@@ -1020,8 +1069,8 @@ class MarlinTransport:
             if not self.absolute_mode:
                 self._exchange_locked("G90", timeout=8)
                 self.absolute_mode = True
-            if self.position[2] < self.clearance_mm:
-                self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F600", timeout=45)
+            if self.position[2] < self.travel_z:
+                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F600", timeout=45)
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=90)
             self._exchange_locked("M400", timeout=90)
             result = self._exchange_locked("M114", timeout=8)
@@ -1106,8 +1155,8 @@ class MarlinTransport:
             if not self.absolute_mode:
                 self._exchange_locked("G90", timeout=8)
                 self.absolute_mode = True
-            if self.position[2] < self.clearance_mm:
-                self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F600", timeout=45)
+            if self.position[2] < self.travel_z:
+                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F600", timeout=45)
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=90)
             self._exchange_locked("M400", timeout=90)
             feed = speed * 60
@@ -1150,7 +1199,7 @@ class MarlinTransport:
                 raise RuntimeError("Parkhöhe unbekannt: keine Fahrt")
             # Positive Z is verified upward, and Z_max is Z_MAX_MM (80 mm).
             # Current height always wins, to avoid a dangerous downward park.
-            z_target = max(self.position[2], self.clearance_mm,
+            z_target = max(self.position[2], self.travel_z,
                            0.0 if self.surface_z is None else
                            self.surface_z + self.probe_clearance_mm)
             if z_target > Z_MAX_MM + 0.0001:
@@ -1233,13 +1282,13 @@ class MarlinTransport:
                 raise ValueError("Werkstück-Abtastpunkt außerhalb X%g..%g/Y%g..%g" % (
                     PROBE_HEAD_MIN[0], PROBE_HEAD_MAX[0],
                     PROBE_HEAD_MIN[1], PROBE_HEAD_MAX[1]))
-            if z < self.clearance_mm:
-                self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F600", timeout=45)
+            if z < self.travel_z:
+                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F600", timeout=45)
                 self._exchange_locked("M400", timeout=45)
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=60)
             self._exchange_locked("M400", timeout=60)
             self.last_xy_commanded = (x, y)
-            start_z = max(z, self.clearance_mm)
+            start_z = max(z, self.travel_z)
             note = ""
             try:
                 replies = self._exchange_locked("G30", timeout=120)
@@ -1264,7 +1313,7 @@ class MarlinTransport:
                 raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
             self.surface_z = contact
             self.last_probe_laser_xy = (laser_x, laser_y)
-            lift = min(Z_MAX_MM, max(self.clearance_mm, contact + self.probe_clearance_mm))
+            lift = min(Z_MAX_MM, max(self.travel_z, contact + self.probe_clearance_mm))
             self._exchange_locked(f"G0 Z{lift:.3f} F600", timeout=45)
             self._exchange_locked("M400", timeout=45)
             self._exchange_locked(f"G0 X{laser_x:.3f} Y{laser_y:.3f} F9000", timeout=60)
@@ -1431,8 +1480,8 @@ class MarlinTransport:
                         if highest is not None:
                             lift(highest + hop_mm)
                         else:   # new area: height unknown, travel high
-                            lift(self.clearance_mm if tallest is None
-                                 else max(self.clearance_mm, tallest + hop_mm))
+                            lift(self.travel_z if tallest is None
+                                 else max(self.travel_z, tallest + hop_mm))
                         go(x, y)
                         contact = contact_at(x, y)
                         values[gi][pi] = contact
@@ -1445,7 +1494,7 @@ class MarlinTransport:
                 gi, pi = min(((g, p) for g in range(len(groups)) for p in range(len(groups[g]))),
                              key=lambda gp: values[gp[0]][gp[1]])
                 if gi != len(groups) - 1:
-                    lift(max(self.clearance_mm, tallest + hop_mm))
+                    lift(max(self.travel_z, tallest + hop_mm))
                 x, y = groups[gi][pi]
                 go(x, y)
                 low = values[gi][pi] + hop_mm
@@ -1457,7 +1506,7 @@ class MarlinTransport:
                 z = contact
                 step_done()
                 self._stow_probe_locked()
-                lift(max(self.clearance_mm, tallest + self.probe_clearance_mm))
+                lift(max(self.travel_z, tallest + self.probe_clearance_mm))
                 self._exchange_locked("M400", timeout=45)
                 self._exchange_locked("M114", timeout=8)
                 self.surface_z = min(v for g in values for v in g)

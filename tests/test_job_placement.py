@@ -90,6 +90,8 @@ m.state = "Idle"
 m.homing_verified = True
 m.homed = True
 m.position = [200.0, 150.0, 20.0]
+web.WORKSPACE.put_state({"material": {"name": "Testplatte", "thickness_mm": 0.0}}, None)
+web.config["thickness_tolerance_mm"] = 50.0
 sent = []
 def command(cmd, **k):
     sent.append(cmd)

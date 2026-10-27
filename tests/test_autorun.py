@@ -215,7 +215,7 @@ class MarlinSim:
         reply = []
         if cmd == "M115":
             reply += ["FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin", "Cap:Z_PROBE:1"]
-        elif cmd == "G28 X Y":
+        elif cmd.startswith("G28 X Y"):
             self.pos[0] = self.pos[1] = 0.0
         elif cmd == "G28 Z":
             self.pos[2] = 0.0
@@ -253,6 +253,10 @@ def connect(surface):
     m.probe_xy_offset_mm = OFFSET
     m.ensure_ready()
     web.machine.homing_verified = True
+    m.last_known_z = sim.pos[2]
+    m.material_mm = 0.0
+    web.WORKSPACE.put_state({"material": {"name": "Testplatte", "thickness_mm": 0.0}}, None)
+    web.config["thickness_tolerance_mm"] = 50.0
     return sim, m
 """
 
@@ -325,7 +329,7 @@ assert m.surface_z == 3.0
 cut_z = [float(c.split("Z")[1].split()[0]) for c in w[i1:] if c.startswith(("G0 Z", "G1 X")) and "Z" in c]
 assert 8.5 in cut_z and 11.5 in cut_z and min(cut_z) >= 5.0, sorted(set(cut_z))
 assert w[-1] != "M112" and "M112" not in w
-assert "G28 X Y" in w and w.count("G28 X Y") == 1
+assert "G28 X Y R0" in w and w.count("G28 X Y R0") == 1
 # Second run: already homed, no homing again; status never shows homing.
 sim.writes.clear()
 r = c.post("/api/action", data={"op": "autorun", "name": "Zwei.gcode"})
@@ -335,7 +339,7 @@ for _ in range(3000):
     if s["state"] in ("complete", "error"):
         break
     time.sleep(0.005)
-assert s["state"] == "complete" and "G28 X Y" not in sim.writes, s
+assert s["state"] == "complete" and "G28 X Y R0" not in sim.writes, s
 """)
 
     def test_job_with_own_z_is_probed_but_not_compensated_again(self):
@@ -414,7 +418,7 @@ OFFSET = (10.0, 5.0)
 sim, m = connect(lambda x, y: 3.0)
 auto = web.auto_plan(["G0 X100 Y100", "M3 I", "G1 X150 Y100 F1500 S80", "M5 I"])
 def hook(cmd):
-    if cmd == "G28 X Y":
+    if cmd.startswith("G28 X Y"):
         web.stop_job.set()
 sim.hook = hook
 web.job_lock.acquire()
@@ -470,6 +474,44 @@ assert "M402" in w and "M3 I" not in w and "M112" not in w, w
 assert "G0 X0.000 Y0.000 F9000" in w[w.index("M402"):], "parked after the error"
 """)
 
+    def test_taller_object_than_the_material_stops_before_lasering(self):
+        self._run(r"""
+OFFSET = (10.0, 5.0)
+sim, m = connect(lambda x, y: 14.0)                 # tongs on the plate: 14 mm under the probe
+web.WORKSPACE.put_state({"material": {"name": "MDF", "thickness_mm": 3.0}}, None)
+web.config["thickness_tolerance_mm"] = 2.0
+assert m.material_mm == 3.0 and abs(m.travel_z - 23.0) < 1e-9
+auto = web.auto_plan(["G0 X100 Y100", "M3 I", "G1 X150 Y100 F1500 S80", "M5 I"])
+web.job_lock.acquire()
+web.stop_job.clear()
+m.owner = "job"
+web._job_worker("a.gcode", auto["commands"], auto)
+assert web.job["state"] == "error", web.job
+assert "Gemessen 14.0 mm" in web.job["error"] and "MDF" in web.job["error"], web.job["error"]
+assert "M3 I" not in sim.writes, "nothing lasered"
+""")
+
+    def test_no_job_without_a_chosen_material(self):
+        self._run(r"""
+OFFSET = (10.0, 5.0)
+sim, m = connect(lambda x, y: 3.0)
+web.WORKSPACE.put_state({"material": None}, None)
+web.local_owner = lambda: None
+(web.JOBS / "a.gcode").write_text("G0 X100 Y100" + chr(10) + "M3 I" + chr(10) + "G1 X150 Y100 F1500 S80" + chr(10) + "M5 I" + chr(10))
+r = web.app.test_client().post("/api/action", data={"op": "autorun", "name": "a.gcode"})
+assert r.status_code == 400 and "Erst Material wählen" in r.get_json()["error"], r.data
+""")
+
+    def test_long_rapids_go_up_to_the_travel_height(self):
+        out, rep = compensate(["G0 X50 Y50", "M3 I", "G1 X52 Y50 F600 S120", "G0 X53 Y50", "G1 X54 Y50 S120",
+                               "G0 X120 Y50", "G1 X122 Y50 S120"], flat(3.0), 7.0, 1.5, start_z=20.0, travel_z=23.0)
+        self.assertEqual(rep.travel_lifts, 2)                  # into the motif and the long jump
+        i = out.index("G0 X120.000 Y50.000")
+        self.assertEqual(out[i - 1], "G0 Z23.000 F600")       # up before the long rapid
+        self.assertEqual(out[i + 1], "G0 Z8.500 F600")        # down to focus at the target
+        j = out.index("G0 X53.000 Y50.000")
+        self.assertNotIn("Z23", out[j - 1])                     # short hop between parts stays low
+
     def test_first_cut_needs_a_known_start_point(self):
         self._run(r"""
 OFFSET = (10.0, 5.0)
@@ -499,7 +541,7 @@ except ValueError as exc:
     assert "Zeile 5" in str(exc), exc
 else:
     raise AssertionError("relative move accepted as start point")
-assert sim.writes.count("G28 X Y") == 0
+assert sim.writes.count("G28 X Y R0") == 0
 """)
 
     def test_queue_runs_every_item_automatically(self):
@@ -527,7 +569,7 @@ for _ in range(3000):
 q = c.get("/api/status").get_json()["queue"]
 assert q["state"] == "complete" and [i["state"] for i in q["items"]] == ["done", "done"], q
 w = sim.writes
-assert w.count("G28 X Y") == 1, "homing only once, when needed"
+assert w.count("G28 X Y R0") == 1, "homing only once, when needed"
 assert w.count("M402") == 2, "every item probed"
 for name in ("A.gcode", "B.gcode"):
     seq = [s for f, s in states if f == name]

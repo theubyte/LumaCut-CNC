@@ -25,6 +25,7 @@ from . import focus_compensation as focus
 from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import create_blueprint as camera_calibration_api
 from . import camera as head_camera
+from .workspace import WorkspaceStore, create_blueprint as workspace_api
 from .app_update import AppUpdates
 
 ROOT = Path(__file__).resolve().parent
@@ -34,7 +35,7 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # /api/status "features": clients switch on Pi-side behaviour by these names.
 # autorun_mesh: op=autorun probes the motif areas and compensates the focus
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
-FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings")
+FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings", "workspace")
 JOBS = DATA / "jobs"
 USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
 # Head camera (USB/UVC or CSI via V4L2) for the workspace scan.
@@ -60,6 +61,8 @@ config = {
     "camera": dict(head_camera.DEFAULTS),
     # X/Y acceleration (mm/s²) and top speed (mm/s) from the motion calibration, None = firmware.
     "motion": {"accel": None, "speed": None},
+    # Probed surface may differ this much from the chosen material's thickness.
+    "thickness_tolerance_mm": 2.0,
 }
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
@@ -81,6 +84,17 @@ machine.light_pct = int(round(float(config["light_brightness"])))
 machine.light_effects = bool(config["light_effects"])
 if (config.get("motion") or {}).get("accel") and (config.get("motion") or {}).get("speed"):
     machine.motion_limits = (float(config["motion"]["accel"]), float(config["motion"]["speed"]))
+# Shared work state (material, areas, project, scan): every app sees the same (workspace.py).
+WORKSPACE = WorkspaceStore(DATA.parent / "workspace")
+app.register_blueprint(workspace_api(WORKSPACE))
+machine.material_mm = WORKSPACE.material_thickness()
+WORKSPACE.on_change = lambda state: setattr(machine, "material_mm", WORKSPACE.material_thickness())
+# Last known head height, so homing after an emergency stop knows how far to lift.
+LAST_Z = DATA / "last_z.json"
+try:
+    machine.last_known_z = float(json.loads(LAST_Z.read_text("utf-8"))["z"])
+except Exception:
+    machine.last_known_z = None
 if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is not None:
     machine.probe_xy_offset_mm = (float(config["probe_offset_x_mm"]),
                                   float(config["probe_offset_y_mm"]))
@@ -229,6 +243,9 @@ def status():
                       "lights":"HE0 PC8 M355 (dimmbar), alte Firmware M7",
                       "aux":"FAN2 PC7 unused"},
                   config=dict(config),
+                  sync=WORKSPACE.revisions(),
+                  travel_z_mm=round(machine.travel_z, 2),
+                  home_needs_confirm=(not machine.z_homed and machine.last_known_z is None),
                   origin=_origin_status(),
                   queue=_queue_status(),
                   camera={"device": CAMERA, "available": os.path.exists(CAMERA)})
@@ -254,11 +271,11 @@ def manual(command, timeout=20):
     return machine.command(command, owner="web", timeout=timeout)
 
 
-def home_z_first():
+def home_z_first(operator_clear=False):
     # Reuse the exact same atomic safe-home transaction as the LightBurn
     # G28 compatibility layer. Never let two implementations diverge.
     local_owner()
-    machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"])
+    machine.safe_home(owner="web", clearance_mm=config["z_clearance_mm"], operator_clear=operator_clear)
 
 
 @app.post("/api/settings")
@@ -285,6 +302,13 @@ def settings():
     if probe_x is not None and not (math.isfinite(probe_x) and -80 <= probe_x <= 80 and
             math.isfinite(probe_y) and -80 <= probe_y <= 80):
         raise ValueError("Taster-X/Y-Versatz muss -80..80 mm sein")
+    # optional: how far the probed surface may differ from the material thickness
+    tol_raw = request.form.get("thickness_tolerance_mm", "").strip()
+    if tol_raw:
+        tol = float(tol_raw)
+        if not (math.isfinite(tol) and 0.5 <= tol <= 10):
+            raise ValueError("Toleranz der Materialstärke muss 0,5..10 mm sein")
+        config["thickness_tolerance_mm"] = tol
     config["probe_offset_x_mm"] = probe_x
     config["probe_offset_y_mm"] = probe_y
     with machine.lock:
@@ -392,7 +416,8 @@ def action():
         return jsonify(message="Marlin M115 + LumaCut-Kennung bestätigt")
     if op == "home":
         _forget_current_placement()
-        home_z_first()
+        # clear=1: the operator confirmed the head stands clear (only asked when Z is unknown)
+        home_z_first(request.form.get("clear") == "1")
         return jsonify(message="X/Y zuerst, danach Maschinenboden Z=0 und Z-Rückzug: referenziert.")
     if op in ("info","position","endstops"):
         cmd = {"info":"M115", "position":"M114", "endstops":"M119"}[op]
@@ -982,6 +1007,24 @@ def _set_phase(phase, state=None):
     job.update(phase=phase, state=state or job["state"])
 
 
+def _check_thickness(measured):
+    """The probed surface must fit the chosen material (thickness from the
+    bed): a taller object under the probe, the wrong material or a probe
+    beside the workpiece stop the job before anything is lasered."""
+    thickness = WORKSPACE.material_thickness()
+    if thickness is None or not measured:
+        return
+    tol = float(config["thickness_tolerance_mm"])
+    name = (WORKSPACE.get_state().get("material") or {}).get("name", "")
+    hi, lo = max(measured), min(measured)
+    if hi > thickness + tol:
+        raise RuntimeError("Gemessen %.1f mm, Material „%s“ hat %.1f mm – liegt ein höheres Objekt unter dem Taster? "
+                           "Material oder Höhe anpassen (Toleranz %.1f mm)." % (hi, name, thickness, tol))
+    if lo < thickness - tol:
+        raise RuntimeError("Gemessen nur %.1f mm, Material „%s“ hat %.1f mm – falsches Material gewählt oder "
+                           "Taster neben dem Werkstück? (Toleranz %.1f mm)" % (lo, name, thickness, tol))
+
+
 def _auto_prepare(auto):
     """op=autorun before lasering: home if needed, probe, compensate.
 
@@ -992,7 +1035,7 @@ def _auto_prepare(auto):
         # Only when needed: after connecting, a reset or an emergency stop.
         _set_phase("homing", "homing")
         machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"],
-                          should_stop=stop_job.is_set)
+                          should_stop=stop_job.is_set, operator_clear=auto.get("operator_clear", False))
     _check_stop()
     _set_phase("probing", "probing")
     grids = [dataclasses.replace(g, z=list(g.z)) for g in auto["grids"]]
@@ -1005,6 +1048,7 @@ def _auto_prepare(auto):
     for g, o, measured in zip(grids, order, values):
         for i, z in zip(o, measured):
             g.z[i] = z
+    _check_thickness([z for measured in values for z in measured])
     _check_stop()
     commands = auto["commands"]
     if auto["compensate"]:
@@ -1013,7 +1057,7 @@ def _auto_prepare(auto):
             commands, heightmap.HeightMapSet(grids), machine.focus_gap_mm,
             machine.probe_tip_offset_mm,
             start_z=machine.position[2] if machine.position else None,
-            should_stop=stop_job.is_set)
+            should_stop=stop_job.is_set, travel_z=machine.travel_z)
         logging.info("Autorun focus compensation: %s", report.as_dict())
     _check_stop()
     job.update(state="running", phase="running", total=len(commands))
@@ -1118,6 +1162,8 @@ def start_job(automatic=False):
     # Head moved by hand / steps lost? (X/Y switches at X0/Y0) - then not homed:
     # the automatic run homes first, a plain start is refused below.
     machine.check_reference()
+    if WORKSPACE.material_thickness() is None:
+        raise RuntimeError("Erst Material wählen – die Stärke bestimmt die Fahrhöhe")
     if not machine.homed and not automatic:
         raise RuntimeError("Vor dem Job referenzieren")
     filename = request.form.get("name","")
@@ -1130,6 +1176,7 @@ def start_job(automatic=False):
     if automatic:
         # x/y: probe only that one point (old one-click behaviour).
         auto = auto_plan(commands, _optional_point(request.form))
+        auto["operator_clear"] = request.form.get("clear") == "1"
         commands = auto["commands"]
     needs_home = not machine.homed
     if not job_lock.acquire(blocking=False):
@@ -1453,10 +1500,26 @@ def start_frame():
                    frame=dict(frame))
 
 
+def _remember_z(state={"z": None}):
+    """Keeps the last known head height on disk (decides the lift before
+    homing after an emergency stop or SKR reset)."""
+    z = machine.last_known_z
+    if z is None or (state["z"] is not None and abs(z - state["z"]) < 0.2):
+        return
+    try:
+        tmp = LAST_Z.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"z": round(z, 3), "at": int(time.time())}), encoding="utf-8")
+        os.replace(tmp, LAST_Z)
+        state["z"] = z
+    except OSError:
+        logging.warning("Letzte Z-Höhe nicht gespeichert", exc_info=True)
+
+
 def monitor_loop():
     last_attempt=0.0
     while running:
         time.sleep(2.0)
+        _remember_z()
         try:
             machine.service_cooldown()
         except Exception:

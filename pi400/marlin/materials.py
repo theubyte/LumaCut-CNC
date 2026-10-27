@@ -97,7 +97,7 @@ def validate(data, *, material_id=None, builtin=False):
     material = {
         "id": material_id or str(uuid.uuid4()),
         "name": name.strip(),
-        "thickness_mm": _number(data, "thickness_mm", 0.0, 50.0),
+        "thickness_mm": _number(data, "thickness_mm", 0.0, 60.0),
         "process": process,
         "mode": mode,
         "power_pct": _number(data, "power_pct", 0.0, 100.0),

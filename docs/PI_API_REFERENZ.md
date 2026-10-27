@@ -122,6 +122,13 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 | POST | `/api/jobs/<name>/delete` | – | Auftrag löschen |
 | GET | `/api/jobs/<name>/geometry` | – | Motivgrenzen und Abtastkandidaten |
 | GET | `/api/camera/snapshot` | – | ein JPEG der Kopfkamera |
+| GET | `/api/workspace` | – | Arbeitsstand lesen: Material, Bereiche, Höhenmesh, App-Einstellungen (Abschnitt 4.15) |
+| PUT | `/api/workspace` | JSON | Arbeitsstand ändern (mit `base_revision`) |
+| GET | `/api/workspace/project` | – | offenes Projekt (alle Platten) als JSON |
+| PUT | `/api/workspace/project` | JSON | Projekt speichern (`?base_revision=n`) |
+| GET | `/api/workspace/scan` | – | Scanbild (PNG) |
+| PUT | `/api/workspace/scan` | PNG | Scanbild speichern (`?base_revision=n`) |
+| DELETE | `/api/workspace/scan` | Query | Scanbild löschen (`?base_revision=n`) |
 | GET | `/api/camera/settings` | – | feste Belichtung/Weißabgleich/Licht lesen |
 | PUT | `/api/camera/settings` | JSON | feste Belichtung/Weißabgleich/Licht speichern |
 | GET | `/api/app/android` | – | neueste Android-App auf dem Pi (Version, Prüfsumme) – Abschnitt 4.15 |
@@ -238,7 +245,10 @@ Felder aus `web.py` (`status()`):
 | `firmware` | string | immer `"marlin"` |
 | `expected_pwm` | string | `"PA1 / M3 I / S0..255"` (Info) |
 | `io` | object | Klartext-Belegung `laser_supply_switch`, `laser_pwm`, `fan_cooldown`, `exhaust`, `lights`, `aux` (Info) |
-| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware) |
+| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware), `thickness_tolerance_mm` (2,0: so weit darf die abgetastete Oberfläche von der Materialstärke abweichen) |
+| `sync` | object | `{workspace, project, scan}`: Revisionen des Arbeitsstands auf dem Pi (Abschnitt 4.15). Ändert sich eine, holt jedes Gerät nur diesen Teil neu. |
+| `travel_z_mm` | number | Fahrhöhe über unbekanntem Gelände = Stärke des gewählten Materials + 20 mm, mindestens `z_clearance_mm`, höchstens 80. Alle Pi-Fahrten (moveto, Abtasten, Parken, nach dem Referenzieren, lange Leerfahrten im Auftrag) gehen mindestens so hoch. |
+| `home_needs_confirm` | bool | `true`: Marlin kennt Z nicht und der Pi hat keine gemerkte Höhe – `op=home` bzw. `op=autorun` brauchen `clear=1` (Bediener bestätigt, dass der Kopf frei über allem steht). |
 | `camera` | object | `{device, available}`: Gerätepfad (`LUMACUT_CAMERA`, Standard `/dev/video0`) und ob er existiert (sagt nichts darüber, ob ffmpeg ein Bild bekommt) |
 
 `job.line` / `job.total`: `total` = Zahl der Auftragszeilen; `line` zählt
@@ -345,9 +355,9 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 
 | | |
 | --- | --- |
-| Parameter | keine |
+| Parameter | `clear=1` optional: Bediener bestätigt, dass der Kopf frei steht (nur nötig bei `home_needs_confirm`) |
 | Vorbedingungen | **frei**, **freigegeben** (sonst 400 `Mechanik/Z-Endschalter nicht verifiziert`), kein Riegel |
-| Wirkung | atomare sichere Referenzfahrt (dieselbe wie LightBurn-G28): erst X/Y in die leere 30-mm-Zone, dann Z auf Maschinenboden Z=0, dann Z-Rückzug `z_clearance_mm`. Verwirft eine Platzierung mit `origin=current`. |
+| Wirkung | atomare sichere Referenzfahrt (dieselbe wie LightBurn-G28): erst auf die Fahrhöhe (`travel_z_mm`; bei unbekanntem Z relativ um Fahrhöhe − gemerkte letzte Höhe, mindestens 5 mm, nie über Z80; ohne gemerkte Höhe 400 `Kopfhöhe unbekannt: … bestätigen`, außer `clear=1`), dann `G28 X Y R0` in die leere 30-mm-Zone (Marlin hebt nicht noch einmal blind an), dann Z auf Maschinenboden Z=0 und in der Ecke auf die Fahrhöhe. Verwirft eine Platzierung mit `origin=current`. Die letzte bekannte Z-Höhe hält der Pi in `/var/lib/lumacut/marlin/last_z.json`. |
 | Erfolg | 200 `X/Y zuerst, danach Maschinenboden Z=0 und Z-Rückzug: referenziert.` |
 | Fehler | Abschnitt 1.2; Marlin-Fehler 400; 503 bei Timeout (Teilschritte bis 150 s) |
 | Hinweis | Die 30-mm-Bänder an X0 und Y0 müssen frei von Material sein. ⚠ Hardware |
@@ -533,7 +543,7 @@ Keine Parameter, keine Vorbedingung. 200 `{"message": "Platzierung aufgehoben: A
 
 | | |
 | --- | --- |
-| Vorbedingungen | **frei**, **referenziert** (`Vor dem Job referenzieren`), **freigegeben** (`Mechanik noch nicht freigegeben`), kein anderer Auftrag/Rahmen (`Ein Auftrag läuft bereits`), LightBurn darf nicht dazwischenkommen (`LightBurn hat inzwischen die Steuerung`) |
+| Vorbedingungen | **frei**, **Material gewählt** im Arbeitsstand (`Erst Material wählen – die Stärke bestimmt die Fahrhöhe`), **referenziert** (`Vor dem Job referenzieren`), **freigegeben** (`Mechanik noch nicht freigegeben`), kein anderer Auftrag/Rahmen (`Ein Auftrag läuft bereits`), LightBurn darf nicht dazwischenkommen (`LightBurn hat inzwischen die Steuerung`) |
 | Wirkung | asynchron: Worker-Thread unter Besitzer `job`. `M5 I`, dann Zeilen streamen (G0/G1 im Fenster `stream_window`, alles andere einzeln); `G28` → sichere Referenzfahrt, `G30` → Abtastung, `M2` ignoriert; am Ende `drain`, Parken. Status über `job`. |
 | Erfolg | 200 `Job gestartet: <name>` (sofort) |
 | Fehler (Start) | 400 `Unbekannte Auftragsdatei`, `Keine gültige Platzierung für … – neu platzieren (op=place)`, `Auftrag seit dem Platzieren geändert – neu platzieren`, `G-Code Zeile N: …`, `Motiv … liegt außerhalb …`, `Zeile N: Die erste Laserbahn beginnt an einer unbekannten Kopfposition – davor mit G0 X… Y… (Laser aus) an ihren Startpunkt fahren.` (gilt auch für Upload, `autorun` und Warteschlange: vor der ersten Bahn mit S>0 muss eine absolute X/Y-Fahrt oder G28 stehen; bei `autorun` zählt das G28 der Datei nicht, es entfällt) |
@@ -551,7 +561,7 @@ Abschnitt 4): Auftrag in Maschinenkoordinaten **ohne Z** hochladen, dann
 
 | | |
 | --- | --- |
-| Vorbedingungen | wie `start`, aber **nicht referenziert nötig**; Tasterversatz gesetzt (`X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen`) |
+| Vorbedingungen | wie `start`, aber **nicht referenziert nötig**; Tasterversatz gesetzt (`X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen`); `clear=1` wie bei `op=home`, wenn `home_needs_confirm`. Nach dem Abtasten muss die Oberfläche zur Materialstärke passen (± `thickness_tolerance_mm`), sonst bricht der Auftrag vor dem Lasern ab (`Gemessen … mm, Material „…“ hat … mm – …`). Leerfahrten über 20 mm im Auftrag gehen erst auf die Fahrhöhe. |
 | Planung (vor jeder Bewegung) | `G28`/`G30`/`M2` aus der Datei entfallen. Motivbereiche = Laserwege (G1 mit S>0) in 5-mm-Zellen, Teile mit < 10 mm Abstand bilden einen Bereich, Bereich = Umriss + 2 mm (max. 12 Bereiche, sonst einer). Raster je Bereich 1×1 bis 4×4 (ca. ein Punkt je 90 mm, 5 mm vom Rand), höchstens 36 Punkte je Auftrag. Erreichbar ist ein Punkt, wenn der Kopf (Punkt − Tasterversatz) in X10..380 / Y10..360 liegt (Marlin `PROBING_MARGIN` 10 mm; der Laser ist aus, der Kopf darf dafür in die Safezone). Ein Punkt im Randstreifen, den der Taster nie erreicht (er sitzt neben dem Laser), wird am **nächsten erreichbaren Ort höchstens 40 mm daneben** abgetastet; dessen Höhe gilt für den Punkt (`HeightGrid.probe_at`). So lassen sich Motive bis an den Rand des Arbeitsbereichs lasern. Was auch so nicht erreichbar ist, wird aus Nachbarn ergänzt; ein ganz unerreichbarer Bereich bekommt die höchste gemessene Oberfläche. Höhenkorrektur einmal gegen eine ebene Testfläche, damit Bögen/relative X/Y sofort abgelehnt werden. |
 | Ablauf | 1. `homing` nur wenn `homed` false ist (nach Verbinden, Reset, Not-Aus). 2. `probing`: je Punkt `G0 X Y` und `G30 E0` (eine Messung, Taster bleibt ausgefahren, kein 16-mm-Anheben durch Marlin), dazwischen nur Hub auf höchste Oberfläche des Bereichs + 3 mm; zwischen Bereichen Z-Rückzug. Der **tiefste Punkt wird zuletzt nochmal** angetastet, `workpiece_surface_z` = tiefster Kontakt, dann `M402` (Taster verstauen) und Z-Rückzug. 3. Höhenkorrektur auf dem Pi (`focus_compensation.py`): Z = Oberfläche + `focus_gap_mm` − `z_switch_tip_offset_mm`, nie unter Oberfläche + 2 mm, Laserlinien in ≤ 2-mm-Stücke, Leerfahrten erst hoch, am Ziel runter, `G91`/`G0 Z-…`/`G90` als Versatz, Vorschub sinkt, wenn Z (9 mm/s) nicht folgt. Ein Auftrag mit **eigenem absolutem Z** wird nur abgetastet, nicht nochmal korrigiert. 4. `running`: Startmelodie, lasern, parken, Melodie. |
 | Status | `job.state`: `homing` → `probing` → `running` → `complete`; `job.probe` = `{done, total}` (total = Punkte + 1 Nachmessung) |
@@ -827,7 +837,7 @@ Material (JSON):
 | --- | --- | --- |
 | `id` | string | vom Pi vergeben (UUID) |
 | `name` | string | 1..80 Zeichen |
-| `thickness_mm` | number | 0..50 |
+| `thickness_mm` | number | 0..60 |
 | `process` | string | `Schneiden`, `Gravieren`, `Markieren` |
 | `mode` | string | `line`, `fill` |
 | `power_pct` | number | 0..100 |
@@ -886,6 +896,46 @@ sofort und lädt eine neuere APK.
 | Fehler | 503 `{"error": "App-Update: <Grund>", …}` (z. B. kein Internet, Prüfsumme falsch); eine schon vorhandene APK bleibt erhalten |
 
 ---
+
+### 4.15 Arbeitsstand (Material, Projekt, Scan)
+
+Der Pi hält den gemeinsamen Stand aller Geräte (`pi400/marlin/workspace.py`,
+gespeichert unter `/var/lib/lumacut/workspace/`). Jeder Teil hat eine eigene
+Revision (`sync` im Status). Schreiben nennt die Revision, auf der die
+Änderung beruht (`base_revision`); ist sie veraltet, antwortet der Pi 409
+`{error, revision}` und das Gerät fragt nach, statt still zu überschreiben.
+Ohne `base_revision` wird immer geschrieben.
+
+#### `GET /api/workspace`
+
+200 `{revision, material, areas, heights, settings, updated_at, updated_by}`:
+`material` `{name, thickness_mm}` oder `null` (die Stärke bestimmt die
+Fahrhöhe; Aufträge starten erst mit Material), `areas` Liste markierter
+Bereiche `[minX, minY, maxX, maxY]` in Arbeits-mm, `heights` das Höhenmesh der
+App oder `null`, `settings` einfache App-Werte (z. B. `gridPower`,
+`meshSpacing`).
+
+#### `PUT /api/workspace`
+
+JSON mit beliebigen der Felder `material`, `areas`, `heights`, `settings`
+(fehlende bleiben), dazu `base_revision` und `updated_by`. Grenzen:
+Materialstärke 0..60 mm (400 `Materialstärke 0 … 60 mm …`), bis 50 Bereiche
+(−1..400 mm), Höhenmesh bis 2 MB, bis 100 Einstellungen. 200 = neuer Stand;
+409 bei veralteter Revision; 400 `Unbekannte Felder: …`.
+
+#### `GET /api/workspace/project`, `PUT /api/workspace/project`
+
+Das offene Projekt der App (alle Platten) unverändert als JSON, bis 30 MB.
+GET: 200 mit Kopfzeile `X-Revision`, 404 solange keines gespeichert ist. PUT:
+Rohdaten im Body, `?base_revision=n&by=Gerät`; 200 `{revision, title, bytes,
+updated_at, updated_by}`, 409 bei veralteter Revision.
+
+#### `GET /api/workspace/scan`, `PUT /api/workspace/scan`, `DELETE /api/workspace/scan`
+
+Das zusammengesetzte Scanbild (PNG, bis 16 MB, ganze Arbeitsfläche). GET 200
+`image/png` mit `X-Revision` oder 404; PUT PNG im Body bzw. DELETE, jeweils
+`?base_revision=n`; 200 `{revision, bytes, …}`, 409 bei veralteter Revision,
+400 `Scanbild muss ein PNG sein`.
 
 ## 5. Polling-Empfehlung
 

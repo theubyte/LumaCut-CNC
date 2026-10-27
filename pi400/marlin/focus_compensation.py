@@ -38,6 +38,7 @@ class Report:
     z_max: float = -math.inf
     outside_mm: float = 0.0
     feed_limited: int = 0
+    travel_lifts: int = 0
     lowest_offset_mm: float = 0.0
     warnings: list = field(default_factory=list)
 
@@ -46,6 +47,7 @@ class Report:
                 "z_min": None if self.segments == 0 else round(self.z_min, 3),
                 "z_max": None if self.segments == 0 else round(self.z_max, 3),
                 "outside_mm": round(self.outside_mm, 1), "feed_limited": self.feed_limited,
+                "travel_lifts": self.travel_lifts,
                 "lowest_offset_mm": round(self.lowest_offset_mm, 3),
                 "warnings": list(self.warnings)}
 
@@ -107,8 +109,13 @@ def _f(value):
 
 def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
                clearance_mm=2.0, max_segment_mm=2.0, z_max_mm_s=9.0, start_z=None,
-               should_stop=None):
-    """(compensated lines, Report). Raises ValueError for unsupported input."""
+               should_stop=None, travel_z=None, long_travel_mm=20.0):
+    """(compensated lines, Report). Raises ValueError for unsupported input.
+
+    With ``travel_z``, rapids longer than ``long_travel_mm`` go up to that
+    height first: between separate motif parts the head may cross a taller
+    object (tongs, a housing), not only the flat plate it lasers on.
+    """
     gap = focus_gap_mm - tip_offset_mm
     if gap < clearance_mm - 1e-9:
         raise ValueError("Fokushöhe läge näher als %g mm am Werkstück "
@@ -186,6 +193,10 @@ def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
             feed = values["F"]
         if g == 0:
             target = surface_z(nx, ny, 0.0)
+            if (travel_z is not None and z is not None and math.hypot(nx - x, ny - y) > long_travel_mm
+                    and travel_z > max(z, target) + Z_RESOLUTION_MM):
+                z_only(travel_z)                # long rapid: over everything
+                rep.travel_lifts += 1
             if z is not None and target > z + Z_RESOLUTION_MM:
                 z_only(target)                  # up first
             out.append("G0 X%s Y%s%s%s" % (_f(nx), _f(ny), s_word,
