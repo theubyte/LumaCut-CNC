@@ -281,15 +281,17 @@ private fun ToolColumn(tool: Tool, onTool: (Tool) -> Unit) {
     val icons = mapOf(Tool.SELECT to LcIcons.select, Tool.RECT to LcIcons.rect, Tool.ELLIPSE to LcIcons.ellipse,
                       Tool.POLYGON to LcIcons.polygon, Tool.LINE to LcIcons.line, Tool.PEN to LcIcons.pen, Tool.TEXT to LcIcons.text,
                       Tool.MEASURE to LcIcons.ruler)
+    // Scrolls when the screen is too short for all tools (otherwise the last one, Messen, is cut off).
     Column(
-        Modifier.width(76.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Lc.surface).border(1.dp, Lc.line, RoundedCornerShape(18.dp)).padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        Modifier.width(76.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Lc.surface).border(1.dp, Lc.line, RoundedCornerShape(18.dp))
+            .verticalScroll(rememberScrollState()).padding(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         for (t in Tool.entries) {
             val on = t == tool
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (on) Lc.accentSoft else Color.Transparent)
-                    .clickable { onTool(t) }.padding(vertical = 10.dp),
+                    .clickable { onTool(t) }.padding(vertical = 7.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Icon(icons.getValue(t), t.label, tint = if (on) Lc.accent else Lc.muted, modifier = Modifier.size(24.dp))
