@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -124,6 +125,12 @@ data class MachineStatus(
     val config: PiConfig = PiConfig(),
     /** Reference check by the X/Y switches at X0/Y0; [ReferenceInfo.lost] says why the machine is no longer homed. */
     val reference: ReferenceInfo = ReferenceInfo(),
+    /** Revisions of the shared work state on the Pi (feature "workspace"). */
+    val sync: SyncRevisions = SyncRevisions(),
+    /** Travel height over unknown ground: material + 20 mm (null on an older Pi). */
+    val travel_z_mm: Double? = null,
+    /** Z unknown and no remembered height: homing needs the operator's "head stands clear". */
+    val home_needs_confirm: Boolean = false,
     val camera: CameraInfo = CameraInfo(),
     val recent: List<String> = emptyList(),
     /** Pi capabilities: "autorun_mesh" (op=autorun probes and corrects itself), "materials" (/api/materials). */
@@ -135,6 +142,26 @@ data class MachineStatus(
     val ownerFree get() = owner == "Frei" || owner.isBlank()
     val probeOffset: Pt? get() = probe_xy_offset_mm?.takeIf { it.size == 2 }?.let { Pt(it[0], it[1]) }
 }
+
+@Serializable
+data class SyncRevisions(val workspace: Int = 0, val project: Int = 0, val scan: Int = 0)
+
+/** Chosen material as the Pi keeps it: its thickness sets the travel height. */
+@Serializable
+data class WorkMaterial(val name: String, val thickness_mm: Double) {
+    /** Same form as the app's material key "name|thickness". */
+    val key get() = "$name|$thickness_mm"
+}
+
+/** Shared work state on the Pi (/api/workspace). */
+@Serializable
+data class PiWorkspace(
+    val revision: Int = 0,
+    val material: WorkMaterial? = null,
+    val areas: List<List<Double>> = emptyList(),
+    val heights: JsonElement? = null,
+    val settings: Map<String, JsonElement> = emptyMap(),
+)
 
 /** switch_check: true = the X/Y switches confirm the reference at X0/Y0, false = they cannot, null = not yet homed. */
 @Serializable
@@ -311,6 +338,53 @@ class PiClient(
                 if (!r.isSuccessful) throw PiException(errorText(bytes.toString(Charsets.UTF_8)) ?: "Kamera: HTTP ${r.code}")
                 if (bytes.size < 2 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) throw PiException("Kamera liefert kein JPEG")
                 bytes
+            }
+        } catch (e: PiException) { throw e } catch (e: IOException) { throw PiException("Pi nicht erreichbar (${e.message ?: e.javaClass.simpleName})") }
+    }
+
+    /* ---------- shared work state (/api/workspace, Pi feature "workspace") ---------- */
+
+    suspend fun workspace(): PiWorkspace =
+        json.decodeFromString(PiWorkspace.serializer(), call(Request.Builder().url(url("api", "workspace")).build()))
+
+    /** Writes the given fields; 409 (another device changed it since [baseRevision]) throws [PiConflictException]. */
+    suspend fun saveWorkspace(fields: JsonObject, baseRevision: Int?, by: String): PiWorkspace {
+        val body = buildJsonObject {
+            fields.forEach { (k, v) -> put(k, v) }
+            baseRevision?.let { put("base_revision", it) }
+            put("updated_by", by)
+        }
+        return json.decodeFromString(PiWorkspace.serializer(), call(Request.Builder().url(url("api", "workspace"))
+            .put(body.toString().toRequestBody("application/json".toMediaType())).build()))
+    }
+
+    /** The open project on the Pi and its revision; null while there is none. */
+    suspend fun project(): Pair<Int, String>? = fetchWithRevision("project")?.let { (rev, bytes) -> rev to bytes.toString(Charsets.UTF_8) }
+
+    /** Stores the project; returns the new revision. */
+    suspend fun saveProject(projectJson: String, baseRevision: Int?, by: String): Int =
+        revisionOf(call(Request.Builder().url(workspaceUrl("project", baseRevision, by))
+            .put(projectJson.toRequestBody("application/json".toMediaType())).build())) ?: 0
+
+    suspend fun scan(): Pair<Int, ByteArray>? = fetchWithRevision("scan")
+
+    /** Stores the scan picture (PNG) or deletes it ([png] null); returns the new revision. */
+    suspend fun saveScan(png: ByteArray?, baseRevision: Int?, by: String): Int {
+        val u = workspaceUrl("scan", baseRevision, by)
+        val req = if (png == null) Request.Builder().url(u).delete() else Request.Builder().url(u).put(png.toRequestBody("image/png".toMediaType()))
+        return revisionOf(call(req.build(), longRunning = true)) ?: 0
+    }
+
+    private fun workspaceUrl(part: String, baseRevision: Int?, by: String) = url("api", "workspace", part).newBuilder()
+        .apply { baseRevision?.let { addQueryParameter("base_revision", it.toString()) } }.addQueryParameter("by", by).build()
+
+    private suspend fun fetchWithRevision(part: String): Pair<Int, ByteArray>? = withContext(Dispatchers.IO) {
+        try {
+            http.newBuilder().readTimeout(60, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("api", "workspace", part)).build()).execute().use { r ->
+                val bytes = r.body?.bytes() ?: ByteArray(0)
+                if (r.code == 404) return@withContext null
+                if (!r.isSuccessful) throw PiException(errorText(bytes.toString(Charsets.UTF_8)) ?: "Pi antwortet mit HTTP ${r.code}")
+                (r.header("X-Revision")?.toIntOrNull() ?: 0) to bytes
             }
         } catch (e: PiException) { throw e } catch (e: IOException) { throw PiException("Pi nicht erreichbar (${e.message ?: e.javaClass.simpleName})") }
     }

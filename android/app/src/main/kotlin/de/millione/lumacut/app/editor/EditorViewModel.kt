@@ -1118,6 +1118,19 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun formatThickness(v: Double) = if (v % 1.0 == 0.0) v.toInt().toString() else v.toString()
 
+    /** The chosen material as another device set it on the Pi: only the key, the layers come with the project. */
+    fun setMaterialKey(key: String?) {
+        if (_materialKey.value == key) return
+        _materialKey.value = key
+        prefs.edit().putString("materialKey", key).apply()
+    }
+
+    /** The project as another device stored it on the Pi (undo brings this device's version back). */
+    fun loadSyncedProject(json: String): Boolean = runCatching { Document.fromJson(json) }.onSuccess { d ->
+        changeProject { d }
+        _selected.value = _selected.value.filter { id -> d.elements.any { it.id == id } }.toSet()
+    }.isSuccess
+
     /** Layer with [name] (Gravieren, Linie, Schneiden) or the active one. */
     fun layerIdByName(name: String): String = _doc.value.layers.firstOrNull { it.name == name }?.id ?: _activeLayer.value
 

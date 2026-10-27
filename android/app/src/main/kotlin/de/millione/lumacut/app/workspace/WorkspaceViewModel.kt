@@ -112,6 +112,9 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearAreas() { _areas.value = emptyList() }
 
+    /** Areas as another device marked them (from the Pi). */
+    fun setAreas(list: List<Box>) { _areas.value = list }
+
     /** One area per cluster of overlapping design parts, 3 mm larger: the material under the motif. */
     fun areasFromDesign(doc: Document): Int {
         val boxes = doc.elements.filter { e -> doc.layer(e.layerId)?.let { it.visible && it.output } == true }
@@ -338,7 +341,8 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Z sweep for the sharpest picture: 5 mm steps upwards, then 1 mm around the best; ends at the sharp height. */
     private suspend fun focusSweep(c: PiClient, machine: MachineViewModel, surface: Double, onProgress: (String) -> Unit): Double {
-        val low = surface + 8; val high = Z_TOP
+        // never closer than 5 mm between probe tip and material (owner's decision 2026-10-27)
+        val low = surface + 5; val high = Z_TOP
         if (high - low < 5) throw IllegalStateException("Zu wenig Platz über dem Material für die Kamera")
         suspend fun measure(z: Double): Pair<Double, Double> {
             val at = zTo(c, machine, z)

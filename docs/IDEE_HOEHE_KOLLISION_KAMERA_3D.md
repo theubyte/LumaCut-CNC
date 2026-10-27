@@ -151,7 +151,15 @@ Ziel ist, nur dort abzutasten, wo sicher Material liegt, die Höhe vorher grob z
 
 ## 7. Offene Fragen an den Nutzer
 
-- Höhe vor dem Referenzieren, wenn Marlin die Position verloren hat (§4.2): Vorschlag „letzte Höhe merken“ bestätigen.
+**Stand 27.10. abends – Schritt 1 gebaut (Claude):** Fahrhöhe = Stärke + 20 mm im Pi (`transport.travel_z`), Material
+**höchstens 60 mm** (Entscheidung des Nutzers, Sticker „MAX. 60 mm HÖHE – Material + Unterlage, gemessen ab Bett“),
+Aufträge nur mit gewähltem Material, Abgleich Messwert ↔ Stärke (± 2 mm, `thickness_tolerance_mm`, Abbruch vor dem
+Lasern), Leerfahrten > 20 mm auf Fahrhöhe, `G28 X Y R0` mit eigenem Anheben vorher (bekanntes Z: absolut; unbekanntes Z:
+relativ ab der gemerkten letzten Höhe `last_z.json`, mind. 5 mm, nie über 80; ohne gemerkte Höhe Bestätigung `clear=1`),
+Kamera-Schärfesuche ab + 5 mm. Das gewählte Material liegt jetzt auf dem Pi (`/api/workspace`), der Pi ist die Zentrale.
+
+- ~~Höhe vor dem Referenzieren, wenn Marlin die Position verloren hat (§4.2)~~: so gebaut wie vorgeschlagen; später
+  besser ein Schalter oben an der Z-Achse (dann referenziert Z zuerst nach oben).
 - ~~Untergrenze der Kamera-Schärfesuche~~: entschieden, mindestens 5 mm zwischen Tasterspitze und Werkstück (§4.5).
 - Laserpunkt oder separater Linienlaser für die 3D-Messung: Entscheidung nach dem Leistungstest.
 

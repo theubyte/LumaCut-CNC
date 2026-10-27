@@ -285,8 +285,20 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun action(op: String, fields: Map<String, String> = emptyMap(), key: String = op, success: String? = null, quiet: Boolean = false) =
+    /** True while the operator has to confirm that the head stands clear (homing with unknown Z). */
+    private val _homeConfirm = MutableStateFlow(false)
+    val homeConfirm: StateFlow<Boolean> = _homeConfirm.asStateFlow()
+
+    fun action(op: String, fields: Map<String, String> = emptyMap(), key: String = op, success: String? = null, quiet: Boolean = false) {
+        // Z unknown and no remembered height: the Pi only homes after "the head stands clear"
+        if (op == "home" && "clear" !in fields && _status.value?.home_needs_confirm == true) { _homeConfirm.value = true; return }
         request(key, success, quiet) { it.action(op, fields) }
+    }
+
+    fun answerHomeConfirm(clear: Boolean) {
+        _homeConfirm.value = false
+        if (clear) action("home", mapOf("clear" to "1"), success = "Referenziert")
+    }
 
     /** No confirmation and no busy lock: an emergency stop must go out immediately. */
     fun emergencyStop() {

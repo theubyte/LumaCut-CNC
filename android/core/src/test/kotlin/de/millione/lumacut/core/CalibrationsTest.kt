@@ -307,6 +307,32 @@ class CalibrationsTest {
         assertEquals(0xFF112233.toInt(), old[(130 * 2) * m.width + 160 * 2], "base itself unchanged")
     }
 
+    @Test fun `work state, project and scan go to the Pi with their revisions`() = runBlocking {
+        okhttp3.mockwebserver.MockWebServer().use { srv ->
+            srv.enqueue(okhttp3.mockwebserver.MockResponse().setBody("""{"revision":4,"material":{"name":"MDF","thickness_mm":3.0},"areas":[[10.0,20.0,60.0,80.0]],"heights":null,"settings":{"gridPower":30}}"""))
+            srv.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(409).setBody("""{"error":"Der Arbeitsstand wurde inzwischen an einem anderen Gerät geändert","revision":5}"""))
+            srv.enqueue(okhttp3.mockwebserver.MockResponse().setBody("""{"title":"Schild"}""").addHeader("X-Revision", "7"))
+            srv.enqueue(okhttp3.mockwebserver.MockResponse().setResponseCode(404).setBody("""{"error":"Noch kein Scanbild auf dem Pi","revision":0}"""))
+            srv.enqueue(okhttp3.mockwebserver.MockResponse().setBody("""{"revision":8,"title":"Schild"}"""))
+            srv.start()
+            val pi = PiClient("127.0.0.1", srv.port)
+            val w = pi.workspace()
+            assertEquals("MDF|3.0", w.material?.key); assertEquals(listOf(listOf(10.0, 20.0, 60.0, 80.0)), w.areas)
+            val e = runCatching { pi.saveWorkspace(kotlinx.serialization.json.buildJsonObject { put("areas", kotlinx.serialization.json.JsonArray(emptyList())) }, 4, "Tablet") }.exceptionOrNull()
+            assertTrue(e is PiConflictException && e.revision == 5, e.toString())
+            srv.takeRequest(); val put = srv.takeRequest()
+            assertEquals("""{"areas":[],"base_revision":4,"updated_by":"Tablet"}""", put.body.readUtf8())
+            assertEquals(7 to """{"title":"Schild"}""", pi.project())
+            assertEquals(null, pi.scan())
+            assertEquals(8, pi.saveProject("""{"title":"Schild"}""", 7, "Tablet"))
+            srv.takeRequest(); srv.takeRequest()
+            assertEquals("/api/workspace/project?base_revision=7&by=Tablet", srv.takeRequest().path)
+        }
+        val s = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString(MachineStatus.serializer(),
+            """{"sync":{"workspace":3,"project":1,"scan":2},"travel_z_mm":23.0,"home_needs_confirm":true}""")
+        assertEquals(SyncRevisions(3, 1, 2), s.sync); assertEquals(23.0, s.travel_z_mm); assertTrue(s.home_needs_confirm)
+    }
+
     @Test fun `status says why the reference was lost`() {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         val s = json.decodeFromString(MachineStatus.serializer(),

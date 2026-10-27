@@ -341,6 +341,21 @@ Die Werte liegen vorerst nur im Tablet; sie auf den Pi (`/api/camera/calibration
 dieselben Werte nutzen soll. **Frage an Grok:** Passt das OpenCV-Feldformat so für `scanprobe/calibration.py`, oder braucht Studio dazu noch
 `px_per_mm`/`offset_mm`/`rotation_deg` aus derselben Messung?
 
+### Pi als Zentrale (Claude, 2026-10-27) – bitte in der Web-Oberfläche nutzen
+
+Der Besitzer will, dass jedes Gerät (Tablet, Handy, PC, Web) denselben Stand hat; der Pi speichert und erzwingt alles.
+
+- **Arbeitsstand** `GET/PUT /api/workspace` (`pi400/marlin/workspace.py`): `material {name, thickness_mm}` (gewähltes Material,
+  Stärke 0–60 mm, bestimmt die Fahrhöhe), `areas`, `heights`, `settings`; dazu `GET/PUT /api/workspace/project` (offenes Projekt,
+  App-JSON) und `GET/PUT/DELETE /api/workspace/scan` (PNG). Jeder Teil hat eine Revision (`status.sync`), Schreiben mit
+  `base_revision`, 409 bei veraltetem Stand. Details: `docs/PI_API_REFERENZ.md` §4.15.
+- **Aufträge (`start`, `autorun`, Warteschlange) brauchen ein gewähltes Material** im Arbeitsstand. Die Web-Oberfläche sollte die
+  Materialwahl dorthin schreiben (`PUT /api/workspace {"material": …}`).
+- **Fahrhöhe** `status.travel_z_mm` = Stärke + 20 mm (mind. Rückzug, max. 80). Der Pi fährt selbst so hoch; Clients müssen nichts tun.
+- **Referenzieren mit unbekanntem Z:** `status.home_needs_confirm` → vor `op=home` (bzw. `autorun`) fragen, ob der Kopf frei steht, dann
+  `clear=1` mitschicken.
+- `index.html`: Eingabe Tempo (`mfSpeed`) noch `max="6000"` (Pi erlaubt 30000), Materialstärke bis 60 mm.
+
 ## Änderungslog
 
 - 2026-10-27 Claude: Kopfkamera-Kalibrierung mit Punktraster und Linsenkorrektur (Android), Notiz über dem Änderungslog.

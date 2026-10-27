@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
@@ -78,6 +79,12 @@ fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
     LaunchedEffect(Unit) { editor.notices.collect { n -> lastNotice = n; snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(n.text) } }
     LaunchedEffect(Unit) { machine.materials.collect { editor.setMaterials(it.items) } }
     LaunchedEffect(Unit) { machine.status.collect { editor.setMotion(it?.config?.motion?.toMotion() ?: de.millione.lumacut.core.MarlinWriter.Motion.FIRMWARE) } }
+    // The Pi is the centre: material, areas, project, scan and settings are the same on every device.
+    val workspace: de.millione.lumacut.app.workspace.WorkspaceViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val sync: de.millione.lumacut.app.sync.PiSyncViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    LaunchedEffect(Unit) { sync.start(machine, editor, workspace) }
+    val syncConflict by sync.conflict.collectAsStateWithLifecycle()
+    val homeConfirm by machine.homeConfirm.collectAsStateWithLifecycle()
 
     Box(Modifier.fillMaxSize().background(Lc.bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(Modifier.fillMaxSize()) {
@@ -107,6 +114,22 @@ fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
             ) { Text(data.visuals.message, style = LcTypography.bodyLarge) }
         }
     }
+    if (syncConflict) AlertDialog(
+        onDismissRequest = {}, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
+        title = { Text("Projekt an einem anderen Gerät geändert", style = LcTypography.titleLarge) },
+        text = { Text("Auf dem Pi liegt eine neuere Fassung des Projekts, und auch hier wurde geändert. Welche soll gelten? " +
+            "Die andere lässt sich mit Rückgängig bzw. am anderen Gerät wiederherstellen.", style = LcTypography.bodyLarge, color = Lc.muted) },
+        confirmButton = { LcButton("Vom Pi übernehmen", { sync.resolveConflict(true) }, kind = BtnKind.PRIMARY) },
+        dismissButton = { LcButton("Diese Fassung behalten", { sync.resolveConflict(false) }, kind = BtnKind.GHOST) },
+    )
+    if (homeConfirm) AlertDialog(
+        onDismissRequest = { machine.answerHomeConfirm(false) }, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
+        title = { Text("Steht der Kopf frei?", style = LcTypography.titleLarge) },
+        text = { Text("Der Pi kennt die Kopfhöhe nicht (nach Not-Aus, Stromausfall oder Neustart des Controllers). Beim Referenzieren " +
+            "fährt der Kopf quer über das Bett in die Ecke. Steht die Tasterspitze über allem, was auf dem Bett liegt?", style = LcTypography.bodyLarge, color = Lc.muted) },
+        confirmButton = { LcButton("Ja, referenzieren", { machine.answerHomeConfirm(true) }, kind = BtnKind.PRIMARY) },
+        dismissButton = { LcButton("Abbrechen", { machine.answerHomeConfirm(false) }, kind = BtnKind.GHOST) },
+    )
 }
 
 @Composable

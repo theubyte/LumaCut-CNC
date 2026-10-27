@@ -18,7 +18,8 @@ object Limits {
     val Z_STEP = 0.0..2.0
     /** Total focus drop over all passes; the Pi keeps Z >= surface + 2 mm, focus sits at surface + 5.5 mm. */
     const val MAX_FOCUS_DROP_MM = 3.0
-    val THICKNESS = 0.0..50.0
+    /** Material + support from the bed: 60 mm leaves 20 mm travel clearance below Z 80 (decided 2026-10-27). */
+    val THICKNESS = 0.0..60.0
     /** Highest switch-tip Z above the homed bed: above 80 mm the head runs out of the Z linear rail. */
     const val Z_MAX_MM = 80.0
     val DEPTH_PER_PASS = 0.0..10.0
