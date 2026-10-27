@@ -41,7 +41,12 @@ Die Kamera-Kalibrierung, die am 27.10. auf dem Pi gespeichert war (Revision 3), 
 - **Ohne gewähltes Material startet nichts.** Meldung: „Erst Material wählen – die Stärke bestimmt die Fahrhöhe“.
 - **H = Stärke + 20 mm.**
 - **Harte Obergrenze Z 80 mm** (Entscheidung des Nutzers, 27.10.). Gemeint ist die Tasterspitze über dem Bett. Diese Grenze darf keine Fahrt überschreiten, egal welcher Auftrag, Rückzug, Scan, Park oder welches Anheben vor dem Referenzieren.
-  - Heute gelten 90 mm: `Z_MAX_POS 90` in der Firmware, Pi-Prüfungen `≤ 90`, App `Z_TOP = 85`.
+  - **Grund:** Über 80 mm läuft der Laserkopf aus der Linearschiene der Z-Achse.
+  - Für die Kamera selbst gilt keine Grenze. Die Fotohöhe wird aber über die Tasterhöhe gefahren (Oberfläche + Kamera-Abstand als Tasterspitze), und die muss unter 80 bleiben.
+  - **Heute ist mehr als 80 erlaubt (Sicherheitsproblem):**
+    - Firmware: `Z_MAX_POS 90` (`firmware/marlin/build.py`).
+    - Pi: `travels.z = 90` (`web.py`) und die Park-Prüfung `z_target > 90` (`transport.py`).
+    - App: `Z_TOP = 85`. Die Schärfesuche der automatischen Kamera-Kalibrierung fährt bis Z 85, der Scan erlaubt bis `Z_TOP + 5` = 90 (`WorkspaceViewModel`). `PiApi` begrenzt `scan_z` auf 90.
   - Umsetzung: an allen drei Stellen auf 80. Die Firmware-Grenze wirkt erst nach dem Referenzieren. Vor dem Referenzieren begrenzt der Pi das Anheben anhand der gemerkten Höhe.
 - **Daraus folgt die maximale Arbeitshöhe:** Materialstärke ≤ 80 − 20 = **60 mm**.
   - Die Kamera muss für den Scan auf Oberfläche + Kamera-Abstand. Ist dieser Abstand größer als 20 mm, sinkt die Grenze auf 80 − Kamera-Abstand. Beispiel: Kamera scharf bei 30 mm, dann maximal 50 mm Material.
