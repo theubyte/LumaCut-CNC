@@ -20,6 +20,8 @@ data class CameraCalibration(
     val relMm: List<Pt> = emptyList(),
     val scanZ: Double = 20.0,
     val lens: Lens? = null,
+    /** Camera height above the material surface at which the picture is sharp (automatic calibration). */
+    val aboveSurface: Double? = null,
 ) {
     init { require(lens != null || (photo.size == 4 && relMm.size == 4)) { "Vier Kalibrierpunkte nötig" } }
 

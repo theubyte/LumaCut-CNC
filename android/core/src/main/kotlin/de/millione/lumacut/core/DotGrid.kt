@@ -135,7 +135,10 @@ object DotGrid {
      * and walks from dot to dot, each step predicted from the last one (so
      * the bending of a wide-angle lens is followed).
      */
-    fun index(blobs: List<Blob>): Map<Pair<Int, Int>, Pt> {
+    /** The big centre dot and the two direction dots as pixel vectors (e1 = one pitch right, e2 = one pitch down). */
+    private class Markers(val big: Blob, val e1: Pt, val e2: Pt, val spacing: Double)
+
+    private fun markers(blobs: List<Blob>): Markers {
         require(blobs.size >= 20) { "Zu wenige Punkte im Bild (${blobs.size}) – Raster ganz im Bild? Licht?" }
         val median = blobs.map { it.area }.sorted()[blobs.size / 2].toDouble()
         val spacing = blobs.map { b -> blobs.filter { it !== b }.minOf { hypot(it.x - b.x, it.y - b.y) } }.sorted()[blobs.size / 2]
@@ -143,7 +146,6 @@ object DotGrid {
         // a wide-angle lens magnifies the centre: measure the spacing at the big dot itself
         val step = blobs.filter { it !== big }.map { hypot(it.x - big.x, it.y - big.y) }.sorted().take(4).let { it[it.size / 2] }
         fun d(b: Blob) = hypot(b.x - big.x, b.y - big.y) / step
-        // a wide-angle lens shows the dots near the centre larger: compare with the dots around the big one
         val near = blobs.filter { it !== big && d(it) < 2.5 }.map { it.area }.sorted()
         val local = if (near.size >= 8) near[near.size / 2].toDouble() else median
         require(big.area > 4.0 * local) { "Großen Mittelpunkt nicht gefunden – Raster-Mitte ins Bild fahren" }
@@ -151,7 +153,34 @@ object DotGrid {
         val right = mids.filter { d(it) in 0.6..1.5 }.minByOrNull { abs(d(it) - 1) }
         val down = mids.filter { d(it) in 1.5..2.6 }.minByOrNull { abs(d(it) - 2) }
         require(right != null && down != null) { "Richtungspunkte neben der Mitte nicht gefunden – Bild schärfer stellen oder Licht prüfen" }
+        return Markers(big, Pt(right.x - big.x, right.y - big.y), Pt((down.x - big.x) / 2, (down.y - big.y) / 2), spacing)
+    }
 
+    /**
+     * Where the image centre looks, in work mm relative to the grid centre
+     * (rough, from the dots next to the centre), or null when the centre
+     * dot is not in the picture. Moving the head by minus this value brings
+     * the grid centre into the middle of the picture.
+     */
+    fun locate(argb: IntArray, w: Int, h: Int): Pt? {
+        val m = runCatching { markers(detect(argb, w, h)) }.getOrNull() ?: return null
+        val vx = w / 2.0 - m.big.x; val vy = h / 2.0 - m.big.y
+        val det = m.e1.x * m.e2.y - m.e2.x * m.e1.y
+        if (abs(det) < 1e-9) return null
+        val a = (vx * m.e2.y - m.e2.x * vy) / det
+        val b = (m.e1.x * vy - vx * m.e1.y) / det
+        return Pt(a * PITCH, b * PITCH)
+    }
+
+    /**
+     * Grid index (i, j) → pixel for the blobs belonging to the grid. Starts
+     * at the big centre dot, takes the directions from the two medium dots
+     * and walks from dot to dot, each step predicted from the last one (so
+     * the bending of a wide-angle lens is followed).
+     */
+    fun index(blobs: List<Blob>): Map<Pair<Int, Int>, Pt> {
+        val mk = markers(blobs)
+        val big = mk.big; val spacing = mk.spacing
         val cell = spacing
         val buckets = HashMap<Long, MutableList<Int>>()
         fun key(gx: Int, gy: Int) = (gx.toLong() shl 32) xor (gy.toLong() and 0xFFFFFFFFL)
@@ -169,8 +198,8 @@ object DotGrid {
         val bigK = blobs.indexOf(big)
         val found = HashMap<Pair<Int, Int>, Pt>()
         val used = HashSet<Int>()
-        val e1 = Pt(right.x - big.x, right.y - big.y)
-        val e2 = Pt((down.x - big.x) / 2, (down.y - big.y) / 2)
+        val e1 = mk.e1
+        val e2 = mk.e2
         class Node(val i: Int, val j: Int, val p: Pt, val e1: Pt, val e2: Pt)
         val queue = ArrayDeque<Node>()
         found[0 to 0] = Pt(big.x, big.y); used += bigK

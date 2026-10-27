@@ -17,7 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -75,6 +77,8 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
     var problem by remember { mutableStateOf<String?>(null) }
     var evaluating by remember { mutableStateOf(false) }
     val markers = remember { mutableStateListOf<Offset>() }
+    var manual by remember { mutableStateOf(false) }
+    var confirmAuto by remember { mutableStateOf(false) }
 
     suspend fun fetch() {
         val c = machine.clientOrNotify() ?: run { live = false; return }
@@ -100,6 +104,17 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
         }
     }
 
+    if (confirmAuto) AlertDialog(
+        onDismissRequest = { confirmAuto = false }, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
+        title = { Text("Kamera automatisch kalibrieren?", style = LcTypography.titleLarge) },
+        text = {
+            SmallText("Liegt eine Restplatte (mind. 21 × 17 cm) mittig auf dem Bett? Der Laser graviert gleich ein Punktraster darauf " +
+                "(ca. 5 min, Laser an – Schutz beachten). Danach fährt der Kopf allein: Kamera suchen, scharf stellen, einmessen, parken. " +
+                "Abbrechen jederzeit über „Abbrechen“ im Fortschritt.")
+        },
+        confirmButton = { LcButton("Starten", { confirmAuto = false; live = false; ws.autoCalibrate(machine); onClose() }, kind = BtnKind.PRIMARY) },
+        dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("Abbrechen", color = Lc.muted) } },
+    )
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Row(Modifier.fillMaxSize().background(Lc.bg).padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             LcCard(Modifier.width(400.dp).fillMaxHeight()) {
@@ -109,6 +124,16 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
                     Segmented(listOf(true to "Punktraster (genau)", false to "4 Ecken (einfach)"), grid, { grid = it; result = null; problem = null }, Modifier.fillMaxWidth())
                     Spacer(Modifier.height(10.dp))
                     if (grid) {
+                        SmallText("Läuft von allein: Punktraster lasern, Kamera sucht das Raster, stellt die Höhe scharf, misst Linse, " +
+                            "Maßstab und Lage zum Laser ein und speichert alles auf dem Pi. Du legst nur eine Restplatte (mind. 21 × 17 cm) " +
+                            "in die Mitte. Dauer ca. 8 Minuten.")
+                        Spacer(Modifier.height(12.dp))
+                        if (!manual) LcButton("Automatisch kalibrieren", { confirmAuto = true }, Modifier.fillMaxWidth(), LcIcons.camera, BtnKind.PRIMARY, big = true)
+                        Spacer(Modifier.height(10.dp))
+                        Segmented(listOf(false to "Automatisch", true to "Einzelschritte"), manual, { manual = it }, Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(10.dp))
+                    }
+                    if (grid && manual) {
                         SmallText("Misst auch die Weitwinkel-Verzerrung der Linse heraus – damit stimmt der Scan bis an den Bildrand.\n\n" +
                             "1. Restplatte (mind. 21 × 17 cm) in die Mitte legen, Fokus messen, Punktraster lasern (ca. 5 min).\n" +
                             "2. Z auf die Höhe fahren, in der gescannt wird, und den Kopf über das Raster fahren.\n" +
@@ -118,7 +143,7 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
                         LcButton("1 · Punktraster an Laser senden", { ws.sendGridJob(machine) }, Modifier.fillMaxWidth(), LcIcons.send, busy = "upload" in busy)
                         Spacer(Modifier.height(8.dp))
                         LcButton("2 · Kopf über das Raster", { ws.headOverGrid(machine) }, Modifier.fillMaxWidth(), LcIcons.machine, busy = "moveto" in busy)
-                    } else {
+                    } else if (!grid) {
                         SmallText("1. Kalibrier-Rechteck (60 × 40 mm, Mitte des Arbeitsbereichs) auf Restmaterial lasern.\n2. Kopf darüber fahren, bis das ganze Rechteck im Bild ist.\n" +
                             "3. Die vier Marker auf die nummerierten Ecken ziehen.\n4. Speichern. Danach nicht mehr in Z verstellen – der Scan nutzt dieselbe Höhe.\nOhne Linsenkorrektur: am Bildrand ungenauer.")
                         Spacer(Modifier.height(12.dp))
@@ -126,6 +151,7 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
                         Spacer(Modifier.height(8.dp))
                         LcButton("2 · Kopf über das Rechteck", { ws.headOverRect(machine) }, Modifier.fillMaxWidth(), LcIcons.machine, busy = "moveto" in busy)
                     }
+                    if (!grid || manual) {
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         SmallText("XY 10:")
@@ -165,9 +191,10 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
                         }
                         problem?.let { Spacer(Modifier.height(8.dp)); SmallText(it, Lc.warn) }
                     }
+                    }
                 }
                 Spacer(Modifier.height(10.dp))
-                LcButton("Speichern", {
+                if (!grid || manual) LcButton("Speichern", {
                     if (grid) result?.let { ws.saveGridCalibration(machine, it); onClose() }
                     else {
                         val p = photo ?: return@LcButton

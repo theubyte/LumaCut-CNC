@@ -142,4 +142,36 @@ class LensTest {
         assertEquals(4, rev); assertEquals(cal, back)
         srv.shutdown()
     }
+
+    @Test fun `locate tells how far the image centre is from the grid centre`() {
+        val t = trueLens()
+        val off = DotGrid.locate(render(t), w, h)!!
+        val truth = head + t.toRel(Pt(w / 2.0, h / 2.0)) - DotGrid.center
+        assertTrue(off.dist(truth) < 4.0, "located $off, true $truth")
+        assertEquals(null, DotGrid.locate(IntArray(w * h) { 0xFFC8B090.toInt() }, w, h))
+    }
+
+    @Test fun `focus measure prefers the sharp picture`() {
+        val sharp = render(trueLens())
+        val blurred = IntArray(w * h) { k ->
+            val x = k % w; val y = k / w
+            var r = 0; var g = 0; var b = 0; var n = 0
+            for (dy in -3..3) for (dx in -3..3) {
+                val xx = (x + dx).coerceIn(0, w - 1); val yy = (y + dy).coerceIn(0, h - 1); val c = sharp[yy * w + xx]
+                r += (c shr 16) and 255; g += (c shr 8) and 255; b += c and 255; n++
+            }
+            (0xFF shl 24) or ((r / n) shl 16) or ((g / n) shl 8) or (b / n)
+        }
+        assertTrue(CameraFocus.sharpness(sharp, w, h) > 2 * CameraFocus.sharpness(blurred, w, h))
+    }
+
+    @Test fun `focus helpers`() {
+        assertEquals(listOf(10.0, 10.0, 1.0, 1.0, 1.0, 0.1), CameraFocus.jogSteps(23.1))
+        assertEquals(listOf(-1.0, -0.1, -0.1), CameraFocus.jogSteps(-1.2))
+        assertEquals(emptyList(), CameraFocus.jogSteps(0.04))
+        val samples = listOf(40.0, 41.0, 42.0, 43.0, 44.0).map { it to 100 - (it - 42.3) * (it - 42.3) }
+        assertEquals(42.3, CameraFocus.peak(samples), 1e-6)
+        assertTrue(!CameraFocus.atEdge(samples))
+        assertTrue(CameraFocus.atEdge(samples.take(2)))
+    }
 }
