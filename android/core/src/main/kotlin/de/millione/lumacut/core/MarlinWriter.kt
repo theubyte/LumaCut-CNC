@@ -174,7 +174,7 @@ class MarlinWriter(private val appVersion: String = "dev", private val motion: M
                 val level = levels[r * cols + c]
                 var e = c + 1
                 while (e < cols && levels[r * cols + e] == level) e++
-                val power = if (level >= 250) 0 else (minS + (maxS - minS) * (255 - level) / 255.0).roundToInt()
+                val power = if (level >= 250) 0 else (minS + (maxS - minS) * layer.powerShare((255 - level) / 255.0)).roundToInt()
                 runs += Run(box.minX + c * cell, box.minX + e * cell, power)
                 c = e
             }

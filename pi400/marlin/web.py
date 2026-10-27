@@ -26,6 +26,7 @@ from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import create_blueprint as camera_calibration_api
 from . import camera as head_camera
 from .workspace import WorkspaceStore, create_blueprint as workspace_api
+from .line_laser import LineLaser
 from .app_update import AppUpdates
 
 ROOT = Path(__file__).resolve().parent
@@ -37,6 +38,11 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
 FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings", "workspace")
 JOBS = DATA / "jobs"
+# Camera pictures taken inside a job while the laser runs (measuring spot/line).
+CAPTURES = DATA / "captures"
+_CAPTURE = re.compile(r"^\s*;\s*LUMACUT-CAPTURE\b(.*)$", re.I)
+_CAPTURE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+_CAPTURE_WORD = re.compile(r"(id|w|h|delay)=([A-Za-z0-9-]+)")
 USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
 # Head camera (USB/UVC or CSI via V4L2) for the workspace scan.
 CAMERA = os.environ.get("LUMACUT_CAMERA", "/dev/video0")
@@ -63,6 +69,8 @@ config = {
     "motion": {"accel": None, "speed": None},
     # Probed surface may differ this much from the chosen material's thickness.
     "thickness_tolerance_mm": 2.0,
+    # Pi GPIO (BCM) of the red measuring line laser on the head, None = not fitted.
+    "line_laser_gpio": None,
 }
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
@@ -89,6 +97,12 @@ WORKSPACE = WorkspaceStore(DATA.parent / "workspace")
 app.register_blueprint(workspace_api(WORKSPACE))
 machine.material_mm = WORKSPACE.material_thickness()
 WORKSPACE.on_change = lambda state: setattr(machine, "material_mm", WORKSPACE.material_thickness())
+# Measuring line laser (3D): off at start, on only while the app measures.
+LINE_LASER = LineLaser()
+try:
+    LINE_LASER.configure(config.get("line_laser_gpio"))
+except Exception:
+    logging.exception("Linienlaser-GPIO nicht eingerichtet")
 # Last known head height, so homing after an emergency stop knows how far to lift.
 LAST_Z = DATA / "last_z.json"
 try:
@@ -244,6 +258,7 @@ def status():
                       "aux":"FAN2 PC7 unused"},
                   config=dict(config),
                   sync=WORKSPACE.revisions(),
+                  line_laser=LINE_LASER.status(),
                   travel_z_mm=round(machine.travel_z, 2),
                   home_needs_confirm=(not machine.z_homed and machine.last_known_z is None),
                   origin=_origin_status(),
@@ -302,6 +317,12 @@ def settings():
     if probe_x is not None and not (math.isfinite(probe_x) and -80 <= probe_x <= 80 and
             math.isfinite(probe_y) and -80 <= probe_y <= 80):
         raise ValueError("Taster-X/Y-Versatz muss -80..80 mm sein")
+    # optional: GPIO of the measuring line laser ("" = none)
+    if "line_laser_gpio" in request.form:
+        raw = request.form.get("line_laser_gpio", "").strip()
+        pin = int(raw) if raw else None
+        LINE_LASER.configure(pin)
+        config["line_laser_gpio"] = pin
     # optional: how far the probed surface may differ from the material thickness
     tol_raw = request.form.get("thickness_tolerance_mm", "").strip()
     if tol_raw:
@@ -511,6 +532,10 @@ def action():
         x = float(request.form.get("x", "nan")); y = float(request.form.get("y", "nan"))
         machine.move_to(x, y, owner="web")
         return jsonify(message="Kopf auf X%.1f Y%.1f" % (x, y), position=machine.position)
+    if op == "line_laser":
+        # Red measuring line laser (never burns); switches itself off after 120 s.
+        LINE_LASER.set(request.form.get("on") == "1")
+        return jsonify(message="Linienlaser " + ("an" if LINE_LASER.on else "aus"), line_laser=LINE_LASER.status())
     if op == "motion_test":
         # Laser-off stress moves at a test acceleration/speed (motion calibration).
         local_owner()
@@ -987,8 +1012,13 @@ def auto_plan(commands, point=None):
     own_z = focus.has_absolute_z(commands)
     limit = machine.safe_zone_xy_mm
     bounds = heightmap.Box(limit, limit, config["travels"]["x"], config["travels"]["y"])
+    tapped = WORKSPACE.probe_points()
     if point is not None:
         grids = heightmap.single_point_plan(point[0], point[1], machine.probe_reachable)
+    elif tapped:
+        # the operator tapped where material lies (work mm -> machine mm, X mirrored)
+        grids = [g for wx, wy in tapped for g in heightmap.single_point_plan(
+            config["travels"]["x"] - wx, machine.safe_zone_xy_mm + wy, machine.probe_reachable)]
     else:
         grids = heightmap.plan_probe(commands, bounds, machine.probe_reachable)
     if not own_z:
@@ -1088,6 +1118,10 @@ def _execute_job(filename, commands, auto=None):
     machine.play_melody("start", owner="job")
     for i, command in enumerate(commands, 1):
         _check_stop()
+        if _CAPTURE.match(command):
+            _capture(command)     # a picture while the line before runs; never stops the job
+            job["line"] = i
+            continue
         normalized = normalize(command)
         if normalized == "G28":
             machine.safe_home(owner="job", clearance_mm=config["z_clearance_mm"])
@@ -1111,6 +1145,50 @@ def _execute_job(filename, commands, auto=None):
         aborted.parked = True
         raise aborted
     job.update(state="complete", phase=None)
+
+
+def _capture(command):
+    """'; LUMACUT-CAPTURE id=<name> w=<px> h=<px> delay=<ms>' in a job: wait
+    [delay] after the line before was sent (the job puts M400 in front of a
+    slow line, so it is running), then take one camera picture and keep it as
+    captures/<id>.jpg for the app (laser spot / line height measurement)."""
+    words = dict(_CAPTURE_WORD.findall(_CAPTURE.match(command).group(1)))
+    name = words.get("id", "").lower()
+    if not _CAPTURE_NAME.match(name) or not os.path.exists(CAMERA):
+        logging.warning("Capture ignored: %s", command.strip())
+        return
+    try:
+        time.sleep(min(int(words.get("delay", "800")), 5000) / 1000.0)
+        settings = head_camera.validate(dict(head_camera.DEFAULTS, **(config.get("camera") or {})))
+        data = head_camera.snapshot(CAMERA, int(words.get("w", "1920")), int(words.get("h", "1080")), settings)
+        CAPTURES.mkdir(parents=True, exist_ok=True)
+        old = sorted(CAPTURES.glob("*.jpg"), key=lambda p: p.stat().st_mtime)
+        for p in old[:-199]:
+            p.unlink(missing_ok=True)
+        (CAPTURES / (name + ".jpg")).write_bytes(data)
+    except Exception:
+        logging.exception("Capture %s failed", name)
+
+
+@app.get("/api/camera/captures/<name>")
+def camera_capture(name):
+    """A picture a job took while the laser ran (see _capture)."""
+    if not _CAPTURE_NAME.match(name):
+        raise ValueError("Unzulässiger Name")
+    path = CAPTURES / (name + ".jpg")
+    if not path.is_file():
+        return jsonify(error="Kein solches Bild"), 404
+    return path.read_bytes(), 200, {"Content-Type": "image/jpeg", "Cache-Control": "no-store"}
+
+
+@app.delete("/api/camera/captures")
+def camera_captures_clear():
+    removed = 0
+    if CAPTURES.is_dir():
+        for p in CAPTURES.glob("*.jpg"):
+            p.unlink(missing_ok=True)
+            removed += 1
+    return jsonify(message="%d Bilder gelöscht" % removed)
 
 
 def job_error_text(exc):

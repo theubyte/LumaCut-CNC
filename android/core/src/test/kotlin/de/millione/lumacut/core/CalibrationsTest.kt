@@ -333,6 +333,146 @@ class CalibrationsTest {
         assertEquals(SyncRevisions(3, 1, 2), s.sync); assertEquals(23.0, s.travel_z_mm); assertTrue(s.home_needs_confirm)
     }
 
+    @Test fun `ringing test measures the swing after the corner and its frequency`() {
+        val spec = RingingTest.Spec()
+        val legs = RingingTest.legs(spec)
+        assertEquals(6, legs.size)
+        val cal = camera()
+        val centre = RingingTest.bounds(spec).center
+        // X lines: the Y axis swings 0.2 mm, 2.5 mm per wave, fading out; Y lines stay straight
+        fun swing(l: RingingTest.Leg, t: Double) = if (l.axis == 'X') 0.2 * exp(-t / 5.0) * kotlin.math.sin(2 * Math.PI * t / 2.5) else 0.0
+        val shade = { p: Pt ->
+            var d = 0.0
+            for (l in legs) {
+                val t = (p - l.corner).let { it.x * l.dir.x + it.y * l.dir.y }
+                val s = (p - l.corner).let { it.x * l.across.x + it.y * l.across.y }
+                if (t in 0.0..spec.length && abs(s - swing(l, t)) < 0.1) d = 0.65
+                if (t in -0.1..0.1 && s in -spec.lead..0.0) d = 0.65
+            }
+            d
+        }
+        val px = photo(cal, centre, shade = shade)
+        val sampler = PhotoSampler(px, w, h, cal, centre)
+        val results = legs.map { RingingTest.measure(sampler, spec, it) }
+        for (r in results.filter { it.leg.axis == 'X' }) {
+            assertTrue(r.rings, "X ${r.leg.speed}: ${r.amplitude} / ${r.noise}")
+            assertEquals(0.2, r.amplitude, 0.06)
+            assertEquals(2.5, r.wavelength, 0.4)
+            assertEquals('Y', r.swingingAxis)
+        }
+        for (r in results.filter { it.leg.axis == 'Y' }) assertTrue(r.found && !r.rings, "Y ${r.leg.speed}: ${r.amplitude}")
+        val g = RingingTest.job(spec).lines()
+        assertEquals(12, g.count { it.startsWith("G1 ") })
+        assertTrue(g.indexOfFirst { it.startsWith("G1") } > g.indexOfFirst { it.startsWith("G0 X") })
+    }
+
+    /** Brown wood with a blue laser spot of [r] px at [at] (white core, blue rim). */
+    private fun spotPicture(at: Pt, r: Double = 4.0, seed: Int = 5): IntArray {
+        val rnd = Random(seed)
+        return IntArray(w * h) { k ->
+            val x = k % w; val y = k / w
+            val d = Pt(x + 0.5, y + 0.5).dist(at)
+            val n = rnd.nextInt(-8, 9)
+            when {
+                d < r * 0.5 -> 0xFFFFFFFF.toInt()
+                d < r -> (0xFF shl 24) or (120 shl 16) or (140 shl 8) or 255
+                else -> (0xFF shl 24) or ((150 + n) shl 16) or ((110 + n) shl 8) or (70 + n)
+            }
+        }
+    }
+
+    @Test fun `laser spot model turns the picture position back into the distance`() {
+        // the spot wanders 6 px per mm across the picture (and 1.5 px down) as the surface comes closer
+        fun spotAt(dist: Double) = Pt(400 + 6.0 * (dist - 15), 520 - 1.5 * (dist - 15))
+        val samples = SpotMeasure.CAL_DISTANCES.map { d -> d to listOf(LightFinder.spot(spotPicture(spotAt(d)), w, h)?.px) }
+        assertTrue(samples.all { it.second[0] != null })
+        assertTrue(samples.all { (d, p) -> p[0]!!.dist(spotAt(d)) < 0.6 })
+        val model = LightModel.fit("spot", listOf(0), samples, power = 5)
+        for (d in listOf(9.3, 15.0, 21.7)) {
+            val (got, off) = assertNotNull(model.distance(0, spotAt(d)))
+            assertEquals(d, got, 0.15); assertTrue(off < 1.0)
+        }
+        assertEquals(null, model.distance(0, Pt(100.0, 100.0)), "far beside the track: not the spot")
+        assertEquals(null, LightFinder.spot(spotPicture(Pt(-50.0, -50.0)), w, h), "no spot in plain wood")
+    }
+
+    @Test fun `power test picks the faintest visible glimmer that leaves no mark`() {
+        fun step(s: Int, seen: Boolean, mark: Double) = SpotMeasure.PowerStep(s, seen, if (seen) 80.0 else 0.0, mark)
+        assertEquals(4, SpotMeasure.pickPower(listOf(step(1, false, 0.0), step(2, false, 0.0), step(3, true, 0.0), step(4, true, 0.0), step(5, true, 0.01))
+            .let { it.map { s -> if (s.s == 3) step(3, true, 0.0) else s } }.let { listOf(step(3, false, 0.0)) + it.drop(3) + listOf(step(6, true, 0.02)) }))
+        assertEquals(null, SpotMeasure.pickPower(listOf(step(1, false, 0.0), step(2, true, 0.08), step(3, true, 0.1))), "seen only where it marks")
+        val job = SpotMeasure.measureJob(listOf(Pt(100.0, 100.0)), 23.0, 5, 1920, 1080).lines()
+        assertTrue(job[job.indexOf("M3 I") + 1].startsWith("G0 Z23.000"), "own Z before the first line: the Pi does not lower to focus")
+        val m400 = job.indexOf("M400")
+        assertTrue(job[m400 + 1].startsWith("G1 ") && job[m400 + 1].endsWith(" F120 S5"))
+        assertEquals("; LUMACUT-CAPTURE id=spotmes-0 w=1920 h=1080 delay=2200", job[m400 + 2])
+        assertEquals(2, SpotMeasure.calibrationJob(Pt(100.0, 100.0), 3.0, 5, 640, 480, listOf(8.0, 20.0)).lines().count { it.startsWith("G0 Z") })
+    }
+
+    @Test fun `line laser heights from on and off pictures`() {
+        val cal = camera()
+        val head = Pt(150.0, 150.0)
+        // the line row moves 5 px per mm distance; at distance 20 it is at row 300
+        fun rowAt(dist: Double) = 300 + 5.0 * (dist - 20)
+        fun pictures(rowOf: (Int) -> Double): Pair<IntArray, IntArray> {
+            val off = IntArray(w * h) { k -> val n = (k * 7919 % 13) - 6; (0xFF shl 24) or ((150 + n) shl 16) or ((110 + n) shl 8) or (70 + n) }
+            val on = off.copyOf()
+            for (x in 0 until w) { val r = rowOf(x); for (y in 0 until h) if (abs(y + 0.5 - r) < 1.5) { val c = on[y * w + x]; on[y * w + x] = (c and 0xFF00FFFF.toInt()) or (255 shl 16) } }
+            return on to off
+        }
+        val cols = LineMeasure.columns(w, 40)
+        val samples = SpotMeasure.CAL_DISTANCES.map { d -> val (on, off) = pictures { rowAt(d) }; d to LightFinder.line(on, off, w, h, cols) }
+        val model = LightModel.fit("line", cols, samples)
+        assertEquals(cols.size, model.keys.size)
+        // a 6 mm block under the right half of the picture: the distance there is 6 mm shorter
+        val headZ = 23.0
+        val (on, off) = pictures { x -> rowAt(if (x > w / 2) 14.0 else 20.0) }
+        val pts = LineMeasure.points(model, on, off, w, h, cal, head, headZ)
+        assertTrue(pts.size >= cols.size - 1)
+        for ((x, _, z) in pts) assertEquals(if (x > head.x + 0.5) 9.0 else 3.0, z, 0.2, "x $x")
+        val grid = assertNotNull(LineMeasure.grid("3D", pts))
+        assertEquals(9.0, grid.max, 0.2); assertEquals(3.0, grid.min, 0.2)
+    }
+
+    @Test fun `tone curve gives the power share for each grey`() {
+        // wood saturates: tone grows fast at first, then slowly (10 fields, 10 … 100 % of the power)
+        val tones = (1..10).map { 0.8 * (1 - exp(-it / 3.0)) }
+        val curve = ToneTest.curve(tones)
+        assertEquals(11, curve.size); assertEquals(0.0, curve[0]); assertEquals(1.0, curve[10], 1e-9)
+        assertTrue(curve.zipWithNext().all { (a, b) -> b >= a })
+        assertTrue(curve[5] < 0.35, "half the darkness needs much less than half the power: ${curve[5]}")
+        val layer = Layer(name = "Foto", color = 0, mode = LayerMode.FILL, powerPct = 40.0, toneCurve = curve)
+        assertEquals(curve[5], layer.powerShare(0.5), 1e-9)
+        assertEquals(0.5, layer.copy(toneCurve = emptyList()).powerShare(0.5))
+        // grey 50 % in a picture: the curve's power, not 50 %
+        val raster = Raster.of(1, 1, byteArrayOf(127))
+        val doc = Document(layers = listOf(layer.copy(intervalMm = 1.0)), elements = listOf(Element(layerId = layer.id, kind = "Bild",
+            transform = Transform(50.0, 50.0), raster = raster, imageWidthMm = 1.0, imageHeightMm = 1.0, imageMode = ImageMode.GRAYSCALE)))
+        val s = MarlinWriter().write(doc).lines().first { it.startsWith("G1") && !it.endsWith(" S0") }.substringAfterLast(" S").toInt()
+        assertEquals((40.0 / 100 * 255 * layer.powerShare(128 / 255.0)).roundToInt().toDouble(), s.toDouble(), 1.0)
+        assertTrue(runCatching { ToneTest.curve(List(10) { 0.01 }) }.isFailure, "too pale: no curve")
+    }
+
+    @Test fun `backlash shows as the shifted second line of each pair`() {
+        val cal = camera()
+        val centre = BacklashTest.bounds().center
+        val play = mapOf('X' to 0.15, 'Y' to 0.0)
+        val shade = { p: Pt ->
+            var d = 0.0
+            for ((axis, o) in BacklashTest.pairs()) {
+                val across = if (axis == 'X') p.x - o.x else p.y - o.y
+                val along = if (axis == 'X') p.y - o.y else p.x - o.x
+                if (along in 0.0..BacklashTest.LEN && (abs(across) < 0.1 || abs(across - BacklashTest.GAP - play[axis]!!) < 0.1)) d = 0.6
+            }
+            d
+        }
+        val px = photo(cal, centre, shade = shade)
+        val sampler = PhotoSampler(px, w, h, cal, centre)
+        val res = BacklashTest.result(BacklashTest.pairs().map { (a, o) -> a to BacklashTest.measure(sampler, a, o) })
+        assertEquals(0.15, res['X']!!, 0.03); assertEquals(0.0, res['Y']!!, 0.03)
+        assertEquals(12, BacklashTest.job().lines().count { it.startsWith("G1 ") })
+    }
+
     @Test fun `status says why the reference was lost`() {
         val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         val s = json.decodeFromString(MachineStatus.serializer(),

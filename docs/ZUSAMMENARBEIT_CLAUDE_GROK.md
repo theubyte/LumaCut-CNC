@@ -354,6 +354,7 @@ Der Besitzer will, dass jedes Gerät (Tablet, Handy, PC, Web) denselben Stand ha
 - **Fahrhöhe** `status.travel_z_mm` = Stärke + 20 mm (mind. Rückzug, max. 80). Der Pi fährt selbst so hoch; Clients müssen nichts tun.
 - **Referenzieren mit unbekanntem Z:** `status.home_needs_confirm` → vor `op=home` (bzw. `autorun`) fragen, ob der Kopf frei steht, dann
   `clear=1` mitschicken.
+- **Abtastpunkte** `probe_points` im Arbeitsstand: sind welche gesetzt, tastet `autorun` nur dort. **Mess-Linienlaser** `op=line_laser` (Pi-GPIO, `status.line_laser`). **Bilder während einer Laserlinie** `; LUMACUT-CAPTURE` + `/api/camera/captures/<name>`.
 - `index.html`: Eingabe Tempo (`mfSpeed`) noch `max="6000"` (Pi erlaubt 30000), Materialstärke bis 60 mm.
 
 ## Änderungslog

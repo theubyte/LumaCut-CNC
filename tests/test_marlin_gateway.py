@@ -1112,6 +1112,32 @@ with web.app.test_client() as c:
                          ["M400", "M201 X2500 Y2500", "M203 X200 Y200 Z9", "M204 P2500 T2500",
                           "M400", "M201 X500 Y500", "M203 X150 Y150 Z9", "M204 P500 T500"])
 
+    def test_job_takes_a_picture_while_the_laser_line_runs(self):
+        self._run_web_script(r"""
+import types
+from marlin import web
+web.CAMERA = web.CONFIG.parent.as_posix()          # an existing path stands in for /dev/video0
+shots = []
+web.head_camera.snapshot = lambda dev, w, h, s: shots.append((w, h)) or b"\xff\xd8jpeg"
+sent = []
+m = web.machine
+m.command = lambda cmd, **k: sent.append(cmd)
+m.stream_command = lambda cmd, **k: sent.append(cmd)
+m.drain = lambda **k: None
+m.park_safezone = lambda **k: sent.append("PARK")
+m.play_melody = lambda *a, **k: None
+web._execute_job("spot.gcode", ["G0 X100 Y100", "M400", "G1 X110 Y100 F120 S5",
+                                "; LUMACUT-CAPTURE id=spot-3 w=640 h=480 delay=0", "M5 I"])
+assert shots == [(640, 480)], shots
+assert not any("CAPTURE" in c for c in sent), sent            # never sent to Marlin
+with web.app.test_client() as c:
+    r = c.get("/api/camera/captures/spot-3")
+    assert r.status_code == 200 and r.data == b"\xff\xd8jpeg", r.data
+    assert c.get("/api/camera/captures/fehlt").status_code == 404
+    assert c.get("/api/camera/captures/..%2Fconfig").status_code in (400, 404)
+    assert c.delete("/api/camera/captures").get_json()["message"] == "1 Bilder gelöscht"
+""")
+
     def test_camera_snapshot_and_moveto_endpoints(self):
         self._run_web_script(r"""
 import subprocess, types, json

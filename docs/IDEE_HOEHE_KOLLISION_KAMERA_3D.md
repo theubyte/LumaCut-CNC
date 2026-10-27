@@ -158,6 +158,8 @@ Lasern), Leerfahrten > 20 mm auf Fahrhöhe, `G28 X Y R0` mit eigenem Anheben vor
 relativ ab der gemerkten letzten Höhe `last_z.json`, mind. 5 mm, nie über 80; ohne gemerkte Höhe Bestätigung `clear=1`),
 Kamera-Schärfesuche ab + 5 mm. Das gewählte Material liegt jetzt auf dem Pi (`/api/workspace`), der Pi ist die Zentrale.
 
+**Stand 27.10. nachts (Claude):** Schritt 2 (Abtastpunkt im Scan antippen, `probe_points`) gebaut. 3D: Übergang mit dem Laserpunkt des LT-80W (Leistungstest S1–S13 mit Kamera: sichtbar ja/nein, Spur ja/nein; Kalibrierung über der Platte in 6 Höhen; Messen an den Abtastpunkten in Fahrhöhe; Pi nimmt die Bilder während der Linie auf, `; LUMACUT-CAPTURE`). Linienlaser: Pi-GPIO (`op=line_laser`, `line_laser_gpio`), Kalibrierung und 3D-Scan in der App – Hardware fehlt noch. Schwing-Test, Umkehrspiel und Graustufen-Kurve ebenfalls gebaut. Noch offen: Kalibrierkörper mit Markern, Stereo durch Bewegung.
+
 - ~~Höhe vor dem Referenzieren, wenn Marlin die Position verloren hat (§4.2)~~: so gebaut wie vorgeschlagen; später
   besser ein Schalter oben an der Z-Achse (dann referenziert Z zuerst nach oben).
 - ~~Untergrenze der Kamera-Schärfesuche~~: entschieden, mindestens 5 mm zwischen Tasterspitze und Werkstück (§4.5).

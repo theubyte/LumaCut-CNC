@@ -18,6 +18,7 @@ import de.millione.lumacut.core.HeightMapSet
 import de.millione.lumacut.core.PiClient
 import de.millione.lumacut.core.PiConflictException
 import de.millione.lumacut.core.PiWorkspace
+import de.millione.lumacut.core.Pt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,8 +68,8 @@ class PiSyncViewModel(app: Application) : AndroidViewModel(app) {
     private var started = false
 
     /** Work state as this device holds it, in the Pi's rounding. */
-    private data class WorkLocal(val material: String?, val areas: List<List<Double>>, val heights: HeightMapSet?,
-                                 val gridPower: Double, val meshSpacing: Double)
+    private data class WorkLocal(val material: String?, val areas: List<List<Double>>, val points: List<List<Double>>,
+                                 val heights: HeightMapSet?, val gridPower: Double, val meshSpacing: Double)
 
     private var machine: MachineViewModel? = null
     private var editor: EditorViewModel? = null
@@ -95,7 +96,8 @@ class PiSyncViewModel(app: Application) : AndroidViewModel(app) {
         }
         // changes here
         viewModelScope.launch {
-            combine(editor.materialKey, ws.areas, editor.heights, ws.gridPower, ws.spacing) { m, a, h, g, s -> local(m, a, h, g, s) }
+            combine(combine(editor.materialKey, ws.areas, ws.probePoints) { m, a, p -> Triple(m, a, p) },
+                    editor.heights, ws.gridPower, ws.spacing) { (m, a, p), h, g, s -> local(m, a, p, h, g, s) }
                 .debounce(1200).distinctUntilChanged().collect { lock.withLock { pushWork(it) } }
         }
         viewModelScope.launch {
@@ -106,8 +108,9 @@ class PiSyncViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun local(material: String?, areas: List<Box>, heights: HeightMapSet?, gridPower: Double, spacing: Double) =
-        WorkLocal(material, areas.map { b -> listOf(b.minX, b.minY, b.maxX, b.maxY).map { round(it * 1000) / 1000 } }, heights, gridPower, spacing)
+    private fun local(material: String?, areas: List<Box>, points: List<Pt>, heights: HeightMapSet?, gridPower: Double, spacing: Double) =
+        WorkLocal(material, areas.map { b -> listOf(b.minX, b.minY, b.maxX, b.maxY).map { round(it * 1000) / 1000 } },
+            points.map { p -> listOf(round(p.x * 1000) / 1000, round(p.y * 1000) / 1000) }, heights, gridPower, spacing)
 
     private fun client(): PiClient? {
         val m = machine ?: return null
@@ -157,13 +160,14 @@ class PiSyncViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun currentWork(): WorkLocal {
         val e = editor!!; val w = ws!!
-        return local(e.materialKey.value, w.areas.value, e.heights.value, w.gridPower.value, w.spacing.value)
+        return local(e.materialKey.value, w.areas.value, w.probePoints.value, e.heights.value, w.gridPower.value, w.spacing.value)
     }
 
     private fun apply(remote: PiWorkspace) {
         val e = editor!!; val w = ws!!
         e.setMaterialKey(remote.material?.key)
         w.setAreas(remote.areas.filter { it.size == 4 }.map { Box(it[0], it[1], it[2], it[3]) })
+        w.setProbePoints(remote.probe_points.filter { it.size == 2 }.map { Pt(it[0], it[1]) })
         e.setHeights(remote.heights?.takeIf { it !is JsonNull }?.let { h ->
             runCatching { Document.JSON.decodeFromJsonElement(HeightMapSet.serializer(), h) }.getOrNull() })
         remote.settings["gridPower"]?.jsonPrimitive?.doubleOrNull?.let(w::setGridPower)
@@ -179,6 +183,8 @@ class PiSyncViewModel(app: Application) : AndroidViewModel(app) {
             buildJsonObject { put("name", name); put("thickness_mm", t) }
         } ?: JsonNull)
         if (since == null || v.areas != since.areas) put("areas", buildJsonArray { v.areas.forEach { b -> add(buildJsonArray { b.forEach { add(JsonPrimitive(it)) } }) } })
+        if (since == null || v.points != since.points)
+            put("probe_points", buildJsonArray { v.points.forEach { p -> add(buildJsonArray { p.forEach { add(JsonPrimitive(it)) } }) } })
         if (since == null || v.heights != since.heights)
             put("heights", v.heights?.let { Document.JSON.encodeToJsonElement(HeightMapSet.serializer(), it) } ?: JsonNull)
         if (since == null || v.gridPower != since.gridPower || v.meshSpacing != since.meshSpacing)

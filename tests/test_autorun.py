@@ -502,6 +502,19 @@ r = web.app.test_client().post("/api/action", data={"op": "autorun", "name": "a.
 assert r.status_code == 400 and "Erst Material wählen" in r.get_json()["error"], r.data
 """)
 
+    def test_tapped_probe_points_replace_the_motif_grid(self):
+        self._run(r"""
+OFFSET = (10.0, 5.0)
+sim, m = connect(lambda x, y: 3.0)
+web.WORKSPACE.put_state({"probe_points": [[100.0, 120.0], [180.0, 60.0]]}, None)
+auto = web.auto_plan(["G0 X100 Y100", "M3 I", "G1 X150 Y100 F1500 S80", "M5 I"])
+pts = [(g.x0, g.y0) for g in auto["grids"]]
+assert pts == [(290.0, 150.0), (210.0, 90.0)], pts          # work mm -> machine mm, X mirrored
+assert auto["points"] == 2, auto["points"]
+web.WORKSPACE.put_state({"probe_points": []}, None)
+assert len(web.auto_plan(["G0 X100 Y100", "M3 I", "G1 X150 Y100 F1500 S80", "M5 I"])["grids"]) >= 1
+""")
+
     def test_long_rapids_go_up_to_the_travel_height(self):
         out, rep = compensate(["G0 X50 Y50", "M3 I", "G1 X52 Y50 F600 S120", "G0 X53 Y50", "G1 X54 Y50 S120",
                                "G0 X120 Y50", "G1 X122 Y50 S120"], flat(3.0), 7.0, 1.5, start_z=20.0, travel_z=23.0)

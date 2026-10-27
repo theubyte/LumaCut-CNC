@@ -4,6 +4,9 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-10-27
 
+- **Abtastpunkte antippen:** Im Arbeitsplatz-Scan (Modus „Abtastpunkte“) antippen, wo Material liegt; Abtasten und der automatische Auftrag tasten nur dort (`probe_points` im Arbeitsstand).
+- **Neue Kalibrierungen:** Schwing-Test (Nachschwingen nach Ecken, Frequenz für Input Shaping), Umkehrspiel, Graustufen-Kurve für Fotos (`toneCurve` je Ebene), 3D-Höhe ohne Berühren mit dem Laserpunkt (Leistungstest, Kalibrierung, Messen an den Abtastpunkten) und Unterstützung für einen roten Mess-Linienlaser an einem Pi-GPIO (`op=line_laser`, 3D-Scan).
+- Pi: Aufträge können während einer Laserlinie Kamerabilder aufnehmen (`; LUMACUT-CAPTURE`, `/api/camera/captures`).
 - **Pi als Zentrale:** Gewähltes Material, markierte Bereiche, Höhenmesh, App-Einstellungen, das offene Projekt (alle Platten) und das Scanbild liegen auf dem Pi (`/api/workspace…`, Revisionen in `status.sync`). Alle Geräte haben denselben Stand; ändern zwei Geräte gleichzeitig das Projekt, fragt die App.
 - **Fahrhöhe aus der Materialstärke:** Materialstärke + 20 mm (mind. Rückzug, max. Z 80) für Fahren, Abtasten, Parken, nach dem Referenzieren und lange Leerfahrten im Auftrag. Material höchstens 60 mm. Aufträge starten nur mit gewähltem Material; weicht die abgetastete Oberfläche mehr als 2 mm von der Stärke ab, bricht der Auftrag vor dem Lasern ab. Vor dem Referenzieren hebt der Pi an (unbekanntes Z: ab der gemerkten letzten Höhe, sonst nach Bestätigung). Kamera-Schärfesuche ab 5 mm über dem Material.
 - **Referenzprüfung:** Auf X0/Y0 müssen die X/Y-Endschalter gedrückt sein, sonst gilt die Maschine als nicht referenziert. Motoren halten im Leerlauf (`M84 S0`).

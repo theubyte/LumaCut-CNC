@@ -74,7 +74,7 @@ import kotlin.math.roundToInt
  * judge it with the head camera.
  */
 @Composable
-fun CalibrationScreen(machine: MachineViewModel, ws: WorkspaceViewModel = viewModel()) {
+fun CalibrationScreen(machine: MachineViewModel, editor: de.millione.lumacut.app.editor.EditorViewModel, ws: WorkspaceViewModel = viewModel()) {
     val status by machine.status.collectAsStateWithLifecycle()
     val online by machine.online.collectAsStateWithLifecycle()
     val cal by ws.calibration.collectAsStateWithLifecycle()
@@ -154,6 +154,10 @@ fun CalibrationScreen(machine: MachineViewModel, ws: WorkspaceViewModel = viewMo
                 Spacer(Modifier.height(12.dp))
                 LcButton("Einmessen", { probeDialog = true }, icon = LcIcons.probe, enabled = status.canControl(online) && homed)
             }
+
+            RingingCard(machine, ws, ready && camera && cal != null) { confirm = it }
+            Height3DCard(machine, ws, ready && camera) { confirm = it }
+            BacklashCard(machine, ws, ready && camera && cal != null) { confirm = it }
         }
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -221,6 +225,7 @@ fun CalibrationScreen(machine: MachineViewModel, ws: WorkspaceViewModel = viewMo
             }
 
             CutCard(machine, ws, cutSpec, ready, motion.maxFeed) { confirm = it }
+            ToneCard(machine, ws, editor, ready && camera && cal != null, motion.maxFeed) { confirm = it }
         }
     }
     if (cameraDialog) CalibrationDialog(machine, ws) { cameraDialog = false }

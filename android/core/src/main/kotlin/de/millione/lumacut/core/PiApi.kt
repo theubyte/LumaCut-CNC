@@ -131,6 +131,8 @@ data class MachineStatus(
     val travel_z_mm: Double? = null,
     /** Z unknown and no remembered height: homing needs the operator's "head stands clear". */
     val home_needs_confirm: Boolean = false,
+    /** Red measuring line laser on a Pi GPIO (3D); gpio null = not fitted. */
+    val line_laser: LineLaserInfo = LineLaserInfo(),
     val camera: CameraInfo = CameraInfo(),
     val recent: List<String> = emptyList(),
     /** Pi capabilities: "autorun_mesh" (op=autorun probes and corrects itself), "materials" (/api/materials). */
@@ -142,6 +144,9 @@ data class MachineStatus(
     val ownerFree get() = owner == "Frei" || owner.isBlank()
     val probeOffset: Pt? get() = probe_xy_offset_mm?.takeIf { it.size == 2 }?.let { Pt(it[0], it[1]) }
 }
+
+@Serializable
+data class LineLaserInfo(val gpio: Int? = null, val on: Boolean = false)
 
 @Serializable
 data class SyncRevisions(val workspace: Int = 0, val project: Int = 0, val scan: Int = 0)
@@ -159,6 +164,8 @@ data class PiWorkspace(
     val revision: Int = 0,
     val material: WorkMaterial? = null,
     val areas: List<List<Double>> = emptyList(),
+    /** Tapped probe points [x, y], work mm: the automatic run probes only there. */
+    val probe_points: List<List<Double>> = emptyList(),
     val heights: JsonElement? = null,
     val settings: Map<String, JsonElement> = emptyMap(),
 )
@@ -389,6 +396,23 @@ class PiClient(
         } catch (e: PiException) { throw e } catch (e: IOException) { throw PiException("Pi nicht erreichbar (${e.message ?: e.javaClass.simpleName})") }
     }
 
+    /** A picture a job took while the laser ran ("; LUMACUT-CAPTURE id=…"); null when there is none. */
+    suspend fun cameraCapture(name: String): ByteArray? = withContext(Dispatchers.IO) {
+        try {
+            http.newBuilder().readTimeout(20, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url("api", "camera", "captures", name)).build()).execute().use { r ->
+                val bytes = r.body?.bytes() ?: ByteArray(0)
+                if (r.code == 404) return@withContext null
+                if (!r.isSuccessful) throw PiException(errorText(bytes.toString(Charsets.UTF_8)) ?: "Kamera: HTTP ${r.code}")
+                bytes
+            }
+        } catch (e: PiException) { throw e } catch (e: IOException) { throw PiException("Pi nicht erreichbar (${e.message ?: e.javaClass.simpleName})") }
+    }
+
+    suspend fun clearCaptures(): String = message(call(Request.Builder().url(url("api", "camera", "captures")).delete().build()))
+
+    /** Red measuring line laser on/off (switches itself off after 2 minutes). */
+    suspend fun lineLaser(on: Boolean): String = action("line_laser", mapOf("on" to if (on) "1" else "0"))
+
     suspend fun cameraSettings(): CameraSettings =
         json.decodeFromString(CameraSettings.serializer(), call(Request.Builder().url(url("api", "camera", "settings")).build()))
 
@@ -513,7 +537,7 @@ class PiClient(
     companion object {
         const val COORD_CONVENTION = "origin_top_right"
 
-        val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame", "moveto", "motion_test", "motion_limits",
+        val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame", "moveto", "motion_test", "motion_limits", "line_laser",
                             "abort", "estop", "estop_reset", "app_update_check")
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

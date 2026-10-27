@@ -48,8 +48,21 @@ data class Layer(
     val materialName: String? = null,
     val thicknessMm: Double = 0.0,
     val depthPerPassMm: Double = 0.0,
+    /**
+     * Grey-scale curve from the tone test: share of the layer power (0..1)
+     * needed for relative darkness 0, 0.1 … 1 of a picture. Empty = linear.
+     */
+    val toneCurve: List<Double> = emptyList(),
 ) {
     val focusDropMm get() = zStepMm * (passes - 1)
+
+    /** Share of the power for relative darkness [dark] (0 = white … 1 = black), through [toneCurve]. */
+    fun powerShare(dark: Double): Double {
+        val d = dark.coerceIn(0.0, 1.0)
+        if (toneCurve.size < 2) return d
+        val x = d * (toneCurve.size - 1); val i = x.toInt().coerceAtMost(toneCurve.size - 2)
+        return (toneCurve[i] + (toneCurve[i + 1] - toneCurve[i]) * (x - i)).coerceIn(0.0, 1.0)
+    }
 }
 
 /** Grayscale raster: 0 = black (full power), 255 = white (laser off). */

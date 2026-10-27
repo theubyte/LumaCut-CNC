@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
@@ -85,7 +86,8 @@ fun WorkspaceScreen(machine: MachineViewModel, editor: EditorViewModel, ws: Work
     val spacing by ws.spacing.collectAsStateWithLifecycle()
     val run by ws.run.collectAsStateWithLifecycle()
     val done by ws.done.collectAsStateWithLifecycle()
-    var marking by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(CanvasMode.VIEW) }
+    val probePoints by ws.probePoints.collectAsStateWithLifecycle()
     var calibrating by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { ws.syncCalibration(machine) }
     var confirm by rememberConfirm()
@@ -98,11 +100,17 @@ fun WorkspaceScreen(machine: MachineViewModel, editor: EditorViewModel, ws: Work
     Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Segmented(listOf(false to "Ansehen", true to "Bereiche markieren"), marking, { marking = it }, Modifier.width(360.dp))
-                SmallText(if (marking) "Rahmen ziehen fügt einen Bereich hinzu · Antippen entfernt ihn" else "Kamera-Scan, Motiv, Bereiche und Höhenmesh im Arbeitsbereich", Lc.faint)
+                Segmented(CanvasMode.entries.map { it to it.label }, mode, { mode = it }, Modifier.width(480.dp))
+                SmallText(when (mode) {
+                    CanvasMode.VIEW -> "Kamera-Scan, Motiv, Bereiche, Abtastpunkte und Höhenmesh im Arbeitsbereich"
+                    CanvasMode.AREAS -> "Rahmen ziehen fügt einen Bereich hinzu · Antippen entfernt ihn"
+                    CanvasMode.POINTS -> "Im Scan antippen, wo Material liegt – dort wird abgetastet · erneut antippen entfernt"
+                }, Lc.faint)
             }
             Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(18.dp))) {
-                WorkspaceCanvas(editor, ws, status?.position, marking)
+                WorkspaceCanvas(editor, ws, status?.position, mode) { p ->
+                    ws.tapProbePoint(p, status?.probeOffset)?.let { machine.notify(it, true) }
+                }
             }
         }
         Column(Modifier.width(390.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -141,9 +149,18 @@ fun WorkspaceScreen(machine: MachineViewModel, editor: EditorViewModel, ws: Work
                 Step(4, "Abtasten", heights != null || surfaceKnown, when {
                     heights != null -> "Höhenmesh: %.2f … %.2f mm".format(heights?.lowest ?: 0.0, heights?.highest ?: 0.0)
                     surfaceKnown -> "Oberfläche Z %.2f mm".format(status?.workpiece_surface_z ?: 0.0)
-                    else -> "Höhenmesh über die Bereiche oder ein Punkt in der Motivmitte"
+                    probePoints.isNotEmpty() -> "${probePoints.size} Abtastpunkt(e) angetippt – der automatische Auftrag tastet nur dort"
+                    else -> "Höhenmesh über die Bereiche, angetippte Punkte oder ein Punkt in der Motivmitte"
                 }) {
+                    if (probePoints.isNotEmpty()) {
+                        LcButton("An Punkten (${probePoints.size})", { ws.probeAtPoints(machine, editor) }, icon = LcIcons.probe, enabled = ready && homed)
+                        LcButton("Punkte löschen", { ws.clearProbePoints() }, kind = BtnKind.GHOST)
+                    }
                     LcButton("Höhenmesh", { ws.probeMesh(machine, editor) }, icon = LcIcons.mesh, enabled = ready && homed)
+                    if (cal?.spot != null) LcButton("Ohne Berühren", { ws.spotMeasure(machine, editor) }, icon = LcIcons.laser, kind = BtnKind.GHOST,
+                        enabled = ready && homed && camera)
+                    if (cal?.line != null && status?.line_laser?.gpio != null) LcButton("3D-Scan", { ws.lineScan(machine, editor) }, icon = LcIcons.scan,
+                        kind = BtnKind.GHOST, enabled = ready && homed && camera)
                     LcButton("Nur Mitte", { ws.probeCentre(machine, editor) }, icon = LcIcons.probe, kind = BtnKind.GHOST,
                         busy = "probe" in busy, enabled = ready && homed)
                 }
@@ -204,17 +221,22 @@ private fun Step(n: Int, title: String, ok: Boolean, text: String, last: Boolean
     }
 }
 
-/** Work area with scan mosaic, motif outline, marked areas and height mesh. */
+/** What a tap or drag on the workspace canvas does. */
+private enum class CanvasMode(val label: String) { VIEW("Ansehen"), AREAS("Bereiche markieren"), POINTS("Abtastpunkte") }
+
+/** Work area with scan mosaic, motif outline, marked areas, tapped probe points and height mesh. */
 @Composable
-private fun WorkspaceCanvas(editor: EditorViewModel, ws: WorkspaceViewModel, head: List<Double>?, marking: Boolean) {
+private fun WorkspaceCanvas(editor: EditorViewModel, ws: WorkspaceViewModel, head: List<Double>?, mode: CanvasMode, onPoint: (Pt) -> Unit) {
     val doc by editor.doc.collectAsStateWithLifecycle()
     val background by editor.background.collectAsStateWithLifecycle()
     val heights by editor.heights.collectAsStateWithLifecycle()
     val areas by ws.areas.collectAsStateWithLifecycle()
+    val points by ws.probePoints.collectAsStateWithLifecycle()
     var size by remember { mutableStateOf(IntSize.Zero) }
     var drag by remember { mutableStateOf<Pair<Pt, Pt>?>(null) }
     fun mapper() = WorkMapper.fit(Size(size.width.toFloat(), size.height.toFloat()))
-    val input = if (!marking) Modifier else Modifier
+    val input = if (mode == CanvasMode.POINTS) Modifier.pointerInput(Unit) { detectTapGestures { onPoint(mapper().toWork(it)) } }
+    else if (mode != CanvasMode.AREAS) Modifier else Modifier
         .pointerInput(Unit) { detectTapGestures { ws.removeAreaAt(mapper().toWork(it)) } }
         .pointerInput(Unit) {
             detectDragGestures(
@@ -262,6 +284,15 @@ private fun WorkspaceCanvas(editor: EditorViewModel, ws: WorkspaceViewModel, hea
                 drawCircle(c.copy(alpha = .85f), 9f, m.at(p))
                 drawCircle(Color.Black.copy(alpha = .4f), 9f, m.at(p), style = Stroke(1f))
             }
+        }
+        for ((i, p) in points.withIndex()) {
+            val c = m.at(p)
+            drawCircle(Color.White, 11f, c, style = Stroke(3f))
+            drawLine(Color.White, c.copy(x = c.x - 16f), c.copy(x = c.x - 6f), 2f); drawLine(Color.White, c.copy(x = c.x + 6f), c.copy(x = c.x + 16f), 2f)
+            drawLine(Color.White, c.copy(y = c.y - 16f), c.copy(y = c.y - 6f), 2f); drawLine(Color.White, c.copy(y = c.y + 6f), c.copy(y = c.y + 16f), 2f)
+            drawContext.canvas.nativeCanvas.drawText("${i + 1}", c.x + 14f, c.y - 12f, android.graphics.Paint().apply {
+                color = android.graphics.Color.WHITE; textSize = 26f; isAntiAlias = true; setShadowLayer(3f, 0f, 0f, android.graphics.Color.BLACK)
+            })
         }
         drawHead(m, head)
     }

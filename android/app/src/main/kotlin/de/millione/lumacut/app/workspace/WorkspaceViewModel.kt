@@ -14,7 +14,15 @@ import de.millione.lumacut.core.Box
 import de.millione.lumacut.core.CameraCalibration
 import de.millione.lumacut.core.CameraLight
 import de.millione.lumacut.core.CameraSettings
+import de.millione.lumacut.core.BacklashTest
+import de.millione.lumacut.core.CameraCover
 import de.millione.lumacut.core.CutTest
+import de.millione.lumacut.core.LightFinder
+import de.millione.lumacut.core.LightModel
+import de.millione.lumacut.core.LineMeasure
+import de.millione.lumacut.core.RingingTest
+import de.millione.lumacut.core.SpotMeasure
+import de.millione.lumacut.core.ToneTest
 import de.millione.lumacut.core.MarlinWriter
 import de.millione.lumacut.core.MotionTest
 import de.millione.lumacut.core.EngraveTest
@@ -114,6 +122,63 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Areas as another device marked them (from the Pi). */
     fun setAreas(list: List<Box>) { _areas.value = list }
+
+    /* ---------- tapped probe points ---------- */
+
+    private val _probePoints = MutableStateFlow<List<Pt>>(emptyList())
+    /** Where the operator tapped material in the scan: probing (also the Pi's automatic run) happens only there. */
+    val probePoints: StateFlow<List<Pt>> = _probePoints.asStateFlow()
+
+    /**
+     * Tap at [p]: removes the point within 6 mm, else adds one. Refused
+     * (message returned) where the probe cannot reach or past 50 points.
+     */
+    fun tapProbePoint(p: Pt, probeOffset: Pt?): String? {
+        val q = Pt(p.x.coerceIn(0.0, Work.WIDTH), p.y.coerceIn(0.0, Work.HEIGHT))
+        val near = _probePoints.value.indexOfFirst { it.dist(q) < 6.0 }
+        if (near >= 0) { _probePoints.update { it.toMutableList().apply { removeAt(near) } }; return null }
+        if (_probePoints.value.size >= 50) return "Höchstens 50 Abtastpunkte"
+        if (probeOffset != null && !Scan.reachable(q, probeOffset)) return "Dort kommt der Taster nicht hin (er sitzt versetzt zum Laser) – etwas weiter innen antippen"
+        _probePoints.update { it + q }
+        return null
+    }
+
+    fun setProbePoints(list: List<Pt>) { _probePoints.value = list }
+    fun clearProbePoints() { _probePoints.value = emptyList() }
+
+    /**
+     * Probes the tapped points one by one (lowest again at the end, so the
+     * Pi's Z floor fits every point) and shows their heights; between the
+     * points the highest measured surface counts, never too low.
+     */
+    fun probeAtPoints(machine: MachineViewModel, editor: EditorViewModel) {
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        val pts = _probePoints.value
+        if (pts.isEmpty()) { machine.notify("Erst Abtastpunkte im Scan antippen", true); return }
+        worker = viewModelScope.launch {
+            try {
+                val st = machine.refreshStatus()
+                if (st?.homed != true) throw IllegalStateException("Erst referenzieren")
+                val measured = ArrayList<Pair<Pt, Double>>()
+                for ((i, p) in pts.withIndex()) {
+                    if (!isActive) return@launch
+                    _run.value = Run("Abtasten", i, pts.size, "Punkt ${i + 1} von ${pts.size}")
+                    measured += p to probe(c, machine, p)
+                }
+                val low = measured.minBy { it.second }
+                _run.value = Run("Abtasten", pts.size, pts.size, "Tiefsten Punkt erneut antasten")
+                probe(c, machine, low.first)
+                editor.setHeights(HeightMapSet(measured.mapIndexed { i, (p, z) -> HeightMap("Punkt ${i + 1}", p.x, p.y, 0.0, 0.0, 1, 1, listOf(z)) }))
+                markDone("probe")
+                machine.notify("%d Punkte abgetastet: %.2f … %.2f mm".format(Locale.GERMANY, measured.size, low.second, measured.maxOf { it.second }))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Abtasten abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
 
     /** One area per cluster of overlapping design parts, 3 mm larger: the material under the motif. */
     fun areasFromDesign(doc: Document): Int {
@@ -219,7 +284,11 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     /** Keeps [cal] on the tablet and on the Pi (the calibration belongs to the machine). */
     private fun store(machine: MachineViewModel, measured: CameraCalibration) {
         // a new lens measurement keeps the light calibration (same camera and light)
-        val cal = if (measured.shading == null) measured.copy(shading = _calibration.value?.shading) else measured
+        val old = _calibration.value
+        var cal = if (measured.shading == null) measured.copy(shading = old?.shading) else measured
+        // the 3D light models are in picture pixels: they stay only while the picture size is the same
+        if (old != null && old.photoWidth == cal.photoWidth && old.photoHeight == cal.photoHeight)
+            cal = cal.copy(spot = cal.spot ?: old.spot, line = cal.line ?: old.line)
         _calibration.value = cal
         prefs.edit().putString("headCamera2", Document.JSON.encodeToString(CameraCalibration.serializer(), cal)).apply()
         val c = machine.clientOrNotify() ?: return
@@ -582,6 +651,12 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         machine.saveSettings(settingsFrom(cfg, probe = off))
     }
 
+    /** GPIO (BCM) of the measuring line laser on the Pi, null = none fitted. */
+    fun setLineLaserGpio(machine: MachineViewModel, pin: Int?) {
+        val cfg = machine.status.value?.config ?: return
+        machine.saveSettings(settingsFrom(cfg) + ("line_laser_gpio" to (pin?.toString() ?: "")))
+    }
+
     private fun settingsFrom(cfg: PiConfig, focusGap: Double = cfg.focus_gap_mm, probe: Pt? = cfg.probe_offset_x_mm?.let { x -> cfg.probe_offset_y_mm?.let { Pt(x, it) } }) =
         mapOf("focus_gap_mm" to "%.2f".format(Locale.ROOT, focusGap), "z_clearance_mm" to cfg.z_clearance_mm.toString(),
               "z_switch_tip_offset_mm" to cfg.z_switch_tip_offset_mm.toString(),
@@ -676,6 +751,409 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     /* ---------- scan ---------- */
 
     fun cancel() { worker?.cancel(); worker = null; _run.value = null }
+
+    /* ---------- more camera tests: ringing, backlash, grey scale, 3D height ---------- */
+
+    private fun Box.holds(b: Box) = b.minX >= minX && b.maxX <= maxX && b.minY >= minY && b.maxY <= maxY
+
+    /**
+     * Photographs [area] (several pictures when it is larger than one) at the
+     * calibrated distance and hands every picture with the work box it
+     * shows well to [each].
+     */
+    private suspend fun photographArea(c: PiClient, machine: MachineViewModel, cal: CameraCalibration, area: Box, light: Int?,
+                                       onStep: (Int, Int) -> Unit = { _, _ -> }, each: suspend (PhotoSampler, Box) -> Unit) {
+        val heads = CameraCover.heads(area, cal)
+        val u = cal.usable(0.1)
+        withScanLight(c, machine, light) {
+            var z: Double? = null
+            for ((n, head) in heads.withIndex()) {
+                onStep(n, heads.size)
+                val at = z?.let { headTo(c, machine, head, it) } ?: cameraOver(c, machine, cal, head + u.center).also { z = it.second }.first
+                val (px, w, h) = pixels(c, cal.photoWidth to cal.photoHeight)
+                each(PhotoSampler(px, w, h, cal, at), Box(at.x + u.minX, at.y + u.minY, at.x + u.maxX, at.y + u.maxY))
+            }
+        }
+    }
+
+    /** Uploads [gcode] and starts it as it is (no probing, no focus of the Pi: the job sets its own Z); waits for the end. */
+    private suspend fun runPlain(c: PiClient, machine: MachineViewModel, name: String, gcode: String, what: String, onProgress: (String) -> Unit) {
+        c.uploadJob(name, gcode)
+        try {
+            c.action("start", mapOf("name" to name))
+            waitForJob(machine, name, what, onProgress)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            withContext(kotlinx.coroutines.NonCancellable) { runCatching { c.action("abort") } }
+            throw e
+        }
+    }
+
+    private suspend fun decode(bytes: ByteArray?): Triple<IntArray, Int, Int>? = bytes?.let { b ->
+        withContext(Dispatchers.Default) {
+            BitmapFactory.decodeByteArray(b, 0, b.size)?.let { bmp -> Triple(IntArray(bmp.width * bmp.height).also { bmp.getPixels(it, 0, bmp.width, 0, 0, bmp.width, bmp.height) }, bmp.width, bmp.height) }
+        }
+    }
+
+    private val _ringing = MutableStateFlow<List<RingingTest.Result>?>(null)
+    /** Last ringing test: per line the swing after the corner. */
+    val ringing: StateFlow<List<RingingTest.Result>?> = _ringing.asStateFlow()
+
+    /** Ringing test: corner-and-line patterns along X and Y at rising speeds, photographed and measured. */
+    fun ringingTest(machine: MachineViewModel) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            fun step(n: Int, text: String) { _run.value = Run("Schwing-Test", n, 3, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                val maxFeed = st!!.config.motion?.toMotion()?.maxFeed ?: MarlinWriter.Motion.FIRMWARE.maxFeed
+                val spec = RingingTest.Spec(speeds = listOf(1500.0, 3000.0, 4500.0, 6000.0).filter { it <= maxFeed }.ifEmpty { listOf(maxFeed) })
+                laserTest(c, machine, RINGING_JOB, RingingTest.job(spec), "Schwing-Test") { step(0, it) }
+                val results = HashMap<RingingTest.Leg, RingingTest.Result>()
+                photographArea(c, machine, cal, RingingTest.bounds(spec), st.config.camera?.light, { n, of -> step(1, "Linien fotografieren: Bild ${n + 1} von $of") }) { sampler, view ->
+                    withContext(Dispatchers.Default) {
+                        for (leg in RingingTest.legs(spec)) {
+                            if (results[leg]?.found == true) continue
+                            val a = leg.corner - leg.across * spec.lead; val b = leg.corner + leg.dir * spec.length
+                            val box = Box(minOf(a.x, b.x) - 1.5, minOf(a.y, b.y) - 1.5, maxOf(a.x, b.x) + 1.5, maxOf(a.y, b.y) + 1.5)
+                            if (view.holds(box)) results[leg] = RingingTest.measure(sampler, spec, leg)
+                        }
+                    }
+                }
+                val list = RingingTest.legs(spec).mapNotNull { results[it] }
+                _ringing.value = list
+                val worst = list.filter { it.found }.maxByOrNull { it.amplitude }
+                machine.notify(when {
+                    worst == null -> "Schwing-Test: Linien nicht erkannt – Licht oder Kamera prüfen"
+                    list.none { it.rings } -> "Schwing-Test: kein Nachschwingen messbar (höchstens %.2f mm)".format(Locale.GERMANY, worst.amplitude)
+                    else -> "Schwing-Test: %c-Achse schwingt %.2f mm nach%s".format(Locale.GERMANY, worst.swingingAxis, worst.amplitude,
+                        if (worst.frequency.isNaN()) "" else " (%.0f Hz)".format(worst.frequency))
+                }, worst == null)
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Schwing-Test abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    private val _backlash = MutableStateFlow<Map<Char, Double>?>(null)
+    val backlash: StateFlow<Map<Char, Double>?> = _backlash.asStateFlow()
+
+    /** Backlash test: line pairs approached from both sides, photographed and measured. */
+    fun backlashTest(machine: MachineViewModel) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            fun step(n: Int, text: String) { _run.value = Run("Umkehrspiel", n, 2, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                laserTest(c, machine, BACKLASH_JOB, BacklashTest.job(), "Umkehrspiel-Test") { step(0, it) }
+                val values = HashMap<Int, Pair<Char, Double>>()
+                val pairs = BacklashTest.pairs()
+                photographArea(c, machine, cal, BacklashTest.bounds(), st!!.config.camera?.light, { n, of -> step(1, "Linien fotografieren: Bild ${n + 1} von $of") }) { sampler, view ->
+                    withContext(Dispatchers.Default) {
+                        for ((i, pair) in pairs.withIndex()) {
+                            if (values[i]?.second?.isNaN() == false) continue
+                            val (axis, o) = pair
+                            val far = o + if (axis == 'X') Pt(BacklashTest.GAP, BacklashTest.LEN) else Pt(BacklashTest.LEN, BacklashTest.GAP)
+                            if (view.holds(Box(o.x - 1.5, o.y - 1.5, far.x + 1.5, far.y + 1.5))) values[i] = axis to BacklashTest.measure(sampler, axis, o)
+                        }
+                    }
+                }
+                val res = BacklashTest.result(values.values.toList())
+                _backlash.value = res
+                machine.notify("Umkehrspiel: X %.2f mm · Y %.2f mm%s".format(Locale.GERMANY, res['X'], res['Y'],
+                    if (res.values.any { !it.isNaN() && it > 0.1 }) " – über 0,1 mm: Riemen nachspannen, Madenschrauben prüfen" else ""))
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Umkehrspiel-Test abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    /** Grey-scale test result: the spec, measured tones and the curve. */
+    class ToneOutcome(val spec: ToneTest.Spec, val tones: List<Double>, val curve: List<Double>)
+    private val _tone = MutableStateFlow<ToneOutcome?>(null)
+    val tone: StateFlow<ToneOutcome?> = _tone.asStateFlow()
+
+    fun toneTest(machine: MachineViewModel, maxPower: Double, speed: Double) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            fun step(n: Int, text: String) { _run.value = Run("Graustufen-Test", n, 2, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                val spec = ToneTest.Spec(maxPower, speed)
+                laserTest(c, machine, TONE_JOB, ToneTest.job(spec, st!!.config.motion?.toMotion() ?: MarlinWriter.Motion.FIRMWARE), "Graustufen-Test") { step(0, it) }
+                val tones = HashMap<Int, Double>()
+                val f = spec.fields
+                photographArea(c, machine, cal, f.bounds(), st.config.camera?.light, { n, of -> step(1, "Felder fotografieren: Bild ${n + 1} von $of") }) { sampler, view ->
+                    withContext(Dispatchers.Default) {
+                        for (i in f.powers.indices) {
+                            if (i in tones) continue
+                            val b = f.cell(i, 0); val m = f.gapMm / 2
+                            if (view.holds(Box(b.minX - m, b.minY - m, b.maxX + m, b.maxY + m))) EngraveTest.measure(f, i, 0, sampler)?.let { tones[i] = it.tone }
+                        }
+                    }
+                }
+                if (tones.size < f.powers.size) throw IllegalStateException("${f.powers.size - tones.size} Felder nicht messbar")
+                val list = f.powers.indices.map { tones.getValue(it) }
+                _tone.value = ToneOutcome(spec, list, ToneTest.curve(list))
+                machine.notify("Graustufen gemessen – Kurve auf die Gravur-Ebene übernehmen")
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Graustufen-Test abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    /* ---------- 3D height: work laser glimmer spot, later the red line laser ---------- */
+
+    private val _spotPower = MutableStateFlow(prefs.getInt("spotPower", 0).takeIf { it > 0 })
+    /** Glimmer power (S of 255) from the power test: seen by the camera, leaves no mark. */
+    val spotPower: StateFlow<Int?> = _spotPower.asStateFlow()
+
+    fun setSpotPower(s: Int?) {
+        _spotPower.value = s
+        prefs.edit().putInt("spotPower", s ?: 0).apply()
+    }
+
+    private val _spotTest = MutableStateFlow<List<SpotMeasure.PowerStep>?>(null)
+    val spotTest: StateFlow<List<SpotMeasure.PowerStep>?> = _spotTest.asStateFlow()
+
+    /**
+     * Power test for the glimmer spot: short slow lines at S 1 … 13, a
+     * picture during each; afterwards a photo of the lines. Keeps the lowest
+     * power the camera sees while nothing up to it left a mark.
+     */
+    fun spotPowerTest(machine: MachineViewModel) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            fun step(n: Int, text: String) { _run.value = Run("Laserpunkt-Leistungstest", n, 3, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                if (st?.homed != true) throw IllegalStateException("Erst referenzieren")
+                val origin = Work.center - Pt(SpotMeasure.LENGTH / 2, 18.0)
+                step(0, "Oberfläche abtasten …")
+                val surface = probe(c, machine, origin + Pt(SpotMeasure.LENGTH / 2, 18.0))
+                runCatching { c.clearCaptures() }
+                runPlain(c, machine, SPOT_JOB, SpotMeasure.powerTestJob(origin, surface, cal.photoWidth, cal.photoHeight), "Leistungstest") { step(1, it) }
+                val steps = SpotMeasure.TEST_POWERS.mapIndexed { k, s ->
+                    val spot = decode(c.cameraCapture("spotpow-$k"))?.let { (px, w, h) -> withContext(Dispatchers.Default) { LightFinder.spot(px, w, h) } }
+                    Triple(k, s, spot)
+                }
+                val marks = HashMap<Int, Double>()
+                val box = Box(origin.x - 2, origin.y - 2, origin.x + SpotMeasure.LENGTH + 2, SpotMeasure.powerLine(origin, SpotMeasure.TEST_POWERS.size - 1).y + 2)
+                photographArea(c, machine, cal, box, st.config.camera?.light, { _, _ -> step(2, "Spuren suchen …") }) { sampler, view ->
+                    for ((k, _, _) in steps) {
+                        if (k in marks) continue
+                        val a = SpotMeasure.powerLine(origin, k)
+                        if (view.holds(Box(a.x, a.y - 1.5, a.x + SpotMeasure.LENGTH, a.y + 1.5))) marks[k] = SpotMeasure.markOf(sampler, a)
+                    }
+                }
+                val result = steps.map { (k, s, spot) -> SpotMeasure.PowerStep(s, spot != null && spot.strength >= 60, spot?.strength ?: 0.0, marks[k] ?: Double.NaN) }
+                _spotTest.value = result
+                val pick = SpotMeasure.pickPower(result.filter { !it.mark.isNaN() })
+                setSpotPower(pick)
+                machine.notify(pick?.let { "Laserpunkt: S$it (%.1f %%) – sichtbar, ohne Spur".format(Locale.GERMANY, it / 2.55) }
+                    ?: "Laserpunkt: keine Leistung, die sichtbar ist und keine Spur hinterlässt – auf diesem Material nicht nutzbar", pick == null)
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Leistungstest abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    /** Calibrates the glimmer spot over the flat plate: one line at each distance, the spot's picture position each time. */
+    fun spotCalibrate(machine: MachineViewModel) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val power = _spotPower.value ?: run { machine.notify("Erst den Leistungstest für den Laserpunkt", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            fun step(n: Int, text: String) { _run.value = Run("Laserpunkt kalibrieren", n, 2, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                if (st?.homed != true) throw IllegalStateException("Erst referenzieren")
+                val origin = Work.center - Pt(SpotMeasure.LENGTH / 2, 6.0)
+                step(0, "Oberfläche abtasten …")
+                val surface = probe(c, machine, origin + Pt(SpotMeasure.LENGTH / 2, 5.0))
+                runCatching { c.clearCaptures() }
+                runPlain(c, machine, SPOT_JOB, SpotMeasure.calibrationJob(origin, surface, power, cal.photoWidth, cal.photoHeight), "Kalibrierlinien") { step(1, it) }
+                val samples = SpotMeasure.CAL_DISTANCES.mapIndexedNotNull { k, d ->
+                    decode(c.cameraCapture("spotcal-$k"))?.let { (px, w, h) -> withContext(Dispatchers.Default) { LightFinder.spot(px, w, h) } }?.let { d to listOf<Pt?>(it.px) }
+                }
+                if (samples.size < 4) throw IllegalStateException("Laserpunkt nur in ${samples.size} von ${SpotMeasure.CAL_DISTANCES.size} Bildern gefunden – Leistungstest wiederholen")
+                val model = LightModel.fit("spot", listOf(0), samples, power)
+                store(machine, cal.copy(spot = model))
+                machine.notify("Laserpunkt kalibriert (%d Höhen)".format(samples.size))
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Kalibrierung abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    /**
+     * Heights without touching at the tapped probe points (or the motif
+     * centre): the head stays at the travel height, a glimmer line through
+     * every point, the spot's picture position gives the distance.
+     */
+    fun spotMeasure(machine: MachineViewModel, editor: EditorViewModel) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val model = cal.spot ?: run { machine.notify("Erst den Laserpunkt kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        val pts = _probePoints.value.ifEmpty { listOfNotNull(editor.doc.value.bounds()?.center) }
+        if (pts.isEmpty()) { machine.notify("Erst Abtastpunkte im Scan antippen", true); return }
+        worker = viewModelScope.launch {
+            fun step(n: Int, text: String) { _run.value = Run("Höhe messen (Laserpunkt)", n, 2, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                if (st?.homed != true) throw IllegalStateException("Erst referenzieren")
+                // the Pi allows own Z only over a measured surface: one touch at the first point if none is known
+                if (st!!.workpiece_surface_z == null) { step(0, "Bezugsfläche abtasten …"); probe(c, machine, pts.first()) }
+                val headZ = machine.refreshStatus()?.travel_z_mm ?: (st.workpiece_surface_z ?: 0.0) + SpotMeasure.MEASURE_DISTANCE
+                runCatching { c.clearCaptures() }
+                runPlain(c, machine, SPOT_JOB, SpotMeasure.measureJob(pts, headZ, model.power, cal.photoWidth, cal.photoHeight), "Messlinien") { step(1, it) }
+                val heights = pts.mapIndexedNotNull { k, p ->
+                    val spot = decode(c.cameraCapture("spotmes-$k"))?.let { (px, w, h) -> withContext(Dispatchers.Default) { LightFinder.spot(px, w, h) } }
+                    spot?.let { model.distance(0, it.px) }?.let { (d, _) -> p to headZ - d }
+                }
+                if (heights.isEmpty()) throw IllegalStateException("Laserpunkt in keinem Bild gefunden")
+                editor.setHeights(HeightMapSet(heights.mapIndexed { i, (p, z) -> HeightMap("Punkt ${i + 1}", p.x, p.y, 0.0, 0.0, 1, 1, listOf(z)) }))
+                reportHeights(machine, heights.map { it.second }, pts.size - heights.size)
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Höhenmessung abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    private fun reportHeights(machine: MachineViewModel, zs: List<Double>, missing: Int) {
+        val st = machine.status.value
+        val thick = st?.travel_z_mm?.let { it - 20.0 }
+        val top = zs.max()
+        machine.notify("Höhen %.1f … %.1f mm%s%s".format(Locale.GERMANY, zs.min(), top,
+            if (missing > 0) " · $missing Punkt(e) ohne Messwert" else "",
+            if (thick != null && top > thick + 2) " – höher als das gewählte Material (%.1f mm): Materialhöhe anpassen!".format(Locale.GERMANY, thick) else ""),
+            thick != null && top > thick + 2)
+    }
+
+    /** Line laser calibration over the flat plate: on/off pictures at each distance (no laser burn, the head stands). */
+    fun lineCalibrate(machine: MachineViewModel) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            fun step(n: Int, text: String) { _run.value = Run("Linienlaser kalibrieren", n, SpotMeasure.CAL_DISTANCES.size + 1, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                if (st?.line_laser?.gpio == null) throw IllegalStateException("Linienlaser nicht eingerichtet (GPIO-Pin eintragen)")
+                if (!st!!.homed) throw IllegalStateException("Erst referenzieren")
+                step(0, "Oberfläche abtasten …")
+                val surface = probe(c, machine, Work.center)
+                headTo(c, machine, Work.center - cal.usable(0.0).center, null)
+                val cols = LineMeasure.columns(cal.photoWidth)
+                val samples = ArrayList<Pair<Double, List<Pt?>>>()
+                try {
+                    for ((k, d) in SpotMeasure.CAL_DISTANCES.withIndex()) {
+                        step(k + 1, "Höhe %.0f mm über der Platte".format(d))
+                        zTo(c, machine, surface + d)
+                        c.lineLaser(true); val (on, w, h) = pixels(c, cal.photoWidth to cal.photoHeight)
+                        c.lineLaser(false); val (off, _, _) = pixels(c, cal.photoWidth to cal.photoHeight)
+                        samples += d to withContext(Dispatchers.Default) { LightFinder.line(on, off, w, h, cols) }
+                    }
+                } finally { withContext(kotlinx.coroutines.NonCancellable) { runCatching { c.lineLaser(false) } } }
+                val model = LightModel.fit("line", cols, samples)
+                if (model.keys.size < cols.size / 4) throw IllegalStateException("Linie nur in ${model.keys.size} von ${cols.size} Spalten gesehen – Laser ausrichten")
+                store(machine, cal.copy(line = model))
+                machine.notify("Linienlaser kalibriert (%d Spalten, %d Höhen)".format(model.keys.size, model.d.size))
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Linienlaser-Kalibrierung abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    /**
+     * 3D scan with the line laser over the marked areas (or the motif): the
+     * head steps 2 mm at a time at the travel height, an on and an off
+     * picture each time; heights become the height mesh.
+     */
+    fun lineScan(machine: MachineViewModel, editor: EditorViewModel) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val model = cal.line ?: run { machine.notify("Erst den Linienlaser kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        val boxes = _areas.value.ifEmpty { listOfNotNull(editor.doc.value.bounds()?.let { Box(it.minX - 5, it.minY - 5, it.maxX + 5, it.maxY + 5) }) }
+        if (boxes.isEmpty()) { machine.notify("Erst Bereiche markieren oder ein Motiv anlegen", true); return }
+        worker = viewModelScope.launch {
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                if (st?.homed != true) throw IllegalStateException("Erst referenzieren")
+                if (st!!.workpiece_surface_z == null) probe(c, machine, boxes.first().center)
+                val headZ = machine.refreshStatus()?.travel_z_mm ?: 20.0
+                // where the line falls relative to the head at the measuring distance
+                val dist = (headZ - (machine.status.value?.workpiece_surface_z ?: 0.0)).coerceIn(model.d.first(), model.d.last())
+                val linePts = model.keys.indices.map { cal.pixelToWork(model.predict(it, dist), Pt(0.0, 0.0)) }
+                val offY = linePts.map { it.y }.average(); val minX = linePts.minOf { it.x }; val maxX = linePts.maxOf { it.x }
+                val span = (maxX - minX) * 0.9
+                val heads = boxes.flatMap { b ->
+                    val xs = if (b.width <= span) listOf(b.center.x - (minX + maxX) / 2) else
+                        (0..(b.width / span).toInt()).map { b.minX + span / 2 + it * span - (minX + maxX) / 2 }
+                    generateSequence(b.minY) { it + 2.0 }.takeWhile { it <= b.maxY }.flatMap { y -> xs.map { x -> Pt(x, y - offY) } }.toList()
+                }
+                val pts = ArrayList<Triple<Double, Double, Double>>()
+                try {
+                    for ((n, head) in heads.withIndex()) {
+                        if (!isActive) return@launch
+                        _run.value = Run("3D-Scan", n, heads.size, "Linie ${n + 1} von ${heads.size}")
+                        val at = headTo(c, machine, head, headZ)
+                        c.lineLaser(true); val (on, w, h) = pixels(c, cal.photoWidth to cal.photoHeight)
+                        c.lineLaser(false); val (off, _, _) = pixels(c, cal.photoWidth to cal.photoHeight)
+                        pts += withContext(Dispatchers.Default) { LineMeasure.points(model, on, off, w, h, cal, at, headZ) }
+                    }
+                } finally { withContext(kotlinx.coroutines.NonCancellable) { runCatching { c.lineLaser(false) } } }
+                val grid = LineMeasure.grid("3D-Scan", pts) ?: throw IllegalStateException("Linie in keinem Bild gefunden")
+                editor.setHeights(HeightMapSet(listOf(grid)))
+                markDone("probe")
+                reportHeights(machine, grid.measured, 0)
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("3D-Scan abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
 
     /* ---------- motion and cut tests ---------- */
 
@@ -954,6 +1432,10 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         const val MOTION_REF_JOB = "kalibrierung-bewegung-referenz.gcode"
         const val MOTION_CHECK_JOB = "kalibrierung-bewegung-pruefung.gcode"
         const val CUT_JOB = "kalibrierung-schnitt.gcode"
+        const val RINGING_JOB = "kalibrierung-schwingen.gcode"
+        const val BACKLASH_JOB = "kalibrierung-umkehrspiel.gcode"
+        const val TONE_JOB = "kalibrierung-graustufen.gcode"
+        const val SPOT_JOB = "messung-laserpunkt.gcode"
         /** LED level for every camera picture: full on, so the dimming PWM cannot flicker in the picture. */
         const val LIGHT_LEVEL = 100
         /** Highest Z the camera is sent to: the rail limit, never more. */

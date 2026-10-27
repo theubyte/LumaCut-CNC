@@ -122,6 +122,8 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 | POST | `/api/jobs/<name>/delete` | – | Auftrag löschen |
 | GET | `/api/jobs/<name>/geometry` | – | Motivgrenzen und Abtastkandidaten |
 | GET | `/api/camera/snapshot` | – | ein JPEG der Kopfkamera |
+| GET | `/api/camera/captures/<name>` | – | ein Bild, das ein Auftrag während einer Laserlinie aufgenommen hat |
+| DELETE | `/api/camera/captures` | – | diese Bilder löschen |
 | GET | `/api/workspace` | – | Arbeitsstand lesen: Material, Bereiche, Höhenmesh, App-Einstellungen (Abschnitt 4.15) |
 | PUT | `/api/workspace` | JSON | Arbeitsstand ändern (mit `base_revision`) |
 | GET | `/api/workspace/project` | – | offenes Projekt (alle Platten) als JSON |
@@ -150,6 +152,7 @@ Alle `op`-Werte von `POST /api/action`:
 | Not-Aus | `estop`, `estop_reset` |
 | Verbindung/Abfrage | `connect`, `info`, `position`, `endstops` |
 | Bewegung | `home`, `jog`, `park`, `moveto`, `probe`, `motion_test`, `motion_limits` |
+| Messen | `line_laser` |
 | Zubehör | `light`, `exhaust` |
 | Ursprung/Platzierung | `origin_set`, `origin_clear`, `place`, `place_clear` |
 | Aufträge | `start`, `autorun`, `abort`, `frame` |
@@ -245,7 +248,8 @@ Felder aus `web.py` (`status()`):
 | `firmware` | string | immer `"marlin"` |
 | `expected_pwm` | string | `"PA1 / M3 I / S0..255"` (Info) |
 | `io` | object | Klartext-Belegung `laser_supply_switch`, `laser_pwm`, `fan_cooldown`, `exhaust`, `lights`, `aux` (Info) |
-| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware), `thickness_tolerance_mm` (2,0: so weit darf die abgetastete Oberfläche von der Materialstärke abweichen) |
+| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware), `thickness_tolerance_mm` (2,0: so weit darf die abgetastete Oberfläche von der Materialstärke abweichen), `line_laser_gpio` (BCM-Pin des Mess-Linienlasers oder `null`) |
+| `line_laser` | object | `{gpio, on}`: roter Mess-Linienlaser am Kopf (3D-Höhe), geschaltet über einen Pi-GPIO (BCM); `gpio` `null` = nicht eingebaut |
 | `sync` | object | `{workspace, project, scan}`: Revisionen des Arbeitsstands auf dem Pi (Abschnitt 4.15). Ändert sich eine, holt jedes Gerät nur diesen Teil neu. |
 | `travel_z_mm` | number | Fahrhöhe über unbekanntem Gelände = Stärke des gewählten Materials + 20 mm, mindestens `z_clearance_mm`, höchstens 80. Alle Pi-Fahrten (moveto, Abtasten, Parken, nach dem Referenzieren, lange Leerfahrten im Auftrag) gehen mindestens so hoch. |
 | `home_needs_confirm` | bool | `true`: Marlin kennt Z nicht und der Pi hat keine gemerkte Höhe – `op=home` bzw. `op=autorun` brauchen `clear=1` (Bediener bestätigt, dass der Kopf frei über allem steht). |
@@ -399,6 +403,19 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | Wirkung | Laser-aus-Fahrt (für Kamera-Scan/Positionieren): `M5 I`, `M400`, Z nur anheben auf `z_clearance_mm`, `G0 X Y F9000`, `M400`, `M114`. Darf in die 30-mm-Zone (Laser aus). Verwirft Platzierung `current`. |
 | Erfolg | 200 `{"message": "Kopf auf X120.0 Y80.0", "position": [x, y, z]}` |
 | Fehler | 400 `Ziel außerhalb X0..390 / Y0..370` (auch bei fehlendem/NaN-Wert); nicht-numerisch → 400 Python-Text |
+
+#### `op=line_laser`
+
+| Parameter | Typ | Erlaubt |
+| --- | --- | --- |
+| `on` | `1`/`0` | an/aus |
+
+| | |
+| --- | --- |
+| Vorbedingungen | Pin unter `POST /api/settings` (`line_laser_gpio`, 2..27, leer = keiner) eingetragen, sonst 400 `Linienlaser nicht eingerichtet …` |
+| Wirkung | schaltet den roten Mess-Linienlaser (5 mW, brennt nichts) per `pinctrl set <pin> op dh/dl`; nach 120 s schaltet er sich selbst aus. Bewegt nichts. |
+| Erfolg | 200 `{"message": "Linienlaser an", "line_laser": {"gpio": 17, "on": true}}` |
+| Fehler | 400 `Linienlaser-Pin GPIO … nicht schaltbar: …` |
 
 #### `op=motion_test`
 
@@ -800,6 +817,18 @@ oben, `light` 1..100. Bewegt nichts, schaltet kein Licht (die App setzt das
 Licht vor dem Scan selbst). 200 `{message, …Werte}`; 400 `Unbekannte
 Kamera-Einstellung: …`, `<schlüssel>: ganze Zahl … oder null erwartet`.
 
+#### Bilder während eines Auftrags (`; LUMACUT-CAPTURE`)
+
+Eine Zeile `; LUMACUT-CAPTURE id=<name> w=<px> h=<px> delay=<ms>` in einem mit
+`op=start` gestarteten Auftrag (beim automatischen Ablauf entfernt die
+Höhenkorrektur Kommentare) lässt den Pi nach `delay` (höchstens 5000 ms) ein
+Kamerabild aufnehmen, während die Zeile davor noch läuft – die App setzt
+`M400` vor eine langsame Laserlinie, damit sie gerade beginnt. Gespeichert
+als `captures/<name>.jpg` (die letzten 200), abrufbar mit
+`GET /api/camera/captures/<name>` (`image/jpeg`, 404 wenn keines),
+`DELETE /api/camera/captures` löscht alle. Ein Fehler beim Aufnehmen stoppt
+den Auftrag nie. Dafür nutzt die App die Höhenmessung mit dem Laserpunkt.
+
 #### `GET /api/camera/calibration`
 
 200 JSON: `image_width`, `image_height`, `px_per_mm`, `scan_z`, `offset_mm`
@@ -908,16 +937,18 @@ Ohne `base_revision` wird immer geschrieben.
 
 #### `GET /api/workspace`
 
-200 `{revision, material, areas, heights, settings, updated_at, updated_by}`:
+200 `{revision, material, areas, probe_points, heights, settings, updated_at, updated_by}`:
 `material` `{name, thickness_mm}` oder `null` (die Stärke bestimmt die
 Fahrhöhe; Aufträge starten erst mit Material), `areas` Liste markierter
-Bereiche `[minX, minY, maxX, maxY]` in Arbeits-mm, `heights` das Höhenmesh der
+Bereiche `[minX, minY, maxX, maxY]` in Arbeits-mm, `probe_points` angetippte
+Abtastpunkte `[x, y]` in Arbeits-mm (bis 50; sind welche gesetzt, tastet
+`op=autorun` nur dort statt im Raster ums Motiv), `heights` das Höhenmesh der
 App oder `null`, `settings` einfache App-Werte (z. B. `gridPower`,
 `meshSpacing`).
 
 #### `PUT /api/workspace`
 
-JSON mit beliebigen der Felder `material`, `areas`, `heights`, `settings`
+JSON mit beliebigen der Felder `material`, `areas`, `probe_points`, `heights`, `settings`
 (fehlende bleiben), dazu `base_revision` und `updated_by`. Grenzen:
 Materialstärke 0..60 mm (400 `Materialstärke 0 … 60 mm …`), bis 50 Bereiche
 (−1..400 mm), Höhenmesh bis 2 MB, bis 100 Einstellungen. 200 = neuer Stand;

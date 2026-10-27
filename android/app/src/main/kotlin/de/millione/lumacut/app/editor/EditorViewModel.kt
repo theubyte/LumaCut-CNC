@@ -1131,6 +1131,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         _selected.value = _selected.value.filter { id -> d.elements.any { it.id == id } }.toSet()
     }.isSuccess
 
+    /** Puts a measured grey-scale curve on the engraving layer, with the power and speed it was measured at. */
+    fun applyToneCurve(curve: List<Double>, powerPct: Double, speed: Double) {
+        val id = layerIdByName("Gravieren")
+        updateLayer(id) { it.copy(toneCurve = curve, powerPct = powerPct, speed = speed) }
+        notify("Graustufen-Kurve auf die Ebene „Gravieren“ übernommen (%.0f %% · %.0f mm/min)".format(powerPct, speed))
+    }
+
     /** Layer with [name] (Gravieren, Linie, Schneiden) or the active one. */
     fun layerIdByName(name: String): String = _doc.value.layers.firstOrNull { it.name == name }?.id ?: _activeLayer.value
 

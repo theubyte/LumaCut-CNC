@@ -26,7 +26,7 @@ from flask import Blueprint, jsonify, request
 # The thickest material that fits under the head with 20 mm travel
 # clearance below the 80 mm Z limit (owner's decision 2026-10-27).
 MAX_MATERIAL_MM = 60.0
-STATE_KEYS = ("material", "areas", "heights", "settings")
+STATE_KEYS = ("material", "areas", "probe_points", "heights", "settings")
 MAX_PROJECT_BYTES = 30 * 1024 * 1024
 MAX_SCAN_BYTES = 16 * 1024 * 1024
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -60,6 +60,13 @@ def _validate_state(data: dict) -> dict:
                                                             and -1.0 <= v <= 400.0 for v in b) for b in a):
             raise ValueError("areas: bis zu 50 Rechtecke [minX, minY, maxX, maxY] in mm")
         out["areas"] = [[round(float(v), 3) for v in b] for b in a]
+    if "probe_points" in data:
+        pts = data["probe_points"]
+        if not isinstance(pts, list) or len(pts) > 50 or not all(
+                isinstance(p, list) and len(p) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                                                            and -1.0 <= v <= 400.0 for v in p) for p in pts):
+            raise ValueError("probe_points: bis zu 50 Punkte [x, y] in mm")
+        out["probe_points"] = [[round(float(v), 3) for v in p] for p in pts]
     if "heights" in data:
         h = data["heights"]
         if h is not None and (not isinstance(h, dict) or len(json.dumps(h)) > 2 * 1024 * 1024):
@@ -80,7 +87,7 @@ class WorkspaceStore:
         self.dir = Path(folder)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
-        self.state = self._read_json("state.json", {"revision": 0, "material": None, "areas": [],
+        self.state = self._read_json("state.json", {"revision": 0, "material": None, "areas": [], "probe_points": [],
                                                     "heights": None, "settings": {}})
         self.project_meta = self._read_json("project.meta.json", {"revision": 0})
         self.scan_meta = self._read_json("scan.meta.json", {"revision": 0})
@@ -116,6 +123,10 @@ class WorkspaceStore:
     def revisions(self) -> dict:
         return {"workspace": self.state["revision"], "project": self.project_meta["revision"],
                 "scan": self.scan_meta["revision"]}
+
+    def probe_points(self):
+        """Tapped probe points, work mm (x right, y down from the work-area top left)."""
+        return [tuple(p) for p in self.state.get("probe_points") or []]
 
     def material_thickness(self):
         m = self.state.get("material")

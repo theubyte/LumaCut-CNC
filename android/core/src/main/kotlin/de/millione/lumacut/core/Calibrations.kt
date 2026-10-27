@@ -171,7 +171,7 @@ object EngraveTest {
         val centre: Pt = Work.center,
     ) {
         init {
-            require(powers.size in 2..8 && speeds.size in 2..8) { "2 … 8 Stufen je Richtung" }
+            require(powers.size in 2..12 && speeds.size in 1..8) { "2 … 12 Leistungen, 1 … 8 Geschwindigkeiten" }
             require(powers.all { it in 1.0..100.0 } && speeds.all { it in Limits.SPEED }) { "Leistung 1–100 %, Tempo bis %.0f mm/min".format(Limits.SPEED.endInclusive) }
         }
         val pitch get() = cellMm + gapMm
@@ -330,27 +330,9 @@ object MotionTest {
     fun measure(sampler: PhotoSampler, k: Int, n: Int, centre: Pt = Work.center): Shift {
         val o = origin(k, n, centre)
         // across the vertical lines (X), averaged down the part where both exist, and the same for Y
-        val dx = spacing { s -> (0..10).map { t -> sampler.lum(Pt(o.x + s, o.y + GAP + 1 + (ARM - GAP - 2) * t / 10)) } }
-        val dy = spacing { s -> (0..10).map { t -> sampler.lum(Pt(o.x + GAP + 1 + (ARM - GAP - 2) * t / 10, o.y + s)) } }
+        val dx = lineSpacing(GAP) { s -> (0..10).map { t -> sampler.lum(Pt(o.x + s, o.y + GAP + 1 + (ARM - GAP - 2) * t / 10)) } }
+        val dy = lineSpacing(GAP) { s -> (0..10).map { t -> sampler.lum(Pt(o.x + GAP + 1 + (ARM - GAP - 2) * t / 10, o.y + s)) } }
         return Shift(dx - GAP, dy - GAP)
-    }
-
-    /** Distance between the dark line near 0 and the one near [GAP] in a profile; [at] gives samples at offset s (mm). */
-    private fun spacing(at: (Double) -> List<Double>): Double {
-        val step = 0.02
-        val offs = (-30..80).map { it * step }                 // -0.6 … +1.6 mm
-        val prof = offs.map { s -> at(s).filter { !it.isNaN() }.takeIf { it.size >= 6 }?.average() ?: return Double.NaN }
-        val bg = prof.sorted().let { it[it.size * 4 / 5] }
-        fun centre(from: Double, to: Double): Double {
-            val idx = offs.indices.filter { offs[it] in from..to }
-            val d = idx.map { max(0.0, bg - prof[it]) }
-            val peak = d.max()
-            if (bg <= 0 || peak / bg < 0.08) return Double.NaN
-            var sw = 0.0; var sx = 0.0
-            for ((m, i) in idx.withIndex()) { val v = d[m] - peak / 2; if (v > 0) { sw += v; sx += v * offs[i] } }
-            return sx / sw
-        }
-        return centre(GAP - 0.5, GAP + 0.55) - centre(-0.55, 0.5)
     }
 
     /**
@@ -370,6 +352,113 @@ object MotionTest {
 
     /** Limits to keep: 70 % of the acceleration and 80 % of the speed of the last level that held. */
     fun recommend(level: Level) = MarlinWriter.Motion((level.accel * 0.7 / 100).roundToInt() * 100.0, (level.speed * 0.8 / 10).roundToInt() * 10.0)
+}
+
+/**
+ * Distance between the dark line near 0 and the one near [gap] (mm) in a
+ * profile across both; [at] gives the samples at offset s (mm). NaN when a
+ * line is not seen.
+ */
+internal fun lineSpacing(gap: Double, at: (Double) -> List<Double>): Double {
+    val step = 0.02
+    val offs = (-30..((gap + 0.6) / step).toInt()).map { it * step }
+    val prof = offs.map { s -> at(s).filter { !it.isNaN() }.takeIf { it.size >= 6 }?.average() ?: return Double.NaN }
+    val bg = prof.sorted().let { it[it.size * 4 / 5] }
+    fun centre(from: Double, to: Double): Double {
+        val idx = offs.indices.filter { offs[it] in from..to }
+        val d = idx.map { max(0.0, bg - prof[it]) }
+        val peak = d.max()
+        if (bg <= 0 || peak / bg < 0.08) return Double.NaN
+        var sw = 0.0; var sx = 0.0
+        for ((m, i) in idx.withIndex()) { val v = d[m] - peak / 2; if (v > 0) { sw += v; sx += v * offs[i] } }
+        return sx / sw
+    }
+    return centre(gap - 0.5, gap + 0.55) - centre(-0.55, 0.5)
+}
+
+/**
+ * Grey-scale curve: one row of squares at the same speed with rising
+ * power. The camera measures how dark each got; inverted, that is the
+ * share of power a picture needs for each grey ([Layer.toneCurve]), so
+ * photos come out with the tones of the original instead of too dark.
+ */
+object ToneTest {
+    data class Spec(val maxPower: Double, val speed: Double, val steps: Int = 10, val intervalMm: Double = 0.1, val centre: Pt = Work.center) {
+        init { require(maxPower in 5.0..100.0 && speed in Limits.SPEED && steps in 4..12) { "Ungültiger Graustufen-Test" } }
+        val fields get() = EngraveTest.Spec(powers = (1..steps).map { maxPower * it / steps }, speeds = listOf(speed),
+            cellMm = 5.0, gapMm = 3.0, intervalMm = intervalMm, centre = centre)
+    }
+
+    fun job(spec: Spec, motion: MarlinWriter.Motion = MarlinWriter.Motion.FIRMWARE) = EngraveTest.job(spec.fields, motion)
+
+    /**
+     * Curve (11 shares of the power for darkness 0, 0.1 … 1) from the tones
+     * measured at power share (i + 1) / steps; a darker field than the next
+     * one (noise) is evened out first.
+     */
+    fun curve(tones: List<Double>): List<Double> {
+        require(tones.isNotEmpty()) { "Keine Messwerte" }
+        val mono = tones.runningReduce { a, b -> max(a, b) }
+        val top = mono.last()
+        require(top >= 0.05) { "Auch mit der höchsten Leistung kaum Farbe – höhere Leistung oder langsamer testen" }
+        val shares = listOf(0.0) + tones.indices.map { (it + 1).toDouble() / tones.size }
+        val rel = listOf(0.0) + mono.map { it / top }
+        return (0..10).map { k ->
+            val want = k / 10.0
+            val i = (1 until rel.size).firstOrNull { rel[it] >= want - 1e-9 } ?: (rel.size - 1)
+            val span = rel[i] - rel[i - 1]
+            if (span < 1e-9) shares[i] else shares[i - 1] + (shares[i] - shares[i - 1]) * (want - rel[i - 1]) / span
+        }
+    }
+}
+
+/**
+ * Backlash: two lines 1 mm apart, the first approached from one side, the
+ * second from the other. Play in belts or pulleys shifts the second; the
+ * camera measures the spacing. Three pairs per axis, averaged.
+ */
+object BacklashTest {
+    const val LEN = 8.0
+    const val GAP = 1.0
+    const val RUN = 5.0
+
+    /** (axis, origin) of the pairs: lines across X first, then across Y. */
+    fun pairs(centre: Pt = Work.center): List<Pair<Char, Pt>> =
+        (0..2).map { 'X' to Pt(centre.x - 20 + it * 6.0, centre.y - LEN / 2) } + (0..2).map { 'Y' to Pt(centre.x + 6, centre.y - 8 + it * 6.0) }
+
+    fun bounds(centre: Pt = Work.center): Box {
+        val ps = pairs(centre).flatMap { (a, o) -> if (a == 'X') listOf(o - Pt(RUN, 0.0), o + Pt(GAP + RUN, LEN)) else listOf(o - Pt(0.0, RUN), o + Pt(LEN, GAP + RUN)) }
+        return Box(ps.minOf { it.x } - 2, ps.minOf { it.y } - 2, ps.maxOf { it.x } + 2, ps.maxOf { it.y } + 2)
+    }
+
+    fun job(powerPct: Double = 25.0, speed: Double = 1200.0, centre: Pt = Work.center): String {
+        val s = (powerPct / 100 * 255).roundToInt()
+        fun xy(p: Pt) = Work.toMachine(p).let { "X%.3f Y%.3f".format(Locale.ROOT, it.x, it.y) }
+        val f = speed.roundToInt()
+        val out = StringBuilder("; LumaCut Umkehrspiel-Test\nG21\nG90\nM5 I\nM3 I\n")
+        for ((axis, o) in pairs(centre)) {
+            val along = if (axis == 'X') Pt(0.0, LEN) else Pt(LEN, 0.0)
+            val across = if (axis == 'X') Pt(1.0, 0.0) else Pt(0.0, 1.0)
+            // first line: approached from the low side; second: from the high side
+            out.append("G0 ${xy(o - across * RUN)}\nG0 ${xy(o)}\nG1 ${xy(o + along)} F$f S$s\n")
+            val b = o + across * GAP
+            out.append("G0 ${xy(b + across * RUN)}\nG0 ${xy(b)}\nG1 ${xy(b + along)} F$f S$s\n")
+        }
+        out.append("M5 I\nM400\n")
+        return out.toString()
+    }
+
+    /** Spacing minus [GAP] of one pair (mm, signed); NaN when not seen. */
+    fun measure(sampler: PhotoSampler, axis: Char, o: Pt): Double {
+        val across = if (axis == 'X') Pt(1.0, 0.0) else Pt(0.0, 1.0)
+        val along = if (axis == 'X') Pt(0.0, 1.0) else Pt(1.0, 0.0)
+        return lineSpacing(GAP) { s -> (0..10).map { t -> sampler.lum(o + across * s + along * (1.5 + (LEN - 3) * t / 10)) } } - GAP
+    }
+
+    /** Backlash per axis: |mean| of its pairs, NaN without measurements. */
+    fun result(values: List<Pair<Char, Double>>): Map<Char, Double> = listOf('X', 'Y').associateWith { a ->
+        values.filter { it.first == a && !it.second.isNaN() }.map { it.second }.takeIf { it.isNotEmpty() }?.let { abs(it.average()) } ?: Double.NaN
+    }
 }
 
 /**
@@ -438,5 +527,110 @@ object CutTest {
         val inconsistent = through.any { (i, j) -> (0 until i).any { k -> (k to j) !in through } }
         val p = spec.passes[chosen.second]
         return Pick(spec.speeds[chosen.first], p, spec.powerPct, if (p > 1) spec.zStep else 0.0, safe != null, inconsistent)
+    }
+}
+
+/**
+ * Ringing test: after a sharp 90° corner the axis that stopped hard may
+ * swing on for a moment; the long straight line drawn right after it then
+ * waves sideways, fading out. Per moved axis and speed one "leg": a short
+ * lead across, the corner, then [Spec.length] mm straight. The camera
+ * follows the line centre and measures how far it swings ([Leg.amplitude])
+ * and how long one wave is, which gives the swing frequency (input
+ * shaping). Lines along X show the Y axis swinging and vice versa.
+ */
+object RingingTest {
+    data class Spec(
+        val speeds: List<Double> = listOf(1500.0, 3000.0, 4500.0),
+        val length: Double = 30.0, val lead: Double = 4.0, val pitch: Double = 5.0,
+        val powerPct: Double = 20.0, val centre: Pt = Work.center,
+    ) {
+        init { require(speeds.size in 1..6 && speeds.all { it in 300.0..Limits.SPEED.endInclusive } && powerPct in 1.0..100.0) { "Ungültiger Schwing-Test" } }
+    }
+
+    /** One line: moving along [axis] at [speed] (mm/min), the corner at [corner], the line towards +axis. */
+    data class Leg(val axis: Char, val speed: Double, val corner: Pt) {
+        val dir get() = if (axis == 'X') Pt(1.0, 0.0) else Pt(0.0, 1.0)
+        val across get() = if (axis == 'X') Pt(0.0, 1.0) else Pt(1.0, 0.0)
+    }
+
+    fun legs(spec: Spec): List<Leg> {
+        val n = spec.speeds.size
+        val blockH = (n - 1) * spec.pitch
+        val left = spec.centre.x - spec.length - spec.lead - 3
+        val top = spec.centre.y - spec.length / 2
+        val xs = spec.speeds.mapIndexed { i, s -> Leg('X', s, Pt(left + spec.lead, top + spec.lead + i * spec.pitch)) }
+        val ys = spec.speeds.mapIndexed { i, s -> Leg('Y', s, Pt(spec.centre.x + 3 + spec.lead + i * spec.pitch, top + spec.lead + blockH + 6)) }
+        return xs + ys
+    }
+
+    fun bounds(spec: Spec): Box {
+        val pts = legs(spec).flatMap { l -> listOf(l.corner - l.across * spec.lead, l.corner + l.dir * spec.length) }
+        return Box(pts.minOf { it.x } - 2, pts.minOf { it.y } - 2, pts.maxOf { it.x } + 2, pts.maxOf { it.y } + 2)
+    }
+
+    /** G-code written directly: the direction of every line must stay as planned (no reordering). */
+    fun job(spec: Spec): String {
+        val s = (spec.powerPct / 100 * 255).roundToInt()
+        fun xy(p: Pt) = Work.toMachine(p).let { "X%.3f Y%.3f".format(Locale.ROOT, it.x, it.y) }
+        val out = StringBuilder()
+        fun line(t: String) { out.append(t).append('\n') }
+        line("; LumaCut Schwing-Test – ${spec.speeds.size} Tempi je Achse")
+        line("G21"); line("G90"); line("M5 I"); line("M3 I")
+        for (l in legs(spec)) {
+            line("; Achse ${l.axis}, %.0f mm/min".format(Locale.ROOT, l.speed))
+            line("G0 ${xy(l.corner - l.across * spec.lead)}")
+            line("G1 ${xy(l.corner)} F${l.speed.roundToInt()} S$s")
+            line("G1 ${xy(l.corner + l.dir * spec.length)} F${l.speed.roundToInt()} S$s")
+        }
+        line("M5 I"); line("M400")
+        return out.toString()
+    }
+
+    /** [amplitude] largest swing (mm) in the first 12 mm after the corner, [noise] wobble of the settled rest, [wavelength] mm or NaN. */
+    class Result(val leg: Leg, val amplitude: Double, val noise: Double, val wavelength: Double) {
+        /** The axis that swings: the one that stopped at the corner. */
+        val swingingAxis get() = if (leg.axis == 'X') 'Y' else 'X'
+        val frequency get() = if (wavelength.isNaN() || wavelength <= 0) Double.NaN else leg.speed / 60 / wavelength
+        val found get() = !amplitude.isNaN()
+        val rings get() = found && amplitude > 0.05 && amplitude > 3 * noise
+    }
+
+    fun measure(sampler: PhotoSampler, spec: Spec, leg: Leg): Result {
+        val step = 0.1
+        val ts = generateSequence(0.4) { it + step }.takeWhile { it <= spec.length - 0.6 }.toList()
+        val offs = (-20..20).map { it * 0.04 }
+        val dev = ts.map { t ->
+            val base = leg.corner + leg.dir * t
+            val prof = offs.map { o -> sampler.lum(base + leg.across * o) }
+            if (prof.any { it.isNaN() }) return Result(leg, Double.NaN, Double.NaN, Double.NaN)
+            val bg = (prof.take(5).average() + prof.takeLast(5).average()) / 2
+            val d = prof.map { max(0.0, bg - it) }
+            val peak = d.max()
+            if (peak < bg * 0.08) Double.NaN
+            else { var sw = 0.0; var sx = 0.0; for (i in d.indices) { val v = d[i] - peak / 2; if (v > 0) { sw += v; sx += v * offs[i] } }; sx / sw }
+        }
+        val good = ts.indices.filter { !dev[it].isNaN() }
+        if (good.size < ts.size * 0.7) return Result(leg, Double.NaN, Double.NaN, Double.NaN)
+        // the settled second half gives the straight line (the camera may see it a little tilted)
+        val tail = good.filter { ts[it] > spec.length * 0.5 }
+        val mt = tail.map { ts[it] }.average(); val md = tail.map { dev[it] }.average()
+        val slope = tail.sumOf { (ts[it] - mt) * (dev[it] - md) } / tail.sumOf { (ts[it] - mt) * (ts[it] - mt) }.coerceAtLeast(1e-9)
+        val res = ts.indices.map { if (dev[it].isNaN()) Double.NaN else dev[it] - (md + slope * (ts[it] - mt)) }
+        val noise = kotlin.math.sqrt(tail.map { res[it] * res[it] }.average())
+        val head = ts.indices.filter { ts[it] <= 12.0 && !res[it].isNaN() }
+        val amplitude = head.maxOf { abs(res[it]) }
+        // wavelength: first peak of the autocorrelation of the swing (robust while it fades out)
+        val r = head.map { res[it] }
+        val energy = r.sumOf { it * it }
+        val ac = (0..r.size / 2).map { k -> if (energy <= 0) 0.0 else (0 until r.size - k).sumOf { r[it] * r[it + k] } / energy }
+        val firstNeg = ac.indexOfFirst { it < 0 }
+        val peak = if (firstNeg < 0) -1 else (firstNeg until ac.size - 1).firstOrNull { ac[it] >= ac[it - 1] && ac[it] >= ac[it + 1] && ac[it] > 0.1 } ?: -1
+        val wavelength = if (peak <= 0) Double.NaN else {
+            val a0 = ac[peak - 1]; val a1 = ac[peak]; val a2 = ac[peak + 1]
+            val d = a0 - 2 * a1 + a2
+            (peak + if (abs(d) < 1e-12) 0.0 else 0.5 * (a0 - a2) / d) * step
+        }
+        return Result(leg, amplitude, noise, wavelength)
     }
 }

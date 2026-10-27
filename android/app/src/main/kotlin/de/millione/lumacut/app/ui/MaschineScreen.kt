@@ -31,7 +31,7 @@ fun MaschineScreen(machine: MachineViewModel, editor: EditorViewModel, tab: Mach
             when (tab) {
                 MachineTab.STEUERUNG -> WerkstattScreen(machine)
                 MachineTab.SCAN -> WorkspaceScreen(machine, editor)
-                MachineTab.KALIBRIEREN -> CalibrationScreen(machine)
+                MachineTab.KALIBRIEREN -> CalibrationScreen(machine, editor)
                 MachineTab.AUFTRAEGE -> JobsScreen(machine)
             }
         }

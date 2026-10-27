@@ -24,6 +24,10 @@ data class CameraCalibration(
     val aboveSurface: Double? = null,
     /** Brightness fall-off towards the picture edges (light calibration), null = not measured. */
     val shading: Shading? = null,
+    /** Height from the work laser's glimmer spot (3D), null = not calibrated. */
+    val spot: LightModel? = null,
+    /** Height from the red measuring line laser (3D), null = not calibrated. */
+    val line: LightModel? = null,
 ) {
     init { require(lens != null || (photo.size == 4 && relMm.size == 4)) { "Vier Kalibrierpunkte nötig" } }
 
