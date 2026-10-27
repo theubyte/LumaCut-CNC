@@ -39,18 +39,21 @@ object DotGrid {
     fun bounds() = Box(center.x - HALF_COLS * PITCH - R_BIG, center.y - HALF_ROWS * PITCH - R_BIG,
                        center.x + HALF_COLS * PITCH + R_BIG, center.y + HALF_ROWS * PITCH + R_BIG)
 
-    /** A filled dot as one polyline: the outline, then a tight spiral inwards. */
-    fun dot(c: Pt, r: Double, pitch: Double = 0.15): Poly {
+    /**
+     * A dot as one open spiral from the rim inwards, [pitch] apart, ending
+     * at [hole] radius. No tight turns in the middle: there the head would
+     * brake while the laser keeps its power, and the wood chars and sparks.
+     * The burn spreads enough to close the small centre.
+     */
+    fun dot(c: Pt, r: Double, pitch: Double = 0.25, hole: Double = 0.45): Poly {
         val out = ArrayList<Pt>()
-        val n = max(24, (2 * PI * r / 0.2).roundToInt())
-        for (k in 0..n) { val a = 2 * PI * k / n; out += Pt(c.x + r * cos(a), c.y + r * sin(a)) }
         var a = 0.0; var rr = r
-        while (rr > pitch / 2) {
-            a += 0.2 / rr
+        out += Pt(c.x + r, c.y)
+        while (rr > hole) {
+            a += 0.25 / rr                              // ~0.25 mm segments, constant speed
             rr = r - pitch * a / (2 * PI)
-            out += Pt(c.x + max(rr, 0.0) * cos(a), c.y + max(rr, 0.0) * sin(a))
+            out += Pt(c.x + rr * cos(a), c.y + rr * sin(a))
         }
-        out += c
         return out
     }
 
@@ -60,9 +63,9 @@ object DotGrid {
         cols.map { i -> dot(position(i, j), radius(i, j)) }
     }
 
-    /** G-code for the grid: low power line mode, just dark enough for the camera. */
+    /** G-code for the grid: low power and fast, light brown dots are enough for the camera. */
     fun job(): String {
-        val layer = Layer(name = "Punktraster", color = 0xFF4FD8B4, mode = LayerMode.LINE, powerPct = 35.0, speed = 1200.0)
+        val layer = Layer(name = "Punktraster", color = 0xFF4FD8B4, mode = LayerMode.LINE, powerPct = 20.0, speed = 1800.0)
         val e = Element(layerId = layer.id, kind = "Punktraster", paths = paths())
         return MarlinWriter("kamera-punktraster").write(Document("Kamera-Punktraster", listOf(layer), listOf(e)))
     }
