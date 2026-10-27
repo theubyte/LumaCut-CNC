@@ -307,6 +307,14 @@ class CalibrationsTest {
         assertEquals(0xFF112233.toInt(), old[(130 * 2) * m.width + 160 * 2], "base itself unchanged")
     }
 
+    @Test fun `status says why the reference was lost`() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val s = json.decodeFromString(MachineStatus.serializer(),
+            """{"homed":false,"reference":{"switch_check":true,"lost":"Kopf steht nicht mehr am Nullpunkt (Endschalter X offen)"}}""")
+        assertEquals(true, s.reference.switch_check); assertTrue(s.reference.lost.contains("Endschalter X"))
+        assertEquals(ReferenceInfo(), json.decodeFromString(MachineStatus.serializer(), "{}").reference)   // older Pi
+    }
+
     @Test fun `probe offset from the head position over the mark`() {
         val off = Pt(-23.0, 15.0)
         val head = ProbeTarget.headFor(off)

@@ -21,6 +21,7 @@ fun headline(s: MachineStatus?, online: Boolean?, host: String, readError: Strin
     s.owner == "lightburn" -> Headline(Tone.WARN, "LightBurn verbunden", "Steuerung über die App erst nach Trennen von LightBurn.")
     !s.ownerFree -> Headline(Tone.BUSY, "Beschäftigt", "Belegt durch ${s.owner}")
     s.state == "Busy" -> Headline(Tone.BUSY, "In Bewegung", "")
+    !s.homed && s.reference.lost.isNotBlank() -> Headline(Tone.WARN, "Referenz verloren", s.reference.lost)
     !s.homed -> Headline(Tone.WARN, "Bereit · nicht referenziert", "Vor dem Arbeiten referenzieren: X/Y, dann Z, dann 20 mm hoch.")
     s.workpiece_surface_z == null -> Headline(Tone.OK, "Bereit", "Referenziert. Werkstück noch nicht abgetastet.")
     else -> Headline(Tone.OK, "Bereit", "Referenziert und abgetastet. Der Fokus wird vor dem ersten Laserweg angefahren.")

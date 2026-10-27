@@ -122,6 +122,8 @@ data class MachineStatus(
     val job: JobProgress = JobProgress(),
     val frame: FrameProgress = FrameProgress(),
     val config: PiConfig = PiConfig(),
+    /** Reference check by the X/Y switches at X0/Y0; [ReferenceInfo.lost] says why the machine is no longer homed. */
+    val reference: ReferenceInfo = ReferenceInfo(),
     val camera: CameraInfo = CameraInfo(),
     val recent: List<String> = emptyList(),
     /** Pi capabilities: "autorun_mesh" (op=autorun probes and corrects itself), "materials" (/api/materials). */
@@ -133,6 +135,10 @@ data class MachineStatus(
     val ownerFree get() = owner == "Frei" || owner.isBlank()
     val probeOffset: Pt? get() = probe_xy_offset_mm?.takeIf { it.size == 2 }?.let { Pt(it[0], it[1]) }
 }
+
+/** switch_check: true = the X/Y switches confirm the reference at X0/Y0, false = they cannot, null = not yet homed. */
+@Serializable
+data class ReferenceInfo(val switch_check: Boolean? = null, val lost: String = "")
 
 @Serializable
 data class CameraInfo(val device: String = "", val available: Boolean = false)

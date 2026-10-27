@@ -196,6 +196,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `firmware_upload_supported` | bool | Firmware meldet `Cap:BINARY_FILE_TRANSFER:1` (Voraussetzung für `/api/firmware`) |
 | `firmware_update` | object | `{state, progress, message}`; `state` ∈ `idle`, `uploading`, `rebooting`, `done`, `error`; `progress` 0..100 |
 | `homing_verified` | bool | = Mechanik-Freigabe (`config.validated`) |
+| `reference` | object | `{switch_check, lost}`: Referenzprüfung über die X/Y-Endschalter. `switch_check` `true` = nach dem Referenzieren waren beide Schalter auf X0/Y0 gedrückt, die Prüfung ist aktiv (`false` = Schalter erreichen X0/Y0 nicht, Prüfung aus; `null` = noch nicht referenziert). Steht der Kopf laut Pi auf X0/Y0 (nach Referenzieren/Parken) und ein Schalter ist offen – geprüft nach dem Parken, alle 2 s im Leerlauf und vor `start`/`autorun`/`frame` –, fällt `homed` auf `false` und `lost` nennt den Grund (Kopf von Hand bewegt oder Schritte verloren); `autorun` referenziert dann zuerst. Nach jedem Referenzieren wieder `""`. Beim Verbinden sendet der Pi `M84 S0`: die Motoren halten auch im Leerlauf. |
 | `position` | [x, y, z] \| null | letzte M114-Position in Maschinen-mm |
 | `fault` | string | letzter Fehler (z. B. nach E-Stop), `""` wenn keiner |
 | `lights` | bool | Licht (LED-Streifen an PC8) an |

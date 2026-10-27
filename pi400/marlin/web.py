@@ -1113,6 +1113,9 @@ def _job_worker(filename, commands, auto=None):
 
 def start_job(automatic=False):
     local_owner()
+    # Head moved by hand / steps lost? (X/Y switches at X0/Y0) - then not homed:
+    # the automatic run homes first, a plain start is refused below.
+    machine.check_reference()
     if not machine.homed and not automatic:
         raise RuntimeError("Vor dem Job referenzieren")
     filename = request.form.get("name","")
@@ -1293,6 +1296,7 @@ def _queue_worker():
 def queue_run():
     """op=queue_run: run the waiting items in order (stops on error/abort)."""
     local_owner()
+    machine.check_reference()     # moved by hand: the first item homes first
     with queue_lock:
         if job_queue["state"] in QUEUE_ACTIVE:
             raise RuntimeError("Warteschlange läuft bereits")
@@ -1419,6 +1423,7 @@ def start_frame():
     local_owner()
     if machine.emergency_latched:
         raise RuntimeError("Notstopp aktiv – erst quittieren")
+    machine.check_reference()
     if not machine.homed:
         raise RuntimeError("Vor dem Rahmen referenzieren")
     mode = request.form.get("mode", "box") or "box"
@@ -1465,6 +1470,8 @@ def monitor_loop():
         elif machine.serial is not None and machine.identity:
             try:
                 machine.command("M114", owner="monitor", use_guard=False, timeout=5)
+                if job["state"] not in ("homing", "probing", "running") and frame["state"] != "running":
+                    machine.check_reference()
             except Exception:
                 logging.warning("Marlin heartbeat failed", exc_info=True)
 

@@ -176,7 +176,7 @@ class USBProtocolTests(unittest.TestCase):
     def test_actual_marlin_m115_and_no_grbl_identity_spoof(self):
         serial=FakeSerial([
             "FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin\n",
-            "ok P15 B3\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n"
+            "ok P15 B3\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n"
         ])
         bridge=MarlinTransport("/dev/null",serial_factory=lambda *a,**k:serial)
         bridge.ensure_ready()
@@ -184,7 +184,7 @@ class USBProtocolTests(unittest.TestCase):
         # the X/Y limits (firmware values until the motion calibration) too.
         self.assertEqual(serial.writes,[b"M115\n",b"M5 I\n",b"M203 Z9\n",
                                         b"M851 X0 Y0 Z0\n", b"M201 X500 Y500\n",
-                                        b"M203 X150 Y150 Z9\n", b"M204 P500 T500\n"])
+                                        b"M203 X150 Y150 Z9\n", b"M204 P500 T500\n", b"M84 S0\n"])
         self.assertTrue(bridge.status()["connected"])
         self.assertIn("LumaCut CNC",bridge.status()["identity"])
 
@@ -219,7 +219,7 @@ class USBProtocolTests(unittest.TestCase):
         bridge.homing_verified=True
         bridge.serial=FakeSerial([
             "ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n","ok\n",
-            "X:0 Y:0 Z:20\n", "ok\n"
+            "X:0 Y:0 Z:20\n", "ok\n", "x_min: TRIGGERED\n", "y_min: TRIGGERED\n", "z_min: open\n", "ok\n"
         ])
         bridge.homing_chime_enabled = False
         response = bridge.safe_home()
@@ -232,7 +232,7 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(bridge.serial.writes[6], b"G0 Z20.00 F600\n")
 
     def test_lightburn_g28_has_one_ack_and_real_marlin_usb_sequence(self):
-        responses=["ok\n"] * 9 + ["X:0 Y:0 Z:20\n","ok\n"]
+        responses=["ok\n"] * 9 + ["X:0 Y:0 Z:20\n","ok\n","x_min: TRIGGERED\n","y_min: TRIGGERED\n","ok\n"]
         serial=FakeSerial(responses)
         controller=MarlinTransport("/dev/null")
         controller.serial=serial
@@ -255,6 +255,49 @@ class USBProtocolTests(unittest.TestCase):
         self.assertTrue(controller.homed)
         self.assertEqual(controller.owner,None)
         self.assertTrue(sock.closed)
+
+    def test_reference_check_by_the_xy_switches_at_the_origin(self):
+        from marlin.transport import parse_endstops
+        self.assertEqual(parse_endstops(["Reporting endstop status", "x_min: open", "y_min: TRIGGERED", "z_min: open", "ok"]),
+                         {"x_min": False, "y_min": True, "z_min": False})
+        def homed_bridge(after_home):
+            serial = FakeSerial(["ok\n"] * 9 + ["X:0 Y:0 Z:20\n", "ok\n"] + after_home)
+            b = MarlinTransport("/dev/null")
+            b.serial = serial
+            b.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+            b.homing_verified = True
+            b.homing_chime_enabled = False
+            b.light_effects = False
+            b.safe_home()
+            return b, serial
+        # switches pressed after homing: check active, still pressed = still homed
+        b, serial = homed_bridge(["x_min: TRIGGERED\n", "y_min: TRIGGERED\n", "ok\n",
+                                  "x_min: TRIGGERED\n", "y_min: TRIGGERED\n", "ok\n"])
+        self.assertTrue(b.switch_check)
+        self.assertTrue(b.check_reference())
+        self.assertTrue(b.homed)
+        self.assertEqual(b.status()["reference"], {"switch_check": True, "lost": ""})
+        # head pushed away by hand: X switch open -> not homed any more, reason given
+        serial.replies += ["x_min: open\n", "y_min: TRIGGERED\n", "ok\n"]
+        self.assertFalse(b.check_reference())
+        self.assertFalse(b.homed)
+        self.assertIn("Endschalter X offen", b.status()["reference"]["lost"])
+        self.assertIsNone(b.check_reference(), "nothing to check while not homed")
+        # head somewhere else on the bed: switches are open by design, no check
+        b, serial = homed_bridge(["x_min: TRIGGERED\n", "y_min: TRIGGERED\n", "ok\n"])
+        b.last_xy_commanded = (120.0, 80.0)
+        writes = len(serial.writes)
+        self.assertIsNone(b.check_reference())
+        self.assertEqual(len(serial.writes), writes)
+        # switches that do not reach X0/Y0 on a machine: check stays off instead of false alarms
+        b, serial = homed_bridge(["x_min: open\n", "y_min: open\n", "ok\n"])
+        self.assertFalse(b.switch_check)
+        self.assertIsNone(b.check_reference())
+        self.assertTrue(b.homed)
+        # somebody else drives the machine: no check
+        b, _ = homed_bridge(["x_min: TRIGGERED\n", "y_min: TRIGGERED\n", "ok\n"])
+        b.owner = "job"
+        self.assertIsNone(b.check_reference())
 
     def test_park_requires_home_and_moves_z_up_before_xy(self):
         serial=FakeSerial([

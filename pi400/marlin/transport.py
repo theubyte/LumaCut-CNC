@@ -109,6 +109,16 @@ MOTION_ACCEL_RANGE = (100.0, 20000.0)
 MOTION_SPEED_RANGE = (10.0, 500.0)
 
 
+def parse_endstops(lines) -> dict:
+    """M119 report -> {"x_min": True (pressed) / False (open), ...}."""
+    out = {}
+    for line in lines:
+        m = re.match(r"\s*([xyz]_(?:min|max)|z_probe)\s*:\s*(TRIGGERED|open)", line, re.I)
+        if m:
+            out[m.group(1).lower()] = m.group(2).upper() == "TRIGGERED"
+    return out
+
+
 def motion_commands(accel: float, speed: float) -> list[str]:
     """Runtime X/Y limits: max acceleration, max feedrate (Z stays 9 mm/s), default accelerations."""
     return ["M201 X%d Y%d" % (accel, accel), "M203 X%d Y%d Z9" % (speed, speed),
@@ -249,6 +259,11 @@ class MarlinTransport:
         # (accel mm/s², speed mm/s) from the tablet's motion calibration,
         # sent on every connect like M203 Z9; None = firmware values.
         self.motion_limits = None
+        # Reference check by the X/Y switches: at X0/Y0 both must be pressed.
+        # None until homing showed whether they are (False: switches do not
+        # reach X0/Y0 on this machine, the check stays off), True = active.
+        self.switch_check = None
+        self.reference_lost = ""
         self.last_probe_laser_xy = None
         self.last_xy_commanded = None
         self.homing_chime_enabled = True
@@ -448,6 +463,9 @@ class MarlinTransport:
                     self._exchange_locked("M851 Z0", timeout=6.0)
                 # Measured X/Y acceleration and speed (never written to EEPROM).
                 self._apply_motion_locked()
+                # Motors keep holding when idle (Marlin's default lets them go
+                # after 120 s): the head cannot be pushed by hand unnoticed.
+                self._exchange_locked("M84 S0", timeout=6.0)
                 self.state = "Idle"
                 self.fault = ""
             except Exception as exc:
@@ -942,6 +960,12 @@ class MarlinTransport:
                 self.homed = True
                 self.absolute_mode = True
                 self.last_xy_commanded = (0.0, 0.0)
+                self.reference_lost = ""
+                # Do the switches reach X0/Y0? Only then can they check the reference later.
+                stops = parse_endstops(self._exchange_locked("M119", timeout=8))
+                self.switch_check = bool(stops.get("x_min") and stops.get("y_min"))
+                if not self.switch_check:
+                    LOG.warning("X/Y switches not pressed after homing (%s): reference check off", stops)
                 self.guard = MarlinLaserGuard()
                 self.laser_enabled = False
                 self._light_effect_locked("home")
@@ -995,6 +1019,35 @@ class MarlinTransport:
             result = self._exchange_locked("M114", timeout=8)
             self.last_xy_commanded = (x, y)
             return result
+
+    def _check_parked_locked(self):
+        """At X0/Y0 the X and Y switches must be pressed; open means the head
+        was moved by hand or lost steps: the reference is dropped (the next
+        automatic job homes first). None when nothing can be checked."""
+        if not self.homed or self.switch_check is not True or self.last_xy_commanded != (0.0, 0.0):
+            return None
+        stops = parse_endstops(self._exchange_locked("M119", timeout=8))
+        if "x_min" not in stops or "y_min" not in stops:
+            return None
+        if stops["x_min"] and stops["y_min"]:
+            return True
+        open_axes = "/".join(a.upper() for a in ("x", "y") if not stops[a + "_min"])
+        self.homed = False
+        self.z_homed = False
+        self.surface_z = None
+        self.last_xy_commanded = None
+        self.reference_lost = ("Kopf steht nicht mehr am Nullpunkt (Endschalter %s offen) – von Hand bewegt "
+                               "oder Schritte verloren. Vor dem nächsten Auftrag wird neu referenziert." % open_axes)
+        LOG.warning("Reference lost: %s switch open at X0/Y0", open_axes)
+        return False
+
+    def check_reference(self, owner=None):
+        """Reference check while nobody else drives the machine (idle monitor, before a start)."""
+        with self.lock:
+            if (self.owner not in (None, owner) or self.serial is None or not self.identity
+                    or self.emergency_latched or self.laser_enabled):
+                return None
+            return self._check_parked_locked()
 
     def _apply_motion_locked(self, limits=None):
         accel, speed = limits or self.motion_limits or FIRMWARE_MOTION
@@ -1104,6 +1157,8 @@ class MarlinTransport:
             result = self._exchange_locked("M114", timeout=8)
             self.focused_this_job = False
             self.last_xy_commanded = (0.0, 0.0)
+            # parked at X0/Y0: the switches show whether the job lost steps
+            self._check_parked_locked()
             self._light_effect_locked("done")
             if self.job_chime_enabled:
                 self._play_stepper_chime_locked("done")
@@ -1541,6 +1596,7 @@ class MarlinTransport:
                 "firmware_upload_supported": self.cap_binary_transfer,
                 "firmware_update": dict(self.firmware),
                 "homing_verified": self.homing_verified,
+                "reference": {"switch_check": self.switch_check, "lost": self.reference_lost},
                 "position": self.position, "fault": self.fault,
                 "lights": self.lights, "exhaust": self.exhaust,
                 "light_brightness": int(round(self.light_pct)), "light_dimmable": self.light_pwm,
