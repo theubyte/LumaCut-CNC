@@ -739,7 +739,9 @@ anfordern, keine Bildrate erwarten.
 200 JSON: `image_width`, `image_height`, `px_per_mm`, `scan_z`, `offset_mm`
 [x, y], `rotation_deg`, `flip_x`, `flip_y` (±1), `crop_fraction`,
 `camera_matrix`, `dist_coeffs`, `exposure`, `homography` (je null oder
-Werte), `calibrated`, `notes`, `updated_by`, `revision` (0 = nie
+Werte), `android` (null oder das Kameramodell der Tablet-App unverändert:
+`photoWidth`, `photoHeight`, `scanZ` und `lens` aus dem Punktraster oder vier
+Punkte `photo`/`relMm`; der Pi prüft nur die Form), `calibrated`, `notes`, `updated_by`, `revision` (0 = nie
 gespeichert), `updated_at`, `format` (`lumacut-camera-calibration/1`),
 `schema_version` (1), `placeholder` (true = Standardwerte, keine Messung),
 `status` (`platzhalter`, `kalibriert`, `unkalibriert`), `storage` `{path,

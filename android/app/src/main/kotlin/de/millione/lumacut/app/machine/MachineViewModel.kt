@@ -85,7 +85,8 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
     private val _notices = MutableSharedFlow<Notice>(extraBufferCapacity = 8)
     val notices: SharedFlow<Notice> = _notices
 
-    private var client: PiClient? = null
+    var client: PiClient? = null
+        private set
     private var poller: Job? = null
     private var lastJobError = ""
     private val materialFile = File(app.filesDir, "materials.json")

@@ -4,6 +4,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -265,6 +268,48 @@ class PiClient(
     }
 
     /** What APK the Pi currently offers. */
+    /** Head-camera calibration the tablet stored on the Pi (null when there is none) and the file's revision. */
+    suspend fun cameraCalibration(): Pair<CameraCalibration?, Int> {
+        val root = json.parseToJsonElement(call(Request.Builder().url(url("api", "camera", "calibration")).build())).jsonObject
+        val revision = root["revision"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        val cal = root["android"]?.takeIf { it is JsonObject }?.let {
+            runCatching { Document.JSON.decodeFromJsonElement(CameraCalibration.serializer(), it) }.getOrNull()
+        }
+        return cal to revision
+    }
+
+    /**
+     * Stores [cal] on the Pi: the tablet's model unchanged under `android`,
+     * plus picture size, scan height and (with a lens model) the OpenCV
+     * values in the Pi's own fields. Reads the revision first; if someone
+     * saved in between it reads again and saves once more.
+     */
+    suspend fun saveCameraCalibration(cal: CameraCalibration): String {
+        var last: PiConflictException? = null
+        repeat(2) {
+            val (_, revision) = cameraCalibration()
+            val body = buildJsonObject {
+                put("revision", revision)
+                put("updated_by", "Tablet")
+                put("calibrated", true)
+                put("image_width", cal.photoWidth)
+                put("image_height", cal.photoHeight)
+                put("scan_z", cal.scanZ.coerceIn(0.0, 90.0))
+                cal.lens?.openCv()?.let { (k, d) ->
+                    put("camera_matrix", JsonArray(k.map { row -> JsonArray(row.map(::JsonPrimitive)) }))
+                    put("dist_coeffs", JsonArray(d.map(::JsonPrimitive)))
+                }
+                put("notes", if (cal.lens != null) "Punktraster, Tablet" else "Vier Ecken, Tablet")
+                put("android", Document.JSON.encodeToJsonElement(CameraCalibration.serializer(), cal))
+            }
+            try {
+                return message(call(Request.Builder().url(url("api", "camera", "calibration"))
+                    .put(body.toString().toRequestBody("application/json".toMediaType())).build()))
+            } catch (e: PiConflictException) { last = e }
+        }
+        throw last!!
+    }
+
     suspend fun appUpdate(): AppUpdateInfo = parseUpdate(call(Request.Builder().url(url("api", "app", "android")).build(), callTimeoutSec = 8))
 
     /** Asks the Pi to look at GitHub right now; the answer carries the same fields as [appUpdate]. */

@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,6 +87,7 @@ fun WorkspaceScreen(machine: MachineViewModel, editor: EditorViewModel, ws: Work
     val done by ws.done.collectAsStateWithLifecycle()
     var marking by remember { mutableStateOf(false) }
     var calibrating by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { ws.syncCalibration(machine) }
     var confirm by rememberConfirm()
 
     val ready = status.canControl(online) && run == null

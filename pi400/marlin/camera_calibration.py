@@ -52,6 +52,9 @@ DEFAULTS = {
     "dist_coeffs": None,
     "exposure": None,
     "homography": None,
+    # The tablet app's own model (lens grid or four marks), stored as it is;
+    # the Pi only checks its shape. Windows Studio will follow this model.
+    "android": None,
 }
 META_DEFAULTS = {"calibrated": False, "notes": "", "updated_by": ""}
 # Read-only fields a client may send back unchanged (GET -> edit -> PUT).
@@ -144,6 +147,17 @@ def validate(data) -> dict:
         errors.append("dist_coeffs: Liste mit 4, 5, 8, 12 oder 14 endlichen Zahlen erwartet")
     if (k is None) != (d is None):
         errors.append("camera_matrix und dist_coeffs nur zusammen angeben")
+    a = merged["android"]
+    if a is not None:
+        if not isinstance(a, dict):
+            errors.append("android: Objekt erwartet")
+        else:
+            for key in ("photoWidth", "photoHeight"):
+                v = a.get(key)
+                if isinstance(v, bool) or not isinstance(v, int) or not 160 <= v <= 8192:
+                    errors.append("android.%s: ganze Zahl 160 … 8192 erwartet" % key)
+            if a.get("lens") is None and not (isinstance(a.get("photo"), list) and len(a["photo"]) == 4):
+                errors.append("android: Linsenmodell oder vier Kalibrierpunkte erwartet")
     h = merged["homography"]
     if h is not None and not (_matrix(h, 3, 3) and abs(_det3(h)) > 1e-12):
         errors.append("homography: invertierbare 3×3-Matrix erwartet")

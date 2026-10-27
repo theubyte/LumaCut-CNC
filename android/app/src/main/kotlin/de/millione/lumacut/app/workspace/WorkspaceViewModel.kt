@@ -156,8 +156,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     fun saveGridCalibration(machine: MachineViewModel, result: DotGrid.Result) {
         val cal = result.calibration
-        _calibration.value = cal
-        prefs.edit().putString("headCamera2", Document.JSON.encodeToString(CameraCalibration.serializer(), cal)).apply()
+        store(machine, cal)
         val u = cal.usable(0.0)
         machine.notify("Kopfkamera kalibriert: Bildfeld %.0f × %.0f mm, Genauigkeit %.2f mm".format(Locale.GERMANY, u.width, u.height, result.lens.rmsMm))
     }
@@ -178,6 +177,37 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         machine.request("moveto", quietSuccess = true) { it.moveTo(m.x.coerceIn(0.0, 390.0), m.y.coerceIn(0.0, 370.0)) }
     }
 
+    /** Keeps [cal] on the tablet and on the Pi (the calibration belongs to the machine). */
+    private fun store(machine: MachineViewModel, cal: CameraCalibration) {
+        _calibration.value = cal
+        prefs.edit().putString("headCamera2", Document.JSON.encodeToString(CameraCalibration.serializer(), cal)).apply()
+        val c = machine.clientOrNotify() ?: return
+        viewModelScope.launch {
+            try { c.saveCameraCalibration(cal); machine.notify("Kamera-Kalibrierung auf dem Pi gespeichert") }
+            catch (e: Exception) { machine.notify("Nur auf dem Tablet gespeichert – Pi: ${e.message}", true) }
+        }
+    }
+
+    /**
+     * Takes the calibration from the Pi when it has one from a tablet;
+     * otherwise uploads the one this tablet still keeps locally (older app).
+     */
+    fun syncCalibration(machine: MachineViewModel) {
+        val c = machine.client ?: return
+        viewModelScope.launch {
+            runCatching { c.cameraCalibration() }.onSuccess { (onPi, _) ->
+                val local = _calibration.value
+                when {
+                    onPi != null && onPi != local -> {
+                        _calibration.value = onPi
+                        prefs.edit().putString("headCamera2", Document.JSON.encodeToString(CameraCalibration.serializer(), onPi)).apply()
+                    }
+                    onPi == null && local != null -> runCatching { c.saveCameraCalibration(local) }
+                }
+            }
+        }
+    }
+
     fun saveCalibration(machine: MachineViewModel, photo: Bitmap, marksPx: List<Pt>): Boolean {
         val pos = machine.status.value?.position
         if (pos == null || pos.size < 3) { machine.notify("Kopfposition unbekannt – Pi verbunden?", true); return false }
@@ -188,8 +218,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         if (f.width < 10 || f.height < 10 || f.width > 400 || f.height > 400) {
             machine.notify("Kalibrierung unplausibel (Bildfeld %.0f × %.0f mm) – Marker prüfen".format(f.width, f.height), true); return false
         }
-        _calibration.value = cal
-        prefs.edit().putString("headCamera2", Document.JSON.encodeToString(CameraCalibration.serializer(), cal)).apply()
+        store(machine, cal)
         machine.notify("Kopfkamera kalibriert: Bildfeld %.0f × %.0f mm".format(Locale.GERMANY, f.width, f.height))
         return true
     }

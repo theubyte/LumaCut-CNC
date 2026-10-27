@@ -1,5 +1,10 @@
 package de.millione.lumacut.core
 
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -112,5 +117,29 @@ class LensTest {
         val g = DotGrid.job()
         assertTrue(g.contains("G1") && g.length > 10_000)
         assertTrue(Work.contains(DotGrid.bounds()))
+    }
+
+    @Test fun `calibration goes to the Pi and comes back unchanged`() = runBlocking {
+        val cal = CameraCalibration(w, h, scanZ = 31.5, lens = trueLens())
+        val stored = Document.JSON.encodeToString(CameraCalibration.serializer(), cal)
+        val srv = MockWebServer().apply {
+            enqueue(MockResponse().setBody("""{"revision":3,"android":null,"placeholder":false}"""))
+            enqueue(MockResponse().setBody("""{"revision":4,"message":"Kamera-Kalibrierung gespeichert"}"""))
+            enqueue(MockResponse().setBody("""{"revision":4,"android":$stored}"""))
+            start()
+        }
+        val pi = PiClient("127.0.0.1", srv.port)
+        assertEquals("Kamera-Kalibrierung gespeichert", pi.saveCameraCalibration(cal))
+        srv.takeRequest()
+        val put = srv.takeRequest()
+        assertEquals("PUT", put.method)
+        val body = Json.parseToJsonElement(put.body.readUtf8()).jsonObject
+        assertEquals("3", body["revision"].toString())
+        assertEquals("$w", body["image_width"].toString())
+        assertTrue(body["dist_coeffs"].toString().startsWith("[-0.28"))
+        assertTrue(body.getValue("android").jsonObject.containsKey("lens"))
+        val (back, rev) = pi.cameraCalibration()
+        assertEquals(4, rev); assertEquals(cal, back)
+        srv.shutdown()
     }
 }

@@ -150,6 +150,18 @@ class ValidationTests(unittest.TestCase):
         self.assertRejected("notes", notes="x" * 2001)
         self.assertRejected("px_per_mm: endliche Zahl", px_per_mm=float("nan"))
 
+    def test_android_model_is_stored_as_is(self):
+        lens = {"cx": 960.0, "cy": 540.0, "f": 1101.4, "k1": -0.21, "k2": 0.03,
+                "g": [0.006, 0, -0.1, 0, 0.006, 0.05, 0, 0, 1.0],
+                "valid": {"minX": 40.0, "minY": 20.0, "maxX": 1880.0, "maxY": 1060.0}}
+        android = {"photoWidth": 1920, "photoHeight": 1080, "scanZ": 30.0, "lens": lens}
+        record = cc.validate(measured(android=android))
+        self.assertEqual(record["android"]["lens"]["k1"], -0.21)
+        self.assertIsNone(cc.validate(measured())["android"])
+        self.assertRejected("android.photoWidth", android=dict(android, photoWidth=50))
+        self.assertRejected("Linsenmodell oder vier", android={"photoWidth": 640, "photoHeight": 480})
+        self.assertRejected("android: Objekt", android=[1])
+
     def test_unknown_fields_format_and_schema(self):
         self.assertRejected("Unbekannte Felder: farbe", farbe="rot")
         self.assertRejected("Unbekanntes Format", format="andere/2")
