@@ -10,6 +10,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.millione.lumacut.app.machine.Notice
 import de.millione.lumacut.core.Arrange
+import de.millione.lumacut.core.Tabs
+import de.millione.lumacut.core.Nest
+import de.millione.lumacut.core.ImportUnit
+import de.millione.lumacut.core.ImportItem
+import de.millione.lumacut.core.BoxSpec
+import de.millione.lumacut.core.BoxMaker
+import de.millione.lumacut.core.Booleans
+import de.millione.lumacut.core.Align
 import de.millione.lumacut.core.EmbeddedImage
 import de.millione.lumacut.core.ImportLayerInfo
 import de.millione.lumacut.core.ImportLayout
@@ -353,7 +361,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
      * named after the colour with the values of the chosen material (lines like Schneiden, fills like Gravieren).
      * Returns the number of elements.
      */
-    fun addImported(kind: String, layout: Layout, scale: Double, infos: List<ImportLayerInfo>, rasters: Map<EmbeddedImage, Raster>): Int {
+    fun addImported(kind: String, layout: Layout, scale: Double, infos: List<ImportLayerInfo>, rasters: Map<EmbeddedImage, Raster>,
+                    fallback: String? = null): Int {
         val doc = _doc.value
         val all = ImportLayout.union(layout.units).center
         fun map(p: Pt, i: Int): Pt {
@@ -383,7 +392,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         for (u in placed) for (item in layout.units[u].items) item.groups.firstOrNull()?.let { groupSize.merge(it, 1, Int::plus) }
         val groupIds = HashMap<String, String>()
         fun groupOf(tag: String?): String? = if (tag == null || (groupSize[tag] ?: 0) < 2) null else groupIds.getOrPut(tag) { UUID.randomUUID().toString() }
-        val fallbackLayer = writableLayer()
+        val fallbackLayer = fallback ?: writableLayer()
         val elements = ArrayList<Element>()
         for (u in placed) {
             val unit = layout.units[u]
@@ -418,14 +427,177 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
      * An import spread over several plates: the first part on the plate being edited, the rest on new plates
      * after the last one. Returns the number of elements; the editor then shows the last new plate.
      */
-    fun addImportedOnPlates(kind: String, plates: List<Layout>, infos: List<ImportLayerInfo>, rasters: Map<EmbeddedImage, Raster>): Int {
+    fun addImportedOnPlates(kind: String, plates: List<Layout>, infos: List<ImportLayerInfo>, rasters: Map<EmbeddedImage, Raster>,
+                            fallback: String? = null): Int {
         var n = 0
         for ((i, layout) in plates.withIndex()) {
             if (i > 0) changeProject { it.addPlate() }
-            n += addImported(kind, layout, 1.0, infos, rasters)
+            n += addImported(kind, layout, 1.0, infos, rasters, fallback)
         }
         return n
     }
+
+    /* ---------- tools: align, mirror, booleans, tabs, circular array, nesting, box maker ---------- */
+
+    /** The selection as units that move together: each group once, single elements alone. */
+    private fun selectionUnits(): List<List<Element>> = selectedElements().groupBy { it.groupId ?: it.id }.values.toList()
+
+    private fun unitBox(u: List<Element>): Box? = u.mapNotNull { it.worldBounds() }.reduceOrNull { a, b -> a.union(b) }
+
+    private fun moveUnits(units: List<List<Element>>, offsets: List<Pt>, coalesce: String?) {
+        val by = HashMap<String, Pt>()
+        units.forEachIndexed { i, u -> u.forEach { by[it.id] = offsets[i] } }
+        if (by.values.all { it.x == 0.0 && it.y == 0.0 }) return
+        change(coalesce) { d -> d.copy(elements = d.elements.map { e ->
+            by[e.id]?.let { o -> e.copy(transform = e.transform.copy(x = e.transform.x + o.x, y = e.transform.y + o.y)) } ?: e
+        }) }
+    }
+
+    /** Several units align to each other; a single element or group aligns to the work area. */
+    fun alignSelected(mode: Align.Mode) {
+        val units = selectionUnits()
+        val boxes = units.map { unitBox(it) ?: return }
+        if (boxes.isEmpty()) return
+        val ref = if (boxes.size >= 2) boxes.reduce { a, b -> a.union(b) } else Box(0.0, 0.0, Work.WIDTH, Work.HEIGHT)
+        moveUnits(units, Align.offsets(boxes, mode, ref), null)
+    }
+
+    fun distributeSelected(horizontal: Boolean) {
+        val units = selectionUnits()
+        if (units.size < 3) { notify("Zum Verteilen mindestens drei Elemente oder Gruppen wählen", true); return }
+        moveUnits(units, Align.distribute(units.map { unitBox(it) ?: return }, horizontal), null)
+    }
+
+    /** Element with new work-area geometry (rotation and scale are baked into the paths). */
+    private fun baked(e: Element, world: List<Poly>): Element {
+        val box = boundsOf(world) ?: return e
+        return e.copy(transform = Transform(box.minX, box.minY), paths = world.map { poly -> poly.map { Pt(it.x - box.minX, it.y - box.minY) } })
+    }
+
+    /** Mirrors the selection inside its bounds; [horizontal] = left/right, otherwise top/bottom. */
+    fun mirrorSelected(horizontal: Boolean) {
+        val ids = _selected.value
+        val b = selectionBounds() ?: return
+        fun m(q: Pt) = if (horizontal) Pt(b.minX + b.maxX - q.x, q.y) else Pt(q.x, b.minY + b.maxY - q.y)
+        change { d -> d.copy(elements = d.elements.map { e ->
+            when {
+                e.id !in ids -> e
+                e.isImage -> mirroredImage(e, horizontal, b)
+                else -> baked(e, e.worldPaths().map { poly -> poly.map(::m) })
+            }
+        }) }
+    }
+
+    private fun mirroredImage(e: Element, horizontal: Boolean, b: Box): Element {
+        val r = e.raster ?: return e
+        val eb = e.worldBounds() ?: return e
+        val src = r.gray(); val w = r.width; val h = r.height
+        val out = ByteArray(src.size) { i -> val x = i % w; val y = i / w; if (horizontal) src[y * w + (w - 1 - x)] else src[(h - 1 - y) * w + x] }
+        val t = if (horizontal) e.transform.copy(x = e.transform.x + (b.minX + b.maxX - eb.maxX) - eb.minX)
+                else e.transform.copy(y = e.transform.y + (b.minY + b.maxY - eb.maxY) - eb.minY)
+        return e.copy(raster = Raster.of(w, h, out), transform = t)
+    }
+
+    /** Weld / subtract / intersect the selected shapes into one new element (bottom-most = the one subtracted from). */
+    fun booleanSelected(op: Booleans.Op) {
+        val ids = _selected.value
+        val shapes = _doc.value.elements.filter { it.id in ids && !it.isImage }
+        if (shapes.size < 2) { notify("Mindestens zwei Formen wählen (Bilder gehen nicht)", true); return }
+        viewModelScope.launch {
+            val res = withContext(Dispatchers.Default) { Booleans.apply(shapes.map { it.worldPaths() }, op) }
+            val box = boundsOf(res)
+            if (res.isEmpty() || box == null) { notify("Kein Ergebnis – die Formen überschneiden sich nicht", true); return@launch }
+            val e = Element(layerId = shapes.first().layerId, kind = op.label, transform = Transform(box.minX, box.minY),
+                paths = res.map { poly -> poly.map { Pt(it.x - box.minX, it.y - box.minY) } })
+            val gone = shapes.map { it.id }.toSet()
+            change { d -> d.copy(elements = d.elements.filterNot { it.id in gone } + e) }
+            _selected.value = setOf(e.id)
+            notify("${op.label}: ${shapes.size} Formen → 1 Element")
+        }
+    }
+
+    /** Holding tabs on the closed paths of the selection. Returns how many elements got tabs. */
+    fun tabsSelected(count: Int, widthMm: Double): Int {
+        val ids = _selected.value
+        var n = 0
+        val changed = _doc.value.elements.filter { it.id in ids && !it.isImage }.mapNotNull { e ->
+            val world = e.worldPaths()
+            val out = Tabs.apply(world, count, widthMm)
+            if (out.size == world.size) null else baked(e, out).also { n++ }
+        }.associateBy { it.id }
+        if (changed.isNotEmpty()) change { d -> d.copy(elements = d.elements.map { changed[it.id] ?: it }) }
+        return n
+    }
+
+    /**
+     * Copies of the selection on a circle: [count] in total (the original included), circle centre [radiusMm] below the
+     * selection centre. With [rotate] the copies turn with the circle (pictures only move). Returns copies left out.
+     */
+    fun circularArray(count: Int, radiusMm: Double, rotate: Boolean): Int {
+        val items = selectedElements()
+        val box = selectionBounds() ?: return 0
+        val c = Pt(box.center.x, box.center.y + radiusMm)
+        var left = 0
+        val copies = ArrayList<Element>()
+        for (k in 1 until count) {
+            val a = 360.0 * k / count
+            val groups = items.mapNotNull { it.groupId }.distinct().associateWith { UUID.randomUUID().toString() }
+            val moved = rotateAround(box.center, c, a)
+            val batch = items.map { e ->
+                val t = e.transform
+                val nt = if (rotate && !e.isImage) rotateAround(Pt(t.x, t.y), c, a).let { q -> t.copy(x = q.x, y = q.y, rotation = ((t.rotation + a) % 360 + 360) % 360) }
+                         else t.copy(x = t.x + moved.x - box.center.x, y = t.y + moved.y - box.center.y)
+                e.copy(id = UUID.randomUUID().toString(), groupId = e.groupId?.let(groups::get), transform = nt)
+            }
+            val bb = batch.mapNotNull { it.worldBounds() }.reduceOrNull { x, y -> x.union(y) }
+            if (bb == null || !Work.contains(bb)) left++ else copies += batch
+        }
+        if (copies.isNotEmpty()) change { d -> d.copy(elements = d.elements + copies) }
+        return left
+    }
+
+    /**
+     * Arranges the selection (or the whole plate) space-saving from the top left; what does not fit continues on new
+     * plates. Returns the number of plates used, 0 when there is nothing.
+     */
+    fun nestSelected(): Int {
+        val units = (if (_selected.value.isEmpty()) _doc.value.elements else selectedElements()).groupBy { it.groupId ?: it.id }.values.toList()
+        if (units.isEmpty()) return 0
+        val placed = Nest.place(units.map { unitBox(it) ?: return 0 })
+        val extra = placed.filterNotNull().maxOfOrNull { it.first } ?: 0
+        val active = _project.value.activePlate
+        val base = _project.value.plateCount
+        val by = HashMap<String, Pair<Int, Pt>>()
+        units.forEachIndexed { i, u -> placed[i]?.let { pl -> u.forEach { by[it.id] = pl } } }
+        changeProject { p -> p.copy(plateCount = base + extra, elements = p.elements.map { e ->
+            by[e.id]?.let { (k, o) -> e.copy(plate = if (k == 0) active else base + k - 1,
+                transform = e.transform.copy(x = e.transform.x + o.x, y = e.transform.y + o.y)) } ?: e
+        }) }
+        val out = placed.count { it == null }
+        notify("Platzsparend angeordnet" + (if (extra > 0) " · ${extra} neue Platte(n)" else "") +
+            (if (out > 0) " · $out Teil(e) größer als eine Platte, nicht verschoben" else ""), out > 0)
+        return extra + 1
+    }
+
+    /** A finger-jointed box on the cutting layer, panels side by side (more plates when needed). Returns the panel count. */
+    fun addBox(spec: BoxSpec): Int {
+        val panels = try { BoxMaker.panels(spec) } catch (e: IllegalArgumentException) { notify(e.message ?: "Box nicht möglich", true); return 0 }
+        val units = panels.map { (name, poly) -> ImportUnit(listOf(ImportItem(listOf(poly), null, false, listOf("box"), name)), emptyList()) }
+        val spread = ImportLayout.spread(units)
+        if (spread.plates.isEmpty()) { notify("Die Box ist größer als eine Platte (360 × 340 mm)", true); return 0 }
+        val cut = layerIdByName("Schneiden")
+        val n = if (spread.plates.size == 1) addImported("Box", spread.plates[0], 1.0, emptyList(), emptyMap(), cut)
+                else addImportedOnPlates("Box", spread.plates, emptyList(), emptyMap(), cut)
+        notify("Box ${spec.w.fmt()} × ${spec.d.fmt()} × ${spec.h.fmt()} mm: $n Teile" +
+            (if (spread.plates.size > 1) " auf ${spread.plates.size} Platten" else "") +
+            (if (spread.leftOut > 0) " · ${spread.leftOut} Teil(e) zu groß" else ""), spread.leftOut > 0)
+        return n
+    }
+
+    /** Thickness of the material on the cutting layer, for the box maker (3 mm when none is set). */
+    fun cutThickness(): Double = _doc.value.layers.firstOrNull { it.name == "Schneiden" }?.thicknessMm?.takeIf { it > 0 } ?: 3.0
+
+    private fun Double.fmt() = if (this % 1.0 == 0.0) toInt().toString() else "%.1f".format(this)
 
     /**
      * Imported geometry as single parts in one group (outer contour with its holes = one part, open path = one part),

@@ -158,8 +158,13 @@ object Contour {
         val m = 2.0
         val x0 = box.minX - m; val y0 = box.minY - m
         val w = ceil((box.width + 2 * m) * p).toInt() + 1; val h = ceil((box.height + 2 * m) * p).toInt() + 1
+        return fromMask(Mask(w, h, rasterize(closed, x0, y0, w, h, p), p, x0, y0), offsetMm, 0.0, outerOnly, 0.0)
+    }
+
+    /** Even-odd fill of the closed shapes [polys] on a [w] x [h] grid starting at ([x0], [y0]) mm with [p] px/mm. */
+    fun rasterize(polys: List<Poly>, x0: Double, y0: Double, w: Int, h: Int, p: Double): BooleanArray {
         val rows = Array(h) { ArrayList<Double>() }
-        for (poly in closed) {
+        for (poly in polys.filter { it.size >= 3 }) {
             val pts = if (poly.isClosed()) poly else poly + poly.first()
             for ((a, b) in pts.zipWithNext()) {
                 if (a.y == b.y) continue
@@ -182,7 +187,7 @@ object Contour {
                 k += 2
             }
         }
-        return fromMask(Mask(w, h, data, p, x0, y0), offsetMm, 0.0, outerOnly, 0.0)
+        return data
     }
 
     /** Sticker: the outline [offsetMm] outside the motif with rounded corners and small gaps between parts closed. */

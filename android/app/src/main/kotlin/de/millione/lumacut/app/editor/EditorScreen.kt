@@ -10,6 +10,7 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.HorizontalDivider
 import de.millione.lumacut.app.ui.BarBtn
+import de.millione.lumacut.core.Booleans
 import de.millione.lumacut.app.ui.BarDivider
 import de.millione.lumacut.app.ui.BarTextField
 import androidx.compose.foundation.Canvas
@@ -139,6 +140,10 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     var adjustOpen by remember { mutableStateOf(false) }
     var qrOpen by remember { mutableStateOf(false) }
     var gridOpen by remember { mutableStateOf(false) }
+    var toolsMenu by remember { mutableStateOf(false) }
+    var tabsOpen by remember { mutableStateOf(false) }
+    var circleOpen by remember { mutableStateOf(false) }
+    var boxOpen by remember { mutableStateOf(false) }
     var shapesMenu by remember { mutableStateOf(false) }
     val doc by editor.doc.collectAsStateWithLifecycle()
     val project by editor.project.collectAsStateWithLifecycle()
@@ -211,6 +216,27 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                     }
                 }
                 BarBtn(LcIcons.polygon, "Kontur", { contourOpen = true }, enabled = selected.isNotEmpty())
+                Box {
+                    BarBtn(LcIcons.tools, "Werkzeuge", { toolsMenu = true }, menu = true)
+                    DropdownMenu(toolsMenu, { toolsMenu = false }, containerColor = Lc.surface2) {
+                        @Composable fun item(label: String, enabled: Boolean = true, action: () -> Unit) =
+                            DropdownMenuItem(text = { Text(label) }, enabled = enabled, onClick = { toolsMenu = false; action() })
+                        val shapes = doc.elements.count { it.id in selected && !it.isImage }
+                        for (op in Booleans.Op.entries) item(op.label + when (op) {
+                            Booleans.Op.UNION -> " (vereinen)"; Booleans.Op.SUBTRACT -> " (unterste minus Rest)"; Booleans.Op.INTERSECT -> " (nur Überlappung)"
+                        }, shapes >= 2) { editor.booleanSelected(op) }
+                        HorizontalDivider(color = Lc.line)
+                        item("Waagrecht spiegeln", selected.isNotEmpty()) { editor.mirrorSelected(true) }
+                        item("Senkrecht spiegeln", selected.isNotEmpty()) { editor.mirrorSelected(false) }
+                        item("Haltestege …", shapes >= 1) { tabsOpen = true }
+                        HorizontalDivider(color = Lc.line)
+                        item("Vervielfältigen (Raster) …", selected.isNotEmpty()) { gridOpen = true }
+                        item("Kreisanordnung …", selected.isNotEmpty()) { circleOpen = true }
+                        item(if (selected.isEmpty()) "Platte platzsparend anordnen" else "Auswahl platzsparend anordnen", doc.elements.isNotEmpty()) { editor.nestSelected() }
+                        HorizontalDivider(color = Lc.line)
+                        item("Box mit Fingerzinken …") { boxOpen = true }
+                    }
+                }
                 BarBtn(LcIcons.camera, "Scannen", onScan, description = "Arbeitsplatz scannen")
                 Box {
                     BarBtn(null, "Mehr", { moreMenu = true }, menu = true)
@@ -218,7 +244,6 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         @Composable fun item(label: String, enabled: Boolean = true, action: () -> Unit) =
                             DropdownMenuItem(text = { Text(label) }, enabled = enabled, onClick = { moreMenu = false; action() })
                         item(if (multi) "Mehrfachauswahl aus" else "Mehrfachauswahl an") { editor.setMulti(!multi) }
-                        item("Vervielfältigen …", selected.isNotEmpty()) { gridOpen = true }
                         item("Gruppieren", selected.size >= 2) { editor.groupSelected() }
                         item("Gruppe auflösen", doc.elements.any { it.id in selected && it.groupId != null }) { editor.ungroupSelected() }
                         item("Kamerafoto als Hintergrund") { cameraOpen = true }
@@ -287,6 +312,9 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     if (contourOpen) ContourDialog(editor) { contourOpen = false }
     if (qrOpen) QrDialog(editor) { qrOpen = false }
     if (gridOpen) GridDialog(editor) { gridOpen = false }
+    if (tabsOpen) TabsDialog(editor) { tabsOpen = false }
+    if (circleOpen) CircularArrayDialog(editor) { circleOpen = false }
+    if (boxOpen) BoxDialog(editor) { boxOpen = false }
     if (adjustOpen) {
         val picture = doc.elements.firstOrNull { it.id in selected && it.isImage }
         if (picture != null) ImageAdjustDialog(editor, picture) { adjustOpen = false } else adjustOpen = false
@@ -714,6 +742,8 @@ private fun SelectionCard(editor: EditorViewModel, e: Element, onAdjust: () -> U
         }
         Spacer(Modifier.height(8.dp))
         NudgePad(editor)
+        Spacer(Modifier.height(8.dp))
+        AlignRows(editor, 1)
         if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (360 × 340 mm) – so wird nicht gelasert.", Lc.bad) }
     }
 }
@@ -738,6 +768,8 @@ private fun MultiCard(editor: EditorViewModel, sel: List<Element>) {
         }
         Spacer(Modifier.height(8.dp))
         NudgePad(editor)
+        Spacer(Modifier.height(8.dp))
+        AlignRows(editor, sel.map { it.groupId ?: it.id }.distinct().size)
         if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (360 × 340 mm).", Lc.bad) }
     }
 }
