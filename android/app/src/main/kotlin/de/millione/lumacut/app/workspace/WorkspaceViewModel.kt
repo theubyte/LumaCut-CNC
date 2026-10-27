@@ -1220,7 +1220,8 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                     last == levels.lastIndex -> "Bewegung: alle Stufen sauber – gespeichert %.0f mm/s², bis %.0f mm/min (Reserve eingerechnet)".format(keep.accel, keep.speed * 60)
                     else -> "Bewegung: Stufe ${last + 2} verlor Schritte – gespeichert %.0f mm/s², bis %.0f mm/min".format(keep.accel, keep.speed * 60)
                 }, keep == null)
-                runCatching { c.action("park") }
+                // after lost steps the machine no longer knows where it is: parking could drive past the switches
+                if (last < levels.lastIndex) runCatching { c.action("home") } else runCatching { c.action("park") }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -150,9 +150,27 @@ object FocusTest {
         }
         val seen = lines.filter { !it.widthMm.isNaN() }
         if (seen.size < 3) throw IllegalStateException("Nur ${seen.size} Linien erkannt – Leistung höher oder Licht prüfen")
-        val best = CameraFocus.peak(seen.map { it.offset to -it.widthMm })
-        val nearest = seen.minBy { abs(it.offset - best) }
-        return Result(lines, best, nearest.widthMm)
+        // the width changes only slowly around the focus: a parabola through all lines, not the single narrowest one
+        // (camera resolution is about 0.1 mm per pixel, single widths are noisy)
+        val fit = parabola(seen.map { it.offset to it.widthMm })
+        val best = if (fit != null && fit.first > 1e-6) (-fit.second / (2 * fit.first)).coerceIn(seen.first().offset, seen.last().offset)
+                   else CameraFocus.peak(seen.map { it.offset to -it.widthMm })
+        return Result(lines, best, seen.minBy { abs(it.offset - best) }.widthMm)
+    }
+
+    /** Least squares y = a x² + b x + c; null when it cannot be solved. */
+    private fun parabola(pts: List<Pair<Double, Double>>): Triple<Double, Double, Double>? {
+        if (pts.size < 3) return null
+        fun s(f: (Double, Double) -> Double) = pts.sumOf { (x, y) -> f(x, y) }
+        val m = arrayOf(doubleArrayOf(s { x, _ -> x * x * x * x }, s { x, _ -> x * x * x }, s { x, _ -> x * x }),
+                        doubleArrayOf(s { x, _ -> x * x * x }, s { x, _ -> x * x }, s { x, _ -> x }),
+                        doubleArrayOf(s { x, _ -> x * x }, s { x, _ -> x }, pts.size.toDouble()))
+        val r = doubleArrayOf(s { x, y -> x * x * y }, s { x, y -> x * y }, s { _, y -> y })
+        fun det(a: Array<DoubleArray>) = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0]) + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0])
+        val d = det(m)
+        if (abs(d) < 1e-12) return null
+        val sol = (0..2).map { k -> det(Array(3) { i -> DoubleArray(3) { j -> if (j == k) r[i] else m[i][j] } }) / d }
+        return Triple(sol[0], sol[1], sol[2])
     }
 }
 
@@ -317,9 +335,24 @@ object MotionTest {
         return listOf(listOf(o, Pt(o.x, o.y + ARM - GAP)), listOf(o, Pt(o.x + ARM - GAP, o.y)))
     }
 
+    /**
+     * The lines of [paths], each started from 2 mm before its start in −X
+     * and −Y: every line is approached from the same side, so the backlash
+     * of the belts (about 0.1 mm) is the same for reference and check marks
+     * and does not look like a lost step. [motion] is not needed (no fills).
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun job(title: String, paths: List<Poly>, motion: MarlinWriter.Motion = MarlinWriter.Motion.FIRMWARE): String {
-        val layer = Layer(name = title, color = 0xFF4FD8B4, mode = LayerMode.LINE, powerPct = 25.0, speed = 1200.0)
-        return MarlinWriter("bewegungstest", motion).write(Document(title, listOf(layer), listOf(Element(layerId = layer.id, kind = title, paths = paths))))
+        val s = (25.0 / 100 * 255).roundToInt()
+        fun xy(p: Pt) = Work.toMachine(p).let { "X%.3f Y%.3f".format(Locale.ROOT, it.x, it.y) }
+        val out = StringBuilder("; LumaCut $title\nG21\nG90\nM5 I\nM3 I\n")
+        for (path in paths) {
+            val start = path.first()
+            out.append("G0 ${xy(start - Pt(2.0, 2.0))}\nG0 ${xy(start)}\n")
+            for (q in path.drop(1)) out.append("G1 ${xy(q)} F1200 S$s\n")
+        }
+        out.append("M5 I\nM400\n")
+        return out.toString()
     }
 
     /** Check minus reference spacing, minus [GAP] (mm): how far the check mark moved; NaN when a line is not found. */
@@ -355,25 +388,31 @@ object MotionTest {
 }
 
 /**
- * Distance between the dark line near 0 and the one near [gap] (mm) in a
- * profile across both; [at] gives the samples at offset s (mm). NaN when a
- * line is not seen.
+ * Distance between two parallel dark lines about [gap] mm apart, from a
+ * profile across both; [at] gives the samples at offset s (mm) from where
+ * the first line should be. The lines are searched in a wide window (±1.5
+ * mm), so a camera that sees everything shifted a little (registration
+ * of camera and laser) does not mix them up. NaN unless two clear lines
+ * are seen.
  */
 internal fun lineSpacing(gap: Double, at: (Double) -> List<Double>): Double {
     val step = 0.02
-    val offs = (-30..((gap + 0.6) / step).toInt()).map { it * step }
+    val offs = (-75..((gap + 1.5) / step).toInt()).map { it * step }
     val prof = offs.map { s -> at(s).filter { !it.isNaN() }.takeIf { it.size >= 6 }?.average() ?: return Double.NaN }
     val bg = prof.sorted().let { it[it.size * 4 / 5] }
-    fun centre(from: Double, to: Double): Double {
-        val idx = offs.indices.filter { offs[it] in from..to }
-        val d = idx.map { max(0.0, bg - prof[it]) }
-        val peak = d.max()
-        if (bg <= 0 || peak / bg < 0.08) return Double.NaN
+    if (bg <= 0) return Double.NaN
+    val d = prof.map { max(0.0, bg - it) }
+    val half = (0.15 / step).toInt()
+    val peaks = d.indices.filter { i -> d[i] > 0.08 * bg && (maxOf(0, i - half)..minOf(d.lastIndex, i + half)).all { d[it] <= d[i] } }
+        .sortedByDescending { d[it] }
+    val first = peaks.firstOrNull() ?: return Double.NaN
+    val second = peaks.firstOrNull { abs(offs[it] - offs[first]) >= gap * 0.4 } ?: return Double.NaN
+    fun centre(i: Int): Double {
         var sw = 0.0; var sx = 0.0
-        for ((m, i) in idx.withIndex()) { val v = d[m] - peak / 2; if (v > 0) { sw += v; sx += v * offs[i] } }
+        for (j in maxOf(0, i - 15)..minOf(d.lastIndex, i + 15)) { val v = d[j] - d[i] / 2; if (v > 0) { sw += v; sx += v * offs[j] } }
         return sx / sw
     }
-    return centre(gap - 0.5, gap + 0.55) - centre(-0.55, 0.5)
+    return abs(centre(second) - centre(first))
 }
 
 /**
@@ -599,7 +638,14 @@ object RingingTest {
     fun measure(sampler: PhotoSampler, spec: Spec, leg: Leg): Result {
         val step = 0.1
         val ts = generateSequence(0.4) { it + step }.takeWhile { it <= spec.length - 0.6 }.toList()
-        val offs = (-20..20).map { it * 0.04 }
+        // where the line really is across (camera and laser may be registered a little apart): wide search in the settled part
+        val wide = (-75..75).map { it * 0.02 }
+        val found = listOf(0.6, 0.75, 0.9).map { k -> val base = leg.corner + leg.dir * (spec.length * k)
+            val prof = wide.map { o -> sampler.lum(base + leg.across * o) }
+            if (prof.any { it.isNaN() }) Double.NaN else wide[prof.indices.minBy { prof[it] }] }.filter { !it.isNaN() }
+        if (found.isEmpty()) return Result(leg, Double.NaN, Double.NaN, Double.NaN)
+        val shift = found.sorted()[found.size / 2]
+        val offs = (-20..20).map { shift + it * 0.04 }
         val dev = ts.map { t ->
             val base = leg.corner + leg.dir * t
             val prof = offs.map { o -> sampler.lum(base + leg.across * o) }

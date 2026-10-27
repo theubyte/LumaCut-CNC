@@ -69,9 +69,13 @@ object LightFinder {
     class Spot(val px: Pt, val strength: Double, val pixels: Int)
 
     /**
-     * The work laser's blue spot: pixels much bluer than red and green or
-     * blown out to white; the strongest compact blob (3 … 3000 px), searched
-     * within [radius] px of [near] when given. Null when there is none.
+     * The work laser's blue spot. On camera it is a white blown-out core in
+     * a wide blue halo that can reach the picture edge: the halo is the
+     * strongest blob of pixels much bluer than red and green (3 px … an
+     * eighth of the searched area), the spot its white core (the bright
+     * pixels inside the halo's box), or the halo's centre when it has no
+     * core. Searched within [radius] px of [near] when given; null when
+     * there is none.
      */
     fun spot(argb: IntArray, w: Int, h: Int, near: Pt? = null, radius: Double = 250.0): Spot? {
         require(argb.size == w * h) { "Ungültige Bilddaten" }
@@ -83,23 +87,24 @@ object LightFinder {
         for (y in y0..y1) for (x in x0..x1) {
             val c = argb[y * w + x]
             val r = (c shr 16) and 255; val g = (c shr 8) and 255; val b = c and 255
-            val lum = (r * 299 + g * 587 + b * 114) / 1000
-            score[(y - y0) * bw + (x - x0)] = (b - (r + g) / 2f - 25f).coerceAtLeast(0f) + ((lum - 235) * 3f).coerceAtLeast(0f)
+            score[(y - y0) * bw + (x - x0)] = (b - (r + g) / 2f - 25f).coerceAtLeast(0f)
         }
         val peak = score.max()
         if (peak < 45f) return null
         val thr = max(30f, peak * 0.35f)
         val seen = BooleanArray(score.size)
-        var best: Spot? = null; var bestSum = 0.0
+        var best: Spot? = null; var bestSum = 0.0; var box = IntArray(4)
         val stack = IntArray(score.size)
         for (start in score.indices) {
             if (seen[start] || score[start] < thr) continue
             var n = 0; var top = 0; stack[top++] = start; seen[start] = true
             var sw = 0.0; var sx = 0.0; var sy = 0.0; var mx = 0f
+            val bb = intArrayOf(bw, bh, -1, -1)
             while (top > 0) {
                 val i = stack[--top]; n++
                 val s = score[i]; sw += s; sx += s * (i % bw); sy += s * (i / bw); mx = max(mx, s)
                 val ix = i % bw; val iy = i / bw
+                bb[0] = min(bb[0], ix); bb[1] = min(bb[1], iy); bb[2] = max(bb[2], ix); bb[3] = max(bb[3], iy)
                 for ((dx, dy) in arrayOf(1 to 0, -1 to 0, 0 to 1, 0 to -1)) {
                     val nx = ix + dx; val ny = iy + dy
                     if (nx < 0 || ny < 0 || nx >= bw || ny >= bh) continue
@@ -107,10 +112,17 @@ object LightFinder {
                     if (!seen[j] && score[j] >= thr) { seen[j] = true; stack[top++] = j }
                 }
             }
-            if (n !in 3..3000) continue
-            if (sw > bestSum) { bestSum = sw; best = Spot(Pt(x0 + sx / sw + 0.5, y0 + sy / sw + 0.5), mx.toDouble(), n) }
+            if (n < 3 || n > score.size / 8) continue
+            if (sw > bestSum) { bestSum = sw; box = bb; best = Spot(Pt(x0 + sx / sw + 0.5, y0 + sy / sw + 0.5), mx.toDouble(), n) }
         }
-        return best
+        val halo = best ?: return null
+        var cn = 0; var cx = 0.0; var cy = 0.0
+        for (iy in box[1]..box[3]) for (ix in box[0]..box[2]) {
+            val c = argb[(y0 + iy) * w + x0 + ix]
+            val lum = (((c shr 16) and 255) * 299 + ((c shr 8) and 255) * 587 + (c and 255) * 114) / 1000
+            if (lum >= 225) { cn++; cx += ix; cy += iy }
+        }
+        return if (cn in 3..halo.pixels) Spot(Pt(x0 + cx / cn + 0.5, y0 + cy / cn + 0.5), halo.strength, halo.pixels) else halo
     }
 
     /**

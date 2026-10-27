@@ -242,6 +242,9 @@ class CalibrationsTest {
             assertEquals(truth[k], shifts[k].dx, 0.03, "dx $k"); assertEquals(-truth[k] / 2, shifts[k].dy, 0.03, "dy $k")
         }
         assertEquals(2, MotionTest.lastGood(shifts))      // levels 0, 1, 2 held, level 3 lost steps
+        // camera and laser registered 0.7 mm apart (as on the real machine): the spacing must not change
+        val shifted = PhotoSampler(px, w, h, cal, MotionTest.bounds(n, centre).center + Pt(0.7, -0.3))
+        for (k in 0 until n) assertEquals(truth[k], MotionTest.measure(shifted, k, n, centre).dx, 0.03, "shifted dx $k")
         val keep = MotionTest.recommend(MotionTest.LEVELS[2])
         assertEquals(2100.0, keep.accel); assertEquals(200.0, keep.speed)
         assertTrue(MotionTest.job("Referenz", (0 until n).flatMap { MotionTest.reference(it, n, centre) }).contains("G1 "))

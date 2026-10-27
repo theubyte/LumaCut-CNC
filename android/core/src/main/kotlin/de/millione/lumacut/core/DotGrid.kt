@@ -25,7 +25,10 @@ object DotGrid {
     const val R_MID = 2.0
     const val R_BIG = 3.0
 
-    val center: Pt get() = Work.center
+    /** Shift of the grid from the work-area centre (0 in the app; a calibration run that shares one plate with other tests moves it). */
+    var offset: Pt = Pt(0.0, 0.0)
+
+    val center: Pt get() = Work.center + offset
 
     fun position(i: Int, j: Int) = Pt(center.x + i * PITCH, center.y + j * PITCH)
 
