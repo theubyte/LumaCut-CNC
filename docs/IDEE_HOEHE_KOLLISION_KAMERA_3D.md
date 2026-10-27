@@ -39,7 +39,13 @@ Die Kamera-Kalibrierung, die am 27.10. auf dem Pi gespeichert war (Revision 3), 
 ### 4.1 Vor Scan und Start
 
 - **Ohne gewähltes Material startet nichts.** Meldung: „Erst Material wählen – die Stärke bestimmt die Fahrhöhe“.
-- **H = Stärke + 20 mm.** Ist H größer als etwa 85 mm (Z-Weg 90 mm), bricht die App ab. Das ergibt eine maximale Stärke von etwa 65 mm.
+- **H = Stärke + 20 mm.**
+- **Harte Obergrenze Z 80 mm** (Entscheidung des Nutzers, 27.10.). Gemeint ist die Tasterspitze über dem Bett. Diese Grenze darf keine Fahrt überschreiten, egal welcher Auftrag, Rückzug, Scan, Park oder welches Anheben vor dem Referenzieren.
+  - Heute gelten 90 mm: `Z_MAX_POS 90` in der Firmware, Pi-Prüfungen `≤ 90`, App `Z_TOP = 85`.
+  - Umsetzung: an allen drei Stellen auf 80. Die Firmware-Grenze wirkt erst nach dem Referenzieren. Vor dem Referenzieren begrenzt der Pi das Anheben anhand der gemerkten Höhe.
+- **Daraus folgt die maximale Arbeitshöhe:** Materialstärke ≤ 80 − 20 = **60 mm**.
+  - Die Kamera muss für den Scan auf Oberfläche + Kamera-Abstand. Ist dieser Abstand größer als 20 mm, sinkt die Grenze auf 80 − Kamera-Abstand. Beispiel: Kamera scharf bei 30 mm, dann maximal 50 mm Material.
+  - Die App prüft das vorher: „Material zu hoch: maximal X mm mit dieser Kamera-Kalibrierung“.
 - **Die App gibt H dem Pi mit**, je Auftrag oder Scan. Pi-Fahrten (`move_to`, Abtasten, Parken) nehmen dann `max(clearance, H)`.
 - **Bei Objekten auf einer Platte** gilt bis zur Kamera-3D-Prüfung: die Objekthöhe als Stärke eintragen.
 
