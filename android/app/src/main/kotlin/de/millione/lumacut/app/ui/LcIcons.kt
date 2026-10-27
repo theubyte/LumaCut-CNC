@@ -72,5 +72,10 @@ object LcIcons {
     val laser = icon("laser", "M12 2v6", "M8 8h8l-2 4h-4z", "M12 14v8M9 19l3 3 3-3")
     val scan = icon("scan", "M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4", "M7 12h10")
     val mesh = icon("mesh", "M4 6h16M4 12h16M4 18h16", "M8 4v16M16 4v16")
+    val menu = icon("menu", "M4 6h16M4 12h16M4 18h16")
+    val chevronDown = icon("chevronDown", "M6 9l6 6 6-6")
+    val chevronLeft = icon("chevronLeft", "M15 6l-6 6 6 6")
+    val chevronRight = icon("chevronRight", "M9 6l6 6-6 6")
+    val panel = icon("panel", "M4 5h16v14H4z", "M15 5v14")
     val workflow = icon("workflow", "M5 5h4v4H5z", "M15 15h4v4h-4z", "M9 7h6a2 2 0 0 1 2 2v6")
 }

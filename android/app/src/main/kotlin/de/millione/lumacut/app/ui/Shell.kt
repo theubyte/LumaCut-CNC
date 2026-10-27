@@ -1,6 +1,9 @@
 package de.millione.lumacut.app.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -65,6 +68,8 @@ enum class Dest(val label: String, val icon: ImageVector, val step: Int? = null)
 fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
     var dest by rememberSaveable { mutableStateOf(if (editor.materialKey.value == null) Dest.MATERIAL else Dest.MOTIV) }
     var machineTab by rememberSaveable { mutableStateOf(MachineTab.STEUERUNG) }
+    // The menu rail folds away for more work area; the button in the top bar brings it back.
+    var railOpen by rememberSaveable { mutableStateOf(true) }
     val snackbar = remember { SnackbarHostState() }
     var lastNotice by remember { mutableStateOf<Notice?>(null) }
     LaunchedEffect(Unit) {
@@ -75,9 +80,9 @@ fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
 
     Box(Modifier.fillMaxSize().background(Lc.bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(Modifier.fillMaxSize()) {
-            TopBar(machine)
+            TopBar(machine, railOpen) { railOpen = !railOpen }
             Row(Modifier.fillMaxSize()) {
-                Rail(dest) { dest = it }
+                AnimatedVisibility(railOpen, enter = expandHorizontally(), exit = shrinkHorizontally()) { Rail(dest) { dest = it } }
                 Box(Modifier.fillMaxSize()) {
                     AnimatedContent(dest, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "dest") { d ->
                         when (d) {
@@ -104,7 +109,7 @@ fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
 }
 
 @Composable
-private fun TopBar(machine: MachineViewModel) {
+private fun TopBar(machine: MachineViewModel, railOpen: Boolean, onToggleRail: () -> Unit) {
     val status by machine.status.collectAsStateWithLifecycle()
     val online by machine.online.collectAsStateWithLifecycle()
     val host by machine.host.collectAsStateWithLifecycle()
@@ -113,12 +118,13 @@ private fun TopBar(machine: MachineViewModel) {
     Row(
         Modifier
             .fillMaxWidth()
-            .height(68.dp)
+            .height(58.dp)
             .background(Brush.verticalGradient(listOf(Color(0xFF0D1218), Color(0xFF0B1015))))
-            .padding(start = 22.dp, end = 16.dp),
+            .padding(start = 10.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        BarBtn(LcIcons.menu, null, onToggleRail, description = if (railOpen) "Menü einklappen" else "Menü ausklappen")
         Row(verticalAlignment = Alignment.Bottom) {
             Text("Luma", fontSize = 21.sp, fontWeight = FontWeight.Light, color = Lc.text)
             Text("Cut", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = Lc.accent)
@@ -140,7 +146,7 @@ private fun TopBar(machine: MachineViewModel) {
         Spacer(Modifier.width(4.dp))
         Box(
             Modifier
-                .height(48.dp)
+                .height(44.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(Lc.estop)
                 .border(2.dp, Color(0xFFFF8A8E), RoundedCornerShape(14.dp))
@@ -156,7 +162,7 @@ private fun TopBar(machine: MachineViewModel) {
 private fun Rail(selected: Dest, onSelect: (Dest) -> Unit) {
     Row {
         Column(
-            Modifier.width(96.dp).fillMaxHeight().background(Color(0xFF0B1016)).padding(horizontal = 10.dp, vertical = 14.dp),
+            Modifier.width(96.dp).fillMaxHeight().background(Color(0xFF0B1016)).padding(horizontal = 10.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             for (d in Dest.entries) {

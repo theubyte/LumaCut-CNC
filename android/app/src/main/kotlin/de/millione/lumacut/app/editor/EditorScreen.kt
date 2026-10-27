@@ -4,6 +4,14 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.HorizontalDivider
+import de.millione.lumacut.app.ui.BarBtn
+import de.millione.lumacut.app.ui.BarDivider
+import de.millione.lumacut.app.ui.BarTextField
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -173,26 +181,24 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // action bar
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // One compact bar, so the work area keeps as much height as possible (the tablet is height-limited).
+    var panelOpen by rememberSaveable { mutableStateOf(true) }
+    Column(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 var title by remember(doc.title) { mutableStateOf(doc.title) }
-                OutlinedTextField(title, { title = it; editor.rename(it) }, singleLine = true, modifier = Modifier.width(220.dp),
-                    textStyle = LcTypography.titleMedium, shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Lc.accent, unfocusedBorderColor = Lc.line))
-                IconBtn(LcIcons.undo, "Rückgängig", editor::undo, enabled = canUndo)
-                IconBtn(LcIcons.redo, "Wiederholen", editor::redo, enabled = canRedo)
-                IconBtn(LcIcons.copy, "Duplizieren", editor::duplicateSelected, enabled = selected.isNotEmpty())
-                IconBtn(LcIcons.trash, "Löschen", editor::deleteSelected, tint = Lc.bad, enabled = selected.isNotEmpty())
-                IconBtn(LcIcons.center, "Zentrieren", editor::centerInWorkArea)
-                Box(Modifier.width(1.dp).height(36.dp).background(Lc.line))
-                LcButton("Importieren", { importPicker.launch(arrayOf("*/*")) }, icon = LcIcons.upload)
-                LcButton("Kontur", { contourOpen = true }, icon = LcIcons.polygon, enabled = selected.isNotEmpty())
-                LcButton("QR-Code", { qrOpen = true }, icon = LcIcons.rect)
+                BarTextField(title, { title = it; editor.rename(it) }, Modifier.width(180.dp))
+                BarBtn(LcIcons.undo, null, editor::undo, enabled = canUndo, description = "Rückgängig")
+                BarBtn(LcIcons.redo, null, editor::redo, enabled = canRedo, description = "Wiederholen")
+                BarDivider()
+                BarBtn(LcIcons.copy, null, editor::duplicateSelected, enabled = selected.isNotEmpty(), description = "Duplizieren")
+                BarBtn(LcIcons.trash, null, editor::deleteSelected, tint = Lc.bad, enabled = selected.isNotEmpty(), description = "Löschen")
+                BarBtn(LcIcons.center, null, editor::centerInWorkArea, description = "Zentrieren")
+                BarDivider()
+                BarBtn(LcIcons.upload, "Importieren", { importPicker.launch(arrayOf("*/*")) })
                 Box {
-                    LcButton("Formen", { shapesMenu = true }, icon = LcIcons.plus)
+                    BarBtn(LcIcons.plus, "Einfügen", { shapesMenu = true }, menu = true)
                     DropdownMenu(shapesMenu, { shapesMenu = false }, containerColor = Lc.surface2) {
                         @Composable fun shape(label: String, kind: String, paths: () -> List<List<Pt>>) =
                             DropdownMenuItem(text = { Text(label) }, onClick = { shapesMenu = false; editor.addShape(kind, paths(), "Schneiden") })
@@ -200,11 +206,14 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         shape("Stern", "Stern") { listOf(ShapeLib.star(5, 60.0, 57.0)) }
                         shape("Abgerundetes Rechteck", "Rechteck") { listOf(Shapes.rect(60.0, 40.0, 8.0)) }
                         shape("Anhänger mit Loch", "Anhänger") { ShapeLib.pendant(50.0, 30.0, 4.0) }
+                        HorizontalDivider(color = Lc.line)
+                        DropdownMenuItem(text = { Text("QR-Code …") }, onClick = { shapesMenu = false; qrOpen = true })
                     }
                 }
-                LcButton("Arbeitsplatz scannen", onScan, icon = LcIcons.camera)
+                BarBtn(LcIcons.polygon, "Kontur", { contourOpen = true }, enabled = selected.isNotEmpty())
+                BarBtn(LcIcons.camera, "Scannen", onScan, description = "Arbeitsplatz scannen")
                 Box {
-                    LcButton("Mehr", { moreMenu = true }, kind = BtnKind.GHOST)
+                    BarBtn(null, "Mehr", { moreMenu = true }, menu = true)
                     DropdownMenu(moreMenu, { moreMenu = false }, containerColor = Lc.surface2) {
                         @Composable fun item(label: String, enabled: Boolean = true, action: () -> Unit) =
                             DropdownMenuItem(text = { Text(label) }, enabled = enabled, onClick = { moreMenu = false; action() })
@@ -222,29 +231,36 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                     }
                 }
             }
-            LcButton("Weiter: Starten", onNext, icon = LcIcons.right, kind = BtnKind.PRIMARY,
-                     enabled = project.elements.isNotEmpty())
+            PlateMenu(editor)
+            BarBtn(LcIcons.right, "Starten", onNext, primary = true, enabled = project.elements.isNotEmpty(), description = "Weiter: Starten")
         }
-        PlateBar(editor, Modifier.fillMaxWidth())
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ToolColumn(tool, editor::setTool)
-            Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(18.dp))) {
+            Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(16.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(16.dp))) {
                 EditorCanvas(editor, machineStatus?.position, onText = { textAt = it })
-                if (tool == Tool.MEASURE) MeasureBar(editor, Modifier.align(Alignment.TopStart).padding(12.dp))
-                SmallText(
+                if (tool == Tool.MEASURE) MeasureBar(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
+                // Shows / hides the right-hand panel (laser, layers, measurements).
+                BarBtn(if (panelOpen) LcIcons.chevronRight else LcIcons.panel,
+                    if (panelOpen) null else if (tool == Tool.MEASURE) "Messwerte" else "Laser & Ebenen",
+                    { panelOpen = !panelOpen }, Modifier.align(Alignment.TopEnd).padding(8.dp),
+                    description = if (panelOpen) "Seitenleiste ausblenden" else "Seitenleiste einblenden")
+                Text(
                     when (tool) {
                         Tool.SELECT -> if (multi) "Mehrfachauswahl: Antippen fügt hinzu oder entfernt · Rahmen ziehen wählt mehrere"
-                                       else "Antippen wählt · ziehen verschiebt · auf leerer Fläche Rahmen ziehen · ⟳-Griff dreht · Eckgriff skaliert · zwei Finger zoomen"
+                                       else "Antippen wählt · ziehen verschiebt · Rahmen ziehen wählt mehrere · ⟳ dreht · Ecke skaliert · zwei Finger zoomen"
                         Tool.PEN -> "Mit dem Finger zeichnen"
                         Tool.TEXT -> "Antippen, wo der Text beginnen soll"
                         Tool.MEASURE -> measureHint(measureMode, measurePoints.size, measureFirst != null) + " · zwei Finger zoomen"
                         else -> "Ziehen, um ${tool.label.lowercase()} aufzuziehen · zwei Finger zoomen"
                     },
-                    Lc.faint, Modifier.align(Alignment.BottomStart).padding(12.dp),
+                    style = LcTypography.bodySmall, color = Lc.faint, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 10.dp, vertical = 6.dp),
                 )
             }
-            if (tool == Tool.MEASURE) MeasurePanel(editor, Modifier.width(350.dp).fillMaxHeight())
-            else Inspector(editor, Modifier.width(350.dp).fillMaxHeight(), onAdjust = { adjustOpen = true })
+            AnimatedVisibility(panelOpen, enter = expandHorizontally(), exit = shrinkHorizontally()) {
+                if (tool == Tool.MEASURE) MeasurePanel(editor, Modifier.width(320.dp).fillMaxHeight())
+                else Inspector(editor, Modifier.width(320.dp).fillMaxHeight(), onAdjust = { adjustOpen = true })
+            }
         }
     }
 
@@ -285,7 +301,7 @@ private fun ToolColumn(tool: Tool, onTool: (Tool) -> Unit) {
                       Tool.MEASURE to LcIcons.ruler)
     // Scrolls when the screen is too short for all tools (otherwise the last one, Messen, is cut off).
     Column(
-        Modifier.width(76.dp).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Lc.surface).border(1.dp, Lc.line, RoundedCornerShape(18.dp))
+        Modifier.width(70.dp).fillMaxHeight().clip(RoundedCornerShape(16.dp)).background(Lc.surface).border(1.dp, Lc.line, RoundedCornerShape(18.dp))
             .verticalScroll(rememberScrollState()).padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp), horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -597,7 +613,7 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier, onAdjust: () 
     val materials by editor.materials.collectAsStateWithLifecycle()
     val background by editor.background.collectAsStateWithLifecycle()
     val bgAlpha by editor.backgroundAlpha.collectAsStateWithLifecycle()
-    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val sel = doc.elements.filter { it.id in selected }
         when {
             sel.size == 1 -> SelectionCard(editor, sel.first(), onAdjust)
@@ -605,7 +621,7 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier, onAdjust: () 
         }
         EffectCard(editor, doc, sel, active)
         var advanced by remember { mutableStateOf(false) }
-        LcButton(if (advanced) "Erweitert ausblenden" else "Erweitert: Ebenen & Laserwerte", { advanced = !advanced }, Modifier.fillMaxWidth(), kind = BtnKind.GHOST)
+        BarBtn(LcIcons.layers, if (advanced) "Ebenen & Laserwerte ausblenden" else "Ebenen & Laserwerte", { advanced = !advanced }, Modifier.fillMaxWidth())
         if (advanced) LcCard(padding = 16.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Ebenen", style = LcTypography.titleLarge, modifier = Modifier.weight(1f))
@@ -635,11 +651,11 @@ private fun EffectCard(editor: EditorViewModel, doc: Document, sel: List<Element
     val byName = doc.layers.associateBy { it.name }
     val options = listOf("Gravieren" to "Gravieren", "Linie" to "Markieren", "Schneiden" to "Schneiden")
         .filter { byName.containsKey(it.first) }.map { byName.getValue(it.first).id to it.second }
-    LcCard(padding = 16.dp) {
+    LcCard(padding = 12.dp) {
         Text("Was soll der Laser tun?", style = LcTypography.titleMedium)
-        Spacer(Modifier.height(10.dp))
-        Segmented(options, focus, { editor.setActiveLayer(it) })
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
+        Segmented(options, focus, { editor.setActiveLayer(it) }, Modifier.fillMaxWidth())
+        Spacer(Modifier.height(4.dp))
         SmallText(if (sel.isNotEmpty()) "Gilt für die Auswahl." else "Gilt für neue Formen. Zum Ändern erst etwas antippen.")
     }
 }
