@@ -978,23 +978,52 @@ with web.app.test_client() as c:
 
     def test_camera_snapshot_and_moveto_endpoints(self):
         self._run_web_script(r"""
-import subprocess, types
+import subprocess, types, json
 from marlin import web
 web.CAMERA = __file__ if False else web.CONFIG.parent.as_posix()   # an existing path stands in for /dev/video0
 calls = []
+FORMATS = "[0]: 'MJPG' (Motion-JPEG, compressed)\n\t\tSize: Discrete 1920x1080\n\t\tSize: Discrete 640x480\n"
+CTRLS = "  white_balance_temperature 0x0098091a (int)    : min=2500 max=7000 step=1 default=6000\n"
 def fake_run(cmd, **k):
     calls.append(cmd)
-    return types.SimpleNamespace(returncode=0, stdout=bytes([0xFF, 0xD8, 0xFF, 0xE0]) + b"jpegdata", stderr=b"")
+    out = FORMATS if "--list-formats-ext" in cmd else CTRLS if "--list-ctrls" in cmd else ""
+    return types.SimpleNamespace(returncode=0, stdout=out if k.get("text") else out.encode(), stderr=b"")
+class FakeProc:
+    def __init__(self, cmd, **k):
+        calls.append(cmd); self.returncode = 0
+        self.stderr = iter([b"Input #0, video4linux2,v4l2\n", b"  Stream #0:0: Video: mjpeg\n"])
+    def communicate(self, timeout=None):
+        return bytes([0xFF, 0xD8, 0xFF, 0xE0]) + b"jpegdata", b""
+    def kill(self):
+        pass
 subprocess.run = fake_run
+subprocess.Popen = FakeProc
 moves = []
 web.machine.move_to = lambda x, y, owner: moves.append((x, y, owner))
 web.local_owner = lambda: None
 with web.app.test_client() as c:
     r = c.get("/api/camera/snapshot?w=640&h=480")
     assert r.status_code == 200 and r.headers["Content-Type"] == "image/jpeg", r.data
-    assert "640x480" in calls[0] and "v4l2" in calls[0]
+    ff = [cmd for cmd in calls if cmd[0] == "ffmpeg"][0]
+    assert "640x480" in ff and "v4l2" in ff and "mjpeg" in ff, ff
     assert c.get("/api/camera/snapshot?w=10&h=10").status_code == 400
+    r = c.get("/api/camera/snapshot?w=800&h=600")
+    assert r.status_code == 400 and "nicht" in r.get_json()["error"], r.data
     assert c.get("/api/status").get_json()["camera"]["available"] is True
+    # fixed white balance: stored, reported with the camera's range, set before and after the stream starts
+    r = c.put("/api/camera/settings", json={"white_balance": 4800, "light": 100})
+    assert r.status_code == 200, r.data
+    got = c.get("/api/camera/settings").get_json()
+    assert got["white_balance"] == 4800 and got["exposure"] is None and got["ranges"]["white_balance"] == [2500, 7000], got
+    assert c.get("/api/status").get_json()["config"]["camera"]["white_balance"] == 4800
+    assert c.put("/api/camera/settings", json={"white_balance": "warm"}).status_code == 400
+    calls.clear()
+    assert c.get("/api/camera/snapshot?w=1920&h=1080").status_code == 200
+    assert sum(1 for cmd in calls if "white_balance_temperature=4800" in cmd) == 2, calls
+    calls.clear()
+    assert c.get("/api/camera/snapshot?w=1920&h=1080&wb=auto").status_code == 200
+    assert not any("white_balance_temperature=4800" in cmd for cmd in calls)
+    assert any("white_balance_automatic=1" in cmd for cmd in calls)
     r = c.post("/api/action", data={"op": "moveto", "x": "120.5", "y": "80"})
     assert r.status_code == 200 and moves == [(120.5, 80.0, "web")], (r.data, moves)
 web.CAMERA = "/dev/does-not-exist"
