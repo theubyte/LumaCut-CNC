@@ -280,6 +280,33 @@ class CalibrationsTest {
         assertEquals(MarlinWriter.Motion.FIRMWARE, PiMotion().toMotion())
     }
 
+    @Test fun `part scan photographs only the area and keeps the earlier scan around it`() {
+        val cal = camera()
+        val u = cal.usable()
+        // a small area: one picture centred on it
+        val small = Box(150.0, 120.0, 170.0, 140.0)
+        val one = Scan.plan(cal, small)
+        assertEquals(1, one.heads.size)
+        assertEquals(small.center.x, one.heads[0].x + u.center.x, 0.01); assertEquals(small.center.y, one.heads[0].y + u.center.y, 0.01)
+        // a larger area: covered completely, far fewer pictures than the whole work area
+        val area = Box(40.0, 60.0, 200.0, 150.0)
+        val plan = Scan.plan(cal, area)
+        assertTrue(plan.uncovered.isEmpty(), plan.uncovered.toString())
+        assertTrue(plan.heads.size < Scan.plan(cal).heads.size)
+        for (x in listOf(40.0, 120.0, 200.0)) for (y in listOf(60.0, 100.0, 150.0))
+            assertTrue(plan.heads.any { h -> x >= h.x + u.minX - 1e-6 && x <= h.x + u.maxX + 1e-6 && y >= h.y + u.minY - 1e-6 && y <= h.y + u.maxY + 1e-6 }, "$x,$y")
+        // two marked workpieces: the pictures of both
+        assertEquals(2, Scan.plan(cal, listOf(small, Box(300.0, 280.0, 320.0, 300.0))).heads.size)
+        // the earlier scan stays outside the new pictures
+        val m0 = Scan.Mosaic(cal, 2.0)
+        val old = IntArray(m0.width * m0.height) { 0xFF112233.toInt() }
+        val m = Scan.Mosaic(cal, 2.0, old)
+        m.add(Scan.Tile(IntArray(w * h) { 0xFFC8C8C8.toInt() }, w, h, one.heads[0]))
+        assertEquals(0xFF112233.toInt(), m.pixels[10 * m.width + 10])
+        assertEquals(0xFFC8C8C8.toInt(), m.pixels[(130 * 2) * m.width + 160 * 2])
+        assertEquals(0xFF112233.toInt(), old[(130 * 2) * m.width + 160 * 2], "base itself unchanged")
+    }
+
     @Test fun `probe offset from the head position over the mark`() {
         val off = Pt(-23.0, 15.0)
         val head = ProbeTarget.headFor(off)

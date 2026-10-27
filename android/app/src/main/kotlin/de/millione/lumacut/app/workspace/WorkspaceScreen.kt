@@ -127,9 +127,9 @@ fun WorkspaceScreen(machine: MachineViewModel, editor: EditorViewModel, ws: Work
                 Step(2, "Arbeitsfläche scannen", "scan" in done, when {
                     !camera -> "Keine Kamera am Pi (USB-Kamera am Kopf anschließen, LUMACUT_CAMERA)"
                     cal == null -> "Kopfkamera einmalig kalibrieren"
-                    else -> "Kamerabilder werden zu einem maßstäblichen Hintergrund zusammengesetzt"
+                    else -> "Markierte Bereiche, nur unter dem Motiv oder alles – ein Teilscan lässt den Rest des Hintergrunds stehen"
                 }) {
-                    LcButton("Scannen", { ws.scan(machine, editor) }, icon = LcIcons.scan, enabled = ready && homed && camera && cal != null)
+                    ScanMenu(machine, editor, ws) { open -> LcButton("Scannen …", open, icon = LcIcons.scan, enabled = ready && homed && camera && cal != null) }
                     LcButton(if (cal == null) "Kalibrieren" else "Neu kalibrieren", { calibrating = true }, icon = LcIcons.camera,
                         kind = BtnKind.GHOST, enabled = camera)
                 }

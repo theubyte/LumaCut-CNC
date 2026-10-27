@@ -171,6 +171,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     var materialTest by remember { mutableStateOf(false) }
     val machineStatus by machine.status.collectAsStateWithLifecycle()
     val machineOnline by machine.online.collectAsStateWithLifecycle()
+    val ws: de.millione.lumacut.app.workspace.WorkspaceViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 
     val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
@@ -250,7 +251,9 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         item("Box mit Fingerzinken …") { boxOpen = true }
                     }
                 }
-                BarBtn(LcIcons.camera, "Scannen", onScan, description = "Arbeitsplatz scannen")
+                de.millione.lumacut.app.workspace.ScanMenu(machine, editor, ws, onSetup = onScan) { open ->
+                    BarBtn(LcIcons.camera, "Scannen", open, menu = true, description = "Scannen: Bereiche, Motiv oder ganzer Arbeitsplatz")
+                }
                 Box {
                     BarBtn(null, "Mehr", { moreMenu = true }, menu = true)
                     DropdownMenu(moreMenu, { moreMenu = false }, containerColor = Lc.surface2) {
@@ -276,6 +279,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
             ToolColumn(tool, editor::setTool)
             Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(16.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(16.dp))) {
                 EditorCanvas(editor, machineStatus?.position, onText = { textAt = it })
+                de.millione.lumacut.app.workspace.RunStrip(ws, Modifier.align(Alignment.BottomCenter).padding(bottom = 30.dp))
                 if (tool == Tool.MEASURE) MeasureBar(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
                 else ToolOptions(editor, tool, Modifier.align(Alignment.TopStart).padding(8.dp).padding(end = 56.dp))
                 // Shows / hides the right-hand panel (laser, layers, measurements).
@@ -695,7 +699,6 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier, onAdjust: () 
     val doc by editor.doc.collectAsStateWithLifecycle()
     val selected by editor.selected.collectAsStateWithLifecycle()
     val active by editor.activeLayer.collectAsStateWithLifecycle()
-    val materials by editor.materials.collectAsStateWithLifecycle()
     val background by editor.background.collectAsStateWithLifecycle()
     val bgAlpha by editor.backgroundAlpha.collectAsStateWithLifecycle()
     Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -704,20 +707,7 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier, onAdjust: () 
             sel.size == 1 -> SelectionCard(editor, sel.first(), onAdjust)
             sel.size > 1 -> MultiCard(editor, sel)
         }
-        EffectCard(editor, doc, sel, active)
-        var advanced by remember { mutableStateOf(false) }
-        BarBtn(LcIcons.layers, if (advanced) "Ebenen & Laserwerte ausblenden" else "Ebenen & Laserwerte", { advanced = !advanced }, Modifier.fillMaxWidth())
-        if (advanced) LcCard(padding = 16.dp) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Ebenen", style = LcTypography.titleLarge, modifier = Modifier.weight(1f))
-                IconBtn(LcIcons.plus, "Ebene hinzufügen", editor::addLayer)
-            }
-            Spacer(Modifier.height(10.dp))
-            SmallText(if (sel.isNotEmpty()) "Antippen legt die Auswahl auf die Ebene." else "Neue Formen landen auf der aktiven Ebene. Reihenfolge = Bearbeitungsreihenfolge. Auge = sichtbar und gelasert, Schloss = gesperrt.")
-            Spacer(Modifier.height(10.dp))
-            val focus = sel.firstOrNull()?.layerId ?: active
-            for (layer in doc.layers) LayerRow(editor, layer, layer.id == focus, materials, doc.elements.count { it.layerId == layer.id })
-        }
+        LaserCard(editor, doc, sel, active)
         if (background != null) LcCard(padding = 16.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Kamera-Hintergrund", style = LcTypography.titleMedium, modifier = Modifier.weight(1f))
@@ -726,22 +716,6 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier, onAdjust: () 
             Slider(bgAlpha, editor::setBackgroundAlpha, colors = SliderDefaults.colors(thumbColor = Lc.accent, activeTrackColor = Lc.accent))
             SmallText("Deckkraft ${(bgAlpha * 100).toInt()} %")
         }
-    }
-}
-
-/** The only laser decision a beginner makes: engrave, mark or cut. Values come from the chosen material. */
-@Composable
-private fun EffectCard(editor: EditorViewModel, doc: Document, sel: List<Element>, active: String) {
-    val focus = sel.firstOrNull()?.layerId ?: active
-    val byName = doc.layers.associateBy { it.name }
-    val options = listOf("Gravieren" to "Gravieren", "Linie" to "Markieren", "Schneiden" to "Schneiden")
-        .filter { byName.containsKey(it.first) }.map { byName.getValue(it.first).id to it.second }
-    LcCard(padding = 12.dp) {
-        Text("Was soll der Laser tun?", style = LcTypography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-        Segmented(options, focus, { editor.setActiveLayer(it) }, Modifier.fillMaxWidth())
-        Spacer(Modifier.height(4.dp))
-        SmallText(if (sel.isNotEmpty()) "Gilt für die Auswahl." else "Gilt für neue Formen. Zum Ändern erst etwas antippen.")
     }
 }
 
@@ -833,7 +807,7 @@ private fun MultiCard(editor: EditorViewModel, sel: List<Element>) {
 
 /** Numeric field that commits valid numbers as you type. */
 @Composable
-private fun Num(label: String, value: Double, modifier: Modifier, suffix: String = "mm", onValue: (Double) -> Unit) {
+internal fun Num(label: String, value: Double, modifier: Modifier, suffix: String = "mm", onValue: (Double) -> Unit) {
     fun fmt(v: Double) = "%.1f".format(java.util.Locale.ROOT, v)
     var text by remember { mutableStateOf(fmt(value)) }
     var focused by remember { mutableStateOf(false) }
@@ -841,93 +815,6 @@ private fun Num(label: String, value: Double, modifier: Modifier, suffix: String
     LaunchedEffect(value) { if (!focused) text = fmt(value) }
     NumberField(label, text, { t -> text = t; t.replace(',', '.').toDoubleOrNull()?.let(onValue) },
         modifier.onFocusChanged { focused = it.isFocused }, suffix)
-}
-
-/** Keeps the per-pass focus drop within [Limits.MAX_FOCUS_DROP_MM]. */
-private fun Layer.withSafeZStep(): Layer =
-    if (passes > 1) copy(zStepMm = zStepMm.coerceIn(0.0, minOf(Limits.Z_STEP.endInclusive, Limits.MAX_FOCUS_DROP_MM / (passes - 1)))) else copy(zStepMm = 0.0)
-
-@Composable
-private fun LayerRow(editor: EditorViewModel, layer: Layer, active: Boolean, materials: List<de.millione.lumacut.core.Material>, count: Int) {
-    var open by remember { mutableStateOf(false) }
-    var menu by remember { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(14.dp))
-            .background(if (active) Lc.surface3 else Lc.surface2)
-            .border(1.dp, if (active) Color(layer.color.toInt()).copy(alpha = .7f) else Lc.line, RoundedCornerShape(14.dp))
-    ) {
-        Row(Modifier.fillMaxWidth().clickable { editor.setActiveLayer(layer.id) }.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(14.dp).clip(CircleShape).background(Color(layer.color.toInt()).copy(alpha = if (layer.visible) 1f else .3f)))
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text(layer.name, style = LcTypography.titleMedium, maxLines = 1, color = if (layer.visible) Lc.text else Lc.faint)
-                SmallText(buildString {
-                    append(if (layer.mode == LayerMode.FILL) "Füllen" else "Linie")
-                    append(" · ${layer.powerPct.roundToInt()} % · ${layer.speed.roundToInt()} mm/min")
-                    if (layer.passes > 1) append(" · ${layer.passes}×")
-                    if (layer.focusDropMm > 0) append(" · Z −%.1f".format(layer.focusDropMm))
-                    if (!layer.output) append(" · nicht lasern")
-                    append(" · $count")
-                })
-            }
-            IconBtn(if (layer.visible) LcIcons.eye else LcIcons.eyeOff, if (layer.visible) "Ausblenden" else "Einblenden",
-                    { editor.updateLayer(layer.id) { it.copy(visible = !it.visible) } }, tint = if (layer.visible) Lc.text else Lc.faint)
-            IconBtn(if (layer.locked) LcIcons.lock else LcIcons.unlock, if (layer.locked) "Entsperren" else "Sperren",
-                    { editor.updateLayer(layer.id) { it.copy(locked = !it.locked) } }, tint = if (layer.locked) Lc.warn else Lc.faint)
-            IconBtn(if (open) LcIcons.up else LcIcons.down, "Einstellungen", { open = !open })
-        }
-        if (open) Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextInput("Name", layer.name, { n -> editor.updateLayer(layer.id, "name") { it.copy(name = n) } }, Modifier.fillMaxWidth())
-            Segmented(listOf(true to "Lasern", false to "Nicht lasern"), layer.output, { on -> editor.updateLayer(layer.id) { it.copy(output = on) } })
-            Segmented(listOf(LayerMode.LINE to "Linie / Schneiden", LayerMode.FILL to "Füllen / Gravieren"), layer.mode,
-                { m -> editor.updateLayer(layer.id) { it.copy(mode = m) } })
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Num("Leistung", layer.powerPct, Modifier.weight(1f), "%") { v -> editor.updateLayer(layer.id, "power") { it.copy(powerPct = v.coerceIn(Limits.POWER)) } }
-                Num("Tempo", layer.speed, Modifier.weight(1f), "mm/min") { v -> editor.updateLayer(layer.id, "speed") { it.copy(speed = v.coerceIn(Limits.SPEED)) } }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Num("Durchgänge", layer.passes.toDouble(), Modifier.weight(1f), "×") { v ->
-                    editor.updateLayer(layer.id, "passes") { it.copy(passes = v.toInt().coerceIn(Limits.PASSES)).withSafeZStep() } }
-                Num("Zeilenabstand", layer.intervalMm, Modifier.weight(1f)) { v -> editor.updateLayer(layer.id, "interval") { it.copy(intervalMm = v.coerceIn(0.03, 2.0)) } }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Num("Min. Leistung (Bild)", layer.minPowerPct, Modifier.weight(1f), "%") { v -> editor.updateLayer(layer.id, "minpower") { it.copy(minPowerPct = v.coerceIn(Limits.POWER)) } }
-                Num("Überlauf", layer.overscanMm, Modifier.weight(1f)) { v -> editor.updateLayer(layer.id, "overscan") { it.copy(overscanMm = v.coerceIn(0.0, 10.0)) } }
-            }
-            Text("Material & Tiefe", style = LcTypography.labelMedium, color = Lc.faint)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Num("Stärke", layer.thicknessMm, Modifier.weight(1f)) { v -> editor.updateLayer(layer.id, "thick") { l ->
-                    val t = v.coerceIn(Limits.THICKNESS)
-                    (if (l.depthPerPassMm > 0 && t > 0) l.copy(thicknessMm = t, passes = Document.passesFor(t, l.depthPerPassMm)) else l.copy(thicknessMm = t)).withSafeZStep()
-                } }
-                Num("Tiefe/Durchgang", layer.depthPerPassMm, Modifier.weight(1f)) { v -> editor.updateLayer(layer.id, "depth") { l ->
-                    val d = v.coerceIn(Limits.DEPTH_PER_PASS)
-                    (if (d > 0 && l.thicknessMm > 0) l.copy(depthPerPassMm = d, passes = Document.passesFor(l.thicknessMm, d)) else l.copy(depthPerPassMm = d)).withSafeZStep()
-                } }
-            }
-            Num("Z-Absenkung je Durchgang", layer.zStepMm, Modifier.fillMaxWidth()) { v ->
-                editor.updateLayer(layer.id, "zstep") { it.copy(zStepMm = v).withSafeZStep() } }
-            SmallText(when {
-                layer.passes <= 1 -> "Ein Durchgang: kein Nachfokussieren."
-                layer.zStepMm > 0 -> "Fokus sinkt pro Durchgang um %.2f mm, insgesamt %.2f mm (max. %.0f mm), danach zurück.".format(layer.zStepMm, layer.focusDropMm, Limits.MAX_FOCUS_DROP_MM)
-                else -> "Alle ${layer.passes} Durchgänge auf derselben Fokushöhe."
-            }, Lc.faint)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box {
-                    LcButton("Material …", { menu = true }, icon = LcIcons.material)
-                    DropdownMenu(menu, { menu = false }, containerColor = Lc.surface2) {
-                        for (m in materials) DropdownMenuItem(
-                            text = { Text("${m.name} ${m.thicknessMm} mm · ${m.process}" + if (m.effectivePasses > 1) " · ${m.effectivePasses}×" else "") },
-                            onClick = { menu = false; editor.applyMaterial(layer.id, m) })
-                    }
-                }
-                IconBtn(LcIcons.up, "Nach oben", { editor.moveLayer(layer.id, true) })
-                IconBtn(LcIcons.down, "Nach unten", { editor.moveLayer(layer.id, false) })
-                IconBtn(LcIcons.trash, "Ebene löschen", { editor.deleteLayer(layer.id) }, tint = Lc.bad)
-            }
-        }
-    }
 }
 
 /* ---------- dialogs ---------- */

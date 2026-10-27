@@ -81,26 +81,30 @@ class TilePlan(val heads: List<Pt>, val uncovered: List<String>)
 object Scan {
     /**
      * Serpentine head positions (work mm) so the usable camera area covers
-     * the whole work area with [overlap] (0..0.5). Head positions are kept
-     * in the machine travel; strips the camera cannot reach are reported.
+     * [area] (default: the whole work area, clipped to it) with [overlap]
+     * (0..0.5). An area smaller than one picture gets one picture centred
+     * on it. Head positions are kept in the machine travel; strips of the
+     * area the camera cannot reach are reported.
      */
-    fun plan(cal: CameraCalibration, overlap: Double = 0.25): TilePlan {
+    fun plan(cal: CameraCalibration, area: Box = Box(0.0, 0.0, Work.WIDTH, Work.HEIGHT), overlap: Double = 0.25): TilePlan {
+        val a = Box(area.minX.coerceIn(0.0, Work.WIDTH), area.minY.coerceIn(0.0, Work.HEIGHT), area.maxX.coerceIn(0.0, Work.WIDTH), area.maxY.coerceIn(0.0, Work.HEIGHT))
+        require(a.width > 0.5 && a.height > 0.5) { "Scanbereich liegt nicht im Arbeitsbereich" }
         val u = cal.usable()
         val stepX = u.width * (1 - overlap.coerceIn(0.0, 0.5))
         val stepY = u.height * (1 - overlap.coerceIn(0.0, 0.5))
         require(stepX > 1 && stepY > 1) { "Kamera-Kalibrierung unplausibel (Bildausschnitt zu klein)" }
-        val cols = max(1, ceil((Work.WIDTH - u.width) / stepX).toInt() + 1)
-        val rows = max(1, ceil((Work.HEIGHT - u.height) / stepY).toInt() + 1)
+        val cols = max(1, ceil((a.width - u.width) / stepX).toInt() + 1)
+        val rows = max(1, ceil((a.height - u.height) / stepY).toInt() + 1)
         // Head travel in work mm (machine 0..390 / 0..370, X reversed) (laser off, may cross the safe zone like parking).
         val minHx = Work.fromMachine(Bed.WIDTH, 0.0).x; val maxHx = Work.fromMachine(0.0, 0.0).x   // machine X is reversed
         val minHy = Work.fromMachine(0.0, 0.0).y; val maxHy = Work.fromMachine(0.0, Bed.HEIGHT).y
         val heads = ArrayList<Pt>()
         val missing = mutableListOf<String>()
         for (r in 0 until rows) {
-            val ty = if (rows == 1) 0.0 else (Work.HEIGHT - u.height) * r / (rows - 1)
+            val ty = if (rows == 1) a.center.y - u.height / 2 else a.minY + (a.height - u.height) * r / (rows - 1)
             val order = if (r % 2 == 0) 0 until cols else (cols - 1 downTo 0)
             for (c in order) {
-                val tx = if (cols == 1) 0.0 else (Work.WIDTH - u.width) * c / (cols - 1)
+                val tx = if (cols == 1) a.center.x - u.width / 2 else a.minX + (a.width - u.width) * c / (cols - 1)
                 // head so that the usable box's top-left lands at (tx, ty)
                 val hx = (tx - u.minX).coerceIn(minHx, maxHx)
                 val hy = (ty - u.minY).coerceIn(minHy, maxHy)
@@ -108,11 +112,18 @@ object Scan {
             }
         }
         val cover = heads.map { Box(it.x + u.minX, it.y + u.minY, it.x + u.maxX, it.y + u.maxY) }
-        if (cover.minOf { it.minX } > 0.5) missing += "linker Rand (%.0f mm)".format(cover.minOf { it.minX })
-        if (cover.minOf { it.minY } > 0.5) missing += "oberer Rand (%.0f mm)".format(cover.minOf { it.minY })
-        if (cover.maxOf { it.maxX } < Work.WIDTH - 0.5) missing += "rechter Rand (%.0f mm)".format(Work.WIDTH - cover.maxOf { it.maxX })
-        if (cover.maxOf { it.maxY } < Work.HEIGHT - 0.5) missing += "unterer Rand (%.0f mm)".format(Work.HEIGHT - cover.maxOf { it.maxY })
+        if (cover.minOf { it.minX } > a.minX + 0.5) missing += "linker Rand (%.0f mm)".format(cover.minOf { it.minX } - a.minX)
+        if (cover.minOf { it.minY } > a.minY + 0.5) missing += "oberer Rand (%.0f mm)".format(cover.minOf { it.minY } - a.minY)
+        if (cover.maxOf { it.maxX } < a.maxX - 0.5) missing += "rechter Rand (%.0f mm)".format(a.maxX - cover.maxOf { it.maxX })
+        if (cover.maxOf { it.maxY } < a.maxY - 0.5) missing += "unterer Rand (%.0f mm)".format(a.maxY - cover.maxOf { it.maxY })
         return TilePlan(heads, missing)
+    }
+
+    /** One plan over several separate [areas] (marked workpieces): their pictures one after another. */
+    fun plan(cal: CameraCalibration, areas: List<Box>, overlap: Double = 0.25): TilePlan {
+        require(areas.isNotEmpty()) { "Kein Scanbereich" }
+        val plans = areas.map { plan(cal, it, overlap) }
+        return TilePlan(plans.flatMap { it.heads }.distinct(), plans.flatMap { it.uncovered }.distinct())
     }
 
     class Tile(val argb: IntArray, val width: Int, val height: Int, val head: Pt)
@@ -124,12 +135,14 @@ object Scan {
      * brightness and colour the mosaic already shows where they overlap
      * (the camera adjusts its brightness for every picture), and blended in
      * with a weight that falls to 0 at its edges, so no seam stays visible.
-     * Sampled bilinearly; uncovered pixels stay transparent. Row 0 = work Y 0.
+     * Sampled bilinearly; uncovered pixels stay transparent (or keep the
+     * earlier scan given as base). Row 0 = work Y 0.
      */
-    class Mosaic(private val cal: CameraCalibration, private val pxPerMm: Double) {
+    class Mosaic(private val cal: CameraCalibration, private val pxPerMm: Double, base: IntArray? = null) {
         val width = (Work.WIDTH * pxPerMm).toInt()
         val height = (Work.HEIGHT * pxPerMm).toInt()
-        val pixels = IntArray(width * height)
+        /** Starts from [base] (an earlier scan of the same size): only the newly photographed parts change. */
+        val pixels = base?.takeIf { it.size == width * height }?.copyOf() ?: IntArray(width * height)
         private val weight = FloatArray(width * height)
         private val reach = cal.footprint()
         private val valid = cal.validPx

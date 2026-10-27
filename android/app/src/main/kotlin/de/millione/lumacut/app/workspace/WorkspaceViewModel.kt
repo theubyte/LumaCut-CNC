@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.millione.lumacut.app.editor.EditorViewModel
@@ -46,6 +47,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import java.util.Locale
+
+/** What a scan photographs: the marked areas, the motif (with 10 mm margin) or the whole work area. */
+enum class ScanRegion(val label: String) {
+    AREAS("Markierte Bereiche"), MOTIF("Nur das Motiv"), ALL("Ganzer Arbeitsplatz"),
+}
 
 /** A long run (scan, probe grid) with progress for the UI. */
 data class Run(val title: String, val done: Int, val total: Int, val text: String = "") {
@@ -768,25 +774,40 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearCut() { _cut.value = null }
 
-    fun scan(machine: MachineViewModel, editor: EditorViewModel) {
+    /**
+     * Photographs [region] and puts the pictures together. A part scan
+     * keeps the earlier scan around it: only the photographed area changes.
+     */
+    fun scan(machine: MachineViewModel, editor: EditorViewModel, region: ScanRegion = ScanRegion.ALL) {
         val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
         val c = machine.clientOrNotify() ?: return
         if (worker?.isActive == true) return
+        val boxes = when (region) {
+            ScanRegion.ALL -> listOf(Box(0.0, 0.0, Work.WIDTH, Work.HEIGHT))
+            ScanRegion.MOTIF -> editor.doc.value.bounds()?.let { listOf(Box(it.minX - 10, it.minY - 10, it.maxX + 10, it.maxY + 10)) }
+                ?: run { machine.notify("Kein Motiv im Editor – „Ganzer Arbeitsplatz“ wählen", true); return }
+            ScanRegion.AREAS -> _areas.value.takeIf { it.isNotEmpty() }
+                ?: run { machine.notify("Keine Bereiche markiert – unter Maschine → Arbeitsplatz scannen → „Bereiche markieren“ Rahmen ziehen", true); return }
+        }
         worker = viewModelScope.launch {
             try {
                 val st = machine.refreshStatus()
                 if (st?.homed != true) throw IllegalStateException("Erst referenzieren")
-                val plan = Scan.plan(cal)
-                plan.uncovered.forEach { machine.notify(it) }
+                val plan = Scan.plan(cal, boxes)
+                if (region == ScanRegion.ALL) plan.uncovered.forEach { machine.notify(it) }
                 // same distance to the material as at the calibration: same scale, sharp picture
                 val scanZ = cal.aboveSurface?.let { above ->
                     val surface = st?.workpiece_surface_z ?: run {
                         _run.value = Run("Scan", 0, plan.heads.size, "Oberfläche abtasten …")
-                        probe(c, machine, editor.doc.value.bounds()?.center ?: Work.center)
+                        probe(c, machine, boxes.first().center)
                     }
                     (surface + above).also { if (it > Z_TOP + 5) throw IllegalStateException("Material zu hoch für die Kamera") }
                 }
-                val mosaic = Scan.Mosaic(cal, mosaicResolution(cal))
+                // a part scan goes into the earlier one (same resolution), everything else stays
+                val base = if (region == ScanRegion.ALL) null else runCatching {
+                    editor.background.value?.asAndroidBitmap()?.let { b -> IntArray(b.width * b.height).also { b.getPixels(it, 0, b.width, 0, 0, b.width, b.height) } }
+                }.getOrNull()
+                val mosaic = Scan.Mosaic(cal, mosaicResolution(cal), base)
                 withScanLight(c, machine, st?.config?.camera?.light) { for ((i, head) in plan.heads.withIndex()) {
                     if (!isActive) return@withScanLight
                     _run.value = Run("Scan", i, plan.heads.size, "Bild ${i + 1} von ${plan.heads.size}")
@@ -807,7 +828,11 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                 val bmp = withContext(Dispatchers.Default) { Bitmap.createBitmap(mosaic.pixels, mosaic.width, mosaic.height, Bitmap.Config.ARGB_8888) }
                 editor.setBackground(bmp)
                 markDone("scan")
-                machine.notify("Arbeitsfläche gescannt (${plan.heads.size} Bilder)")
+                machine.notify(when (region) {
+                    ScanRegion.ALL -> "Arbeitsfläche gescannt (${plan.heads.size} Bilder)"
+                    ScanRegion.MOTIF -> "Bereich unter dem Motiv gescannt (${plan.heads.size} Bilder)"
+                    ScanRegion.AREAS -> "${boxes.size} markierte(r) Bereich(e) gescannt (${plan.heads.size} Bilder)"
+                })
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
