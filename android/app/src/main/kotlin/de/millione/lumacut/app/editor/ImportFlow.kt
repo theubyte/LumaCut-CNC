@@ -98,9 +98,16 @@ private suspend fun importVector(kind: FileKind, bytes: ByteArray, editor: Edito
             " (Originalgröße, nebeneinander angeordnet, damit alles in den Arbeitsbereich passt)")
         FitKind.PARTIAL -> {
             val k = ImportLayout.shrinkFactor(units)
+            // Original size over several plates: what does not fit on this one continues on the next.
+            val spread = withContext(Dispatchers.Default) { ImportLayout.spread(units) }.takeIf { it.plates.size > 1 }
             editor.pendingImport.value = PendingImport(kind.label, layout.units.size, layout.units.size - layout.leftOut, (k * 100).toInt(),
                 onFitting = { report(editor.addImported(kind.label, layout, 1.0, result.layers, rasters), " (Originalgröße, ${layout.leftOut} Teile ausgelassen)") },
-                onShrink = { report(editor.addImported(kind.label, Layout(FitKind.AS_IS, units, units.map { Pt(0.0, 0.0) }), k, result.layers, rasters), " (auf ${(k * 100).toInt()} % verkleinert)") })
+                onShrink = { report(editor.addImported(kind.label, Layout(FitKind.AS_IS, units, units.map { Pt(0.0, 0.0) }), k, result.layers, rasters), " (auf ${(k * 100).toInt()} % verkleinert)") },
+                plates = spread?.plates?.size ?: 0,
+                onPlates = spread?.let { sp -> {
+                    report(editor.addImportedOnPlates(kind.label, sp.plates, result.layers, rasters),
+                        " (Originalgröße, auf ${sp.plates.size} Platten verteilt" + (if (sp.leftOut > 0) ", ${sp.leftOut} zu große Teile ausgelassen" else "") + ")")
+                } })
         }
     }
 }

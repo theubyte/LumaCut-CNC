@@ -69,6 +69,7 @@ enum class ImageMode { GRAYSCALE, DITHER, THRESHOLD, DITHER_JARVIS, DITHER_STUCK
  * lives in [paths] (local mm, before [transform]); text keeps its source;
  * images carry a [raster] stretched over [imageWidthMm] x [imageHeightMm].
  * Elements with the same [groupId] are selected and moved together.
+ * [plate] = index of the plate (sheet of material) the element is lasered on.
  */
 @Serializable
 data class Element(
@@ -87,6 +88,7 @@ data class Element(
     val imageMode: ImageMode = ImageMode.GRAYSCALE,
     val adjust: ImageAdjust = ImageAdjust(),
     val groupId: String? = null,
+    val plate: Int = 0,
 ) {
     val isImage get() = raster != null
 
@@ -100,20 +102,57 @@ data class Element(
     fun worldBounds(): Box? = if (isImage) boundsOf(listOf(imageCorners())) else boundsOf(worldPaths())
 }
 
+/**
+ * A project. A motif that does not fit on one sheet continues on further plates
+ * ([plateCount], each a full work area); layers (material) are shared by all plates.
+ */
 @Serializable
 data class Document(
     val title: String = "Neues Projekt",
     val layers: List<Layer> = defaultLayers(),
     val elements: List<Element> = emptyList(),
+    val plateCount: Int = 1,
+    val activePlate: Int = 0,
 ) {
     fun layer(id: String) = layers.firstOrNull { it.id == id }
     fun bounds(): Box? = elements.mapNotNull { it.worldBounds() }.reduceOrNull { a, b -> a.union(b) }
+
+    /** Only the elements of plate [i] (what is lasered when that plate is started). */
+    fun plateView(i: Int = activePlate): Document = copy(elements = elements.filter { it.plate == i })
+
+    fun plateSize(i: Int): Int = elements.count { it.plate == i }
+
+    /** Writes an edited [plateView] of the active plate back: title and layers from [view], its elements onto the active plate. */
+    fun withPlate(view: Document): Document = copy(title = view.title, layers = view.layers,
+        elements = elements.filter { it.plate != activePlate } + view.elements.map { if (it.plate == activePlate) it else it.copy(plate = activePlate) })
+
+    /** A new empty plate after the last one, made active. */
+    fun addPlate(): Document = copy(plateCount = plateCount + 1, activePlate = plateCount)
+
+    /** Removes plate [i] with its elements; later plates move up one. The last plate stays. */
+    fun removePlate(i: Int): Document {
+        if (plateCount <= 1 || i !in 0 until plateCount) return this
+        val els = elements.filter { it.plate != i }.map { if (it.plate > i) it.copy(plate = it.plate - 1) else it }
+        val active = if (activePlate >= i) maxOf(0, activePlate - 1) else activePlate
+        return copy(elements = els, plateCount = plateCount - 1, activePlate = active)
+    }
+
+    /** Moves the elements [ids] (same position) onto plate [target]. */
+    fun moveToPlate(ids: Set<String>, target: Int): Document =
+        if (target !in 0 until plateCount) this else copy(elements = elements.map { if (it.id in ids) it.copy(plate = target) else it })
+
+    /** Old or hand-edited files: plate indices and the active plate inside 0 until plateCount. */
+    fun normalized(): Document {
+        val n = maxOf(plateCount, (elements.maxOfOrNull { it.plate } ?: 0) + 1, 1)
+        return copy(plateCount = n, activePlate = activePlate.coerceIn(0, n - 1),
+            elements = if (elements.any { it.plate < 0 }) elements.map { if (it.plate < 0) it.copy(plate = 0) else it } else elements)
+    }
 
     fun toJson(): String = JSON.encodeToString(serializer(), this)
 
     companion object {
         val JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = false }
-        fun fromJson(text: String): Document = JSON.decodeFromString(serializer(), text)
+        fun fromJson(text: String): Document = JSON.decodeFromString(serializer(), text).normalized()
 
         fun defaultLayers() = listOf(
             Layer(name = "Gravieren", color = 0xFF4FD8B4, mode = LayerMode.FILL, powerPct = 25.0, speed = 3000.0, intervalMm = 0.1),

@@ -21,7 +21,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,10 +59,10 @@ private fun blocker(s: MachineStatus?, online: Boolean?, host: String): String? 
     else -> null
 }
 
-/** Step 3: summary, optional frame, one start button, then progress from the Pi. */
+/** Step 3: which plate, summary, optional frame, one start button, then progress from the Pi. */
 @Composable
 fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: () -> Unit, onMotiv: () -> Unit) {
-    val doc by editor.doc.collectAsStateWithLifecycle()
+    val project by editor.project.collectAsStateWithLifecycle()
     val chosen by editor.materialKey.collectAsStateWithLifecycle()
     val status by machine.status.collectAsStateWithLifecycle()
     val online by machine.online.collectAsStateWithLifecycle()
@@ -69,12 +71,21 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
     val update by machine.update.collectAsStateWithLifecycle()
     var confirm by rememberConfirm()
     var built by remember { mutableStateOf<Built?>(null) }
+    // Plate to laser: the one being edited, unless the operator picks another here.
+    var chosenPlate by rememberSaveable { mutableIntStateOf(project.activePlate) }
+    val plate = chosenPlate.coerceIn(0, project.plateCount - 1)
+    val doc = project.plateView(plate)
+    val multi = project.plateCount > 1
+    // Plates lasered in this session (check mark), and the one the last start was for.
+    var done by remember { mutableStateOf(emptySet<Int>()) }
+    var startedPlate by rememberSaveable { mutableStateOf<Int?>(null) }
 
     // Build and check the job before it leaves the tablet. No Z values: the Pi corrects the height itself.
-    LaunchedEffect(doc) {
+    LaunchedEffect(project, plate) {
         built = null
+        if (doc.elements.isEmpty()) { built = Built.Fail(if (multi) "Platte ${plate + 1} ist leer – eine andere Platte wählen." else "Noch kein Motiv – zuerst etwas gestalten."); return@LaunchedEffect }
         built = try {
-            val job = editor.buildJob(false, 7.0, 1.5)
+            val job = editor.buildJob(false, 7.0, 1.5, plate)
             Built.Ok(job.gcode, withContext(Dispatchers.Default) { Toolpath.parse(job.gcode) })
         } catch (e: kotlinx.coroutines.CancellationException) { throw e
         } catch (e: Exception) { Built.Fail(e.message ?: "Der Auftrag lässt sich nicht erzeugen.") }
@@ -86,7 +97,12 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
     val ok = built as? Built.Ok
     val why = blocker(status, online, host)
     val ready = ok != null && why == null && !running && !framing
-    val name = PiClient.jobNameFrom(doc.title)
+    val name = PiClient.jobNameFrom(if (multi) "${project.title} Platte ${plate + 1}" else project.title)
+    LaunchedEffect(job?.state, startedPlate) {
+        val p = startedPlate
+        if (job?.state == "complete" && p != null) done = done + p
+    }
+    val next = (plate + 1 until project.plateCount).firstOrNull { project.plateSize(it) > 0 && it !in done }
 
     Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Box(
@@ -102,6 +118,10 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
         }
         Column(Modifier.width(380.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("3 · Starten", style = LcTypography.headlineSmall)
+            if (multi) {
+                SmallText("Welche Platte soll gelasert werden?")
+                PlateChips(project, plate, { if (!running) chosenPlate = it }, Modifier.fillMaxWidth(), done)
+            }
             if (update.available && !running) Banner("Update ${update.info?.version_name} verfügbar – unter Einstellungen aktualisieren.", Lc.info)
             val materialText = materialSummary(doc)
             Tile("Material", materialText ?: "noch keines gewählt", Modifier.fillMaxWidth(), if (materialText == null) Lc.warn else Lc.text)
@@ -121,7 +141,12 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
                 RunCard(machine, job.step, job.lastPaths, job.probe.done, job.probe.total, job.fraction, ok?.toolpath?.remainingSeconds(job.line), busy)
             } else {
                 if (job?.state == "aborted") Banner("Abgebrochen – der Laser ist aus. Zum Wiederholen erneut Starten.", Lc.info)
-                if (job?.state == "complete") Banner("Fertig – der Auftrag ist abgeschlossen, der Kopf steht geparkt.", Lc.ok)
+                if (job?.state == "complete") {
+                    val which = startedPlate?.takeIf { multi }?.let { "Platte ${it + 1} " } ?: ""
+                    Banner("Fertig – ${which}ist gelasert, der Kopf steht geparkt.", Lc.ok)
+                    if (multi && next != null && startedPlate == plate)
+                        LcButton("Weiter mit Platte ${next + 1}", { chosenPlate = next }, Modifier.fillMaxWidth(), LcIcons.right)
+                }
                 if (job?.state == "error" && job.error.isNotBlank()) Banner(job.error, Lc.bad)
                 if (why != null) Banner(why, Lc.info)
                 if (framing) {
@@ -132,8 +157,9 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
                     Modifier.fillMaxWidth(), LcIcons.rect, busy = "frame" in busy, enabled = ready)
                 LcButton("Starten", {
                     confirm = Confirm("Auftrag starten?",
-                        "Liegt das Material, und ist der Arbeitsbereich frei? Die Maschine referenziert, misst die Höhe und lasert danach von selbst.",
-                        "Starten") { ok?.let { machine.startAutomatic(name, it.gcode) } }
+                        (if (multi) "Liegt Platte ${plate + 1} in der Maschine? " else "Liegt das Material? ") +
+                            "Ist der Arbeitsbereich frei? Die Maschine referenziert, misst die Höhe und lasert danach von selbst.",
+                        "Starten") { ok?.let { startedPlate = plate; machine.startAutomatic(name, it.gcode) } }
                 }, Modifier.fillMaxWidth(), LcIcons.play, BtnKind.PRIMARY, busy = "start" in busy, enabled = ready, big = true)
                 SmallText("Die Maschine referenziert, tastet das Material ab, korrigiert die Höhe, lasert und parkt – alles automatisch.", Lc.faint)
             }

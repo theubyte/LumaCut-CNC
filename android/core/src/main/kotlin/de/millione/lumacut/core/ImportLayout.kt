@@ -11,6 +11,9 @@ class ImportUnit(val items: List<ImportItem>, val images: List<EmbeddedImage>) {
 
 enum class FitKind { AS_IS, PACKED, PARTIAL }
 
+/** An import spread over several plates: one layout per plate, [leftOut] units fit on none. */
+class Spread(val plates: List<Layout>, val leftOut: Int)
+
 /** [offsets] = translation per unit (null = does not fit and is left out). */
 class Layout(val kind: FitKind, val units: List<ImportUnit>, val offsets: List<Pt?>) {
     val leftOut get() = offsets.count { it == null }
@@ -50,10 +53,34 @@ object ImportLayout {
             val d = Pt(w / 2 - all.center.x, h / 2 - all.center.y)
             return Layout(FitKind.AS_IS, units0, units0.map { d })
         }
-        // one big group: its parts become the units
-        val units = if (units0.size == 1) units0[0].let { u -> u.items.map { ImportUnit(listOf(it), emptyList()) } + u.images.map { ImportUnit(emptyList(), listOf(it)) } } else units0
+        val units = explode(units0)
         val packed = shelf(units.map { it.box }, w, h)
         return Layout(if (packed.all { it != null }) FitKind.PACKED else FitKind.PARTIAL, units, packed)
+    }
+
+    /** One big group: its parts become the units. */
+    private fun explode(units0: List<ImportUnit>): List<ImportUnit> =
+        if (units0.size == 1) units0[0].let { u -> u.items.map { ImportUnit(listOf(it), emptyList()) } + u.images.map { ImportUnit(emptyList(), listOf(it)) } }
+        else units0
+
+    /**
+     * Spreads the units over as many plates as needed, original size, shelf-packed plate by plate (at most [maxPlates]).
+     * One [Layout] per plate over the same units (offset null = not on this plate); [leftOut] of the
+     * result = units larger than a whole plate, they are on none.
+     */
+    fun spread(units0: List<ImportUnit>, w: Double = Work.WIDTH, h: Double = Work.HEIGHT, maxPlates: Int = 20): Spread {
+        val units = explode(units0)
+        var rest = units.indices.filter { val b = units[it].box; b.width <= w - 2 * MARGIN && b.height <= h - 2 * MARGIN }
+        val tooBig = units.size - rest.size
+        val plates = ArrayList<Layout>()
+        while (rest.isNotEmpty() && plates.size < maxPlates) {
+            val packed = shelf(rest.map { units[it].box }, w, h)
+            val offsets = arrayOfNulls<Pt>(units.size)
+            rest.forEachIndexed { k, i -> offsets[i] = packed[k] }
+            plates += Layout(FitKind.PACKED, units, offsets.toList())
+            rest = rest.filterIndexed { k, _ -> packed[k] == null }
+        }
+        return Spread(plates, tooBig + rest.size)
     }
 
     /** Factor (< 1) that shrinks everything into the work area with a 5 mm border. */

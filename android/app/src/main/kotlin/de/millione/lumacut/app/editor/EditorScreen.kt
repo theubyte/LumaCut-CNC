@@ -133,6 +133,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     var gridOpen by remember { mutableStateOf(false) }
     var shapesMenu by remember { mutableStateOf(false) }
     val doc by editor.doc.collectAsStateWithLifecycle()
+    val project by editor.project.collectAsStateWithLifecycle()
     val selected by editor.selected.collectAsStateWithLifecycle()
     val tool by editor.tool.collectAsStateWithLifecycle()
     val multi by editor.multi.collectAsStateWithLifecycle()
@@ -160,7 +161,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     val projectSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
         scope.launch(Dispatchers.IO) {
-            runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(editor.doc.value.toJson().toByteArray()) } }
+            runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(editor.projectJson().toByteArray()) } }
                 .onSuccess { editor.notify("Projekt gespeichert") }.onFailure { editor.notify("Speichern fehlgeschlagen", true) }
         }
     }
@@ -215,15 +216,16 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         item("Materialtest …") {
                             confirm = Confirm("Materialtest erstellen?", "Das aktuelle Projekt wird durch ein Testraster ersetzt (Rückgängig holt es zurück).", "Weiter") { materialTest = true }
                         }
-                        item("Neues Projekt") { confirm = Confirm("Neues Projekt?", "Alle Elemente werden entfernt. Ebenen bleiben.", "Neu", danger = true) { editor.newDocument() } }
+                        item("Neues Projekt") { confirm = Confirm("Neues Projekt?", "Alle Platten und Elemente werden entfernt. Ebenen bleiben.", "Neu", danger = true) { editor.newDocument() } }
                         item("Projekt öffnen …") { projectOpener.launch(arrayOf("application/json", "*/*")) }
                         item("Projekt speichern …") { projectSaver.launch(PiClient.jobNameFrom(doc.title).removeSuffix(".gcode") + ".lumacut.json") }
                     }
                 }
             }
             LcButton("Weiter: Starten", onNext, icon = LcIcons.right, kind = BtnKind.PRIMARY,
-                     enabled = doc.elements.isNotEmpty())
+                     enabled = project.elements.isNotEmpty())
         }
+        PlateBar(editor, Modifier.fillMaxWidth())
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ToolColumn(tool, editor::setTool)
             Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(18.dp))) {

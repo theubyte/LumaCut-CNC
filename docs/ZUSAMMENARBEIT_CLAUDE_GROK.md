@@ -325,6 +325,11 @@ Hauptweg, drei Schritte, immer sichtbar:
 - (Claude, Android) **Fertig: Messwerkzeug** im Editor (Commit 34aef6f, CI grün: https://github.com/theubyte/LumaCut-CNC/actions/runs/40422762188).
   Fangen (Ecke > Mitte/Kantenmitte > Kante, 24 dp) mit Lupe; Abstand, Linie–Linie, Element-Info, Winkel, Rand; Liste mit Kopieren/Löschen.
   Geometrie in core (`Measure.kt`, Tests grün), Maße nur Anzeige, nicht im Projekt. Nicht am Tablet erprobt (Lupe/Gesten nur per CI kompiliert).
+- (Claude, Android) **Fertig: mehrere Platten** (Wunsch des Besitzers): ein Projekt kann mehrere Platten haben, wenn das Vorhaben
+  nicht auf eine Platte passt. Projekt-JSON: `Document.plateCount`, `activePlate`, `Element.plate` (Index, Standard 0; alte Dateien = 1 Platte).
+  Editor: Plattenleiste über der Zeichenfläche (wechseln, „Weitere Platte“, Auswahl auf andere Platte, Platte löschen); Import, der nicht
+  passt, kann in Originalgröße auf mehrere Platten verteilt werden. Schritt 3: Platte wählen, nur sie wird gelasert, danach „Weiter mit Platte N“.
+  Ebenen/Material gelten für alle Platten. **Wunsch an Grok (Windows):** gleiche Felder im Projektformat lesen/schreiben und eine Plattenauswahl beim Start.
 
 ## Änderungslog
 

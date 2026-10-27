@@ -56,7 +56,8 @@ import kotlin.math.sin
 
 /** An import that does not fit as drawn: the operator picks one of the ways out (dialog in the editor). */
 class PendingImport(val kindLabel: String, val total: Int, val fitting: Int, val shrinkPercent: Int,
-                    val onFitting: () -> Unit, val onShrink: () -> Unit)
+                    val onFitting: () -> Unit, val onShrink: () -> Unit,
+                    val plates: Int = 0, val onPlates: (() -> Unit)? = null)
 
 enum class Tool(val label: String) { SELECT("Auswahl"), RECT("Rechteck"), ELLIPSE("Ellipse"), POLYGON("Vieleck"),
     LINE("Linie"), PEN("Freihand"), TEXT("Text"), MEASURE("Messen") }
@@ -72,6 +73,8 @@ class BuiltJob(val gcode: String, val focus: FocusReport?)
 /**
  * Editor state. All geometry is in work-area mm (0..360 × 0..340, origin
  * top-left); the safezone never appears here and nothing can be moved into it.
+ * The project can have several plates; [doc] is the plate being edited, so every
+ * editing function works on that plate only, and [project] holds all of them.
  */
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val dir = app.filesDir
@@ -80,7 +83,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val backgroundFile = File(dir, "background.png")
     private val heightFile = File(dir, "heights.json")
 
-    private val _doc = MutableStateFlow(load())
+    private val _project = MutableStateFlow(load())
+    val project: StateFlow<Document> = _project.asStateFlow()
+    private val _doc = MutableStateFlow(_project.value.plateView())
     val doc: StateFlow<Document> = _doc.asStateFlow()
 
     private val _selected = MutableStateFlow<Set<String>>(emptySet())
@@ -128,28 +133,35 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ---------- history ---------- */
 
-    /** Applies a change; edits with the same [coalesce] key within 1.5 s share one undo step. */
-    fun change(coalesce: String? = null, block: (Document) -> Document) {
+    /** Applies a change to the plate being edited; edits with the same [coalesce] key within 1.5 s share one undo step. */
+    fun change(coalesce: String? = null, block: (Document) -> Document) =
+        changeProject(coalesce) { p -> p.withPlate(block(p.plateView())) }
+
+    /** Applies a change to the whole project (all plates). */
+    private fun changeProject(coalesce: String? = null, block: (Document) -> Document) {
         val now = System.currentTimeMillis()
         val merge = coalesce != null && coalesce == lastEditKey && now - lastEditAt < 1500
-        if (!merge) { undo.addLast(_doc.value); if (undo.size > 100) undo.removeFirst(); redo.clear() }
+        if (!merge) { undo.addLast(_project.value); if (undo.size > 100) undo.removeFirst(); redo.clear() }
         lastEditKey = coalesce; lastEditAt = now
-        _doc.value = block(_doc.value)
+        _project.value = block(_project.value)
         afterChange()
     }
 
+    // Undo shows the plate the step happened on (the snapshot carries its active plate).
     fun undo() {
         val prev = undo.removeLastOrNull() ?: return
-        redo.addLast(_doc.value); _doc.value = prev; lastEditKey = null; afterChange()
+        redo.addLast(_project.value); _project.value = prev; lastEditKey = null; afterChange()
     }
 
     fun redo() {
         val next = redo.removeLastOrNull() ?: return
-        undo.addLast(_doc.value); _doc.value = next; lastEditKey = null; afterChange()
+        undo.addLast(_project.value); _project.value = next; lastEditKey = null; afterChange()
     }
 
     private fun afterChange() {
         _canUndo.value = undo.isNotEmpty(); _canRedo.value = redo.isNotEmpty()
+        if (_doc.value.activePlate != _project.value.activePlate) clearMeasurements()
+        _doc.value = _project.value.plateView()
         val d = _doc.value
         _selected.update { sel -> sel.filter { id -> d.elements.firstOrNull { it.id == id }?.let(::selectable) == true }.toSet() }
         if (d.layers.none { it.id == _activeLayer.value }) _activeLayer.value = d.layers.first().id
@@ -157,11 +169,51 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         saveJob?.cancel()
         saveJob = viewModelScope.launch(Dispatchers.IO) {
             delay(800)
-            runCatching { File(dir, "project.json.tmp").apply { writeText(_doc.value.toJson()) }.renameTo(projectFile) }
+            runCatching { File(dir, "project.json.tmp").apply { writeText(_project.value.toJson()) }.renameTo(projectFile) }
         }
     }
 
     private fun load(): Document = runCatching { Document.fromJson(projectFile.readText()) }.getOrElse { Document() }
+
+    /** The whole project (all plates) as JSON, for "Projekt speichern". */
+    fun projectJson(): String = _project.value.toJson()
+
+    /* ---------- plates ---------- */
+
+    /** Shows plate [i] in the editor (not an undo step). */
+    fun setPlate(i: Int) {
+        val p = _project.value
+        if (i !in 0 until p.plateCount || i == p.activePlate) return
+        _project.value = p.copy(activePlate = i)
+        _selected.value = emptySet(); lastEditKey = null
+        afterChange()
+    }
+
+    /** A new empty plate after the last one; the editor switches to it. */
+    fun addPlate() {
+        changeProject { it.addPlate() }
+        _selected.value = emptySet()
+        notify("Platte ${_project.value.plateCount} angelegt – hier geht es weiter")
+    }
+
+    fun deletePlate(i: Int) {
+        if (_project.value.plateCount <= 1) { notify("Die letzte Platte bleibt bestehen", true); return }
+        changeProject { it.removePlate(i) }
+        notify("Platte ${i + 1} entfernt")
+    }
+
+    /** Moves the selection (same position) to plate [target]; [target] = plate count makes a new plate. */
+    fun moveSelectedToPlate(target: Int) {
+        val ids = _selected.value
+        if (ids.isEmpty() || target == _project.value.activePlate) return
+        changeProject { p ->
+            val q = if (target >= p.plateCount) p.copy(plateCount = p.plateCount + 1) else p
+            val t = minOf(target, q.plateCount - 1)
+            q.moveToPlate(ids, t).copy(activePlate = t)
+        }
+        _selected.value = ids
+        notify("${ids.size} Element(e) auf Platte ${_project.value.activePlate + 1} verschoben")
+    }
 
     /* ---------- selection & tools ---------- */
 
@@ -360,6 +412,19 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
         _selected.value = elements.map { it.id }.toSet()
         return elements.size
+    }
+
+    /**
+     * An import spread over several plates: the first part on the plate being edited, the rest on new plates
+     * after the last one. Returns the number of elements; the editor then shows the last new plate.
+     */
+    fun addImportedOnPlates(kind: String, plates: List<Layout>, infos: List<ImportLayerInfo>, rasters: Map<EmbeddedImage, Raster>): Int {
+        var n = 0
+        for ((i, layout) in plates.withIndex()) {
+            if (i > 0) changeProject { it.addPlate() }
+            n += addImported(kind, layout, 1.0, infos, rasters)
+        }
+        return n
     }
 
     /**
@@ -681,25 +746,27 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Replaces the project (e.g. by a generated material test); undo brings the old one back. */
     fun replaceDocument(d: Document) {
-        change { d }
+        changeProject { d.normalized() }
         _selected.value = emptySet()
         _activeLayer.value = d.layers.first().id
     }
 
-    fun newDocument() { change { Document(layers = it.layers) }; _selected.value = emptySet() }
+    fun newDocument() { changeProject { Document(layers = it.layers) }; _selected.value = emptySet() }
 
     fun openJson(text: String) = runCatching { Document.fromJson(text) }
-        .onSuccess { d -> change { d }; _selected.value = emptySet(); notify("Projekt „${d.title}“ geöffnet") }
+        .onSuccess { d -> changeProject { d }; _selected.value = emptySet()
+            notify("Projekt „${d.title}“ geöffnet" + if (d.plateCount > 1) " (${d.plateCount} Platten)" else "") }
         .onFailure { notify("Keine gültige LumaCut-Projektdatei", true) }
 
     fun rename(title: String) = change("title") { it.copy(title = title) }
 
     /**
-     * Builds the job. With [focusGapMm]/[tipOffsetMm] and a height mesh, every
-     * burning segment gets its own focus height over the measured surface.
+     * Builds the job for [plate] (default: the plate being edited). With [focusGapMm]/[tipOffsetMm] and a height
+     * mesh, every burning segment gets its own focus height over the measured surface.
      */
-    suspend fun buildJob(compensate: Boolean, focusGapMm: Double, tipOffsetMm: Double): BuiltJob = withContext(Dispatchers.Default) {
-        val gcode = MarlinWriter(appVersion()).write(_doc.value)
+    suspend fun buildJob(compensate: Boolean, focusGapMm: Double, tipOffsetMm: Double,
+                         plate: Int = _project.value.activePlate): BuiltJob = withContext(Dispatchers.Default) {
+        val gcode = MarlinWriter(appVersion()).write(_project.value.plateView(plate))
         val maps = _heights.value
         if (compensate && maps != null) {
             val (out, report) = FocusCompensation.apply(gcode, maps, focusGapMm, tipOffsetMm)
