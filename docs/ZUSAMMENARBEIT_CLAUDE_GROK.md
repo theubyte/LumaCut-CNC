@@ -331,8 +331,19 @@ Hauptweg, drei Schritte, immer sichtbar:
   passt, kann in Originalgröße auf mehrere Platten verteilt werden. Schritt 3: Platte wählen, nur sie wird gelasert, danach „Weiter mit Platte N“.
   Ebenen/Material gelten für alle Platten. **Wunsch an Grok (Windows):** gleiche Felder im Projektformat lesen/schreiben und eine Plattenauswahl beim Start.
 
+**Fertig (Claude, Android): Kopfkamera mit Weitwinkel-Linsenkorrektur.** Kamera des Besitzers: HBVCAM F1716HD V66
+(OV2710, 1920 × 1080, ca. 100°, Fixfokus von Hand) am Laserkopf, am Pi per USB. Die Kalibrierung läuft über ein gelasertes
+Punktraster (`core/DotGrid.kt`: 17 × 13 Punkte, 12 mm Abstand, Mitte des Arbeitsbereichs, großer Mittelpunkt, mittlere Punkte bei
+(+1, 0) und (0, +2) für Richtung und Spiegelung). Ein Foto reicht: Erkennung, Zuordnung und Ausgleich (`core/Lens.kt`) liefern
+Homographie + radiale Verzeichnung im **OpenCV-Modell** (`camera_matrix` mit fx = fy = halbe Bilddiagonale, `dist_coeffs` = [k1, k2, 0, 0, 0],
+`Lens.openCv()`). Der Tablet-Scan holt Bilder in 1920 × 1080 (Rückfall 1280 × 720) und setzt das Mosaik mit bis zu 5 px/mm zusammen.
+Die Werte liegen vorerst nur im Tablet; sie auf den Pi (`/api/camera/calibration`) zu schreiben, wäre der nächste Schritt, wenn Studio
+dieselben Werte nutzen soll. **Frage an Grok:** Passt das OpenCV-Feldformat so für `scanprobe/calibration.py`, oder braucht Studio dazu noch
+`px_per_mm`/`offset_mm`/`rotation_deg` aus derselben Messung?
+
 ## Änderungslog
 
+- 2026-10-27 Claude: Kopfkamera-Kalibrierung mit Punktraster und Linsenkorrektur (Android), Notiz über dem Änderungslog.
 - 2026-10-27 Claude: Web-Oberfläche des Pi vorübergehend bei Claude (Besitzer: Grok derzeit nicht verfügbar). Vor einer Rückgabe hier eintragen, damit niemand gleichzeitig an `index.html` arbeitet.
 
 - 2026-10-26 Claude: Dokument angelegt; Koordinaten vom Besitzer bestätigt (Endschalter hinten rechts von der Tür aus).

@@ -52,6 +52,7 @@ typealias Poly = List<Pt>
 fun Poly.length(): Double = zipWithNext().sumOf { (a, b) -> a.dist(b) }
 fun Poly.isClosed(eps: Double = 1e-6) = size > 2 && first().dist(last()) < eps
 
+@Serializable
 data class Box(val minX: Double, val minY: Double, val maxX: Double, val maxY: Double) {
     val width get() = maxX - minX
     val height get() = maxY - minY

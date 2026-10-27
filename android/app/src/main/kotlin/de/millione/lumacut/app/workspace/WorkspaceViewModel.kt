@@ -12,6 +12,7 @@ import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.core.Box
 import de.millione.lumacut.core.CameraCalibration
 import de.millione.lumacut.core.Document
+import de.millione.lumacut.core.DotGrid
 import de.millione.lumacut.core.Frame
 import de.millione.lumacut.core.HeightMap
 import de.millione.lumacut.core.HeightMapSet
@@ -112,14 +113,53 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ---------- camera ---------- */
 
-    /** Snapshot from the head camera, scaled to [width] px wide (scan tiles and calibration share this size). */
-    suspend fun snapshot(c: PiClient, width: Int = TILE_WIDTH): Bitmap {
-        val bytes = c.cameraSnapshot(1280, 720)
+    /** Largest picture size the camera delivered so far (Full HD first, 1280 × 720 if it refuses). */
+    private var cameraSize = CAMERA_SIZES.first()
+
+    /**
+     * Snapshot from the head camera at full resolution, or scaled to
+     * [width] px wide. Scan tiles are brought to the calibration's size.
+     */
+    suspend fun snapshot(c: PiClient, width: Int? = null): Bitmap {
+        val bytes = try { c.cameraSnapshot(cameraSize.first, cameraSize.second) } catch (e: Exception) {
+            val next = CAMERA_SIZES.getOrNull(CAMERA_SIZES.indexOf(cameraSize) + 1) ?: throw e
+            cameraSize = next
+            c.cameraSnapshot(next.first, next.second)
+        }
         return withContext(Dispatchers.Default) {
             val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw IllegalStateException("Kamerabild nicht lesbar")
-            val h = (raw.height.toLong() * width / raw.width).toInt()
-            Bitmap.createScaledBitmap(raw, width, h, true)
+            if (width == null || width == raw.width) raw
+            else Bitmap.createScaledBitmap(raw, width, (raw.height.toLong() * width / raw.width).toInt(), true)
         }
+    }
+
+    fun sendGridJob(machine: MachineViewModel) =
+        machine.uploadJob("kamera-punktraster.gcode", DotGrid.job())
+
+    /** Moves the head (laser off) so the dot grid's centre is under the camera, as far as known. */
+    fun headOverGrid(machine: MachineViewModel) {
+        val target = DotGrid.center - (_calibration.value?.usable(0.0)?.center ?: Pt(0.0, 0.0))
+        val m = Work.toMachine(target)
+        machine.request("moveto", quietSuccess = true) { it.moveTo(m.x.coerceIn(0.0, 390.0), m.y.coerceIn(0.0, 370.0)) }
+    }
+
+    /** Finds the dot grid in [photo] and fits the lens; the head position and Z come from the Pi. */
+    suspend fun evaluateGrid(machine: MachineViewModel, photo: Bitmap): DotGrid.Result {
+        val pos = machine.refreshStatus()?.position
+        if (pos == null || pos.size < 3) throw IllegalStateException("Kopfposition unbekannt – Pi verbunden?")
+        val head = Work.fromMachine(pos[0], pos[1])
+        return withContext(Dispatchers.Default) {
+            val px = IntArray(photo.width * photo.height).also { photo.getPixels(it, 0, photo.width, 0, 0, photo.width, photo.height) }
+            DotGrid.calibrate(px, photo.width, photo.height, head, pos[2])
+        }
+    }
+
+    fun saveGridCalibration(machine: MachineViewModel, result: DotGrid.Result) {
+        val cal = result.calibration
+        _calibration.value = cal
+        prefs.edit().putString("headCamera2", Document.JSON.encodeToString(CameraCalibration.serializer(), cal)).apply()
+        val u = cal.usable(0.0)
+        machine.notify("Kopfkamera kalibriert: Bildfeld %.0f × %.0f mm, Genauigkeit %.2f mm".format(Locale.GERMANY, u.width, u.height, result.lens.rmsMm))
     }
 
     /** Lasered marks for the head camera: a 60 × 40 mm rectangle in the middle of the work area. */
@@ -168,7 +208,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                 if (st?.homed != true) throw IllegalStateException("Erst referenzieren")
                 val plan = Scan.plan(cal)
                 plan.uncovered.forEach { machine.notify(it) }
-                val tiles = ArrayList<Scan.Tile>()
+                val mosaic = Scan.Mosaic(cal, mosaicResolution(cal))
                 for ((i, head) in plan.heads.withIndex()) {
                     if (!isActive) return@launch
                     _run.value = Run("Scan", i, plan.heads.size, "Bild ${i + 1} von ${plan.heads.size}")
@@ -176,22 +216,21 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                     c.moveTo(m.x, m.y)
                     delay(350)                       // let the gantry settle before the picture
                     val bmp = snapshot(c, cal.photoWidth)
-                    val sized = if (bmp.height == cal.photoHeight) bmp else Bitmap.createScaledBitmap(bmp, cal.photoWidth, cal.photoHeight, true)
-                    val px = IntArray(sized.width * sized.height).also { sized.getPixels(it, 0, sized.width, 0, 0, sized.width, sized.height) }
-                    tiles += Scan.Tile(px, sized.width, sized.height, head)
+                    withContext(Dispatchers.Default) {
+                        val sized = if (bmp.height == cal.photoHeight) bmp else Bitmap.createScaledBitmap(bmp, cal.photoWidth, cal.photoHeight, true)
+                        val px = IntArray(sized.width * sized.height).also { sized.getPixels(it, 0, sized.width, 0, 0, sized.width, sized.height) }
+                        mosaic.add(Scan.Tile(px, sized.width, sized.height, head))
+                    }
                     machine.refreshStatus()?.position?.getOrNull(2)?.let { z ->
                         if (i == 0 && kotlin.math.abs(z - cal.scanZ) > 1.0)
                             machine.notify("Kamerahöhe Z %.1f statt %.1f wie bei der Kalibrierung – Maßstab weicht ab".format(z, cal.scanZ), true)
                     }
                 }
                 _run.value = Run("Scan", plan.heads.size, plan.heads.size, "Mosaik wird berechnet …")
-                val bmp = withContext(Dispatchers.Default) {
-                    val (out, w, h) = Scan.mosaic(tiles, cal)
-                    Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888)
-                }
+                val bmp = withContext(Dispatchers.Default) { Bitmap.createBitmap(mosaic.pixels, mosaic.width, mosaic.height, Bitmap.Config.ARGB_8888) }
                 editor.setBackground(bmp)
                 markDone("scan")
-                machine.notify("Arbeitsfläche gescannt (${tiles.size} Bilder)")
+                machine.notify("Arbeitsfläche gescannt (${plan.heads.size} Bilder)")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -293,5 +332,14 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    companion object { const val TILE_WIDTH = 640 }
+    /** Mosaic pixels per mm: close to what the camera resolves, 2 … 5 px/mm (5 px/mm ≈ 1800 × 1700 px). */
+    private fun mosaicResolution(cal: CameraCalibration): Double {
+        val native = cal.photoWidth / cal.footprint().width.coerceAtLeast(1.0)
+        return (native * 0.8).coerceIn(2.0, 5.0)
+    }
+
+    companion object {
+        /** Tried in this order; the OV2710 (HBVCAM F1716) does Full HD, many webcams only 1280 × 720 raw. */
+        val CAMERA_SIZES = listOf(1920 to 1080, 1280 to 720)
+    }
 }

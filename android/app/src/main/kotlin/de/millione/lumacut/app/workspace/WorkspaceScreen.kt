@@ -1,6 +1,5 @@
 package de.millione.lumacut.app.workspace
 
-import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,15 +25,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -47,19 +43,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import de.millione.lumacut.app.editor.EditorViewModel
-import de.millione.lumacut.app.editor.MarkerCanvas
 import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.app.machine.canControl
 import de.millione.lumacut.app.ui.Banner
 import de.millione.lumacut.app.ui.BtnKind
 import de.millione.lumacut.app.ui.Confirm
 import de.millione.lumacut.app.ui.ConfirmDialog
-import de.millione.lumacut.app.ui.IconBtn
 import de.millione.lumacut.app.ui.Lc
 import de.millione.lumacut.app.ui.LcButton
 import de.millione.lumacut.app.ui.LcCard
@@ -77,7 +69,6 @@ import de.millione.lumacut.core.Box as WBox
 import de.millione.lumacut.core.Frame
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Work
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
@@ -273,62 +264,3 @@ private fun WorkspaceCanvas(editor: EditorViewModel, ws: WorkspaceViewModel, hea
         drawHead(m, head)
     }
 }
-
-@Composable
-private fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel, onClose: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    val busy by machine.busy.collectAsStateWithLifecycle()
-    var photo by remember { mutableStateOf<Bitmap?>(null) }
-    var loading by remember { mutableStateOf(false) }
-    val markers = remember { mutableStateListOf<Offset>() }
-    fun grab() {
-        val c = machine.clientOrNotify() ?: return
-        loading = true
-        scope.launch {
-            try {
-                val bmp = ws.snapshot(c)
-                if (photo == null || markers.size != 4) {
-                    markers.clear()
-                    val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
-                    markers.addAll(listOf(Offset(w * .3f, h * .3f), Offset(w * .7f, h * .3f), Offset(w * .7f, h * .7f), Offset(w * .3f, h * .7f)))
-                }
-                photo = bmp
-            } catch (e: Exception) { machine.notify(e.message ?: "Kein Kamerabild", true) } finally { loading = false }
-        }
-    }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Row(Modifier.fillMaxSize().background(Lc.bg).padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            LcCard(Modifier.width(380.dp).fillMaxHeight()) {
-                Text("Kopfkamera kalibrieren", style = LcTypography.headlineSmall)
-                Spacer(Modifier.height(8.dp))
-                SmallText("1. Kalibrier-Rechteck (60 × 40 mm, Mitte des Arbeitsbereichs) auf Restmaterial lasern.\n2. Kopf darüber fahren, bis das ganze Rechteck im Bild ist.\n3. Die vier Marker auf die nummerierten Ecken ziehen.\n4. Speichern. Danach nicht mehr in Z verstellen – der Scan nutzt dieselbe Höhe.")
-                Spacer(Modifier.height(14.dp))
-                LcButton("1 · Rechteck an Laser senden", { ws.sendCalibrationJob(machine) }, Modifier.fillMaxWidth(), LcIcons.send, busy = "upload" in busy)
-                Spacer(Modifier.height(8.dp))
-                LcButton("2 · Kopf über das Rechteck", { ws.headOverRect(machine) }, Modifier.fillMaxWidth(), LcIcons.machine, busy = "moveto" in busy)
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    SmallText("10 mm:")
-                    IconBtn(LcIcons.left, "X+", { machine.jog('X', 10.0) })
-                    IconBtn(LcIcons.right, "X−", { machine.jog('X', -10.0) })
-                    IconBtn(LcIcons.up, "Y−", { machine.jog('Y', -10.0) })
-                    IconBtn(LcIcons.down, "Y+", { machine.jog('Y', 10.0) })
-                }
-                Spacer(Modifier.height(8.dp))
-                LcButton("Kamerabild holen", { grab() }, Modifier.fillMaxWidth(), LcIcons.camera, BtnKind.PRIMARY, busy = loading)
-                Spacer(Modifier.weight(1f))
-                LcButton("Speichern", {
-                    val p = photo ?: return@LcButton
-                    if (ws.saveCalibration(machine, p, markers.map { Pt(it.x.toDouble(), it.y.toDouble()) })) onClose()
-                }, Modifier.fillMaxWidth(), LcIcons.check, BtnKind.PRIMARY, enabled = photo != null && markers.size == 4, big = true)
-                Spacer(Modifier.height(8.dp))
-                LcButton("Schließen", onClose, Modifier.fillMaxWidth(), kind = BtnKind.GHOST)
-            }
-            Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015)), contentAlignment = Alignment.Center) {
-                val p = photo
-                if (p == null) SmallText("Noch kein Kamerabild") else MarkerCanvas(p, markers)
-            }
-        }
-    }
-}
-
