@@ -11,6 +11,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material3.HorizontalDivider
 import de.millione.lumacut.app.ui.BarBtn
 import de.millione.lumacut.core.Booleans
+import de.millione.lumacut.core.make
+import de.millione.lumacut.core.ShapeKind
+import de.millione.lumacut.core.Curves
 import de.millione.lumacut.app.ui.BarDivider
 import de.millione.lumacut.app.ui.BarTextField
 import androidx.compose.foundation.Canvas
@@ -144,6 +147,8 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     var tabsOpen by remember { mutableStateOf(false) }
     var circleOpen by remember { mutableStateOf(false) }
     var boxOpen by remember { mutableStateOf(false) }
+    var personalMenu by remember { mutableStateOf(false) }
+    var personal by remember { mutableStateOf<String?>(null) }
     var shapesMenu by remember { mutableStateOf(false) }
     val doc by editor.doc.collectAsStateWithLifecycle()
     val project by editor.project.collectAsStateWithLifecycle()
@@ -217,6 +222,14 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                 }
                 BarBtn(LcIcons.polygon, "Kontur", { contourOpen = true }, enabled = selected.isNotEmpty())
                 Box {
+                    BarBtn(LcIcons.heart, "Personalisieren", { personalMenu = true }, menu = true)
+                    DropdownMenu(personalMenu, { personalMenu = false }, containerColor = Lc.surface2) {
+                        for ((key, label) in listOf("tags" to "Namensschilder & Anhänger …", "emblem" to "Monogramm-Emblem …",
+                                "frame" to "Rahmen …", "ruler" to "Lineal …", "puzzle" to "Puzzle …"))
+                            DropdownMenuItem(text = { Text(label) }, onClick = { personalMenu = false; personal = key })
+                    }
+                }
+                Box {
                     BarBtn(LcIcons.tools, "Werkzeuge", { toolsMenu = true }, menu = true)
                     DropdownMenu(toolsMenu, { toolsMenu = false }, containerColor = Lc.surface2) {
                         @Composable fun item(label: String, enabled: Boolean = true, action: () -> Unit) =
@@ -264,6 +277,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
             Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(16.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(16.dp))) {
                 EditorCanvas(editor, machineStatus?.position, onText = { textAt = it })
                 if (tool == Tool.MEASURE) MeasureBar(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
+                else ToolOptions(editor, tool, Modifier.align(Alignment.TopStart).padding(8.dp).padding(end = 56.dp))
                 // Shows / hides the right-hand panel (laser, layers, measurements).
                 BarBtn(if (panelOpen) LcIcons.chevronRight else LcIcons.panel,
                     if (panelOpen) null else if (tool == Tool.MEASURE) "Messwerte" else "Laser & Ebenen",
@@ -274,6 +288,11 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         Tool.SELECT -> if (multi) "Mehrfachauswahl: Antippen fügt hinzu oder entfernt · Rahmen ziehen wählt mehrere"
                                        else "Antippen wählt · ziehen verschiebt · Rahmen ziehen wählt mehrere · ⟳ dreht · Ecke skaliert · zwei Finger zoomen"
                         Tool.PEN -> "Mit dem Finger zeichnen"
+                        Tool.NODES -> "Element antippen · Punkte ziehen verschiebt sie · ziehen auf leerer Fläche verschiebt die Ansicht"
+                        Tool.CURVE -> "Punkte antippen – die Kurve läuft weich hindurch · ersten Punkt erneut antippen schließt sie"
+                        Tool.STAMP -> "Antippen setzt eine Kopie der Vorlage"
+                        Tool.PAINT -> "Element antippen legt es auf die Ebene, die rechts gewählt ist"
+                        Tool.ERASER -> "Antippen oder darüber wischen löscht Elemente"
                         Tool.TEXT -> "Antippen, wo der Text beginnen soll"
                         Tool.MEASURE -> measureHint(measureMode, measurePoints.size, measureFirst != null) + " · zwei Finger zoomen"
                         else -> "Ziehen, um ${tool.label.lowercase()} aufzuziehen · zwei Finger zoomen"
@@ -315,6 +334,13 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     if (tabsOpen) TabsDialog(editor) { tabsOpen = false }
     if (circleOpen) CircularArrayDialog(editor) { circleOpen = false }
     if (boxOpen) BoxDialog(editor) { boxOpen = false }
+    when (personal) {
+        "tags" -> TagsDialog(editor) { personal = null }
+        "emblem" -> EmblemDialog(editor) { personal = null }
+        "frame" -> FrameDialog(editor, selected.isNotEmpty()) { personal = null }
+        "ruler" -> RulerDialog(editor) { personal = null }
+        "puzzle" -> PuzzleDialog(editor, selected.isNotEmpty()) { personal = null }
+    }
     if (adjustOpen) {
         val picture = doc.elements.firstOrNull { it.id in selected && it.isImage }
         if (picture != null) ImageAdjustDialog(editor, picture) { adjustOpen = false } else adjustOpen = false
@@ -324,9 +350,10 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
 
 @Composable
 private fun ToolColumn(tool: Tool, onTool: (Tool) -> Unit) {
-    val icons = mapOf(Tool.SELECT to LcIcons.select, Tool.RECT to LcIcons.rect, Tool.ELLIPSE to LcIcons.ellipse,
-                      Tool.POLYGON to LcIcons.polygon, Tool.LINE to LcIcons.line, Tool.PEN to LcIcons.pen, Tool.TEXT to LcIcons.text,
-                      Tool.MEASURE to LcIcons.ruler)
+    val icons = mapOf(Tool.SELECT to LcIcons.select, Tool.NODES to LcIcons.nodes, Tool.RECT to LcIcons.rect, Tool.ELLIPSE to LcIcons.ellipse,
+                      Tool.POLYGON to LcIcons.polygon, Tool.SHAPE to LcIcons.heart, Tool.LINE to LcIcons.line, Tool.CURVE to LcIcons.curve,
+                      Tool.PEN to LcIcons.pen, Tool.TEXT to LcIcons.text, Tool.STAMP to LcIcons.stamp, Tool.PAINT to LcIcons.brush,
+                      Tool.ERASER to LcIcons.eraser, Tool.MEASURE to LcIcons.ruler)
     // Scrolls when the screen is too short for all tools (otherwise the last one, Messen, is cut off).
     Column(
         Modifier.width(70.dp).fillMaxHeight().clip(RoundedCornerShape(16.dp)).background(Lc.surface).border(1.dp, Lc.line, RoundedCornerShape(18.dp))
@@ -350,7 +377,7 @@ private fun ToolColumn(tool: Tool, onTool: (Tool) -> Unit) {
 
 /* ---------- canvas ---------- */
 
-private enum class Drag { NONE, MOVE, BAND, ROTATE, SCALE, PAN }
+private enum class Drag { NONE, MOVE, BAND, ROTATE, SCALE, PAN, NODE }
 
 /** Screen positions of the selection frame and its handles. */
 private class Handles(val topLeft: Offset, val size: Size) {
@@ -391,6 +418,10 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
     val pointMode = measureMode == MeasureMode.DISTANCE || measureMode == MeasureMode.ANGLE
     val pen = remember { mutableStateListOf<Pt>() }
     val images = remember { HashMap<String, ImageBitmap>() }
+    val curvePts by editor.curve.collectAsStateWithLifecycle()
+    val shapeKind by editor.shapeKind.collectAsStateWithLifecycle()
+    val sides by editor.polygonSides.collectAsStateWithLifecycle()
+    val activeNode by editor.activeNode.collectAsStateWithLifecycle()
 
     fun mapper() = WorkMapper.fit(Size(size.width.toFloat(), size.height.toFloat()), zoom = zoom, pan = pan)
 
@@ -405,6 +436,8 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
             val slop = viewConfiguration.touchSlop
             // Handles are decided at touch-down so they win over moving the shape underneath.
             val startHandles = editor.selectionBounds()?.takeIf { tool == Tool.SELECT }?.let { Handles.of(mapper(), it) }
+            val startNode = if (tool == Tool.NODES) editor.nodeAt(mapper().toWork(start), mapper().mm(24.dp.toPx()).toDouble()) else null
+            if (startNode != null) editor.setActiveNode(startNode)
             fun refreshProbe(pos: Offset) {
                 probe = pos
                 val mm = mapper()
@@ -450,7 +483,9 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
                                 }
                             }
                             Tool.PEN -> { pen.clear(); pen.add(p0) }
-                            Tool.TEXT -> drag = Drag.PAN
+                            Tool.TEXT, Tool.CURVE, Tool.STAMP, Tool.PAINT -> drag = Drag.PAN
+                            Tool.NODES -> drag = if (startNode != null) Drag.NODE else Drag.PAN
+                            Tool.ERASER -> editor.eraseAt(p0, m.mm(16f).toDouble(), key)
                             Tool.MEASURE -> {}
                             else -> { draftStart = p0; draftEnd = p0 }
                         }
@@ -476,7 +511,9 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
                                 else -> pan += pos - last
                             } }
                             Tool.PEN -> pen.add(b)
-                            Tool.TEXT -> pan += pos - last
+                            Tool.TEXT, Tool.CURVE, Tool.STAMP, Tool.PAINT -> pan += pos - last
+                            Tool.NODES -> if (drag == Drag.NODE && startNode != null) editor.moveNode(startNode, b, key) else pan += pos - last
+                            Tool.ERASER -> editor.eraseAt(b, m.mm(16f).toDouble(), key)
                             Tool.MEASURE -> {}
                             else -> draftEnd = b
                         }
@@ -497,6 +534,11 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
                 when (tool) {
                     Tool.SELECT -> editor.select(editor.hit(p, m.mm(24f).toDouble())?.id)
                     Tool.TEXT -> if (Work.contains(p)) onText(p) else editor.notify("Text bitte im Arbeitsbereich beginnen", true)
+                    Tool.NODES -> if (startNode == null) { editor.setActiveNode(null); editor.select(editor.hit(p, m.mm(24f).toDouble())?.id, false) }
+                    Tool.CURVE -> editor.curveTap(p, m.mm(30f).toDouble())
+                    Tool.STAMP -> if (Work.contains(p)) editor.stampAt(p)
+                    Tool.PAINT -> editor.paintAt(p, m.mm(24f).toDouble())
+                    Tool.ERASER -> editor.eraseAt(p, m.mm(24f).toDouble(), key)
                     else -> {}
                 }
             } else if (mode == 1) {
@@ -506,10 +548,11 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
                         band?.let { (a, b) -> editor.selectIn(WBox(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y))) }
                         if (drag == Drag.ROTATE || drag == Drag.SCALE) editor.keepInside(key)
                     }
-                    Tool.TEXT -> {}
+                    Tool.TEXT, Tool.NODES, Tool.CURVE, Tool.STAMP, Tool.PAINT, Tool.ERASER -> {}
                     else -> {
                         val a = draftStart; val b = draftEnd
-                        if (a != null && b != null) shapeFromDrag(tool, clampWork(a), clampWork(b))?.let { editor.addVector(tool.label, listOf(it)) }
+                        if (a != null && b != null) shapeFromDrag(tool, clampWork(a), clampWork(b), editor.shapeKind.value, editor.polygonSides.value)
+                            ?.let { editor.addVector(if (tool == Tool.SHAPE) editor.shapeKind.value.label else tool.label, listOf(it)) }
                     }
                 }
                 draftStart = null; draftEnd = null; pen.clear(); band = null; angleHint = null
@@ -576,13 +619,26 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
             drawRect(Lc.accent, tl, sz, style = Stroke(1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f))))
         }
         val a = draftStart; val b = draftEnd
-        if (a != null && b != null) shapeFromDrag(tool, clampWork(a), clampWork(b))?.let { poly ->
+        if (a != null && b != null) shapeFromDrag(tool, clampWork(a), clampWork(b), shapeKind, sides)?.let { poly ->
             val path = Path().apply { val p0 = m.at(poly.first()); moveTo(p0.x, p0.y); poly.drop(1).forEach { val q = m.at(it); lineTo(q.x, q.y) } }
             drawPath(path, Lc.accent, style = Stroke(2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f))))
         }
         if (pen.size > 1) {
             val path = Path().apply { val p0 = m.at(pen.first()); moveTo(p0.x, p0.y); pen.drop(1).forEach { val q = m.at(it); lineTo(q.x, q.y) } }
             drawPath(path, Lc.accent, style = Stroke(2.5f, cap = StrokeCap.Round))
+        }
+        if (tool == Tool.CURVE && curvePts.isNotEmpty()) {
+            val smooth = Curves.catmullRom(curvePts, false)
+            val path = Path().apply { val p0 = m.at(smooth.first()); moveTo(p0.x, p0.y); smooth.drop(1).forEach { val q = m.at(it); lineTo(q.x, q.y) } }
+            drawPath(path, Lc.accent, style = Stroke(2.5f, cap = StrokeCap.Round))
+            curvePts.forEachIndexed { i, q -> val o = m.at(q); drawCircle(Lc.bg, 9f, o); drawCircle(if (i == 0) Lc.warn else Lc.accent, 7f, o) }
+        }
+        if (tool == Tool.NODES) editor.editableNodes()?.takeIf { it.id in selected }?.let { e ->
+            e.worldPaths().forEachIndexed { pi, poly -> poly.forEachIndexed { i, q ->
+                val o = m.at(q); val on = activeNode?.let { it.elementId == e.id && it.poly == pi && it.index == i } == true
+                drawRect(Lc.bg, o - Offset(7f, 7f), Size(14f, 14f))
+                drawRect(if (on) Lc.warn else Lc.accent, o - Offset(5f, 5f), Size(10f, 10f), style = if (on) androidx.compose.ui.graphics.drawscope.Fill else Stroke(2f))
+            } }
         }
         drawHead(m, head)
         }
@@ -618,14 +674,15 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, onText: (
 private fun clampWork(p: Pt) = Pt(p.x.coerceIn(0.0, Work.WIDTH), p.y.coerceIn(0.0, Work.HEIGHT))
 
 /** World polygon for a drag from [a] to [b]. */
-private fun shapeFromDrag(tool: Tool, a: Pt, b: Pt): Poly? {
+private fun shapeFromDrag(tool: Tool, a: Pt, b: Pt, kind: ShapeKind, sides: Int): Poly? {
     val x = minOf(a.x, b.x); val y = minOf(a.y, b.y); val w = abs(b.x - a.x); val h = abs(b.y - a.y)
     if (tool == Tool.LINE) return if (a.dist(b) < 0.5) null else listOf(a, b)
     if (w < 0.5 || h < 0.5) return null
     val local = when (tool) {
         Tool.RECT -> Shapes.rect(w, h)
         Tool.ELLIPSE -> Shapes.ellipse(w, h)
-        Tool.POLYGON -> Shapes.polygon(6, w, h)
+        Tool.POLYGON -> Shapes.polygon(sides, w, h)
+        Tool.SHAPE -> ShapeLib.make(kind, w, h)
         else -> return null
     }
     return local.map { Pt(it.x + x, it.y + y) }

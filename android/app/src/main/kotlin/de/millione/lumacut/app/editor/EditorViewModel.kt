@@ -10,6 +10,11 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.millione.lumacut.app.machine.Notice
 import de.millione.lumacut.core.Arrange
+import de.millione.lumacut.core.TagStyle
+import de.millione.lumacut.core.ShapeKind
+import de.millione.lumacut.core.Personalize
+import de.millione.lumacut.core.Parts
+import de.millione.lumacut.core.Curves
 import de.millione.lumacut.core.Tabs
 import de.millione.lumacut.core.Nest
 import de.millione.lumacut.core.ImportUnit
@@ -67,8 +72,12 @@ class PendingImport(val kindLabel: String, val total: Int, val fitting: Int, val
                     val onFitting: () -> Unit, val onShrink: () -> Unit,
                     val plates: Int = 0, val onPlates: (() -> Unit)? = null)
 
-enum class Tool(val label: String) { SELECT("Auswahl"), RECT("Rechteck"), ELLIPSE("Ellipse"), POLYGON("Vieleck"),
-    LINE("Linie"), PEN("Freihand"), TEXT("Text"), MEASURE("Messen") }
+enum class Tool(val label: String) { SELECT("Auswahl"), NODES("Knoten"), RECT("Rechteck"), ELLIPSE("Ellipse"), POLYGON("Vieleck"),
+    SHAPE("Formen"), LINE("Linie"), CURVE("Kurve"), PEN("Freihand"), TEXT("Text"), STAMP("Stempel"), PAINT("Zuweisen"),
+    ERASER("Radierer"), MEASURE("Messen") }
+
+/** A vertex of a vector element: path [poly], point [index]. */
+data class NodeRef(val elementId: String, val poly: Int, val index: Int)
 
 /** What the next taps of the measuring tool create. */
 enum class MeasureMode(val label: String) {
@@ -226,8 +235,226 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     /* ---------- selection & tools ---------- */
 
     fun setTool(t: Tool) {
-        _tool.value = t; if (t != Tool.SELECT) _selected.value = emptySet()
+        if (t == Tool.STAMP) {
+            val sel = selectedElements()
+            if (sel.isNotEmpty()) _stamp.value = sel
+            if (_stamp.value.isEmpty()) notify("Erst etwas auswählen, dann Stempel – jedes Antippen setzt eine Kopie", true)
+        }
+        _tool.value = t
+        if (t != Tool.SELECT && t != Tool.NODES) _selected.value = emptySet()
+        if (t == Tool.NODES && selectedElements().size > 1) _selected.value = emptySet()
         if (t != Tool.MEASURE) clearPendingMeasure()
+        if (t != Tool.CURVE) _curve.value = emptyList()
+    }
+
+    /* ---------- creating and editing tools of the left bar ---------- */
+
+    private val _shapeKind = MutableStateFlow(ShapeKind.STAR)
+    val shapeKind: StateFlow<ShapeKind> = _shapeKind.asStateFlow()
+    fun setShapeKind(k: ShapeKind) { _shapeKind.value = k }
+
+    private val _polygonSides = MutableStateFlow(6)
+    val polygonSides: StateFlow<Int> = _polygonSides.asStateFlow()
+    fun setPolygonSides(n: Int) { _polygonSides.value = n.coerceIn(3, 24) }
+
+    /** Points tapped so far with the curve tool. */
+    private val _curve = MutableStateFlow<List<Pt>>(emptyList())
+    val curve: StateFlow<List<Pt>> = _curve.asStateFlow()
+
+    /** Adds a curve point; tapping the first point again closes the curve. */
+    fun curveTap(p: Pt, closeRadiusMm: Double) {
+        val pts = _curve.value
+        if (pts.size >= 3 && p.dist(pts.first()) <= closeRadiusMm) { finishCurve(true); return }
+        _curve.value = pts + Pt(p.x.coerceIn(0.0, Work.WIDTH), p.y.coerceIn(0.0, Work.HEIGHT))
+    }
+
+    fun finishCurve(closed: Boolean) {
+        val pts = _curve.value
+        _curve.value = emptyList()
+        if (pts.size < 2) return
+        addVector("Kurve", listOf(Curves.catmullRom(pts, closed && pts.size >= 3)))
+        moveSelected(0.0, 0.0, "curve")
+    }
+
+    fun undoCurvePoint() { _curve.value = _curve.value.dropLast(1) }
+    fun cancelCurve() { _curve.value = emptyList() }
+
+    /** What the stamp tool places: the selection when the tool was picked. */
+    private val _stamp = MutableStateFlow<List<Element>>(emptyList())
+    val stamp: StateFlow<List<Element>> = _stamp.asStateFlow()
+
+    /** A copy of the stamp centred at [p], moved back into the work area when it sticks out. */
+    fun stampAt(p: Pt) {
+        val items = _stamp.value
+        val b = items.mapNotNull { it.worldBounds() }.reduceOrNull { a, c -> a.union(c) } ?: run { notify("Erst etwas auswählen, dann Stempel", true); return }
+        if (b.width > Work.WIDTH || b.height > Work.HEIGHT) { notify("Die Vorlage ist größer als der Arbeitsbereich", true); return }
+        val dx = (p.x - b.width / 2).coerceIn(0.0, Work.WIDTH - b.width) - b.minX
+        val dy = (p.y - b.height / 2).coerceIn(0.0, Work.HEIGHT - b.height) - b.minY
+        val groups = items.mapNotNull { it.groupId }.distinct().associateWith { UUID.randomUUID().toString() }
+        val writable = _doc.value.layers.filter { !it.locked && it.visible }.map { it.id }.toSet()
+        val copies = items.map { e -> e.copy(id = UUID.randomUUID().toString(), groupId = e.groupId?.let(groups::get),
+            layerId = if (e.layerId in writable) e.layerId else writableLayer(),
+            transform = e.transform.copy(x = e.transform.x + dx, y = e.transform.y + dy)) }
+        change { d -> d.copy(elements = d.elements + copies) }
+    }
+
+    /** Puts the element at [p] on the active layer (Gravieren / Markieren / Schneiden from the right panel). */
+    fun paintAt(p: Pt, marginMm: Double) {
+        val e = hit(p, marginMm) ?: return
+        val target = _activeLayer.value
+        if (e.layerId == target) return
+        val ids = withGroup(e)
+        change { d -> d.copy(elements = d.elements.map { if (it.id in ids) it.copy(layerId = target) else it }) }
+        notify("Auf „${_doc.value.layer(target)?.name}“ gelegt")
+    }
+
+    /** Deletes the element under [p] (only that element, not its group); one drag is one undo step. */
+    fun eraseAt(p: Pt, marginMm: Double, coalesce: String) {
+        val e = hit(p, marginMm) ?: return
+        change(coalesce) { d -> d.copy(elements = d.elements.filterNot { it.id == e.id }) }
+    }
+
+    /** The vertex of the single selected vector element nearest to [p] within [radiusMm]. */
+    fun nodeAt(p: Pt, radiusMm: Double): NodeRef? {
+        val e = editableNodes() ?: return null
+        var best: NodeRef? = null; var bestD = radiusMm
+        e.worldPaths().forEachIndexed { pi, poly -> poly.forEachIndexed { i, q -> val d = q.dist(p); if (d <= bestD) { bestD = d; best = NodeRef(e.id, pi, i) } } }
+        return best
+    }
+
+    /** The vertex last touched with the node tool ("Punkt löschen" acts on it). */
+    private val _activeNode = MutableStateFlow<NodeRef?>(null)
+    val activeNode: StateFlow<NodeRef?> = _activeNode.asStateFlow()
+    fun setActiveNode(ref: NodeRef?) { _activeNode.value = ref }
+
+    /** The single selected vector element whose points can be dragged (not too many to show), or null. */
+    fun editableNodes(): Element? = selectedElement()?.takeIf { !it.isImage && it.paths.sumOf { p -> p.size } in 2..NODE_LIMIT }
+
+    /** Moves a vertex to [world] (work mm); start and end of a closed path move together. */
+    fun moveNode(ref: NodeRef, world: Pt, coalesce: String) {
+        val w = Pt(world.x.coerceIn(0.0, Work.WIDTH), world.y.coerceIn(0.0, Work.HEIGHT))
+        updateElement(ref.elementId, coalesce) { e ->
+            val local = e.transform.invert(w)
+            e.copy(paths = e.paths.mapIndexed { pi, poly ->
+                if (pi != ref.poly) poly else {
+                    val closed = poly.isClosed()
+                    poly.mapIndexed { i, q -> if (i == ref.index || (closed && (ref.index == 0 || ref.index == poly.lastIndex) && (i == 0 || i == poly.lastIndex))) local else q }
+                }
+            })
+        }
+    }
+
+    /** Removes a vertex (paths keep at least two points; closed ones at least a triangle). */
+    fun deleteActiveNode() { _activeNode.value?.let(::deleteNode); _activeNode.value = null }
+
+    fun deleteNode(ref: NodeRef) {
+        updateElement(ref.elementId) { e ->
+            e.copy(paths = e.paths.mapIndexed { pi, poly ->
+                if (pi != ref.poly) poly else {
+                    val closed = poly.isClosed()
+                    if (poly.size <= (if (closed) 4 else 2)) poly
+                    else if (closed && (ref.index == 0 || ref.index == poly.lastIndex)) poly.drop(1).dropLast(1).let { it + it.first() }
+                    else poly.filterIndexed { i, _ -> i != ref.index }
+                }
+            })
+        }
+    }
+
+    /* ---------- personalised pieces ---------- */
+
+    private fun partsElements(parts: Parts, kind: String, at: Pt, group: Boolean): List<Element> {
+        val gid = if (group) UUID.randomUUID().toString() else null
+        fun el(polys: List<Poly>, layer: String, k: String): Element? {
+            val box = boundsOf(polys) ?: return null
+            return Element(layerId = layer, kind = k, transform = Transform(at.x + box.minX, at.y + box.minY),
+                paths = polys.map { poly -> poly.map { Pt(it.x - box.minX, it.y - box.minY) } }, groupId = gid)
+        }
+        val labels = parts.labels.flatMap { (q, t) ->
+            val glyphs = TextPaths.build(t, 3.0, false, "sans-serif")
+            val gb = boundsOf(glyphs) ?: return@flatMap emptyList()
+            glyphs.map { poly -> poly.map { Pt(it.x - gb.center.x + q.x, it.y - gb.minY + q.y) } }
+        }
+        return listOfNotNull(
+            el(parts.engrave + labels, layerIdByName("Gravieren"), kind),
+            el(parts.marks, layerIdByName("Linie"), "$kind (Linien)"),
+            el(parts.cut, layerIdByName("Schneiden"), "$kind (Schnitt)"),
+        )
+    }
+
+    /**
+     * Places finished pieces space-saving: on the plate being edited when it is empty, otherwise on new plates
+     * (more plates when needed). Returns the number of plates used.
+     */
+    private fun placePieces(pieces: List<List<Element>>): Int {
+        val boxes = pieces.map { u -> u.mapNotNull { it.worldBounds() }.reduceOrNull { a, b -> a.union(b) } ?: Box(0.0, 0.0, 1.0, 1.0) }
+        val placed = Nest.place(boxes)
+        val reuse = _doc.value.elements.isEmpty()
+        val base = _project.value.plateCount
+        val first = if (reuse) _project.value.activePlate else base
+        val used = (placed.filterNotNull().maxOfOrNull { it.first } ?: -1) + 1
+        if (used == 0) { notify("Zu groß für eine Platte (360 × 340 mm)", true); return 0 }
+        val newPlates = used - if (reuse) 1 else 0
+        val all = pieces.flatMapIndexed { i, u -> placed[i]?.let { (k, o) ->
+            u.map { e -> e.copy(plate = if (k == 0) first else (if (reuse) base + k - 1 else base + k),
+                transform = e.transform.copy(x = e.transform.x + o.x, y = e.transform.y + o.y)) } } ?: emptyList() }
+        changeProject { p -> p.copy(plateCount = base + newPlates, activePlate = first, elements = p.elements + all) }
+        _selected.value = all.filter { it.plate == first }.map { it.id }.toSet()
+        return used
+    }
+
+    /** One name tag per name; returns how many were made. */
+    fun addTags(names: List<String>, style: TagStyle, heightMm: Double, bold: Boolean, holeMm: Double?): Int {
+        val pieces = names.map { it.trim() }.filter { it.isNotEmpty() }.mapNotNull { n ->
+            val text = TextPaths.build(n, heightMm, bold, "sans-serif").takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            partsElements(Personalize.tag(text, style, holeMm), n, Pt(0.0, 0.0), true)
+        }
+        if (pieces.isEmpty()) { notify("Keine Namen eingegeben", true); return 0 }
+        val plates = placePieces(pieces)
+        if (plates > 0) notify("${pieces.size} × ${style.label}" + if (plates > 1) " auf $plates Platten" else "")
+        return pieces.size
+    }
+
+    fun addEmblem(initials: String, top: String, bottom: String, diameterMm: Double) {
+        fun t(s: String, bold: Boolean) = s.trim().takeIf { it.isNotEmpty() }?.let { TextPaths.build(it, 10.0, bold, "serif") }?.takeIf { it.isNotEmpty() }
+        val mid = t(initials, true) ?: run { notify("Bitte Initialen eingeben", true); return }
+        val parts = Personalize.emblem(mid, t(top, true), t(bottom, false), diameterMm)
+        val at = Pt(Work.center.x - diameterMm / 2, Work.center.y - diameterMm / 2)
+        val els = partsElements(parts, "Emblem", at, true)
+        change { d -> d.copy(elements = d.elements + els) }
+        _selected.value = els.map { it.id }.toSet()
+    }
+
+    /** Frame around the selection, or around everything on the plate. */
+    fun addFrame(style: Personalize.FrameStyle, marginMm: Double, cut: Boolean) {
+        val box = (if (_selected.value.isNotEmpty()) selectionBounds() else _doc.value.bounds())
+            ?: run { notify("Erst ein Motiv anlegen – der Rahmen kommt darum herum", true); return }
+        val polys = Personalize.frame(box, style, marginMm)
+        val fb = boundsOf(polys) ?: return
+        if (!Work.contains(fb)) { notify("Der Rahmen passt nicht in den Arbeitsbereich – kleineren Abstand wählen oder Motiv verschieben", true); return }
+        val e = Element(layerId = layerIdByName(if (cut) "Schneiden" else "Linie"), kind = "Rahmen", transform = Transform(fb.minX, fb.minY),
+            paths = polys.map { poly -> poly.map { Pt(it.x - fb.minX, it.y - fb.minY) } })
+        change { d -> d.copy(elements = d.elements + e) }
+        _selected.value = setOf(e.id)
+    }
+
+    fun addRuler(lengthMm: Int, widthMm: Double, holeMm: Double?) {
+        val parts = Personalize.ruler(lengthMm, widthMm, holeMm)
+        val b = parts.bounds() ?: return
+        if (b.width > Work.WIDTH) { notify("Höchstens ${(Work.WIDTH - 20).toInt()} mm lang", true); return }
+        val els = partsElements(parts, "Lineal", Pt(Work.center.x - b.width / 2, Work.center.y - b.height / 2), true)
+        change { d -> d.copy(elements = d.elements + els) }
+        _selected.value = els.map { it.id }.toSet()
+    }
+
+    /** Puzzle cut lines over the selection (e.g. a photo) or as a new [wMm] x [hMm] piece in the middle. */
+    fun addPuzzle(cols: Int, rows: Int, wMm: Double, hMm: Double) {
+        val box = selectionBounds() ?: Box(Work.center.x - wMm / 2, Work.center.y - hMm / 2, Work.center.x + wMm / 2, Work.center.y + hMm / 2)
+        if (!Work.contains(box)) { notify("Das Puzzle passt nicht in den Arbeitsbereich", true); return }
+        val polys = Personalize.puzzle(box.width, box.height, cols, rows, (System.currentTimeMillis() % 100000).toInt())
+        val e = Element(layerId = layerIdByName("Schneiden"), kind = "Puzzle", transform = Transform(box.minX, box.minY), paths = polys)
+        change { d -> d.copy(elements = d.elements + e) }
+        _selected.value = setOf(e.id)
+        notify("Puzzle mit ${cols * rows} Teilen")
     }
 
     /* ---------- measuring: display only, never part of the document or the job ---------- */
@@ -953,6 +1180,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: "?"
     }.getOrDefault("?")
 }
+
+/** Above this many points the node tool does not show handles (imports, traced pictures). */
+const val NODE_LIMIT = 600
 
 /** Rotates [p] around [c] by [deg] degrees. */
 fun rotateAround(p: Pt, c: Pt, deg: Double): Pt {
