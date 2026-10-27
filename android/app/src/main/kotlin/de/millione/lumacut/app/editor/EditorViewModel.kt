@@ -1089,6 +1089,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     /** The Pi's material list (fed by the shell); only used for the per-layer menu under "Erweitert". */
     fun setMaterials(list: List<Material>) { _materials.value = list }
 
+    /** The machine's X/Y acceleration and speed (Pi config.motion): run-up length and speed limit of every job. */
+    @Volatile var motion: MarlinWriter.Motion = MarlinWriter.Motion.FIRMWARE
+        private set
+
+    fun setMotion(m: MarlinWriter.Motion) { motion = m }
+
     /** "name|thickness" of the chosen material; null until the operator picked one. */
     private val _materialKey = MutableStateFlow(prefs.getString("materialKey", null))
     val materialKey: StateFlow<String?> = _materialKey.asStateFlow()
@@ -1166,7 +1172,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun buildJob(compensate: Boolean, focusGapMm: Double, tipOffsetMm: Double,
                          plate: Int = _project.value.activePlate): BuiltJob = withContext(Dispatchers.Default) {
-        val gcode = MarlinWriter(appVersion()).write(_project.value.plateView(plate))
+        val gcode = MarlinWriter(appVersion(), motion).write(_project.value.plateView(plate))
         val maps = _heights.value
         if (compensate && maps != null) {
             val (out, report) = FocusCompensation.apply(gcode, maps, focusGapMm, tipOffsetMm)

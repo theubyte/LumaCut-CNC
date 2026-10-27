@@ -101,7 +101,7 @@ def validate(data, *, material_id=None, builtin=False):
         "process": process,
         "mode": mode,
         "power_pct": _number(data, "power_pct", 0.0, 100.0),
-        "speed_mm_min": _number(data, "speed_mm_min", 1.0, 6000.0),
+        "speed_mm_min": _number(data, "speed_mm_min", 1.0, 30000.0),
         "passes": int(passes_raw),
         "interval_mm": _number(data, "interval_mm", 0.01, 5.0, 0.1),
         "depth_per_pass_mm": _number(data, "depth_per_pass_mm", 0.0, 50.0, 0.0),

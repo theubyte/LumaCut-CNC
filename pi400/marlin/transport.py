@@ -101,6 +101,20 @@ def normalize(line: str) -> str:
     return line.split(";", 1)[0].strip().upper()
 
 
+# X/Y acceleration (mm/s²) and top speed (mm/s) of the firmware build
+# (DEFAULT_MAX_ACCELERATION / DEFAULT_MAX_FEEDRATE in firmware/marlin/build.py).
+FIRMWARE_MOTION = (500.0, 150.0)
+# Hard caps for runtime limits and the motion test (belt-driven diode gantry).
+MOTION_ACCEL_RANGE = (100.0, 20000.0)
+MOTION_SPEED_RANGE = (10.0, 500.0)
+
+
+def motion_commands(accel: float, speed: float) -> list[str]:
+    """Runtime X/Y limits: max acceleration, max feedrate (Z stays 9 mm/s), default accelerations."""
+    return ["M201 X%d Y%d" % (accel, accel), "M203 X%d Y%d Z9" % (speed, speed),
+            "M204 P%d T%d" % (accel, accel)]
+
+
 class MarlinLaserGuard:
     """Conservatively permit only real Marlin 2.1 laser inline operation."""
 
@@ -232,6 +246,9 @@ class MarlinTransport:
         # Cutting must occur strictly inside the remaining rectangle.
         self.safe_zone_xy_mm = 30.0
         self.probe_xy_offset_mm = None
+        # (accel mm/s², speed mm/s) from the tablet's motion calibration,
+        # sent on every connect like M203 Z9; None = firmware values.
+        self.motion_limits = None
         self.last_probe_laser_xy = None
         self.last_xy_commanded = None
         self.homing_chime_enabled = True
@@ -429,6 +446,8 @@ class MarlinTransport:
                 except MarlinCommandError:
                     LOG.warning("M851 X/Y not accepted, resetting Z offset only")
                     self._exchange_locked("M851 Z0", timeout=6.0)
+                # Measured X/Y acceleration and speed (never written to EEPROM).
+                self._apply_motion_locked()
                 self.state = "Idle"
                 self.fault = ""
             except Exception as exc:
@@ -973,6 +992,75 @@ class MarlinTransport:
                 self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F600", timeout=45)
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=90)
             self._exchange_locked("M400", timeout=90)
+            result = self._exchange_locked("M114", timeout=8)
+            self.last_xy_commanded = (x, y)
+            return result
+
+    def _apply_motion_locked(self, limits=None):
+        accel, speed = limits or self.motion_limits or FIRMWARE_MOTION
+        for cmd in motion_commands(accel, speed):
+            self._exchange_locked(cmd, timeout=6.0)
+
+    def set_motion_limits(self, limits, owner: str = "web"):
+        """Stores (accel, speed) or None (firmware values) and sends them when connected."""
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            self.motion_limits = limits
+            if self.serial is not None and self.identity and not self.emergency_latched:
+                self._exchange_locked("M400", timeout=60)
+                self._apply_motion_locked()
+
+    def motion_test(self, accel: float, speed: float, x: float, y: float, span: float,
+                    cycles: int, owner: str = "web", should_stop=None):
+        """Laser-off stress moves for the motion calibration.
+
+        Sets [accel]/[speed] for the test only, then drives [cycles] times
+        out from (x, y) by [span] mm and back: +X, -X, +Y, -Y and both
+        diagonals, ending exactly at (x, y). Z is raised to the clearance
+        first (as moveto). The stored limits are restored afterwards, also
+        on error. A lost step shows as an offset of the next lasered mark.
+        """
+        import math
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise RuntimeError("SKR nicht bereit / Notstopp aktiv")
+            if not self.homed:
+                raise RuntimeError("Fahren erst nach gültiger XYZ-Referenzfahrt")
+            if self.laser_enabled:
+                raise RuntimeError("Fahren bei aktivem Laser unzulässig")
+            if not (MOTION_ACCEL_RANGE[0] <= accel <= MOTION_ACCEL_RANGE[1]
+                    and MOTION_SPEED_RANGE[0] <= speed <= MOTION_SPEED_RANGE[1]):
+                raise ValueError("Beschleunigung %g..%g mm/s², Tempo %g..%g mm/s" % (MOTION_ACCEL_RANGE + MOTION_SPEED_RANGE))
+            if not (math.isfinite(x) and math.isfinite(y) and 5.0 <= span <= 120.0 and 1 <= cycles <= 30
+                    and 0.0 <= x - span and x + span <= 390.0 and 0.0 <= y - span and y + span <= 370.0):
+                raise ValueError("Testbewegung außerhalb X0..390 / Y0..370")
+            self._exchange_locked("M5 I", timeout=8)
+            self._exchange_locked("M400", timeout=30)
+            self._exchange_locked("M114", timeout=8)
+            if self.position is None:
+                raise RuntimeError("Position unbekannt: keine Fahrt")
+            if not self.absolute_mode:
+                self._exchange_locked("G90", timeout=8)
+                self.absolute_mode = True
+            if self.position[2] < self.clearance_mm:
+                self._exchange_locked(f"G0 Z{self.clearance_mm:.3f} F600", timeout=45)
+            self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=90)
+            self._exchange_locked("M400", timeout=90)
+            feed = speed * 60
+            try:
+                self._apply_motion_locked((accel, speed))
+                for _ in range(cycles):
+                    for dx, dy in ((span, 0), (-span, 0), (0, span), (0, -span), (span, span), (-span, -span)):
+                        self._exchange_locked(f"G0 X{x + dx:.3f} Y{y + dy:.3f} F{feed:.0f}", timeout=60)
+                        self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F{feed:.0f}", timeout=60)
+                    if should_stop is not None and should_stop():
+                        break
+                self._exchange_locked("M400", timeout=180)
+            finally:
+                self._apply_motion_locked()
             result = self._exchange_locked("M114", timeout=8)
             self.last_xy_commanded = (x, y)
             return result

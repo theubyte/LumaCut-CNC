@@ -199,6 +199,87 @@ class CalibrationsTest {
         assertEquals(5200, s.config.camera?.white_balance)
     }
 
+    @Test fun `fill run-up is long enough for the speed with the machine's acceleration`() {
+        val layer = Layer(name = "Gravur", color = 0xFF4FD8B4, mode = LayerMode.FILL, powerPct = 30.0, speed = 6000.0, intervalMm = 1.0)
+        val doc = Document("t", listOf(layer), listOf(Element(layerId = layer.id, kind = "r", transform = Transform(100.0, 100.0), paths = listOf(Shapes.rect(10.0, 3.0)))))
+        fun firstRunUp(motion: MarlinWriter.Motion): Double {
+            val lines = MarlinWriter("t", motion).write(doc).lines()
+            val rapid = lines.first { it.startsWith("G0 X") }
+            val runUp = lines[lines.indexOf(rapid) + 1]
+            fun x(l: String) = Regex("X([-0-9.]+)").find(l)!!.groupValues[1].toDouble()
+            assertTrue(runUp.endsWith(" S0"), runUp)
+            return abs(x(runUp) - x(rapid))
+        }
+        assertEquals(100.0 * 100.0 / (2 * 500) * 1.15 + 0.3, firstRunUp(MarlinWriter.Motion.FIRMWARE), 0.01)  // 11.8 mm at 500 mm/s²
+        assertEquals(2.5, firstRunUp(MarlinWriter.Motion(5000.0, 250.0)), 0.01)                            // the layer's own 2.5 mm is enough
+        val e = runCatching { MarlinWriter("t", MarlinWriter.Motion(3000.0, 80.0)).write(doc) }.exceptionOrNull()
+        assertTrue(e is JobBuildException && e.message!!.contains("4800"), e.toString())
+    }
+
+    @Test fun `motion test finds the level where a step was lost`() {
+        val n = MotionTest.LEVELS.size + 1
+        // true shift of each check mark: baseline 0.04 (backlash), lost 0.3 mm in X at level 3 (index 3 → glyph 4)
+        val truth = listOf(0.04, 0.04, 0.05, 0.04, 0.34, 0.34, 0.35)
+        val centre = Work.center
+        val cal = camera()
+        val shade = { p: Pt ->
+            var d = 0.0
+            for (k in 0 until n) {
+                val ref = MotionTest.reference(k, n, centre)
+                val chk = MotionTest.check(k, n, centre).map { path -> path.map { it + Pt(truth[k], -truth[k] / 2) } }
+                for (seg in ref + chk) {
+                    val a = seg[0]; val b = seg[1]
+                    val near = if (a.x == b.x) abs(p.x - a.x) < 0.1 && p.y in a.y..b.y else abs(p.y - a.y) < 0.1 && p.x in a.x..b.x
+                    if (near) d = 0.6
+                }
+            }
+            d
+        }
+        val px = photo(cal, MotionTest.bounds(n, centre).center, shade = shade)
+        val sampler = PhotoSampler(px, w, h, cal, MotionTest.bounds(n, centre).center)
+        val shifts = (0 until n).map { MotionTest.measure(sampler, it, n, centre) }
+        for (k in 0 until n) {
+            assertEquals(truth[k], shifts[k].dx, 0.03, "dx $k"); assertEquals(-truth[k] / 2, shifts[k].dy, 0.03, "dy $k")
+        }
+        assertEquals(2, MotionTest.lastGood(shifts))      // levels 0, 1, 2 held, level 3 lost steps
+        val keep = MotionTest.recommend(MotionTest.LEVELS[2])
+        assertEquals(2100.0, keep.accel); assertEquals(200.0, keep.speed)
+        assertTrue(MotionTest.job("Referenz", (0 until n).flatMap { MotionTest.reference(it, n, centre) }).contains("G1 "))
+    }
+
+    @Test fun `cut test picks the quickest square with reserve`() {
+        val spec = CutTest.Spec(thicknessMm = 3.0)
+        assertEquals(1.0, spec.zStep)
+        // columns = speeds 150 … 600, rows = 1, 2, 3 passes
+        val through = setOf(0 to 0, 0 to 1, 1 to 1, 2 to 1, 3 to 1, 0 to 2, 1 to 2, 2 to 2, 3 to 2, 4 to 2)
+        val p = assertNotNull(CutTest.pick(spec, through))
+        // quickest: 2 passes at 450 (2/450) – reserve: 2 passes at 350 (2/350 ≥ 1.15 × 2/450) is the next one
+        assertEquals(350.0, p.speed); assertEquals(2, p.passes); assertTrue(p.reserve); assertTrue(!p.inconsistent)
+        assertTrue(CutTest.pick(spec, setOf(2 to 0)).let { it != null && it.inconsistent })
+        assertEquals(null, CutTest.pick(spec, emptySet()))
+        val job = CutTest.job(spec).lines()
+        assertTrue("G0 Z-1.000 F600" in job)
+        assertEquals(15, job.count { it.startsWith("; Ebene 100 %") })
+    }
+
+    @Test fun `motion limits go to the Pi and come back in the status`() = runBlocking {
+        okhttp3.mockwebserver.MockWebServer().use { srv ->
+            repeat(3) { srv.enqueue(okhttp3.mockwebserver.MockResponse().setBody("""{"message":"ok"}""")) }
+            srv.start()
+            val pi = PiClient("127.0.0.1", srv.port)
+            pi.motionTest(3000.0, 250.0, 195.0, 200.0, 40.0, 6)
+            assertEquals("op=motion_test&accel=3000&speed=250&x=195.000&y=200.000&span=40.0&cycles=6", srv.takeRequest().body.readUtf8())
+            pi.motionLimits(MarlinWriter.Motion(2100.0, 200.0))
+            assertEquals("op=motion_limits&accel=2100&speed=200", srv.takeRequest().body.readUtf8())
+            pi.motionLimits(null)
+            assertEquals("op=motion_limits&accel=&speed=", srv.takeRequest().body.readUtf8())
+        }
+        val s = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString(MachineStatus.serializer(),
+            """{"config":{"motion":{"accel":2100.0,"speed":200.0}}}""")
+        assertEquals(MarlinWriter.Motion(2100.0, 200.0), s.config.motion?.toMotion())
+        assertEquals(MarlinWriter.Motion.FIRMWARE, PiMotion().toMotion())
+    }
+
     @Test fun `probe offset from the head position over the mark`() {
         val off = Pt(-23.0, 15.0)
         val head = ProbeTarget.headFor(off)

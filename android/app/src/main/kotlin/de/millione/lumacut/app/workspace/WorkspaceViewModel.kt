@@ -13,6 +13,9 @@ import de.millione.lumacut.core.Box
 import de.millione.lumacut.core.CameraCalibration
 import de.millione.lumacut.core.CameraLight
 import de.millione.lumacut.core.CameraSettings
+import de.millione.lumacut.core.CutTest
+import de.millione.lumacut.core.MarlinWriter
+import de.millione.lumacut.core.MotionTest
 import de.millione.lumacut.core.EngraveTest
 import de.millione.lumacut.core.FocusTest
 import de.millione.lumacut.core.MachineStatus
@@ -615,7 +618,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val st = machine.refreshStatus()
                 needCamera(st)
-                laserTest(c, machine, ENGRAVE_JOB, EngraveTest.job(spec), "Gravur-Test") { step(0, it) }
+                laserTest(c, machine, ENGRAVE_JOB, EngraveTest.job(spec, st!!.config.motion?.toMotion() ?: MarlinWriter.Motion.FIRMWARE), "Gravur-Test") { step(0, it) }
                 val u = cal.usable(0.1)
                 val fields = HashMap<Pair<Int, Int>, EngraveTest.Field>()
                 withScanLight(c, machine, st!!.config.camera?.light) {
@@ -650,6 +653,109 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     /* ---------- scan ---------- */
 
     fun cancel() { worker?.cancel(); worker = null; _run.value = null }
+
+    /* ---------- motion and cut tests ---------- */
+
+    /** Last motion calibration: per level the shift of its check mark and the last level that held. */
+    class MotionOutcome(val levels: List<MotionTest.Level>, val shifts: List<MotionTest.Shift>, val lastGood: Int, val kept: MarlinWriter.Motion?)
+    private val _motion = MutableStateFlow<MotionOutcome?>(null)
+    val motion: StateFlow<MotionOutcome?> = _motion.asStateFlow()
+
+    /**
+     * Motion calibration: reference marks, a check mark without stress (the
+     * baseline), then per level laser-off stress moves at rising
+     * acceleration and speed followed by a check mark, photographed and
+     * measured right away. Stops at the first level that lost a step and
+     * stores 70 % / 80 % of the last good level on the Pi.
+     */
+    fun motionCalibration(machine: MachineViewModel) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            val levels = MotionTest.LEVELS
+            val n = levels.size + 1
+            val total = 2 + 2 * levels.size
+            fun step(k: Int, text: String) { _run.value = Run("Bewegungs-Kalibrierung", k, total, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                val motion = st!!.config.motion?.toMotion() ?: MarlinWriter.Motion.FIRMWARE
+                laserTest(c, machine, MOTION_REF_JOB, MotionTest.job("Referenzmarken", (0 until n).flatMap { MotionTest.reference(it, n) }, motion), "Referenzmarken") { step(0, it) }
+                val shifts = ArrayList<MotionTest.Shift>()
+                val area = MotionTest.bounds(n)
+                suspend fun checkAndMeasure(k: Int, label: String) {
+                    c.uploadJob(MOTION_CHECK_JOB, MotionTest.job("Prüfmarke ${k + 1}", MotionTest.check(k, n), motion))
+                    c.action("start", mapOf("name" to MOTION_CHECK_JOB))
+                    waitForJob(machine, MOTION_CHECK_JOB, "Prüfmarke") { step(2 * k + 1, "$label: Prüfmarke lasern") }
+                    step(2 * k + 1, "$label: Prüfmarke messen")
+                    val o = MotionTest.origin(k, n)
+                    val shift = withScanLight(c, machine, st.config.camera?.light) {
+                        val (head, _) = cameraOver(c, machine, cal, Pt(o.x + MotionTest.ARM / 2, o.y + MotionTest.ARM / 2))
+                        val (px, w, h) = pixels(c, cal.photoWidth to cal.photoHeight)
+                        withContext(Dispatchers.Default) { MotionTest.measure(PhotoSampler(px, w, h, cal, head), k, n) }
+                    }
+                    shifts += shift
+                }
+                checkAndMeasure(0, "Ohne Belastung")
+                if (!shifts[0].found) throw IllegalStateException("Prüfmarke nicht erkannt – Kamera neu kalibrieren oder Licht prüfen")
+                val m = Work.toMachine(area.center)
+                for ((i, level) in levels.withIndex()) {
+                    val label = "Stufe ${i + 1}: %.0f mm/s² · %.0f mm/min".format(level.accel, level.speed * 60)
+                    step(2 * i + 2, "$label: Testfahrten")
+                    c.motionTest(level.accel, level.speed, m.x, m.y, 40.0, 6)
+                    checkAndMeasure(i + 1, label)
+                    if (MotionTest.lastGood(shifts) < i) break      // this level lost steps: no harder ones
+                }
+                val last = MotionTest.lastGood(shifts)
+                val keep = if (last >= 0) MotionTest.recommend(levels[last]) else null
+                if (keep != null && (keep.accel > MarlinWriter.Motion.FIRMWARE.accel || keep.speed > MarlinWriter.Motion.FIRMWARE.speed)) {
+                    c.motionLimits(MarlinWriter.Motion(maxOf(keep.accel, MarlinWriter.Motion.FIRMWARE.accel), maxOf(keep.speed, MarlinWriter.Motion.FIRMWARE.speed)))
+                }
+                machine.refreshStatus()
+                _motion.value = MotionOutcome(levels, shifts, last, keep)
+                machine.notify(when {
+                    keep == null -> "Schon bei der ersten Stufe Schrittverlust – Riemenspannung und Motorstrom prüfen; Firmware-Werte bleiben"
+                    last == levels.lastIndex -> "Bewegung: alle Stufen sauber – gespeichert %.0f mm/s², bis %.0f mm/min (Reserve eingerechnet)".format(keep.accel, keep.speed * 60)
+                    else -> "Bewegung: Stufe ${last + 2} verlor Schritte – gespeichert %.0f mm/s², bis %.0f mm/min".format(keep.accel, keep.speed * 60)
+                }, keep == null)
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Bewegungs-Kalibrierung abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    fun resetMotion(machine: MachineViewModel) = machine.request("motion", "Bewegung: Firmware-Werte") { c -> c.motionLimits(null).also { _motion.value = null; machine.refreshStatus() } }
+
+    /** Cut test lasered with [spec], waiting for the operator to mark which squares fell out. */
+    private val _cut = MutableStateFlow<CutTest.Spec?>(null)
+    val cut: StateFlow<CutTest.Spec?> = _cut.asStateFlow()
+
+    fun cutTest(machine: MachineViewModel, spec: CutTest.Spec) {
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            try {
+                val st = machine.refreshStatus() ?: throw IllegalStateException("Pi nicht erreichbar")
+                if (st.job.active) throw IllegalStateException("Es läuft gerade ein Auftrag")
+                _cut.value = null
+                laserTest(c, machine, CUT_JOB, CutTest.job(spec, st.config.motion?.toMotion() ?: MarlinWriter.Motion.FIRMWARE), "Schnitt-Test") {
+                    _run.value = Run("Schnitt-Test", 0, 1, it)
+                }
+                _cut.value = spec
+                machine.notify("Schnitt-Test fertig: Felder herausdrücken und in der App antippen, welche durchgefallen sind")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Schnitt-Test abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    fun clearCut() { _cut.value = null }
 
     fun scan(machine: MachineViewModel, editor: EditorViewModel) {
         val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
@@ -803,6 +909,9 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         const val PROBE_JOB = "kalibrierung-tasterziel.gcode"
         const val FOCUS_JOB = "kalibrierung-fokus.gcode"
         const val ENGRAVE_JOB = "kalibrierung-gravur.gcode"
+        const val MOTION_REF_JOB = "kalibrierung-bewegung-referenz.gcode"
+        const val MOTION_CHECK_JOB = "kalibrierung-bewegung-pruefung.gcode"
+        const val CUT_JOB = "kalibrierung-schnitt.gcode"
         /** LED level for every camera picture: full on, so the dimming PWM cannot flicker in the picture. */
         const val LIGHT_LEVEL = 100
         /** Highest Z the camera is sent to (Pi travel 90 mm). */

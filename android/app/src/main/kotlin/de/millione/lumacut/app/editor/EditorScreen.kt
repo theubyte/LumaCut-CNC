@@ -986,7 +986,7 @@ private fun MaterialTestDialog(onDismiss: () -> Unit, onCreate: (MaterialTest.Sp
         title = { Text("Materialtest", style = LcTypography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SmallText("Raster aus Leistung (Spalten) × Tempo (Zeilen, bis 6000 mm/min). Jedes Feld bekommt eine eigene Ebene, die Beschriftung wird leicht graviert.")
+                SmallText("Raster aus Leistung (Spalten) × Tempo (Zeilen, bis zum Maschinenlimit aus der Bewegungs-Kalibrierung). Jedes Feld bekommt eine eigene Ebene, die Beschriftung wird leicht graviert.")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     NumberField("Leistung von", pFrom, { pFrom = it }, Modifier.weight(1f), "%")
                     NumberField("bis", pTo, { pTo = it }, Modifier.weight(1f), "%")

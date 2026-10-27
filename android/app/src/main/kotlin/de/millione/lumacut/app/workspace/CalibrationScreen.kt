@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,7 +56,9 @@ import de.millione.lumacut.app.ui.Segmented
 import de.millione.lumacut.app.ui.SmallText
 import de.millione.lumacut.app.ui.TextInput
 import de.millione.lumacut.app.ui.rememberConfirm
+import de.millione.lumacut.core.CutTest
 import de.millione.lumacut.core.EngraveTest
+import de.millione.lumacut.core.MarlinWriter
 import de.millione.lumacut.core.LayerMode
 import de.millione.lumacut.core.Material
 import de.millione.lumacut.core.MaterialTest
@@ -77,6 +81,8 @@ fun CalibrationScreen(machine: MachineViewModel, ws: WorkspaceViewModel = viewMo
     val run by ws.run.collectAsStateWithLifecycle()
     val focus by ws.focusResult.collectAsStateWithLifecycle()
     val engrave by ws.engrave.collectAsStateWithLifecycle()
+    val motionResult by ws.motion.collectAsStateWithLifecycle()
+    val cutSpec by ws.cut.collectAsStateWithLifecycle()
     var confirm by rememberConfirm()
     var cameraDialog by remember { mutableStateOf(false) }
     var probeDialog by remember { mutableStateOf(false) }
@@ -87,6 +93,7 @@ fun CalibrationScreen(machine: MachineViewModel, ws: WorkspaceViewModel = viewMo
     val camera = status?.camera?.available == true
     val cfg = status?.config
     val fullHd = "camera_settings" in (status?.features ?: emptyList())
+    val motion = cfg?.motion?.toMotion() ?: MarlinWriter.Motion.FIRMWARE
 
     Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -165,7 +172,7 @@ fun CalibrationScreen(machine: MachineViewModel, ws: WorkspaceViewModel = viewMo
                 Spacer(Modifier.height(12.dp))
                 LcButton("Fokus-Test starten", {
                     val p = power.replace(',', '.').toDoubleOrNull(); val s = speed.replace(',', '.').toDoubleOrNull()
-                    if (p == null || s == null || p !in 5.0..100.0 || s !in 100.0..6000.0) { machine.notify("Leistung 5–100 %, Tempo 100–6000 mm/min", true); return@LcButton }
+                    if (p == null || s == null || p !in 5.0..100.0 || s !in 100.0..motion.maxFeed) { machine.notify("Leistung 5–100 %%, Tempo 100–%.0f mm/min".format(motion.maxFeed), true); return@LcButton }
                     confirm = Confirm("Fokus-Test lasern?", "Restplatte liegt mittig? Der Laser graviert 13 Linien (ca. 1 min, Laser an – Schutzbrille). " +
                         "Danach fotografiert die Kamera sie und der Fokusabstand wird angepasst.", "Lasern") { ws.focusTest(machine, p, s) }
                 }, icon = LcIcons.laser, kind = BtnKind.PRIMARY, enabled = ready && camera && cal != null)
@@ -176,7 +183,44 @@ fun CalibrationScreen(machine: MachineViewModel, ws: WorkspaceViewModel = viewMo
                 }
             }
 
-            EngraveCard(machine, ws, engrave, ready && camera && cal != null) { confirm = it }
+            EngraveCard(machine, ws, engrave, ready && camera && cal != null, motion.maxFeed) { confirm = it }
+
+            LcCard {
+                CardTitle("6 · Bewegung (Tempo & Genauigkeit)")
+                SmallText(if (cfg?.motion?.measured == true) "Gemessen: Beschleunigung %.0f mm/s², höchstens %.0f mm/min".format(motion.accel, motion.maxFeed)
+                          else "Firmware-Werte: %.0f mm/s², höchstens %.0f mm/min (nicht gemessen)".format(motion.accel, motion.maxFeed))
+                Spacer(Modifier.height(6.dp))
+                SmallText("Lasert kleine Referenzmarken, fährt dann mit ausgeschaltetem Laser immer härter und schneller hin und her " +
+                    "(bis 8000 mm/s² und 24000 mm/min) und lasert nach jeder Stufe eine Prüfmarke daneben. Die Kamera misst, ob sich etwas " +
+                    "verschoben hat (Schrittverlust ab 0,1 mm). Gespeichert wird die letzte saubere Stufe mit Reserve – danach sind Gravuren " +
+                    "schneller und der Anlauf jeder Zeile passt. Restplatte mittig, laut, Dauer 5–10 min.", Lc.faint)
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LcButton("Bewegung kalibrieren", {
+                        confirm = Confirm("Bewegungs-Kalibrierung starten?", "Restplatte liegt mittig? Der Laser graviert kleine Marken; dazwischen fährt der Kopf " +
+                            "mit ausgeschaltetem Laser sehr schnell hin und her (laut). Nichts auf dem Bett, das im Weg ist. Schutzbrille, danebenbleiben.", "Starten") {
+                            ws.motionCalibration(machine)
+                        }
+                    }, icon = LcIcons.laser, kind = BtnKind.PRIMARY, enabled = ready && camera && cal != null)
+                    if (cfg?.motion?.measured == true) LcButton("Firmware-Werte", { ws.resetMotion(machine) }, kind = BtnKind.GHOST, enabled = ready)
+                }
+                motionResult?.let { r ->
+                    Spacer(Modifier.height(12.dp))
+                    val base = r.shifts.firstOrNull()
+                    base?.let { SmallText("Ohne Belastung: Prüfmarke um X %+.2f / Y %+.2f mm versetzt (Wiederholgenauigkeit, Umkehrspiel)".format(Locale.GERMANY, it.dx, it.dy)) }
+                    for ((i, level) in r.levels.withIndex()) {
+                        val sh = r.shifts.getOrNull(i + 1) ?: break
+                        val prev = r.shifts[i]
+                        val ok = i <= r.lastGood
+                        SmallText("Stufe ${i + 1} · %.0f mm/s² · %.0f mm/min: ".format(level.accel, level.speed * 60) +
+                            (if (!sh.found) "Marke nicht gefunden" else "Versatz X %+.2f / Y %+.2f mm".format(Locale.GERMANY, sh.dx - prev.dx, sh.dy - prev.dy)) +
+                            if (ok) " · sauber" else " · Schrittverlust", if (ok) Lc.ok else Lc.bad)
+                    }
+                    r.kept?.let { SmallText("Gespeichert: %.0f mm/s², bis %.0f mm/min".format(it.accel, it.maxFeed), Lc.text) }
+                }
+            }
+
+            CutCard(machine, ws, cutSpec, ready, motion.maxFeed) { confirm = it }
         }
     }
     if (cameraDialog) CalibrationDialog(machine, ws) { cameraDialog = false }
@@ -203,7 +247,7 @@ private fun FocusChart(r: de.millione.lumacut.core.FocusTest.Result) {
 }
 
 @Composable
-private fun EngraveCard(machine: MachineViewModel, ws: WorkspaceViewModel, outcome: WorkspaceViewModel.EngraveOutcome?, enabled: Boolean, ask: (Confirm) -> Unit) {
+private fun EngraveCard(machine: MachineViewModel, ws: WorkspaceViewModel, outcome: WorkspaceViewModel.EngraveOutcome?, enabled: Boolean, maxFeed: Double, ask: (Confirm) -> Unit) {
     val materials by machine.materials.collectAsStateWithLifecycle()
     var name by remember { mutableStateOf("MDF") }
     var thickness by remember { mutableStateOf("3") }
@@ -237,8 +281,8 @@ private fun EngraveCard(machine: MachineViewModel, ws: WorkspaceViewModel, outco
         LcButton("Gravur-Test starten", {
             fun num(t: String) = t.replace(',', '.').toDoubleOrNull()
             val a = num(pFrom); val b = num(pTo); val c = num(sFrom); val d = num(sTo)
-            if (a == null || b == null || c == null || d == null || a !in 1.0..100.0 || b !in 1.0..100.0 || c !in 100.0..6000.0 || d !in 100.0..6000.0 || a >= b || c >= d) {
-                machine.notify("Leistung 1–100 %, Tempo 100–6000 mm/min, jeweils „von“ kleiner als „bis“", true); return@LcButton
+            if (a == null || b == null || c == null || d == null || a !in 1.0..100.0 || b !in 1.0..100.0 || c !in 100.0..maxFeed || d !in 100.0..maxFeed || a >= b || c >= d) {
+                machine.notify("Leistung 1–100 %%, Tempo 100–%.0f mm/min (Maschinenlimit), jeweils „von“ kleiner als „bis“".format(maxFeed), true); return@LcButton
             }
             val spec = EngraveTest.Spec(powers = MaterialTest.steps(a, b, 5), speeds = MaterialTest.steps(c, d, 5), intervalMm = interval)
             ask(Confirm("Gravur-Test lasern?", "Restplatte liegt mittig? 25 Felder à 5 × 5 mm (ca. 4 min, Laser an – Schutzbrille, danebenbleiben). " +
@@ -382,4 +426,89 @@ internal fun ProbeOffsetDialog(machine: MachineViewModel, ws: WorkspaceViewModel
         }
     }
     ConfirmDialog(confirm) { confirm = null }
+}
+
+/**
+ * Guided cut test: lasered squares (rows = passes, columns = speed); the
+ * operator taps the ones that fell out, the app keeps the quickest with
+ * reserve as the cutting setting of the material.
+ */
+@Composable
+private fun CutCard(machine: MachineViewModel, ws: WorkspaceViewModel, spec: CutTest.Spec?, ready: Boolean, maxFeed: Double, ask: (Confirm) -> Unit) {
+    val materials by machine.materials.collectAsStateWithLifecycle()
+    var name by remember { mutableStateOf("MDF") }
+    var thickness by remember { mutableStateOf("3") }
+    var power by remember { mutableStateOf("100") }
+    var sFrom by remember { mutableStateOf("150") }; var sTo by remember { mutableStateOf("600") }
+    var maxPasses by remember { mutableStateOf(3) }
+    var through by remember(spec) { mutableStateOf(emptySet<Pair<Int, Int>>()) }
+    LcCard {
+        CardTitle("7 · Schnitt-Test (geführt)")
+        SmallText("1. Restplatte des Materials mittig auflegen, Stärke eintragen. 2. Der Laser schneidet 5 × $maxPasses Quadrate (8 mm): " +
+            "nach rechts schneller, nach unten mehr Durchgänge; ein kleiner Pfeil oben links zeigt die Lage. 3. Platte umdrehen, Quadrate " +
+            "vorsichtig herausdrücken. 4. Hier antippen, welche herausgefallen sind – die App nimmt die schnellste sichere Einstellung. " +
+            "Ohne Luftunterstützung kann MDF beim Schneiden aufflammen: danebenbleiben.", Lc.faint)
+        if (spec == null) {
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextInput("Material", name, { name = it }, Modifier.weight(1.4f))
+                NumberField("Stärke", thickness, { thickness = it }, Modifier.weight(1f), "mm")
+                NumberField("Leistung", power, { power = it }, Modifier.weight(1f), "%")
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                NumberField("Tempo von", sFrom, { sFrom = it }, Modifier.weight(1f), "mm/min")
+                NumberField("bis", sTo, { sTo = it }, Modifier.weight(1f), "mm/min")
+                SmallText("Durchgänge")
+                Segmented(listOf(1 to "1", 2 to "2", 3 to "3", 4 to "4"), maxPasses, { maxPasses = it })
+            }
+            Spacer(Modifier.height(12.dp))
+            LcButton("Schnitt-Test lasern", {
+                fun num(t: String) = t.replace(',', '.').toDoubleOrNull()
+                val t = num(thickness); val pw = num(power); val a = num(sFrom); val b = num(sTo)
+                if (t == null || pw == null || a == null || b == null || t !in 0.1..20.0 || pw !in 10.0..100.0 || a !in 30.0..maxFeed || b !in 30.0..maxFeed || a >= b) {
+                    machine.notify("Stärke 0,1–20 mm, Leistung 10–100 %%, Tempo 30–%.0f mm/min, „von“ kleiner als „bis“".format(maxFeed), true); return@LcButton
+                }
+                val s = CutTest.Spec(powerPct = pw, speeds = MaterialTest.steps(a, b, 5), passes = (1..maxPasses).toList(), thicknessMm = t)
+                ask(Confirm("Schnitt-Test lasern?", "Restplatte (%s mm) liegt mittig? Der Laser schneidet ${5 * maxPasses} Quadrate (Laser an, kann einige Minuten dauern). ".format(thickness) +
+                    "Abluft an, Schutzbrille, danebenbleiben.", "Lasern") { ws.cutTest(machine, s) })
+            }, icon = LcIcons.laser, kind = BtnKind.PRIMARY, enabled = ready)
+        } else {
+            Spacer(Modifier.height(12.dp))
+            Text("Welche Quadrate sind herausgefallen?", style = LcTypography.titleMedium)
+            SmallText("Antippen = durch (grün). Lage wie auf der Platte, Pfeil oben links.", Lc.faint)
+            Spacer(Modifier.height(8.dp))
+            Row { Spacer(Modifier.width(64.dp)); for (sp in spec.speeds) SmallText("${sp.roundToInt()}", modifier = Modifier.width(52.dp)) }
+            for ((j, p) in spec.passes.withIndex()) Row(verticalAlignment = Alignment.CenterVertically) {
+                SmallText("${p}×", modifier = Modifier.width(64.dp))
+                for (i in spec.speeds.indices) {
+                    val on = (i to j) in through
+                    Box(Modifier.padding(3.dp).size(46.dp).background(if (on) Lc.ok.copy(alpha = .35f) else Lc.surface2)
+                        .clickable { through = if (on) through - (i to j) else through + (i to j) }, contentAlignment = Alignment.Center) {
+                        if (on) Icon(LcIcons.check, null, tint = Lc.ok)
+                    }
+                }
+            }
+            SmallText("Spalten: Tempo mm/min · Zeilen: Durchgänge · Leistung %.0f %%".format(spec.powerPct), Lc.faint)
+            Spacer(Modifier.height(10.dp))
+            val pick = CutTest.pick(spec, through)
+            if (pick == null) SmallText("Noch nichts angetippt." + if (through.isEmpty()) " Ist keines durch: Leistung erhöhen oder mehr Durchgänge." else "")
+            else {
+                SmallText("Empfehlung: %.0f %% · %.0f mm/min · %d× (Fokus je Durchgang %.1f mm tiefer)".format(Locale.GERMANY, pick.powerPct, pick.speed, pick.passes, pick.zStep), Lc.text)
+                if (!pick.reserve) SmallText("Ohne Reserve: kein langsameres Quadrat war ebenfalls durch – lieber eine Stufe langsamer testen.", Lc.warn)
+                if (pick.inconsistent) SmallText("Auffällig: ein langsameres Quadrat mit gleichen Durchgängen ist nicht durch – Markierung prüfen.", Lc.warn)
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                LcButton("Als Material speichern", {
+                    val p = pick ?: return@LcButton
+                    val label = name.trim().ifBlank { "Material" }
+                    val old = materials.items.firstOrNull { it.name == label && abs(it.thicknessMm - spec.thicknessMm) < 0.01 && it.process == "Schneiden" }
+                    machine.saveMaterial(Material(id = old?.id ?: java.util.UUID.randomUUID().toString(), name = label, thicknessMm = spec.thicknessMm, process = "Schneiden",
+                        mode = LayerMode.LINE, powerPct = p.powerPct, speed = p.speed, passes = p.passes, zStepMm = p.zStep), isNew = old == null)
+                }, kind = BtnKind.PRIMARY, enabled = pick != null)
+                LcButton("Neuer Test", { ws.clearCut() }, kind = BtnKind.GHOST)
+            }
+        }
+    }
 }

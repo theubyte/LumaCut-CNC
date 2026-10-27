@@ -85,7 +85,7 @@ class MaterialStoreTests(unittest.TestCase):
     def test_limits(self):
         bad = [
             {"power_pct": 100.5}, {"power_pct": -1}, {"speed_mm_min": 0.5},
-            {"speed_mm_min": 6001}, {"passes": 0}, {"passes": 31}, {"passes": 2.5},
+            {"speed_mm_min": 30001}, {"passes": 0}, {"passes": 31}, {"passes": 2.5},
             {"z_step_mm": 2.1}, {"passes": 3, "z_step_mm": 2.0},          # 4 mm in total
             {"thickness_mm": 6, "depth_per_pass_mm": 1.0, "z_step_mm": 0.7},  # 6 passes, 3.5 mm
             {"process": "Fräsen"}, {"mode": "raster"}, {"name": " "}, {"power_pct": "viel"},

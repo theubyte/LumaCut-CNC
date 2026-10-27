@@ -176,13 +176,15 @@ class USBProtocolTests(unittest.TestCase):
     def test_actual_marlin_m115_and_no_grbl_identity_spoof(self):
         serial=FakeSerial([
             "FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin\n",
-            "ok P15 B3\n", "ok\n", "ok\n", "ok\n"
+            "ok P15 B3\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n"
         ])
         bridge=MarlinTransport("/dev/null",serial_factory=lambda *a,**k:serial)
         bridge.ensure_ready()
-        # M851 clears a stale EEPROM probe offset (Mega Zero -40/-10/+2).
+        # M851 clears a stale EEPROM probe offset (Mega Zero -40/-10/+2);
+        # the X/Y limits (firmware values until the motion calibration) too.
         self.assertEqual(serial.writes,[b"M115\n",b"M5 I\n",b"M203 Z9\n",
-                                        b"M851 X0 Y0 Z0\n"])
+                                        b"M851 X0 Y0 Z0\n", b"M201 X500 Y500\n",
+                                        b"M203 X150 Y150 Z9\n", b"M204 P500 T500\n"])
         self.assertTrue(bridge.status()["connected"])
         self.assertIn("LumaCut CNC",bridge.status()["identity"])
 
@@ -975,6 +977,45 @@ with web.app.test_client() as c:
         bridge.laser_enabled = True
         with self.assertRaisesRegex(RuntimeError, "Laser"):
             bridge.move_to(100.0, 100.0)
+
+    def test_motion_test_uses_test_limits_and_restores_the_stored_ones(self):
+        from marlin.transport import MarlinTransport
+        replies = (["ok\n"] * 2 + ["X:10.00 Y:10.00 Z:5.00\n", "ok\n"] + ["ok\n"] * (3 + 3 + 12 + 1 + 3)
+                   + ["X:200.00 Y:150.00 Z:20.00\n", "ok\n"])
+        serial = FakeSerial(replies)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.motion_limits = (1500.0, 180.0)
+        bridge.motion_test(3000.0, 250.0, 200.0, 150.0, 40.0, 1)
+        writes = [w.decode().strip() for w in serial.writes]
+        test = writes.index("M201 X3000 Y3000")
+        self.assertEqual(writes[test:test + 3], ["M201 X3000 Y3000", "M203 X250 Y250 Z9", "M204 P3000 T3000"])
+        moves = [w for w in writes[test + 3:] if w.startswith("G0 X")]
+        self.assertEqual(len(moves), 12)
+        self.assertTrue(all(w.endswith("F15000") for w in moves))
+        self.assertEqual(moves[-1], "G0 X200.000 Y150.000 F15000")
+        self.assertIn("G0 X240.000 Y190.000 F15000", moves)
+        self.assertEqual(writes[-4:], ["M201 X1500 Y1500", "M203 X180 Y180 Z9", "M204 P1500 T1500", "M114"])
+        self.assertNotIn("M500", writes)
+        with self.assertRaisesRegex(ValueError, "außerhalb"):
+            bridge.motion_test(3000.0, 250.0, 20.0, 150.0, 40.0, 1)
+        with self.assertRaisesRegex(ValueError, "Beschleunigung"):
+            bridge.motion_test(50000.0, 250.0, 200.0, 150.0, 40.0, 1)
+
+    def test_motion_limits_sent_now_and_firmware_values_by_default(self):
+        from marlin.transport import MarlinTransport
+        serial = FakeSerial(["ok\n"] * 8)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.set_motion_limits((2500.0, 200.0))
+        bridge.set_motion_limits(None)
+        self.assertEqual([w.decode().strip() for w in serial.writes],
+                         ["M400", "M201 X2500 Y2500", "M203 X200 Y200 Z9", "M204 P2500 T2500",
+                          "M400", "M201 X500 Y500", "M203 X150 Y150 Z9", "M204 P500 T500"])
 
     def test_camera_snapshot_and_moveto_endpoints(self):
         self._run_web_script(r"""

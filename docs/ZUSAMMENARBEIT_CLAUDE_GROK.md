@@ -76,7 +76,7 @@ Material (JSON, Einheiten im Namen):
   "builtin": false, "updated": "2026-10-26T15:00:00Z" }
 ```
 
-Grenzen wie bisher: Leistung 0–100 %, Tempo 1–6000 mm/min, Durchgänge 1–30,
+Grenzen wie bisher: Leistung 0–100 %, Tempo 1–30000 mm/min (seit 2026-10-27; vorher 6000 – Eingabefeld `mfSpeed` in index.html hat noch max="6000", bitte anheben), Durchgänge 1–30,
 Z-Absenkung 0–2 mm und gesamt ≤ 3 mm. Beim ersten Start legt der Pi die Startwerte an.
 Die Apps halten nur einen Zwischenspeicher für den Fall ohne Verbindung.
 

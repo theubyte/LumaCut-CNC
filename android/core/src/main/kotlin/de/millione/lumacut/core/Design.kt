@@ -12,7 +12,8 @@ enum class LayerMode { LINE, FILL }
 /** Limits shared with the Windows app (lumacut_canvas/model.py). */
 object Limits {
     val POWER = 0.0..100.0
-    val SPEED = 1.0..6000.0
+    /** mm/min; what the machine really does comes from the motion calibration (MarlinWriter.Motion). */
+    val SPEED = 1.0..30000.0
     val PASSES = 1..30
     val Z_STEP = 0.0..2.0
     /** Total focus drop over all passes; the Pi keeps Z >= surface + 2 mm, focus sits at surface + 5.5 mm. */

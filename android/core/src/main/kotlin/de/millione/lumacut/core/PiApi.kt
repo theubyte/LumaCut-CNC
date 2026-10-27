@@ -68,7 +68,15 @@ data class PiConfig(
     val probe_offset_y_mm: Double? = null,
     /** Fixed head-camera values from the light calibration (Pi with "camera_settings"). */
     val camera: CameraSettings? = null,
+    /** Measured X/Y acceleration and speed (motion calibration); null values = firmware. */
+    val motion: PiMotion? = null,
 )
+
+@Serializable
+data class PiMotion(val accel: Double? = null, val speed: Double? = null) {
+    val measured get() = accel != null && speed != null
+    fun toMotion() = if (accel != null && speed != null) MarlinWriter.Motion(accel, speed) else MarlinWriter.Motion.FIRMWARE
+}
 
 /**
  * Fixed head-camera values, each null = automatic: [exposure] in 100 µs
@@ -213,7 +221,7 @@ class PiClient(
     suspend fun action(op: String, fields: Map<String, String> = emptyMap()): String {
         require(op in ACTIONS) { "Aktion nicht vorgesehen: $op" }
         val form = FormBody.Builder().add("op", op).apply { fields.forEach { (k, v) -> add(k, v) } }.build()
-        val long = op in setOf("home", "probe", "park", "moveto")
+        val long = op in setOf("home", "probe", "park", "moveto", "motion_test", "motion_limits")
         return message(call(Request.Builder().url(url("api", "action")).post(form).build(), longRunning = long))
     }
 
@@ -267,6 +275,17 @@ class PiClient(
 
     /** Traces [program] (from [Frame.program]) with the laser off. */
     suspend fun frame(program: String, mode: Frame.Mode): String = action("frame", mapOf("gcode" to program, "mode" to mode.api))
+
+    /** Laser-off stress moves at a test acceleration/speed around machine X/Y (motion calibration). */
+    suspend fun motionTest(accel: Double, speed: Double, machineX: Double, machineY: Double, span: Double, cycles: Int): String =
+        action("motion_test", mapOf("accel" to "%.0f".format(java.util.Locale.ROOT, accel), "speed" to "%.0f".format(java.util.Locale.ROOT, speed),
+            "x" to "%.3f".format(java.util.Locale.ROOT, machineX), "y" to "%.3f".format(java.util.Locale.ROOT, machineY),
+            "span" to "%.1f".format(java.util.Locale.ROOT, span), "cycles" to cycles.toString()))
+
+    /** Stores the measured limits on the Pi (sent to Marlin now and on every connect); null = firmware values. */
+    suspend fun motionLimits(m: MarlinWriter.Motion?): String = action("motion_limits",
+        if (m == null) mapOf("accel" to "", "speed" to "")
+        else mapOf("accel" to "%.0f".format(java.util.Locale.ROOT, m.accel), "speed" to "%.0f".format(java.util.Locale.ROOT, m.speed)))
 
     /** Laser-off move of the head to machine X/Y; Z only goes up (camera scan). */
     suspend fun moveTo(machineX: Double, machineY: Double): String = action("moveto", mapOf(
@@ -414,7 +433,7 @@ class PiClient(
     companion object {
         const val COORD_CONVENTION = "origin_top_right"
 
-        val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame", "moveto",
+        val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame", "moveto", "motion_test", "motion_limits",
                             "abort", "estop", "estop_reset", "app_update_check")
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

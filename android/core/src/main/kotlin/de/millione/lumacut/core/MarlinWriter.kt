@@ -16,10 +16,25 @@ class JobBuildException(message: String) : IllegalArgumentException(message)
  *   laser-off overscan, ever leaves the work area (the safe zone is never entered);
  * - layers with zStep lower the focus between passes with
  *   `G91 / G0 Z-… F600 / G90` and return to focus height afterwards;
- * - fills and images run bidirectionally with laser-off run-up (G1 S0);
+ * - fills and images run bidirectionally with laser-off run-up (G1 S0), long
+ *   enough for the head to reach the layer speed with the machine's
+ *   acceleration ([Motion]) before the laser burns;
  * - homing, probing, focus and parking are done by the Pi.
  */
-class MarlinWriter(private val appVersion: String = "dev") {
+class MarlinWriter(private val appVersion: String = "dev", private val motion: Motion = Motion.FIRMWARE) {
+
+    /**
+     * X/Y acceleration (mm/s²) and top speed (mm/s) the machine runs with:
+     * the Pi's config.motion from the motion calibration, else the firmware's.
+     */
+    data class Motion(val accel: Double, val speed: Double) {
+        val maxFeed get() = speed * 60
+
+        /** Laser-off run-up for [feed] mm/min: braking/accelerating distance v²/2a plus 15 % and 0.3 mm. */
+        fun runUp(feed: Double): Double { val v = feed / 60; return v * v / (2 * accel) * 1.15 + 0.3 }
+
+        companion object { val FIRMWARE = Motion(500.0, 150.0) }
+    }
 
     private val out = StringBuilder()
     // Last commanded point in work coordinates. Unknown at the start: the head
@@ -41,6 +56,9 @@ class MarlinWriter(private val appVersion: String = "dev") {
         for (layer in doc.layers.filter { it.id in active }) {
             if (layer.powerPct !in Limits.POWER || layer.speed !in Limits.SPEED || layer.passes !in Limits.PASSES)
                 throw JobBuildException("Ungültige Werte auf Ebene „${layer.name}“")
+            if (layer.speed > motion.maxFeed + 1e-6)
+                throw JobBuildException("Ebene „${layer.name}“: %.0f mm/min – die Maschine fährt höchstens %.0f mm/min (Maschine → Kalibrieren → Bewegung)"
+                    .format(Locale.GERMANY, layer.speed, motion.maxFeed))
             if (layer.zStepMm !in Limits.Z_STEP || layer.focusDropMm > Limits.MAX_FOCUS_DROP_MM + 1e-6)
                 throw JobBuildException("Fokus-Absenkung zu groß auf „${layer.name}“ (%.2f mm > %.0f mm)".format(Locale.GERMANY, layer.focusDropMm, Limits.MAX_FOCUS_DROP_MM))
         }
@@ -112,7 +130,8 @@ class MarlinWriter(private val appVersion: String = "dev") {
         if (runs.isEmpty()) return
         val forward = runs.first().x1 >= runs.first().x0
         val dir = if (forward) 1.0 else -1.0
-        val over = layer.overscanMm.coerceIn(0.0, 10.0)
+        // the head must be at full speed when the laser starts, else the line edges burn darker
+        val over = max(layer.overscanMm.coerceIn(0.0, 10.0), motion.runUp(feed(layer).toDouble())).coerceAtMost(40.0)
         val start = clampX(runs.first().x0 - dir * over)
         val end = clampX(runs.last().x1 + dir * over)
         rapid(Pt(start, y))

@@ -172,7 +172,7 @@ object EngraveTest {
     ) {
         init {
             require(powers.size in 2..8 && speeds.size in 2..8) { "2 … 8 Stufen je Richtung" }
-            require(powers.all { it in 1.0..100.0 } && speeds.all { it in Limits.SPEED }) { "Leistung 1–100 %, Tempo bis 6000 mm/min" }
+            require(powers.all { it in 1.0..100.0 } && speeds.all { it in Limits.SPEED }) { "Leistung 1–100 %, Tempo bis %.0f mm/min".format(Limits.SPEED.endInclusive) }
         }
         val pitch get() = cellMm + gapMm
 
@@ -186,7 +186,7 @@ object EngraveTest {
         fun bounds(): Box = cell(0, 0).union(cell(powers.size - 1, speeds.size - 1)).let { Box(it.minX - gapMm, it.minY - gapMm, it.maxX + gapMm, it.maxY + gapMm) }
     }
 
-    fun job(spec: Spec): String {
+    fun job(spec: Spec, motion: MarlinWriter.Motion = MarlinWriter.Motion.FIRMWARE): String {
         val layers = ArrayList<Layer>(); val elements = ArrayList<Element>()
         // slowest first: the hottest squares burn while the plate is still cool
         for ((j, speed) in spec.speeds.withIndex()) for ((i, power) in spec.powers.withIndex()) {
@@ -196,7 +196,7 @@ object EngraveTest {
             layers += layer
             elements += Element(layerId = layer.id, kind = "Testfeld", transform = Transform(b.minX, b.minY), paths = listOf(Shapes.rect(spec.cellMm, spec.cellMm)))
         }
-        return MarlinWriter("gravur-test").write(Document("Gravur-Test", layers, elements))
+        return MarlinWriter("gravur-test", motion).write(Document("Gravur-Test", layers, elements))
     }
 
     /**
@@ -256,9 +256,14 @@ object EngraveTest {
     }
 
     /** Head positions (work mm) whose usable camera area together show every square with its surroundings. */
-    fun photos(spec: Spec, cal: CameraCalibration): List<Pt> {
+    fun photos(spec: Spec, cal: CameraCalibration): List<Pt> = CameraCover.heads(spec.bounds(), cal)
+}
+
+/** Head positions for photos of a test area. */
+object CameraCover {
+    /** Head positions (work mm) whose usable camera areas (25 % overlap) together cover [area]. */
+    fun heads(area: Box, cal: CameraCalibration): List<Pt> {
         val u = cal.usable(0.1)
-        val area = spec.bounds()
         val cols = max(1, ceil((area.width - u.width) / (u.width * 0.75)).toInt() + 1)
         val rows = max(1, ceil((area.height - u.height) / (u.height * 0.75)).toInt() + 1)
         return (0 until rows).flatMap { r -> (0 until cols).map { c ->
@@ -266,5 +271,172 @@ object EngraveTest {
             val ty = if (rows == 1) area.center.y - u.height / 2 else area.minY + (area.height - u.height) * r / (rows - 1)
             Pt(tx - u.minX, ty - u.minY)
         } }
+    }
+}
+
+/**
+ * Motion calibration: how hard and how fast the gantry can move without
+ * losing a step. First a reference mark per level is lasered (an "L" of two
+ * lines). Then, level by level, the Pi drives laser-off stress moves at a
+ * rising acceleration and speed, and the laser draws a check "L" 1 mm
+ * beside the reference. A lost step moves every later check mark; the
+ * camera measures the line spacing, so a level fails when its check mark
+ * moved more than [TOLERANCE] against the previous one. Glyph 0 gets its
+ * check mark without stress: the baseline (repeatability, backlash).
+ */
+object MotionTest {
+    data class Level(val accel: Double, val speed: Double)
+
+    val LEVELS = listOf(Level(1000.0, 150.0), Level(2000.0, 200.0), Level(3000.0, 250.0),
+                        Level(4500.0, 300.0), Level(6000.0, 350.0), Level(8000.0, 400.0))
+    const val ARM = 6.0
+    const val GAP = 1.0
+    const val PITCH = 10.0
+    const val PER_ROW = 4
+    const val TOLERANCE = 0.1
+
+    /** Top-left corner of glyph [k] of [n] (glyph 0 = baseline, glyph k = level k-1). */
+    fun origin(k: Int, n: Int, centre: Pt = Work.center): Pt {
+        val rows = (n + PER_ROW - 1) / PER_ROW
+        val col = k % PER_ROW; val row = k / PER_ROW
+        return Pt(centre.x + (col - (PER_ROW - 1) / 2.0) * PITCH - ARM / 2, centre.y + (row - (rows - 1) / 2.0) * PITCH - ARM / 2)
+    }
+
+    fun bounds(n: Int, centre: Pt = Work.center): Box =
+        (0 until n).map { origin(it, n, centre) }.let { o -> Box(o.minOf { it.x } - 2, o.minOf { it.y } - 2, o.maxOf { it.x } + ARM + 2, o.maxOf { it.y } + ARM + 2) }
+
+    /** Reference "L": vertical line at x, horizontal line at y, corner top-left. */
+    fun reference(k: Int, n: Int, centre: Pt = Work.center): List<Poly> {
+        val o = origin(k, n, centre)
+        return listOf(listOf(o, Pt(o.x, o.y + ARM)), listOf(o, Pt(o.x + ARM, o.y)))
+    }
+
+    /** Check "L" [GAP] mm right of and below the reference. */
+    fun check(k: Int, n: Int, centre: Pt = Work.center): List<Poly> {
+        val o = origin(k, n, centre) + Pt(GAP, GAP)
+        return listOf(listOf(o, Pt(o.x, o.y + ARM - GAP)), listOf(o, Pt(o.x + ARM - GAP, o.y)))
+    }
+
+    fun job(title: String, paths: List<Poly>, motion: MarlinWriter.Motion = MarlinWriter.Motion.FIRMWARE): String {
+        val layer = Layer(name = title, color = 0xFF4FD8B4, mode = LayerMode.LINE, powerPct = 25.0, speed = 1200.0)
+        return MarlinWriter("bewegungstest", motion).write(Document(title, listOf(layer), listOf(Element(layerId = layer.id, kind = title, paths = paths))))
+    }
+
+    /** Check minus reference spacing, minus [GAP] (mm): how far the check mark moved; NaN when a line is not found. */
+    class Shift(val dx: Double, val dy: Double) {
+        val found get() = !dx.isNaN() && !dy.isNaN()
+    }
+
+    fun measure(sampler: PhotoSampler, k: Int, n: Int, centre: Pt = Work.center): Shift {
+        val o = origin(k, n, centre)
+        // across the vertical lines (X), averaged down the part where both exist, and the same for Y
+        val dx = spacing { s -> (0..10).map { t -> sampler.lum(Pt(o.x + s, o.y + GAP + 1 + (ARM - GAP - 2) * t / 10)) } }
+        val dy = spacing { s -> (0..10).map { t -> sampler.lum(Pt(o.x + GAP + 1 + (ARM - GAP - 2) * t / 10, o.y + s)) } }
+        return Shift(dx - GAP, dy - GAP)
+    }
+
+    /** Distance between the dark line near 0 and the one near [GAP] in a profile; [at] gives samples at offset s (mm). */
+    private fun spacing(at: (Double) -> List<Double>): Double {
+        val step = 0.02
+        val offs = (-30..80).map { it * step }                 // -0.6 … +1.6 mm
+        val prof = offs.map { s -> at(s).filter { !it.isNaN() }.takeIf { it.size >= 6 }?.average() ?: return Double.NaN }
+        val bg = prof.sorted().let { it[it.size * 4 / 5] }
+        fun centre(from: Double, to: Double): Double {
+            val idx = offs.indices.filter { offs[it] in from..to }
+            val d = idx.map { max(0.0, bg - prof[it]) }
+            val peak = d.max()
+            if (bg <= 0 || peak / bg < 0.08) return Double.NaN
+            var sw = 0.0; var sx = 0.0
+            for ((m, i) in idx.withIndex()) { val v = d[m] - peak / 2; if (v > 0) { sw += v; sx += v * offs[i] } }
+            return sx / sw
+        }
+        return centre(GAP - 0.5, GAP + 0.55) - centre(-0.55, 0.5)
+    }
+
+    /**
+     * Index of the last level that held (−1: not even the first), from the
+     * shifts of glyphs 0 … n (glyph 0 = baseline without stress).
+     */
+    fun lastGood(shifts: List<Shift>): Int {
+        var last = -1
+        for (k in 1 until shifts.size) {
+            val a = shifts[k - 1]; val b = shifts[k]
+            if (!a.found || !b.found) break
+            if (abs(b.dx - a.dx) > TOLERANCE || abs(b.dy - a.dy) > TOLERANCE) break
+            last = k - 1
+        }
+        return last
+    }
+
+    /** Limits to keep: 70 % of the acceleration and 80 % of the speed of the last level that held. */
+    fun recommend(level: Level) = MarlinWriter.Motion((level.accel * 0.7 / 100).roundToInt() * 100.0, (level.speed * 0.8 / 10).roundToInt() * 10.0)
+}
+
+/**
+ * Guided cut test: small squares cut with rising passes (rows) and speeds
+ * (columns). The operator presses them out and taps in the app which ones
+ * fell through; the fastest one that did, with some reserve, becomes the
+ * cutting setting of the material. A small engraved arrow at the top left
+ * shows the orientation.
+ */
+object CutTest {
+    data class Spec(
+        val powerPct: Double = 100.0,
+        val speeds: List<Double> = listOf(150.0, 250.0, 350.0, 450.0, 600.0),
+        val passes: List<Int> = listOf(1, 2, 3),
+        val thicknessMm: Double = 3.0,
+        val cellMm: Double = 8.0, val gapMm: Double = 4.0,
+        val centre: Pt = Work.center,
+    ) {
+        init {
+            require(powerPct in 1.0..100.0 && speeds.size in 2..6 && passes.size in 1..4) { "Ungültiger Schnitt-Test" }
+            require(speeds.all { it in 30.0..Limits.SPEED.endInclusive } && passes.all { it in 1..10 }) { "Tempo oder Durchgänge ungültig" }
+        }
+        /** Focus drop per pass: following the cut into the material, at most 3 mm in total. */
+        val zStep: Double get() { val p = passes.max(); return if (p <= 1) 0.0 else minOf(thicknessMm / p, Limits.MAX_FOCUS_DROP_MM / (p - 1), 1.0) }
+
+        /** Square for speed [i] (column) and passes [j] (row). */
+        fun cell(i: Int, j: Int): Box {
+            val pitch = cellMm + gapMm
+            val x = centre.x + (i - (speeds.size - 1) / 2.0) * pitch - cellMm / 2
+            val y = centre.y + (j - (passes.size - 1) / 2.0) * pitch - cellMm / 2
+            return Box(x, y, x + cellMm, y + cellMm)
+        }
+    }
+
+    fun job(spec: Spec, motion: MarlinWriter.Motion = MarlinWriter.Motion.FIRMWARE): String {
+        val mark = Layer(name = "Markierung", color = 0xFFEEF3F8, mode = LayerMode.LINE, powerPct = 20.0, speed = 1500.0)
+        val first = spec.cell(0, 0)
+        val arrow = listOf(Pt(first.minX, first.minY - 4), Pt(first.minX + 3, first.minY - 4), Pt(first.minX + 2, first.minY - 5), Pt(first.minX + 3, first.minY - 4), Pt(first.minX + 2, first.minY - 3))
+        val layers = arrayListOf(mark); val elements = arrayListOf(Element(layerId = mark.id, kind = "Markierung", paths = listOf(arrow)))
+        for ((j, p) in spec.passes.withIndex()) for ((i, s) in spec.speeds.withIndex()) {
+            val layer = Layer(name = "${spec.powerPct.roundToInt()} % · ${s.roundToInt()} mm/min · ${p}×", color = 0xFFFF8A5C, mode = LayerMode.LINE,
+                powerPct = spec.powerPct, speed = s, passes = p, zStepMm = if (p > 1) spec.zStep else 0.0)
+            val b = spec.cell(i, j)
+            layers += layer
+            elements += Element(layerId = layer.id, kind = "Schnittfeld", transform = Transform(b.minX, b.minY), paths = listOf(Shapes.rect(spec.cellMm, spec.cellMm)))
+        }
+        return MarlinWriter("schnitt-test", motion).write(Document("Schnitt-Test", layers, elements))
+    }
+
+    /** Setting to keep: [reserve] true when a slower square that also fell through backs it up. */
+    class Pick(val speed: Double, val passes: Int, val powerPct: Double, val zStep: Double, val reserve: Boolean, val inconsistent: Boolean)
+
+    /**
+     * From the squares that fell through ([through]: column, row): the
+     * quickest (passes / speed); taken is the next slower one that also fell
+     * through (≥ 15 % more time), so material variation does not leave
+     * parts hanging. [Pick.inconsistent] when a slower square with the same
+     * passes did not fall through although a faster one did (check the marks).
+     */
+    fun pick(spec: Spec, through: Set<Pair<Int, Int>>): Pick? {
+        if (through.isEmpty()) return null
+        fun cost(c: Pair<Int, Int>) = spec.passes[c.second] / spec.speeds[c.first]
+        val best = through.minBy(::cost)
+        val safe = through.filter { cost(it) >= cost(best) * 1.15 }.minByOrNull(::cost)
+        val chosen = safe ?: best
+        val inconsistent = through.any { (i, j) -> (0 until i).any { k -> (k to j) !in through } }
+        val p = spec.passes[chosen.second]
+        return Pick(spec.speeds[chosen.first], p, spec.powerPct, if (p > 1) spec.zStep else 0.0, safe != null, inconsistent)
     }
 }

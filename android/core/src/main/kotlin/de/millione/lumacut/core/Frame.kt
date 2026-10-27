@@ -68,7 +68,7 @@ object MaterialTest {
     fun build(spec: Spec, label: (String, Double) -> List<Poly>): Document {
         require(spec.powerSteps in 1..10 && spec.speedSteps in 1..10) { "Höchstens 10 × 10 Felder" }
         require(spec.powerFrom in 0.0..100.0 && spec.powerTo in 0.0..100.0) { "Leistung 0–100 %" }
-        require(spec.speedFrom in 10.0..6000.0 && spec.speedTo in 10.0..6000.0) { "Tempo 10–6000 mm/min" }
+        require(spec.speedFrom in 10.0..Limits.SPEED.endInclusive && spec.speedTo in 10.0..Limits.SPEED.endInclusive) { "Tempo 10–%.0f mm/min".format(Limits.SPEED.endInclusive) }
         val powers = steps(spec.powerFrom, spec.powerTo, spec.powerSteps)
         val speeds = steps(spec.speedFrom, spec.speedTo, spec.speedSteps)
         val labelH = 3.0

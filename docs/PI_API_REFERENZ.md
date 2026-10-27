@@ -142,7 +142,7 @@ Alle `op`-Werte von `POST /api/action`:
 | --- | --- |
 | Not-Aus | `estop`, `estop_reset` |
 | Verbindung/Abfrage | `connect`, `info`, `position`, `endstops` |
-| Bewegung | `home`, `jog`, `park`, `moveto`, `probe` |
+| Bewegung | `home`, `jog`, `park`, `moveto`, `probe`, `motion_test`, `motion_limits` |
 | Zubehör | `light`, `exhaust` |
 | Ursprung/Platzierung | `origin_set`, `origin_clear`, `place`, `place_clear` |
 | Aufträge | `start`, `autorun`, `abort`, `frame` |
@@ -237,7 +237,7 @@ Felder aus `web.py` (`status()`):
 | `firmware` | string | immer `"marlin"` |
 | `expected_pwm` | string | `"PA1 / M3 I / S0..255"` (Info) |
 | `io` | object | Klartext-Belegung `laser_supply_switch`, `laser_pwm`, `fan_cooldown`, `exhaust`, `lights`, `aux` (Info) |
-| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 90}`, `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`) |
+| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 90}`, `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware) |
 | `camera` | object | `{device, available}`: Gerätepfad (`LUMACUT_CAMERA`, Standard `/dev/video0`) und ob er existiert (sagt nichts darüber, ob ffmpeg ein Bild bekommt) |
 
 `job.line` / `job.total`: `total` = Zahl der Auftragszeilen; `line` zählt
@@ -388,6 +388,36 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | Wirkung | Laser-aus-Fahrt (für Kamera-Scan/Positionieren): `M5 I`, `M400`, Z nur anheben auf `z_clearance_mm`, `G0 X Y F9000`, `M400`, `M114`. Darf in die 30-mm-Zone (Laser aus). Verwirft Platzierung `current`. |
 | Erfolg | 200 `{"message": "Kopf auf X120.0 Y80.0", "position": [x, y, z]}` |
 | Fehler | 400 `Ziel außerhalb X0..390 / Y0..370` (auch bei fehlendem/NaN-Wert); nicht-numerisch → 400 Python-Text |
+
+#### `op=motion_test`
+
+| Parameter | Typ | Erlaubt |
+| --- | --- | --- |
+| `accel` | number | 100..20000 mm/s² (Testbeschleunigung X/Y) |
+| `speed` | number | 10..500 mm/s (Testtempo X/Y) |
+| `x`, `y` | number | Mitte der Fahrt (Maschinen-mm), `x ± span` in 0..390, `y ± span` in 0..370 |
+| `span` | number, optional | 5..120 mm, Standard 40 |
+| `cycles` | int, optional | 1..30, Standard 6 |
+
+| | |
+| --- | --- |
+| Vorbedingungen | **frei**, **referenziert**, kein Riegel, Laser nicht scharf (wie `op=moveto`) |
+| Wirkung | Bewegungs-Kalibrierung der App, Laser aus: `M5 I`, Z nur anheben, `G0` zur Mitte, dann nur für den Test `M201`/`M203`/`M204` mit `accel`/`speed`, je Zyklus von der Mitte aus ±X, ±Y und beide Diagonalen um `span` hin und zurück (endet genau in der Mitte), `M400`; danach die gespeicherten Grenzen zurück (auch bei Fehler). Ein Schrittverlust zeigt sich, wenn die App danach an derselben Stelle wieder lasert. Verwirft Platzierung `current`. |
+| Erfolg | 200 `{"message": "Testfahrt … fertig", "position": [x, y, z]}` |
+| Fehler | 400 `Beschleunigung 100..20000 mm/s², Tempo 10..500 mm/s`, `Testbewegung außerhalb X0..390 / Y0..370` |
+
+#### `op=motion_limits`
+
+| Parameter | Typ | Erlaubt |
+| --- | --- | --- |
+| `accel`, `speed` | number, optional | beide oder keiner; 100..20000 mm/s² / 10..500 mm/s; keiner = Firmware-Werte (500 mm/s², 150 mm/s) |
+
+| | |
+| --- | --- |
+| Vorbedingungen | **frei** |
+| Wirkung | speichert `config.motion` dauerhaft und sendet sofort (und bei jeder SKR-Verbindung) `M201 X Y`, `M203 X Y Z9`, `M204 P T` – nur zur Laufzeit, nie ins EEPROM. Jobs fahren damit; die App rechnet den Anlaufweg beim Gravieren daraus. |
+| Erfolg | 200 `{"message": "Bewegung: 3000 mm/s², bis 250 mm/s", "motion": {"accel", "speed"}}` |
+| Fehler | 400 `Beschleunigung und Tempo beide angeben oder beide leer lassen`, Bereichsfehler wie oben |
 
 #### `op=probe`
 
@@ -800,7 +830,7 @@ Material (JSON):
 | `process` | string | `Schneiden`, `Gravieren`, `Markieren` |
 | `mode` | string | `line`, `fill` |
 | `power_pct` | number | 0..100 |
-| `speed_mm_min` | number | 1..6000 |
+| `speed_mm_min` | number | 1..30000 |
 | `passes` | int | 1..30 (Standard 1) |
 | `interval_mm` | number | 0.01..5 (Standard 0.1) |
 | `depth_per_pass_mm` | number | 0..50 (Standard 0); > 0: Durchgänge = aufgerundet Dicke / Tiefe |
@@ -1087,7 +1117,7 @@ curl -s -X PUT -H 'Content-Type: application/json' \
 ```js
 // Same-Origin: relative URLs. Fehler immer als Error mit deutschem Text.
 const TIMEOUTS = {status: 3000, quick: 15000, motion: 300000, upload: 120000};
-const MOTION_OPS = new Set(["home", "jog", "park", "moveto", "probe",
+const MOTION_OPS = new Set(["home", "jog", "park", "moveto", "probe", "motion_test", "motion_limits",
                             "info", "position", "endstops", "connect", "estop_reset"]);
 
 class PiError extends Error {

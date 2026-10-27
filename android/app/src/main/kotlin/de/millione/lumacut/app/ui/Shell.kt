@@ -77,6 +77,7 @@ fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
     }
     LaunchedEffect(Unit) { editor.notices.collect { n -> lastNotice = n; snackbar.currentSnackbarData?.dismiss(); snackbar.showSnackbar(n.text) } }
     LaunchedEffect(Unit) { machine.materials.collect { editor.setMaterials(it.items) } }
+    LaunchedEffect(Unit) { machine.status.collect { editor.setMotion(it?.config?.motion?.toMotion() ?: de.millione.lumacut.core.MarlinWriter.Motion.FIRMWARE) } }
 
     Box(Modifier.fillMaxSize().background(Lc.bg).windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(Modifier.fillMaxSize()) {

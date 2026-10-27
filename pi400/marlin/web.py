@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import (Aborted, MarlinTransport, MarlinLaserGuard, ProbeFailed, normalize,
-                        serve_tcp)
+                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE)
 from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
@@ -58,6 +58,8 @@ config = {
     "light_effects": True,      # light effects at homing, job start/end, error
     # Fixed head-camera exposure from the tablet's light calibration (camera.py), None = automatic.
     "camera": dict(head_camera.DEFAULTS),
+    # X/Y acceleration (mm/s²) and top speed (mm/s) from the motion calibration, None = firmware.
+    "motion": {"accel": None, "speed": None},
 }
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
@@ -75,6 +77,8 @@ machine.probe_tip_offset_mm = float(config["z_switch_tip_offset_mm"])
 machine.focus_gap_mm = float(config["focus_gap_mm"])
 machine.light_pct = int(round(float(config["light_brightness"])))
 machine.light_effects = bool(config["light_effects"])
+if (config.get("motion") or {}).get("accel") and (config.get("motion") or {}).get("speed"):
+    machine.motion_limits = (float(config["motion"]["accel"]), float(config["motion"]["speed"]))
 if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is not None:
     machine.probe_xy_offset_mm = (float(config["probe_offset_x_mm"]),
                                   float(config["probe_offset_y_mm"]))
@@ -480,6 +484,33 @@ def action():
         x = float(request.form.get("x", "nan")); y = float(request.form.get("y", "nan"))
         machine.move_to(x, y, owner="web")
         return jsonify(message="Kopf auf X%.1f Y%.1f" % (x, y), position=machine.position)
+    if op == "motion_test":
+        # Laser-off stress moves at a test acceleration/speed (motion calibration).
+        local_owner()
+        _forget_current_placement()
+        accel = float(request.form.get("accel", "nan")); speed = float(request.form.get("speed", "nan"))
+        x = float(request.form.get("x", "nan")); y = float(request.form.get("y", "nan"))
+        span = float(request.form.get("span", "40")); cycles = int(request.form.get("cycles", "6"))
+        machine.motion_test(accel, speed, x, y, span, cycles, owner="web")
+        return jsonify(message="Testfahrt %g mm/s² · %g mm/s fertig" % (accel, speed), position=machine.position)
+    if op == "motion_limits":
+        # Measured X/Y limits; both empty = back to the firmware values.
+        accel_raw = request.form.get("accel", "").strip(); speed_raw = request.form.get("speed", "").strip()
+        if bool(accel_raw) != bool(speed_raw):
+            raise ValueError("Beschleunigung und Tempo beide angeben oder beide leer lassen")
+        limits = None
+        if accel_raw:
+            accel = float(accel_raw); speed = float(speed_raw)
+            if not (MOTION_ACCEL_RANGE[0] <= accel <= MOTION_ACCEL_RANGE[1]
+                    and MOTION_SPEED_RANGE[0] <= speed <= MOTION_SPEED_RANGE[1]):
+                raise ValueError("Beschleunigung %g..%g mm/s², Tempo %g..%g mm/s" % (MOTION_ACCEL_RANGE + MOTION_SPEED_RANGE))
+            limits = (accel, speed)
+        local_owner()
+        machine.set_motion_limits(limits, owner="web")
+        config["motion"] = {"accel": limits[0] if limits else None, "speed": limits[1] if limits else None}
+        persist()
+        return jsonify(message=("Bewegung: %g mm/s², bis %g mm/s" % limits) if limits else "Bewegung: Firmware-Werte",
+                       motion=config["motion"])
     if op == "origin_set":
         return set_user_origin()
     if op == "origin_clear":
