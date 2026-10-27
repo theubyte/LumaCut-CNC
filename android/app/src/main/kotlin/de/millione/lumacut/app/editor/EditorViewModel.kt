@@ -49,6 +49,7 @@ import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Transform
 import de.millione.lumacut.core.Work
 import de.millione.lumacut.core.boundsOf
+import de.millione.lumacut.core.isClosed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
