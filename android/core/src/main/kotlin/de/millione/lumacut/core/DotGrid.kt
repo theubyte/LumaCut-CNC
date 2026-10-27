@@ -63,9 +63,14 @@ object DotGrid {
         cols.map { i -> dot(position(i, j), radius(i, j)) }
     }
 
+    /** Laser power for the grid, chosen by the operator: 20 % first, more when the camera finds too few dots. */
+    const val POWER_MIN = 20.0
+    const val POWER_MAX = 60.0
+
     /** G-code for the grid: low power and fast, light brown dots are enough for the camera. */
-    fun job(): String {
-        val layer = Layer(name = "Punktraster", color = 0xFF4FD8B4, mode = LayerMode.LINE, powerPct = 20.0, speed = 1800.0)
+    fun job(powerPct: Double = POWER_MIN): String {
+        require(powerPct in POWER_MIN..POWER_MAX) { "Leistung für das Punktraster: 20–60 %" }
+        val layer = Layer(name = "Punktraster", color = 0xFF4FD8B4, mode = LayerMode.LINE, powerPct = powerPct, speed = 1800.0)
         val e = Element(layerId = layer.id, kind = "Punktraster", paths = paths())
         return MarlinWriter("kamera-punktraster").write(Document("Kamera-Punktraster", listOf(layer), listOf(e)))
     }

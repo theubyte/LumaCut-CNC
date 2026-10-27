@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-10-26
 
+- Android: Laserleistung für das Kamera-Punktraster im Kalibrier-Dialog einstellbar, 20–60 % in 5-%-Schritten (Standard 20 %, wird gemerkt).
 - Pi-Web-UI: Nullpunkt X0/Y0 oben rechts (Bett gespiegelt, Jog/Tastatur angepasst), Materialauswahl über `GET /api/materials` mit Abgleich gegen G-Code, Phasenanzeige für Ein-Klick-Aufträge, Fallback für ältere Pis. Siehe docs/PI_WEB_UI_REDESIGN.md §10.
 
 **Pi-Weboberfläche neu gestaltet:** Sticky-Statusleiste (verbunden, referenziert, SKR, Steuerung, Laser, Job-Fortschritt) mit immer erreichbarem Not-Aus, Bewegung links, Bettansicht mittig, Aufträge rechts, Einrichtung in Tabs; Studio-Dark-Theme, große Touch-Ziele, responsiv. Neu in der UI: Rahmen fahren, Warteschlange, Auftrag löschen, Veraltet-Banner. API unverändert. Details: `docs/PI_WEB_UI_REDESIGN.md`.

@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import java.util.Locale
 
 /** A long run (scan, probe grid) with progress for the UI. */
@@ -69,6 +70,10 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _spacing = MutableStateFlow(prefs.getFloat("meshSpacing", 20f).toDouble())
     val spacing: StateFlow<Double> = _spacing.asStateFlow()
+
+    private val _gridPower = MutableStateFlow(
+        prefs.getFloat("gridPower", DotGrid.POWER_MIN.toFloat()).toDouble().coerceIn(DotGrid.POWER_MIN, DotGrid.POWER_MAX))
+    val gridPower: StateFlow<Double> = _gridPower.asStateFlow()
 
     private val _run = MutableStateFlow<Run?>(null)
     val run: StateFlow<Run?> = _run.asStateFlow()
@@ -124,6 +129,12 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         prefs.edit().putFloat("meshSpacing", _spacing.value.toFloat()).apply()
     }
 
+    /** Dot grid laser power in whole 5 % steps, 20–60 %. */
+    fun setGridPower(pct: Double) {
+        _gridPower.value = ((pct / 5).roundToInt() * 5.0).coerceIn(DotGrid.POWER_MIN, DotGrid.POWER_MAX)
+        prefs.edit().putFloat("gridPower", _gridPower.value.toFloat()).apply()
+    }
+
     /* ---------- camera ---------- */
 
     /** Largest picture size the camera delivered so far (Full HD first, smaller ones if it refuses). */
@@ -152,7 +163,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun sendGridJob(machine: MachineViewModel) =
-        machine.uploadJob(GRID_JOB, DotGrid.job())
+        machine.uploadJob(GRID_JOB, DotGrid.job(_gridPower.value))
 
     /** Moves the head (laser off) so the dot grid's centre is under the camera, as far as known. */
     fun headOverGrid(machine: MachineViewModel) {
@@ -371,7 +382,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                 if (!st.camera.available) throw IllegalStateException("Keine Kamera am Pi angeschlossen")
                 if (st.job.active) throw IllegalStateException("Es läuft gerade ein Auftrag")
                 step(0, "Punktraster wird hochgeladen …")
-                c.uploadJob(GRID_JOB, DotGrid.job())
+                c.uploadJob(GRID_JOB, DotGrid.job(_gridPower.value))
                 lasering = true
                 c.autorun(GRID_JOB)
                 waitForJob(machine, GRID_JOB, "Punktraster") { step(0, it) }

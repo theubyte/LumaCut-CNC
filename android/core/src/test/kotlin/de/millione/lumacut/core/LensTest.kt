@@ -119,6 +119,14 @@ class LensTest {
         assertTrue(Work.contains(DotGrid.bounds()))
     }
 
+    @Test fun `grid power is chosen between 20 and 60 percent`() {
+        fun powers(g: String) = Regex("""^G1 .* S(\d+)$""", RegexOption.MULTILINE).findAll(g).map { it.groupValues[1] }.toSet()
+        assertEquals(setOf("51"), powers(DotGrid.job()))
+        assertEquals(setOf("153"), powers(DotGrid.job(60.0)))
+        assertTrue(runCatching { DotGrid.job(65.0) }.isFailure)
+        assertTrue(runCatching { DotGrid.job(15.0) }.isFailure)
+    }
+
     @Test fun `calibration goes to the Pi and comes back unchanged`() = runBlocking {
         val cal = CameraCalibration(w, h, scanZ = 31.5, lens = trueLens())
         val stored = Document.JSON.encodeToString(CameraCalibration.serializer(), cal)

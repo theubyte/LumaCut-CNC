@@ -18,6 +18,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -69,6 +71,7 @@ import kotlin.math.roundToInt
 internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
     val busy by machine.busy.collectAsStateWithLifecycle()
+    val gridPower by ws.gridPower.collectAsStateWithLifecycle()
     var grid by remember { mutableStateOf(true) }
     var photo by remember { mutableStateOf<Bitmap?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -127,6 +130,15 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
                         SmallText("Läuft von allein: Punktraster lasern, Kamera sucht das Raster, stellt die Höhe scharf, misst Linse, " +
                             "Maßstab und Lage zum Laser ein und speichert alles auf dem Pi. Du legst nur eine Restplatte (mind. 21 × 17 cm) " +
                             "in die Mitte. Dauer ca. 8 Minuten.")
+                        Spacer(Modifier.height(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Laserleistung Punktraster", style = LcTypography.bodyMedium, modifier = Modifier.weight(1f))
+                            Text("${gridPower.roundToInt()} %", style = LcTypography.bodyMedium, color = Lc.muted)
+                        }
+                        Slider(gridPower.toFloat(), { ws.setGridPower(it.toDouble()) },
+                            valueRange = DotGrid.POWER_MIN.toFloat()..DotGrid.POWER_MAX.toFloat(), steps = 7,
+                            colors = SliderDefaults.colors(thumbColor = Lc.accent, activeTrackColor = Lc.accent))
+                        SmallText("Mit 20 % anfangen. Findet die Kamera zu wenige Punkte, Leistung erhöhen und das Raster neu lasern.")
                         Spacer(Modifier.height(12.dp))
                         if (!manual) LcButton("Automatisch kalibrieren", { confirmAuto = true }, Modifier.fillMaxWidth(), LcIcons.camera, BtnKind.PRIMARY, big = true)
                         Spacer(Modifier.height(10.dp))
