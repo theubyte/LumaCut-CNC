@@ -47,8 +47,11 @@ Die Kamera-Kalibrierung, die am 27.10. auf dem Pi gespeichert war (Revision 3), 
 
 1. **Vorher anheben.** Marlin kann die Höhe je Aufruf übernehmen (`G28 X Y R<H>`, Parameter R in `G28.cpp`, angehoben wird nur, nie abgesenkt, begrenzt auf `Z_MAX_POS`).
    - **Ist Z bekannt:** auf H anheben.
-   - **Ist Z unbekannt** (Stromausfall, SKR-Neustart): Marlin nimmt Z = 0 an. Ein Anheben um H könnte einen Kopf, der schon oben steht, gegen den oberen Anschlag fahren.
-   - **Vorschlag dafür:** Der Pi merkt sich die letzte Z-Höhe dauerhaft und hebt nur so weit, dass oben noch Platz bleibt. Kennt er die Höhe nicht, fragt die App nach: „Steht der Kopf über allem?“ **Der Nutzer hat das noch nicht entschieden** (Alternative: immer nachfragen).
+   - **Ist Z unbekannt:** Das gilt nur für den Moment *vor* dem Referenzieren, nachdem Marlin seine Position verloren hat. Das passiert nach Not-Aus (M112, danach ein SKR-Reset), nach Stromausfall, nach einem SKR-Neustart oder Firmware-Flash.
+     - Z wird erst in der Ecke 0/0 referenziert. Die Fahrt in die Ecke geschieht also vorher, in einer Höhe, die Marlin nicht kennt.
+     - Typischer Fall: Not-Aus mitten im Auftrag, der Kopf steht im Fokusabstand etwa 5 mm über dem Werkstück. Ohne Anheben fährt das Referenzieren quer über das Werkstück.
+     - Marlin nimmt dann Z = 0 an. „Auf H anheben“ hieße blind um H nach oben. Steht der Kopf schon oben, fährt er gegen den oberen Anschlag; oben gibt es keinen Endschalter.
+   - **Vorschlag dafür:** Der Pi merkt sich die letzte bekannte Z-Höhe dauerhaft, laufend aus M114. Bei unbekanntem Z hebt er relativ um `H − letzte Höhe` an, mindestens um 5 mm und nur so weit, dass oben Platz bleibt. Kennt er keine Höhe, weil der Kopf von Hand bewegt wurde oder die Datei fehlt, fragt die App: „Steht der Kopf über allem?“ **Bestätigung durch den Nutzer steht aus.**
 2. X/Y in die Ecke, `G28 Z` in der Ecke 0/0. Dort liegt nichts, das ist die Safezone.
 3. **In der Ecke auf H**, erst dann aus der Safezone heraus.
 
@@ -74,7 +77,7 @@ Die Kamera-Kalibrierung, die am 27.10. auf dem Pi gespeichert war (Revision 3), 
 
 - **Die automatische Kalibrierung gibt es schon** (`WorkspaceViewModel.autoCalibrate`, `focusSweep`): Punktraster lasern, abtasten, die Schärfe von Oberfläche **+ 8 mm** bis Z 85 in 5-mm-Schritten suchen, dann millimetergenau. Gespeichert wird `aboveSurface`.
 - **Wo die Kamera scharf ist, legt das Objektiv fest.** Die App findet diese Höhe nur.
-- **Vorschlag, mit dem Nutzer besprochen, aber noch nicht ausdrücklich bestätigt:** Die Suche beginnt bei Oberfläche **+ 20 mm** statt + 8 mm. Liegt die Schärfe am unteren Rand, meldet die App „Objektiv auf größeren Abstand drehen“. Diese Meldung gibt es schon (`CameraFocus.atEdge`). So bleibt der Abstand automatisch, liegt aber nie unter 20 mm.
+- **Entscheidung des Nutzers (27.10.):** Die Schärfesuche darf tiefer als die Fahrhöhe gehen. Zwischen Tasterspitze, dem tiefsten Punkt des Kopfs, und Werkstück bleiben aber **immer mindestens 5 mm**. Die Suche beginnt also bei Oberfläche **+ 5 mm** statt heute + 8 mm. Liegt die Schärfe am unteren Rand, meldet die App „Objektiv auf größeren Abstand drehen“. Diese Meldung gibt es schon (`CameraFocus.atEdge`). Die 20 mm gelten für Fahrten über unbekanntem Gelände. Die Fotohöhe liegt nur über einer gemessenen Fläche und darf darunter liegen, aber nie unter + 5 mm.
 - **Erweiterung (optional):** In zwei Höhen kalibrieren. Dann lässt sich der Maßstab für jede Höhe rechnen, etwa für Fotos weiter über hohen Objekten.
 - **Geometrie, geschätzt aus der alten Kalibrierung** (f ≈ 1101 px, rund 10,8 px/mm bei Z 20): Das Objektiv liegt etwa 100 mm über dem Material, also etwa 80 mm über der Tasterspitze.
 
@@ -128,7 +131,7 @@ Ziel ist, nur dort abzutasten, wo sicher Material liegt, die Höhe vorher grob z
 
 ## 6. Reihenfolge (Vorschlag)
 
-1. **Fahrhöhe aus der Materialstärke** (§4), dazu `G28 R`, der Abgleich Messwert ↔ Stärke und die Untergrenze 20 mm für die Kamera-Suche. **Erst bauen, wenn die offenen Fragen in §7 geklärt sind.**
+1. **Fahrhöhe aus der Materialstärke** (§4), dazu `G28 R`, der Abgleich Messwert ↔ Stärke und die Untergrenze + 5 mm für die Kamera-Suche. **Erst bauen, wenn die offenen Fragen in §7 geklärt sind.**
 2. Abtastpunkt im Scan antippen, mit Prüfung gegen die Maske (§5.1).
 3. Kalibrierkörper mit Markern (§5.2.4).
 4. Stereo durch Bewegung: Höhenkarte, Flach-Erkennung, Kollisionsschutz.
@@ -137,8 +140,8 @@ Ziel ist, nur dort abzutasten, wo sicher Material liegt, die Höhe vorher grob z
 
 ## 7. Offene Fragen an den Nutzer
 
-- Höhe vor dem Referenzieren bei unbekanntem Z: Soll der Pi sich die letzte Höhe merken (empfohlen), oder soll die App immer nachfragen?
-- Untergrenze der Kamera-Schärfesuche auf + 20 mm: bestätigen.
+- Höhe vor dem Referenzieren, wenn Marlin die Position verloren hat (§4.2): Vorschlag „letzte Höhe merken“ bestätigen.
+- ~~Untergrenze der Kamera-Schärfesuche~~: entschieden, mindestens 5 mm zwischen Tasterspitze und Werkstück (§4.5).
 - Laserpunkt oder separater Linienlaser für die 3D-Messung: Entscheidung nach dem Leistungstest.
 
 Vor dem Bauen: `git fetch` und die letzten Commits sowie `docs/ZUSAMMENARBEIT_CLAUDE_GROK.md` prüfen. Andere Sitzungen arbeiten parallel an Kamera, Kalibrierung und Pi.
