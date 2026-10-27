@@ -24,6 +24,7 @@ from . import heightmap
 from . import focus_compensation as focus
 from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import create_blueprint as camera_calibration_api
+from . import camera as head_camera
 from .app_update import AppUpdates
 
 ROOT = Path(__file__).resolve().parent
@@ -33,12 +34,11 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # /api/status "features": clients switch on Pi-side behaviour by these names.
 # autorun_mesh: op=autorun probes the motif areas and compensates the focus
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
-FEATURES = ("autorun_mesh", "materials", "app_update")
+FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings")
 JOBS = DATA / "jobs"
 USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
 # Head camera (USB/UVC or CSI via V4L2) for the workspace scan.
 CAMERA = os.environ.get("LUMACUT_CAMERA", "/dev/video0")
-JPEG_MAGIC = bytes([0xFF, 0xD8])
 HTTP = int(os.environ.get("LUMACUT_HTTP", "8080"))
 TCP = int(os.environ.get("LUMACUT_TCP", "23"))
 machine = MarlinTransport(USB)
@@ -56,6 +56,8 @@ config = {
     "user_origin": None,        # [x, y] machine mm, op=origin_set (job placement)
     "light_brightness": 60,     # % for the dimmable LED strip on PC8
     "light_effects": True,      # light effects at homing, job start/end, error
+    # Fixed head-camera exposure from the tablet's light calibration (camera.py), None = automatic.
+    "camera": dict(head_camera.DEFAULTS),
 }
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
@@ -713,24 +715,41 @@ def app_android_apk():
 
 @app.get("/api/camera/snapshot")
 def camera_snapshot():
-    """One JPEG from the head camera. Safe at any time: never moves or lasers."""
-    import subprocess
+    """One JPEG from the head camera. Safe at any time: never moves or lasers.
+
+    w/h must be a size the camera offers (else 400). exposure, gain and wb
+    override the stored settings for this one picture ("auto" = automatic),
+    used by the tablet's light calibration while it searches the values.
+    """
     if not os.path.exists(CAMERA):
         raise ConnectionError("Keine Kamera an " + CAMERA + " (LUMACUT_CAMERA in /etc/lumacut/lumacut.env)")
-    width = int(request.args.get("w", "1280")); height = int(request.args.get("h", "960"))
+    width = int(request.args.get("w", "1280")); height = int(request.args.get("h", "720"))
     if not (160 <= width <= 4096 and 120 <= height <= 3072):
         raise ValueError("Bildgröße unzulässig")
-    # Several frames are read so auto exposure settles; only the last one is kept.
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "v4l2",
-           "-video_size", "%dx%d" % (width, height), "-i", CAMERA,
-           "-vf", r"select=gte(n\,5)", "-frames:v", "1", "-q:v", "3", "-f", "image2", "pipe:1"]
-    try:
-        done = subprocess.run(cmd, capture_output=True, timeout=15, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ConnectionError("Kamera antwortet nicht: " + str(exc)[:120])
-    if done.returncode != 0 or not done.stdout.startswith(JPEG_MAGIC):
-        raise ConnectionError("Kamera lieferte kein Bild: " + done.stderr.decode("utf-8", "replace")[:160])
-    return done.stdout, 200, {"Content-Type": "image/jpeg", "Cache-Control": "no-store"}
+    settings = dict(head_camera.DEFAULTS, **(config.get("camera") or {}))
+    for arg, key in (("exposure", "exposure"), ("gain", "gain"), ("wb", "white_balance")):
+        v = request.args.get(arg)
+        if v is not None:
+            settings[key] = None if v == "auto" else int(v)
+    settings = head_camera.validate(settings)
+    data = head_camera.snapshot(CAMERA, width, height, settings)
+    return data, 200, {"Content-Type": "image/jpeg", "Cache-Control": "no-store"}
+
+
+@app.get("/api/camera/settings")
+def camera_settings():
+    """Stored values plus the camera's own ranges (empty without camera)."""
+    limits = head_camera.ranges(CAMERA) if os.path.exists(CAMERA) else {}
+    return jsonify(dict(head_camera.DEFAULTS, **(config.get("camera") or {}),
+                        ranges={k: list(v) for k, v in limits.items()}))
+
+
+@app.put("/api/camera/settings")
+def camera_settings_put():
+    """Fixed exposure, gain, white balance and light level (null = automatic)."""
+    config["camera"] = head_camera.validate(_json_body())
+    persist()
+    return jsonify(message="Kamera-Einstellungen gespeichert", **config["camera"])
 
 
 @app.get("/api/jobs")

@@ -161,10 +161,10 @@ private fun MoveCard(machine: MachineViewModel) {
     }
 }
 
-private val PAD = 88.dp
+internal val PAD = 88.dp
 
 @Composable
-private fun JogKey(icon: ImageVector, label: String, enabled: Boolean, center: Boolean = false, tall: Boolean = false, onClick: () -> Unit) {
+internal fun JogKey(icon: ImageVector, label: String, enabled: Boolean, center: Boolean = false, tall: Boolean = false, onClick: () -> Unit) {
     Box(
         Modifier
             .size(width = PAD, height = if (tall) PAD + PAD / 2 + 5.dp else PAD)

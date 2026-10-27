@@ -43,11 +43,11 @@ fun SettingsScreen(machine: MachineViewModel) {
     val cfg = status?.config
     var focus by remember { mutableStateOf("") }; var clear by remember { mutableStateOf("") }; var tip by remember { mutableStateOf("") }
     var px by remember { mutableStateOf("") }; var py by remember { mutableStateOf("") }
-    var loaded by remember { mutableStateOf(false) }
-    LaunchedEffect(cfg) {
-        if (cfg != null && !loaded) {
+    // whenever the Pi's values change (also by a calibration), so Speichern never writes old ones back
+    LaunchedEffect(cfg?.focus_gap_mm, cfg?.z_clearance_mm, cfg?.z_switch_tip_offset_mm, cfg?.probe_offset_x_mm, cfg?.probe_offset_y_mm) {
+        if (cfg != null) {
             focus = cfg.focus_gap_mm.toString(); clear = cfg.z_clearance_mm.toString(); tip = cfg.z_switch_tip_offset_mm.toString()
-            px = cfg.probe_offset_x_mm?.toString() ?: ""; py = cfg.probe_offset_y_mm?.toString() ?: ""; loaded = true
+            px = cfg.probe_offset_x_mm?.toString() ?: ""; py = cfg.probe_offset_y_mm?.toString() ?: ""
         }
     }
     val firmware = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -95,7 +95,8 @@ fun SettingsScreen(machine: MachineViewModel) {
                                                "probe_offset_x_mm" to px, "probe_offset_y_mm" to py))
                 }, kind = BtnKind.PRIMARY, busy = "settings" in busy, enabled = online == true)
                 Spacer(Modifier.height(10.dp))
-                SmallText("Fokus Z = Werkstück Z + Fokusabstand − Schalter→Spitze. Tasterversatz = Tasterspitze relativ zum Laserpunkt. Nach Änderungen neu abtasten.")
+                SmallText("Fokus Z = Werkstück Z + Fokusabstand − Schalter→Spitze. Tasterversatz = Tasterspitze relativ zum Laserpunkt. Nach Änderungen neu abtasten. " +
+                    "Fokusabstand und Tasterversatz lassen sich unter Maschine → Kalibrieren einmessen.")
             }
             LcCard {
                 CardTitle("Licht")

@@ -11,6 +11,15 @@ import de.millione.lumacut.app.editor.calibrationJob
 import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.core.Box
 import de.millione.lumacut.core.CameraCalibration
+import de.millione.lumacut.core.CameraLight
+import de.millione.lumacut.core.CameraSettings
+import de.millione.lumacut.core.EngraveTest
+import de.millione.lumacut.core.FocusTest
+import de.millione.lumacut.core.MachineStatus
+import de.millione.lumacut.core.PhotoSampler
+import de.millione.lumacut.core.PiConfig
+import de.millione.lumacut.core.ProbeTarget
+import de.millione.lumacut.core.Shading
 import de.millione.lumacut.core.CameraFocus
 import de.millione.lumacut.core.Document
 import de.millione.lumacut.core.DotGrid
@@ -114,23 +123,28 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ---------- camera ---------- */
 
-    /** Largest picture size the camera delivered so far (Full HD first, 1280 × 720 if it refuses). */
+    /** Largest picture size the camera delivered so far (Full HD first, smaller ones if it refuses). */
     private var cameraSize = CAMERA_SIZES.first()
 
     /**
-     * Snapshot from the head camera at full resolution, or scaled to
-     * [width] px wide. Scan tiles are brought to the calibration's size.
+     * Snapshot from the head camera: the largest size it delivers, or
+     * exactly [size] (the calibration's, for scan tiles; an older Pi sends
+     * its own size, then the picture is scaled). [whiteBalance] in Kelvin
+     * (0 = automatic) overrides the stored value for this picture.
      */
-    suspend fun snapshot(c: PiClient, width: Int? = null): Bitmap {
-        val bytes = try { c.cameraSnapshot(cameraSize.first, cameraSize.second) } catch (e: Exception) {
-            val next = CAMERA_SIZES.getOrNull(CAMERA_SIZES.indexOf(cameraSize) + 1) ?: throw e
-            cameraSize = next
-            c.cameraSnapshot(next.first, next.second)
+    suspend fun snapshot(c: PiClient, size: Pair<Int, Int>? = null, whiteBalance: Int? = null): Bitmap {
+        val bytes = if (size != null) c.cameraSnapshot(size.first, size.second, whiteBalance) else {
+            var result: ByteArray? = null
+            var error: Exception? = null
+            for (s in CAMERA_SIZES.drop(CAMERA_SIZES.indexOf(cameraSize))) {
+                try { result = c.cameraSnapshot(s.first, s.second, whiteBalance); cameraSize = s; break } catch (e: Exception) { error = e }
+            }
+            result ?: throw error!!
         }
         return withContext(Dispatchers.Default) {
             val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw IllegalStateException("Kamerabild nicht lesbar")
-            if (width == null || width == raw.width) raw
-            else Bitmap.createScaledBitmap(raw, width, (raw.height.toLong() * width / raw.width).toInt(), true)
+            if (size == null || (raw.width == size.first && raw.height == size.second)) raw
+            else Bitmap.createScaledBitmap(raw, size.first, size.second, true)
         }
     }
 
@@ -179,7 +193,9 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Keeps [cal] on the tablet and on the Pi (the calibration belongs to the machine). */
-    private fun store(machine: MachineViewModel, cal: CameraCalibration) {
+    private fun store(machine: MachineViewModel, measured: CameraCalibration) {
+        // a new lens measurement keeps the light calibration (same camera and light)
+        val cal = if (measured.shading == null) measured.copy(shading = _calibration.value?.shading) else measured
         _calibration.value = cal
         prefs.edit().putString("headCamera2", Document.JSON.encodeToString(CameraCalibration.serializer(), cal)).apply()
         val c = machine.clientOrNotify() ?: return
@@ -246,15 +262,15 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         return Work.fromMachine(mx, my)
     }
 
-    private suspend fun pixels(c: PiClient): Triple<IntArray, Int, Int> {
-        val bmp = snapshot(c)
+    private suspend fun pixels(c: PiClient, size: Pair<Int, Int>? = null, whiteBalance: Int? = null): Triple<IntArray, Int, Int> {
+        val bmp = snapshot(c, size, whiteBalance)
         return withContext(Dispatchers.Default) {
             Triple(IntArray(bmp.width * bmp.height).also { bmp.getPixels(it, 0, bmp.width, 0, 0, bmp.width, bmp.height) }, bmp.width, bmp.height)
         }
     }
 
-    /** Waits for the Pi's run of [name] to end; throws unless it completed. */
-    private suspend fun waitForJob(machine: MachineViewModel, name: String, onProgress: (String) -> Unit) {
+    /** Waits for the Pi's run of [name] ([what], e.g. "Punktraster") to end; throws unless it completed. */
+    private suspend fun waitForJob(machine: MachineViewModel, name: String, what: String, onProgress: (String) -> Unit) {
         var seen = false
         val start = System.currentTimeMillis()
         while (true) {
@@ -265,14 +281,14 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                 seen = true
                 onProgress(when (job.step) {
                     "homing" -> "Referenzieren …"; "probing", "focusing" -> "Abtasten …"; "parking" -> "Parken …"
-                    else -> "Punktraster wird gelasert: %d %%".format((job.fraction * 100).toInt())
+                    else -> "$what wird gelasert: %d %%".format((job.fraction * 100).toInt())
                 })
             }
             if (ours && !job.active && (seen || System.currentTimeMillis() - start > 20_000)) {
                 if (job.state == "complete") return
-                throw IllegalStateException("Punktraster nicht gelasert: " + job.error.ifBlank { job.state })
+                throw IllegalStateException("$what nicht gelasert: " + job.error.ifBlank { job.state })
             }
-            if (System.currentTimeMillis() - start > 40 * 60_000) throw IllegalStateException("Punktraster dauert ungewöhnlich lange – am Pi prüfen")
+            if (System.currentTimeMillis() - start > 40 * 60_000) throw IllegalStateException("$what dauert ungewöhnlich lange – am Pi prüfen")
         }
     }
 
@@ -355,7 +371,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                 c.uploadJob(GRID_JOB, DotGrid.job())
                 lasering = true
                 c.autorun(GRID_JOB)
-                waitForJob(machine, GRID_JOB) { step(0, it) }
+                waitForJob(machine, GRID_JOB, "Punktraster") { step(0, it) }
                 lasering = false
 
                 val surface = machine.refreshStatus()?.workpiece_surface_z ?: run {
@@ -394,6 +410,243 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /* ---------- camera light, probe offset, focus and engraving tests ---------- */
+
+    private val _focusResult = MutableStateFlow<FocusTest.Result?>(null)
+    /** Last focus test (for the line-width chart). */
+    val focusResult: StateFlow<FocusTest.Result?> = _focusResult.asStateFlow()
+
+    /** Last engraving test: the measured squares. */
+    class EngraveOutcome(val spec: EngraveTest.Spec, val fields: List<EngraveTest.Field>)
+    private val _engrave = MutableStateFlow<EngraveOutcome?>(null)
+    val engrave: StateFlow<EngraveOutcome?> = _engrave.asStateFlow()
+
+    /** Runs [block] with the LEDs at [level] % (null: as they are) and puts the light back afterwards. */
+    private suspend fun <T> withScanLight(c: PiClient, machine: MachineViewModel, level: Int?, block: suspend () -> T): T {
+        if (level == null) return block()
+        val st = machine.status.value
+        val wasOn = st?.lights == true; val wasLevel = st?.light_brightness?.let { kotlin.math.round(it).toInt() }
+        runCatching { c.light(on = true, brightness = level) }
+        delay(300)
+        try { return block() } finally {
+            withContext(kotlinx.coroutines.NonCancellable) { runCatching { c.light(on = wasOn, brightness = wasLevel) } }
+        }
+    }
+
+    /**
+     * Puts the camera over work point [p] at the distance to the material
+     * of the calibration (probes [p] first when no surface is known).
+     * Returns the head position (work mm) and the Z used.
+     */
+    private suspend fun cameraOver(c: PiClient, machine: MachineViewModel, cal: CameraCalibration, p: Pt): Pair<Pt, Double> {
+        val surface = machine.refreshStatus()?.workpiece_surface_z ?: probe(c, machine, p)
+        val z = cal.aboveSurface?.let { surface + it } ?: cal.scanZ
+        if (z > Z_TOP + 5) throw IllegalStateException("Material zu hoch für die Kamera")
+        if (z < surface + 3) throw IllegalStateException("Kamerahöhe der Kalibrierung liegt zu nah am Material – Kamera neu kalibrieren")
+        val head = headTo(c, machine, p - cal.usable(0.0).center, z)
+        return head to z
+    }
+
+    private fun needCamera(st: MachineStatus?, needsSettings: Boolean = false) {
+        if (st == null) throw IllegalStateException("Pi nicht erreichbar")
+        if (!st.camera.available) throw IllegalStateException("Keine Kamera am Pi angeschlossen")
+        if (st.job.active) throw IllegalStateException("Es läuft gerade ein Auftrag")
+        if (needsSettings && "camera_settings" !in st.features) throw IllegalStateException("Pi zu alt für die Lichtkalibrierung – Pi aktualisieren")
+    }
+
+    /**
+     * Light calibration on a plain white sheet under the camera: LEDs to
+     * [LIGHT_LEVEL], white balance until the sheet is neutral grey, five
+     * photos at slightly shifted positions for the brightness fall-off to
+     * the edges (flat field). The white balance and light level go to the
+     * Pi (every picture uses them), the flat field into the calibration.
+     */
+    fun calibrateLight(machine: MachineViewModel) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            fun step(n: Int, text: String) { _run.value = Run("Kamera-Licht kalibrieren", n, 4, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st, needsSettings = true)
+                if (st?.homed != true) throw IllegalStateException("Erst referenzieren")
+                val ranges = c.cameraSettings()
+                val size = cal.photoWidth to cal.photoHeight
+                withScanLight(c, machine, LIGHT_LEVEL) {
+                    step(0, "Kamera über das Blatt fahren …")
+                    val (head, z) = cameraOver(c, machine, cal, Work.center)
+                    val (first, w, h) = pixels(c, size, 0)
+                    val bright = withContext(Dispatchers.Default) { CameraLight.brightness(first, w, h) }
+                    if (bright < 50) throw IllegalStateException("Bild zu dunkel – liegt ein weißes Blatt unter der Kamera, ist das Licht an?")
+                    val wb = CameraLight.whiteBalance(ranges.range("white_balance", 2500..7000)) { k ->
+                        step(1, "Weißabgleich: $k K")
+                        val (px, pw, ph) = pixels(c, size, k)
+                        withContext(Dispatchers.Default) { CameraLight.tint(px, pw, ph) }
+                    }
+                    val shifts = listOf(Pt(0.0, 0.0), Pt(12.0, 0.0), Pt(-12.0, 0.0), Pt(0.0, 9.0), Pt(0.0, -9.0))
+                    val photos = shifts.mapIndexed { i, d ->
+                        step(2, "Randabfall messen: Bild ${i + 1} von ${shifts.size}")
+                        headTo(c, machine, head + d, z)
+                        pixels(c, size, wb).first
+                    }
+                    step(3, "Speichern …")
+                    val shading = withContext(Dispatchers.Default) { Shading.measure(photos, size.first, size.second) }
+                    c.saveCameraSettings(CameraSettings(white_balance = wb, light = LIGHT_LEVEL))
+                    store(machine, cal.copy(shading = shading))
+                    machine.notify("Kamera-Licht kalibriert: Weißabgleich %d K, Licht %d %%, Randabfall bis %.0f %% ausgeglichen"
+                        .format(wb, LIGHT_LEVEL, (1 - 1 / shading.gain.max()) * 100))
+                }
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Lichtkalibrierung abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    /** Uploads and runs [gcode] as [name] automatically (home, probe, focus, laser, park); aborts the laser when cancelled. */
+    private suspend fun laserTest(c: PiClient, machine: MachineViewModel, name: String, gcode: String, what: String, onProgress: (String) -> Unit) {
+        c.uploadJob(name, gcode)
+        try {
+            c.autorun(name)
+            waitForJob(machine, name, what, onProgress)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            withContext(kotlinx.coroutines.NonCancellable) { runCatching { c.action("abort") } }
+            throw e
+        }
+    }
+
+    /** Lasers the probe target in the middle of the work area, then puts the probe tip over it (as far as the offset is known). */
+    fun laserProbeTarget(machine: MachineViewModel) {
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            try {
+                val st = machine.refreshStatus() ?: throw IllegalStateException("Pi nicht erreichbar")
+                if (st.job.active) throw IllegalStateException("Es läuft gerade ein Auftrag")
+                laserTest(c, machine, PROBE_JOB, ProbeTarget.job(), "Tasterziel") { _run.value = Run("Taster-Versatz", 0, 2, it) }
+                _run.value = Run("Taster-Versatz", 1, 2, "Taster über das Ziel fahren …")
+                tipOver(c, machine)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Tasterziel: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    private suspend fun tipOver(c: PiClient, machine: MachineViewModel) {
+        val off = machine.refreshStatus()?.probeOffset ?: Pt(0.0, 0.0)
+        val m = ProbeTarget.headFor(off)
+        c.moveTo(m.x.coerceIn(0.0, 390.0), m.y.coerceIn(0.0, 370.0))
+        machine.refreshStatus()
+    }
+
+    fun tipOverTarget(machine: MachineViewModel) = machine.request("moveto", quietSuccess = true) { c -> tipOver(c, machine); "Taster über dem Ziel" }
+
+    /** Offset from the current head position, the tip sitting exactly over the target centre (machine mm). */
+    fun probeOffsetHere(machine: MachineViewModel): Pt? = machine.status.value?.position?.takeIf { it.size >= 2 }?.let { ProbeTarget.offset(Pt(it[0], it[1])) }
+
+    fun saveProbeOffset(machine: MachineViewModel) {
+        val off = probeOffsetHere(machine) ?: run { machine.notify("Kopfposition unbekannt", true); return }
+        val cfg = machine.status.value?.config ?: return
+        if (kotlin.math.abs(off.x) > 80 || kotlin.math.abs(off.y) > 80) { machine.notify("Versatz über 80 mm – Taster wirklich über dem Ziel?", true); return }
+        machine.saveSettings(settingsFrom(cfg, probe = off))
+    }
+
+    private fun settingsFrom(cfg: PiConfig, focusGap: Double = cfg.focus_gap_mm, probe: Pt? = cfg.probe_offset_x_mm?.let { x -> cfg.probe_offset_y_mm?.let { Pt(x, it) } }) =
+        mapOf("focus_gap_mm" to "%.2f".format(Locale.ROOT, focusGap), "z_clearance_mm" to cfg.z_clearance_mm.toString(),
+              "z_switch_tip_offset_mm" to cfg.z_switch_tip_offset_mm.toString(),
+              "probe_offset_x_mm" to (probe?.let { "%.2f".format(Locale.ROOT, it.x) } ?: ""),
+              "probe_offset_y_mm" to (probe?.let { "%.2f".format(Locale.ROOT, it.y) } ?: ""))
+
+    /**
+     * Focus ramp: 13 lines from 3 mm below to 3 mm above the current focus,
+     * photographed and measured; the narrowest line's height becomes the new
+     * focus distance on the Pi.
+     */
+    fun focusTest(machine: MachineViewModel, powerPct: Double, speed: Double) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            fun step(n: Int, text: String) { _run.value = Run("Fokus-Test", n, 3, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                val cfg = st!!.config
+                val offsets = FocusTest.offsets(cfg.focus_gap_mm - cfg.z_switch_tip_offset_mm)
+                val area = FocusTest.bounds(offsets.size)
+                val u = cal.usable(0.05)
+                if (area.width > u.width || area.height > u.height) throw IllegalStateException("Kamerabild zu klein für die Testlinien – Kamera höher kalibrieren")
+                laserTest(c, machine, FOCUS_JOB, FocusTest.job(offsets, powerPct, speed), "Fokus-Test") { step(0, it) }
+                step(1, "Linien fotografieren …")
+                val result = withScanLight(c, machine, cfg.camera?.light) {
+                    val (head, _) = cameraOver(c, machine, cal, area.center)
+                    val (px, w, h) = pixels(c, cal.photoWidth to cal.photoHeight)
+                    step(2, "Linienbreiten messen …")
+                    withContext(Dispatchers.Default) { FocusTest.evaluate(PhotoSampler(px, w, h, cal, head), offsets) }
+                }
+                _focusResult.value = result
+                val gap = kotlin.math.round((cfg.focus_gap_mm + result.bestOffset) * 10) / 10
+                c.settings(settingsFrom(cfg, focusGap = gap))
+                machine.refreshStatus()
+                machine.notify("Fokus-Test: schärfste Linie bei %+.1f mm · Fokusabstand %.1f → %.1f mm · Strahlbreite %.2f mm"
+                    .format(Locale.GERMANY, result.bestOffset, cfg.focus_gap_mm, gap, result.widthAtBest))
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Fokus-Test abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
+    /** Engraving test with [spec]: lasered, photographed square by square and measured; the result waits for the operator's choice. */
+    fun engraveTest(machine: MachineViewModel, spec: EngraveTest.Spec) {
+        val cal = _calibration.value ?: run { machine.notify("Erst die Kopfkamera kalibrieren", true); return }
+        val c = machine.clientOrNotify() ?: return
+        if (worker?.isActive == true) return
+        worker = viewModelScope.launch {
+            val heads = EngraveTest.photos(spec, cal)
+            fun step(n: Int, text: String) { _run.value = Run("Gravur-Test", n, heads.size + 2, text) }
+            try {
+                val st = machine.refreshStatus()
+                needCamera(st)
+                laserTest(c, machine, ENGRAVE_JOB, EngraveTest.job(spec), "Gravur-Test") { step(0, it) }
+                val u = cal.usable(0.1)
+                val fields = HashMap<Pair<Int, Int>, EngraveTest.Field>()
+                withScanLight(c, machine, st!!.config.camera?.light) {
+                    var z: Double? = null
+                    for ((n, head) in heads.withIndex()) {
+                        step(n + 1, "Felder fotografieren: Bild ${n + 1} von ${heads.size}")
+                        val at = z?.let { headTo(c, machine, head, it) } ?: cameraOver(c, machine, cal, head + u.center).also { z = it.second }.first
+                        val (px, w, h) = pixels(c, cal.photoWidth to cal.photoHeight)
+                        withContext(Dispatchers.Default) {
+                            val sampler = PhotoSampler(px, w, h, cal, at)
+                            for (i in spec.powers.indices) for (j in spec.speeds.indices) {
+                                if ((i to j) in fields) continue
+                                val b = spec.cell(i, j); val m = spec.gapMm / 2
+                                val inside = b.minX - m >= at.x + u.minX && b.maxX + m <= at.x + u.maxX && b.minY - m >= at.y + u.minY && b.maxY + m <= at.y + u.maxY
+                                if (inside) EngraveTest.measure(spec, i, j, sampler)?.let { fields[i to j] = it }
+                            }
+                        }
+                    }
+                }
+                val total = spec.powers.size * spec.speeds.size
+                if (fields.size < total) machine.notify("Gravur-Test: ${total - fields.size} von $total Feldern nicht messbar", true)
+                _engrave.value = EngraveOutcome(spec, fields.values.sortedWith(compareBy<EngraveTest.Field>({ it.speed }, { it.power })))
+                runCatching { c.action("park") }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                machine.notify("Gravur-Test abgebrochen: ${e.message}", true)
+            } finally { _run.value = null }
+        }
+    }
+
     /* ---------- scan ---------- */
 
     fun cancel() { worker?.cancel(); worker = null; _run.value = null }
@@ -417,11 +670,11 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                     (surface + above).also { if (it > Z_TOP + 5) throw IllegalStateException("Material zu hoch für die Kamera") }
                 }
                 val mosaic = Scan.Mosaic(cal, mosaicResolution(cal))
-                for ((i, head) in plan.heads.withIndex()) {
-                    if (!isActive) return@launch
+                withScanLight(c, machine, st?.config?.camera?.light) { for ((i, head) in plan.heads.withIndex()) {
+                    if (!isActive) return@withScanLight
                     _run.value = Run("Scan", i, plan.heads.size, "Bild ${i + 1} von ${plan.heads.size}")
                     headTo(c, machine, head, scanZ)
-                    val bmp = snapshot(c, cal.photoWidth)
+                    val bmp = snapshot(c, cal.photoWidth to cal.photoHeight)
                     withContext(Dispatchers.Default) {
                         val sized = if (bmp.height == cal.photoHeight) bmp else Bitmap.createScaledBitmap(bmp, cal.photoWidth, cal.photoHeight, true)
                         val px = IntArray(sized.width * sized.height).also { sized.getPixels(it, 0, sized.width, 0, 0, sized.width, sized.height) }
@@ -431,7 +684,8 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                         if (i == 0 && kotlin.math.abs(z - cal.scanZ) > 1.0)
                             machine.notify("Kamerahöhe Z %.1f statt %.1f wie bei der Kalibrierung – Maßstab weicht ab".format(z, cal.scanZ), true)
                     }
-                }
+                } }
+                if (!isActive) return@launch
                 _run.value = Run("Scan", plan.heads.size, plan.heads.size, "Mosaik wird berechnet …")
                 val bmp = withContext(Dispatchers.Default) { Bitmap.createBitmap(mosaic.pixels, mosaic.width, mosaic.height, Bitmap.Config.ARGB_8888) }
                 editor.setBackground(bmp)
@@ -546,9 +800,14 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         const val GRID_JOB = "kamera-punktraster.gcode"
+        const val PROBE_JOB = "kalibrierung-tasterziel.gcode"
+        const val FOCUS_JOB = "kalibrierung-fokus.gcode"
+        const val ENGRAVE_JOB = "kalibrierung-gravur.gcode"
+        /** LED level for every camera picture: full on, so the dimming PWM cannot flicker in the picture. */
+        const val LIGHT_LEVEL = 100
         /** Highest Z the camera is sent to (Pi travel 90 mm). */
         const val Z_TOP = 85.0
         /** Tried in this order; the OV2710 (HBVCAM F1716) does Full HD, many webcams only 1280 × 720 raw. */
-        val CAMERA_SIZES = listOf(1920 to 1080, 1280 to 720)
+        val CAMERA_SIZES = listOf(1920 to 1080, 1280 to 720, 640 to 480)
     }
 }

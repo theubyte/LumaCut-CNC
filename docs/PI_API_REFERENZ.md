@@ -27,7 +27,7 @@ offene Punkte), [MACHINE_API.md](../software/lumacut-studio-native/docs/MACHINE_
 | Server | Flask `threaded=True`: jede Anfrage in eigenem Thread. Lange Fahrten blockieren nur ihre eigene Anfrage. |
 | Anfragen mit Formular | `POST /api/action`, `/api/settings`, `/api/commission`: `application/x-www-form-urlencoded` (oder `multipart/form-data`). Felder werden **nur** aus dem Formular gelesen (`request.form`), nicht aus Query-String oder JSON. |
 | Datei-Uploads | `POST /api/upload`, `/api/firmware`: `multipart/form-data`, Feld `file`. |
-| JSON-Body | nur `PUT /api/camera/calibration` (`application/json`). |
+| JSON-Body | `PUT /api/camera/calibration`, `PUT /api/camera/settings`, Materialien (`application/json`). |
 | Antwortformat | JSON. Ausnahmen: `GET /` (HTML), `/api/jobs/<name>/content` (`text/plain`), `/api/camera/snapshot` (`image/jpeg`). |
 | Header jeder Antwort | `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. |
 | Max. Anfragegröße | 32 MB (`MAX_CONTENT_LENGTH`). Größer → **413 als HTML** (siehe unten). |
@@ -122,6 +122,8 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 | POST | `/api/jobs/<name>/delete` | – | Auftrag löschen |
 | GET | `/api/jobs/<name>/geometry` | – | Motivgrenzen und Abtastkandidaten |
 | GET | `/api/camera/snapshot` | – | ein JPEG der Kopfkamera |
+| GET | `/api/camera/settings` | – | feste Belichtung/Weißabgleich/Licht lesen |
+| PUT | `/api/camera/settings` | JSON | feste Belichtung/Weißabgleich/Licht speichern |
 | GET | `/api/app/android` | – | neueste Android-App auf dem Pi (Version, Prüfsumme) – Abschnitt 4.15 |
 | GET | `/api/app/android.apk` | – | die APK zum Installieren |
 | GET | `/api/camera/calibration` | – | Kamera-Kalibrierung lesen |
@@ -228,14 +230,14 @@ Felder aus `web.py` (`status()`):
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
 | `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
-| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi). Fehlt bei älteren Pi-Ständen. |
+| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi), `camera_settings` = `/api/camera/settings` und Snapshots in genau der angefragten Größe. Fehlt bei älteren Pi-Ständen. |
 | `coord_convention` | string | `"origin_top_right"`: Bedeutung der Ankernamen (siehe `op=place`). Fehlt bei Pi-Ständen vor 2026-10-26; Studio tauscht dann links/rechts. |
 | `estimated_tip_gap_mm` | number \| null | geschätzter Abstand Spitze ↔ Werkstück (nur wenn referenziert, Position und Oberfläche bekannt). Schätzung, keine Messung. |
 | `estimated_focus_adjust_mm` | number \| null | Fokusabstand − `estimated_tip_gap_mm` (nur Anzeige) |
 | `firmware` | string | immer `"marlin"` |
 | `expected_pwm` | string | `"PA1 / M3 I / S0..255"` (Info) |
 | `io` | object | Klartext-Belegung `laser_supply_switch`, `laser_pwm`, `fan_cooldown`, `exhaust`, `lights`, `aux` (Info) |
-| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 90}`, `user_origin`, `light_brightness`, `light_effects` |
+| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 90}`, `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`) |
 | `camera` | object | `{device, available}`: Gerätepfad (`LUMACUT_CAMERA`, Standard `/dev/video0`) und ob er existiert (sagt nichts darüber, ob ffmpeg ein Bild bekommt) |
 
 `job.line` / `job.total`: `total` = Zahl der Auftragszeilen; `line` zählt
@@ -724,15 +726,38 @@ gefunden`. Prüft die Dateiendung nicht (anders als `content`/`delete`).
 | Parameter | Typ | Bereich | Standard |
 | --- | --- | --- | --- |
 | `w` | int (Query) | 160..4096 | 1280 |
-| `h` | int (Query) | 120..3072 | 960 |
+| `h` | int (Query) | 120..3072 | 720 |
+| `exposure` | int oder `auto` (Query) | 1..10000 | gespeicherte Einstellung |
+| `gain` | int oder `auto` (Query) | 0..255 | gespeicherte Einstellung |
+| `wb` | int (Kelvin) oder `auto` (Query) | 2000..10000 | gespeicherte Einstellung |
 
-Bewegt nie etwas, keine Vorbedingung. Startet `ffmpeg` (V4L2), verwirft 5
-Bilder für die Belichtung, liefert das nächste als `image/jpeg`. Dauer
-typisch 1–3 s, Timeout 15 s. ⚠ Hardware. Fehler: 503 `Keine Kamera an
+Bewegt nie etwas, keine Vorbedingung. Stellt Belichtung, Verstärkung und
+Weißabgleich nach `GET /api/camera/settings` ein (Query-Werte gelten nur für
+dieses eine Bild), startet `ffmpeg` (V4L2; MJPEG mit 15 fps, wenn die Kamera
+die Größe so anbietet – sonst roh), stellt die Werte nach dem Streamstart
+erneut ein (UVC-Kameras setzen die Belichtungszeit beim Start auf die
+Bildperiode), verwirft 14 Bilder (feste Belichtung) bzw. 8 (automatisch) und
+liefert das nächste als `image/jpeg` in genau `w` × `h`. Hinweis: Die
+HBVCAM F1716 (OV2710) regelt die Helligkeit intern trotzdem nach; fest bleibt
+dort nur der Weißabgleich. Dauer typisch 1–2 s, Timeout 20 s. ⚠ Hardware. Fehler: 503 `Keine Kamera an
 /dev/video0 (LUMACUT_CAMERA in /etc/lumacut/lumacut.env)`, `Kamera antwortet
-nicht: …`, `Kamera lieferte kein Bild: …`; 400 `Bildgröße unzulässig`.
-Parallele Anfragen konkurrieren um dasselbe Gerät → nie gleichzeitig
-anfordern, keine Bildrate erwarten.
+nicht: …`, `Kamera lieferte kein Bild: …`; 400 `Bildgröße unzulässig`,
+`Kamera kann W × H nicht (möglich: …)`, `Kamera lieferte W × H statt …`.
+Anfragen werden nacheinander bedient (Sperre), keine Bildrate erwarten.
+
+#### `GET /api/camera/settings`
+
+200 JSON `{exposure, gain, white_balance, light}`: feste Kamerawerte aus der
+Lichtkalibrierung der App (`exposure` in 100-µs-Schritten wie V4L2
+`exposure_time_absolute`, `white_balance` in Kelvin, `light` = LED-Helligkeit
+in % für Scans), jeweils `null` = automatisch, und `ranges` `{exposure, gain, white_balance}` = [min, max] der angeschlossenen Kamera (leer ohne Kamera; Werte außerhalb werden beim Bild darauf begrenzt).
+
+#### `PUT /api/camera/settings`
+
+JSON-Objekt mit denselben Schlüsseln (fehlende = `null`). Wertebereiche wie
+oben, `light` 1..100. Bewegt nichts, schaltet kein Licht (die App setzt das
+Licht vor dem Scan selbst). 200 `{message, …Werte}`; 400 `Unbekannte
+Kamera-Einstellung: …`, `<schlüssel>: ganze Zahl … oder null erwartet`.
 
 #### `GET /api/camera/calibration`
 

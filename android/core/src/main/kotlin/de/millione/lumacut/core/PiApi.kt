@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -65,7 +66,25 @@ data class PiConfig(
     val z_switch_tip_offset_mm: Double = 1.5,
     val probe_offset_x_mm: Double? = null,
     val probe_offset_y_mm: Double? = null,
+    /** Fixed head-camera values from the light calibration (Pi with "camera_settings"). */
+    val camera: CameraSettings? = null,
 )
+
+/**
+ * Fixed head-camera values, each null = automatic: [exposure] in 100 µs
+ * (V4L2 exposure_time_absolute), [white_balance] in Kelvin, [light] = LED
+ * level in % for scans. [ranges] = what the camera accepts (read only).
+ */
+@Serializable
+data class CameraSettings(
+    val exposure: Int? = null,
+    val gain: Int? = null,
+    val white_balance: Int? = null,
+    val light: Int? = null,
+    val ranges: Map<String, List<Int>> = emptyMap(),
+) {
+    fun range(key: String, default: IntRange): IntRange = ranges[key]?.takeIf { it.size == 2 }?.let { it[0]..it[1] } ?: default
+}
 
 /** Mirror of the Pi's /api/status (pi400/marlin/web.py). Unknown keys are ignored. */
 @Serializable
@@ -253,10 +272,14 @@ class PiClient(
     suspend fun moveTo(machineX: Double, machineY: Double): String = action("moveto", mapOf(
         "x" to "%.3f".format(java.util.Locale.ROOT, machineX), "y" to "%.3f".format(java.util.Locale.ROOT, machineY)))
 
-    /** JPEG from the head camera on the Pi. */
-    suspend fun cameraSnapshot(width: Int = 1280, height: Int = 720): ByteArray = withContext(Dispatchers.IO) {
+    /**
+     * JPEG from the head camera on the Pi. [whiteBalance] (Kelvin, 0 =
+     * automatic) overrides the stored value for this one picture.
+     */
+    suspend fun cameraSnapshot(width: Int = 1280, height: Int = 720, whiteBalance: Int? = null): ByteArray = withContext(Dispatchers.IO) {
         val u = url("api", "camera", "snapshot").newBuilder()
-            .addQueryParameter("w", width.toString()).addQueryParameter("h", height.toString()).build()
+            .addQueryParameter("w", width.toString()).addQueryParameter("h", height.toString())
+            .apply { whiteBalance?.let { addQueryParameter("wb", if (it == 0) "auto" else it.toString()) } }.build()
         try {
             http.newBuilder().readTimeout(20, TimeUnit.SECONDS).build().newCall(Request.Builder().url(u).build()).execute().use { r ->
                 val bytes = r.body?.bytes() ?: ByteArray(0)
@@ -267,7 +290,21 @@ class PiClient(
         } catch (e: PiException) { throw e } catch (e: IOException) { throw PiException("Pi nicht erreichbar (${e.message ?: e.javaClass.simpleName})") }
     }
 
-    /** What APK the Pi currently offers. */
+    suspend fun cameraSettings(): CameraSettings =
+        json.decodeFromString(CameraSettings.serializer(), call(Request.Builder().url(url("api", "camera", "settings")).build()))
+
+    /** Stores fixed camera values (null = automatic); the ranges are not sent. */
+    suspend fun saveCameraSettings(s: CameraSettings): String {
+        val body = buildJsonObject {
+            put("exposure", s.exposure?.let(::JsonPrimitive) ?: JsonNull)
+            put("gain", s.gain?.let(::JsonPrimitive) ?: JsonNull)
+            put("white_balance", s.white_balance?.let(::JsonPrimitive) ?: JsonNull)
+            put("light", s.light?.let(::JsonPrimitive) ?: JsonNull)
+        }
+        return message(call(Request.Builder().url(url("api", "camera", "settings"))
+            .put(body.toString().toRequestBody("application/json".toMediaType())).build()))
+    }
+
     /** Head-camera calibration the tablet stored on the Pi (null when there is none) and the file's revision. */
     suspend fun cameraCalibration(): Pair<CameraCalibration?, Int> {
         val root = json.parseToJsonElement(call(Request.Builder().url(url("api", "camera", "calibration")).build())).jsonObject

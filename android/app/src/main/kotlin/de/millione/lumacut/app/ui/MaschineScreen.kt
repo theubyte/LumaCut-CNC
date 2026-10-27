@@ -12,13 +12,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import de.millione.lumacut.app.editor.EditorViewModel
 import de.millione.lumacut.app.machine.MachineViewModel
+import de.millione.lumacut.app.workspace.CalibrationScreen
 import de.millione.lumacut.app.workspace.WorkspaceScreen
 
 enum class MachineTab(val label: String) {
-    STEUERUNG("Steuerung"), SCAN("Arbeitsplatz scannen"), AUFTRAEGE("Aufträge auf dem Pi"),
+    STEUERUNG("Steuerung"), SCAN("Arbeitsplatz scannen"), KALIBRIEREN("Kalibrieren"), AUFTRAEGE("Aufträge auf dem Pi"),
 }
 
-/** Everything a beginner never needs: jog, probe, job list, camera calibration and workplace scan. */
+/** Everything a beginner never needs: jog, probe, job list, workplace scan and the calibrations. */
 @Composable
 fun MaschineScreen(machine: MachineViewModel, editor: EditorViewModel, tab: MachineTab, onTab: (MachineTab) -> Unit) {
     Column(Modifier.fillMaxSize()) {
@@ -30,6 +31,7 @@ fun MaschineScreen(machine: MachineViewModel, editor: EditorViewModel, tab: Mach
             when (tab) {
                 MachineTab.STEUERUNG -> WerkstattScreen(machine)
                 MachineTab.SCAN -> WorkspaceScreen(machine, editor)
+                MachineTab.KALIBRIEREN -> CalibrationScreen(machine)
                 MachineTab.AUFTRAEGE -> JobsScreen(machine)
             }
         }

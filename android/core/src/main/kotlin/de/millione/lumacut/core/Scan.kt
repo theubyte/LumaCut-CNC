@@ -22,6 +22,8 @@ data class CameraCalibration(
     val lens: Lens? = null,
     /** Camera height above the material surface at which the picture is sharp (automatic calibration). */
     val aboveSurface: Double? = null,
+    /** Brightness fall-off towards the picture edges (light calibration), null = not measured. */
+    val shading: Shading? = null,
 ) {
     init { require(lens != null || (photo.size == 4 && relMm.size == 4)) { "Vier Kalibrierpunkte nötig" } }
 
@@ -117,40 +119,75 @@ object Scan {
 
     /**
      * Mosaic of the work area at [pxPerMm], built tile by tile so only one
-     * photo is in memory at a time: each output pixel comes from the tile
-     * whose usable centre is closest (least lens distortion) and that
-     * actually shows it, sampled bilinearly. Uncovered pixels stay
-     * transparent. Row 0 = work Y 0.
+     * photo is in memory at a time. Every tile is first corrected for the
+     * vignetting ([CameraCalibration.shading]), then brought to the
+     * brightness and colour the mosaic already shows where they overlap
+     * (the camera adjusts its brightness for every picture), and blended in
+     * with a weight that falls to 0 at its edges, so no seam stays visible.
+     * Sampled bilinearly; uncovered pixels stay transparent. Row 0 = work Y 0.
      */
     class Mosaic(private val cal: CameraCalibration, private val pxPerMm: Double) {
         val width = (Work.WIDTH * pxPerMm).toInt()
         val height = (Work.HEIGHT * pxPerMm).toInt()
         val pixels = IntArray(width * height)
-        private val best = FloatArray(width * height) { Float.MAX_VALUE }
-        private val centre = cal.usable(0.0).center
+        private val weight = FloatArray(width * height)
         private val reach = cal.footprint()
         private val valid = cal.validPx
 
+        /** Gain per channel (R, G, B) the last tile was multiplied with to match the mosaic. */
+        var lastGain = doubleArrayOf(1.0, 1.0, 1.0); private set
+
         fun add(tile: Tile) {
-            val c = tile.head + centre
             val i0 = max(0, floor((tile.head.x + reach.minX) * pxPerMm).toInt()); val i1 = min(width - 1, ceil((tile.head.x + reach.maxX) * pxPerMm).toInt())
             val j0 = max(0, floor((tile.head.y + reach.minY) * pxPerMm).toInt()); val j1 = min(height - 1, ceil((tile.head.y + reach.maxY) * pxPerMm).toInt())
             val minX = max(0.0, valid.minX); val minY = max(0.0, valid.minY)
             val maxX = min(tile.width - 1.0, valid.maxX - 1); val maxY = min(tile.height - 1.0, valid.maxY - 1)
+            val halfW = (maxX - minX) / 2; val halfH = (maxY - minY) / 2
+            if (halfW <= 0 || halfH <= 0 || i1 < i0 || j1 < j0) return
+            // 1. project: mosaic pixel, corrected colour and edge weight for every pixel the tile shows
+            val cap = (i1 - i0 + 1) * (j1 - j0 + 1)
+            val idx = IntArray(cap); val col = IntArray(cap); val wt = FloatArray(cap)
+            var n = 0
             for (j in j0..j1) {
                 val wy = (j + 0.5) / pxPerMm
                 for (i in i0..i1) {
-                    val wx = (i + 0.5) / pxPerMm
-                    val d = ((c.x - wx) * (c.x - wx) + (c.y - wy) * (c.y - wy)).toFloat()
-                    val k = j * width + i
-                    if (d >= best[k]) continue
-                    val p = cal.workToPixel(Pt(wx, wy), tile.head)
+                    val p = cal.workToPixel(Pt((i + 0.5) / pxPerMm, wy), tile.head)
                     val x = p.x - 0.5; val y = p.y - 0.5
                     if (x < minX || y < minY || x >= maxX || y >= maxY) continue
                     val x0 = floor(x).toInt(); val y0 = floor(y).toInt()
-                    pixels[k] = sample(tile, x0, y0, x - x0, y - y0)
-                    best[k] = d
+                    var c = sample(tile, x0, y0, x - x0, y - y0)
+                    cal.shading?.let { c = it.correct(c, p.x / tile.width, p.y / tile.height) }
+                    val e = min(min(x - minX, maxX - x) / halfW, min(y - minY, maxY - y) / halfH).coerceIn(0.0, 1.0)
+                    idx[n] = j * width + i; col[n] = c; wt[n] = (e * e + 1e-4).toFloat()
+                    n++
                 }
+            }
+            // 2. gain per channel from the overlap with what is already there (clipped and dark pixels left out)
+            val sumTile = DoubleArray(3); val sumMosaic = DoubleArray(3); var shared = 0
+            for (q in 0 until n) {
+                val k = idx[q]
+                if (weight[k] < 0.05f || wt[q] < 0.05f) continue
+                val a = col[q]; val b = pixels[k]
+                if (CameraLight.luminance(a) !in 15..240 || CameraLight.luminance(b) !in 15..240) continue
+                for (ch in 0..2) { val sh = 16 - 8 * ch; sumTile[ch] += (a shr sh) and 255; sumMosaic[ch] += (b shr sh) and 255 }
+                shared++
+            }
+            val gain = DoubleArray(3) { ch -> if (shared < 200 || sumTile[ch] <= 0) 1.0 else (sumMosaic[ch] / sumTile[ch]).coerceIn(0.7, 1.4) }
+            lastGain = gain
+            // 3. blend: running weighted mean, so a pixel ends up as the weighted mean of all tiles showing it
+            for (q in 0 until n) {
+                val k = idx[q]; val w = wt[q]; val total = weight[k] + w
+                val f = w / total
+                val a = col[q]; val old = pixels[k]
+                var out = 0xFF000000.toInt()
+                for (ch in 0..2) {
+                    val sh = 16 - 8 * ch
+                    val v = ((a shr sh) and 255) * gain[ch]
+                    val blended = if (weight[k] == 0f) v else ((old shr sh) and 255) + (v - ((old shr sh) and 255)) * f
+                    out = out or ((blended + 0.5).toInt().coerceIn(0, 255) shl sh)
+                }
+                pixels[k] = out
+                weight[k] = total
             }
         }
     }
