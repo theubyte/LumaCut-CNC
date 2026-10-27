@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import (Aborted, MarlinTransport, MarlinLaserGuard, ProbeFailed, normalize,
-                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE)
+                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM)
 from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
@@ -52,7 +52,7 @@ config = {
     "z_switch_tip_offset_mm": 1.5,
     "probe_offset_x_mm": None,
     "probe_offset_y_mm": None,  # tip height above reference plane at switch trigger
-    "travels": {"x": 390.0, "y": 370.0, "z": 90.0},
+    "travels": {"x": 390.0, "y": 370.0, "z": 80.0},
     "user_origin": None,        # [x, y] machine mm, op=origin_set (job placement)
     "light_brightness": 60,     # % for the dimmable LED strip on PC8
     "light_effects": True,      # light effects at homing, job start/end, error
@@ -71,6 +71,8 @@ if CONFIG.is_file():
             config.update({k: saved[k] for k in config if k in saved})
     except Exception:
         logging.exception("Marlin config corrupt, using safe disabled default")
+# An older config.json may still say 90 mm: never above the rail limit.
+config["travels"]["z"] = min(float(config["travels"].get("z", Z_MAX_MM)), Z_MAX_MM)
 machine.homing_verified = bool(config["validated"])
 machine.clearance_mm = float(config["z_clearance_mm"])
 machine.probe_tip_offset_mm = float(config["z_switch_tip_offset_mm"])

@@ -238,7 +238,7 @@ Felder aus `web.py` (`status()`):
 | `firmware` | string | immer `"marlin"` |
 | `expected_pwm` | string | `"PA1 / M3 I / S0..255"` (Info) |
 | `io` | object | Klartext-Belegung `laser_supply_switch`, `laser_pwm`, `fan_cooldown`, `exhaust`, `lights`, `aux` (Info) |
-| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 90}`, `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware) |
+| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware) |
 | `camera` | object | `{device, available}`: Gerätepfad (`LUMACUT_CAMERA`, Standard `/dev/video0`) und ob er existiert (sagt nichts darüber, ob ffmpeg ein Bild bekommt) |
 
 `job.line` / `job.total`: `total` = Zahl der Auftragszeilen; `line` zählt
@@ -372,7 +372,7 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | --- | --- |
 | Parameter | keine |
 | Vorbedingungen | **frei**, **referenziert** (`Parken erst nach gültiger XYZ-Referenzfahrt`), kein Riegel (`SKR nicht bereit / Notstopp aktiv`) |
-| Wirkung | wie LightBurn-M2/Auftragsende: Laser aus (`M5 I`), Z nur nach oben (max. aus aktueller Höhe, Rückzug, Oberfläche + Abstand; >90 mm → Fehler), dann `G0 X0 Y0 F9000`; startet Kühlungsnachlauf |
+| Wirkung | wie LightBurn-M2/Auftragsende: Laser aus (`M5 I`), Z nur nach oben (max. aus aktueller Höhe, Rückzug, Oberfläche + Abstand; >80 mm → Fehler), dann `G0 X0 Y0 F9000`; startet Kühlungsnachlauf |
 | Erfolg | 200 `Geparkt: Laser aus, Z-Rückzug, X0/Y0` |
 | Fehler | 400 `Z-Position außerhalb konfiguriertem Z-Hub`, `Parkhöhe unbekannt: keine Fahrt` |
 
@@ -808,7 +808,7 @@ write_path, writable, error}`.
 | | |
 | --- | --- |
 | Anfrage | `Content-Type: application/json`, Objekt mit den Feldern oben plus Pflichtfeld `revision` (die zuletzt gelesene) |
-| Bereiche | `image_width` 160..8192, `image_height` 120..8192, `px_per_mm` 0.5..100, `scan_z` 0..90, `rotation_deg` -180..180, `crop_fraction` 0..<0.4, `offset_mm` je ±200, `notes` ≤2000 Zeichen, `updated_by` ≤80 |
+| Bereiche | `image_width` 160..8192, `image_height` 120..8192, `px_per_mm` 0.5..100, `scan_z` 0..80, `rotation_deg` -180..180, `crop_fraction` 0..<0.4, `offset_mm` je ±200, `notes` ≤2000 Zeichen, `updated_by` ≤80 |
 | Erfolg | 200 gespeicherte Kalibrierung + `message`, `revision` +1 |
 | Fehler | **403** `Fremde Webseite darf die Kalibrierung nicht ändern` (Origin ≠ Host), **415** `Content-Type application/json erwartet`, **413** `Kalibrierung zu groß (max. 64 KB)`, **409** `Kalibrierung wurde inzwischen geändert …` + `current` (aktuelle Daten), 400 `revision fehlt: …`, `Kalibrierung ungültig: …`, `Unbekannte Felder: …` |
 

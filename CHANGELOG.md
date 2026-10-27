@@ -2,6 +2,11 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-10-27
+
+- **Z nie über 80 mm** (darüber läuft der Kopf aus der Z-Linearschiene): Firmware `Z_MAX_POS 80` (SKR neu flashen), Pi-Z-Sperre für jede Z-Fahrt (Auftrag, Jog, LightBurn), Parken, Abtast-Rückzüge und `travels.z`; App: Kamera höchstens Z 80 (Schärfesuche, Scan), `scan_z` ≤ 80.
+- Idee für Fahrhöhe nach Materialstärke, Kollisionsschutz und Kamera-3D-Vorprüfung: `docs/IDEE_HOEHE_KOLLISION_KAMERA_3D.md`.
+
 ## 2026-10-26
 
 - Android: Laserleistung für das Kamera-Punktraster im Kalibrier-Dialog einstellbar, 20–60 % in 5-%-Schritten (Standard 20 %, wird gemerkt).

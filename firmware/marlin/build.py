@@ -74,7 +74,8 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "X_BED_SIZE", "390")
     cfg = replace_active(cfg, "Y_BED_SIZE", "370")
     cfg = replace_active(cfg, "X_MIN_POS", "0")
-    cfg = replace_active(cfg, "Z_MAX_POS", "90")
+    # Above 80 mm the head runs out of the Z linear rail.
+    cfg = replace_active(cfg, "Z_MAX_POS", "80")
     # Native Marlin G30 uses the installed Z-min mechanical contact switch.
     # Unlike G28 it measures height without changing machine Z=0.
     # The upstream board example may already enable this option.

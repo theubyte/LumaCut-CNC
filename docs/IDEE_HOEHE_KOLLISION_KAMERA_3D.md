@@ -43,7 +43,7 @@ Die Kamera-Kalibrierung, die am 27.10. auf dem Pi gespeichert war (Revision 3), 
 - **Harte Obergrenze Z 80 mm** (Entscheidung des Nutzers, 27.10.). Gemeint ist die Tasterspitze über dem Bett. Diese Grenze darf keine Fahrt überschreiten, egal welcher Auftrag, Rückzug, Scan, Park oder welches Anheben vor dem Referenzieren.
   - **Grund:** Über 80 mm läuft der Laserkopf aus der Linearschiene der Z-Achse.
   - Für die Kamera selbst gilt keine Grenze. Die Fotohöhe wird aber über die Tasterhöhe gefahren (Oberfläche + Kamera-Abstand als Tasterspitze), und die muss unter 80 bleiben.
-  - **Heute ist mehr als 80 erlaubt (Sicherheitsproblem):**
+  - **Umgesetzt am 27.10.:** Firmware, Pi und App begrenzen auf 80 mm. Die Firmware wirkt erst nach dem Flashen. Vorher war Folgendes erlaubt:
     - Firmware: `Z_MAX_POS 90` (`firmware/marlin/build.py`).
     - Pi: `travels.z = 90` (`web.py`) und die Park-Prüfung `z_target > 90` (`transport.py`).
     - App: `Z_TOP = 85`. Die Schärfesuche der automatischen Kamera-Kalibrierung fährt bis Z 85, der Scan erlaubt bis `Z_TOP + 5` = 90 (`WorkspaceViewModel`). `PiApi` begrenzt `scan_z` auf 90.

@@ -7,7 +7,7 @@
 | Steuerrechner | Raspberry Pi 400 (Raspberry Pi OS 64-bit), WLAN, `lumacut.local` |
 | Controller | BTT SKR Mini MZ V1.0 (STM32F103RC, TMC2209), Marlin 2.1.2.9, USB-CDC zum Pi |
 | Laser | LaserTree LT-80W-AA-Pro (24 V, TTL/PWM-Eingang) |
-| Mechanik | Arbeitsraum X 390 × Y 370 × Z 90 mm, drei Motoren, drei Endschalter |
+| Mechanik | Arbeitsraum X 390 × Y 370 × Z 80 mm, drei Motoren, drei Endschalter. **Z nie über 80 mm** (Tasterspitze über dem referenzierten Bett), darüber läuft der Kopf aus der Z-Linearschiene: Firmware `Z_MAX_POS 80`, Pi-Z-Sperre, App. |
 
 ## Belegung SKR Mini MZ
 

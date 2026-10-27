@@ -356,7 +356,7 @@ class PiClient(
                 put("calibrated", true)
                 put("image_width", cal.photoWidth)
                 put("image_height", cal.photoHeight)
-                put("scan_z", cal.scanZ.coerceIn(0.0, 90.0))
+                put("scan_z", cal.scanZ.coerceIn(0.0, Limits.Z_MAX_MM))
                 cal.lens?.openCv()?.let { (k, d) ->
                     put("camera_matrix", JsonArray(k.map { row -> JsonArray(row.map(::JsonPrimitive)) }))
                     put("dist_coeffs", JsonArray(d.map(::JsonPrimitive)))

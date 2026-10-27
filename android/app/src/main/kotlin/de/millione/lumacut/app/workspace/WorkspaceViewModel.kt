@@ -19,6 +19,7 @@ import de.millione.lumacut.core.MarlinWriter
 import de.millione.lumacut.core.MotionTest
 import de.millione.lumacut.core.EngraveTest
 import de.millione.lumacut.core.FocusTest
+import de.millione.lumacut.core.Limits
 import de.millione.lumacut.core.MachineStatus
 import de.millione.lumacut.core.PhotoSampler
 import de.millione.lumacut.core.PiConfig
@@ -265,6 +266,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     /** Moves Z (laser off) in jog steps to the absolute height [target]; the Pi refuses anything below surface + 2 mm. */
     private suspend fun zTo(c: PiClient, machine: MachineViewModel, target: Double): Double {
         val z = machine.refreshStatus()?.position?.getOrNull(2) ?: throw IllegalStateException("Z-Position unbekannt")
+        if (target > Z_TOP + 0.01) throw IllegalStateException("Z %.1f über der Höchstgrenze Z %.0f – Material zu hoch für die Kamera".format(target, Z_TOP))
         for (step in CameraFocus.jogSteps(target - z)) c.action("jog", mapOf("axis" to "Z", "distance" to step.toString()))
         return machine.refreshStatus()?.position?.getOrNull(2) ?: target
     }
@@ -461,7 +463,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun cameraOver(c: PiClient, machine: MachineViewModel, cal: CameraCalibration, p: Pt): Pair<Pt, Double> {
         val surface = machine.refreshStatus()?.workpiece_surface_z ?: probe(c, machine, p)
         val z = cal.aboveSurface?.let { surface + it } ?: cal.scanZ
-        if (z > Z_TOP + 5) throw IllegalStateException("Material zu hoch für die Kamera")
+        if (z > Z_TOP) throw IllegalStateException("Material zu hoch für die Kamera")
         if (z < surface + 3) throw IllegalStateException("Kamerahöhe der Kalibrierung liegt zu nah am Material – Kamera neu kalibrieren")
         val head = headTo(c, machine, p - cal.usable(0.0).center, z)
         return head to z
@@ -801,7 +803,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                         _run.value = Run("Scan", 0, plan.heads.size, "Oberfläche abtasten …")
                         probe(c, machine, boxes.first().center)
                     }
-                    (surface + above).also { if (it > Z_TOP + 5) throw IllegalStateException("Material zu hoch für die Kamera") }
+                    (surface + above).also { if (it > Z_TOP) throw IllegalStateException("Material zu hoch für die Kamera") }
                 }
                 // a part scan goes into the earlier one (same resolution), everything else stays
                 val base = if (region == ScanRegion.ALL) null else runCatching {
@@ -950,8 +952,8 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
         const val CUT_JOB = "kalibrierung-schnitt.gcode"
         /** LED level for every camera picture: full on, so the dimming PWM cannot flicker in the picture. */
         const val LIGHT_LEVEL = 100
-        /** Highest Z the camera is sent to (Pi travel 90 mm). */
-        const val Z_TOP = 85.0
+        /** Highest Z the camera is sent to: the rail limit, never more. */
+        const val Z_TOP = Limits.Z_MAX_MM
         /** Tried in this order; the OV2710 (HBVCAM F1716) does Full HD, many webcams only 1280 × 720 raw. */
         val CAMERA_SIZES = listOf(1920 to 1080, 1280 to 720, 640 to 480)
     }

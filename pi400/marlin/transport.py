@@ -68,6 +68,10 @@ PROBE_HEAD_MAX = (380.0, 360.0)
 PROBE_HEAD_MIN = (10.0, 10.0)
 # Fast multi-point probing: low hop between the points of one area.
 PROBE_HOP_MM = 3.0
+# Highest switch-tip Z above the homed bed: above 80 mm the head runs out
+# of the Z linear rail. Firmware Z_MAX_POS is the same; the Pi checks it too
+# because a SKR with older firmware still allows 90 mm.
+Z_MAX_MM = 80.0
 
 
 class MarlinCommandError(RuntimeError):
@@ -517,6 +521,10 @@ class MarlinTransport:
             raise ValueError(
                 f"Z-Sperre: Ziel {target:.3f} mm, Minimum {minimum:.3f} mm "
                 "(2mm Tastabstand). Schneidtiefe begrenzen.")
+        if target > Z_MAX_MM + 0.0001:
+            raise ValueError(
+                f"Z-Sperre: Ziel {target:.3f} mm über der Höchstgrenze Z{Z_MAX_MM:g} "
+                "(darüber läuft der Kopf aus der Linearschiene).")
 
     def _xy_cut_guard_locked(self, cmd: str):
         """Reject any armed linear cut touching the 30mm X/Y home bands.
@@ -1140,13 +1148,13 @@ class MarlinTransport:
             self._exchange_locked("M114", timeout=8)
             if self.position is None:
                 raise RuntimeError("Parkhöhe unbekannt: keine Fahrt")
-            # Positive Z is verified upward, and Z_max is currently 90mm.
+            # Positive Z is verified upward, and Z_max is Z_MAX_MM (80 mm).
             # Current height always wins, to avoid a dangerous downward park.
             z_target = max(self.position[2], self.clearance_mm,
                            0.0 if self.surface_z is None else
                            self.surface_z + self.probe_clearance_mm)
-            if z_target > 90.0:
-                raise RuntimeError("Z-Position außerhalb konfiguriertem Z-Hub")
+            if z_target > Z_MAX_MM + 0.0001:
+                raise RuntimeError("Z-Position außerhalb konfiguriertem Z-Hub (max. Z%g)" % Z_MAX_MM)
             if not self.absolute_mode:
                 self._exchange_locked("G90", timeout=8)
                 self.absolute_mode = True
@@ -1252,11 +1260,11 @@ class MarlinTransport:
                         "(Kontakt oberhalb Firmware-Grenze Z_CLEARANCE_MULTI_PROBE), "
                         f"Taster bestaetigt geschaltet bei Z{contact:.3f}")
                 LOG.warning(note)
-            if contact is None or not 0.0 <= contact <= 90.0:
+            if contact is None or not 0.0 <= contact <= Z_MAX_MM:
                 raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
             self.surface_z = contact
             self.last_probe_laser_xy = (laser_x, laser_y)
-            lift = max(self.clearance_mm, contact + self.probe_clearance_mm)
+            lift = min(Z_MAX_MM, max(self.clearance_mm, contact + self.probe_clearance_mm))
             self._exchange_locked(f"G0 Z{lift:.3f} F600", timeout=45)
             self._exchange_locked("M400", timeout=45)
             self._exchange_locked(f"G0 X{laser_x:.3f} Y{laser_y:.3f} F9000", timeout=60)
@@ -1335,7 +1343,7 @@ class MarlinTransport:
             if "probing failed" not in str(exc).lower():
                 raise
             contact = self._early_trigger_contact_locked(start_z)
-        if contact is None or not 0.0 <= contact <= 90.0:
+        if contact is None or not 0.0 <= contact <= Z_MAX_MM:
             raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
         return contact
 
@@ -1395,6 +1403,7 @@ class MarlinTransport:
 
             def lift(target):
                 nonlocal z
+                target = min(target, Z_MAX_MM)
                 if z < target - 0.001:
                     self._exchange_locked(f"G0 Z{target:.3f} F600", timeout=45)
                     z = target

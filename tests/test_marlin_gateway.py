@@ -120,6 +120,10 @@ class FirmwareDirectionContractTests(unittest.TestCase):
         self.assertIn('replace_active(cfg, "Z_SAFE_HOMING_Y_POINT", "0")',build)
         self.assertIn('replace_active(cfg, "Z_PROBE_LOW_POINT", "-2")',build)
 
+    def test_firmware_z_travel_ends_at_80mm(self):
+        build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
+        self.assertIn('replace_active(cfg, "Z_MAX_POS", "80")',build)
+
     def test_default_z_steps_match_calibrated_value(self):
         build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
         self.assertIn(
@@ -593,6 +597,24 @@ class USBProtocolTests(unittest.TestCase):
         self.assertEqual(serial.writes,[b"G0 Z8.5 F600\n", b"G0 Z5.2\n"])
         with self.assertRaisesRegex(ValueError,"Z-Sperre"):
             bridge.command("G0 Z4.9")
+
+    def test_z_never_above_80mm_rail_limit(self):
+        # Above Z80 the head runs out of the Z linear rail.
+        serial=FakeSerial(["ok\n", "ok\n", "ok\n", "X:0 Y:0 Z:75\n", "ok\n"])
+        bridge=MarlinTransport("/dev/null")
+        bridge.serial=serial
+        bridge.identity="FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed=True
+        bridge.homing_verified=True
+        bridge.surface_z=3.0
+        bridge.command("G0 Z80 F600")
+        with self.assertRaisesRegex(ValueError,"Höchstgrenze Z80"):
+            bridge.command("G0 Z80.1")
+        bridge.command("G91")
+        with self.assertRaisesRegex(ValueError,"Höchstgrenze Z80"):
+            bridge.command("G0 Z+10 F360")   # jog from Z75
+        self.assertNotIn(b"G0 Z80.1\n",serial.writes)
+        self.assertNotIn(b"G0 Z+10 F360\n",serial.writes)
 
     def test_no_laser_before_probing_workpiece(self):
         serial=FakeSerial([])

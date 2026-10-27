@@ -151,6 +151,20 @@ class LensTest {
         srv.shutdown()
     }
 
+    @Test fun `scan height sent to the Pi never exceeds the 80 mm rail limit`() = runBlocking {
+        val srv = MockWebServer().apply {
+            enqueue(MockResponse().setBody("""{"revision":1,"android":null,"placeholder":false}"""))
+            enqueue(MockResponse().setBody("""{"revision":2,"message":"ok"}"""))
+            start()
+        }
+        PiClient("127.0.0.1", srv.port).saveCameraCalibration(CameraCalibration(w, h, scanZ = 85.0, lens = trueLens()))
+        srv.takeRequest()
+        val body = Json.parseToJsonElement(srv.takeRequest().body.readUtf8()).jsonObject
+        assertEquals("80.0", body["scan_z"].toString())
+        assertEquals(80.0, Limits.Z_MAX_MM)
+        srv.shutdown()
+    }
+
     @Test fun `locate tells how far the image centre is from the grid centre`() {
         val t = trueLens()
         val off = DotGrid.locate(render(t), w, h)!!

@@ -125,7 +125,7 @@ def validate(data) -> dict:
     _number(merged, "image_width", 160, 8192, errors, integer=True)
     _number(merged, "image_height", 120, 8192, errors, integer=True)
     _number(merged, "px_per_mm", 0.5, 100.0, errors)
-    _number(merged, "scan_z", 0.0, 90.0, errors)
+    _number(merged, "scan_z", 0.0, 80.0, errors)
     _number(merged, "rotation_deg", -180.0, 180.0, errors)
     _number(merged, "crop_fraction", 0.0, 0.4, errors)
     if merged["crop_fraction"] == 0.4:  # wie Studio: 0 <= crop_fraction < 0.4
