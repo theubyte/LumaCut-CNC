@@ -177,6 +177,19 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     adv = replace_active(adv, "BUFSIZE", "8")
     adv = adv.replace("//#define RX_BUFFER_SIZE 1024",
                       "#define RX_BUFFER_SIZE 256")
+    # Input shaping (ZV) for Y, compiled in but OFF by default (F0): the
+    # gantry rings at ~12.5 Hz in Y after corners (calibration run
+    # 2026-10-28, wave period grows with speed at a fixed frequency).
+    # Marlin 2.1.2.9 delays only the shaped axis's steps, not X and not the
+    # laser power (applied at block start), so with shaping on, Y lags by
+    # roughly 15-20 ms: harmless for X raster lines, but it skews vector
+    # paths with a Y component (~0.3 mm at 1000 mm/min). Enable only at
+    # runtime and only after measuring: M593 Y F12.5 D0.15 (F0 = off again).
+    # SHAPING_MIN_FREQ sizes the echo buffer (SRAM) down to 10 Hz.
+    adv = uncomment(adv, "INPUT_SHAPING_Y")
+    adv = replace_active(adv, "SHAPING_FREQ_Y", "0.0")
+    adv = uncomment(adv, "SHAPING_MIN_FREQ")
+    adv = replace_active(adv, "SHAPING_MIN_FREQ", "10.0")
     # No real-time overrides masquerading as GRBL. Marlin M112 is a true stop.
     return cfg, adv
 
@@ -304,6 +317,7 @@ def main():
                             "exhaust": "M8 BED PC9"},
             "tones": "M300 S<Hz> P<ms> [X] [Y]: stepper coils, no motion, laser must be off",
             "update": "Pi: M28 B1 binary transfer to SD + M997 (SD card stays in SKR)",
+            "input_shaping": "ZV on Y compiled in, off by default; M593 Y F<Hz> D<zeta> (F0 = off), 10 Hz minimum",
             "hardware_verified": False,
             "do_not_flash_before_isolation_interlock_test": True,
             "sha256": hashlib.sha256(fw.read_bytes()).hexdigest()
