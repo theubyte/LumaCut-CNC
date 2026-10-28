@@ -53,6 +53,11 @@ class ScreenshotTest {
 
     /** Navigates by the test tag nav-<key> (new shell) or the first matching label (old shell). */
     private fun go(key: String, vararg labels: String) {
+        // Upright tablets and short screens start with the rail folded: open it as a user would.
+        if (rule.onAllNodes(hasTestTag("nav-$key")).fetchSemanticsNodes().isEmpty()) {
+            val menu = rule.onAllNodesWithContentDescription("Menü ausklappen")
+            if (menu.fetchSemanticsNodes().isNotEmpty()) { menu.onFirst().performClick(); rule.waitForIdle() }
+        }
         val tagged = rule.onAllNodes(hasTestTag("nav-$key"))
         if (tagged.fetchSemanticsNodes().isNotEmpty()) { tagged.onFirst().performClick(); rule.waitForIdle(); return }
         for (l in labels) {
