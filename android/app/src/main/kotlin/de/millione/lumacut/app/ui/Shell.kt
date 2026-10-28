@@ -78,7 +78,8 @@ fun LumaCutApp(machine: MachineViewModel, editor: EditorViewModel) {
     var machineTab by rememberSaveable { mutableStateOf(MachineTab.STEUERUNG) }
     // The menu rail folds away for more work area; the button in the top bar brings it back.
     // Upright tablets start with the rail folded: the width goes to the editor's bar and canvas.
-    var railOpen by rememberSaveable { mutableStateOf(LocalConfiguration.current.screenWidthDp >= 900) }
+    val wideScreen = LocalConfiguration.current.screenWidthDp >= 900
+    var railOpen by rememberSaveable { mutableStateOf(wideScreen) }
     val snackbar = remember { SnackbarHostState() }
     var lastNotice by remember { mutableStateOf<Notice?>(null) }
     LaunchedEffect(Unit) {
