@@ -122,3 +122,23 @@ class ScanPlanTest {
         assertTrue(Scan.reachable(Pt(100.0, 2.0), offset), "upper edge: head may enter the safezone while probing")
     }
 }
+
+class ScanLevelTest {
+    private fun grey(v: Int) = (0xFF shl 24) or (v shl 16) or (v shl 8) or v
+    private fun lum(c: Int) = (c shr 8) and 255
+
+    @Test fun `slow light change goes, marks keep their contrast`() {
+        val w = 400; val h = 300
+        // background falls from 200 on the left to 80 on the right; dark marks at 40 % of it
+        val px = IntArray(w * h) { q -> val x = q % w; val y = q / w
+            val bg = 200 - 120 * x / (w - 1)
+            grey(if (x % 50 in 20..22 && y % 60 in 10..40) bg * 4 / 10 else bg) }
+        px[5] = 0   // an uncovered pixel stays transparent
+        val out = Scan.level(px, w, h, pxPerMm = 4.0)
+        assertEquals(0, out[5])
+        val left = lum(out[150 * w + 10]); val right = lum(out[150 * w + 390])
+        assertTrue(kotlin.math.abs(left - right) <= 12, "even background: $left vs $right")
+        val mark = lum(out[20 * w + 371]); val beside = lum(out[20 * w + 380])
+        assertTrue(mark < beside * 0.55, "mark still dark: $mark vs $beside")
+    }
+}

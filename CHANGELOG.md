@@ -2,6 +2,11 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-10-28
+
+- **Kalibrierlauf auf 3-mm-MDF:** Fokus-Test (Parabel über alle Linien), Bewegungs- und Schwing-Auswertung (robuster Linienabstand, Marken von einer Seite angefahren), Laserpunkt-Finder (weißer Kern im großen blauen Hof) nach echtem Lauf überarbeitet.
+- **Scan gleichmäßig hell:** Das Licht auf dem Bett ändert sich mit der Kopfposition (Blendung mal links, mal rechts im Bild); der fertige Scan wird jetzt im Hintergrund ausgeglichen (`Scan.level`), Markierungen behalten ihren Kontrast.
+
 ## 2026-10-27
 
 - **Abtastpunkte antippen:** Im Arbeitsplatz-Scan (Modus „Abtastpunkte“) antippen, wo Material liegt; Abtasten und der automatische Auftrag tasten nur dort (`probe_points` im Arbeitsstand).

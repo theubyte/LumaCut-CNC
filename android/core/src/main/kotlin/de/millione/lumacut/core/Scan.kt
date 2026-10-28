@@ -5,6 +5,7 @@ import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Camera on the laser head, at the fixed scan height. Either [lens] (dot
@@ -207,6 +208,79 @@ object Scan {
                 weight[k] = total
             }
         }
+    }
+
+    /**
+     * Even background for a finished mosaic: the light on the bed changes
+     * with the head position (glare on one side of the picture in one row,
+     * on the other side in the next), which no flat field fixed to the camera
+     * can undo. Per channel, the bright background (70th percentile, so marks
+     * and engravings do not pull it down) is taken in cells of [cellMm],
+     * smoothed, and every pixel scaled so that background reaches one level
+     * (the 90th percentile of the cells). Marks keep their contrast; only
+     * slow brightness changes across the bed go. Uncovered (transparent)
+     * pixels stay as they are.
+     */
+    fun level(argb: IntArray, w: Int, h: Int, pxPerMm: Double, cellMm: Double = 10.0): IntArray {
+        require(argb.size == w * h) { "Ungültige Bilddaten" }
+        val c = max(8, (cellMm * pxPerMm).roundToInt())
+        val gw = (w + c - 1) / c; val gh = (h + c - 1) / c
+        val out = argb.copyOf()
+        val bgs = arrayOfNulls<DoubleArray>(3); val targets = DoubleArray(3)
+        for (ch in 0..2) {
+            val sh = 16 - 8 * ch
+            val cell = DoubleArray(gw * gh) { Double.NaN }
+            val hist = IntArray(256)
+            for (gj in 0 until gh) for (gi in 0 until gw) {
+                hist.fill(0); var n = 0
+                for (y in gj * c until min(h, (gj + 1) * c)) for (x in gi * c until min(w, (gi + 1) * c)) {
+                    val v = argb[y * w + x]; if ((v ushr 24) == 0) continue
+                    hist[(v shr sh) and 255]++; n++
+                }
+                if (n < c * c / 4) continue
+                var acc = 0; var k = 0
+                while (k < 255) { acc += hist[k]; if (acc >= n * 0.7) break; k++ }
+                cell[gj * gw + gi] = k.toDouble()
+            }
+            val valid = cell.filter { !it.isNaN() }.sorted()
+            if (valid.isEmpty()) return out
+            val target = valid[(valid.size * 0.9).toInt().coerceAtMost(valid.size - 1)]
+            // fill cells without picture from their neighbours, then median and mean over 3×3
+            repeat(gw + gh) {
+                if (cell.none { it.isNaN() }) return@repeat
+                val prev = cell.copyOf()
+                for (j in 0 until gh) for (i in 0 until gw) if (prev[j * gw + i].isNaN()) {
+                    val nb = listOf(i - 1 to j, i + 1 to j, i to j - 1, i to j + 1).filter { (x, y) -> x in 0 until gw && y in 0 until gh }.map { (x, y) -> prev[y * gw + x] }.filter { !it.isNaN() }
+                    if (nb.isNotEmpty()) cell[j * gw + i] = nb.average()
+                }
+            }
+            // at the border only the cells that exist count, and a cell's own value is kept where
+            // the median would pull it towards the inside (a light falling off to the edge stays)
+            fun around(src: DoubleArray, i: Int, j: Int) = (-1..1).flatMap { dy -> (-1..1).mapNotNull { dx ->
+                val x = i + dx; val y = j + dy; if (x in 0 until gw && y in 0 until gh) src[y * gw + x] else null } }
+            val med = DoubleArray(cell.size) { val a = around(cell, it % gw, it / gw); if (a.size < 9) cell[it] else a.sorted()[4] }
+            val bg = DoubleArray(cell.size) { val a = around(med, it % gw, it / gw); if (a.size < 9) med[it] else a.average() }
+            bgs[ch] = bg; targets[ch] = target
+        }
+        for (y in 0 until h) {
+            val fy = ((y + 0.5) / c - 0.5).coerceIn(0.0, gh - 1.0); val j0 = min(fy.toInt(), max(0, gh - 2)); val ty = if (gh > 1) fy - j0 else 0.0
+            val j1 = min(j0 + 1, gh - 1)
+            for (x in 0 until w) {
+                val v = argb[y * w + x]; if ((v ushr 24) == 0) continue
+                val fx = ((x + 0.5) / c - 0.5).coerceIn(0.0, gw - 1.0); val i0 = min(fx.toInt(), max(0, gw - 2)); val tx = if (gw > 1) fx - i0 else 0.0
+                val i1 = min(i0 + 1, gw - 1)
+                var o = v and 0xFF000000.toInt()
+                for (ch in 0..2) {
+                    val bg = bgs[ch]!!; val sh = 16 - 8 * ch
+                    val top = bg[j0 * gw + i0] + (bg[j0 * gw + i1] - bg[j0 * gw + i0]) * tx
+                    val bottom = bg[j1 * gw + i0] + (bg[j1 * gw + i1] - bg[j1 * gw + i0]) * tx
+                    val gain = targets[ch] / max(8.0, top + (bottom - top) * ty)
+                    o = o or ((((v shr sh) and 255) * gain + 0.5).toInt().coerceIn(0, 255) shl sh)
+                }
+                out[y * w + x] = o
+            }
+        }
+        return out
     }
 
     fun mosaic(tiles: List<Tile>, cal: CameraCalibration, pxPerMm: Double = 2.0): Triple<IntArray, Int, Int> {

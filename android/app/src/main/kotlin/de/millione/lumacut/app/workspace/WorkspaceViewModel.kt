@@ -1310,7 +1310,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
                 } }
                 if (!isActive) return@launch
                 _run.value = Run("Scan", plan.heads.size, plan.heads.size, "Mosaik wird berechnet …")
-                val bmp = withContext(Dispatchers.Default) { Bitmap.createBitmap(mosaic.pixels, mosaic.width, mosaic.height, Bitmap.Config.ARGB_8888) }
+                val bmp = withContext(Dispatchers.Default) { Bitmap.createBitmap(Scan.level(mosaic.pixels, mosaic.width, mosaic.height, mosaicResolution(cal)), mosaic.width, mosaic.height, Bitmap.Config.ARGB_8888) }
                 editor.setBackground(bmp)
                 markDone("scan")
                 machine.notify(when (region) {
