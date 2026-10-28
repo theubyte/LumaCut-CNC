@@ -2,6 +2,7 @@ package de.millione.lumacut.app
 
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onRoot
@@ -35,6 +36,9 @@ class ScreenshotTest {
     @Test @Config(qualifiers = "w1280dp-h800dp-land-mdpi") fun tablet() = tour("tablet")
     @Test @Config(qualifiers = "w1280dp-h800dp-land-night-mdpi") fun tabletDark() = tour("tablet-dunkel")
     @Test @Config(qualifiers = "w411dp-h891dp-port-night-xhdpi") fun phoneDark() = tour("handy-dunkel")
+    // The owner's Galaxy Tab S7 FE: 2560 × 1600 px at density ~2.1 minus status and task bar, larger system font.
+    @Test @Config(qualifiers = "w1200dp-h720dp-land-xhdpi", fontScale = 1.1f) fun tabS7fe() = tour("tab-s7fe")
+    @Test @Config(qualifiers = "w752dp-h1160dp-port-xhdpi", fontScale = 1.1f) fun tabS7feHoch() = tour("tab-s7fe-hoch")
     @Test @Config(qualifiers = "w411dp-h891dp-port-xhdpi") fun phone() = tour("handy")
     @Test @Config(qualifiers = "w891dp-h411dp-land-xhdpi") fun phoneLandscape() = tour("handy-quer")
 
@@ -93,6 +97,9 @@ class ScreenshotTest {
         }
         go("motiv", "2 · Motiv", "Motiv")
         shot("$prefix-2-motiv")
+        // Zoomed in: the sheet must stay inside the canvas and never cover the tools.
+        val zoomIn = rule.onAllNodesWithContentDescription("Vergrößern")
+        if (zoomIn.fetchSemanticsNodes().isNotEmpty()) { repeat(3) { zoomIn.onFirst().performClick() }; shot("$prefix-2b-motiv-zoom") }
         go("start", "3 · Starten", "Starten")
         shot("$prefix-3-starten")
         go("maschine", "Maschine")
