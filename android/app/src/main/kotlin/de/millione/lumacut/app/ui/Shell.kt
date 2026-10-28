@@ -1,6 +1,7 @@
 package de.millione.lumacut.app.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkHorizontally
@@ -47,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
@@ -159,6 +161,10 @@ private fun LogoMark(size: Dp = 40.dp) {
     }
 }
 
+/**
+ * One slim line (48 dp): logo icon, one status chip (connection + state), head position in small monospace, NOT-AUS.
+ * Before it was 64 dp with word mark, two chips and a large position pill – space the editor and the scan need.
+ */
 @Composable
 private fun TopBar(machine: MachineViewModel, compact: Boolean, railOpen: Boolean, onToggleRail: (() -> Unit)?) {
     val status by machine.status.collectAsStateWithLifecycle()
@@ -166,57 +172,62 @@ private fun TopBar(machine: MachineViewModel, compact: Boolean, railOpen: Boolea
     val host by machine.host.collectAsStateWithLifecycle()
     val readError by machine.readError.collectAsStateWithLifecycle()
     val head = headline(status, online, host, readError)
-    val wideEnough = LocalConfiguration.current.screenWidthDp >= 980
+    val width = LocalConfiguration.current.screenWidthDp
     Row(
-        Modifier
-            .fillMaxWidth()
-            .height(if (compact) 60.dp else if (LocalConfiguration.current.screenHeightDp < 500) 54.dp else 64.dp)
-            .padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (onToggleRail != null) BarBtn(LcIcons.menu, null, onToggleRail, description = if (railOpen) "Menü einklappen" else "Menü ausklappen")
-        if (compact || !railOpen) LogoMark(if (compact) 36.dp else 40.dp)
-        if (!compact) Row(verticalAlignment = Alignment.Bottom) {
-            Text("Luma", fontSize = 21.sp, fontWeight = FontWeight.Light, color = Lc.text)
-            Text("Cut", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = Lc.accent)
-        }
+        if (onToggleRail != null) Box(
+            Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = if (railOpen) "Menü einklappen" else "Menü ausklappen") { onToggleRail() },
+            contentAlignment = Alignment.Center,
+        ) { Icon(LcIcons.menu, if (railOpen) "Menü einklappen" else "Menü ausklappen", tint = Lc.text, modifier = Modifier.size(20.dp)) }
+        if (compact || !railOpen) LogoMark(30.dp)
         val connTone = when { host.isBlank() -> Tone.OFF; online == true && status?.connected == true -> Tone.OK; online == null -> Tone.BUSY; else -> Tone.BAD }
-        if (compact) {
-            // One chip on the phone: the machine state; the address only matters in Einstellungen.
-            ToneChip(head.title, if (connTone == Tone.OK) head.tone else connTone, Modifier.weight(1f, fill = false))
-            Spacer(Modifier.weight(1f))
-        } else {
-            ToneChip(if (host.isBlank()) "Nicht verbunden" else host, connTone)
-            ToneChip(head.title, head.tone, Modifier.weight(1f, fill = false))
-            Spacer(Modifier.weight(1f))
-            if (wideEnough) status?.position?.takeIf { it.size == 3 }?.let { p ->
-                // Work-area coordinates like the editor; negative = head in the laser's reserved border (parked).
-                val w = de.millione.lumacut.core.Work.fromMachine(p[0], p[1])
-                Row(
-                    Modifier.height(40.dp).clip(CircleShape).background(Lc.surface).padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
+        // Connection and state as one dot + short text; the address only while connected and there is room.
+        val tone = if (connTone == Tone.OK) head.tone else connTone
+        val text = if (!compact && width >= 900 && host.isNotBlank() && connTone == Tone.OK) "${head.title} · $host" else head.title
+        StatusDot(text, tone, Modifier.weight(1f, fill = false))
+        Spacer(Modifier.weight(1f))
+        if (width >= 760) status?.position?.takeIf { it.size == 3 }?.let { p ->
+            // Work-area coordinates like the editor; negative = head in the laser's reserved border (parked).
+            val w = de.millione.lumacut.core.Work.fromMachine(p[0], p[1])
+            val mono = LcTypography.labelMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontWeight = FontWeight.Medium)
+            Text(
+                androidx.compose.ui.text.buildAnnotatedString {
                     for ((axis, v) in listOf("X" to w.x, "Y" to w.y, "Z" to p[2])) {
-                        Text(axis, style = LcTypography.labelMedium, color = Lc.accent)
-                        Text("%.2f".format(v), style = LcTypography.labelLarge.merge(NumberStyle), color = Lc.text,
-                             textAlign = TextAlign.End, modifier = Modifier.width(58.dp))
+                        pushStyle(androidx.compose.ui.text.SpanStyle(color = Lc.accent)); append(axis); pop()
+                        append(" %7.2f  ".format(v))
                     }
-                    Text("mm", style = LcTypography.labelMedium, color = Lc.faint)
-                }
-            }
+                }, style = mono, color = Lc.text, maxLines = 1,
+            )
         }
-        // Always visible, on every screen size: the software emergency stop.
+        // Always visible and easy to hit on every screen size: the software emergency stop (48 dp high).
         Box(
             Modifier
-                .height(44.dp)
+                .height(48.dp)
+                .padding(vertical = 4.dp)
                 .clip(CircleShape)
                 .background(Lc.estop)
                 .border(2.dp, Color(0xFFFF8A8E), CircleShape)
                 .clickable(onClickLabel = "Software-Notstopp M112") { machine.emergencyStop() }
-                .padding(horizontal = if (compact) 16.dp else 22.dp),
+                .padding(horizontal = if (compact) 16.dp else 20.dp),
             contentAlignment = Alignment.Center,
-        ) { Text("NOT-AUS", color = Color.White, fontWeight = FontWeight.Black, letterSpacing = 1.sp, maxLines = 1) }
+        ) { Text("NOT-AUS", color = Color.White, fontWeight = FontWeight.Black, fontSize = 15.sp, letterSpacing = 1.sp, maxLines = 1) }
+    }
+}
+
+/** Small status: coloured dot and a short text, no frame (pulses while busy). */
+@Composable
+private fun StatusDot(text: String, tone: Tone, modifier: Modifier = Modifier) {
+    val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "dot")
+    val a by pulse.animateFloat(1f, .25f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(700),
+        androidx.compose.animation.core.RepeatMode.Reverse), label = "a")
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(9.dp).graphicsLayer { alpha = if (tone == Tone.BUSY) a else 1f }.clip(CircleShape).background(tone.color))
+        Spacer(Modifier.width(7.dp))
+        Text(text, style = LcTypography.labelLarge, color = if (tone == Tone.OK || tone == Tone.OFF || tone == Tone.BUSY) Lc.text else tone.color,
+             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

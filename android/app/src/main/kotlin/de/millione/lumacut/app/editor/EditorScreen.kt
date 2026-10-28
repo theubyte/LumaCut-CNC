@@ -202,11 +202,11 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     val view = remember { CanvasView() }
     // Narrow (tablet upright, phone): the menus show only their icons and the plate choice moves into the scrolling bar.
     val roomyBar = config.screenWidthDp >= 1100
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxSize().padding(start = 12.dp, end = 12.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val barScroll = rememberScrollState()
             Box(Modifier.weight(1f)) {
-            Row(Modifier.horizontalScroll(barScroll).padding(vertical = 6.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically,
+            Row(Modifier.horizontalScroll(barScroll).padding(vertical = 2.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 var title by remember(doc.title) { mutableStateOf(doc.title) }
                 BarTextField(title, { title = it; editor.rename(it) }, Modifier.width(if (roomyBar) 150.dp else 130.dp))

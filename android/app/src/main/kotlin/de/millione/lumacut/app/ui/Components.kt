@@ -301,13 +301,13 @@ fun <T> Segmented(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> 
 @Composable
 fun <T> PillTabs(options: List<Triple<T, String, ImageVector?>>, selected: T, onSelect: (T) -> Unit, modifier: Modifier = Modifier) {
     // Inner padding leaves room for the selected pill's shadow inside the scrolling row.
-    Row(modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp, horizontal = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(modifier.horizontalScroll(rememberScrollState()).padding(vertical = 4.dp, horizontal = 2.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for ((value, label, icon) in options) {
             val on = value == selected
             val shape = CircleShape
             Row(
                 Modifier
-                    .height(44.dp)
+                    .height(40.dp)
                     .then(if (on) Modifier.lift(shape, 6.dp) else Modifier)
                     .clip(shape)
                     .background(if (on) Lc.accent else Lc.surface)

@@ -24,7 +24,7 @@ enum class MachineTab(val label: String, val icon: ImageVector) {
 fun MaschineScreen(machine: MachineViewModel, editor: EditorViewModel, tab: MachineTab, onTab: (MachineTab) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         PillTabs(MachineTab.entries.map { Triple(it, it.label, it.icon) }, tab, onTab,
-            Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 4.dp))
+            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp))
         Box(Modifier.fillMaxSize()) {
             when (tab) {
                 MachineTab.STEUERUNG -> WerkstattScreen(machine)
