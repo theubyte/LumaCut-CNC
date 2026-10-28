@@ -44,7 +44,7 @@ fun LaserCard(machine: MachineViewModel) {
     var ip by remember(host) { mutableStateOf(host) }
     LcCard {
         CardTitle("Laser")
-        Text(if (host.isBlank()) "Noch kein Laser eingestellt" else "Aktueller Laser: $host", style = LcTypography.titleMedium)
+        Text(if (host.isBlank()) "Noch kein Laser eingestellt" else "Aktueller Laser: $host", style = LcTypography.titleMedium, color = Lc.text)
         SmallText(when {
             host.isBlank() -> "Mit „Laser suchen“ im WLAN finden oder die Adresse eintragen (steht im Router, z. B. 192.168.2.89)."
             online == true -> "Verbunden · Controller ${if (status?.connected == true) "bereit" else "nicht verbunden"}"
@@ -66,7 +66,7 @@ fun LaserCard(machine: MachineViewModel) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(l.name, style = LcTypography.titleMedium, maxLines = 1)
+                        Text(l.name, style = LcTypography.titleMedium, color = Lc.text, maxLines = 1)
                         SmallText("${l.host} · ${l.state}", if (l.state == "bereit") Lc.ok else Lc.warn)
                     }
                     Text("Verbinden", style = LcTypography.labelLarge, color = Lc.accent)
@@ -79,7 +79,7 @@ fun LaserCard(machine: MachineViewModel) {
         OutlinedTextField(
             ip, { ip = it.filter { c -> c.isDigit() || c == '.' } }, label = { Text("Adresse eingeben") }, singleLine = true,
             modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            textStyle = LcTypography.bodyLarge.merge(NumberStyle),
+            textStyle = LcTypography.bodyLarge.merge(NumberStyle), shape = RoundedCornerShape(14.dp),
         )
         Spacer(Modifier.height(10.dp))
         LcButton("Verbinden", { machine.connect(ip) }, enabled = ip.isNotBlank())

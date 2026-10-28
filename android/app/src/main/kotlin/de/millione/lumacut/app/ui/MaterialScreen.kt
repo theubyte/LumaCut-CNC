@@ -5,6 +5,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -52,32 +56,50 @@ fun MaterialScreen(machine: MachineViewModel, editor: EditorViewModel, onNext: (
     var editing by remember { mutableStateOf<Pair<Material, Boolean>?>(null) }
     var confirm by rememberConfirm()
     val groups = state.items.grouped(query)
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text("1 · Material wählen", style = LcTypography.headlineSmall)
-                SmallText("Leistung, Tempo und Durchgänge setzt die App danach selbst.")
+    val compact = isCompact()
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val picked = groups.firstOrNull { it.key == chosen }
+        val next: @Composable (Modifier) -> Unit = { mod ->
+            LcButton("Weiter: Motiv", onNext, mod, icon = LcIcons.right, kind = BtnKind.PRIMARY, enabled = picked != null || chosen != null, big = true)
+        }
+        if (compact) {
+            ScreenTitle("Material wählen", "Leistung, Tempo und Durchgänge setzt die App danach selbst.", step = 1)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                TextInput("Material suchen", query, { query = it }, Modifier.weight(1f))
+                IconBtn(LcIcons.refresh, "Liste neu laden", { machine.refreshMaterials() })
             }
-            TextInput("Suchen", query, { query = it }, Modifier.width(260.dp))
+        } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            ScreenTitle("Material wählen", "Leistung, Tempo und Durchgänge setzt die App danach selbst.", step = 1, modifier = Modifier.weight(1f))
+            TextInput("Material suchen", query, { query = it }, Modifier.width(260.dp))
             IconBtn(LcIcons.refresh, "Liste neu laden", { machine.refreshMaterials() })
-            val picked = groups.firstOrNull { it.key == chosen }
-            LcButton("Weiter: Motiv", onNext, icon = LcIcons.right, kind = BtnKind.PRIMARY, enabled = picked != null || chosen != null, big = true)
+            next(Modifier)
         }
         if (!state.fromPi) Banner("Kein Kontakt zum Pi – das ist die zuletzt gespeicherte Liste. Verbindung unter Einstellungen prüfen.", Lc.info)
         if (groups.isEmpty()) SmallText("Kein Material gefunden. Anderen Suchbegriff versuchen.")
-        LazyVerticalGrid(GridCells.Adaptive(300.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyVerticalGrid(GridCells.Adaptive(if (compact) 160.dp else 260.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp)) {
             items(groups, key = { it.key }) { g ->
                 val on = g.key == chosen
+                val shape = RoundedCornerShape(22.dp)
                 Column(
-                    Modifier.clip(RoundedCornerShape(18.dp)).background(if (on) Lc.accentSoft else Lc.surface)
-                        .border(if (on) 2.dp else 1.dp, if (on) Lc.accent else Lc.line, RoundedCornerShape(18.dp))
-                        .clickable { editor.selectMaterial(g) }.padding(18.dp)
+                    Modifier.lift(shape, if (on) 12.dp else 6.dp).clip(shape).background(Lc.surface)
+                        .border(if (on) 2.dp else 0.dp, if (on) Lc.accent else Color.Transparent, shape)
+                        .clickable { editor.selectMaterial(g) }.padding(16.dp)
                 ) {
-                    Text(g.name, style = LcTypography.titleLarge)
-                    Text("${formatMm(g.thicknessMm)} mm", style = LcTypography.titleMedium, color = Lc.muted)
-                    Spacer(Modifier.height(10.dp))
-                    SmallText(g.processes.joinToString(" · "), if (on) Lc.accent else Lc.faint)
+                    Row(verticalAlignment = Alignment.Top) {
+                        Text(g.name, style = LcTypography.titleMedium, color = Lc.text, modifier = Modifier.weight(1f), maxLines = 2,
+                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        Box(Modifier.size(26.dp).clip(CircleShape).background(if (on) Lc.accent else Lc.surface3), contentAlignment = Alignment.Center) {
+                            if (on) Icon(LcIcons.check, "gewählt", tint = Lc.accentInk, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text("${formatMm(g.thicknessMm)} mm", style = LcTypography.headlineSmall.merge(NumberStyle), color = if (on) Lc.accent else Lc.text)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (pr in g.processes) Text(pr, style = LcTypography.labelMedium, color = Lc.muted,
+                            modifier = Modifier.clip(CircleShape).background(Lc.surface2).padding(horizontal = 8.dp, vertical = 3.dp), maxLines = 1)
+                    }
                     if (advanced) {
                         Spacer(Modifier.height(10.dp))
                         for (m in g.entries) Row(
@@ -85,7 +107,7 @@ fun MaterialScreen(machine: MachineViewModel, editor: EditorViewModel, onNext: (
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text("${m.process}: ${m.powerPct.roundToInt()} % · ${m.speed.roundToInt()} mm/min · ${m.effectivePasses}×",
-                                style = LcTypography.bodyMedium, modifier = Modifier.weight(1f))
+                                style = LcTypography.bodyMedium, color = Lc.text, modifier = Modifier.weight(1f))
                             Text("ändern", style = LcTypography.labelMedium, color = Lc.accent)
                         }
                     }
@@ -93,12 +115,13 @@ fun MaterialScreen(machine: MachineViewModel, editor: EditorViewModel, onNext: (
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            LcButton(if (advanced) "Erweitert ausblenden" else "Erweitert: Materialwerte bearbeiten", { advanced = !advanced }, kind = BtnKind.GHOST)
+            LcButton(if (advanced) "Werte ausblenden" else "Werte bearbeiten", { advanced = !advanced }, kind = BtnKind.GHOST, icon = LcIcons.tools)
             if (advanced) LcButton("Neues Material", {
                 editing = Material(id = "", name = "", thicknessMm = 3.0, process = "Schneiden", mode = LayerMode.LINE, powerPct = 80.0, speed = 400.0) to true
             }, icon = LcIcons.plus)
-            SmallText("Startwerte – jedes Material am eigenen Laser testen. Änderungen gelten auch für Windows-App und Web-Oberfläche.", Lc.faint)
+            if (!compact) SmallText("Startwerte – jedes Material am eigenen Laser testen. Änderungen gelten auch für Windows-App und Web-Oberfläche.", Lc.faint, Modifier.weight(1f))
         }
+        if (compact) next(Modifier.fillMaxWidth())
     }
     editing?.let { (m, isNew) ->
         MaterialDialog(m, isNew, onDismiss = { editing = null },
@@ -125,7 +148,7 @@ private fun MaterialDialog(m: Material, isNew: Boolean, onDismiss: () -> Unit, o
     fun d(s: String) = s.replace(',', '.').toDoubleOrNull()
     AlertDialog(
         onDismissRequest = onDismiss, containerColor = Lc.surface, shape = RoundedCornerShape(24.dp),
-        title = { Text(if (isNew) "Neues Material" else "Material bearbeiten", style = LcTypography.titleLarge) },
+        title = { Text(if (isNew) "Neues Material" else "Material bearbeiten", style = LcTypography.titleLarge, color = Lc.text) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

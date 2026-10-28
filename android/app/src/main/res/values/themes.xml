@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.LumaCut" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.LumaCut" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
         <item name="android:navigationBarColor">@color/bg</item>
     </style>
-    <color name="bg">#FF090C11</color>
-    <color name="accent">#FF4FD8B4</color>
+    <color name="bg">#FFF2F3F9</color>
+    <color name="accent">#FF4A57E3</color>
+    <color name="icon_bg">#FF4A57E3</color>
 </resources>

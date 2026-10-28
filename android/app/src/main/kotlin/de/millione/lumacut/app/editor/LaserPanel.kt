@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -185,7 +186,7 @@ private fun LayerDialog(editor: EditorViewModel, layer: Layer, materials: List<M
     var materialMenu by remember { mutableStateOf(false) }
     val maxFeed = editor.motion.maxFeed
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        LcCard(Modifier.width(600.dp).heightIn(max = 760.dp), padding = 20.dp) {
+        LcCard(Modifier.padding(12.dp).widthIn(max = 600.dp).fillMaxWidth().heightIn(max = 760.dp), padding = 20.dp) {
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(18.dp).clip(CircleShape).background(Color(layer.color.toInt())))

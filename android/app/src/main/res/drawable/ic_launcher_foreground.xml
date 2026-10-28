@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Laser beam hitting a work piece: LumaCut mark on the 108dp adaptive canvas. -->
+<!-- Laser beam hitting a work piece: LumaCut mark on the 108dp adaptive canvas (white on indigo). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#00000000" android:strokeColor="#FF4FD8B4" android:strokeWidth="4"
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="4"
         android:strokeLineCap="round" android:pathData="M54,28 L54,62" />
-    <path android:fillColor="#FF4FD8B4" android:pathData="M54,62 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
-    <path android:fillColor="#00000000" android:strokeColor="#FFEEF3F8" android:strokeWidth="4"
+    <path android:fillColor="#FFFFFFFF" android:pathData="M54,62 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+    <path android:fillColor="#00000000" android:strokeColor="#FFFFFFFF" android:strokeWidth="4"
         android:strokeLineCap="round" android:pathData="M32,74 L76,74" />
-    <path android:fillColor="#00000000" android:strokeColor="#664FD8B4" android:strokeWidth="2.5"
+    <path android:fillColor="#00000000" android:strokeColor="#99FFFFFF" android:strokeWidth="2.5"
         android:strokeLineCap="round" android:pathData="M42,52 L36,46 M66,52 L72,46 M44,64 L37,66 M64,64 L71,66" />
 </vector>

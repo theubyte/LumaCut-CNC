@@ -76,8 +76,20 @@ fun JobsScreen(machine: MachineViewModel) {
         val base = name.substringBeforeLast('.')
         machine.uploadJob(PiClient.jobNameFrom(base), text)
     }
-    Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        LcCard(Modifier.width(330.dp).fillMaxHeight()) {
+    SplitPane(Modifier.padding(16.dp), sideWidth = 330.dp, mainShare = .62f, sideFirst = true, main = { mod ->
+        LcCard(mod) {
+            val view = job
+            if (view == null) {
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(LcIcons.jobs, null, tint = Lc.faint, modifier = Modifier.size(52.dp))
+                    Spacer(Modifier.height(12.dp))
+                    Text("Auftrag auswählen oder hochladen", style = LcTypography.titleMedium, color = Lc.text)
+                    SmallText("Vorschau, Dauer und Ein-Klick-Start erscheinen hier.")
+                }
+            } else JobDetail(machine, view, busy)
+        }
+    }, side = { mod ->
+        LcCard(mod) {
             CardTitle("Aufträge") {
                 IconBtn(LcIcons.refresh, "Aktualisieren", { machine.refreshJobs() })
                 Spacer(Modifier.width(8.dp))
@@ -88,13 +100,13 @@ fun JobsScreen(machine: MachineViewModel) {
                 items(jobs, key = { it.name }) { f ->
                     val on = f.name == job?.name
                     Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
                             .background(if (on) Lc.accentSoft else Lc.surface2)
-                            .border(1.dp, if (on) Lc.accent else Lc.line, RoundedCornerShape(14.dp))
+                            .border(1.dp, if (on) Lc.accent else Color.Transparent, RoundedCornerShape(16.dp))
                             .clickable { machine.selectJob(f.name) }
                             .padding(horizontal = 16.dp, vertical = 13.dp)
                     ) {
-                        Text(f.name, style = LcTypography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(f.name, style = LcTypography.titleMedium, color = Lc.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         val size = if (f.bytes > 10240) "${f.bytes / 1024} KB" else "%.1f KB".format(f.bytes / 1024.0)
                         val date = if (f.modified > 0) " · " + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(f.modified * 1000)) else ""
                         SmallText(size + date, Lc.faint)
@@ -102,18 +114,7 @@ fun JobsScreen(machine: MachineViewModel) {
                 }
             }
         }
-        LcCard(Modifier.weight(1f).fillMaxHeight()) {
-            val view = job
-            if (view == null) {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(LcIcons.jobs, null, tint = Lc.faint, modifier = Modifier.size(52.dp))
-                    Spacer(Modifier.height(12.dp))
-                    Text("Auftrag auswählen oder hochladen", style = LcTypography.titleMedium)
-                    SmallText("Vorschau, Dauer und Ein-Klick-Start erscheinen hier.")
-                }
-            } else JobDetail(machine, view, busy)
-        }
-    }
+    })
 }
 
 @Composable
@@ -128,15 +129,10 @@ private fun JobDetail(machine: MachineViewModel, view: JobView, busy: Set<String
             confirm = Confirm("Auftrag löschen?", view.name, "Löschen", danger = true) { machine.deleteJob(view.name) }
         }, tint = Lc.bad, enabled = !running)
     }
-    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-        Box(
-            Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(14.dp)).background(Color(0xFF0B1015))
-                .border(1.dp, Lc.line, RoundedCornerShape(14.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
+    SplitPane(sideWidth = 310.dp, breakpoint = 640.dp, mainShare = .45f, main = { mod -> CanvasSurface(mod) {
             when {
-                view.error != null -> Banner("Vorschau nicht möglich: ${view.error}", Lc.bad, Modifier.padding(20.dp))
-                tp == null -> CircularProgressIndicator(color = Lc.accent)
+                view.error != null -> Banner("Vorschau nicht möglich: ${view.error}", Lc.bad, Modifier.align(Alignment.Center).padding(20.dp))
+                tp == null -> CircularProgressIndicator(color = Lc.accent, modifier = Modifier.align(Alignment.Center))
                 else -> ToolpathCanvas(
                     tp, view.probe, status?.position, if (running) status?.job?.line ?: 0 else 0,
                     Modifier.fillMaxSize(), onTap = { if (!running) machine.setProbe(it) },
@@ -146,8 +142,8 @@ private fun JobDetail(machine: MachineViewModel, view: JobView, busy: Set<String
                 Legend(Lc.cut, "Laser"); Legend(Lc.travel, "Leerfahrt"); Legend(Lc.info, "Abtastpunkt", dot = true)
                 SmallText("Antippen setzt den Abtastpunkt", Lc.faint)
             }
-        }
-        Column(Modifier.width(310.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        } }, side = { mod ->
+        Column(mod.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             val st = tp?.stats
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Tile("Dauer (ca.)", st?.let { formatDuration(it.seconds) } ?: "—", Modifier.weight(1f))
@@ -172,7 +168,7 @@ private fun JobDetail(machine: MachineViewModel, view: JobView, busy: Set<String
                         .border(1.dp, Lc.accent.copy(alpha = .3f), RoundedCornerShape(16.dp)).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(when (jobState.state) { "homing" -> "Referenzfahrt"; "probing" -> "Abtasten"; else -> "Auftrag läuft" }, style = LcTypography.titleMedium)
+                    Text(when (jobState.state) { "homing" -> "Referenzfahrt"; "probing" -> "Abtasten"; else -> "Auftrag läuft" }, style = LcTypography.titleMedium, color = Lc.text)
                     val pct = (jobState.fraction * 100).toInt()
                     SmallText(if (jobState.state == "running") "$pct % · noch ca. ${formatDuration(tp?.remainingSeconds(jobState.line) ?: 0.0)}" else "Vorbereitung …")
                     Progress(jobState.fraction.toFloat(), Modifier.fillMaxWidth(), thick = true)
@@ -206,7 +202,7 @@ private fun JobDetail(machine: MachineViewModel, view: JobView, busy: Set<String
                 SmallText("Ein-Klick: Referenzieren (X/Y, dann Z) → Abtasten → Fokus → Auftrag → Parken mit Melodie.")
             }
         }
-    }
+    })
     ConfirmDialog(confirm) { confirm = null }
 }
 
@@ -233,7 +229,7 @@ fun ToolpathCanvas(tp: Toolpath, probe: Pt?, head: List<Double>?, doneLine: Int,
         fun path(list: List<de.millione.lumacut.core.Segment>) = Path().apply {
             for (s in list) { val a = m.machine(s.x0, s.y0); moveTo(a.x, a.y); val e = m.machine(s.x1, s.y1); lineTo(e.x, e.y) }
         }
-        drawPath(path(travel), Color(0x735A6E87), style = Stroke(1f))
+        drawPath(path(travel), Lc.travel, style = Stroke(1f))
         val width = (m.scale * 0.3f).coerceIn(1f, 2.4f)
         buckets.forEachIndexed { b, list ->
             if (list.isNotEmpty()) drawPath(path(list), Lc.cut.copy(alpha = .35f + .65f * (b + 1) / 4f), style = Stroke(width, cap = StrokeCap.Round))
@@ -241,7 +237,7 @@ fun ToolpathCanvas(tp: Toolpath, probe: Pt?, head: List<Double>?, doneLine: Int,
         if (doneLine > 0) drawPath(path(tp.segments.filter { it.cut && it.line <= doneLine }), Lc.accent, style = Stroke(width + .6f, cap = StrokeCap.Round))
         tp.bounds?.let { b ->
             val a = m.machine(b.minX, b.minY); val c = m.machine(b.maxX, b.maxY)
-            drawRect(Color(0x40EEF3F8), Offset(minOf(a.x, c.x), minOf(a.y, c.y)),
+            drawRect(Lc.muted.copy(alpha = .5f), Offset(minOf(a.x, c.x), minOf(a.y, c.y)),
                 androidx.compose.ui.geometry.Size(kotlin.math.abs(c.x - a.x), kotlin.math.abs(c.y - a.y)),
                 style = Stroke(1.2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f))))
         }

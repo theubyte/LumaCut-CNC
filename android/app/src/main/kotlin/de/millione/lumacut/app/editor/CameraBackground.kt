@@ -52,6 +52,7 @@ import androidx.core.content.FileProvider
 import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.app.ui.BtnKind
 import de.millione.lumacut.app.ui.Lc
+import de.millione.lumacut.app.ui.SplitPane
 import de.millione.lumacut.app.ui.LcButton
 import de.millione.lumacut.app.ui.LcCard
 import de.millione.lumacut.app.ui.LcIcons
@@ -114,8 +115,8 @@ fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, o
     }
 
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Row(Modifier.fillMaxSize().background(Lc.bg).padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            LcCard(Modifier.width(360.dp).fillMaxHeight()) {
+        SplitPane(Modifier.background(Lc.bg).padding(20.dp), sideWidth = 360.dp, breakpoint = 700.dp, mainShare = .4f, sideFirst = true, side = { sideMod ->
+            LcCard(sideMod) {
                 Text("Kamera-Hintergrund", style = LcTypography.headlineSmall)
                 Spacer(Modifier.height(8.dp))
                 SmallText("1. Kalibrier-Rechteck lasern (einmalig, z. B. auf die Opferplatte).\n2. Arbeitsfläche möglichst senkrecht von oben fotografieren.\n3. Die vier Marker auf die nummerierten Ecken ziehen.\n4. Übernehmen – das Foto liegt maßgenau unter dem Editor.")
@@ -158,12 +159,13 @@ fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, o
                 Spacer(Modifier.height(8.dp))
                 LcButton("Schließen", onClose, Modifier.fillMaxWidth(), kind = BtnKind.GHOST)
             }
-            Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015)), contentAlignment = Alignment.Center) {
+        }, main = { mainMod ->
+            Box(mainMod.clip(RoundedCornerShape(24.dp)).background(Color(0xFF0B1015)), contentAlignment = Alignment.Center) {
                 val p = photo
                 if (p == null) SmallText("Noch kein Foto")
                 else MarkerCanvas(p, markers)
             }
-        }
+        })
     }
 }
 

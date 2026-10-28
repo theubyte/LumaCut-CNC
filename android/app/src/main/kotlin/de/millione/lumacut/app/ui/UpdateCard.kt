@@ -36,7 +36,7 @@ fun UpdateCard(machine: MachineViewModel) {
             else -> "Angeboten: ${offered.version_name} – die App ist aktuell."
         })
         Spacer(Modifier.height(10.dp))
-        u.progress?.let { LinearProgressIndicator(progress = { it }, Modifier.fillMaxWidth(), color = Lc.accent); Spacer(Modifier.height(10.dp)) }
+        u.progress?.let { LinearProgressIndicator(progress = { it }, Modifier.fillMaxWidth(), color = Lc.accent, trackColor = Lc.surface3); Spacer(Modifier.height(10.dp)) }
         u.error?.let { Banner(it, Lc.bad); Spacer(Modifier.height(10.dp)) }
         if (running) { Banner("Während ein Auftrag läuft, wird nicht aktualisiert.", Lc.info); Spacer(Modifier.height(10.dp)) }
         if (u.available) {

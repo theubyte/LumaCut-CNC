@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -59,77 +60,98 @@ fun SettingsScreen(machine: MachineViewModel) {
         }
     }
 
-    Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            LaserCard(machine)
-            UpdateCard(machine)
-            LcCard {
-                CardTitle("Arbeitsbereich")
-                SmallText("360 × 340 mm, Nullpunkt oben links. Der 30-mm-Rand der Maschine ist für den Laser reserviert (Parken, Referenzieren) und wird nicht angezeigt – dort wird nie gelasert, auch kein Überlauf.")
-            }
-            LcCard {
-                CardTitle("Über")
-                SmallText("LumaCut für Android · Version ${runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"}")
-                status?.identity?.takeIf { it.isNotBlank() }?.let {
-                    SmallText("Controller: " + it.removePrefix("FIRMWARE_NAME:").substringBefore(" SOURCE_CODE_URL"))
-                }
-            }
+    val leftCards: @Composable () -> Unit = {
+        AppearanceCard()
+        LaserCard(machine)
+        UpdateCard(machine)
+        LcCard {
+            CardTitle("Arbeitsbereich")
+            SmallText("360 × 340 mm, Nullpunkt oben links. Der 30-mm-Rand der Maschine ist für den Laser reserviert (Parken, Referenzieren) und wird nicht angezeigt – dort wird nie gelasert, auch kein Überlauf.")
         }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            LcCard {
-                CardTitle("Fokus & Taster")
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberField("Fokusabstand", focus, { focus = it }, Modifier.weight(1f), "mm")
-                    NumberField("Rückzug nach Homing", clear, { clear = it }, Modifier.weight(1f), "mm")
-                }
-                Spacer(Modifier.height(10.dp))
-                NumberField("Schalter → Laserspitze", tip, { tip = it }, Modifier.fillMaxWidth(), "mm")
-                Spacer(Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NumberField("Tasterversatz X", px, { px = it }, Modifier.weight(1f), "mm")
-                    NumberField("Tasterversatz Y", py, { py = it }, Modifier.weight(1f), "mm")
-                }
-                Spacer(Modifier.height(14.dp))
-                LcButton("Speichern", {
-                    machine.saveSettings(mapOf("focus_gap_mm" to focus, "z_clearance_mm" to clear, "z_switch_tip_offset_mm" to tip,
-                                               "probe_offset_x_mm" to px, "probe_offset_y_mm" to py))
-                }, kind = BtnKind.PRIMARY, busy = "settings" in busy, enabled = online == true)
-                Spacer(Modifier.height(10.dp))
-                SmallText("Fokus Z = Werkstück Z + Fokusabstand − Schalter→Spitze. Tasterversatz = Tasterspitze relativ zum Laserpunkt. Nach Änderungen neu abtasten. " +
-                    "Fokusabstand und Tasterversatz lassen sich unter Maschine → Kalibrieren einmessen.")
-            }
-            LcCard {
-                CardTitle("Licht")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Lichteffekte", style = LcTypography.titleMedium)
-                        SmallText("Blitzen beim Referenzieren, Hochdimmen beim Auftragsstart, Atmen am Ende, Blinken bei Fehlern.")
-                    }
-                    Switch(status?.light_effects != false, { machine.action("light", mapOf("effects" to if (it) "1" else "0"), key = "light", quiet = true) },
-                           enabled = online == true && status?.light_dimmable != false)
-                }
-                if (status?.light_dimmable == false) {
-                    Spacer(Modifier.height(8.dp))
-                    SmallText("Für Dimmen und Lichteffekte die neue Firmware flashen.")
-                }
-            }
-            LcCard {
-                CardTitle("SKR-Firmware")
-                val fw = status?.firmware_update
-                SmallText(when {
-                    fw != null && fw.state != "idle" -> "${fw.state}: ${fw.message}"
-                    status?.firmware_upload_supported == true -> "Update über den Pi möglich (SD-Karte bleibt im SKR)."
-                    online == true -> "Aktuelle Firmware kann keine Dateien empfangen – einmalig per SD-Karte flashen."
-                    else -> "—"
-                })
-                Spacer(Modifier.height(10.dp))
-                Progress((fw?.progress ?: 0) / 100f, Modifier.fillMaxWidth())
-                Spacer(Modifier.height(14.dp))
-                LcButton("firmware.bin wählen & flashen", { firmware.launch(arrayOf("application/octet-stream", "*/*")) }, icon = LcIcons.upload,
-                    busy = "firmware" in busy || (fw?.state ?: "") in setOf("uploading", "rebooting"),
-                    enabled = online == true && status?.firmware_upload_supported == true && status?.ownerFree == true)
+        LcCard {
+            CardTitle("Über")
+            SmallText("LumaCut für Android · Version ${runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "?"}")
+            status?.identity?.takeIf { it.isNotBlank() }?.let {
+                SmallText("Controller: " + it.removePrefix("FIRMWARE_NAME:").substringBefore(" SOURCE_CODE_URL"))
             }
         }
     }
+    val rightCards: @Composable () -> Unit = {
+        LcCard {
+            CardTitle("Fokus & Taster")
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                NumberField("Fokusabstand", focus, { focus = it }, Modifier.weight(1f), "mm")
+                NumberField("Rückzug nach Homing", clear, { clear = it }, Modifier.weight(1f), "mm")
+            }
+            Spacer(Modifier.height(10.dp))
+            NumberField("Schalter → Laserspitze", tip, { tip = it }, Modifier.fillMaxWidth(), "mm")
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                NumberField("Tasterversatz X", px, { px = it }, Modifier.weight(1f), "mm")
+                NumberField("Tasterversatz Y", py, { py = it }, Modifier.weight(1f), "mm")
+            }
+            Spacer(Modifier.height(14.dp))
+            LcButton("Speichern", {
+                machine.saveSettings(mapOf("focus_gap_mm" to focus, "z_clearance_mm" to clear, "z_switch_tip_offset_mm" to tip,
+                                           "probe_offset_x_mm" to px, "probe_offset_y_mm" to py))
+            }, kind = BtnKind.PRIMARY, busy = "settings" in busy, enabled = online == true)
+            Spacer(Modifier.height(10.dp))
+            SmallText("Fokus Z = Werkstück Z + Fokusabstand − Schalter→Spitze. Tasterversatz = Tasterspitze relativ zum Laserpunkt. Nach Änderungen neu abtasten. " +
+                "Fokusabstand und Tasterversatz lassen sich unter Maschine → Kalibrieren einmessen.")
+        }
+        LcCard {
+            CardTitle("Licht")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Lichteffekte", style = LcTypography.titleMedium, color = Lc.text)
+                    SmallText("Blitzen beim Referenzieren, Hochdimmen beim Auftragsstart, Atmen am Ende, Blinken bei Fehlern.")
+                }
+                Switch(status?.light_effects != false, { machine.action("light", mapOf("effects" to if (it) "1" else "0"), key = "light", quiet = true) },
+                       enabled = online == true && status?.light_dimmable != false, colors = lcSwitchColors())
+            }
+            if (status?.light_dimmable == false) {
+                Spacer(Modifier.height(8.dp))
+                SmallText("Für Dimmen und Lichteffekte die neue Firmware flashen.")
+            }
+        }
+        LcCard {
+            CardTitle("SKR-Firmware")
+            val fw = status?.firmware_update
+            SmallText(when {
+                fw != null && fw.state != "idle" -> "${fw.state}: ${fw.message}"
+                status?.firmware_upload_supported == true -> "Update über den Pi möglich (SD-Karte bleibt im SKR)."
+                online == true -> "Aktuelle Firmware kann keine Dateien empfangen – einmalig per SD-Karte flashen."
+                else -> "—"
+            })
+            Spacer(Modifier.height(10.dp))
+            Progress((fw?.progress ?: 0) / 100f, Modifier.fillMaxWidth())
+            Spacer(Modifier.height(14.dp))
+            LcButton("firmware.bin wählen & flashen", { firmware.launch(arrayOf("application/octet-stream", "*/*")) }, icon = LcIcons.upload,
+                busy = "firmware" in busy || (fw?.state ?: "") in setOf("uploading", "rebooting"),
+                enabled = online == true && status?.firmware_upload_supported == true && status?.ownerFree == true)
+        }
+    }
+    // Two columns on the tablet, one on the phone (two columns of 180 dp made every field unreadable).
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        if (maxWidth >= 840.dp) Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(4.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) { leftCards() }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(4.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) { rightCards() }
+        } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            leftCards(); rightCards()
+        }
+    }
     ConfirmDialog(confirm) { confirm = null }
+}
+
+/** Light, dark or as the system: a choice per device. */
+@Composable
+private fun AppearanceCard() {
+    val context = LocalContext.current
+    var mode by remember { mutableStateOf(ThemeMode.load(context)) }
+    LcCard {
+        CardTitle("Darstellung")
+        Segmented(ThemeMode.entries.map { it to it.label }, mode, { mode = it; ThemeMode.apply(context, it) }, Modifier.fillMaxWidth())
+        Spacer(Modifier.height(10.dp))
+        SmallText("Hell ist in der hellen Werkstatt besser lesbar, Dunkel blendet abends weniger. Gilt nur für dieses Gerät.")
+    }
 }

@@ -31,23 +31,25 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun BarBtn(icon: ImageVector?, label: String?, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true,
            primary: Boolean = false, tint: Color = Lc.text, menu: Boolean = false, description: String? = label) {
+    val shape = RoundedCornerShape(14.dp)
     Row(
         modifier
             .height(44.dp)
             .widthIn(min = 44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (primary) Lc.accent else Lc.surface2)
-            .border(1.dp, if (primary) Lc.accent else Lc.line2, RoundedCornerShape(12.dp))
+            .then(if (primary && enabled) Modifier.lift(shape, 8.dp) else Modifier)
+            .clip(shape)
+            .background(if (primary) Lc.accent else Lc.surface)
+            .border(1.dp, if (primary) Lc.accent else Lc.line, shape)
             .clickable(enabled = enabled, onClickLabel = description, onClick = onClick)
             .alpha(if (enabled) 1f else .4f)
-            .padding(horizontal = if (label == null) 10.dp else 12.dp),
+            .padding(horizontal = if (label == null) 10.dp else 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
     ) {
         val color = if (primary) Lc.accentInk else tint
         if (icon != null) Icon(icon, if (label == null) description else null, tint = color, modifier = Modifier.size(20.dp))
         if (label != null) Text(label, style = LcTypography.labelLarge, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (menu) Icon(LcIcons.chevronDown, null, tint = Lc.muted, modifier = Modifier.size(16.dp))
+        if (menu) Icon(LcIcons.chevronDown, null, tint = if (primary) Lc.accentInk else Lc.muted, modifier = Modifier.size(16.dp))
     }
 }
 
@@ -57,12 +59,12 @@ fun BarTextField(value: String, onChange: (String) -> Unit, modifier: Modifier =
     BasicTextField(
         value, onChange, singleLine = true, textStyle = LcTypography.titleMedium.copy(color = Lc.text),
         cursorBrush = SolidColor(Lc.accent), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        modifier = modifier.height(44.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF0C1117))
-            .border(1.dp, Lc.line, RoundedCornerShape(12.dp)),
+        modifier = modifier.height(44.dp).clip(RoundedCornerShape(14.dp)).background(Lc.surface)
+            .border(1.dp, Lc.line, RoundedCornerShape(14.dp)),
         decorationBox = { inner -> Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) { inner() } },
     )
 }
 
 /** Thin vertical divider between groups of bar buttons. */
 @Composable
-fun BarDivider() = Box(Modifier.size(width = 1.dp, height = 28.dp).background(Lc.line))
+fun BarDivider() = Box(Modifier.size(width = 1.dp, height = 28.dp).background(Lc.line2))

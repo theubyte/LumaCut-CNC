@@ -26,9 +26,9 @@ import de.millione.lumacut.core.ShapeKind
 @Composable
 private fun Chip(text: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     Text(
-        text, style = LcTypography.labelLarge, color = if (!enabled) Lc.faint else if (on) Lc.accent else Lc.text, maxLines = 1,
-        modifier = Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(12.dp))
-            .background(if (on) Lc.accentSoft else Lc.surface).border(1.dp, if (on) Lc.accent else Lc.line, RoundedCornerShape(12.dp))
+        text, style = LcTypography.labelLarge, color = if (!enabled) Lc.faint else if (on) Lc.accentInk else Lc.text, maxLines = 1,
+        modifier = Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp))
+            .background(if (on) Lc.accent else Lc.surface).border(1.dp, if (on) Lc.accent else Lc.line, RoundedCornerShape(20.dp))
             .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = 10.dp),
     )
 }

@@ -24,9 +24,10 @@ import de.millione.lumacut.core.SnapKind
 import kotlin.math.atan2
 import kotlin.math.hypot
 
-private val MEASURE_COLOR = Color(0xFFFFC857)
+// Darker amber and green on the light sheet: the bright ones of the dark theme vanish on white.
+private val MEASURE_COLOR get() = if (Lc.dark) Color(0xFFFFC857) else Color(0xFFB86500)
 private val STALE_COLOR = Color(0xFF8892A0)
-private val SNAP_COLOR = Color(0xFF5BE3A1)
+private val SNAP_COLOR get() = if (Lc.dark) Color(0xFF5BE3A1) else Color(0xFF0E8F62)
 
 private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 30f; typeface = Typeface.DEFAULT_BOLD }
 
@@ -53,7 +54,7 @@ fun DrawScope.drawMeasurements(m: WorkMapper, views: List<Pair<String, MeasureVi
         }
         for ((a, b) in o.dashed) drawLine(color.copy(alpha = .5f), m.at(a), m.at(b), 1.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
         for ((a, b) in o.segs) {
-            if (heavy) drawLine(Color.White.copy(alpha = .6f), m.at(a), m.at(b), 6f, StrokeCap.Round)
+            if (heavy) drawLine(Lc.sheet.copy(alpha = .6f), m.at(a), m.at(b), 6f, StrokeCap.Round)
             drawLine(color, m.at(a), m.at(b), if (heavy) 3.5f else 2.5f, StrokeCap.Round)
         }
         o.arc?.let { arc ->
@@ -94,7 +95,7 @@ fun DrawScope.drawLoupe(finger: Offset, hit: SnapHit?, hitAt: Offset?, snapping:
     c = Offset(c.x.coerceIn(radiusPx + 4f, size.width - radiusPx - 4f), c.y.coerceIn(radiusPx + 4f, size.height - radiusPx - 4f))
     val clip = Path().apply { addOval(Rect(c, radiusPx)) }
     clipPath(clip) {
-        drawRect(Color(0xFF0B1015), Offset(c.x - radiusPx, c.y - radiusPx), Size(2 * radiusPx, 2 * radiusPx))
+        drawRect(Lc.canvas, Offset(c.x - radiusPx, c.y - radiusPx), Size(2 * radiusPx, 2 * radiusPx))
         withTransform({ translate(c.x - finger.x, c.y - finger.y); scale(zoom, zoom, pivot = finger) }) { scene() }
         // the caught point is where the crosshair points: show it magnified too
         if (hit != null && hitAt != null) drawSnapMarker(Offset(c.x + (hitAt.x - finger.x) * zoom, c.y + (hitAt.y - finger.y) * zoom), hit.kind)

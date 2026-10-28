@@ -49,6 +49,7 @@ import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.app.ui.BtnKind
 import de.millione.lumacut.app.ui.IconBtn
 import de.millione.lumacut.app.ui.Lc
+import de.millione.lumacut.app.ui.SplitPane
 import de.millione.lumacut.app.ui.LcButton
 import de.millione.lumacut.app.ui.LcCard
 import de.millione.lumacut.app.ui.LcIcons
@@ -119,8 +120,8 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
         dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("Abbrechen", color = Lc.muted) } },
     )
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Row(Modifier.fillMaxSize().background(Lc.bg).padding(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            LcCard(Modifier.width(400.dp).fillMaxHeight()) {
+        SplitPane(Modifier.background(Lc.bg).padding(20.dp), sideWidth = 400.dp, breakpoint = 700.dp, mainShare = .4f, sideFirst = true, side = { sideMod ->
+            LcCard(sideMod) {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                     Text("Kopfkamera kalibrieren", style = LcTypography.headlineSmall)
                     Spacer(Modifier.height(8.dp))
@@ -217,7 +218,8 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
                 Spacer(Modifier.height(8.dp))
                 LcButton("Schließen", { live = false; onClose() }, Modifier.fillMaxWidth(), kind = BtnKind.GHOST)
             }
-            Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015)), contentAlignment = Alignment.Center) {
+        }, main = { mainMod ->
+            Box(mainMod.clip(RoundedCornerShape(24.dp)).background(Color(0xFF0B1015)), contentAlignment = Alignment.Center) {
                 val p = photo
                 when {
                     p == null -> SmallText("Noch kein Kamerabild")
@@ -225,7 +227,7 @@ internal fun CalibrationDialog(machine: MachineViewModel, ws: WorkspaceViewModel
                     else -> MarkerCanvas(p, markers)
                 }
             }
-        }
+        })
     }
 }
 

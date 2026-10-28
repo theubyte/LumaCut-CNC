@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -83,7 +84,7 @@ fun ScanMenu(machine: MachineViewModel, editor: EditorViewModel, ws: WorkspaceVi
 fun RunStrip(ws: WorkspaceViewModel, modifier: Modifier = Modifier) {
     val run by ws.run.collectAsStateWithLifecycle()
     val r = run ?: return
-    LcCard(modifier.width(360.dp), padding = 12.dp, accent = Lc.accent) {
+    LcCard(modifier.widthIn(max = 360.dp), padding = 12.dp, accent = Lc.accent) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(r.title, style = LcTypography.titleMedium)

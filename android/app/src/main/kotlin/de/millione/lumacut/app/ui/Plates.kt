@@ -32,7 +32,7 @@ fun PlateChips(doc: Document, selected: Int, onSelect: (Int) -> Unit, modifier: 
             val on = i == selected
             Column(
                 Modifier.heightIn(min = 48.dp).widthIn(min = 96.dp).clip(RoundedCornerShape(12.dp))
-                    .background(if (on) Lc.accentSoft else Color(0xFF0C1117))
+                    .background(if (on) Lc.accentSoft else Lc.surface)
                     .border(1.dp, if (on) Lc.accent.copy(alpha = .5f) else Lc.line, RoundedCornerShape(12.dp))
                     .clickable { onSelect(i) }.padding(horizontal = 14.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.Center,

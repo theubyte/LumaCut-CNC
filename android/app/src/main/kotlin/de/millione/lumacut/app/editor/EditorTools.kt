@@ -175,7 +175,7 @@ private fun ContourPreview(source: List<Element>, contour: List<Poly>?, working:
     val bitmap = remember(source.firstOrNull()?.id) {
         source.singleOrNull()?.takeIf { it.isImage }?.raster?.let { Images.toBitmap(it).asImageBitmap() }
     }
-    Canvas(Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(12.dp))) {
+    Canvas(Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(16.dp)).background(Lc.sheet).border(1.dp, Lc.line, RoundedCornerShape(16.dp))) {
         val src = source.mapNotNull { it.worldBounds() }.reduceOrNull { a, b -> a.union(b) } ?: return@Canvas
         val view = boundsOf(contour.orEmpty())?.union(src) ?: src
         val pad = 14f
@@ -189,7 +189,7 @@ private fun ContourPreview(source: List<Element>, contour: List<Poly>?, working:
             for (e in source) for (poly in e.worldPaths()) {
                 val path = Path()
                 poly.forEachIndexed { i, p -> val o = at(p); if (i == 0) path.moveTo(o.x, o.y) else path.lineTo(o.x, o.y) }
-                drawPath(path, Color(0xFF8E9DB0), style = Stroke(1.5f))
+                drawPath(path, Lc.muted, style = Stroke(1.5f))
             }
         }
         for (poly in contour.orEmpty()) {

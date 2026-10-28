@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -104,38 +105,41 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
     }
     val next = (plate + 1 until project.plateCount).firstOrNull { project.plateSize(it) > 0 && it !in done }
 
-    Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Box(
-            Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015))
-                .border(1.dp, Lc.line, RoundedCornerShape(18.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
+    val compact = isCompact()
+    Column(Modifier.fillMaxSize()) {
+    // On the phone the heading stands above the preview; on the tablet it heads the right column.
+    if (compact) ScreenTitle("Starten", "Prüfen, Rahmen zeigen, lasern.", step = 3, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp))
+    SplitPane(Modifier.padding(16.dp), sideWidth = 400.dp, mainShare = .4f, main = { mod ->
+        CanvasSurface(mod) {
             when (val b = built) {
-                null -> CircularProgressIndicator(color = Lc.accent)
-                is Built.Fail -> Banner(b.text, Lc.bad, Modifier.padding(20.dp))
+                null -> CircularProgressIndicator(color = Lc.accent, modifier = Modifier.align(Alignment.Center))
+                is Built.Fail -> Banner(b.text, Lc.bad, Modifier.align(Alignment.Center).padding(20.dp))
                 is Built.Ok -> ToolpathCanvas(b.toolpath, null, status?.position, if (running) job?.line ?: 0 else 0, Modifier.fillMaxSize())
             }
         }
-        Column(Modifier.width(380.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("3 · Starten", style = LcTypography.headlineSmall)
+    }, side = { mod ->
+        Column(mod.verticalScroll(rememberScrollState()).padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (!compact) ScreenTitle("Starten", "Prüfen, Rahmen zeigen, lasern.", step = 3)
             if (multi) {
                 SmallText("Welche Platte soll gelasert werden?")
                 PlateChips(project, plate, { if (!running) chosenPlate = it }, Modifier.fillMaxWidth(), done)
             }
             if (update.available && !running) Banner("Update ${update.info?.version_name} verfügbar – unter Einstellungen aktualisieren.", Lc.info)
             val materialText = materialSummary(doc)
-            Tile("Material", materialText ?: "noch keines gewählt", Modifier.fillMaxWidth(), if (materialText == null) Lc.warn else Lc.text)
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Tile("Laserzeit (ca.)", ok?.let { formatDuration(it.toolpath.stats.seconds) } ?: "—", Modifier.weight(1f))
-                Tile("Größe", ok?.toolpath?.bounds?.let { "%.0f × %.0f mm".format(it.width, it.height) } ?: "—", Modifier.weight(1f))
+            LcCard(Modifier.fillMaxWidth(), padding = 16.dp) {
+                Tile("Material", materialText ?: "noch keines gewählt", Modifier.fillMaxWidth(), if (materialText == null) Lc.warn else Lc.text)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Tile("Laserzeit (ca.)", ok?.let { formatDuration(it.toolpath.stats.seconds) } ?: "—", Modifier.weight(1f))
+                    Tile("Größe", ok?.toolpath?.bounds?.let { "%.0f × %.0f mm".format(it.width, it.height) } ?: "—", Modifier.weight(1f))
+                }
             }
             if (materialText == null && chosen == null) {
                 Banner("Ohne Material gelten die Standardwerte der Ebenen. Besser zuerst das Material wählen.")
-                LcButton("Material wählen", onMaterial, Modifier.fillMaxWidth())
+                LcButton("Material wählen", onMaterial, Modifier.fillMaxWidth(), LcIcons.material)
             }
-            (built as? Built.Fail)?.let { LcButton("Zurück zum Motiv", onMotiv, Modifier.fillMaxWidth()) }
+            (built as? Built.Fail)?.let { LcButton("Zurück zum Motiv", onMotiv, Modifier.fillMaxWidth(), LcIcons.editor) }
             ok?.toolpath?.stats?.warnings?.forEach { Banner(it) }
-            Spacer(Modifier.height(4.dp))
 
             if (running && job != null) {
                 RunCard(machine, job.step, job.lastPaths, job.probe.done, job.probe.total, job.fraction, ok?.toolpath?.remainingSeconds(job.line), busy)
@@ -161,9 +165,10 @@ fun StartScreen(machine: MachineViewModel, editor: EditorViewModel, onMaterial: 
                             "Ist der Arbeitsbereich frei? Die Maschine referenziert, misst die Höhe und lasert danach von selbst.",
                         "Starten") { ok?.let { startedPlate = plate; machine.startAutomatic(name, it.gcode) } }
                 }, Modifier.fillMaxWidth(), LcIcons.play, BtnKind.PRIMARY, busy = "start" in busy, enabled = ready, big = true)
-                SmallText("Die Maschine referenziert, tastet das Material ab, korrigiert die Höhe, lasert und parkt – alles automatisch.", Lc.faint)
+                StepList(listOf("Referenzieren", "Material abtasten", "Höhe korrigieren", "Lasern", "Parken"))
             }
         }
+    })
     }
     ConfirmDialog(confirm) { confirm = null }
 }
@@ -181,8 +186,8 @@ private fun materialSummary(doc: de.millione.lumacut.core.Document): String? {
 private fun RunCard(machine: MachineViewModel, state: String, lastPaths: Boolean, probeDone: Int, probeTotal: Int, fraction: Double, remaining: Double?, busy: Set<String>) {
     var confirm by rememberConfirm()
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Lc.accentSoft)
-            .border(1.dp, Lc.accent.copy(alpha = .3f), RoundedCornerShape(16.dp)).padding(16.dp),
+        Modifier.fillMaxWidth().lift(RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(Lc.surface)
+            .border(2.dp, Lc.accent.copy(alpha = .5f), RoundedCornerShape(24.dp)).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(when (state) {
@@ -191,15 +196,18 @@ private fun RunCard(machine: MachineViewModel, state: String, lastPaths: Boolean
             "focusing" -> "Höhenkorrektur wird berechnet …"
             "finishing", "parking" -> "Letzte Bahnen, dann Parken"
             else -> if (lastPaths) "Letzte Bahnen, dann Parken" else "Der Laser arbeitet"
-        }, style = LcTypography.titleMedium)
+        }, style = LcTypography.titleLarge, color = Lc.text)
         when (state) {
             "probing" -> {
                 SmallText(if (probeTotal > 0) "Messpunkt $probeDone von $probeTotal" else "Messpunkte werden vorbereitet")
                 Progress(if (probeTotal > 0) probeDone.toFloat() / probeTotal else 0f, Modifier.fillMaxWidth(), thick = true)
             }
-            "running", "finishing" -> {
-                SmallText("${(fraction * 100).toInt()} %" + (remaining?.let { " · noch ca. ${formatDuration(it)}" } ?: ""))
-                Progress(fraction.toFloat(), Modifier.fillMaxWidth(), thick = true)
+            "running", "finishing" -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                ProgressRing(fraction.toFloat(), "${(fraction * 100).toInt()} %", "gelasert", size = 120.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(remaining?.let { "noch ca. ${formatDuration(it)}" } ?: "Restzeit wird berechnet", style = LcTypography.titleMedium, color = Lc.text)
+                    SmallText("Das Display bleibt an, solange der Laser arbeitet.")
+                }
             }
             else -> Progress(0f, Modifier.fillMaxWidth(), thick = true)
         }
@@ -208,4 +216,19 @@ private fun RunCard(machine: MachineViewModel, state: String, lastPaths: Boolean
         }, Modifier.fillMaxWidth(), kind = BtnKind.DANGER, busy = "abort" in busy)
     }
     ConfirmDialog(confirm) { confirm = null }
+}
+
+/** What the automatic run does, as numbered steps, so a beginner knows what to expect. */
+@Composable
+private fun StepList(steps: List<String>) {
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SmallText("Nach dem Start läuft alles von selbst:", Lc.muted)
+        for ((i, step) in steps.withIndex()) Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(22.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Lc.surface3), contentAlignment = Alignment.Center) {
+                Text("${i + 1}", style = LcTypography.labelMedium, color = Lc.muted)
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(step, style = LcTypography.bodyMedium, color = Lc.text)
+        }
+    }
 }

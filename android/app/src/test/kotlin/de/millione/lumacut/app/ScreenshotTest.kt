@@ -33,13 +33,16 @@ class ScreenshotTest {
     @get:Rule val rule = createAndroidComposeRule<MainActivity>()
 
     @Test @Config(qualifiers = "w1280dp-h800dp-land-mdpi") fun tablet() = tour("tablet")
-    @Test @Config(qualifiers = "w1280dp-h800dp-land-mdpi-night") fun tabletDark() = tour("tablet-dunkel")
+    @Test @Config(qualifiers = "w1280dp-h800dp-land-night-mdpi") fun tabletDark() = tour("tablet-dunkel")
+    @Test @Config(qualifiers = "w411dp-h891dp-port-night-xhdpi") fun phoneDark() = tour("handy-dunkel")
     @Test @Config(qualifiers = "w411dp-h891dp-port-xhdpi") fun phone() = tour("handy")
     @Test @Config(qualifiers = "w891dp-h411dp-land-xhdpi") fun phoneLandscape() = tour("handy-quer")
 
     private fun shot(name: String) {
         rule.waitForIdle()
-        rule.mainClock.advanceTimeBy(1000)
+        // Background work (toolpath build on Dispatchers.Default) and the snackbar's 4 s should be over.
+        Thread.sleep(1500)
+        rule.mainClock.advanceTimeBy(6000)
         rule.waitForIdle()
         rule.onRoot().captureRoboImage("build/screenshots/$name.png")
     }
@@ -68,6 +71,7 @@ class ScreenshotTest {
         val provider = ViewModelProvider(rule.activity)
         val machine = provider[MachineViewModel::class.java]
         val editor = provider[EditorViewModel::class.java]
+        shot("$prefix-0-erststart")
         rule.runOnUiThread {
             field<String>(machine, "_host").value = "192.168.2.89"
             field<Boolean?>(machine, "_online").value = true
@@ -78,6 +82,7 @@ class ScreenshotTest {
                 coord_convention = PiClient.COORD_CONVENTION, recent = listOf("echo: busy processing", "X:182.00 Y:160.00 Z:24.50"),
             )
         }
+        go("material", "1 · Material", "Material")
         shot("$prefix-1-material")
         rule.runOnUiThread {
             machine.materials.value.items.grouped("").firstOrNull()?.let(editor::selectMaterial)

@@ -74,7 +74,8 @@ private fun StatusCard(machine: MachineViewModel) {
             Column(Modifier.weight(1f)) {
                 Eyebrow("Maschine")
                 Spacer(Modifier.height(4.dp))
-                Text(h.title, style = LcTypography.displaySmall, color = if (h.tone == Tone.OK || h.tone == Tone.BUSY || h.tone == Tone.OFF) Lc.text else h.tone.color)
+                Text(h.title, style = if (isCompact()) LcTypography.headlineSmall else LcTypography.displaySmall,
+                     color = if (h.tone == Tone.OK || h.tone == Tone.BUSY || h.tone == Tone.OFF) Lc.text else h.tone.color)
                 if (h.text.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(h.text, style = LcTypography.bodyLarge, color = Lc.muted) }
             }
             val status = s
@@ -88,26 +89,30 @@ private fun StatusCard(machine: MachineViewModel) {
             }
         }
         Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            val st = s
-            Tile("Referenziert", if (online == true && st != null) (if (st.homed) "Ja" else "Nein") else "—", Modifier.weight(1f),
-                 if (st?.homed == true) Lc.text else Lc.warn)
-            Tile("Werkstück Z", st?.workpiece_surface_z?.let { "%.2f mm".format(it) } ?: "—", Modifier.weight(1f))
-            Tile("Fokus Z", st?.laser_focus_z?.let { "%.2f mm".format(it) } ?: "—", Modifier.weight(1f))
-            Tile("Laserversorgung", when { st == null -> "—"; st.laser_cooling_fan_on -> st.cooldown_remaining_s?.let { "Nachlauf $it s" } ?: "Ein"; else -> "Aus" }, Modifier.weight(1f))
+        val st = s
+        val tiles: List<@Composable (Modifier) -> Unit> = listOf(
+            { m -> Tile("Referenziert", if (online == true && st != null) (if (st.homed) "Ja" else "Nein") else "—", m, if (st?.homed == true) Lc.text else Lc.warn) },
+            { m -> Tile("Werkstück Z", st?.workpiece_surface_z?.let { "%.2f mm".format(it) } ?: "—", m) },
+            { m -> Tile("Fokus Z", st?.laser_focus_z?.let { "%.2f mm".format(it) } ?: "—", m) },
+            { m -> Tile("Laserversorgung", when { st == null -> "—"; st.laser_cooling_fan_on -> st.cooldown_remaining_s?.let { "Nachlauf $it s" } ?: "Ein"; else -> "Aus" }, m) },
+        )
+        // Four in a row on the tablet, two by two on the phone (else the values are cut off).
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            for (row in tiles.chunked(if (isCompact()) 2 else 4)) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (t in row) t(Modifier.weight(1f))
+            }
         }
         s?.job?.takeIf { it.active }?.let { job ->
             Spacer(Modifier.height(16.dp))
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Lc.accentSoft)
-                    .border(1.dp, Lc.accent.copy(alpha = .3f), RoundedCornerShape(14.dp)).padding(14.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Lc.accentSoft).padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Column(Modifier.width(200.dp)) {
-                    Text(job.file, style = LcTypography.titleMedium, maxLines = 1)
+                Column(Modifier.weight(1f)) {
+                    Text(job.file, style = LcTypography.titleMedium, color = Lc.text, maxLines = 1)
                     SmallText(if (job.state == "running") "${(job.fraction * 100).toInt()} % · Zeile ${job.line}/${job.total}" else h.title)
                 }
-                Progress(job.fraction.toFloat(), Modifier.weight(1f))
+                ProgressRing(job.fraction.toFloat(), "${(job.fraction * 100).toInt()} %", null, size = 72.dp)
                 LcButton("Abbrechen", { machine.action("abort") }, kind = BtnKind.DANGER, busy = "abort" in busy)
             }
         }
@@ -151,32 +156,38 @@ private fun MoveCard(machine: MachineViewModel) {
             }
         }
         Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LcButton("Referenzieren", { machine.action("home") }, Modifier.weight(1f), LcIcons.home, enabled = control, busy = "home" in busy)
-            LcButton("Abtasten", { machine.action("probe") }, Modifier.weight(1f), LcIcons.probe, enabled = control && homed, busy = "probe" in busy)
-            LcButton("Parken", { machine.action("park") }, Modifier.weight(1f), LcIcons.park, enabled = control && homed, busy = "park" in busy)
-        }
+        val actions: List<@Composable (Modifier) -> Unit> = listOf(
+            { m -> LcButton("Referenzieren", { machine.action("home") }, m, LcIcons.home, enabled = control, busy = "home" in busy) },
+            { m -> LcButton("Abtasten", { machine.action("probe") }, m, LcIcons.probe, enabled = control && homed, busy = "probe" in busy) },
+            { m -> LcButton("Parken", { machine.action("park") }, m, LcIcons.park, enabled = control && homed, busy = "park" in busy) },
+        )
+        // Side by side on the tablet; stacked on the phone so "Referenzieren" is not cut off.
+        if (isCompact()) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { for (a in actions) a(Modifier.fillMaxWidth()) }
+        else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { for (a in actions) a(Modifier.weight(1f)) }
         Spacer(Modifier.height(10.dp))
         SmallText("Referenzieren: X/Y zuerst, dann Z, dann ${s?.config?.z_clearance_mm?.let { "%.0f".format(it) } ?: "20"} mm hoch. Abtasten misst die Werkstückoberfläche unter dem Laserpunkt (G30).")
     }
 }
 
-internal val PAD = 88.dp
+/** Jog key size: smaller on the phone so the cross and the Z keys fit side by side. */
+internal val PAD: androidx.compose.ui.unit.Dp @Composable get() = if (isCompact()) 66.dp else 88.dp
 
 @Composable
 internal fun JogKey(icon: ImageVector, label: String, enabled: Boolean, center: Boolean = false, tall: Boolean = false, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(24.dp)
     Box(
         Modifier
             .size(width = PAD, height = if (tall) PAD + PAD / 2 + 5.dp else PAD)
-            .clip(RoundedCornerShape(22.dp))
-            .background(if (center) Brush.verticalGradient(listOf(Lc.bg, Lc.bg)) else Brush.verticalGradient(listOf(Lc.surface3, Lc.surface2)))
-            .border(1.dp, Lc.line2, RoundedCornerShape(22.dp))
+            .then(if (enabled && !center) Modifier.lift(shape, 5.dp) else Modifier)
+            .clip(shape)
+            .background(if (center) Lc.accentSoft else Lc.surface)
+            .border(1.dp, if (center) Lc.accent.copy(alpha = .35f) else Lc.line, shape)
             .clickable(enabled = enabled, onClickLabel = label, onClick = onClick)
             .alpha(if (enabled) 1f else .4f),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, label, tint = if (center) Lc.muted else Lc.text, modifier = Modifier.size(if (center) 24.dp else 30.dp))
+            Icon(icon, label, tint = if (center) Lc.accent else Lc.text, modifier = Modifier.size(if (center) 24.dp else 28.dp))
             if (center || tall) { Spacer(Modifier.height(2.dp)); Text(label, style = LcTypography.labelMedium, color = Lc.muted) }
         }
     }
@@ -206,7 +217,7 @@ private fun ExtrasCard(machine: MachineViewModel) {
             Slider(
                 level, { level = it }, valueRange = 1f..100f, enabled = usable,
                 onValueChangeFinished = { machine.action("light", mapOf("on" to "1", "brightness" to level.toInt().toString()), key = "light", quiet = true) },
-                colors = SliderDefaults.colors(thumbColor = Lc.accent, activeTrackColor = Lc.accent),
+                colors = SliderDefaults.colors(thumbColor = Lc.accent, activeTrackColor = Lc.accent, inactiveTrackColor = Lc.surface3),
             )
         }
         if (s?.emergency_latched == true) {
@@ -224,7 +235,7 @@ private fun LogCard(machine: MachineViewModel) {
     if (lines.isEmpty()) return
     LcCard {
         CardTitle("Controller-Meldungen")
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Lc.bg).padding(12.dp)) {
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Lc.surface2).padding(12.dp)) {
             for (l in lines) Text(l, style = LcTypography.bodySmall.copy(fontFamily = FontFamily.Monospace), color = Lc.muted, maxLines = 1)
         }
         s?.identity?.takeIf { it.isNotBlank() }?.let {

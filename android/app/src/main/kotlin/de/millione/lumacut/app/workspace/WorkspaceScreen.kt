@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -55,6 +57,8 @@ import de.millione.lumacut.app.ui.BtnKind
 import de.millione.lumacut.app.ui.Confirm
 import de.millione.lumacut.app.ui.ConfirmDialog
 import de.millione.lumacut.app.ui.Lc
+import de.millione.lumacut.app.ui.SplitPane
+import de.millione.lumacut.app.ui.CanvasSurface
 import de.millione.lumacut.app.ui.LcButton
 import de.millione.lumacut.app.ui.LcCard
 import de.millione.lumacut.app.ui.LcIcons
@@ -97,26 +101,27 @@ fun WorkspaceScreen(machine: MachineViewModel, editor: EditorViewModel, ws: Work
     val camera = status?.camera?.available == true
     val surfaceKnown = status?.workpiece_surface_z != null
 
-    Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Segmented(CanvasMode.entries.map { it to it.label }, mode, { mode = it }, Modifier.width(480.dp))
+    SplitPane(Modifier.padding(16.dp), sideWidth = 390.dp, mainShare = .5f, main = { mod ->
+        Column(mod, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Segmented(CanvasMode.entries.map { it to it.label }, mode, { mode = it }, Modifier.horizontalScroll(rememberScrollState()))
                 SmallText(when (mode) {
                     CanvasMode.VIEW -> "Kamera-Scan, Motiv, Bereiche, Abtastpunkte und Höhenmesh im Arbeitsbereich"
                     CanvasMode.AREAS -> "Rahmen ziehen fügt einen Bereich hinzu · Antippen entfernt ihn"
                     CanvasMode.POINTS -> "Im Scan antippen, wo Material liegt – dort wird abgetastet · erneut antippen entfernt"
                 }, Lc.faint)
             }
-            Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color(0xFF0B1015)).border(1.dp, Lc.line, RoundedCornerShape(18.dp))) {
+            CanvasSurface(Modifier.weight(1f).fillMaxWidth()) {
                 WorkspaceCanvas(editor, ws, status?.position, mode) { p ->
                     ws.tapProbePoint(p, status?.probeOffset)?.let { machine.notify(it, true) }
                 }
             }
         }
-        Column(Modifier.width(390.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    }, side = { mod ->
+        Column(mod.verticalScroll(rememberScrollState()).padding(4.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             run?.let { r ->
                 LcCard(padding = 16.dp, accent = Lc.accent) {
-                    Text(r.title, style = LcTypography.titleMedium)
+                    Text(r.title, style = LcTypography.titleMedium, color = Lc.text)
                     SmallText(r.text)
                     Spacer(Modifier.height(8.dp))
                     Progress(r.fraction, Modifier.fillMaxWidth(), thick = true)
@@ -200,7 +205,7 @@ fun WorkspaceScreen(machine: MachineViewModel, editor: EditorViewModel, ws: Work
             }
             if (background != null) SmallText("Hintergrund liegt auch im Editor unter dem Motiv (Deckkraft dort einstellbar).", Lc.faint)
         }
-    }
+    })
     if (calibrating) CalibrationDialog(machine, ws) { calibrating = false }
     ConfirmDialog(confirm) { confirm = null }
 }
@@ -285,13 +290,16 @@ private fun WorkspaceCanvas(editor: EditorViewModel, ws: WorkspaceViewModel, hea
                 drawCircle(Color.Black.copy(alpha = .4f), 9f, m.at(p), style = Stroke(1f))
             }
         }
+        // Probe crosses in the theme's ink: white crosses vanished on the light sheet.
+        val mark = if (Lc.dark) Color.White else Lc.ink
+        val halo = if (Lc.dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE
         for ((i, p) in points.withIndex()) {
             val c = m.at(p)
-            drawCircle(Color.White, 11f, c, style = Stroke(3f))
-            drawLine(Color.White, c.copy(x = c.x - 16f), c.copy(x = c.x - 6f), 2f); drawLine(Color.White, c.copy(x = c.x + 6f), c.copy(x = c.x + 16f), 2f)
-            drawLine(Color.White, c.copy(y = c.y - 16f), c.copy(y = c.y - 6f), 2f); drawLine(Color.White, c.copy(y = c.y + 6f), c.copy(y = c.y + 16f), 2f)
+            drawCircle(mark, 11f, c, style = Stroke(3f))
+            drawLine(mark, c.copy(x = c.x - 16f), c.copy(x = c.x - 6f), 2f); drawLine(mark, c.copy(x = c.x + 6f), c.copy(x = c.x + 16f), 2f)
+            drawLine(mark, c.copy(y = c.y - 16f), c.copy(y = c.y - 6f), 2f); drawLine(mark, c.copy(y = c.y + 6f), c.copy(y = c.y + 16f), 2f)
             drawContext.canvas.nativeCanvas.drawText("${i + 1}", c.x + 14f, c.y - 12f, android.graphics.Paint().apply {
-                color = android.graphics.Color.WHITE; textSize = 26f; isAntiAlias = true; setShadowLayer(3f, 0f, 0f, android.graphics.Color.BLACK)
+                color = mark.toArgb(); textSize = 26f; isAntiAlias = true; setShadowLayer(3f, 0f, 0f, halo)
             })
         }
         drawHead(m, head)
