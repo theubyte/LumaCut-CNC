@@ -79,13 +79,14 @@ private fun StatusCard(machine: MachineViewModel) {
                 if (h.text.isNotBlank()) { Spacer(Modifier.height(6.dp)); Text(h.text, style = LcTypography.bodyLarge, color = Lc.muted) }
             }
             val status = s
+            // The next step while one is due (before: also "Parken", the third park button on this page).
             if (status.canControl(online)) {
-                val (op, label) = when {
+                val next = when {
                     !status!!.homed -> "home" to "Referenzieren"
                     status.workpiece_surface_z == null -> "probe" to "Abtasten"
-                    else -> "park" to "Parken"
+                    else -> null
                 }
-                LcButton(label, { machine.action(op) }, kind = BtnKind.PRIMARY, big = true, busy = op in busy)
+                next?.let { (op, label) -> LcButton(label, { machine.action(op) }, kind = BtnKind.PRIMARY, big = true, busy = op in busy) }
             }
         }
         Spacer(Modifier.height(20.dp))
@@ -96,10 +97,13 @@ private fun StatusCard(machine: MachineViewModel) {
             { m -> Tile("Fokus Z", st?.laser_focus_z?.let { "%.2f mm".format(it) } ?: "—", m) },
             { m -> Tile("Laserversorgung", when { st == null -> "—"; st.laser_cooling_fan_on -> st.cooldown_remaining_s?.let { "Nachlauf $it s" } ?: "Ein"; else -> "Aus" }, m) },
         )
-        // Four in a row on the tablet, two by two on the phone (else the values are cut off).
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            for (row in tiles.chunked(if (isCompact()) 2 else 4)) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                for (t in row) t(Modifier.weight(1f))
+        // Four in a row only when the card is wide enough; else two by two (before: "Laserversorgu…" cut off).
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val perRow = if (maxWidth >= 620.dp) 4 else 2
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (row in tiles.chunked(perRow)) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    for (t in row) t(Modifier.weight(1f))
+                }
             }
         }
         s?.job?.takeIf { it.active }?.let { job ->
@@ -142,7 +146,7 @@ private fun MoveCard(machine: MachineViewModel) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     JogKey(LcIcons.left, "X+", enabled) { machine.jog('X', step) }
-                    JogKey(LcIcons.park, "Park", enabled, center = true) { machine.action("park") }
+                    HeadSpot(s?.position)
                     JogKey(LcIcons.right, "X−", enabled) { machine.jog('X', -step) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -156,21 +160,38 @@ private fun MoveCard(machine: MachineViewModel) {
             }
         }
         Spacer(Modifier.height(20.dp))
-        val actions: List<@Composable (Modifier) -> Unit> = listOf(
-            { m -> LcButton("Referenzieren", { machine.action("home") }, m, LcIcons.home, enabled = control, busy = "home" in busy) },
-            { m -> LcButton("Abtasten", { machine.action("probe") }, m, LcIcons.probe, enabled = control && homed, busy = "probe" in busy) },
-            { m -> LcButton("Parken", { machine.action("park") }, m, LcIcons.park, enabled = control && homed, busy = "park" in busy) },
-        )
-        // Side by side on the tablet; stacked on the phone so "Referenzieren" is not cut off.
-        if (isCompact()) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { for (a in actions) a(Modifier.fillMaxWidth()) }
-        else Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { for (a in actions) a(Modifier.weight(1f)) }
+        // Three in a row only when each gets enough room; else "Referenzieren" on its own line (before: "Referenzie…").
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val home: @Composable (Modifier) -> Unit = { m -> LcButton("Referenzieren", { machine.action("home") }, m, LcIcons.home, enabled = control, busy = "home" in busy) }
+            val probe: @Composable (Modifier) -> Unit = { m -> LcButton("Abtasten", { machine.action("probe") }, m, LcIcons.probe, enabled = control && homed, busy = "probe" in busy) }
+            val park: @Composable (Modifier) -> Unit = { m -> LcButton("Parken", { machine.action("park") }, m, LcIcons.park, enabled = control && homed, busy = "park" in busy) }
+            if (maxWidth >= 600.dp) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { home(Modifier.weight(1.3f)); probe(Modifier.weight(1f)); park(Modifier.weight(1f)) }
+            else Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                home(Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { probe(Modifier.weight(1f)); park(Modifier.weight(1f)) }
+            }
+        }
         Spacer(Modifier.height(10.dp))
         SmallText("Referenzieren: X/Y zuerst, dann Z, dann ${s?.config?.z_clearance_mm?.let { "%.0f".format(it) } ?: "20"} mm hoch. Abtasten misst die Werkstückoberfläche unter dem Laserpunkt (G30).")
     }
 }
 
 /** Jog key size: smaller on the phone so the cross and the Z keys fit side by side. */
-internal val PAD: androidx.compose.ui.unit.Dp @Composable get() = if (isCompact()) 66.dp else 88.dp
+internal val PAD: androidx.compose.ui.unit.Dp @Composable get() = if (isCompact()) 66.dp else 76.dp
+
+/** Centre of the jog cross: where the head is (work-area coordinates), not a button. */
+@Composable
+private fun HeadSpot(position: List<Double>?) {
+    Column(
+        Modifier.size(PAD).clip(RoundedCornerShape(24.dp)).background(Lc.accentSoft),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+    ) {
+        val w = position?.takeIf { it.size >= 2 }?.let { de.millione.lumacut.core.Work.fromMachine(it[0], it[1]) }
+        Text("Kopf", style = LcTypography.labelMedium, color = Lc.muted)
+        Text(w?.let { "%.0f".format(it.x) } ?: "—", style = LcTypography.labelLarge.merge(NumberStyle), color = Lc.text)
+        Text(w?.let { "%.0f".format(it.y) } ?: "—", style = LcTypography.labelLarge.merge(NumberStyle), color = Lc.text)
+    }
+}
 
 @Composable
 internal fun JogKey(icon: ImageVector, label: String, enabled: Boolean, center: Boolean = false, tall: Boolean = false, onClick: () -> Unit) {

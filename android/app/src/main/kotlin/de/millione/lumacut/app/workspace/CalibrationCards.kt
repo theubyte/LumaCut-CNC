@@ -27,6 +27,7 @@ import de.millione.lumacut.app.ui.BtnKind
 import de.millione.lumacut.app.ui.CardTitle
 import de.millione.lumacut.app.ui.Confirm
 import de.millione.lumacut.app.ui.Lc
+import de.millione.lumacut.app.ui.HowTo
 import de.millione.lumacut.app.ui.LcButton
 import de.millione.lumacut.app.ui.LcCard
 import de.millione.lumacut.app.ui.LcIcons
@@ -41,9 +42,9 @@ import kotlin.math.roundToInt
 internal fun RingingCard(machine: MachineViewModel, ws: WorkspaceViewModel, enabled: Boolean, ask: (Confirm) -> Unit) {
     val result by ws.ringing.collectAsStateWithLifecycle()
     LcCard {
-        CardTitle("8 · Schwing-Test (Nachschwingen)")
-        SmallText("Lasert je Achse kurze Haken: quer, scharfe Ecke, dann 30 mm gerade – bei mehreren Geschwindigkeiten. Schwingt eine Achse nach der Ecke " +
-            "nach, wellt sich die gerade Linie. Die Kamera misst wie stark und wie schnell (Hz). Restplatte mittig, ca. 2 min.", Lc.faint)
+        CardTitle("Schwing-Test (Nachschwingen)")
+        HowTo("Lasert je Achse kurze Haken: quer, scharfe Ecke, dann 30 mm gerade – bei mehreren Geschwindigkeiten. Schwingt eine Achse nach der Ecke " +
+            "nach, wellt sich die gerade Linie. Die Kamera misst wie stark und wie schnell (Hz). Restplatte mittig, ca. 2 min.")
         Spacer(Modifier.height(12.dp))
         LcButton("Schwing-Test starten", {
             ask(Confirm("Schwing-Test lasern?", "Restplatte liegt mittig? Kurze Linien bei bis zu 6000 mm/min (Laser an – Schutzbrille, danebenbleiben).", "Lasern") { ws.ringingTest(machine) })
@@ -69,9 +70,9 @@ internal fun RingingCard(machine: MachineViewModel, ws: WorkspaceViewModel, enab
 internal fun BacklashCard(machine: MachineViewModel, ws: WorkspaceViewModel, enabled: Boolean, ask: (Confirm) -> Unit) {
     val result by ws.backlash.collectAsStateWithLifecycle()
     LcCard {
-        CardTitle("11 · Umkehrspiel")
-        SmallText("Lasert Linienpaare 1 mm auseinander, die erste von links bzw. oben angefahren, die zweite von der anderen Seite. " +
-            "Spiel in Riemen oder Zahnrädern verschiebt die zweite – die Kamera misst um wie viel. Restplatte mittig, ca. 1 min.", Lc.faint)
+        CardTitle("Umkehrspiel")
+        HowTo("Lasert Linienpaare 1 mm auseinander, die erste von links bzw. oben angefahren, die zweite von der anderen Seite. " +
+            "Spiel in Riemen oder Zahnrädern verschiebt die zweite – die Kamera misst um wie viel. Restplatte mittig, ca. 1 min.")
         Spacer(Modifier.height(12.dp))
         LcButton("Umkehrspiel messen", {
             ask(Confirm("Umkehrspiel-Test lasern?", "Restplatte liegt mittig? 12 kurze Linien (Laser an – Schutzbrille).", "Lasern") { ws.backlashTest(machine) })
@@ -94,9 +95,9 @@ internal fun ToneCard(machine: MachineViewModel, ws: WorkspaceViewModel, editor:
     val result by ws.tone.collectAsStateWithLifecycle()
     var power by remember { mutableStateOf("40") }; var speed by remember { mutableStateOf("3000") }
     LcCard {
-        CardTitle("10 · Graustufen (Fotos)")
-        SmallText("10 Felder mit gleicher Geschwindigkeit und steigender Leistung. Die Kamera misst, wie dunkel jedes wird – daraus wird eine Kurve, " +
-            "damit Fotos die Grautöne des Originals bekommen statt zu dunkel zu werden. Leistung und Tempo wie für Fotos auf diesem Material.", Lc.faint)
+        CardTitle("Graustufen (Fotos)")
+        HowTo("10 Felder mit gleicher Geschwindigkeit und steigender Leistung. Die Kamera misst, wie dunkel jedes wird – daraus wird eine Kurve, " +
+            "damit Fotos die Grautöne des Originals bekommen statt zu dunkel zu werden. Leistung und Tempo wie für Fotos auf diesem Material.")
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             NumberField("Höchste Leistung", power, { power = it }, Modifier.weight(1f), "%")
@@ -137,9 +138,9 @@ internal fun Height3DCard(machine: MachineViewModel, ws: WorkspaceViewModel, rea
     val gpio = status?.line_laser?.gpio
     var pin by remember(gpio) { mutableStateOf(gpio?.toString() ?: "") }
     LcCard {
-        CardTitle("9 · 3D-Höhe ohne Berühren")
-        SmallText("Ein Licht am Kopf fällt aufs Material, die Kamera sieht es schräg – je höher die Oberfläche, desto weiter wandert es im Bild. " +
-            "So misst die Maschine Höhen, ohne den Taster aufzusetzen (an den angetippten Abtastpunkten oder als 3D-Karte).", Lc.faint)
+        CardTitle("3D-Höhe ohne Berühren")
+        HowTo("Ein Licht am Kopf fällt aufs Material, die Kamera sieht es schräg – je höher die Oberfläche, desto weiter wandert es im Bild. " +
+            "So misst die Maschine Höhen, ohne den Taster aufzusetzen (an den angetippten Abtastpunkten oder als 3D-Karte).")
 
         Spacer(Modifier.height(12.dp))
         Text("Mit dem Laserpunkt (jetzt)", style = LcTypography.titleMedium)
@@ -147,8 +148,8 @@ internal fun Height3DCard(machine: MachineViewModel, ws: WorkspaceViewModel, rea
             power?.let { "Leistung S$it (%.1f %%)".format(Locale.GERMANY, it / 2.55) } ?: "Leistung noch nicht getestet",
             if (cal?.spot != null) "kalibriert" else "nicht kalibriert",
         ).joinToString(" · "))
-        SmallText("1. Leistungstest: kurze Linien mit 0,4–5 %; die Kamera prüft, ab wann sie den Punkt sieht und ab wann eine Spur bleibt. " +
-            "2. Kalibrieren an der flachen Platte in 6 Höhen. 3. Messen unter Maschine → Arbeitsplatz scannen → Abtasten.", Lc.faint)
+        HowTo("1. Leistungstest: kurze Linien mit 0,4–5 %; die Kamera prüft, ab wann sie den Punkt sieht und ab wann eine Spur bleibt. " +
+            "2. Kalibrieren an der flachen Platte in 6 Höhen. 3. Messen unter Maschine → Arbeitsplatz scannen → Abtasten.")
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             LcButton("1 · Leistung testen", {

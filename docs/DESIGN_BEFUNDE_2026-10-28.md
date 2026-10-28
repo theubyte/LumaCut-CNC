@@ -122,6 +122,64 @@ Unverändert (bewusst): Referenzierungs-Abfrage „Steht der Kopf frei?“,
 Material-Hinweis vor dem Start, Z ≤ 80 mm und Material ≤ 60 mm (Core/Pi),
 alle Kalibrierungen, Not-Aus-Verhalten, Pi als zentrale Quelle.
 
+## Runde 2: Test auf dem echten Tablet (Galaxy Tab S7 FE, 2560 × 1600)
+
+Der Screenshot-Test rendert jetzt zusätzlich die Größe dieses Tablets (1200 × 720 dp
+quer, 752 × 1160 dp hoch, Systemschrift 110 %) und den Editor gezoomt. Vorher-Bilder
+der Runde liegen auf `screenshots-design2-vorher`.
+
+Befunde und Änderungen:
+
+1. **Editor: Blatt überdeckte beim Zoomen die Werkzeugleiste.** Die Zeichenfläche
+   wurde nicht beschnitten; jetzt ist sie auf ihren Bereich begrenzt (abgerundet).
+   Die abgeschnittenen Werkzeugnamen („Rech“, „Ellip“) kamen daher; die Leiste ist
+   zusätzlich etwas breiter, die Namen kürzen notfalls mit „…“.
+2. **Editor-Werkzeugzeile lief über.** „Import“ und „Vorlagen“ stecken jetzt im
+   Menü „Einfügen“ (Datei importieren, Formen, QR-Code, Vorlagen); die Platten-
+   Auswahl steht wieder fest neben „Starten“. Bei schmaler Breite (Hochformat,
+   Handy) zeigen Werkzeuge/Scannen/Mehr nur ihre Symbole, die Platten-Auswahl
+   rutscht in die scrollende Zeile, und die Navigation startet im Hochformat
+   eingeklappt.
+3. **Laser-Panel: „Was soll der Laser tun?“ war leer**, wenn das Projekt die drei
+   Standardebenen nicht hat (z. B. nach dem Materialtest). Dann stehen dort die
+   eigenen Ebenen des Projekts.
+4. **„Ebene 29“:** neue Ebenen bekommen die kleinste freie Nummer statt
+   Ebenenanzahl + 1.
+5. **Kamera-Hintergrund unten angeschnitten:** Seitenleiste scrollt jetzt mit
+   Abstand bis ganz nach unten.
+6. **Steuerung:**
+   - „Parken“ stand dreimal auf der Seite. Jetzt nur noch unter dem Steuerkreuz.
+   - Die Statuskarte zeigt nur den fälligen nächsten Schritt (Referenzieren bzw.
+     Abtasten).
+   - In der Mitte des Kreuzes steht die Kopfposition statt eines zweiten Park-Knopfs.
+   - Kacheln 2 × 2, sobald die Karte schmal ist („Laserversorgu…“).
+   - Referenzieren in eigener Zeile („Referenzie…“).
+   - Jog-Tasten 76 statt 88 dp.
+7. **Kalibrieren neu geordnet:**
+   - Links eine Übersicht aller 11 Kalibrierungen in empfohlener Reihenfolge:
+     Grundlagen, je Material, Feinschliff.
+   - Jede zeigt den gespeicherten Wert und einen Status-Chip (erledigt / offen /
+     fehlt / optional), oben den Fortschritt „Grundlagen x von 5“.
+   - Rechts steht die gewählte Kalibrierung (höchstens 720 dp breit, damit die
+     Felder nicht riesig werden).
+   - Lange Erklärungen sind unter „So läuft es“ eingeklappt.
+   - Auf dem Handy öffnet sich die gewählte Kalibrierung direkt unter ihrer Zeile.
+   - Alle Kalibrierungen, Felder und Sicherheitsabfragen sind unverändert vorhanden.
+8. **Scannen:** Die Knöpfe der Schritte brechen in eine zweite Zeile um statt
+   „Scannen …“ / „Neu kalibrier…“ abzuschneiden.
+9. **Scanbild:**
+   - Auf dem Pi liegt (Revision 12, geprüft 28.10. 02:04) nur eine einzelne
+     entzerrte Kamerakachel oben rechts. 1800 × 1700 px ist die Leinwand der
+     ganzen Platte, kein vollständiger Scan.
+   - Die App zeigt also richtig an, was der Pi hat. Die gekrümmten Ränder sind
+     die Linsenentzerrung dieser einen Kachel.
+   - Den Blaustich verursacht der automatische Weißabgleich; „Kamera-Licht“ ist
+     noch offen.
+   - Gefunden und behoben: Beim App-Start konnte ein älteres, auf dem Gerät
+     zwischengespeichertes Scanbild per „das neueste gewinnt“ einen neueren Scan
+     auf dem Pi überschreiben. Jetzt schickt die App erst nach dem ersten Abgleich
+     mit dem Pi ein Scanbild.
+
 ## Offene Punkte / Ideen für später
 
 - Ebenenfarben kommen aus dem Projekt; sehr helle Ebenenfarben (z. B. Gelb)

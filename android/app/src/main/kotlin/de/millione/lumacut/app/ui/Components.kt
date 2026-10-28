@@ -49,6 +49,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -509,5 +510,23 @@ fun CanvasSurface(modifier: Modifier = Modifier, content: @Composable androidx.c
     Box(modifier.lift(shape).clip(shape).background(Lc.canvas)) {
         DottedBackground()
         content()
+    }
+}
+
+/** A long explanation folded to one line: "So läuft es" opens it. Keeps cards short for those who know the step. */
+@Composable
+fun HowTo(text: String, modifier: Modifier = Modifier) {
+    var open by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    Column(modifier) {
+        Row(
+            Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = if (open) "Erklärung ausblenden" else "Erklärung zeigen") { open = !open }
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(if (open) "Erklärung ausblenden" else "So läuft es", style = LcTypography.labelLarge, color = Lc.accent)
+            Spacer(Modifier.width(4.dp))
+            Icon(if (open) LcIcons.chevronDown else LcIcons.chevronRight, null, tint = Lc.accent, modifier = Modifier.size(16.dp))
+        }
+        if (open) Text(text, style = LcTypography.bodySmall, color = Lc.muted)
     }
 }

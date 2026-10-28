@@ -20,6 +20,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import de.millione.lumacut.app.ui.HowTo
+import de.millione.lumacut.app.ui.Tone
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
@@ -97,143 +108,178 @@ fun CalibrationScreen(machine: MachineViewModel, editor: de.millione.lumacut.app
     val fullHd = "camera_settings" in (status?.features ?: emptyList())
     val motion = cfg?.motion?.toMotion() ?: MarlinWriter.Motion.FIRMWARE
 
-    val leftCards: @Composable () -> Unit = {
-        run?.let { r ->
-            LcCard(padding = 16.dp, accent = Lc.accent) {
-                Text(r.title, style = LcTypography.titleMedium, color = Lc.text)
-                SmallText(r.text)
-                Spacer(Modifier.height(8.dp))
-                Progress(r.fraction, Modifier.fillMaxWidth(), thick = true)
-                Spacer(Modifier.height(10.dp))
-                LcButton("Abbrechen", { ws.cancel() }, Modifier.fillMaxWidth(), kind = BtnKind.DANGER)
-            }
-        }
-        if (!camera) Banner("Keine Kamera am Pi – für die Kamera-, Fokus- und Gravurtests die Kopfkamera anschließen.")
-
-        LcCard {
-            CardTitle("1 · Kopfkamera")
-            SmallText(cal?.let { c ->
-                val u = c.usable(0.0)
-                "Kalibriert mit ${c.photoWidth} × ${c.photoHeight} px · Bildfeld %.0f × %.0f mm".format(u.width, u.height) +
-                    (c.lens?.let { " · Genauigkeit %.2f mm".format(Locale.GERMANY, it.rmsMm) } ?: " · ohne Linsenmodell") +
-                    (c.aboveSurface?.let { " · scharf %.0f mm über dem Material".format(it) } ?: "")
-            } ?: "Nicht kalibriert. Grundlage für Scan und alle Kameratests: misst Linse, Maßstab und Lage zum Laser.")
-            if (cal != null && fullHd && cal!!.photoWidth < 1920) {
-                Spacer(Modifier.height(8.dp))
-                Banner("Die Kamera liefert jetzt Full HD statt ${cal!!.photoWidth} × ${cal!!.photoHeight}. Neu kalibrieren: dreimal schärfere Scans und genauere Tests.", Lc.info)
-            }
-            Spacer(Modifier.height(12.dp))
-            LcButton(if (cal == null) "Kalibrieren" else "Neu kalibrieren", { cameraDialog = true }, icon = LcIcons.camera, enabled = camera)
-        }
-
-        LcCard {
-            CardTitle("2 · Kamera-Licht")
-            val wb = cfg?.camera?.white_balance
-            SmallText(listOf(
-                wb?.let { "Weißabgleich fest auf $it K" } ?: "Weißabgleich automatisch (Farben wechseln von Bild zu Bild)",
-                if (cal?.shading != null) "Randabfall ausgeglichen" else "Randabfall nicht gemessen",
-            ).joinToString(" · "))
-            Spacer(Modifier.height(6.dp))
-            SmallText("Ein weißes Blatt Papier (A4) mittig auf das Bett legen. Licht auf 100 %, Weißabgleich auf neutrales Grau, " +
-                "dann fünf Bilder für den Helligkeitsabfall zum Bildrand. Dauer ca. 1 Minute, Laser bleibt aus. " +
-                "Die Gesamthelligkeit regelt die Kamera selbst nach – die gleicht der Scan in den Überlappungen aus.", Lc.faint)
-            Spacer(Modifier.height(12.dp))
-            LcButton("Licht kalibrieren", {
-                confirm = Confirm("Kamera-Licht kalibrieren?", "Liegt ein weißes Blatt Papier mittig auf dem Bett? Der Kopf fährt darüber, der Laser bleibt aus.", "Starten") {
-                    ws.calibrateLight(machine)
+    val off = status?.probeOffset
+    val camOk = ready && camera && cal != null
+    // Recommended order: the basics once, then per material, then the fine tuning. Each entry says what is stored now.
+    val steps = listOf(
+        CalStep("Kopfkamera", CalGroup.BASIC, if (cal != null) Tone.OK else Tone.BAD, if (cal != null) "erledigt" else "fehlt",
+            cal?.let { c -> "${c.photoWidth} × ${c.photoHeight} px" + (c.lens?.let { " · ±%.2f mm".format(Locale.GERMANY, it.rmsMm) } ?: "") }
+                ?: "Grundlage für Scan und alle Kameratests") {
+            LcCard {
+                CardTitle("Kopfkamera")
+                SmallText(cal?.let { c ->
+                    val u = c.usable(0.0)
+                    "Kalibriert mit ${c.photoWidth} × ${c.photoHeight} px · Bildfeld %.0f × %.0f mm".format(u.width, u.height) +
+                        (c.lens?.let { " · Genauigkeit %.2f mm".format(Locale.GERMANY, it.rmsMm) } ?: " · ohne Linsenmodell") +
+                        (c.aboveSurface?.let { " · scharf %.0f mm über dem Material".format(it) } ?: "")
+                } ?: "Nicht kalibriert. Grundlage für Scan und alle Kameratests: misst Linse, Maßstab und Lage zum Laser.")
+                if (cal != null && fullHd && cal!!.photoWidth < 1920) {
+                    Spacer(Modifier.height(8.dp))
+                    Banner("Die Kamera liefert jetzt Full HD statt ${cal!!.photoWidth} × ${cal!!.photoHeight}. Neu kalibrieren: dreimal schärfere Scans und genauere Tests.", Lc.info)
                 }
-            }, icon = LcIcons.light, enabled = ready && homed && camera && cal != null)
-        }
-
-        LcCard {
-            CardTitle("3 · Taster-Versatz")
-            val off = status?.probeOffset
-            SmallText(off?.let { "Tasterspitze liegt X %+.1f / Y %+.1f mm neben dem Laserpunkt".format(Locale.GERMANY, it.x, it.y) }
-                ?: "Nicht eingetragen – ohne Versatz tastet der Pi nicht automatisch ab.")
-            Spacer(Modifier.height(6.dp))
-            SmallText("Der Laser graviert ein kleines Kreuz, du fährst die Tasterspitze mit den Pfeilen genau darüber, der Pi übernimmt den Versatz.", Lc.faint)
-            Spacer(Modifier.height(12.dp))
-            LcButton("Einmessen", { probeDialog = true }, icon = LcIcons.probe, enabled = status.canControl(online) && homed)
-        }
-
-        RingingCard(machine, ws, ready && camera && cal != null) { confirm = it }
-        Height3DCard(machine, ws, ready && camera) { confirm = it }
-        BacklashCard(machine, ws, ready && camera && cal != null) { confirm = it }
-    }
-    val rightCards: @Composable () -> Unit = {
-        LcCard {
-            CardTitle("4 · Laser-Fokus")
-            SmallText(cfg?.let { "Fokusabstand %.1f mm (Laser %.1f mm über dem Material)".format(Locale.GERMANY, it.focus_gap_mm, it.focus_gap_mm - it.z_switch_tip_offset_mm) } ?: "—")
-            Spacer(Modifier.height(6.dp))
-            SmallText("Lasert 13 kurze Linien, jede 0,5 mm höher als die vorige (−3 … +3 mm um den jetzigen Fokus). Die Kamera misst ihre Breite, " +
-                "die schmalste ist im Fokus – der Pi übernimmt den neuen Fokusabstand. Restplatte mittig, Dauer ca. 1 Minute.", Lc.faint)
-            var power by remember { mutableStateOf("30") }; var speed by remember { mutableStateOf("1000") }
-            Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NumberField("Leistung", power, { power = it }, Modifier.weight(1f), "%")
-                NumberField("Tempo", speed, { speed = it }, Modifier.weight(1f), "mm/min")
-            }
-            Spacer(Modifier.height(12.dp))
-            LcButton("Fokus-Test starten", {
-                val p = power.replace(',', '.').toDoubleOrNull(); val s = speed.replace(',', '.').toDoubleOrNull()
-                if (p == null || s == null || p !in 5.0..100.0 || s !in 100.0..motion.maxFeed) { machine.notify("Leistung 5–100 %%, Tempo 100–%.0f mm/min".format(motion.maxFeed), true); return@LcButton }
-                confirm = Confirm("Fokus-Test lasern?", "Restplatte liegt mittig? Der Laser graviert 13 Linien (ca. 1 min, Laser an – Schutzbrille). " +
-                    "Danach fotografiert die Kamera sie und der Fokusabstand wird angepasst.", "Lasern") { ws.focusTest(machine, p, s) }
-            }, icon = LcIcons.laser, kind = BtnKind.PRIMARY, enabled = ready && camera && cal != null)
-            focus?.let { r ->
                 Spacer(Modifier.height(12.dp))
-                FocusChart(r)
-                SmallText("Schärfste Linie bei %+.1f mm · Strahlbreite dort %.2f mm".format(Locale.GERMANY, r.bestOffset, r.widthAtBest))
+                LcButton(if (cal == null) "Kalibrieren" else "Neu kalibrieren", { cameraDialog = true }, icon = LcIcons.camera, enabled = camera)
             }
-        }
-
-        EngraveCard(machine, ws, engrave, ready && camera && cal != null, motion.maxFeed) { confirm = it }
-
-        LcCard {
-            CardTitle("6 · Bewegung (Tempo & Genauigkeit)")
-            SmallText(if (cfg?.motion?.measured == true) "Gemessen: Beschleunigung %.0f mm/s², höchstens %.0f mm/min".format(motion.accel, motion.maxFeed)
-                      else "Firmware-Werte: %.0f mm/s², höchstens %.0f mm/min (nicht gemessen)".format(motion.accel, motion.maxFeed))
-            Spacer(Modifier.height(6.dp))
-            SmallText("Lasert kleine Referenzmarken, fährt dann mit ausgeschaltetem Laser immer härter und schneller hin und her " +
-                "(bis 8000 mm/s² und 24000 mm/min) und lasert nach jeder Stufe eine Prüfmarke daneben. Die Kamera misst, ob sich etwas " +
-                "verschoben hat (Schrittverlust ab 0,1 mm). Gespeichert wird die letzte saubere Stufe mit Reserve – danach sind Gravuren " +
-                "schneller und der Anlauf jeder Zeile passt. Restplatte mittig, laut, Dauer 5–10 min.", Lc.faint)
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                LcButton("Bewegung kalibrieren", {
-                    confirm = Confirm("Bewegungs-Kalibrierung starten?", "Restplatte liegt mittig? Der Laser graviert kleine Marken; dazwischen fährt der Kopf " +
-                        "mit ausgeschaltetem Laser sehr schnell hin und her (laut). Nichts auf dem Bett, das im Weg ist. Schutzbrille, danebenbleiben.", "Starten") {
-                        ws.motionCalibration(machine)
+        },
+        CalStep("Kamera-Licht", CalGroup.BASIC, if (cal?.shading != null) Tone.OK else Tone.WARN, if (cal?.shading != null) "erledigt" else "offen",
+            (cfg?.camera?.white_balance?.let { "Weißabgleich $it K" } ?: "Weißabgleich automatisch") +
+                (if (cal?.shading != null) " · Rand ausgeglichen" else "")) {
+            LcCard {
+                CardTitle("Kamera-Licht")
+                val wb = cfg?.camera?.white_balance
+                SmallText(listOf(
+                    wb?.let { "Weißabgleich fest auf $it K" } ?: "Weißabgleich automatisch (Farben wechseln von Bild zu Bild)",
+                    if (cal?.shading != null) "Randabfall ausgeglichen" else "Randabfall nicht gemessen",
+                ).joinToString(" · "))
+                Spacer(Modifier.height(6.dp))
+                HowTo("Ein weißes Blatt Papier (A4) mittig auf das Bett legen. Licht auf 100 %, Weißabgleich auf neutrales Grau, " +
+                    "dann fünf Bilder für den Helligkeitsabfall zum Bildrand. Dauer ca. 1 Minute, Laser bleibt aus. " +
+                    "Die Gesamthelligkeit regelt die Kamera selbst nach – die gleicht der Scan in den Überlappungen aus.")
+                Spacer(Modifier.height(12.dp))
+                LcButton("Licht kalibrieren", {
+                    confirm = Confirm("Kamera-Licht kalibrieren?", "Liegt ein weißes Blatt Papier mittig auf dem Bett? Der Kopf fährt darüber, der Laser bleibt aus.", "Starten") {
+                        ws.calibrateLight(machine)
                     }
-                }, icon = LcIcons.laser, kind = BtnKind.PRIMARY, enabled = ready && camera && cal != null)
-                if (cfg?.motion?.measured == true) LcButton("Firmware-Werte", { ws.resetMotion(machine) }, kind = BtnKind.GHOST, enabled = ready)
+                }, icon = LcIcons.light, enabled = ready && homed && camera && cal != null)
             }
-            motionResult?.let { r ->
+        },
+        CalStep("Taster-Versatz", CalGroup.BASIC, if (off != null) Tone.OK else Tone.BAD, if (off != null) "erledigt" else "fehlt",
+            off?.let { "X %+.1f · Y %+.1f mm".format(Locale.GERMANY, it.x, it.y) } ?: "nötig zum automatischen Abtasten") {
+            LcCard {
+                CardTitle("Taster-Versatz")
+                val off = status?.probeOffset
+                SmallText(off?.let { "Tasterspitze liegt X %+.1f / Y %+.1f mm neben dem Laserpunkt".format(Locale.GERMANY, it.x, it.y) }
+                    ?: "Nicht eingetragen – ohne Versatz tastet der Pi nicht automatisch ab.")
+                Spacer(Modifier.height(6.dp))
+                HowTo("Der Laser graviert ein kleines Kreuz, du fährst die Tasterspitze mit den Pfeilen genau darüber, der Pi übernimmt den Versatz.")
                 Spacer(Modifier.height(12.dp))
-                val base = r.shifts.firstOrNull()
-                base?.let { SmallText("Ohne Belastung: Prüfmarke um X %+.2f / Y %+.2f mm versetzt (Wiederholgenauigkeit, Umkehrspiel)".format(Locale.GERMANY, it.dx, it.dy)) }
-                for ((i, level) in r.levels.withIndex()) {
-                    val sh = r.shifts.getOrNull(i + 1) ?: break
-                    val prev = r.shifts[i]
-                    val ok = i <= r.lastGood
-                    SmallText("Stufe ${i + 1} · %.0f mm/s² · %.0f mm/min: ".format(level.accel, level.speed * 60) +
-                        (if (!sh.found) "Marke nicht gefunden" else "Versatz X %+.2f / Y %+.2f mm".format(Locale.GERMANY, sh.dx - prev.dx, sh.dy - prev.dy)) +
-                        if (ok) " · sauber" else " · Schrittverlust", if (ok) Lc.ok else Lc.bad)
-                }
-                r.kept?.let { SmallText("Gespeichert: %.0f mm/s², bis %.0f mm/min".format(it.accel, it.maxFeed), Lc.text) }
+                LcButton("Einmessen", { probeDialog = true }, icon = LcIcons.probe, enabled = status.canControl(online) && homed)
             }
-        }
-
-        CutCard(machine, ws, cutSpec, ready, motion.maxFeed) { confirm = it }
-        ToneCard(machine, ws, editor, ready && camera && cal != null, motion.maxFeed) { confirm = it }
+        },
+        CalStep("Laser-Fokus", CalGroup.BASIC, if (focus != null) Tone.OK else Tone.OFF, if (focus != null) "gemessen" else "Wert",
+            cfg?.let { "Fokusabstand %.1f mm".format(Locale.GERMANY, it.focus_gap_mm) } ?: "—") {
+            LcCard {
+                CardTitle("Laser-Fokus")
+                SmallText(cfg?.let { "Fokusabstand %.1f mm (Laser %.1f mm über dem Material)".format(Locale.GERMANY, it.focus_gap_mm, it.focus_gap_mm - it.z_switch_tip_offset_mm) } ?: "—")
+                Spacer(Modifier.height(6.dp))
+                HowTo("Lasert 13 kurze Linien, jede 0,5 mm höher als die vorige (−3 … +3 mm um den jetzigen Fokus). Die Kamera misst ihre Breite, " +
+                    "die schmalste ist im Fokus – der Pi übernimmt den neuen Fokusabstand. Restplatte mittig, Dauer ca. 1 Minute.")
+                var power by remember { mutableStateOf("30") }; var speed by remember { mutableStateOf("1000") }
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    NumberField("Leistung", power, { power = it }, Modifier.weight(1f), "%")
+                    NumberField("Tempo", speed, { speed = it }, Modifier.weight(1f), "mm/min")
+                }
+                Spacer(Modifier.height(12.dp))
+                LcButton("Fokus-Test starten", {
+                    val p = power.replace(',', '.').toDoubleOrNull(); val s = speed.replace(',', '.').toDoubleOrNull()
+                    if (p == null || s == null || p !in 5.0..100.0 || s !in 100.0..motion.maxFeed) { machine.notify("Leistung 5–100 %%, Tempo 100–%.0f mm/min".format(motion.maxFeed), true); return@LcButton }
+                    confirm = Confirm("Fokus-Test lasern?", "Restplatte liegt mittig? Der Laser graviert 13 Linien (ca. 1 min, Laser an – Schutzbrille). " +
+                        "Danach fotografiert die Kamera sie und der Fokusabstand wird angepasst.", "Lasern") { ws.focusTest(machine, p, s) }
+                }, icon = LcIcons.laser, kind = BtnKind.PRIMARY, enabled = ready && camera && cal != null)
+                focus?.let { r ->
+                    Spacer(Modifier.height(12.dp))
+                    FocusChart(r)
+                    SmallText("Schärfste Linie bei %+.1f mm · Strahlbreite dort %.2f mm".format(Locale.GERMANY, r.bestOffset, r.widthAtBest))
+                }
+            }
+        },
+        CalStep("Bewegung (Tempo)", CalGroup.BASIC, if (cfg?.motion?.measured == true) Tone.OK else Tone.WARN,
+            if (cfg?.motion?.measured == true) "gemessen" else "offen",
+            "%.0f mm/s² · bis %.0f mm/min".format(motion.accel, motion.maxFeed)) {
+            LcCard {
+                CardTitle("Bewegung (Tempo & Genauigkeit)")
+                SmallText(if (cfg?.motion?.measured == true) "Gemessen: Beschleunigung %.0f mm/s², höchstens %.0f mm/min".format(motion.accel, motion.maxFeed)
+                          else "Firmware-Werte: %.0f mm/s², höchstens %.0f mm/min (nicht gemessen)".format(motion.accel, motion.maxFeed))
+                Spacer(Modifier.height(6.dp))
+                HowTo("Lasert kleine Referenzmarken, fährt dann mit ausgeschaltetem Laser immer härter und schneller hin und her " +
+                    "(bis 8000 mm/s² und 24000 mm/min) und lasert nach jeder Stufe eine Prüfmarke daneben. Die Kamera misst, ob sich etwas " +
+                    "verschoben hat (Schrittverlust ab 0,1 mm). Gespeichert wird die letzte saubere Stufe mit Reserve – danach sind Gravuren " +
+                    "schneller und der Anlauf jeder Zeile passt. Restplatte mittig, laut, Dauer 5–10 min.")
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LcButton("Bewegung kalibrieren", {
+                        confirm = Confirm("Bewegungs-Kalibrierung starten?", "Restplatte liegt mittig? Der Laser graviert kleine Marken; dazwischen fährt der Kopf " +
+                            "mit ausgeschaltetem Laser sehr schnell hin und her (laut). Nichts auf dem Bett, das im Weg ist. Schutzbrille, danebenbleiben.", "Starten") {
+                            ws.motionCalibration(machine)
+                        }
+                    }, icon = LcIcons.laser, kind = BtnKind.PRIMARY, enabled = ready && camera && cal != null)
+                    if (cfg?.motion?.measured == true) LcButton("Firmware-Werte", { ws.resetMotion(machine) }, kind = BtnKind.GHOST, enabled = ready)
+                }
+                motionResult?.let { r ->
+                    Spacer(Modifier.height(12.dp))
+                    val base = r.shifts.firstOrNull()
+                    base?.let { SmallText("Ohne Belastung: Prüfmarke um X %+.2f / Y %+.2f mm versetzt (Wiederholgenauigkeit, Umkehrspiel)".format(Locale.GERMANY, it.dx, it.dy)) }
+                    for ((i, level) in r.levels.withIndex()) {
+                        val sh = r.shifts.getOrNull(i + 1) ?: break
+                        val prev = r.shifts[i]
+                        val ok = i <= r.lastGood
+                        SmallText("Stufe ${i + 1} · %.0f mm/s² · %.0f mm/min: ".format(level.accel, level.speed * 60) +
+                            (if (!sh.found) "Marke nicht gefunden" else "Versatz X %+.2f / Y %+.2f mm".format(Locale.GERMANY, sh.dx - prev.dx, sh.dy - prev.dy)) +
+                            if (ok) " · sauber" else " · Schrittverlust", if (ok) Lc.ok else Lc.bad)
+                    }
+                    r.kept?.let { SmallText("Gespeichert: %.0f mm/s², bis %.0f mm/min".format(it.accel, it.maxFeed), Lc.text) }
+                }
+            }
+        },
+        CalStep("Gravur-Test", CalGroup.MATERIAL, Tone.OFF, "je Material", "Leistung und Tempo zum Gravieren finden") {
+            EngraveCard(machine, ws, engrave, camOk, motion.maxFeed) { confirm = it }
+        },
+        CalStep("Schnitt-Test", CalGroup.MATERIAL, Tone.OFF, "je Material", "Durchgänge zum sicheren Durchschneiden") {
+            CutCard(machine, ws, cutSpec, ready, motion.maxFeed) { confirm = it }
+        },
+        CalStep("Graustufen (Fotos)", CalGroup.MATERIAL, Tone.OFF, "je Material", "Tonwerte für Fotogravuren") {
+            ToneCard(machine, ws, editor, camOk, motion.maxFeed) { confirm = it }
+        },
+        CalStep("Schwing-Test", CalGroup.FINE, Tone.OFF, "optional", "Nachschwingen bei schnellen Richtungswechseln") {
+            RingingCard(machine, ws, camOk) { confirm = it }
+        },
+        CalStep("3D-Höhe ohne Berühren", CalGroup.FINE, if (cal?.spot != null) Tone.OK else Tone.OFF, if (cal?.spot != null) "erledigt" else "optional",
+            "Höhe per Laserpunkt bzw. Linienlaser") {
+            Height3DCard(machine, ws, ready && camera) { confirm = it }
+        },
+        CalStep("Umkehrspiel", CalGroup.FINE, Tone.OFF, "optional", "Spiel beim Richtungswechsel messen") {
+            BacklashCard(machine, ws, camOk) { confirm = it }
+        },
+    )
+    val firstOpen = steps.indexOfFirst { it.group == CalGroup.BASIC && (it.tone == Tone.BAD || it.tone == Tone.WARN) }.coerceAtLeast(0)
+    var selected by rememberSaveable { mutableIntStateOf(firstOpen) }
+    val notices: @Composable () -> Unit = {
+            run?.let { r ->
+                LcCard(padding = 16.dp, accent = Lc.accent) {
+                    Text(r.title, style = LcTypography.titleMedium, color = Lc.text)
+                    SmallText(r.text)
+                    Spacer(Modifier.height(8.dp))
+                    Progress(r.fraction, Modifier.fillMaxWidth(), thick = true)
+                    Spacer(Modifier.height(10.dp))
+                    LcButton("Abbrechen", { ws.cancel() }, Modifier.fillMaxWidth(), kind = BtnKind.DANGER)
+                }
+            }
+            if (!camera) Banner("Keine Kamera am Pi – für die Kamera-, Fokus- und Gravurtests die Kopfkamera anschließen.")
     }
-    // Two columns on the tablet; one on the phone, where two columns left every card 160 dp wide.
+    // Overview on the left, the chosen calibration on the right (before: eleven long cards in two columns).
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        if (maxWidth >= 840.dp) Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(4.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { leftCards() }
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(4.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) { rightCards() }
-        } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            leftCards(); rightCards()
+        if (maxWidth >= 900.dp) Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.width(360.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                CalOverview(steps, selected) { selected = it }
+            }
+            Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(4.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                notices()
+                Column(Modifier.widthIn(max = 720.dp)) { (steps.getOrNull(selected) ?: steps[firstOpen]).content() }
+            }
+        } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            notices()
+            CalOverview(steps, selected, expanded = { i -> steps[i].content() }) { selected = if (selected == it) -1 else it }
         }
     }
     if (cameraDialog) CalibrationDialog(machine, ws) { cameraDialog = false }
@@ -268,10 +314,10 @@ private fun EngraveCard(machine: MachineViewModel, ws: WorkspaceViewModel, outco
     var sFrom by remember { mutableStateOf("1500") }; var sTo by remember { mutableStateOf("6000") }
     var interval by remember { mutableDoubleStateOf(0.1) }
     LcCard {
-        CardTitle("5 · Gravur-Test (Material)")
-        SmallText("Lasert 5 × 5 kleine Felder mit steigender Leistung und Geschwindigkeit. Die Kamera misst je Feld, wie dunkel und wie " +
+        CardTitle("Gravur-Test (Material)")
+        HowTo("Lasert 5 × 5 kleine Felder mit steigender Leistung und Geschwindigkeit. Die Kamera misst je Feld, wie dunkel und wie " +
             "gleichmäßig es wurde und ob es die Umgebung verrußt. Danach wählst du hell, mittel oder dunkel – gespeichert wird die schnellste saubere Einstellung. " +
-            "Restplatte mittig, Dauer ca. 4 Minuten. Ohne Luftunterstützung danebenbleiben.", Lc.faint)
+            "Restplatte mittig, Dauer ca. 4 Minuten. Ohne Luftunterstützung danebenbleiben.")
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TextInput("Material", name, { name = it }, Modifier.weight(1.4f))
@@ -457,7 +503,7 @@ private fun CutCard(machine: MachineViewModel, ws: WorkspaceViewModel, spec: Cut
     var maxPasses by remember { mutableStateOf(3) }
     var through by remember(spec) { mutableStateOf(emptySet<Pair<Int, Int>>()) }
     LcCard {
-        CardTitle("7 · Schnitt-Test (geführt)")
+        CardTitle("Schnitt-Test (geführt)")
         SmallText("1. Restplatte des Materials mittig auflegen, Stärke eintragen. 2. Der Laser schneidet 5 × $maxPasses Quadrate (8 mm): " +
             "nach rechts schneller, nach unten mehr Durchgänge; ein kleiner Pfeil oben links zeigt die Lage. 3. Platte umdrehen, Quadrate " +
             "vorsichtig herausdrücken. 4. Hier antippen, welche herausgefallen sind – die App nimmt die schnellste sichere Einstellung. " +
@@ -524,5 +570,64 @@ private fun CutCard(machine: MachineViewModel, ws: WorkspaceViewModel, spec: Cut
                 LcButton("Neuer Test", { ws.clearCut() }, kind = BtnKind.GHOST)
             }
         }
+    }
+}
+
+internal enum class CalGroup(val title: String, val hint: String) {
+    BASIC("Grundlagen", "einmal einrichten, in dieser Reihenfolge"),
+    MATERIAL("Je Material", "für jedes neue Material"),
+    FINE("Feinschliff", "optional"),
+}
+
+internal class CalStep(val title: String, val group: CalGroup, val tone: Tone, val chip: String, val value: String, val content: @Composable () -> Unit)
+
+/**
+ * The calibrations as a short list: number in the recommended order, title, what is stored now and a status chip.
+ * [expanded] shows the chosen one right under its row (phone); without it the row only selects (tablet).
+ */
+@Composable
+private fun CalOverview(steps: List<CalStep>, selected: Int, expanded: (@Composable (Int) -> Unit)? = null, onSelect: (Int) -> Unit) {
+    val basics = steps.filter { it.group == CalGroup.BASIC }
+    val done = basics.count { it.tone == Tone.OK }
+    LcCard(padding = 16.dp) {
+        Text("Kalibrieren", style = LcTypography.titleLarge, color = Lc.text)
+        SmallText("Grundlagen: $done von ${basics.size} erledigt")
+        Spacer(Modifier.height(8.dp))
+        Progress(done / basics.size.toFloat(), Modifier.fillMaxWidth())
+    }
+    var group: CalGroup? = null
+    for ((i, step) in steps.withIndex()) {
+        if (step.group != group) {
+            group = step.group
+            Row(Modifier.padding(start = 6.dp, top = 10.dp, bottom = 2.dp), verticalAlignment = Alignment.Bottom) {
+                Text(step.group.title.uppercase(), style = LcTypography.labelSmall, color = Lc.muted)
+                Spacer(Modifier.width(8.dp))
+                SmallText(step.group.hint, Lc.faint)
+            }
+        }
+        val on = i == selected
+        val shape = RoundedCornerShape(18.dp)
+        Row(
+            Modifier.fillMaxWidth().clip(shape).background(if (on) Lc.accentSoft else Lc.surface)
+                .border(1.dp, if (on) Lc.accent.copy(alpha = .5f) else Lc.line, shape)
+                .clickable(onClickLabel = step.title) { onSelect(i) }.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(28.dp).clip(CircleShape).background(if (step.tone == Tone.OK) Lc.ok.copy(alpha = .18f) else Lc.surface3),
+                contentAlignment = Alignment.Center) {
+                if (step.tone == Tone.OK) Icon(LcIcons.check, null, tint = Lc.ok, modifier = Modifier.size(16.dp))
+                else Text("${i + 1}", style = LcTypography.labelMedium, color = Lc.muted)
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(step.title, style = LcTypography.titleMedium, color = Lc.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(step.value, style = LcTypography.bodySmall, color = Lc.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.width(8.dp))
+            val c = when (step.tone) { Tone.OK -> Lc.ok; Tone.BAD -> Lc.bad; Tone.WARN -> Lc.warn; else -> Lc.muted }
+            Text(step.chip, style = LcTypography.labelMedium, color = c, maxLines = 1,
+                modifier = Modifier.clip(CircleShape).background(c.copy(alpha = .12f)).padding(horizontal = 10.dp, vertical = 4.dp))
+        }
+        if (on && expanded != null) expanded(i)
     }
 }

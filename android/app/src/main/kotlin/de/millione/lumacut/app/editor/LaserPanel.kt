@@ -3,6 +3,7 @@ package de.millione.lumacut.app.editor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -116,8 +117,10 @@ internal fun LaserCard(editor: EditorViewModel, doc: Document, sel: List<Element
         Text("Was soll der Laser tun?", style = LcTypography.titleMedium)
         Spacer(Modifier.height(6.dp))
         val byName = doc.layers.associateBy { it.name }
+        // Projects without the three standard layers (material test, imports) offer their own layers instead of an empty bar.
         val options = listOf("Gravieren", "Linie", "Schneiden").mapNotNull { byName[it] }.map { it.id to it.label() }
-        Segmented(options, focus, { editor.setActiveLayer(it) }, Modifier.fillMaxWidth())
+            .ifEmpty { doc.layers.filter { l -> doc.elements.any { it.layerId == l.id } }.ifEmpty { doc.layers }.take(4).map { it.id to it.label() } }
+        Segmented(options, focus, { editor.setActiveLayer(it) }, Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()))
         Spacer(Modifier.height(4.dp))
         SmallText(if (sel.isNotEmpty()) "Gilt für die Auswahl (${sel.size})." else "Gilt für neue Formen – zum Ändern erst etwas antippen.", Lc.faint)
 

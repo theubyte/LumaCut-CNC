@@ -211,6 +211,7 @@ fun WorkspaceScreen(machine: MachineViewModel, editor: EditorViewModel, ws: Work
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 private fun Step(n: Int, title: String, ok: Boolean, text: String, last: Boolean = false, actions: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(bottom = if (last) 0.dp else 12.dp)) {
         Box(Modifier.size(28.dp).clip(CircleShape).background(if (ok) Lc.ok.copy(alpha = .2f) else Lc.surface3), contentAlignment = Alignment.Center) {
@@ -221,7 +222,8 @@ private fun Step(n: Int, title: String, ok: Boolean, text: String, last: Boolean
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(title, style = LcTypography.titleMedium, fontWeight = FontWeight.SemiBold)
             SmallText(text, if (ok) Lc.muted else Lc.faint)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { actions() }
+            // Wraps onto a second line instead of cutting labels off.
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { actions() }
         }
     }
 }

@@ -145,7 +145,8 @@ class PiSyncViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
             }
-            if (scanRev != base("scan") && (!scanSyncedOnce || e.background.value === scanSynced)) {
+            if (!scanSyncedOnce && scanRev == base("scan")) { scanSynced = e.background.value; scanSyncedOnce = true }
+            else if (scanRev != base("scan") && (!scanSyncedOnce || e.background.value === scanSynced)) {
                 val remote = c.scan()
                 val bmp = remote?.let { withContext(Dispatchers.Default) { BitmapFactory.decodeByteArray(it.second, 0, it.second.size) } }
                 e.setBackground(bmp)
@@ -235,7 +236,9 @@ class PiSyncViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun pushScan(bmp: ImageBitmap?) {
         val c = client() ?: return
         if (scanSyncedOnce && bmp === scanSynced) return
-        if (!scanSyncedOnce && (bmp == null || (base("scan") == 0 && (machine?.status?.value?.sync?.scan ?: 0) > 0))) return
+        // Not before the first comparison with the Pi: at start-up the picture cached on this device could be older than
+        // the Pi's, and "the newest scan wins" below would then overwrite a newer scan with it.
+        if (!scanSyncedOnce) return
         try {
             val png = bmp?.let { b -> withContext(Dispatchers.Default) {
                 ByteArrayOutputStream().also { b.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()

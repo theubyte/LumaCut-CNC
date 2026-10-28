@@ -55,6 +55,7 @@ object LcIcons {
     val layers = material
     val plus = icon("plus", "M12 5v14M5 12h14")
     val minus = icon("minus", "M5 12h14")
+    val more = icon("more", "M5 12h.01M12 12h.01M19 12h.01")
     val fit = icon("fit", "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5", "M8 8h8v8H8z")
     val send = icon("send", "M4 12l16-8-6 16-2-7z")
     val save = icon("save", "M5 4h11l3 3v13H5z", "M8 4v5h7V4", "M8 20v-6h8v6")

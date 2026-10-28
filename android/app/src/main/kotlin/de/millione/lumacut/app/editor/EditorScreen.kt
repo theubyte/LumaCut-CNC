@@ -84,6 +84,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.millione.lumacut.app.machine.MachineViewModel
 import de.millione.lumacut.app.machine.canControl
@@ -199,6 +200,8 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     val config = androidx.compose.ui.platform.LocalConfiguration.current
     var panelOpen by rememberSaveable { mutableStateOf(config.screenWidthDp >= 1000) }
     val view = remember { CanvasView() }
+    // Narrow (tablet upright, phone): the menus show only their icons and the plate choice moves into the scrolling bar.
+    val roomyBar = config.screenWidthDp >= 1100
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val barScroll = rememberScrollState()
@@ -206,14 +209,17 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
             Row(Modifier.horizontalScroll(barScroll).padding(vertical = 6.dp, horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 var title by remember(doc.title) { mutableStateOf(doc.title) }
-                BarTextField(title, { title = it; editor.rename(it) }, Modifier.width(if (compact) 140.dp else 150.dp))
+                BarTextField(title, { title = it; editor.rename(it) }, Modifier.width(if (roomyBar) 150.dp else 130.dp))
                 BarBtn(LcIcons.undo, null, editor::undo, enabled = canUndo, description = "Rückgängig")
                 BarBtn(LcIcons.redo, null, editor::redo, enabled = canRedo, description = "Wiederholen")
                 BarDivider()
-                BarBtn(LcIcons.upload, "Import", { importPicker.launch(arrayOf("*/*")) }, description = "Datei importieren (SVG, DXF, Bild)")
                 Box {
-                    BarBtn(LcIcons.plus, "Einfügen", { shapesMenu = true }, menu = true)
+                    BarBtn(LcIcons.plus, "Einfügen", { shapesMenu = true }, menu = true, description = "Einfügen: Datei, Formen, QR-Code, Vorlagen")
                     DropdownMenu(shapesMenu, { shapesMenu = false }, containerColor = Lc.surface) {
+                        DropdownMenuItem(text = { Text("Datei importieren (SVG, DXF, Bild) …") },
+                            leadingIcon = { Icon(LcIcons.upload, null, tint = Lc.muted) },
+                            onClick = { shapesMenu = false; importPicker.launch(arrayOf("*/*")) })
+                        HorizontalDivider(color = Lc.line)
                         @Composable fun shape(label: String, kind: String, paths: () -> List<List<Pt>>) =
                             DropdownMenuItem(text = { Text(label) }, onClick = { shapesMenu = false; editor.addShape(kind, paths(), "Schneiden") })
                         shape("Herz", "Herz") { listOf(ShapeLib.heart(60.0, 54.0)) }
@@ -222,18 +228,15 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         shape("Anhänger mit Loch", "Anhänger") { ShapeLib.pendant(50.0, 30.0, 4.0) }
                         HorizontalDivider(color = Lc.line)
                         DropdownMenuItem(text = { Text("QR-Code …") }, onClick = { shapesMenu = false; qrOpen = true })
+                        HorizontalDivider(color = Lc.line)
+                        // Templates to personalise (before: an own button "Personalisieren"/"Vorlagen").
+                        for ((key, label) in listOf("tags" to "Vorlage: Namensschilder & Anhänger …", "emblem" to "Vorlage: Monogramm-Emblem …",
+                                "frame" to "Vorlage: Rahmen …", "ruler" to "Vorlage: Lineal …", "puzzle" to "Vorlage: Puzzle …"))
+                            DropdownMenuItem(text = { Text(label) }, onClick = { shapesMenu = false; personal = key })
                     }
                 }
                 Box {
-                    BarBtn(LcIcons.heart, "Vorlagen", { personalMenu = true }, menu = true, description = "Vorlagen zum Personalisieren")
-                    DropdownMenu(personalMenu, { personalMenu = false }, containerColor = Lc.surface) {
-                        for ((key, label) in listOf("tags" to "Namensschilder & Anhänger …", "emblem" to "Monogramm-Emblem …",
-                                "frame" to "Rahmen …", "ruler" to "Lineal …", "puzzle" to "Puzzle …"))
-                            DropdownMenuItem(text = { Text(label) }, onClick = { personalMenu = false; personal = key })
-                    }
-                }
-                Box {
-                    BarBtn(LcIcons.tools, "Werkzeuge", { toolsMenu = true }, menu = true)
+                    BarBtn(LcIcons.tools, if (roomyBar) "Werkzeuge" else null, { toolsMenu = true }, menu = true, description = "Werkzeuge")
                     DropdownMenu(toolsMenu, { toolsMenu = false }, containerColor = Lc.surface) {
                         @Composable fun item(label: String, enabled: Boolean = true, action: () -> Unit) =
                             DropdownMenuItem(text = { Text(label) }, enabled = enabled, onClick = { toolsMenu = false; action() })
@@ -256,10 +259,10 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                     }
                 }
                 de.millione.lumacut.app.workspace.ScanMenu(machine, editor, ws, onSetup = onScan) { open ->
-                    BarBtn(LcIcons.camera, "Scannen", open, menu = true, description = "Scannen: Bereiche, Motiv oder ganzer Arbeitsplatz")
+                    BarBtn(LcIcons.camera, if (roomyBar) "Scannen" else null, open, menu = true, description = "Scannen: Bereiche, Motiv oder ganzer Arbeitsplatz")
                 }
                 Box {
-                    BarBtn(null, "Mehr", { moreMenu = true }, menu = true)
+                    BarBtn(if (roomyBar) null else LcIcons.more, if (roomyBar) "Mehr" else null, { moreMenu = true }, menu = true, description = "Mehr: Projekt, Gruppen, Hintergrund")
                     DropdownMenu(moreMenu, { moreMenu = false }, containerColor = Lc.surface) {
                         @Composable fun item(label: String, enabled: Boolean = true, action: () -> Unit) =
                             DropdownMenuItem(text = { Text(label) }, enabled = enabled, onClick = { moreMenu = false; action() })
@@ -277,12 +280,13 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         item("Projekt speichern …") { projectSaver.launch(PiClient.jobNameFrom(doc.title).removeSuffix(".gcode") + ".lumacut.json") }
                     }
                 }
-                PlateMenu(editor)
+                if (!roomyBar) PlateMenu(editor)
             }
             // Fades out where the bar continues, so it is clear that more tools follow.
             if (barScroll.canScrollForward) Box(Modifier.align(Alignment.CenterEnd).width(40.dp).height(56.dp)
                 .background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Lc.bg.copy(alpha = 0f), Lc.bg))))
             }
+            if (roomyBar) PlateMenu(editor)
             BarBtn(LcIcons.right, if (compact) null else "Starten", onNext, primary = true, enabled = project.elements.isNotEmpty(), description = "Weiter: Starten")
         }
         // Work surface: tools, canvas and side panel float on the dotted background (ref.: floor-plan editor).
@@ -293,7 +297,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                 androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
                     val roomy = maxWidth > 760.dp
                     // Below the zoom pill, so it never covers the top edge of the work area.
-                    Box(Modifier.fillMaxSize().padding(top = if (config.screenHeightDp >= 500) 52.dp else 0.dp)) { EditorCanvas(editor, machineStatus?.position, view, onText = { textAt = it }) }
+                    Box(Modifier.fillMaxSize().padding(top = if (config.screenHeightDp >= 500) 52.dp else 0.dp).clip(RoundedCornerShape(18.dp))) { EditorCanvas(editor, machineStatus?.position, view, onText = { textAt = it }) }
                     if (tool == Tool.MEASURE) MeasureBar(editor, Modifier.align(Alignment.TopStart).padding(top = 60.dp))
                     else ToolOptions(editor, tool, Modifier.align(Alignment.TopStart).padding(top = 60.dp))
                     ZoomPill(view, Modifier.align(Alignment.TopStart))
@@ -395,7 +399,7 @@ private fun ToolColumn(tool: Tool, onTool: (Tool) -> Unit, labels: Boolean) {
     val groups = listOf(setOf(Tool.SELECT, Tool.NODES), setOf(Tool.STAMP, Tool.PAINT, Tool.ERASER), setOf(Tool.MEASURE))
     val shape = RoundedCornerShape(22.dp)
     Column(
-        Modifier.width(if (labels) 76.dp else 56.dp).lift(shape).clip(shape).background(Lc.surface)
+        Modifier.width(if (labels) 82.dp else 56.dp).lift(shape).clip(shape).background(Lc.surface)
             .verticalScroll(rememberScrollState()).padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -413,7 +417,8 @@ private fun ToolColumn(tool: Tool, onTool: (Tool) -> Unit, labels: Boolean) {
                 Icon(icons.getValue(t), t.label, tint = if (on) Lc.accentInk else Lc.muted, modifier = Modifier.size(22.dp))
                 if (labels) {
                     Spacer(Modifier.height(3.dp))
-                    Text(t.label, style = LcTypography.labelMedium, color = if (on) Lc.accentInk else Lc.muted, maxLines = 1, overflow = TextOverflow.Clip)
+                    Text(t.label, style = LcTypography.labelMedium.copy(fontSize = 11.sp, letterSpacing = 0.sp), color = if (on) Lc.accentInk else Lc.muted,
+                         maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -810,6 +815,7 @@ private fun Inspector(editor: EditorViewModel, modifier: Modifier, onAdjust: () 
             Slider(bgAlpha, editor::setBackgroundAlpha, colors = SliderDefaults.colors(thumbColor = Lc.accent, activeTrackColor = Lc.accent))
             SmallText("Deckkraft ${(bgAlpha * 100).toInt()} %")
         }
+        Spacer(Modifier.height(72.dp))
     }
 }
 

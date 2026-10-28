@@ -1060,7 +1060,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     fun addLayer() {
         val palette = listOf(0xFFFFB45CL, 0xFFB98CFFL, 0xFFFF8AD8L, 0xFF9BE15DL, 0xFF5CE1E6L)
         val n = _doc.value.layers.size
-        val layer = Layer(name = "Ebene ${n + 1}", color = palette[n % palette.size], mode = LayerMode.LINE, powerPct = 50.0, speed = 1200.0)
+        // Smallest free number: the layer count includes the standard layers, so it gave "Ebene 29" for the third own layer.
+        val taken = _doc.value.layers.map { it.name }.toSet()
+        val k = generateSequence(1) { it + 1 }.first { "Ebene $it" !in taken }
+        val layer = Layer(name = "Ebene $k", color = palette[n % palette.size], mode = LayerMode.LINE, powerPct = 50.0, speed = 1200.0)
         change { it.copy(layers = it.layers + layer) }
         _activeLayer.value = layer.id
     }
