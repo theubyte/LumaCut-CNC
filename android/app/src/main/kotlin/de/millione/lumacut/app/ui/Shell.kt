@@ -187,8 +187,8 @@ private fun TopBar(machine: MachineViewModel, compact: Boolean, railOpen: Boolea
         // Connection and state as one dot + short text; the address only while connected and there is room.
         val tone = if (connTone == Tone.OK) head.tone else connTone
         val text = if (!compact && width >= 900 && host.isNotBlank() && connTone == Tone.OK) "${head.title} · $host" else head.title
-        StatusDot(text, tone, Modifier.weight(1f, fill = false))
-        Spacer(Modifier.weight(1f))
+        // Takes the free width, so position and NOT-AUS sit flush right.
+        StatusDot(text, tone, Modifier.weight(1f))
         if (width >= 760) status?.position?.takeIf { it.size == 3 }?.let { p ->
             // Work-area coordinates like the editor; negative = head in the laser's reserved border (parked).
             val w = de.millione.lumacut.core.Work.fromMachine(p[0], p[1])
