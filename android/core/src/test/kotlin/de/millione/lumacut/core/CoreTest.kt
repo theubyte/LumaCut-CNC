@@ -72,10 +72,31 @@ class PiClientTest {
         srv.shutdown()
     }
 
+    @Test fun `address accepts IP, host name and URL`() {
+        assertEquals("http://192.168.2.89:8080/", PiClient.baseUrl("192.168.2.89").toString())
+        assertEquals("http://192.168.2.89:9000/", PiClient.baseUrl(" 192.168.2.89:9000 ").toString())
+        assertEquals("http://lumacut.local:8080/", PiClient.baseUrl("lumacut.local").toString())
+        assertEquals("http://lumacut:8080/", PiClient.baseUrl("lumacut").toString())
+        assertEquals("http://lumacut.fritz.box/", PiClient.baseUrl("http://lumacut.fritz.box/").toString())
+        assertEquals("https://laser.example.com/lumacut", PiClient.baseUrl("https://laser.example.com/lumacut").toString())
+        for (bad in listOf("", "ftp://192.168.2.89", "laser.example.com", "http://8.8.8.8", "http://u:p@lumacut.local", "lumacut.local/?x=1"))
+            assertFailsWith<IllegalArgumentException>(bad) { PiClient.baseUrl(bad) }
+    }
+
+    @Test fun `requests go below the URL path`() = runBlocking {
+        val srv = MockWebServer()
+        srv.enqueue(MockResponse().setBody("""{"files":[]}"""))
+        srv.start()
+        PiClient("http://127.0.0.1:${srv.port}/lumacut/").jobs()
+        assertEquals("/lumacut/api/jobs", srv.takeRequest().path)
+        srv.shutdown()
+    }
+
     @Test fun `only LAN addresses, unknown actions and bad names refused`() {
         assertTrue(PiClient.isLocalIpv4("192.168.2.89"))
         assertTrue(!PiClient.isLocalIpv4("8.8.8.8") && !PiClient.isLocalIpv4("lumacut.local"))
         assertFailsWith<IllegalArgumentException> { PiClient("1.1.1.1") }
+        assertFailsWith<IllegalArgumentException> { PiClient("http://laser.example.com") }
         assertFailsWith<IllegalArgumentException> { runBlocking { PiClient("127.0.0.1", 1).action("M42") } }
         assertFailsWith<IllegalArgumentException> { PiClient.checkJobName("../x.gcode") }
         assertEquals("Namensschild-fuer-Maerz.gcode", PiClient.jobNameFrom("Namensschild für März"))

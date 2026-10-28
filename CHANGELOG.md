@@ -6,6 +6,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 - **Kalibrierlauf auf 3-mm-MDF:** Fokus-Test (Parabel über alle Linien), Bewegungs- und Schwing-Auswertung (robuster Linienabstand, Marken von einer Seite angefahren), Laserpunkt-Finder (weißer Kern im großen blauen Hof) nach echtem Lauf überarbeitet.
 - **Scan gleichmäßig hell:** Das Licht auf dem Bett ändert sich mit der Kopfposition (Blendung mal links, mal rechts im Bild); der fertige Scan wird jetzt im Hintergrund ausgeglichen (`Scan.level`), Markierungen behalten ihren Kontrast.
+- **Laser-Adresse als Name oder URL:** Statt nur der IP gehen auch `lumacut.local`, `192.168.2.89:9000`, `http://lumacut.fritz.box` oder `https://…/pfad`. Ohne `http://` gilt Port 8080; unverschlüsseltes http nur im Heimnetz, im Internet nur https.
 
 ## 2026-10-27
 

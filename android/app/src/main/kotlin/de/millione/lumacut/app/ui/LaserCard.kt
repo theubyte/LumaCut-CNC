@@ -46,7 +46,7 @@ fun LaserCard(machine: MachineViewModel) {
         CardTitle("Laser")
         Text(if (host.isBlank()) "Noch kein Laser eingestellt" else "Aktueller Laser: $host", style = LcTypography.titleMedium, color = Lc.text)
         SmallText(when {
-            host.isBlank() -> "Mit „Laser suchen“ im WLAN finden oder die Adresse eintragen (steht im Router, z. B. 192.168.2.89)."
+            host.isBlank() -> "Mit „Laser suchen“ im WLAN finden oder die Adresse eintragen: IP (steht im Router, z. B. 192.168.2.89), Name (lumacut.local) oder URL."
             online == true -> "Verbunden · Controller ${if (status?.connected == true) "bereit" else "nicht verbunden"}"
             online == false -> "Keine Antwort von $host – Laser einschalten und WLAN prüfen."
             else -> "Verbinde …"
@@ -77,8 +77,9 @@ fun LaserCard(machine: MachineViewModel) {
         }
         Spacer(Modifier.height(14.dp))
         OutlinedTextField(
-            ip, { ip = it.filter { c -> c.isDigit() || c == '.' } }, label = { Text("Adresse eingeben") }, singleLine = true,
-            modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            ip, { ip = it.filterNot { c -> c.isWhitespace() } }, label = { Text("IP oder Adresse") }, singleLine = true,
+            placeholder = { Text("192.168.2.89 · lumacut.local · https://…") },
+            modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             textStyle = LcTypography.bodyLarge.merge(NumberStyle), shape = RoundedCornerShape(14.dp),
         )
         Spacer(Modifier.height(10.dp))

@@ -15,6 +15,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.FormBody
 import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -191,21 +192,22 @@ class PiStatusFormatException(message: String) : PiException(message)
 /**
  * HTTP client for the Pi 400 service on port 8080. All safety rules are
  * enforced by the Pi; this class only transports requests.
+ *
+ * [address] is an IP, a host name or a URL (see [baseUrl]).
  */
 class PiClient(
-    val host: String,
-    private val port: Int = 8080,
+    address: String,
+    defaultPort: Int = 8080,
     private val http: OkHttpClient = defaultClient(),
 ) {
     private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; explicitNulls = false }
     private val bodyJson = Json { encodeDefaults = true; explicitNulls = false }
 
-    init {
-        require(isLocalIpv4(host)) { "Nur lokale IPv4-Adressen (z. B. 192.168.2.89)" }
-    }
+    private val base: HttpUrl = baseUrl(address, defaultPort)
+    val host: String get() = base.host
 
     private fun url(vararg segments: String): HttpUrl =
-        HttpUrl.Builder().scheme("http").host(host).port(port).apply { segments.forEach { addPathSegment(it) } }.build()
+        base.newBuilder().apply { segments.forEach { addPathSegment(it) } }.build()
 
     private suspend fun call(request: Request, longRunning: Boolean = false, callTimeoutSec: Long = 0): String = withContext(Dispatchers.IO) {
         val client = when {
@@ -546,6 +548,38 @@ class PiClient(
             .writeTimeout(60, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .build()
+
+        private val LOCAL_SUFFIXES = listOf(".local", ".lan", ".home", ".home.arpa", ".internal", ".fritz.box", ".localhost")
+
+        /**
+         * Base URL from what the user typed: "192.168.2.89", "lumacut.local:8080",
+         * "http://lumacut.fritz.box" or "https://laser.example.com/lumacut".
+         * Without a scheme it is http on [defaultPort]; with one, the URL's own port.
+         * Plain http only to the home network – anything else needs https.
+         */
+        fun baseUrl(address: String, defaultPort: Int = 8080): HttpUrl {
+            val text = address.trim().trimEnd('/')
+            require(text.isNotEmpty()) { "Adresse fehlt" }
+            val hasScheme = "://" in text
+            val url = (if (hasScheme) text else "http://$text").toHttpUrlOrNull()
+            require(url != null && url.scheme in setOf("http", "https") && url.host.isNotEmpty()) {
+                "Adresse nicht lesbar – z. B. 192.168.2.89, lumacut.local oder https://…"
+            }
+            require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) {
+                "Adresse ohne Benutzer, ? oder #"
+            }
+            require(url.scheme == "https" || isHomeNetwork(url.host)) {
+                "Unverschlüsselt (http) nur im Heimnetz – für Adressen im Internet https:// verwenden"
+            }
+            val explicitPort = ":" in text.substringAfter("://").substringBefore('/')
+            return if (hasScheme || explicitPort) url else url.newBuilder().port(defaultPort).build()
+        }
+
+        /** Private IPv4 or a name that only the home network resolves (no dot, .local, .fritz.box, …). */
+        fun isHomeNetwork(host: String): Boolean {
+            val h = host.lowercase()
+            return isLocalIpv4(h) || h == "localhost" || ('.' !in h && h.any { it.isLetter() }) || LOCAL_SUFFIXES.any { h.endsWith(it) }
+        }
 
         fun isLocalIpv4(host: String): Boolean {
             val parts = host.split(".")
