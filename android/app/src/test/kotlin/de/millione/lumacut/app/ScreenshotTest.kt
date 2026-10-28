@@ -1,0 +1,101 @@
+package de.millione.lumacut.app
+
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.lifecycle.ViewModelProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.github.takahirom.roborazzi.captureRoboImage
+import de.millione.lumacut.app.editor.EditorViewModel
+import de.millione.lumacut.app.machine.MachineViewModel
+import de.millione.lumacut.core.MachineStatus
+import de.millione.lumacut.core.PiClient
+import de.millione.lumacut.core.ShapeLib
+import de.millione.lumacut.core.grouped
+import kotlinx.coroutines.flow.MutableStateFlow
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+/**
+ * Renders every main screen as a PNG (build/screenshots) on tablet and phone, light and dark.
+ * The machine is faked as connected and homed (no network); the motif is a heart and a star.
+ */
+@RunWith(AndroidJUnit4::class)
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+@Config(sdk = [34])
+class ScreenshotTest {
+    @get:Rule val rule = createAndroidComposeRule<MainActivity>()
+
+    @Test @Config(qualifiers = "w1280dp-h800dp-land-mdpi") fun tablet() = tour("tablet")
+    @Test @Config(qualifiers = "w1280dp-h800dp-land-mdpi-night") fun tabletDark() = tour("tablet-dunkel")
+    @Test @Config(qualifiers = "w411dp-h891dp-port-xhdpi") fun phone() = tour("handy")
+    @Test @Config(qualifiers = "w891dp-h411dp-land-xhdpi") fun phoneLandscape() = tour("handy-quer")
+
+    private fun shot(name: String) {
+        rule.waitForIdle()
+        rule.mainClock.advanceTimeBy(1000)
+        rule.waitForIdle()
+        rule.onRoot().captureRoboImage("build/screenshots/$name.png")
+    }
+
+    /** Navigates by the test tag nav-<key> (new shell) or the first matching label (old shell). */
+    private fun go(key: String, vararg labels: String) {
+        val tagged = rule.onAllNodes(hasTestTag("nav-$key"))
+        if (tagged.fetchSemanticsNodes().isNotEmpty()) { tagged.onFirst().performClick(); rule.waitForIdle(); return }
+        for (l in labels) {
+            val n = rule.onAllNodesWithText(l)
+            if (n.fetchSemanticsNodes().isNotEmpty()) { n.onFirst().performClick(); rule.waitForIdle(); return }
+        }
+        error("Navigation $key nicht gefunden")
+    }
+
+    private fun tab(label: String) {
+        val n = rule.onAllNodesWithText(label, substring = true)
+        if (n.fetchSemanticsNodes().isNotEmpty()) { n.onFirst().performClick(); rule.waitForIdle() }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> field(vm: Any, name: String) =
+        vm.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(vm) as MutableStateFlow<T>
+
+    private fun tour(prefix: String) {
+        val provider = ViewModelProvider(rule.activity)
+        val machine = provider[MachineViewModel::class.java]
+        val editor = provider[EditorViewModel::class.java]
+        rule.runOnUiThread {
+            field<String>(machine, "_host").value = "192.168.2.89"
+            field<Boolean?>(machine, "_online").value = true
+            field<MachineStatus?>(machine, "_status").value = MachineStatus(
+                connected = true, state = "Idle", homed = true, position = listOf(182.0, 160.0, 24.5),
+                identity = "FIRMWARE_NAME:Marlin 2.1.2.5 (LumaCut)", lights = true, light_dimmable = true, light_brightness = 70.0,
+                workpiece_surface_z = 3.0, laser_focus_z = 9.2, features = listOf("autorun_mesh", "materials", "workspace", "app_update"),
+                coord_convention = PiClient.COORD_CONVENTION, recent = listOf("echo: busy processing", "X:182.00 Y:160.00 Z:24.50"),
+            )
+        }
+        shot("$prefix-1-material")
+        rule.runOnUiThread {
+            machine.materials.value.items.grouped("").firstOrNull()?.let(editor::selectMaterial)
+            editor.addShape("Herz", listOf(ShapeLib.heart(80.0, 72.0)), "Schneiden")
+            editor.moveSelected(-70.0, 0.0, "shot-a")
+            editor.addShape("Stern", listOf(ShapeLib.star(5, 70.0, 66.0)), "Schneiden")
+            editor.moveSelected(70.0, 0.0, "shot-b")
+        }
+        go("motiv", "2 · Motiv", "Motiv")
+        shot("$prefix-2-motiv")
+        go("start", "3 · Starten", "Starten")
+        shot("$prefix-3-starten")
+        go("maschine", "Maschine")
+        shot("$prefix-4-maschine")
+        tab("Kalibrieren"); shot("$prefix-5-kalibrieren")
+        tab("Arbeitsplatz"); shot("$prefix-6-scan")
+        tab("Aufträge"); shot("$prefix-7-auftraege")
+        go("einstellungen", "Einstellungen")
+        shot("$prefix-8-einstellungen")
+    }
+}

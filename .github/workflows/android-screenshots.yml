@@ -1,0 +1,56 @@
+name: LumaCut Android Screenshots
+# Renders the app screens with Robolectric/Roborazzi (tablet, phone, light, dark) and
+# keeps the PNGs as artifact and on the branch screenshots-<branch> for review.
+on:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-screenshots.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  shots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Render screens
+        run: gradle :app:testDebugUnitTest --tests '*ScreenshotTest*' --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LumaCut-Screenshots
+          path: |
+            android/app/build/screenshots/
+            android/app/build/reports/tests/
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Push PNGs to screenshots branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="$PWD/app/build/screenshots"
+          [ -d "$src" ] || { echo "keine Screenshots"; exit 0; }
+          dir="$RUNNER_TEMP/shots"; mkdir -p "$dir"; cp "$src"/*.png "$dir"/
+          cd "$dir"
+          echo "Screenshots von ${GITHUB_SHA} (${GITHUB_REF_NAME})" > README.md
+          git init -q; git checkout -q -b shots; git add .
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -q -m "Screenshots ${GITHUB_SHA}"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/screenshots-${GITHUB_REF_NAME//\//-}"
