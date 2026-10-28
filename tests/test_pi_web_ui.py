@@ -47,7 +47,10 @@ def test_phase_display_and_estop_never_disabled():
     assert 'id="stop"' in HTML
     assert not re.search(r'\$\("stop"\)\.disabled', HTML)
     assert not re.search(r'getElementById\(["\']stop["\']\)\.disabled', HTML)
-    assert "confirm(" in HTML and "M112" in HTML
+    # Not-Aus fragt nach (eigener Dialog) und löst dann M112 aus
+    assert '$("stop").onclick=estop' in HTML and "M112" in HTML
+    body = HTML[HTML.index("async function estop()"):HTML.index('$("stop").onclick=estop')]
+    assert "await ask(" in body and 'call("estop")' in body
 
 
 def test_light_brightness_effects_and_material_editing():
@@ -59,8 +62,43 @@ def test_light_brightness_effects_and_material_editing():
 
 
 def test_single_main_start_button_runs_autorun():
-    assert '<button class="primary" data-action="autorun" data-motion type="button">Auftrag starten</button>' in HTML
+    assert re.search(r'<button class="btn primary lg block" data-action="autorun" data-motion type="button">.*?Auftrag starten</button>', HTML)
+    assert len(re.findall(r'<button[^>]*data-action="autorun"', HTML)) == 1
     assert "Motivmitte" not in HTML   # der Pi tastet ein Raster ab
+
+
+def test_material_choice_is_shared_on_the_pi():
+    # Das gewählte Material liegt im Arbeitsstand des Pi (gilt für alle Geräte),
+    # nicht nur im Browser; ohne Material startet kein Auftrag.
+    assert 'api("/api/workspace",{method:"PUT",json:{material:{name,thickness_mm:t},base_revision:wsRev' in HTML
+    assert "e.status===409" in HTML
+    assert 'id="materialMissing"' in HTML
+
+
+def test_new_pages_and_settings():
+    for page in ("steuerung", "auftraege", "material", "kamera", "einstellungen", "system"):
+        assert 'data-page="%s"' % page in HTML and 'data-nav="%s"' % page in HTML
+    for name in ("machine_name", "exhaust_auto", "exhaust_after_s", "thickness_tolerance_mm", "line_laser_gpio"):
+        assert name in HTML
+    assert 'op:"report",cmd' in HTML and 'href="/api/backup"' in HTML
+    assert 'call("motion_limits"' in HTML and 'call("origin_set"' in HTML
+    assert 'api("/api/camera/settings",{method:"PUT",json:body})' in HTML
+
+
+def test_bed_click_menu_only_sends_laser_off_actions():
+    menu = HTML[HTML.index("function bedMenu(ev)"):HTML.index('document.addEventListener("pointerdown"')]
+    ops = set(re.findall(r'call\("([a-z_]+)"', menu))
+    assert ops == {"moveto", "probe", "origin_set"}
+    assert "!free||!homed" in menu
+
+
+def test_scan_image_lies_outside_the_mirrored_group():
+    assert HTML.index('<image id="bedScan"') < HTML.index('<g id="bedFlip"')
+
+
+def test_light_and_dark_theme():
+    assert "@media (prefers-color-scheme:dark)" in HTML and ":root[data-theme=dark]" in HTML
+    assert 'localStorage.getItem("lumacut.theme")' in HTML
 
 
 def test_android_app_tab():

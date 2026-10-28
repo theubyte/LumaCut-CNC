@@ -68,6 +68,8 @@ class DiscoveryTest {
         assertEquals("belegt", LaserDiscovery.parseStatus(status.replace("\"Frei\"", "\"lightburn\""), "h")!!.state)
         assertEquals("Auftrag läuft", LaserDiscovery.parseStatus(status.replace("\"idle\"", "\"probing\""), "h")!!.state)
         assertEquals("Controller getrennt", LaserDiscovery.parseStatus(status.replace("\"connected\":true", "\"connected\":false"), "h")!!.state)
+        // the name set on the Pi wins over the firmware identity
+        assertEquals("Werkstatt", LaserDiscovery.parseStatus(status.replace("\"job\":", "\"config\":{\"machine_name\":\"Werkstatt\"},\"job\":"), "h")!!.name)
         // an older Pi without features is still recognised by the convention + job fields
         assertNotNull(LaserDiscovery.parseStatus("""{"connected":true,"coord_convention":"origin_top_right","job":{}}""", "h"))
         // other devices on port 8080

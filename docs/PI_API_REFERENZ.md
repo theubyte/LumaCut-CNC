@@ -110,10 +110,11 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 
 | Methode | Pfad | Content-Type der Anfrage | Zweck |
 | --- | --- | --- | --- |
-| GET | `/` | – | alte Web-UI (`pi400/marlin/index.html`) |
+| GET | `/` | – | Web-UI (`pi400/marlin/index.html`, Aufbau in `docs/PI_WEB_UI_REDESIGN.md`) |
 | GET | `/api/status` | – | kompletter Maschinen-, Auftrags-, Rahmen-, Warteschlangenstatus |
 | POST | `/api/action` | form | alle Maschinenaktionen über `op` (Abschnitt 4) |
-| POST | `/api/settings` | form | Z-/Fokus-/Tasterwerte dauerhaft speichern |
+| POST | `/api/settings` | form | Einstellungen dauerhaft speichern (jedes Feld optional, Abschnitt 4.9) |
+| GET | `/api/backup` | – | alle Einstellungen, Materialien, Arbeitsstand und Kamera-Kalibrierung als JSON-Download (Abschnitt 4.9) |
 | POST | `/api/commission` | form | Mechanik-Freigabe ein/aus |
 | POST | `/api/firmware` | multipart | SKR-Firmware über USB flashen |
 | POST | `/api/upload` | multipart | G-Code-Auftrag prüfen und speichern |
@@ -241,14 +242,14 @@ Felder aus `web.py` (`status()`):
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
 | `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
-| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi), `camera_settings` = `/api/camera/settings` und Snapshots in genau der angefragten Größe. Fehlt bei älteren Pi-Ständen. |
+| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi), `camera_settings` = `/api/camera/settings` und Snapshots in genau der angefragten Größe, `workspace` = `/api/workspace…`, `report` = `op=report`, `backup` = `GET /api/backup`, `exhaust_auto` = Abluft-Automatik und `machine_name` in `/api/settings`. Fehlt bei älteren Pi-Ständen. |
 | `coord_convention` | string | `"origin_top_right"`: Bedeutung der Ankernamen (siehe `op=place`). Fehlt bei Pi-Ständen vor 2026-10-26; Studio tauscht dann links/rechts. |
 | `estimated_tip_gap_mm` | number \| null | geschätzter Abstand Spitze ↔ Werkstück (nur wenn referenziert, Position und Oberfläche bekannt). Schätzung, keine Messung. |
 | `estimated_focus_adjust_mm` | number \| null | Fokusabstand − `estimated_tip_gap_mm` (nur Anzeige) |
 | `firmware` | string | immer `"marlin"` |
 | `expected_pwm` | string | `"PA1 / M3 I / S0..255"` (Info) |
 | `io` | object | Klartext-Belegung `laser_supply_switch`, `laser_pwm`, `fan_cooldown`, `exhaust`, `lights`, `aux` (Info) |
-| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware), `thickness_tolerance_mm` (2,0: so weit darf die abgetastete Oberfläche von der Materialstärke abweichen), `line_laser_gpio` (BCM-Pin des Mess-Linienlasers oder `null`) |
+| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware), `thickness_tolerance_mm` (2,0: so weit darf die abgetastete Oberfläche von der Materialstärke abweichen), `line_laser_gpio` (BCM-Pin des Mess-Linienlasers oder `null`), `machine_name` (Gerätename, Standard „LumaCut“), `exhaust_auto` (Abluft beim Auftragsstart an), `exhaust_after_s` (Abluft-Nachlauf nach dem Auftrag, 0..900 s, Standard 60) |
 | `line_laser` | object | `{gpio, on}`: roter Mess-Linienlaser am Kopf (3D-Höhe), geschaltet über einen Pi-GPIO (BCM); `gpio` `null` = nicht eingebaut |
 | `sync` | object | `{workspace, project, scan}`: Revisionen des Arbeitsstands auf dem Pi (Abschnitt 4.15). Ändert sich eine, holt jedes Gerät nur diesen Teil neu. |
 | `travel_z_mm` | number | Fahrhöhe über unbekanntem Gelände = Stärke des gewählten Materials + 20 mm, mindestens `z_clearance_mm`, höchstens 80. Alle Pi-Fahrten (moveto, Abtasten, Parken, nach dem Referenzieren, lange Leerfahrten im Auftrag) gehen mindestens so hoch. |
@@ -349,6 +350,16 @@ wiederholen (Abschnitt 9.2).
 | Wirkung | sendet `M115` / `M114` / `M119` (Timeout 12 s) |
 | Erfolg | 200 `{"message": "<Marlin-Antwortzeilen, mit \n getrennt>"}` |
 | Fehler | Abschnitt 1.2; 503 `Keine Marlin-Bestätigung vor Fristablauf` |
+
+#### `op=report`
+
+| | |
+| --- | --- |
+| Parameter | `cmd`: genau eine der Abfragen `M105`, `M114`, `M115`, `M119`, `M503` (nur lesen, ohne Parameter) |
+| Vorbedingungen | **frei** |
+| Wirkung | sendet die Abfrage (Timeout 15 s); Diagnose-Seite der Web-UI |
+| Erfolg | 200 `{message, cmd, lines: [<Marlin-Antwortzeilen>]}` |
+| Fehler | 400 `Nur Abfragen: M105, M114, M115, M119, M503`; Abschnitt 1.2 |
 
 ### 4.4 `POST /api/action` – Bewegung
 
@@ -684,7 +695,8 @@ laufenden. 200 `{"message": "Warteschlange geleert", "queue": {…}}`.
 
 ### 4.9 `POST /api/settings`
 
-Form-Felder (**alle drei Zahlen Pflicht**, kein Teil-Update):
+Form-Felder – **jedes optional**: ein fehlendes Feld behält seinen Wert, so speichert die
+Web-UI jede Gruppe für sich.
 
 | Feld | Typ | Bereich |
 | --- | --- | --- |
@@ -692,14 +704,24 @@ Form-Felder (**alle drei Zahlen Pflicht**, kein Teil-Update):
 | `focus_gap_mm` | number | 0.1..30 |
 | `z_switch_tip_offset_mm` | number | -20..20 |
 | `probe_offset_x_mm`, `probe_offset_y_mm` | number oder leer | -80..80; beide oder keiner (leer = Versatz löschen) |
+| `thickness_tolerance_mm` | number | 0.5..10 (leer = unverändert) |
+| `line_laser_gpio` | int oder leer | BCM-Pin des Mess-Linienlasers, leer = keiner |
+| `machine_name` | string | 1..40 Zeichen (Leerraum wird zusammengefasst) |
+| `exhaust_auto` | `0`/`1` | Abluft beim Auftragsstart einschalten (`M8`) |
+| `exhaust_after_s` | int | 0..900: so lange nach dem Auftrag läuft die Abluft noch, dann `M9` – außer ein neuer Auftrag läuft oder jemand anderes hat die Steuerung |
 
 | | |
 | --- | --- |
 | Vorbedingungen | keine Besitzer-Prüfung (geht auch mit LightBurn); sendet nichts an das SKR |
 | Sperre | nimmt die Maschinensperre **blockierend** → wartet, bis eine laufende Web-Fahrt (Homing usw.) fertig ist |
-| Wirkung | speichert dauerhaft (`config.json`), löscht die gemessene Werkstückoberfläche (`workpiece_surface_z = null`) |
-| Erfolg | 200 `{message, z_clearance_mm, focus_gap_mm, z_switch_tip_offset_mm, probe_offset_x_mm, probe_offset_y_mm, note}` |
-| Fehler | 400 `Z-Rückzug muss zwischen 0,5 und 50 mm liegen`, `Fokusabstand muss zwischen 0,1 und 30 mm liegen`, `Schalter-zu-Spitze-Offset muss zwischen -20 und +20 mm liegen`, `Taster-X/Y-Versatz muss -80..80 mm sein`, `X/Y-Tasterversatz entweder beide eintragen oder beide leer lassen` |
+| Wirkung | speichert dauerhaft (`config.json`); ändert sich Taster-/Fokus-Geometrie, wird die gemessene Werkstückoberfläche gelöscht (`workpiece_surface_z = null`) |
+| Erfolg | 200 `{message, z_clearance_mm, focus_gap_mm, z_switch_tip_offset_mm, probe_offset_x_mm, probe_offset_y_mm, config, note}` |
+| Fehler | 400 `Z-Rückzug muss zwischen 0,5 und 50 mm liegen`, `Fokusabstand muss zwischen 0,1 und 30 mm liegen`, `Schalter-zu-Spitze-Offset muss zwischen -20 und +20 mm liegen`, `Taster-X/Y-Versatz muss -80..80 mm sein`, `X/Y-Tasterversatz entweder beide eintragen oder beide leer lassen`, `Gerätename: 1 bis 40 Zeichen`, `Abluft-Nachlauf muss 0..900 s sein`, `exhaust_auto 0/1 erwartet` |
+
+#### `GET /api/backup`
+
+Liest nur. Antwort `application/json` als Download (`lumacut-sicherung-<Datum>.json`):
+`{created, machine_name, config, materials: {revision, materials}, workspace, camera_calibration}`.
 
 ### 4.10 `POST /api/commission`
 

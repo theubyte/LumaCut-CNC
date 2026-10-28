@@ -43,11 +43,13 @@ object LaserDiscovery {
             (o["firmware"]?.let { (it as? JsonPrimitive)?.contentOrNull } == "marlin" && hasJob && o.containsKey("connected"))
         if (!ours) return null
         val identity = (o["identity"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        // the name the owner gave the Pi (web UI Einstellungen → Gerät); older Pis have none
+        val machineName = ((o["config"] as? JsonObject)?.get("machine_name") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
         val connected = (o["connected"] as? JsonPrimitive)?.booleanOrNull ?: false
         val owner = (o["owner"] as? JsonPrimitive)?.contentOrNull ?: "Frei"
         val state = (o["job"] as? JsonObject)?.get("state")?.let { (it as? JsonPrimitive)?.contentOrNull }
         val busy = state in setOf("homing", "probing", "running")
-        return DiscoveredLaser(host, port, identity ?: "LumaCut-Laser", when {
+        return DiscoveredLaser(host, port, machineName ?: identity ?: "LumaCut-Laser", when {
             busy -> "Auftrag läuft"
             !connected -> "Controller getrennt"
             owner != "Frei" && owner.isNotBlank() -> "belegt"

@@ -4,6 +4,8 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-10-28
 
+- **Pi-Weboberfläche neu:** gleiches Design wie die Android-App (hell/dunkel), Seiten Steuerung, Aufträge, Material, Kamera, Einstellungen und System. Arbeitsfläche zoom- und antippbar (hinfahren, abtasten, Ursprung setzen) mit Scanbild der App; Aufträge mit Vorschaubildern, Dauer und Platzierung; Materialtabelle mit Import/Export; Kamera live mit Bildeinstellungen; Befehlsliste (Strg+K) und Tastenkürzel. Das gewählte Material gilt jetzt auch aus dem Browser für alle Geräte.
+- **Pi:** Gerätename (auch in der Lasersuche der App), Abluft automatisch mit Nachlauf, Marlin-Abfragen `op=report` (M503 u. a.), Sicherung aller Einstellungen (`GET /api/backup`); `/api/settings` speichert jetzt auch einzelne Gruppen.
 - **Kalibrierlauf auf 3-mm-MDF:** Fokus-Test (Parabel über alle Linien), Bewegungs- und Schwing-Auswertung (robuster Linienabstand, Marken von einer Seite angefahren), Laserpunkt-Finder (weißer Kern im großen blauen Hof) nach echtem Lauf überarbeitet.
 - **Scan gleichmäßig hell:** Das Licht auf dem Bett ändert sich mit der Kopfposition (Blendung mal links, mal rechts im Bild); der fertige Scan wird jetzt im Hintergrund ausgeglichen (`Scan.level`), Markierungen behalten ihren Kontrast.
 - **Laser-Adresse als Name oder URL:** Statt nur der IP gehen auch `lumacut.local`, `192.168.2.89:9000`, `http://lumacut.fritz.box` oder `https://…/pfad`. Ohne `http://` gilt Port 8080; unverschlüsseltes http nur im Heimnetz, im Internet nur https.

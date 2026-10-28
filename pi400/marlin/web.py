@@ -36,7 +36,8 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # /api/status "features": clients switch on Pi-side behaviour by these names.
 # autorun_mesh: op=autorun probes the motif areas and compensates the focus
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
-FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings", "workspace")
+FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings", "workspace",
+            "report", "backup", "exhaust_auto")
 JOBS = DATA / "jobs"
 # Camera pictures taken inside a job while the laser runs (measuring spot/line).
 CAPTURES = DATA / "captures"
@@ -71,7 +72,17 @@ config = {
     "thickness_tolerance_mm": 2.0,
     # Pi GPIO (BCM) of the red measuring line laser on the head, None = not fitted.
     "line_laser_gpio": None,
+    # Shown in the web UI and in the apps' laser search.
+    "machine_name": "LumaCut",
+    # Exhaust on at every job start; off this many seconds after the job (fumes).
+    "exhaust_auto": False,
+    "exhaust_after_s": 60,
 }
+MACHINE_NAME_MAX = 40
+EXHAUST_AFTER_RANGE = (0, 900)
+# op=report: Marlin queries that only read (transport.READ_ONLY without M400).
+REPORTS = {"M105": "Temperaturen", "M114": "Position", "M115": "Firmware",
+           "M119": "Endschalter", "M503": "Firmware-Einstellungen"}
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -297,58 +308,100 @@ def home_z_first(operator_clear=False):
 def settings():
     # Configuration can be edited while homed and while LightBurn owns TCP.
     # This endpoint never sends motion or laser commands to the SKR.
+    # Every field is optional: a missing one keeps its value, so a page can
+    # save one group of settings at a time.
     import math
-    clearance = float(request.form.get("z_clearance_mm", "nan"))
-    gap = float(request.form.get("focus_gap_mm", "nan"))
-    offset = float(request.form.get("z_switch_tip_offset_mm", "nan"))
+    form = request.form
+
+    def number(name, low, high, message):
+        raw = form.get(name)
+        if raw is None:
+            return config[name]
+        value = float(raw)
+        if not (math.isfinite(value) and low <= value <= high):
+            raise ValueError(message)
+        return value
+
+    clearance = number("z_clearance_mm", 0.5, 50, "Z-Rückzug muss zwischen 0,5 und 50 mm liegen")
+    gap = number("focus_gap_mm", 0.1, 30, "Fokusabstand muss zwischen 0,1 und 30 mm liegen")
+    offset = number("z_switch_tip_offset_mm", -20, 20,
+                    "Schalter-zu-Spitze-Offset muss zwischen -20 und +20 mm liegen")
     # Off-axis switch displacement relative to laser spot, signed machine XY.
-    probe_x_raw = request.form.get("probe_offset_x_mm", "").strip()
-    probe_y_raw = request.form.get("probe_offset_y_mm", "").strip()
-    if bool(probe_x_raw) != bool(probe_y_raw):
-        raise ValueError("X/Y-Tasterversatz entweder beide eintragen oder beide leer lassen")
-    probe_x = float(probe_x_raw) if probe_x_raw else None
-    probe_y = float(probe_y_raw) if probe_y_raw else None
-    if not (math.isfinite(clearance) and 0.5 <= clearance <= 50):
-        raise ValueError("Z-Rückzug muss zwischen 0,5 und 50 mm liegen")
-    if not (math.isfinite(gap) and 0.1 <= gap <= 30):
-        raise ValueError("Fokusabstand muss zwischen 0,1 und 30 mm liegen")
-    if not (math.isfinite(offset) and -20 <= offset <= 20):
-        raise ValueError("Schalter-zu-Spitze-Offset muss zwischen -20 und +20 mm liegen")
-    if probe_x is not None and not (math.isfinite(probe_x) and -80 <= probe_x <= 80 and
-            math.isfinite(probe_y) and -80 <= probe_y <= 80):
-        raise ValueError("Taster-X/Y-Versatz muss -80..80 mm sein")
+    probe_x, probe_y = config["probe_offset_x_mm"], config["probe_offset_y_mm"]
+    if "probe_offset_x_mm" in form or "probe_offset_y_mm" in form:
+        probe_x_raw = form.get("probe_offset_x_mm", "").strip()
+        probe_y_raw = form.get("probe_offset_y_mm", "").strip()
+        if bool(probe_x_raw) != bool(probe_y_raw):
+            raise ValueError("X/Y-Tasterversatz entweder beide eintragen oder beide leer lassen")
+        probe_x = float(probe_x_raw) if probe_x_raw else None
+        probe_y = float(probe_y_raw) if probe_y_raw else None
+        if probe_x is not None and not (math.isfinite(probe_x) and -80 <= probe_x <= 80 and
+                math.isfinite(probe_y) and -80 <= probe_y <= 80):
+            raise ValueError("Taster-X/Y-Versatz muss -80..80 mm sein")
+    tolerance = config["thickness_tolerance_mm"]
+    if form.get("thickness_tolerance_mm", "").strip():
+        # how far the probed surface may differ from the material thickness
+        tolerance = number("thickness_tolerance_mm", 0.5, 10,
+                           "Toleranz der Materialstärke muss 0,5..10 mm sein")
+    name = config["machine_name"]
+    if "machine_name" in form:
+        name = " ".join(form.get("machine_name", "").split())
+        if not 1 <= len(name) <= MACHINE_NAME_MAX:
+            raise ValueError("Gerätename: 1 bis %d Zeichen" % MACHINE_NAME_MAX)
+    exhaust_auto = config["exhaust_auto"]
+    if "exhaust_auto" in form:
+        if form["exhaust_auto"] not in ("0", "1"):
+            raise ValueError("exhaust_auto 0/1 erwartet")
+        exhaust_auto = form["exhaust_auto"] == "1"
+    exhaust_after = int(number("exhaust_after_s", *EXHAUST_AFTER_RANGE,
+                               "Abluft-Nachlauf muss %d..%d s sein" % EXHAUST_AFTER_RANGE))
     # optional: GPIO of the measuring line laser ("" = none)
-    if "line_laser_gpio" in request.form:
-        raw = request.form.get("line_laser_gpio", "").strip()
+    if "line_laser_gpio" in form:
+        raw = form.get("line_laser_gpio", "").strip()
         pin = int(raw) if raw else None
         LINE_LASER.configure(pin)
         config["line_laser_gpio"] = pin
-    # optional: how far the probed surface may differ from the material thickness
-    tol_raw = request.form.get("thickness_tolerance_mm", "").strip()
-    if tol_raw:
-        tol = float(tol_raw)
-        if not (math.isfinite(tol) and 0.5 <= tol <= 10):
-            raise ValueError("Toleranz der Materialstärke muss 0,5..10 mm sein")
-        config["thickness_tolerance_mm"] = tol
-    config["probe_offset_x_mm"] = probe_x
-    config["probe_offset_y_mm"] = probe_y
+    geometry_changed = ((probe_x, probe_y, offset, gap) !=
+                        (config["probe_offset_x_mm"], config["probe_offset_y_mm"],
+                         config["z_switch_tip_offset_mm"], config["focus_gap_mm"]))
     with machine.lock:
         machine.probe_xy_offset_mm = (probe_x, probe_y) if probe_x is not None else None
         machine.clearance_mm = clearance
         machine.probe_tip_offset_mm = offset
         machine.focus_gap_mm = gap
-        # Any new probe geometry invalidates the prior measured material height.
-        machine.surface_z = None
-        machine.focused_this_job = False
-    config["z_clearance_mm"] = clearance
-    config["focus_gap_mm"] = gap
-    config["z_switch_tip_offset_mm"] = offset
+        if geometry_changed:
+            # New probe geometry invalidates the prior measured material height.
+            machine.surface_z = None
+            machine.focused_this_job = False
+    config.update(probe_offset_x_mm=probe_x, probe_offset_y_mm=probe_y,
+                  z_clearance_mm=clearance, focus_gap_mm=gap, z_switch_tip_offset_mm=offset,
+                  thickness_tolerance_mm=tolerance, machine_name=name,
+                  exhaust_auto=exhaust_auto, exhaust_after_s=exhaust_after)
     persist()
-    return jsonify(message="Z-Offset, Sicherheitsabstand und Fokusreferenz dauerhaft gespeichert",
+    return jsonify(message="Einstellungen dauerhaft auf dem Pi gespeichert",
                    z_clearance_mm=clearance, focus_gap_mm=gap,
                    z_switch_tip_offset_mm=offset,
                    probe_offset_x_mm=probe_x, probe_offset_y_mm=probe_y,
+                   config=dict(config),
                    note="LightBurn G28 referenziert Boden, G30 tastet Werkstück über X/Y-Tasterversatz ab, ohne Maschinen-Z0 zu verändern.")
+
+
+@app.get("/api/backup")
+def backup():
+    """Every setting the Pi keeps, as one JSON file to download (reads only)."""
+    calibration = DATA.parent / "camera_calibration.json"
+    try:
+        camera_cal = json.loads(calibration.read_text("utf-8")) if calibration.is_file() else None
+    except Exception:
+        camera_cal = None
+    body = {"created": time.strftime("%Y-%m-%dT%H:%M:%S"), "machine_name": config["machine_name"],
+            "config": config, "materials": MATERIALS.list(), "workspace": WORKSPACE.get_state(),
+            "camera_calibration": camera_cal}
+    stamp = time.strftime("%Y-%m-%d")
+    return (json.dumps(body, indent=2, ensure_ascii=False), 200,
+            {"Content-Type": "application/json; charset=utf-8",
+             "Content-Disposition": 'attachment; filename="lumacut-sicherung-%s.json"' % stamp})
+
 
 def _json_body():
     body = request.get_json(silent=True)
@@ -444,6 +497,13 @@ def action():
         cmd = {"info":"M115", "position":"M114", "endstops":"M119"}[op]
         reply = manual(cmd, timeout=12)
         return jsonify(message="\n".join(reply))
+    if op == "report":
+        # Read-only Marlin queries for the diagnosis page, nothing else.
+        cmd = request.form.get("cmd", "").strip().upper()
+        if cmd not in REPORTS:
+            raise ValueError("Nur Abfragen: " + ", ".join(REPORTS))
+        reply = manual(cmd, timeout=15)
+        return jsonify(message="%s (%s) gelesen" % (REPORTS[cmd], cmd), cmd=cmd, lines=reply)
     if op == "jog":
         if not machine.homed:
             raise RuntimeError("Marlin muss zuerst referenziert werden")
@@ -1113,6 +1173,8 @@ def _execute_job(filename, commands, auto=None):
     if _job_sets_focus(commands):
         machine.focused_this_job = True
     machine.command("M5 I", owner="job")
+    if config["exhaust_auto"] and not machine.exhaust:
+        machine.command("M8", owner="job")
     # Start melody on the motor coils (no motion, laser off); a missing or
     # failing melody never stops the job.
     machine.play_melody("start", owner="job")
@@ -1224,6 +1286,29 @@ def _job_failed(exc):
             logging.exception("Error light effect failed")
 
 
+def _exhaust_after_job():
+    """With exhaust_auto: switch the exhaust off exhaust_after_s after a job,
+    unless the next job or someone else has the machine by then."""
+    if not config["exhaust_auto"] or not machine.exhaust:
+        return
+
+    def off():
+        time.sleep(float(config["exhaust_after_s"]))
+        if job_lock.locked() or not machine.exhaust or machine.emergency_latched:
+            return
+        with machine.lock:
+            if machine.owner is not None:
+                return
+        try:
+            lights = machine.lights
+            machine.command("M9", owner="web", timeout=10)
+            if lights and not machine.lights:
+                machine.set_light(True, owner="web")   # old firmware: M9 also hit PC8
+        except Exception:
+            logging.exception("Exhaust run-on: switching off failed")
+    threading.Thread(target=off, daemon=True, name="exhaust-run-on").start()
+
+
 def _job_worker(filename, commands, auto=None):
     try:
         _execute_job(filename, commands, auto)
@@ -1233,6 +1318,7 @@ def _job_worker(filename, commands, auto=None):
         with machine.lock:
             machine.owner=None
         job_lock.release()
+        _exhaust_after_job()
 
 
 def start_job(automatic=False):
@@ -1418,6 +1504,7 @@ def _queue_worker():
         with machine.lock:
             machine.owner = None
         job_lock.release()
+        _exhaust_after_job()
 
 
 def queue_run():

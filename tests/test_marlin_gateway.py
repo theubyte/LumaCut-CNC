@@ -1621,8 +1621,8 @@ assert abs(m.position[0]) < 0.01 and abs(m.position[1]) < 0.01
         web=(ROOT/"pi400"/"marlin"/"web.py").read_text()
         ui=(ROOT/"pi400"/"marlin"/"index.html").read_text()
         self.assertIn('"z_switch_tip_offset_mm": 1.5',web)
-        self.assertIn('request.form.get("z_switch_tip_offset_mm"',web)
-        self.assertIn('config["z_switch_tip_offset_mm"] = offset',web)
+        self.assertIn('number("z_switch_tip_offset_mm"',web)
+        self.assertIn('z_switch_tip_offset_mm=offset',web)
         self.assertIn('persist()',web)
         self.assertIn('estimated_tip_gap_mm=tip_gap',web)
         self.assertIn('estimated_focus_adjust_mm=',web)
@@ -1661,6 +1661,40 @@ with web.app.test_client() as client:
   })
   assert empty.status_code == 200, empty.data
   assert web.machine.probe_xy_offset_mm is None
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env["LUMACUT_DATA"] = tmp
+            env["PYTHONPATH"] = str(ROOT / "pi400")
+            run = subprocess.run([sys.executable, "-c", source], env=env,
+                                 cwd=ROOT, capture_output=True, text=True,
+                                 timeout=15)
+            self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_settings_save_one_group_and_new_machine_settings(self):
+        source = r"""
+from marlin import web
+with web.app.test_client() as client:
+  before = client.get("/api/status").get_json()["config"]
+  r = client.post("/api/settings", data={"machine_name": "  Werkstatt   Laser ", "exhaust_auto": "1", "exhaust_after_s": "90"})
+  assert r.status_code == 200, r.data
+  cfg = client.get("/api/status").get_json()["config"]
+  assert cfg["machine_name"] == "Werkstatt Laser"
+  assert cfg["exhaust_auto"] is True and cfg["exhaust_after_s"] == 90
+  # untouched groups keep their values
+  for key in ("focus_gap_mm", "z_clearance_mm", "z_switch_tip_offset_mm", "probe_offset_x_mm"):
+    assert cfg[key] == before[key], key
+  assert client.post("/api/settings", data={"machine_name": ""}).status_code == 400
+  assert client.post("/api/settings", data={"exhaust_after_s": "5000"}).status_code == 400
+  assert client.post("/api/settings", data={"exhaust_auto": "ja"}).status_code == 400
+  # read-only Marlin reports only
+  r = client.post("/api/action", data={"op": "report", "cmd": "M502"})
+  assert r.status_code == 400 and "Nur Abfragen" in r.get_json()["error"]
+  b = client.get("/api/backup")
+  assert b.status_code == 200 and "attachment" in b.headers["Content-Disposition"]
+  data = b.get_json()
+  assert data["config"]["machine_name"] == "Werkstatt Laser" and "materials" in data and "workspace" in data
+  assert "report" in client.get("/api/status").get_json()["features"]
 """
         with tempfile.TemporaryDirectory() as tmp:
             env = os.environ.copy()
