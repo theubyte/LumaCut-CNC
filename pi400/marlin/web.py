@@ -890,8 +890,65 @@ def camera_snapshot():
         if v is not None:
             settings[key] = None if v == "auto" else int(v)
     settings = head_camera.validate(settings)
+    if request.args.get("light") != "keep":
+        _camera_light_on()
     data = head_camera.snapshot(CAMERA, width, height, settings)
     return data, 200, {"Content-Type": "image/jpeg", "Cache-Control": "no-store"}
+
+
+# Camera light: every snapshot switches the LEDs on at the camera level (the
+# app's light calibration, config camera.light; else the normal brightness).
+# CAMERA_LIGHT_HOLD_S after the last snapshot the light goes back to how it
+# was, so a scan or the live view does not flicker. While a job or LightBurn
+# has the machine the light is left alone.
+CAMERA_LIGHT_HOLD_S = 8.0
+CAMERA_LIGHT_SETTLE_S = 0.3
+_cam_light = {"saved": None, "set": None, "timer": None}
+_cam_light_lock = threading.Lock()
+
+
+def _camera_light_level():
+    level = (config.get("camera") or {}).get("light")
+    return int(level if level is not None else machine.light_pct)
+
+
+def _camera_light_on():
+    level = _camera_light_level()
+    changed = False
+    with _cam_light_lock:
+        if _cam_light["timer"] is not None:
+            _cam_light["timer"].cancel()
+            _cam_light["timer"] = None
+        if not (machine.lights and machine.light_pct == level):
+            saved = (machine.lights, machine.light_pct)
+            try:
+                machine.set_light(True, level, owner="web")
+                changed = True
+                if _cam_light["saved"] is None:
+                    _cam_light["saved"] = saved
+                _cam_light["set"] = (True, level)
+            except Exception as exc:
+                logging.info("Kameralicht nicht geschaltet: %s", exc)
+        if _cam_light["saved"] is not None:
+            timer = threading.Timer(CAMERA_LIGHT_HOLD_S, _camera_light_restore)
+            timer.daemon = True
+            _cam_light["timer"] = timer
+            timer.start()
+    if changed:
+        time.sleep(CAMERA_LIGHT_SETTLE_S)
+
+
+def _camera_light_restore():
+    with _cam_light_lock:
+        saved, mine = _cam_light["saved"], _cam_light["set"]
+        _cam_light.update(saved=None, set=None, timer=None)
+        # Someone switched the light in between (app, web UI): theirs stays.
+        if saved is None or (machine.lights, machine.light_pct) != mine:
+            return
+        try:
+            machine.set_light(saved[0], saved[1], owner="web")
+        except Exception as exc:
+            logging.info("Kameralicht nicht zurückgestellt: %s", exc)
 
 
 def _above_bed():

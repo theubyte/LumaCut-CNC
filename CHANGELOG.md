@@ -5,6 +5,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 ## 2026-10-29
 
 - **Bettkarte (Pi):** Der Taster tastet das leere Bett einmal an 6 × 6 Punkten ab (`op=bedmap`, Laser aus), der Pi speichert die Karte (`GET /api/bedmap`, Status `bed_map`). Danach meldet jedes Abtasten auch die Dicke über dem Bett (`workpiece_above_bed_mm`). Weboberfläche: Karte als Farbraster unter Einstellungen.
+- **Kameralicht automatisch:** Jedes Kamerabild über den Pi (Live-Bild im Browser, Scans, Messungen) schaltet die LEDs mit der Helligkeit der Lichtkalibrierung ein und 8 s nach dem letzten Bild wieder zurück.
 - **Abtasten unter Z0:** Das leere Bett liegt 0,7–1,2 mm unter Z0 (Z0 ist der Schaltpunkt beim Referenzieren). Kontakte bis −3 mm gelten jetzt als gültig; vorher verwarf der Pi jedes Antasten auf dem leeren Bett.
 
 ## 2026-10-28

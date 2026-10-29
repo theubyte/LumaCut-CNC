@@ -833,8 +833,15 @@ gefunden`. Prüft die Dateiendung nicht (anders als `content`/`delete`).
 | `exposure` | int oder `auto` (Query) | 1..10000 | gespeicherte Einstellung |
 | `gain` | int oder `auto` (Query) | 0..255 | gespeicherte Einstellung |
 | `wb` | int (Kelvin) oder `auto` (Query) | 2000..10000 | gespeicherte Einstellung |
+| `light` | `keep` (Query) | – | Licht automatisch schalten |
 
-Bewegt nie etwas, keine Vorbedingung. Stellt Belichtung, Verstärkung und
+Bewegt nie etwas, keine Vorbedingung. **Licht:** Vor dem Bild schaltet der
+Pi die LEDs ein, mit der Helligkeit aus der Lichtkalibrierung (`camera.light`,
+sonst `light_brightness`), und wartet 0,3 s. 8 s nach dem letzten Bild stellt
+er das Licht zurück, wie es war, außer jemand hat es inzwischen selbst
+geschaltet. Während eines Auftrags oder einer LightBurn-Verbindung bleibt das
+Licht unberührt. `light=keep` schaltet nichts (für eine Lichtkalibrierung,
+die die LEDs selbst steuert). Stellt Belichtung, Verstärkung und
 Weißabgleich nach `GET /api/camera/settings` ein (Query-Werte gelten nur für
 dieses eine Bild), startet `ffmpeg` (V4L2; MJPEG mit 15 fps, wenn die Kamera
 die Größe so anbietet – sonst roh), stellt die Werte nach dem Streamstart
