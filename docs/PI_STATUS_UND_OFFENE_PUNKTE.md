@@ -441,7 +441,12 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
          bei −0,72 und −1,23 mm).
    - [x] Bettkarte `op=bedmap` (6 × 6, nur Taster), Dicke über dem Bett
          beim Abtasten.
-   - [ ] Bettkarte an der Maschine messen (Bett leer räumen).
+   - [x] Bettkarte an der Maschine gemessen (29.10., 17:13 UTC): Bett
+         −0,71 bis −1,82 mm unter Z0, Spanne 1,11 mm. Hinten (Y40) etwa
+         −0,9, vorn links (großes X, großes Y) bis −1,8; Sprung von etwa
+         0,7 mm zwischen Y96 und Y152 auf der linken Hälfte (Plattenstoß
+         oder Verzug?). X40/Y40 ohne Kontakt bis −2 mm (Loch/Spalt?), aus
+         den Nachbarn ergänzt. Spalte X380 wird bei X352 getastet.
    - [ ] **Echten Y-Weg messen:** Bei `moveto` Y370 lief der Kopf bei etwa
          Y350 an und verlor rund 20 mm. Firmware `Y_BED_SIZE 370`, Pi
          `travels.y 370` und `PROBE_HEAD_MAX` Y360 auf den gemessenen Wert
