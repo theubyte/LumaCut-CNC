@@ -72,6 +72,9 @@ PROBE_HOP_MM = 3.0
 # of the Z linear rail. Firmware Z_MAX_POS is the same; the Pi checks it too
 # because a SKR with older firmware still allows 90 mm.
 Z_MAX_MM = 80.0
+# Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
+# 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
+BED_BELOW_Z0_MM = 3.0
 # Travel height over unknown ground = material thickness + this (owner's
 # rule): the probe tip, the lowest part of the head, clears everything.
 TRAVEL_GAP_MM = 20.0
@@ -1309,7 +1312,7 @@ class MarlinTransport:
                         "(Kontakt oberhalb Firmware-Grenze Z_CLEARANCE_MULTI_PROBE), "
                         f"Taster bestaetigt geschaltet bei Z{contact:.3f}")
                 LOG.warning(note)
-            if contact is None or not 0.0 <= contact <= Z_MAX_MM:
+            if contact is None or not -BED_BELOW_Z0_MM <= contact <= Z_MAX_MM:
                 raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
             self.surface_z = contact
             self.last_probe_laser_xy = (laser_x, laser_y)
@@ -1359,7 +1362,7 @@ class MarlinTransport:
             raise RuntimeError(
                 f"Z-Taster war schon beim G30-Start (Z{start_z:.2f}) gedrückt: "
                 "Taster klemmt/Verdrahtung prüfen, Material zu hoch für Z-Rückzug")
-        if stop_z < 0.0:
+        if stop_z < -BED_BELOW_Z0_MM:
             raise RuntimeError(f"G30-Kontakt Z{stop_z:.2f} unter Maschinenboden: Z-Referenz prüfen")
         return stop_z
 
@@ -1392,7 +1395,7 @@ class MarlinTransport:
             if "probing failed" not in str(exc).lower():
                 raise
             contact = self._early_trigger_contact_locked(start_z)
-        if contact is None or not 0.0 <= contact <= Z_MAX_MM:
+        if contact is None or not -BED_BELOW_Z0_MM <= contact <= Z_MAX_MM:
             raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
         return contact
 

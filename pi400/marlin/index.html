@@ -210,6 +210,10 @@ label.field .unit::after{content:attr(data-unit);position:absolute;right:12px;to
 /* Kennzahlen */
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
 .metric{background:var(--surface2);border-radius:var(--r-sm);padding:11px 13px;min-width:0}
+.bedmap{display:grid;gap:3px}
+.bedmap:empty{display:none}
+.bedcell{border-radius:6px;padding:8px 2px;text-align:center;font:600 12px/1 var(--mono);color:var(--accent-ink);min-width:0}
+.bedlegend{display:flex;justify-content:space-between;font-size:12px;color:var(--faint)}
 .metric small{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--faint);margin-bottom:3px}
 .metric strong{font-size:16px;font-weight:700;word-break:break-word;font-variant-numeric:tabular-nums}
 .metric em{display:block;font-style:normal;font-size:11.5px;color:var(--faint);margin-top:2px}
@@ -810,6 +814,22 @@ dialog.danger h2{color:var(--bad)}
    </form>
   </section>
 
+  <section class="card" id="bedMapPanel" hidden>
+   <div class="card-head"><h2><svg class="i"><use href="#i-probe"/></svg>Bettkarte</h2><span class="tag" id="bedMapTag">nicht gemessen</span></div>
+   <div class="stack">
+    <p class="help">Der Taster tastet das <b>leere</b> Bett an 36 Punkten ab (Laser aus, etwa 10 Minuten). Danach zeigt jedes Abtasten auch die Dicke über dem Bett, und Unebenheiten sind bekannt. Einmal messen reicht, bis die Opferplatte getauscht wird.</p>
+    <div class="bedlegend" id="bedMapLegend" hidden><span>hinten links</span><span>Ansicht von der Tür</span><span>hinten rechts</span></div>
+    <div class="bedmap" id="bedMapGrid" role="img" aria-label="Bettkarte"></div>
+    <div class="metrics">
+     <div class="metric"><small>Tiefster Punkt</small><strong id="bedLow">—</strong></div>
+     <div class="metric"><small>Höchster Punkt</small><strong id="bedHigh">—</strong></div>
+     <div class="metric"><small>Unebenheit</small><strong id="bedRange">—</strong></div>
+    </div>
+    <p class="small faint" id="bedMapInfo">Noch keine Bettkarte</p>
+    <div class="row"><button type="button" class="btn primary" id="bedMapRun" data-motion data-needs-home><svg class="i"><use href="#i-probe"/></svg>Bett vermessen</button><button type="button" class="btn ghost" id="bedMapClear">Löschen</button></div>
+   </div>
+  </section>
+
   <section class="card">
    <div class="card-head"><h2><svg class="i"><use href="#i-chip"/></svg>Gerät</h2></div>
    <form id="deviceSettings" class="stack" data-settings>
@@ -1161,7 +1181,9 @@ function refreshUI(s){
  $("activity").textContent={idle:"Bereit",job:"Auftrag aktiv",framing:"Rahmenfahrt"}[s.activity]||s.activity||"—";
  $("surfaceZ").textContent=s.workpiece_surface_z==null?"—":fmt(s.workpiece_surface_z)+" mm";
  $("surfaceInfo").textContent=s.workpiece_surface_z==null||s.probe_minimum_z==null?"Werkstück noch nicht abgetastet":
-  "Oberfläche Z "+fmt(s.workpiece_surface_z)+" · Fokus Z "+fmt(s.laser_focus_z)+" · tiefstes Z "+fmt(s.probe_minimum_z)+" mm";
+  "Oberfläche Z "+fmt(s.workpiece_surface_z)+" · Fokus Z "+fmt(s.laser_focus_z)+" · tiefstes Z "+fmt(s.probe_minimum_z)+" mm"+
+  (s.workpiece_above_bed_mm==null?"":" · "+fmt(s.workpiece_above_bed_mm)+" mm über dem Bett");
+ renderBedMap(s);
  // Einstellungen (nur übernehmen, solange niemand tippt)
  fillSettings(s);
  $("tipGap").textContent=s.estimated_tip_gap_mm==null?"nicht referenziert":s.estimated_tip_gap_mm.toFixed(2)+" mm";
@@ -2046,6 +2068,39 @@ async function homeFields(){
  if(!snapshot?.home_needs_confirm)return {};
  return await ask("Kopf frei?","Die Z-Höhe ist unbekannt. Der Kopf fährt zuerst nach oben. Steht nichts darüber und nichts im Weg?","Ja, frei")?{clear:"1"}:null;
 }
+/* Bettkarte: Raster so gezeigt, wie man von der Tür aufs Bett sieht
+   (Maschinen-X wächst nach links, kleines Y = hinten). */
+let bedSig;
+async function renderBedMap(s){
+ const panel=$("bedMapPanel");panel.hidden=!has("bed_map");if(panel.hidden)return;
+ const b=s.bed_map;
+ $("bedMapTag").textContent=b?"gemessen":"nicht gemessen";$("bedMapTag").className="tag"+(b?" ok":"");
+ $("bedLow").textContent=b?fmt(b.lowest)+" mm":"—";$("bedHigh").textContent=b?fmt(b.highest)+" mm":"—";
+ $("bedRange").textContent=b?fmt(b.range)+" mm":"—";
+ $("bedMapInfo").textContent=b?"Gemessen am "+new Date(b.measured_at).toLocaleString("de-DE")+" · Höhen relativ zum Referenzpunkt Z0":"Noch keine Bettkarte";
+ $("bedMapClear").disabled=!b;
+ const sig=b?b.measured_at:null;if(sig===bedSig)return;bedSig=sig;
+ const grid=$("bedMapGrid");grid.replaceChildren();$("bedMapLegend").hidden=!b;
+ if(!b)return;
+ let full;try{full=(await api("/api/bedmap")).bed_map}catch{bedSig=undefined;return}
+ if(!full)return;
+ grid.style.gridTemplateColumns="repeat("+full.cols+",1fr)";
+ const span=Math.max(full.range,0.01);
+ for(let r=0;r<full.rows;r++)for(let c=full.cols-1;c>=0;c--){
+  const i=r*full.cols+c,z=full.z[i],[x,y]=full.points[i],cell=document.createElement("div");
+  cell.className="bedcell";cell.textContent=fmt(z);
+  cell.style.background="color-mix(in oklab, var(--warn) "+Math.round((z-full.lowest)/span*100)+"%, var(--info))";
+  cell.title="X "+fmt(x,0)+" · Y "+fmt(y,0)+": Z "+fmt(z)+" mm";grid.append(cell);
+ }
+}
+$("bedMapRun").onclick=async ev=>{
+ if(!await ask("Bett leer?","Der Taster fährt 36 Punkte auf dem ganzen Bett ab, dazwischen nur 10 mm über dem Bett. Alles muss herunter: Material, Anschläge, Klemmen, Werkzeug. Laser bleibt aus.","Bett ist leer"))return;
+ call("bedmap",{},ev.currentTarget);
+};
+$("bedMapClear").onclick=async ev=>{
+ if(!await ask("Bettkarte löschen?","Danach zeigt das Abtasten keine Dicke über dem Bett mehr.","Löschen",true))return;
+ call("bedmap_clear",{},ev.currentTarget);
+};
 for(const b of $$("[data-action]"))
  b.onclick=async()=>{
   const op=b.dataset.action,needsName=["start","autorun"].includes(op);

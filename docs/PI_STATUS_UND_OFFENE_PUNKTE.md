@@ -436,3 +436,16 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
    - [ ] Kamera-Vorprüfung, welche Fläche abtastbar ist (später 3D)
    - [ ] Entscheidung offen: letzte Z-Höhe auf dem Pi merken oder nach
          NOT-AUS/Stromausfall immer fragen
+10. **Bettkarte und echter Y-Weg (2026-10-29).**
+   - [x] Abtasten akzeptiert Kontakte bis −3 mm unter Z0 (leeres Bett lag
+         bei −0,72 und −1,23 mm).
+   - [x] Bettkarte `op=bedmap` (6 × 6, nur Taster), Dicke über dem Bett
+         beim Abtasten.
+   - [ ] Bettkarte an der Maschine messen (Bett leer räumen).
+   - [ ] **Echten Y-Weg messen:** Bei `moveto` Y370 lief der Kopf bei etwa
+         Y350 an und verlor rund 20 mm. Firmware `Y_BED_SIZE 370`, Pi
+         `travels.y 370` und `PROBE_HEAD_MAX` Y360 auf den gemessenen Wert
+         setzen. Bis dahin tastet die Bettkarte nur bis Y330.
+   - [ ] Plausibilitätsprüfung der Materialstärke mit der Bettkarte
+         rechnen (Dicke über dem Bett statt Z über Z0).
+   - [ ] Android-App: Bettkarte anzeigen und starten.

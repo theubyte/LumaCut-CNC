@@ -122,6 +122,7 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 | GET | `/api/jobs/<name>/content` | – | G-Code eines Auftrags als Text |
 | POST | `/api/jobs/<name>/delete` | – | Auftrag löschen |
 | GET | `/api/jobs/<name>/geometry` | – | Motivgrenzen und Abtastkandidaten |
+| GET | `/api/bedmap` | – | gespeicherte Bettkarte (Raster, Höhen relativ zu Z0) oder `bed_map: null` (Abschnitt 4.4) |
 | GET | `/api/camera/snapshot` | – | ein JPEG der Kopfkamera |
 | GET | `/api/camera/captures/<name>` | – | ein Bild, das ein Auftrag während einer Laserlinie aufgenommen hat |
 | DELETE | `/api/camera/captures` | – | diese Bilder löschen |
@@ -153,6 +154,7 @@ Alle `op`-Werte von `POST /api/action`:
 | Not-Aus | `estop`, `estop_reset` |
 | Verbindung/Abfrage | `connect`, `info`, `position`, `endstops` |
 | Bewegung | `home`, `jog`, `park`, `moveto`, `probe`, `motion_test`, `motion_limits` |
+| Bettkarte | `bedmap`, `bedmap_clear` |
 | Messen | `line_laser` |
 | Zubehör | `light`, `exhaust` |
 | Ursprung/Platzierung | `origin_set`, `origin_clear`, `place`, `place_clear` |
@@ -217,7 +219,9 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `exhaust` | bool | Abluft (M8) an |
 | `laser_armed` | bool | Laser per `M3 I` scharf; außerhalb eines Auftrags immer `false` |
 | `laser_cooling_fan_on` | bool | Laserversorgung/Kühlung (FAN1/PC6) an |
-| `workpiece_surface_z` | number \| null | gemessene Werkstückoberfläche (Z, mm) nach `op=probe`/G30 |
+| `workpiece_surface_z` | number \| null | gemessene Werkstückoberfläche (Z, mm) nach `op=probe`/G30; kann bis −3 mm sein (das Bett liegt unter Z0) |
+| `workpiece_above_bed_mm` | number \| null | gemessene Oberfläche über dem Bett an der angetasteten Stelle (= Werkstückdicke), nur mit Bettkarte |
+| `bed_map` | object \| null | Zusammenfassung der Bettkarte: `measured_at`, `cols`, `rows`, `lowest`, `highest`, `range`, `mean` (mm relativ zu Z0); `null` = keine gemessen |
 | `safe_zone_xy_mm` | number | 30.0: Bänder X<30 und Y<30 sind Homing-/Parkzone, dort wird nie geschnitten |
 | `probe_xy_offset_mm` | [dx, dy] \| null | Versatz Taster ↔ Laserpunkt |
 | `cutting_bounds` | object | `{x_min: 30, y_min: 30, x_max: 390, y_max: 370}` |
@@ -242,7 +246,7 @@ Felder aus `web.py` (`status()`):
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
 | `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
-| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi), `camera_settings` = `/api/camera/settings` und Snapshots in genau der angefragten Größe, `workspace` = `/api/workspace…`, `report` = `op=report`, `backup` = `GET /api/backup`, `exhaust_auto` = Abluft-Automatik und `machine_name` in `/api/settings`. Fehlt bei älteren Pi-Ständen. |
+| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi), `camera_settings` = `/api/camera/settings` und Snapshots in genau der angefragten Größe, `workspace` = `/api/workspace…`, `report` = `op=report`, `backup` = `GET /api/backup`, `exhaust_auto` = Abluft-Automatik und `machine_name` in `/api/settings`, `bed_map` = Bettkarte (`op=bedmap`, `GET /api/bedmap`). Fehlt bei älteren Pi-Ständen. |
 | `coord_convention` | string | `"origin_top_right"`: Bedeutung der Ankernamen (siehe `op=place`). Fehlt bei Pi-Ständen vor 2026-10-26; Studio tauscht dann links/rechts. |
 | `estimated_tip_gap_mm` | number \| null | geschätzter Abstand Spitze ↔ Werkstück (nur wenn referenziert, Position und Oberfläche bekannt). Schätzung, keine Messung. |
 | `estimated_focus_adjust_mm` | number \| null | Fokusabstand − `estimated_tip_gap_mm` (nur Anzeige) |
@@ -468,8 +472,27 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | --- | --- |
 | Vorbedingungen | **frei**, **referenziert** (`Vor dem Abtasten referenzieren`), Freigabe, Firmware mit `Cap:Z_PROBE` (sonst 400 `SKR meldet Cap:Z_PROBE:0 …`), Tasterversatz gesetzt (`X/Y-Tasterversatz muss zuerst kalibriert sein`), Laser aus |
 | Wirkung | optional `G0 X Y` (Timeout 60 s), dann G30-Abtastung unter der aktuellen Laser-XY (mit Tasterversatz). Setzt `workpiece_surface_z`; Maschinen-Z0 bleibt unverändert. |
-| Erfolg | 200 `{"message": "Werkstückoberfläche Z=… mm, Fokus Z=… mm", "detail": "<bis 6 Marlin-Zeilen>"}` |
-| Fehler | 400 `Abtastpunkt außerhalb X30..390 / Y30..370`, `G30 ohne Tasterkontakt bis Z…: kein Material unter dem Taster …`, `Z-Taster war schon beim G30-Start … gedrückt …`, `G30-Kontakt Z… unter Maschinenboden …` ⚠ Hardware |
+| Erfolg | 200 `{"message": "Werkstückoberfläche Z=… mm, Fokus Z=… mm[, … mm über dem Bett]", "above_bed_mm": number \| null, "detail": "<bis 6 Marlin-Zeilen>"}`; die Dicke über dem Bett nur mit Bettkarte |
+| Fehler | 400 `Abtastpunkt außerhalb X30..390 / Y30..370`, `G30 ohne Tasterkontakt bis Z…: kein Material unter dem Taster …`, `Z-Taster war schon beim G30-Start … gedrückt …`, `G30-Kontakt Z… unter Maschinenboden …` (erst unter −3 mm: das leere Bett liegt 0,7–1,2 mm unter Z0) ⚠ Hardware |
+
+#### `op=bedmap`
+
+Keine Parameter. Das **leere** Bett wird mit dem Taster vermessen (Laser aus).
+
+| | |
+| --- | --- |
+| Vorbedingungen | **frei**, **referenziert** (`Vor der Bettkarte referenzieren`), kein laufender Auftrag, Tasterversatz gesetzt. **Das Bett muss leer sein** – der Pi prüft das nicht. |
+| Wirkung | läuft wie ein Auftrag (`job.file = "Bettkarte"`, `job.state = probing`, Fortschritt in `job.probe`, Abbruch mit `op=abort`): 6 × 6 Punkte über X40..380 / Y40..320 (Y bis 330 begrenzt, bis der echte Y-Weg gemessen ist), unerreichbare Punkte daneben. Zwischen den Punkten 10 mm über dem höchsten Kontakt. Speichert `/var/lib/lumacut/marlin/bed_map.json`, löscht danach `workpiece_surface_z` (das Bett ist kein Werkstück) und parkt. |
+| Erfolg | 200 `{"message": "Bettkarte: 36 Punkte werden abgetastet – das Bett muss leer sein"}`; Ende in `job.state = complete`, Ergebnis in `bed_map` |
+| Fehler | 400 `Ein Auftrag läuft bereits`, `Steuerung belegt: …`, Abtastfehler wie bei `op=probe` (dann `job.state = error`) |
+
+#### `op=bedmap_clear`
+
+Keine Parameter, **frei**. Löscht die gespeicherte Bettkarte. 200 `{"message": "Bettkarte gelöscht"}`.
+
+#### `GET /api/bedmap`
+
+200 `{"bed_map": null}` oder `{"bed_map": {format: "lumacut-bed-map/1", measured_at, cols, rows, lowest, highest, range, mean, x0, y0, step_x, step_y, region, points: [[x, y], …], z: [z, …], reachable, probe_at}}`. `z` in mm relativ zu Z0, Reihe für Reihe (`z[r * cols + c]`), Maschinen-X/Y.
 
 ### 4.5 `POST /api/action` – Zubehör
 

@@ -21,6 +21,7 @@ from .transport import (Aborted, MarlinTransport, MarlinLaserGuard, ProbeFailed,
 from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
+from . import bedmap
 from . import focus_compensation as focus
 from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import create_blueprint as camera_calibration_api
@@ -37,7 +38,7 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # autorun_mesh: op=autorun probes the motif areas and compensates the focus
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
 FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings", "workspace",
-            "report", "backup", "exhaust_auto")
+            "report", "backup", "exhaust_auto", "bed_map")
 JOBS = DATA / "jobs"
 # Camera pictures taken inside a job while the laser runs (measuring spot/line).
 CAPTURES = DATA / "captures"
@@ -123,6 +124,9 @@ except Exception:
 if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is not None:
     machine.probe_xy_offset_mm = (float(config["probe_offset_x_mm"]),
                                   float(config["probe_offset_y_mm"]))
+# Bed map (bedmap.py): the empty bed probed once; None until measured.
+BED_MAP_FILE = DATA / bedmap.FILENAME
+BED = bedmap.load(BED_MAP_FILE)
 # probe: {"done", "total"} while op=autorun probes (and afterwards), else None.
 # phase: finer step while active (homing, probing, focusing, running,
 # finishing, parking), None otherwise.
@@ -271,6 +275,8 @@ def status():
                   sync=WORKSPACE.revisions(),
                   line_laser=LINE_LASER.status(),
                   travel_z_mm=round(machine.travel_z, 2),
+                  bed_map=None if BED is None else BED.summary(),
+                  workpiece_above_bed_mm=_above_bed(),
                   home_needs_confirm=(not machine.z_homed and machine.last_known_z is None),
                   origin=_origin_status(),
                   queue=_queue_status(),
@@ -576,9 +582,18 @@ def action():
         if point is not None:
             machine.command("G0 X%.3f Y%.3f" % point, owner="web", timeout=60)
         reply = machine.probe_workpiece(owner="web")
-        return jsonify(message="Werkstückoberfläche Z=%.3f mm, Fokus Z=%.3f mm" % (
-            machine.surface_z, machine.status()["laser_focus_z"]),
-            detail="\n".join(reply[:6]))
+        text = "Werkstückoberfläche Z=%.3f mm, Fokus Z=%.3f mm" % (
+            machine.surface_z, machine.status()["laser_focus_z"])
+        above = _above_bed()
+        if above is not None:
+            text += ", %.2f mm über dem Bett" % above
+        return jsonify(message=text, above_bed_mm=above, detail="\n".join(reply[:6]))
+    if op == "bedmap":
+        return start_bed_map()
+    if op == "bedmap_clear":
+        local_owner()
+        _set_bed(None)
+        return jsonify(message="Bettkarte gelöscht")
     if op == "park":
         # Same routine as LightBurn M2 / end of job: laser off, Z never
         # downward, then X0/Y0 inside the empty keep-out band.
@@ -877,6 +892,79 @@ def camera_snapshot():
     settings = head_camera.validate(settings)
     data = head_camera.snapshot(CAMERA, width, height, settings)
     return data, 200, {"Content-Type": "image/jpeg", "Cache-Control": "no-store"}
+
+
+def _above_bed():
+    """Probed surface above the bed map at the probed point, or None."""
+    xy = machine.last_probe_laser_xy
+    if BED is None or machine.surface_z is None or xy is None:
+        return None
+    return round(BED.above_bed(machine.surface_z, *xy), 3)
+
+
+def _set_bed(bed):
+    global BED
+    BED = bed
+    if bed is None:
+        bedmap.delete(BED_MAP_FILE)
+    else:
+        bedmap.save(BED_MAP_FILE, bed)
+
+
+@app.get("/api/bedmap")
+def bed_map_get():
+    """The stored bed map (grid, heights relative to Z0), or bed_map: null."""
+    return jsonify(bed_map=None if BED is None else BED.as_dict())
+
+
+def start_bed_map():
+    """op=bedmap: probe the EMPTY bed on a grid with the switch (laser off),
+    store the map, park. Runs like a job (job state, abort, progress)."""
+    local_owner()
+    machine.check_reference()
+    if not machine.homed:
+        raise RuntimeError("Vor der Bettkarte referenzieren")
+    limit = machine.safe_zone_xy_mm
+    grid = bedmap.plan(heightmap.Box(limit, limit, config["travels"]["x"], config["travels"]["y"]),
+                       machine.probe_reachable)
+    order = [i for i in grid.order() if grid.reachable[i]]
+    if not job_lock.acquire(blocking=False):
+        raise RuntimeError("Ein Auftrag läuft bereits")
+    stop_job.clear()
+    with machine.lock:
+        if machine.owner is not None:
+            job_lock.release()
+            raise RuntimeError("Steuerung belegt: " + machine.owner)
+        machine.owner = "job"
+    job.update(file="Bettkarte", state="probing", phase="probing", line=0, total=0,
+               error="", probe={"done": 0, "total": len(order) + 1})
+    threading.Thread(target=_bed_map_worker, args=(grid, order), daemon=True,
+                     name="bed-map").start()
+    return jsonify(message="Bettkarte: %d Punkte werden abgetastet – das Bett muss leer sein" % len(order))
+
+
+def _bed_map_worker(grid, order):
+    try:
+        values = machine.probe_surface(
+            [[grid.probe_point(i) for i in order]], owner="job", hop_mm=bedmap.HOP_MM,
+            progress=lambda done, total: job["probe"].update(done=done, total=total),
+            should_stop=stop_job.is_set)
+        for i, z in zip(order, values[0]):
+            grid.z[i] = z
+        bed = bedmap.BedMap.from_measured(grid)
+        _set_bed(bed)
+        logging.info("Bed map: %s", bed.summary())
+        # The bed is no workpiece: the next job must probe its own surface.
+        machine.surface_z = None
+        _set_phase("parking")
+        machine.park_safezone(owner="job")
+        job.update(state="complete", phase=None)
+    except Exception as exc:
+        _job_failed(exc)
+    finally:
+        with machine.lock:
+            machine.owner = None
+        job_lock.release()
 
 
 @app.get("/api/camera/settings")

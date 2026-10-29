@@ -2,6 +2,11 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-10-29
+
+- **Bettkarte (Pi):** Der Taster tastet das leere Bett einmal an 6 × 6 Punkten ab (`op=bedmap`, Laser aus), der Pi speichert die Karte (`GET /api/bedmap`, Status `bed_map`). Danach meldet jedes Abtasten auch die Dicke über dem Bett (`workpiece_above_bed_mm`). Weboberfläche: Karte als Farbraster unter Einstellungen.
+- **Abtasten unter Z0:** Das leere Bett liegt 0,7–1,2 mm unter Z0 (Z0 ist der Schaltpunkt beim Referenzieren). Kontakte bis −3 mm gelten jetzt als gültig; vorher verwarf der Pi jedes Antasten auf dem leeren Bett.
+
 ## 2026-10-28
 
 - **Pi-Weboberfläche neu:** gleiches Design wie die Android-App (hell/dunkel), Seiten Steuerung, Aufträge, Material, Kamera, Einstellungen und System. Arbeitsfläche zoom- und antippbar (hinfahren, abtasten, Ursprung setzen) mit Scanbild der App; Aufträge mit Vorschaubildern, Dauer und Platzierung; Materialtabelle mit Import/Export; Kamera live mit Bildeinstellungen; Befehlsliste (Strg+K) und Tastenkürzel. Das gewählte Material gilt jetzt auch aus dem Browser für alle Geräte.
