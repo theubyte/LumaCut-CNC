@@ -422,3 +422,17 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
      dort entscheiden.
    - Abbrechen wirkt bei Rahmen an der **nächsten Ecke**, nicht mitten in
      der Kante. Sofort stoppt nur NOT-AUS.
+8. **Z-Obergrenze 80 mm (Commit `f163c3f`): an der Maschine noch zu tun.**
+   - [ ] Pi aktualisieren: `sudo bash /opt/lumacut/pi400/update.sh`
+   - [ ] SKR neu flashen (Firmware mit `Z_MAX_POS 80`)
+   - [ ] Danach prüfen: Jog nach oben stoppt bei 80 mm, Aufträge mit
+         Rückzug über 80 mm werden abgelehnt.
+9. **Höhe und Kollision: als Idee aufgeschrieben, noch nicht gebaut.**
+   Details: [IDEE_HOEHE_KOLLISION_KAMERA_3D.md](IDEE_HOEHE_KOLLISION_KAMERA_3D.md).
+   - [ ] Fahrhöhe = Materialstärke + 20 mm (Tasterspitze), vor dem Homing
+         erst sicher anheben (`G28 R`)
+   - [ ] Schärfesuche der Kamera nie tiefer als Taster-Nullpunkt + 5 mm
+   - [ ] Plausibilitätsprüfung der Materialstärke (Antasten gegen Eingabe)
+   - [ ] Kamera-Vorprüfung, welche Fläche abtastbar ist (später 3D)
+   - [ ] Entscheidung offen: letzte Z-Höhe auf dem Pi merken oder nach
+         NOT-AUS/Stromausfall immer fragen
