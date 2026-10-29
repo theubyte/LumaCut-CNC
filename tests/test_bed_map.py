@@ -115,6 +115,30 @@ assert c.get("/api/status").get_json()["bed_map"] is None
 assert not web.BED_MAP_FILE.exists()
 """)
 
+    def test_point_without_bed_is_filled_from_neighbours(self):
+        self._run(r"""
+import time
+OFFSET = (-27.4, 13.0)
+sim, m = connect(lambda x, y: -1.0)
+def hole(cmd):
+    # the first grid point (laser X40 Y40) has no bed within the firmware's probe depth
+    if cmd.startswith("G30"):
+        sim.no_contact = abs(sim.pos[0] - 67.4) < 0.5 and abs(sim.pos[1] - 27.0) < 0.5
+sim.hook = hole
+c = web.app.test_client()
+assert c.post("/api/action", data={"op": "home"}).status_code == 200
+assert c.post("/api/action", data={"op": "bedmap"}).status_code == 200
+for _ in range(4000):
+    s = c.get("/api/status").get_json()
+    if s["job"]["state"] in ("complete", "error", "aborted"):
+        break
+    time.sleep(0.005)
+assert s["job"]["state"] == "complete", s["job"]
+assert s["bed_map"]["missing"] == 1, s["bed_map"]
+full = c.get("/api/bedmap").get_json()["bed_map"]
+assert full["missing_points"] == [0] and abs(full["z"][0] + 1.0) < 1e-6, full
+""")
+
 
 if __name__ == "__main__":
     unittest.main()

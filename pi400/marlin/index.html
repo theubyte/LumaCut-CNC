@@ -213,6 +213,7 @@ label.field .unit::after{content:attr(data-unit);position:absolute;right:12px;to
 .bedmap{display:grid;gap:3px}
 .bedmap:empty{display:none}
 .bedcell{border-radius:6px;padding:8px 2px;text-align:center;font:600 12px/1 var(--mono);color:var(--accent-ink);min-width:0}
+.bedcell.gap{opacity:.45;outline:1px dashed var(--bad);outline-offset:-2px}
 .bedlegend{display:flex;justify-content:space-between;font-size:12px;color:var(--faint)}
 .metric small{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--faint);margin-bottom:3px}
 .metric strong{font-size:16px;font-weight:700;word-break:break-word;font-variant-numeric:tabular-nums}
@@ -2077,7 +2078,8 @@ async function renderBedMap(s){
  $("bedMapTag").textContent=b?"gemessen":"nicht gemessen";$("bedMapTag").className="tag"+(b?" ok":"");
  $("bedLow").textContent=b?fmt(b.lowest)+" mm":"—";$("bedHigh").textContent=b?fmt(b.highest)+" mm":"—";
  $("bedRange").textContent=b?fmt(b.range)+" mm":"—";
- $("bedMapInfo").textContent=b?"Gemessen am "+new Date(b.measured_at).toLocaleString("de-DE")+" · Höhen relativ zum Referenzpunkt Z0":"Noch keine Bettkarte";
+ $("bedMapInfo").textContent=b?"Gemessen am "+new Date(b.measured_at).toLocaleString("de-DE")+" · Höhen relativ zum Referenzpunkt Z0"+
+  (b.missing?" · "+b.missing+" Punkt(e) ohne Bettkontakt, aus den Nachbarn ergänzt (gestrichelt)":""):"Noch keine Bettkarte";
  $("bedMapClear").disabled=!b;
  const sig=b?b.measured_at:null;if(sig===bedSig)return;bedSig=sig;
  const grid=$("bedMapGrid");grid.replaceChildren();$("bedMapLegend").hidden=!b;
@@ -2088,9 +2090,10 @@ async function renderBedMap(s){
  const span=Math.max(full.range,0.01);
  for(let r=0;r<full.rows;r++)for(let c=full.cols-1;c>=0;c--){
   const i=r*full.cols+c,z=full.z[i],[x,y]=full.points[i],cell=document.createElement("div");
-  cell.className="bedcell";cell.textContent=fmt(z);
+  const gap=(full.missing_points||[]).includes(i);
+  cell.className="bedcell"+(gap?" gap":"");cell.textContent=(gap?"≈":"")+fmt(z);
   cell.style.background="color-mix(in oklab, var(--warn) "+Math.round((z-full.lowest)/span*100)+"%, var(--info))";
-  cell.title="X "+fmt(x,0)+" · Y "+fmt(y,0)+": Z "+fmt(z)+" mm";grid.append(cell);
+  cell.title="X "+fmt(x,0)+" · Y "+fmt(y,0)+": Z "+fmt(z)+" mm"+(gap?" – kein Bett gefunden (tiefer als die Firmware tastet), aus den Nachbarn ergänzt":"");grid.append(cell);
  }
 }
 $("bedMapRun").onclick=async ev=>{

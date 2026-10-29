@@ -1400,7 +1400,7 @@ class MarlinTransport:
         return contact
 
     def probe_surface(self, groups, owner: str = "job", progress=None,
-                      should_stop=None, hop_mm: float = PROBE_HOP_MM):
+                      should_stop=None, hop_mm: float = PROBE_HOP_MM, skip_missing: bool = False):
         """Probe several laser X/Y points quickly; returns the contacts per group.
 
         ``groups`` are lists of laser points, one list per motif area. Inside
@@ -1410,6 +1410,9 @@ class MarlinTransport:
         the measured surface (and with it the Z floor surface + 2 mm) is the
         lowest one: every focus height of the job is then allowed. Laser stays
         off; the switch is stowed (M402) and Z raised whatever happens.
+        ``skip_missing`` (bed map): a point where the switch finds nothing
+        before the firmware's lowest probe Z is left None instead of
+        stopping; every other probe error still stops.
         """
         with self.lock:
             if self.owner not in (None, owner):
@@ -1486,7 +1489,17 @@ class MarlinTransport:
                             lift(self.travel_z if tallest is None
                                  else max(self.travel_z, tallest + hop_mm))
                         go(x, y)
-                        contact = contact_at(x, y)
+                        try:
+                            contact = contact_at(x, y)
+                        except ProbeFailed as exc:
+                            if not skip_missing or "ohne Tasterkontakt" not in str(exc.cause):
+                                raise
+                            LOG.warning("Probe point skipped: %s", exc)
+                            self._exchange_locked("M114", timeout=8)
+                            z = self.position[2] if self.position is not None else -BED_BELOW_Z0_MM
+                            lift(self.travel_z if highest is None else highest + hop_mm)
+                            step_done()
+                            continue
                         values[gi][pi] = contact
                         highest = contact if highest is None else max(highest, contact)
                         tallest = highest if tallest is None else max(tallest, highest)
@@ -1494,8 +1507,11 @@ class MarlinTransport:
                         lift(highest + hop_mm)
                         step_done()
                 check_stop()
-                gi, pi = min(((g, p) for g in range(len(groups)) for p in range(len(groups[g]))),
-                             key=lambda gp: values[gp[0]][gp[1]])
+                found = [(g, p) for g in range(len(groups)) for p in range(len(groups[g]))
+                         if values[g][p] is not None]
+                if not found:
+                    raise RuntimeError("Der Taster hat an keinem Punkt eine Fläche gefunden")
+                gi, pi = min(found, key=lambda gp: values[gp[0]][gp[1]])
                 if gi != len(groups) - 1:
                     lift(max(self.travel_z, tallest + hop_mm))
                 x, y = groups[gi][pi]
@@ -1512,7 +1528,7 @@ class MarlinTransport:
                 lift(max(self.travel_z, tallest + self.probe_clearance_mm))
                 self._exchange_locked("M400", timeout=45)
                 self._exchange_locked("M114", timeout=8)
-                self.surface_z = min(v for g in values for v in g)
+                self.surface_z = min(v for g in values for v in g if v is not None)
                 self.last_probe_laser_xy = (x, y)
                 self.focused_this_job = False
                 self.fault = ""

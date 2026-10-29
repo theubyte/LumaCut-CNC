@@ -221,7 +221,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `laser_cooling_fan_on` | bool | Laserversorgung/Kühlung (FAN1/PC6) an |
 | `workpiece_surface_z` | number \| null | gemessene Werkstückoberfläche (Z, mm) nach `op=probe`/G30; kann bis −3 mm sein (das Bett liegt unter Z0) |
 | `workpiece_above_bed_mm` | number \| null | gemessene Oberfläche über dem Bett an der angetasteten Stelle (= Werkstückdicke), nur mit Bettkarte |
-| `bed_map` | object \| null | Zusammenfassung der Bettkarte: `measured_at`, `cols`, `rows`, `lowest`, `highest`, `range`, `mean` (mm relativ zu Z0); `null` = keine gemessen |
+| `bed_map` | object \| null | Zusammenfassung der Bettkarte: `measured_at`, `cols`, `rows`, `lowest`, `highest`, `range`, `mean` (mm relativ zu Z0), `missing` (Punkte ohne Bettkontakt); `null` = keine gemessen |
 | `safe_zone_xy_mm` | number | 30.0: Bänder X<30 und Y<30 sind Homing-/Parkzone, dort wird nie geschnitten |
 | `probe_xy_offset_mm` | [dx, dy] \| null | Versatz Taster ↔ Laserpunkt |
 | `cutting_bounds` | object | `{x_min: 30, y_min: 30, x_max: 390, y_max: 370}` |
@@ -482,7 +482,7 @@ Keine Parameter. Das **leere** Bett wird mit dem Taster vermessen (Laser aus).
 | | |
 | --- | --- |
 | Vorbedingungen | **frei**, **referenziert** (`Vor der Bettkarte referenzieren`), kein laufender Auftrag, Tasterversatz gesetzt. **Das Bett muss leer sein** – der Pi prüft das nicht. |
-| Wirkung | läuft wie ein Auftrag (`job.file = "Bettkarte"`, `job.state = probing`, Fortschritt in `job.probe`, Abbruch mit `op=abort`): 6 × 6 Punkte über X40..380 / Y40..320 (Y bis 330 begrenzt, bis der echte Y-Weg gemessen ist), unerreichbare Punkte daneben. Zwischen den Punkten 10 mm über dem höchsten Kontakt. Speichert `/var/lib/lumacut/marlin/bed_map.json`, löscht danach `workpiece_surface_z` (das Bett ist kein Werkstück) und parkt. |
+| Wirkung | läuft wie ein Auftrag (`job.file = "Bettkarte"`, `job.state = probing`, Fortschritt in `job.probe`, Abbruch mit `op=abort`): 6 × 6 Punkte über X40..380 / Y40..320 (Y bis 330 begrenzt, bis der echte Y-Weg gemessen ist), unerreichbare Punkte daneben. Zwischen den Punkten 10 mm über dem höchsten Kontakt. Findet der Taster an einem Punkt bis zur Firmware-Grenze (−2 mm) kein Bett, bleibt der Punkt leer, wird aus den Nachbarn ergänzt und in `missing_points` gemeldet; andere Abtastfehler brechen ab. Speichert `/var/lib/lumacut/marlin/bed_map.json`, löscht danach `workpiece_surface_z` (das Bett ist kein Werkstück) und parkt. |
 | Erfolg | 200 `{"message": "Bettkarte: 36 Punkte werden abgetastet – das Bett muss leer sein"}`; Ende in `job.state = complete`, Ergebnis in `bed_map` |
 | Fehler | 400 `Ein Auftrag läuft bereits`, `Steuerung belegt: …`, Abtastfehler wie bei `op=probe` (dann `job.state = error`) |
 
@@ -492,7 +492,7 @@ Keine Parameter, **frei**. Löscht die gespeicherte Bettkarte. 200 `{"message": 
 
 #### `GET /api/bedmap`
 
-200 `{"bed_map": null}` oder `{"bed_map": {format: "lumacut-bed-map/1", measured_at, cols, rows, lowest, highest, range, mean, x0, y0, step_x, step_y, region, points: [[x, y], …], z: [z, …], reachable, probe_at}}`. `z` in mm relativ zu Z0, Reihe für Reihe (`z[r * cols + c]`), Maschinen-X/Y.
+200 `{"bed_map": null}` oder `{"bed_map": {format: "lumacut-bed-map/1", measured_at, cols, rows, lowest, highest, range, mean, x0, y0, step_x, step_y, region, points: [[x, y], …], z: [z, …], reachable, probe_at, missing_points}}`. `z` in mm relativ zu Z0, Reihe für Reihe (`z[r * cols + c]`), Maschinen-X/Y.
 
 ### 4.5 `POST /api/action` – Zubehör
 

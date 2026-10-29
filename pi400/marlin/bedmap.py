@@ -51,6 +51,9 @@ def plan(bounds: Box, reachable, cols=COLS, rows=ROWS) -> HeightGrid:
 class BedMap:
     grid: HeightGrid          # filled: every z set
     measured_at: float
+    # Points where the switch found no bed (deeper than the firmware probes):
+    # their height is filled in from the neighbours.
+    missing: tuple = ()
 
     def at(self, x, y):
         """Bed Z (relative to Z0) at machine X/Y, bilinear, clamped to the grid."""
@@ -66,10 +69,11 @@ class BedMap:
                 "cols": self.grid.cols, "rows": self.grid.rows,
                 "lowest": round(min(z), 3), "highest": round(max(z), 3),
                 "range": round(max(z) - min(z), 3),
-                "mean": round(sum(z) / len(z), 3)}
+                "mean": round(sum(z) / len(z), 3), "missing": len(self.missing)}
 
     def as_dict(self):
         return {"format": FORMAT, **self.summary(), **self.grid.as_dict(),
+                "missing_points": list(self.missing),
                 "x0": self.grid.x0, "y0": self.grid.y0,
                 "step_x": self.grid.step_x, "step_y": self.grid.step_y}
 
@@ -77,7 +81,8 @@ class BedMap:
     def from_measured(cls, grid: HeightGrid, measured_at=None):
         if not grid.measured:
             raise ValueError("Bettkarte ohne Messpunkt")
-        return cls(grid.filled(), time.time() if measured_at is None else measured_at)
+        missing = tuple(i for i, z in enumerate(grid.z) if z is None)
+        return cls(grid.filled(), time.time() if measured_at is None else measured_at, missing)
 
     @classmethod
     def from_dict(cls, d):
@@ -91,7 +96,7 @@ class BedMap:
         if len(grid.z) != grid.cols * grid.rows:
             raise ValueError("Bettkarte unvollständig")
         stamp = calendar.timegm(time.strptime(d["measured_at"], "%Y-%m-%dT%H:%M:%SZ"))
-        return cls(grid, stamp)
+        return cls(grid, stamp, tuple(int(i) for i in d.get("missing_points") or ()))
 
 
 def load(path: Path):

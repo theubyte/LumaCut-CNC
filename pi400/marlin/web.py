@@ -947,6 +947,7 @@ def _bed_map_worker(grid, order):
     try:
         values = machine.probe_surface(
             [[grid.probe_point(i) for i in order]], owner="job", hop_mm=bedmap.HOP_MM,
+            skip_missing=True,
             progress=lambda done, total: job["probe"].update(done=done, total=total),
             should_stop=stop_job.is_set)
         for i, z in zip(order, values[0]):
