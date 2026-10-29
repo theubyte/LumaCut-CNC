@@ -386,6 +386,25 @@ class PiClient(
         return revisionOf(call(req.build(), longRunning = true)) ?: 0
     }
 
+    /* ---------- saved projects (/api/projects, Pi feature "projects") ---------- */
+
+    suspend fun savedProjects(): List<SavedProject> =
+        json.decodeFromString(SavedProjectList.serializer(), call(Request.Builder().url(url("api", "projects")).build())).projects
+
+    /** The project JSON as it was saved. */
+    suspend fun savedProject(id: String): String =
+        call(Request.Builder().url(url("api", "projects", id)).build(), longRunning = true)
+
+    /** Saves [projectJson] under [name]; a project with the same name (any case) is replaced. */
+    suspend fun saveProjectAs(name: String, projectJson: String, by: String): SavedProject {
+        val u = url("api", "projects").newBuilder().addQueryParameter("name", name.trim()).addQueryParameter("by", by).build()
+        val body = call(Request.Builder().url(u).post(projectJson.toRequestBody("application/json".toMediaType())).build(), longRunning = true)
+        return json.decodeFromString(SavedProjectReply.serializer(), body).project
+    }
+
+    suspend fun deleteSavedProject(id: String): String =
+        message(call(Request.Builder().url(url("api", "projects", id)).delete().build()))
+
     private fun workspaceUrl(part: String, baseRevision: Int?, by: String) = url("api", "workspace", part).newBuilder()
         .apply { baseRevision?.let { addQueryParameter("base_revision", it.toString()) } }.addQueryParameter("by", by).build()
 

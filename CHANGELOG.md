@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-10-29
 
+- **Projekte auf dem Pi speichern und öffnen:** Editor → Mehr → „Auf dem Pi speichern …“ legt das Projekt unter einem Namen auf dem Pi ab (gleicher Name ersetzt nach Hinweis), „Vom Pi öffnen …“ zeigt die Liste aller Geräte mit Datum, Gerät und Elementzahl, Löschen mit Rückfrage. Neue Pi-Ablage `/api/projects` (Merkmal `projects`); Speichern/Öffnen als Datei auf dem Gerät bleibt.
 - **Regler „präziser ↔ schneller“ und „heller ↔ dunkler“ (App, Ebenen-Fenster):** Tempo und Leistung ändern sich zusammen. Der erste hält die Schwärze gleich (gleiche Energie je mm), der zweite folgt der Schwärze-Kurve aus dem Materialtest mit Kamera. Die Leistung geht nie unter 8 %: darunter zündet der Laser nicht sicher (Einladungskarte mit 6 % war unlesbar). Der Pi speichert die Kurve je Material (`tone_curve`), der Materialtest sucht nicht mehr unter 8 %.
 - **Sperrholz Mittel/Hell korrigiert:** 8 % / 4000 und 8 % / 5300 mm/min statt 6 % und 4,5 % bei 3000.
 - **Bettkarte (Pi):** Der Taster tastet das leere Bett einmal an 6 × 6 Punkten ab (`op=bedmap`, Laser aus), der Pi speichert die Karte (`GET /api/bedmap`, Status `bed_map`). Danach meldet jedes Abtasten auch die Dicke über dem Bett (`workpiece_above_bed_mm`). Weboberfläche: Karte als Farbraster unter Einstellungen.

@@ -28,6 +28,7 @@ from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import CalibrationStore, create_blueprint as camera_calibration_api
 from . import camera as head_camera
 from .workspace import WorkspaceStore, create_blueprint as workspace_api
+from .projects import ProjectStore, create_blueprint as projects_api
 from .line_laser import LineLaser
 from .app_update import AppUpdates
 
@@ -39,7 +40,7 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # autorun_mesh: op=autorun probes the motif areas and compensates the focus
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
 FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings", "workspace",
-            "report", "backup", "exhaust_auto", "bed_map", "material_calibration")
+            "report", "backup", "exhaust_auto", "bed_map", "material_calibration", "projects")
 JOBS = DATA / "jobs"
 # Camera pictures taken inside a job while the laser runs (measuring spot/line).
 CAPTURES = DATA / "captures"
@@ -110,6 +111,9 @@ WORKSPACE = WorkspaceStore(DATA.parent / "workspace")
 app.register_blueprint(workspace_api(WORKSPACE))
 machine.material_mm = WORKSPACE.material_thickness()
 WORKSPACE.on_change = lambda state: setattr(machine, "material_mm", WORKSPACE.material_thickness())
+# Saved projects next to the open one: every app stores and opens them by name (projects.py).
+PROJECTS = ProjectStore(DATA.parent / "projects")
+app.register_blueprint(projects_api(PROJECTS))
 # Measuring line laser (3D): off at start, on only while the app measures.
 LINE_LASER = LineLaser()
 try:

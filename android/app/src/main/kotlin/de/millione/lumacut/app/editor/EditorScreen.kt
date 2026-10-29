@@ -171,6 +171,8 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
     var moreMenu by remember { mutableStateOf(false) }
     var cameraOpen by remember { mutableStateOf(false) }
     var materialTest by remember { mutableStateOf(false) }
+    // null = closed, false = open from the Pi, true = save on the Pi
+    var piProjects by remember { mutableStateOf<Boolean?>(null) }
     val machineStatus by machine.status.collectAsStateWithLifecycle()
     val machineOnline by machine.online.collectAsStateWithLifecycle()
     val ws: de.millione.lumacut.app.workspace.WorkspaceViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
@@ -276,8 +278,10 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         }
                         HorizontalDivider(color = Lc.line)
                         item("Neues Projekt") { confirm = Confirm("Neues Projekt?", "Alle Platten und Elemente werden entfernt. Ebenen bleiben.", "Neu", danger = true) { editor.newDocument() } }
-                        item("Projekt öffnen …") { projectOpener.launch(arrayOf("application/json", "*/*")) }
-                        item("Projekt speichern …") { projectSaver.launch(PiClient.jobNameFrom(doc.title).removeSuffix(".gcode") + ".lumacut.json") }
+                        item("Vom Pi öffnen …") { piProjects = false }
+                        item("Auf dem Pi speichern …") { piProjects = true }
+                        item("Datei öffnen (Gerät) …") { projectOpener.launch(arrayOf("application/json", "*/*")) }
+                        item("Als Datei speichern (Gerät) …") { projectSaver.launch(PiClient.jobNameFrom(doc.title).removeSuffix(".gcode") + ".lumacut.json") }
                     }
                 }
                 if (!roomyBar) PlateMenu(editor)
@@ -359,6 +363,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
         editor.moveSelected(0.0, 0.0, "text")
     } }
 
+    piProjects?.let { save -> PiProjectsDialog(machine, editor, save) { piProjects = null } }
     if (materialTest) MaterialTestDialog(onDismiss = { materialTest = false }) { spec ->
         materialTest = false
         val generated = MaterialTest.build(spec) { t, h -> TextPaths.build(t, h, true, "sans-serif") }

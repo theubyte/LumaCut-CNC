@@ -134,6 +134,10 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 | GET | `/api/workspace/scan` | – | Scanbild (PNG) |
 | PUT | `/api/workspace/scan` | PNG | Scanbild speichern (`?base_revision=n`) |
 | DELETE | `/api/workspace/scan` | Query | Scanbild löschen (`?base_revision=n`) |
+| GET | `/api/projects` | – | gespeicherte Projekte auf dem Pi (Abschnitt 4.17) |
+| GET | `/api/projects/<name>` | – | ein gespeichertes Projekt als JSON |
+| POST | `/api/projects` | JSON | Projekt unter `?name=` speichern (gleicher Name = ersetzt) |
+| DELETE | `/api/projects/<name>` | – | gespeichertes Projekt löschen (`<name>` = id aus der Liste) |
 | GET | `/api/camera/settings` | – | feste Belichtung/Weißabgleich/Licht lesen |
 | PUT | `/api/camera/settings` | JSON | feste Belichtung/Weißabgleich/Licht speichern |
 | GET | `/api/app/android` | – | neueste Android-App auf dem Pi (Version, Prüfsumme) – Abschnitt 4.15 |
@@ -248,7 +252,7 @@ Felder aus `web.py` (`status()`):
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
 | `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
-| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi), `camera_settings` = `/api/camera/settings` und Snapshots in genau der angefragten Größe, `workspace` = `/api/workspace…`, `report` = `op=report`, `backup` = `GET /api/backup`, `exhaust_auto` = Abluft-Automatik und `machine_name` in `/api/settings`, `bed_map` = Bettkarte (`op=bedmap`, `GET /api/bedmap`), `material_calibration` = Materialtest mit Kamera (`op=matcal`, `GET /api/matcal`). Fehlt bei älteren Pi-Ständen. |
+| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi), `camera_settings` = `/api/camera/settings` und Snapshots in genau der angefragten Größe, `workspace` = `/api/workspace…`, `report` = `op=report`, `backup` = `GET /api/backup`, `exhaust_auto` = Abluft-Automatik und `machine_name` in `/api/settings`, `bed_map` = Bettkarte (`op=bedmap`, `GET /api/bedmap`), `material_calibration` = Materialtest mit Kamera (`op=matcal`, `GET /api/matcal`), `projects` = Projektablage `/api/projects`. Fehlt bei älteren Pi-Ständen. |
 | `coord_convention` | string | `"origin_top_right"`: Bedeutung der Ankernamen (siehe `op=place`). Fehlt bei Pi-Ständen vor 2026-10-26; Studio tauscht dann links/rechts. |
 | `estimated_tip_gap_mm` | number \| null | geschätzter Abstand Spitze ↔ Werkstück (nur wenn referenziert, Position und Oberfläche bekannt). Schätzung, keine Messung. |
 | `estimated_focus_adjust_mm` | number \| null | Fokusabstand − `estimated_tip_gap_mm` (nur Anzeige) |
@@ -1047,6 +1051,22 @@ Das zusammengesetzte Scanbild (PNG, bis 16 MB, ganze Arbeitsfläche). GET 200
 `image/png` mit `X-Revision` oder 404; PUT PNG im Body bzw. DELETE, jeweils
 `?base_revision=n`; 200 `{revision, bytes, …}`, 409 bei veralteter Revision,
 400 `Scanbild muss ein PNG sein`.
+
+### 4.17 Projektablage (`/api/projects`)
+
+Neben dem gerade offenen Projekt (`/api/workspace/project`) hält der Pi eine
+Ablage gespeicherter Projekte, die jede App öffnen kann (Modul `projects.py`,
+Ordner `/var/lib/lumacut/projects`, höchstens 200 Projekte à 30 MB).
+
+| Aufruf | Antwort |
+| --- | --- |
+| `GET /api/projects` | 200 `{"projects": [{id, name, bytes, updated_at, updated_by, elements, layers, plates}]}`, neueste zuerst |
+| `GET /api/projects/<id>` | 200 Projekt-JSON wie gespeichert; 404 `Projekt nicht gefunden` |
+| `POST /api/projects?name=…&by=Gerät` | Body = Projekt-JSON (wie `/api/workspace/project`). Gleicher Name (ohne Groß/klein) ersetzt das Projekt, sonst neu. 200 `{"project": {id, name, …, replaced}}`; 400 `Projektname: 1 bis 80 Zeichen`, `Kein LumaCut-Projekt (layers und elements fehlen)`, `Projekt ist kein gültiges JSON`, `Projekt größer als 30 MB`, `Schon 200 Projekte auf dem Pi – erst alte löschen` |
+| `DELETE /api/projects/<id>` | 200 `{"message": "Projekt gelöscht"}`; 404 |
+
+Ein geöffnetes Projekt wird in der App zum offenen Projekt und läuft dann
+wie gewohnt über `/api/workspace/project` zu den anderen Geräten.
 
 ## 5. Polling-Empfehlung
 

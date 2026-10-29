@@ -97,7 +97,7 @@ class PiApiReferenceDocTests(unittest.TestCase):
 
     def test_every_route_is_documented_with_its_method(self):
         routes = (_routes(_tree("web.py"), "app") | _routes(_tree("camera_calibration.py"), "blueprint")
-                  | _routes(_tree("workspace.py"), "bp"))
+                  | _routes(_tree("workspace.py"), "bp") | _routes(_tree("projects.py"), "bp"))
         self.assertGreaterEqual(len(routes), 14, routes)
         for method, path in sorted(routes):
             row = "| %s | `%s` |" % (method, _doc_path(path))

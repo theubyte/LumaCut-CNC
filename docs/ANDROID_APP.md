@@ -24,7 +24,7 @@ Die Leiste links führt durch den Hauptweg, mehr braucht ein Neuling nicht:
 | **Bild anpassen** (in der Auswahl) | Dithering Floyd-Steinberg, Jarvis, Stucki, S/W, Graustufen; Helligkeit, Kontrast, Schärfe, Invertieren mit Vorschau dessen, was gelasert wird. |
 | **QR-Code** | Text/URL, Stufe M, Version 1–10 (bis 213 Byte), gefüllte Rechtecke auf Gravieren; Warnung unter 0,8 mm Punktgröße. Intern gegen Reed-Solomon-Beispiel, Format-BCH und Rücklesen der Codewörter geprüft, aber noch nicht mit einem echten Scanner. |
 | **Formen** | Herz, Stern, abgerundetes Rechteck, Anhänger mit Loch. |
-| **Mehr** | Vervielfältigen als Raster (Anzahl, Abstand; Kopien außerhalb des Arbeitsbereichs entfallen), Mehrfachauswahl, Gruppen, Materialtest, Projekte. Text-Dialog: „Auf dem Bogen“ (Radius, minus = unten). |
+| **Mehr** | Vervielfältigen als Raster (Anzahl, Abstand; Kopien außerhalb des Arbeitsbereichs entfallen), Mehrfachauswahl, Gruppen, Materialtest, Projekte: „Vom Pi öffnen …“ und „Auf dem Pi speichern …“ (Ablage auf dem Pi, `/api/projects`, für alle Geräte gleich; gleicher Name ersetzt nach Hinweis, Löschen mit Rückfrage) sowie Datei öffnen/speichern auf dem Gerät. Text-Dialog: „Auf dem Bogen“ (Radius, minus = unten). |
 
 Unter **Maschine** liegt alles Übrige: Steuerung (Status, Steuerkreuz, Referenzieren, Abtasten, Parken, Licht/Abluft, Notstopp quittieren), Arbeitsplatz scannen (Kopfkamera kalibrieren, Mosaik, Werkstücke markieren, Höhenmesh, geführter Ablauf – nur für Fachleute) und die Auftragsliste des Pi. **Einstellungen**: Pi-Adresse, Fokus & Taster, SKR-Firmware, Version. NOT-AUS ist immer oben rechts.
 
