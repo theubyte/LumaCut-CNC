@@ -831,6 +831,21 @@ dialog.danger h2{color:var(--bad)}
    </div>
   </section>
 
+  <section class="card" id="matcalPanel" hidden>
+   <div class="card-head"><h2><svg class="i"><use href="#i-beam"/></svg>Material automatisch kalibrieren</h2><span class="tag" id="matcalTag">bereit</span></div>
+   <div class="stack">
+    <p class="help"><b>Gravur:</b> ein 5-mm-Feld lasern, fotografieren, Ton, Streifen und Rauchrand messen, nächste Leistung rechnen – bis Dunkel, Mittel und Hell gefunden sind (meist 6–10 Felder). <b>Schnitt:</b> je Tempo ein Durchgang nach dem anderen, bis die Kamera das Loch offen sieht; gespeichert wird die Einstellung mit der wenigsten Energie (sauberste Rückseite). Der Testbereich beginnt am Laserpunkt (Gravur 51 × 21 mm, Schnitt 44 × 8 mm Richtung +X/+Y). Ergebnisse werden als Materialien gespeichert.</p>
+    <div class="cols2">
+     <label class="field">Material<input id="matcalName" type="text" maxlength="60" placeholder="z. B. Sperrholz"></label>
+     <label class="field">Stärke<span class="unit" data-unit="mm"><input id="matcalThickness" type="number" min="0.1" max="50" step="0.1" value="4" inputmode="decimal"></span></label>
+    </div>
+    <label class="check small"><input type="checkbox" id="matcalRaised"> Platte liegt hochgelegt auf Abstandhaltern (nötig zum Schneiden)</label>
+    <div class="row"><button type="button" class="btn primary" id="matcalEngrave" data-motion data-needs-home><svg class="i"><use href="#i-beam"/></svg>Gravur kalibrieren</button><button type="button" class="btn" id="matcalCut" data-motion data-needs-home><svg class="i"><use href="#i-beam"/></svg>Schnitt kalibrieren</button></div>
+    <p class="small faint" id="matcalInfo">Noch kein Materialtest</p>
+    <ul class="small" id="matcalResult"></ul>
+   </div>
+  </section>
+
   <section class="card">
    <div class="card-head"><h2><svg class="i"><use href="#i-chip"/></svg>Gerät</h2></div>
    <form id="deviceSettings" class="stack" data-settings>
@@ -1185,6 +1200,7 @@ function refreshUI(s){
   "Oberfläche Z "+fmt(s.workpiece_surface_z)+" · Fokus Z "+fmt(s.laser_focus_z)+" · tiefstes Z "+fmt(s.probe_minimum_z)+" mm"+
   (s.workpiece_above_bed_mm==null?"":" · "+fmt(s.workpiece_above_bed_mm)+" mm über dem Bett");
  renderBedMap(s);
+ renderMatcal(s);
  // Einstellungen (nur übernehmen, solange niemand tippt)
  fillSettings(s);
  $("tipGap").textContent=s.estimated_tip_gap_mm==null?"nicht referenziert":s.estimated_tip_gap_mm.toFixed(2)+" mm";
@@ -2096,6 +2112,39 @@ async function renderBedMap(s){
   cell.title="X "+fmt(x,0)+" · Y "+fmt(y,0)+": Z "+fmt(z)+" mm"+(gap?" – kein Bett gefunden (tiefer als die Firmware tastet), aus den Nachbarn ergänzt":"");grid.append(cell);
  }
 }
+/* Material automatisch kalibrieren (op=matcal, Pi-Modul matcal.py) */
+function renderMatcal(s){
+ const panel=$("matcalPanel");panel.hidden=!has("material_calibration");if(panel.hidden)return;
+ const r=s.material_calibration,t=$("matcalTag");
+ const label={running:"läuft",complete:"fertig",error:"Fehler",aborted:"abgebrochen"};
+ t.textContent=r?label[r.state]||r.state:"bereit";t.className="tag"+(r?.state==="complete"?" ok":r?.state==="error"?" bad":"");
+ const list=$("matcalResult");list.replaceChildren();
+ if(!r){$("matcalInfo").textContent="Noch kein Materialtest";return}
+ const l=r.last,n=v=>fmt(v,1);
+ let info=(r.kind==="engrave"?"Gravur":"Schnitt")+" · „"+r.material+"“ · "+r.steps+(r.kind==="engrave"?" Felder":" Durchgänge");
+ if(l)info+=r.kind==="engrave"?" · zuletzt "+n(l.power)+" % / "+fmt(l.speed,0)+" mm/min → Ton "+fmt(l.tone,2)+(l.clean?"":" (streifig/Rand)")
+                               :" · zuletzt "+fmt(l.speed,0)+" mm/min, Durchgang "+(l.pass+1)+": "+(l.fell?"durch":"noch zu");
+ if(r.error)info+=" · "+r.error;
+ $("matcalInfo").textContent=info;
+ const add=text=>{const li=document.createElement("li");li.textContent=text;list.append(li)};
+ const res=r.result||{};
+ if(r.kind==="engrave")for(const k of ["dunkel","mittel","hell"]){const f=res[k];if(f)add(k[0].toUpperCase()+k.slice(1)+": "+n(f.power)+" % · "+fmt(f.speed,0)+" mm/min (Ton "+fmt(f.tone,2)+")"+(f.approximate?" – nur ungefähr":""))}
+ else{for(const q of res.squares||[])add(fmt(q.speed,0)+" mm/min: "+(q.fell?q.passes+" Durchgänge":"nach "+q.passes+" nicht durch"));
+  if(res.best)add("Beste: "+fmt(res.best.speed,0)+" mm/min × "+res.best.passes+" (wenigste Energie)")}
+ if(r.state==="complete"&&r.saved?.length)add("Gespeichert als: "+r.saved.map(m=>m.name+" ("+m.process+")").join(", "));
+}
+async function startMatcal(kind,button){
+ const name=$("matcalName").value.trim(),thickness=Number($("matcalThickness").value);
+ const pos=Array.isArray(snapshot?.position)?snapshot.position:null;
+ if(!name||!(thickness>0)){show("Materialname und Stärke eintragen",true);return}
+ if(!pos){show("Position unbekannt – erst referenzieren",true);return}
+ if(kind==="cut"&&!$("matcalRaised").checked){show("Zum Schneiden die Platte hochlegen und das Häkchen setzen",true);return}
+ const what=kind==="engrave"?"Gravur Feld für Feld (bis 18 Felder à 5 mm)":"Schnitt Durchgang für Durchgang (4 Quadrate à 8 mm)";
+ if(!await ask("Materialtest starten?",what+" auf „"+name+"“ ab dem Laserpunkt X "+fmt(pos[0],0)+" / Y "+fmt(pos[1],0)+". Der Pi tastet zuerst ab, dann lasert er. Hände raus, Deckel zu, Schutzbrille auf, Abluft an – danebenbleiben.","Lasern"))return;
+ call("matcal",{kind,x:pos[0].toFixed(2),y:pos[1].toFixed(2),name,thickness,...(kind==="cut"?{raised:1}:{})},button);
+}
+$("matcalEngrave").onclick=ev=>startMatcal("engrave",ev.currentTarget);
+$("matcalCut").onclick=ev=>startMatcal("cut",ev.currentTarget);
 $("bedMapRun").onclick=async ev=>{
  if(!await ask("Bett leer?","Der Taster fährt 36 Punkte auf dem ganzen Bett ab, dazwischen nur 10 mm über dem Bett. Alles muss herunter: Material, Anschläge, Klemmen, Werkzeug. Laser bleibt aus.","Bett ist leer"))return;
  call("bedmap",{},ev.currentTarget);

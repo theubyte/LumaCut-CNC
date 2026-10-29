@@ -140,6 +140,8 @@ data class MachineStatus(
     val features: List<String> = emptyList(),
     /** "origin_top_right" = Pi uses the 2026-10-26 axis convention; missing = old Pi. */
     val coord_convention: String? = null,
+    /** Last or running adaptive material calibration (feature "material_calibration"), null = none yet. */
+    val material_calibration: MatcalSummary? = null,
 ) {
     val coordOk get() = coord_convention == PiClient.COORD_CONVENTION
     val ownerFree get() = owner == "Frei" || owner.isBlank()
@@ -540,7 +542,7 @@ class PiClient(
         const val COORD_CONVENTION = "origin_top_right"
 
         val ACTIONS = setOf("home", "jog", "probe", "park", "light", "exhaust", "start", "autorun", "frame", "moveto", "motion_test", "motion_limits", "line_laser",
-                            "abort", "estop", "estop_reset", "app_update_check")
+                            "abort", "estop", "estop_reset", "app_update_check", "matcal")
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(4, TimeUnit.SECONDS)

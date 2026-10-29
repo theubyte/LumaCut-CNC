@@ -22,9 +22,10 @@ from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
 from . import bedmap
+from . import matcal
 from . import focus_compensation as focus
 from .materials import ConflictError, MaterialStore, NotFoundError
-from .camera_calibration import create_blueprint as camera_calibration_api
+from .camera_calibration import CalibrationStore, create_blueprint as camera_calibration_api
 from . import camera as head_camera
 from .workspace import WorkspaceStore, create_blueprint as workspace_api
 from .line_laser import LineLaser
@@ -38,7 +39,7 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # autorun_mesh: op=autorun probes the motif areas and compensates the focus
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
 FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings", "workspace",
-            "report", "backup", "exhaust_auto", "bed_map")
+            "report", "backup", "exhaust_auto", "bed_map", "material_calibration")
 JOBS = DATA / "jobs"
 # Camera pictures taken inside a job while the laser runs (measuring spot/line).
 CAPTURES = DATA / "captures"
@@ -127,6 +128,7 @@ if config["probe_offset_x_mm"] is not None and config["probe_offset_y_mm"] is no
 # Bed map (bedmap.py): the empty bed probed once; None until measured.
 BED_MAP_FILE = DATA / bedmap.FILENAME
 BED = bedmap.load(BED_MAP_FILE)
+MATCAL_FILE = DATA / "matcal.json"
 # probe: {"done", "total"} while op=autorun probes (and afterwards), else None.
 # phase: finer step while active (homing, probing, focusing, running,
 # finishing, parking), None otherwise.
@@ -276,6 +278,7 @@ def status():
                   line_laser=LINE_LASER.status(),
                   travel_z_mm=round(machine.travel_z, 2),
                   bed_map=None if BED is None else BED.summary(),
+                  material_calibration=_matcal_summary(),
                   workpiece_above_bed_mm=_above_bed(),
                   home_needs_confirm=(not machine.z_homed and machine.last_known_z is None),
                   origin=_origin_status(),
@@ -590,6 +593,8 @@ def action():
         return jsonify(message=text, above_bed_mm=above, detail="\n".join(reply[:6]))
     if op == "bedmap":
         return start_bed_map()
+    if op == "matcal":
+        return start_material_calibration()
     if op == "bedmap_clear":
         local_owner()
         _set_bed(None)
@@ -1023,6 +1028,297 @@ def _bed_map_worker(grid, order):
         with machine.lock:
             machine.owner = None
         job_lock.release()
+
+
+# --- Adaptive material calibration (op=matcal, matcal.py) ----------------
+# Engraving: field by field (laser, photo, measure, next power). Cutting on a
+# raised plate: pass by pass until the camera sees the hole open. Runs like a
+# job (job state, abort, park); the results are stored as materials.
+MATCAL_TITLES = {"engrave": "Materialtest Gravur", "cut": "Materialtest Schnitt"}
+
+
+def _load_matcal():
+    try:
+        return json.loads(MATCAL_FILE.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+MATCAL = {"run": _load_matcal()}
+
+
+def _save_matcal():
+    tmp = MATCAL_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(MATCAL["run"], ensure_ascii=False, indent=1), "utf-8")
+    os.replace(tmp, MATCAL_FILE)
+
+
+def _matcal_summary():
+    run = MATCAL["run"]
+    if run is None:
+        return None
+    steps = run.get("fields") if run["kind"] == "engrave" else run.get("passes")
+    return {"kind": run["kind"], "material": run["material"], "state": run["state"],
+            "steps": len(steps or ()), "last": (steps or [None])[-1], "result": run.get("result"),
+            "saved": run.get("saved"), "error": run.get("error", "")}
+
+
+@app.get("/api/matcal")
+def matcal_get():
+    """The last (or running) material calibration with every field/pass."""
+    return jsonify(material_calibration=MATCAL["run"])
+
+
+def _camera_model():
+    return matcal.CameraModel(CalibrationStore().load().get("android") or {})
+
+
+def _matcal_photo(cam, head):
+    """Head to the camera position (laser off, Z only up), one grey picture."""
+    machine.move_to(head[0], head[1], owner="job")
+    settings = head_camera.validate(dict(head_camera.DEFAULTS, **(config.get("camera") or {})))
+    error = None
+    for _ in range(3):        # the USB camera sometimes drops out for a moment
+        _check_stop()
+        try:
+            jpeg = head_camera.snapshot(CAMERA, cam.photo_w, cam.photo_h, settings)
+            return matcal.decode_gray(jpeg, cam.photo_w, cam.photo_h), machine.position[2]
+        except Exception as exc:
+            error = exc
+            time.sleep(1.0)
+    raise RuntimeError("Kamera liefert kein Bild (%s) – Kamerakabel prüfen, dann neu starten" % error)
+
+
+def _matcal_laser(lines):
+    for line in lines:
+        _check_stop()
+        machine.stream_command(line, owner="job", timeout=150)
+    machine.drain(owner="job")
+
+
+def start_material_calibration():
+    """op=matcal: kind=engrave|cut, x/y = corner of the test area (machine mm,
+    the fields grow towards +X/+Y), name = material. Optional: thickness,
+    power/speed (engraving start), power/speeds (cutting, comma list),
+    raised=1 (cutting: the plate lies on spacers so pieces can fall out)."""
+    local_owner()
+    machine.check_reference()
+    if not machine.homed:
+        raise RuntimeError("Vor dem Materialtest referenzieren")
+    if WORKSPACE.material_thickness() is None:
+        raise RuntimeError("Erst Material wählen – die Stärke bestimmt die Fahrhöhe")
+    form = request.form
+    kind = form.get("kind", "")
+    if kind not in MATCAL_TITLES:
+        raise ValueError("kind muss engrave oder cut sein")
+    name = form.get("name", "").strip()
+    if not 1 <= len(name) <= 60:
+        raise ValueError("Materialname fehlt")
+    origin = (float(form.get("x", "nan")), float(form.get("y", "nan")))
+    thickness = float(form.get("thickness") or WORKSPACE.material_thickness() or 0)
+    if not 0 < thickness <= 50:
+        raise ValueError("Materialstärke 0..50 mm")
+    if kind == "engrave":
+        area = matcal.engrave_area(origin)
+        start_power = float(form.get("power") or 10.0)
+        speed = float(form.get("speed") or 4500.0)
+        if not (1 <= start_power <= 60 and 500 <= speed <= 9000):
+            raise ValueError("Startleistung 1..60 %, Tempo 500..9000 mm/min")
+        search = matcal.EngraveSearch(start_power=start_power, speed=speed)
+    else:
+        if form.get("raised") != "1":
+            raise RuntimeError("Platte zuerst hochlegen (Abstandhalter, ca. 10 mm Luft): nur dann fällt ein "
+                               "durchgeschnittenes Teil heraus und die Kamera sieht das Loch")
+        speeds = tuple(float(v) for v in (form.get("speeds") or "").split(",") if v.strip()) or matcal.CUT_SPEEDS
+        power = float(form.get("power") or 100.0)
+        if not (1 <= len(speeds) <= 6 and all(60 <= v <= 6000 for v in speeds) and 10 <= power <= 100):
+            raise ValueError("1..6 Tempi 60..6000 mm/min, Leistung 10..100 %")
+        area = matcal.cut_area(origin, len(speeds))
+        search = matcal.CutSearch(speeds=speeds, power=power)
+    limit = machine.safe_zone_xy_mm
+    if not all(v == v for v in origin) or area[0] < limit or area[1] < limit or area[2] > 390 or area[3] > 370:
+        raise ValueError("Testbereich X%.0f..%.0f / Y%.0f..%.0f liegt nicht im Arbeitsbereich X%.0f..390 / Y%.0f..370"
+                         % (area[0], area[2], area[1], area[3], limit, limit))
+    centre = ((area[0] + area[2]) / 2, (area[1] + area[3]) / 2)
+    if not machine.probe_reachable(*centre):
+        raise ValueError("Die Mitte des Testbereichs ist für den Taster nicht erreichbar")
+    if not os.path.exists(CAMERA):
+        raise ConnectionError("Keine Kamera an " + CAMERA)
+    cam = _camera_model()
+    head = cam.head_for(*centre)
+    if not (0 <= head[0] <= 390 and 0 <= head[1] <= 370):
+        raise ValueError("Für das Foto müsste der Kopf nach X%.0f Y%.0f – Testbereich weiter zur Mitte legen" % head)
+    if not job_lock.acquire(blocking=False):
+        raise RuntimeError("Ein Auftrag läuft bereits")
+    stop_job.clear()
+    with machine.lock:
+        if machine.owner is not None:
+            job_lock.release()
+            raise RuntimeError("Steuerung belegt: " + machine.owner)
+        machine.owner = "job"
+    total = matcal.ENGRAVE_MAX_FIELDS if kind == "engrave" else len(search.speeds) * search.max_passes
+    job.update(file=MATCAL_TITLES[kind], state="probing", phase="probing", line=0, total=total,
+               error="", probe=None)
+    MATCAL["run"] = {"kind": kind, "material": name, "thickness_mm": thickness, "origin": list(origin),
+                     "area": [round(v, 2) for v in area], "state": "running",
+                     "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                     "fields" if kind == "engrave" else "passes": [], "result": None, "saved": [], "error": ""}
+    threading.Thread(target=_matcal_worker, args=(kind, origin, centre, head, cam, search, name, thickness),
+                     daemon=True, name="material-calibration").start()
+    what = "Gravur Feld für Feld" if kind == "engrave" else "Schnitt Durchgang für Durchgang"
+    return jsonify(message="%s: %s, Testbereich X%.0f..%.0f / Y%.0f..%.0f" % (MATCAL_TITLES[kind], what, *area[0::2], *area[1::2]))
+
+
+def _matcal_worker(kind, origin, centre, head, cam, search, name, thickness):
+    run = MATCAL["run"]
+    lights = (machine.lights, machine.light_pct)
+
+    def restore_light():
+        try:
+            machine.set_light(lights[0], lights[1], owner="job")
+        except Exception:
+            logging.info("Licht nach dem Materialtest nicht zurückgestellt")
+    try:
+        machine.command("G0 X%.3f Y%.3f" % centre, owner="job", timeout=60)
+        machine.probe_workpiece(owner="job")
+        surface, focus_z = machine.surface_z, machine.status()["laser_focus_z"]
+        run.update(surface_z=surface, focus_z=focus_z)
+        try:
+            machine.set_light(True, _camera_light_level(), owner="job")
+        except Exception as exc:
+            logging.info("Kameralicht nicht geschaltet: %s", exc)
+        if config["exhaust_auto"] and not machine.exhaust:
+            machine.command("M8", owner="job")
+        if kind == "engrave":
+            _matcal_engrave(run, origin, head, cam, search, surface, focus_z)
+            results = search.results
+            run["result"] = {k: {a: v[a] for a in ("power", "speed", "tone", "approximate")} for k, v in results.items()}
+            run["saved"] = _matcal_save_engrave(name, thickness, results)
+        else:
+            _matcal_cut(run, origin, head, cam, search, surface, focus_z)
+            best = search.best()
+            run["result"] = {"squares": search.squares, "best": best}
+            if best is None:
+                raise RuntimeError("Kein Quadrat ist durchgefallen – Platte hochgelegt? Langsamer oder mit mehr "
+                                   "Leistung testen")
+            run["saved"] = _matcal_save_cut(name, thickness, best, search.power)
+        run["state"] = "complete"
+        restore_light()
+        _set_phase("parking")
+        machine.park_safezone(owner="job")
+        job.update(state="complete", phase=None)
+    except Exception as exc:
+        run.update(state="aborted" if stop_job.is_set() or isinstance(exc, Aborted) else "error",
+                   error=job_error_text(exc))
+        restore_light()
+        _job_failed(exc)
+    finally:
+        run["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        try:
+            _save_matcal()
+        except OSError:
+            logging.exception("Materialtest nicht gespeichert")
+        with machine.lock:
+            machine.owner = None
+        job_lock.release()
+        _exhaust_after_job()
+
+
+def _matcal_engrave(run, origin, head, cam, search, surface, focus_z):
+    before, z = _matcal_photo(cam, head)
+    lum_before = cam.sampler(before, head, z, surface)
+    guess, reach = (0.0, 0.0), 3.0
+    while True:
+        step = search.next()
+        if step is None:
+            return
+        k = len(search.fields)
+        x, y = matcal.engrave_slot(origin, k)
+        _set_phase("running", "running")
+        _matcal_laser(matcal.engrave_field(x, y, step["power"], step["speed"], focus_z))
+        _set_phase("measuring")
+        after, z = _matcal_photo(cam, head)
+        lum_after = cam.sampler(after, head, z, surface)
+        dx, dy, dark = matcal.locate(lum_before, lum_after, x, y, matcal.ENGRAVE_CELL_MM, guess, reach)
+        if dark < 8 and k > 0:
+            dx, dy = guess            # hardly any colour: keep the registration seen so far
+        else:
+            guess, reach = (dx, dy), 1.0
+        measured = matcal.measure_field(lum_after, x + dx, y + dy)
+        search.add(step, measured)
+        run["fields"].append(dict(search.fields[-1], x=round(x, 2), y=round(y, 2),
+                                  shift=[round(dx, 2), round(dy, 2)]))
+        job["line"] = k + 1
+        lum_before = lum_after
+
+
+def _matcal_cut(run, origin, head, cam, search, surface, focus_z):
+    img, z = _matcal_photo(cam, head)
+    lum = cam.sampler(img, head, z, surface)
+    start = None
+    while True:
+        step = search.next()
+        if step is None:
+            return
+        x, y = matcal.cut_slot(origin, step["square"])
+        if step["pass"] == 0:
+            start = matcal.hole_ratio(lum, x, y)
+        _set_phase("running", "running")
+        _matcal_laser(matcal.cut_pass(x, y, step["speed"], step["power"], focus_z, step["pass"]))
+        _set_phase("measuring")
+        img, z = _matcal_photo(cam, head)
+        lum = cam.sampler(img, head, z, surface)
+        ratio = matcal.hole_ratio(lum, x, y)
+        fell = ratio < 0.5 * start
+        search.add(step, fell)
+        run["passes"].append(dict(step, ratio=round(ratio, 3), fell=fell))
+        job["line"] = len(run["passes"])
+
+
+def _upsert_material(name, process, body):
+    """Create or update the material with this name and process (Pi = master)."""
+    for _ in range(3):
+        listing = MATERIALS.list()
+        same = [m for m in listing["materials"] if m["name"] == name and m["process"] == process
+                and not m.get("builtin")]
+        data = dict(body, name=name, process=process, base_revision=listing["revision"])
+        try:
+            if same:
+                return MATERIALS.update(same[0]["id"], data)["material"]
+            return MATERIALS.create(data)["material"]
+        except ConflictError:
+            continue
+    raise RuntimeError("Materialliste wurde gleichzeitig geändert – Ergebnis nicht gespeichert")
+
+
+def _matcal_save_engrave(name, thickness, results):
+    today = time.strftime("%Y-%m-%d")
+    labels = {"dunkel": name, "mittel": name + " (mittel)", "hell": name + " (hell)"}
+    saved = []
+    for key, label in labels.items():
+        f = results.get(key)
+        if f is None:
+            continue
+        note = "Automatische Gravur-Kalibrierung %s: Ton %.2f (Ziel %.2f)%s%s." % (
+            today, f["tone"], f["tone_target"], "" if f["clean"] else ", fleckig/streifig",
+            ", nur ungefähr getroffen" if f["approximate"] else "")
+        m = _upsert_material(label, "Gravieren", {
+            "mode": "fill", "thickness_mm": thickness, "power_pct": f["power"],
+            "speed_mm_min": round(f["speed"]), "passes": 1, "interval_mm": matcal.INTERVAL_MM,
+            "z_step_mm": 0.0, "depth_per_pass_mm": 0.0, "notes": note})
+        saved.append({"id": m["id"], "name": label, "process": "Gravieren"})
+    return saved
+
+
+def _matcal_save_cut(name, thickness, best, power):
+    note = ("Automatische Schnitt-Kalibrierung %s auf hochgelegter Platte: %d × %d mm/min fiel durch "
+            "(wenigste Energie). Immer hochgelegt schneiden." % (time.strftime("%Y-%m-%d"), best["passes"], best["speed"]))
+    m = _upsert_material(name, "Schneiden", {
+        "mode": "line", "thickness_mm": thickness, "power_pct": power, "speed_mm_min": best["speed"],
+        "passes": best["passes"], "interval_mm": matcal.INTERVAL_MM,
+        "z_step_mm": matcal.CUT_Z_STEP_MM if best["passes"] > 1 else 0.0, "depth_per_pass_mm": 0.0,
+        "notes": note})
+    return [{"id": m["id"], "name": name, "process": "Schneiden"}]
 
 
 @app.get("/api/camera/settings")

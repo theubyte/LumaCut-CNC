@@ -89,6 +89,7 @@ Lokal: `core` testen geht mit JDK 17+ und Gradle (`gradle :core:test` im Ordner 
 3. Optional: „Arbeitsplatz scannen“ (Motiv-Seite) legt ein Foto der Arbeitsfläche als Hintergrund.
 4. Kopfkamera einmalig: Maschine → Arbeitsplatz scannen → Kalibrieren → Rechteck lasern → Kopf darüber → Kamerabild → vier Marker auf die Ecken → Speichern. Die Kamera hängt per USB am Pi (`LUMACUT_CAMERA`, Standard `/dev/video0`).
 5. Ohne Kopfkamera: Editor → Kamera → Kalibrier-Rechteck lasern, mit dem Tablet fotografieren, Marker setzen.
+6. Neues Material: Kalibrieren → Je Material → **Automatisch mit Kamera**. Kopf über eine freie Stelle fahren, Name und Stärke eintragen, „Gravur kalibrieren“ bzw. (Platte hochgelegt) „Schnitt kalibrieren“. Der Pi lasert, fotografiert und misst Schritt für Schritt und speichert die Ergebnisse als Materialien (`docs/MATERIAL_KALIBRIERUNG.md`).
 
 ## Grenzen der ersten Version
 

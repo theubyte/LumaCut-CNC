@@ -5,6 +5,8 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 ## 2026-10-29
 
 - **Bettkarte (Pi):** Der Taster tastet das leere Bett einmal an 6 × 6 Punkten ab (`op=bedmap`, Laser aus), der Pi speichert die Karte (`GET /api/bedmap`, Status `bed_map`). Danach meldet jedes Abtasten auch die Dicke über dem Bett (`workpiece_above_bed_mm`). Weboberfläche: Karte als Farbraster unter Einstellungen.
+- **Materialtest mit Kamera (`op=matcal`):** Der Pi kalibriert ein Material selbst. Gravur Feld für Feld (lasern, fotografieren, Ton/Streifen/Rauchrand messen, nächste Leistung rechnen) bis Dunkel, Mittel und Hell; Schnitt auf hochgelegter Platte Durchgang für Durchgang, bis die Kamera das Loch offen sieht – gespeichert wird die Einstellung mit der wenigsten Energie. Ergebnisse landen als Materialien auf dem Pi. Karte in der Weboberfläche (Einstellungen) und in der App (Kalibrieren → Je Material → Automatisch mit Kamera).
+- **Sperrholz kalibriert (4 mm, 10 W ohne Air Assist):** Gravur dunkel 12,8 % / 4500 mm/min; Schnitt hochgelegt 500 mm/min × 2. Flach auf der Opferplatte verkohlte die Rückseite (Messwerte in `docs/MATERIAL_KALIBRIERUNG.md`).
 - **Kameralicht automatisch:** Jedes Kamerabild über den Pi (Live-Bild im Browser, Scans, Messungen) schaltet die LEDs mit der Helligkeit der Lichtkalibrierung ein und 8 s nach dem letzten Bild wieder zurück.
 - **Abtasten unter Z0:** Das leere Bett liegt 0,7–1,2 mm unter Z0 (Z0 ist der Schaltpunkt beim Referenzieren). Kontakte bis −3 mm gelten jetzt als gültig; vorher verwarf der Pi jedes Antasten auf dem leeren Bett.
 

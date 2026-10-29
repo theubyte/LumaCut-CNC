@@ -123,6 +123,7 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 | POST | `/api/jobs/<name>/delete` | – | Auftrag löschen |
 | GET | `/api/jobs/<name>/geometry` | – | Motivgrenzen und Abtastkandidaten |
 | GET | `/api/bedmap` | – | gespeicherte Bettkarte (Raster, Höhen relativ zu Z0) oder `bed_map: null` (Abschnitt 4.4) |
+| GET | `/api/matcal` | – | letzter oder laufender Materialtest mit allen Feldern/Durchgängen (Abschnitt 4.4) |
 | GET | `/api/camera/snapshot` | – | ein JPEG der Kopfkamera |
 | GET | `/api/camera/captures/<name>` | – | ein Bild, das ein Auftrag während einer Laserlinie aufgenommen hat |
 | DELETE | `/api/camera/captures` | – | diese Bilder löschen |
@@ -221,6 +222,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `laser_cooling_fan_on` | bool | Laserversorgung/Kühlung (FAN1/PC6) an |
 | `workpiece_surface_z` | number \| null | gemessene Werkstückoberfläche (Z, mm) nach `op=probe`/G30; kann bis −3 mm sein (das Bett liegt unter Z0) |
 | `workpiece_above_bed_mm` | number \| null | gemessene Oberfläche über dem Bett an der angetasteten Stelle (= Werkstückdicke), nur mit Bettkarte |
+| `material_calibration` | object \| null | letzter oder laufender Materialtest (`op=matcal`): `kind` (`engrave`/`cut`), `material`, `state` (`running`, `complete`, `error`, `aborted`), `steps` (Felder bzw. Durchgänge bisher), `last` (letztes Feld bzw. letzter Durchgang wie in `GET /api/matcal`), `result`, `saved` (`[{id, name, process}]` der gespeicherten Materialien), `error`; `null` = noch keiner |
 | `bed_map` | object \| null | Zusammenfassung der Bettkarte: `measured_at`, `cols`, `rows`, `lowest`, `highest`, `range`, `mean` (mm relativ zu Z0), `missing` (Punkte ohne Bettkontakt); `null` = keine gemessen |
 | `safe_zone_xy_mm` | number | 30.0: Bänder X<30 und Y<30 sind Homing-/Parkzone, dort wird nie geschnitten |
 | `probe_xy_offset_mm` | [dx, dy] \| null | Versatz Taster ↔ Laserpunkt |
@@ -246,7 +248,7 @@ Felder aus `web.py` (`status()`):
 | `frame` | object | `{state, mode, line, total, error}`; `state` ∈ `idle`, `running`, `complete`, `aborted`, `error`; `mode` ∈ `""`, `box`, `hull` |
 | `queue` | object | `{items, state, current, max}` (siehe unten) |
 | `origin` | object | `{modes, anchors, coord_convention, user, placement}` (siehe unten) |
-| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi), `camera_settings` = `/api/camera/settings` und Snapshots in genau der angefragten Größe, `workspace` = `/api/workspace…`, `report` = `op=report`, `backup` = `GET /api/backup`, `exhaust_auto` = Abluft-Automatik und `machine_name` in `/api/settings`, `bed_map` = Bettkarte (`op=bedmap`, `GET /api/bedmap`). Fehlt bei älteren Pi-Ständen. |
+| `features` | string[] | Merkmale des Pi-Stands: `autorun_mesh` = `op=autorun` tastet selbst ab und korrigiert den Fokus (Apps laden den Auftrag ohne Z hoch), `materials` = `/api/materials` vorhanden, `app_update` = `/api/app/android` (App-Updates über den Pi), `camera_settings` = `/api/camera/settings` und Snapshots in genau der angefragten Größe, `workspace` = `/api/workspace…`, `report` = `op=report`, `backup` = `GET /api/backup`, `exhaust_auto` = Abluft-Automatik und `machine_name` in `/api/settings`, `bed_map` = Bettkarte (`op=bedmap`, `GET /api/bedmap`), `material_calibration` = Materialtest mit Kamera (`op=matcal`, `GET /api/matcal`). Fehlt bei älteren Pi-Ständen. |
 | `coord_convention` | string | `"origin_top_right"`: Bedeutung der Ankernamen (siehe `op=place`). Fehlt bei Pi-Ständen vor 2026-10-26; Studio tauscht dann links/rechts. |
 | `estimated_tip_gap_mm` | number \| null | geschätzter Abstand Spitze ↔ Werkstück (nur wenn referenziert, Position und Oberfläche bekannt). Schätzung, keine Messung. |
 | `estimated_focus_adjust_mm` | number \| null | Fokusabstand − `estimated_tip_gap_mm` (nur Anzeige) |
@@ -485,6 +487,31 @@ Keine Parameter. Das **leere** Bett wird mit dem Taster vermessen (Laser aus).
 | Wirkung | läuft wie ein Auftrag (`job.file = "Bettkarte"`, `job.state = probing`, Fortschritt in `job.probe`, Abbruch mit `op=abort`): 6 × 6 Punkte über X40..380 / Y40..320 (Y bis 330 begrenzt, bis der echte Y-Weg gemessen ist), unerreichbare Punkte daneben. Zwischen den Punkten 10 mm über dem höchsten Kontakt. Findet der Taster an einem Punkt bis zur Firmware-Grenze (−2 mm) kein Bett, bleibt der Punkt leer, wird aus den Nachbarn ergänzt und in `missing_points` gemeldet; andere Abtastfehler brechen ab. Speichert `/var/lib/lumacut/marlin/bed_map.json`, löscht danach `workpiece_surface_z` (das Bett ist kein Werkstück) und parkt. |
 | Erfolg | 200 `{"message": "Bettkarte: 36 Punkte werden abgetastet – das Bett muss leer sein"}`; Ende in `job.state = complete`, Ergebnis in `bed_map` |
 | Fehler | 400 `Ein Auftrag läuft bereits`, `Steuerung belegt: …`, Abtastfehler wie bei `op=probe` (dann `job.state = error`) |
+
+#### `op=matcal`
+
+Materialtest mit der Kopfkamera, Schritt für Schritt (Modul `matcal.py`, Messungen in `docs/MATERIAL_KALIBRIERUNG.md`).
+
+| Parameter | Typ | Bereich | Standard |
+| --- | --- | --- | --- |
+| `kind` | `engrave` \| `cut` | – | Pflicht |
+| `x`, `y` | number (Maschinen-mm) | Testbereich im Arbeitsbereich | Pflicht: Ecke des Testbereichs, die Felder wachsen nach +X/+Y |
+| `name` | string | 1..60 Zeichen | Pflicht: Materialname der Ergebnisse |
+| `thickness` | number | 0..50 mm | Stärke des gewählten Materials |
+| `power`, `speed` | number | 1..60 %, 500..9000 mm/min | Gravur-Start 10 %, 4500 mm/min |
+| `power`, `speeds` | number, Liste | 10..100 %; 1..6 Tempi 60..6000 mm/min | Schnitt 100 %, `350,500,800,1200` |
+| `raised` | `1` | – | Schnitt: Pflicht – die Platte liegt auf Abstandhaltern |
+
+| | |
+| --- | --- |
+| Vorbedingungen | **frei**, **referenziert**, **Material gewählt**, kein laufender Auftrag, Kamera am Pi, Kamera mit dem Punktraster kalibriert (`android.lens` in der Kamera-Kalibrierung), Testbereich (Gravur 51 × 21 mm inkl. Anlauf, Schnitt 8 + 12 mm je Tempo × 8 mm) im Arbeitsbereich ab X/Y 30, Mitte für den Taster erreichbar, Fotoposition erreichbar. |
+| Wirkung | läuft wie ein Auftrag (`job.file = "Materialtest Gravur"` bzw. `"Materialtest Schnitt"`, `job.state` `probing` → `running`, `job.phase` `running`/`measuring`, `job.line` = Felder bzw. Durchgänge, Abbruch mit `op=abort`). Tastet die Mitte des Testbereichs ab, Licht auf Kameraniveau, Abluft wie beim Auftrag. **Gravur:** je Feld (5 × 5 mm, Zeilenabstand 0,1 mm, 3 mm Anlauf) lasern, Kopf zur Fotoposition (Laser aus), Bild, Feld im Bild suchen (Kamera/Laser-Versatz), Ton gegen das Material daneben, Streifen und Rauchrand messen; die nächste Leistung per Sekante in log(Leistung), bis Dunkel (Ton 0,85), Mittel (0,55) und Hell (0,30) je ±0,06 sauber getroffen sind (höchstens 4 Felder je Ton, 18 insgesamt). Dunkel streifig → gleiche Energie langsamer, Rauchrand → schneller. **Schnitt:** je Tempo ein Durchgang (100 %, Fokus je Durchgang 0,4 mm tiefer, höchstens 3 mm), Bild, Loch offen (Innen < halb so hell wie vorher) → nächstes Tempo; ein Tempo, das schon 1,6 × die Energie des besten braucht, hört auf. Speichert die Ergebnisse als Materialien (gleicher Name und Prozess wird überschrieben): Gravur `name`, `name (mittel)`, `name (hell)`; Schnitt `name` mit Tempo und Durchgängen der wenigsten Energie (Durchgänge ÷ Tempo). Licht zurück, parken. Lauf in `/var/lib/lumacut/marlin/matcal.json`. ⚠ Hardware, Laser an |
+| Erfolg | 200 `{"message": "Materialtest Gravur: Gravur Feld für Feld, Testbereich X147..198 / Y120..141"}`; Ende in `job.state = complete`, Ergebnis in `material_calibration` |
+| Fehler | 400 `kind muss engrave oder cut sein`, `Materialname fehlt`, `Testbereich X… liegt nicht im Arbeitsbereich …`, `Platte zuerst hochlegen (Abstandhalter, ca. 10 mm Luft): …`, `Kamera nicht kalibriert: zuerst in der App die Kamera mit dem Punktraster kalibrieren`, `Für das Foto müsste der Kopf nach … – Testbereich weiter zur Mitte legen`, `Ein Auftrag läuft bereits`; 503 `Keine Kamera an …`. Während des Laufs: `job.state = error` mit z. B. `Kamera liefert kein Bild (…) – Kamerakabel prüfen, dann neu starten`, `Kein Quadrat ist durchgefallen – Platte hochgelegt? …` |
+
+#### `GET /api/matcal`
+
+200 `{"material_calibration": null}` oder `{"material_calibration": {kind, material, thickness_mm, origin, area, state, started_at, finished_at, surface_z, focus_z, fields | passes, result, saved, error}}`. Gravur-`fields[]`: `{target, tone_target, power, speed, tone, uneven, stripes, halo, clean, x, y, shift}` (Ton 0 = unberührt … 1 = schwarz, die anderen als Anteil der Materialhelligkeit; `shift` = gefundener Versatz Kamera/Laser in mm). Schnitt-`passes[]`: `{square, speed, power, pass, ratio, fell}`. `result`: Gravur `{dunkel|mittel|hell: {power, speed, tone, approximate}}`, Schnitt `{squares: [{speed, passes, fell}], best}`.
 
 #### `op=bedmap_clear`
 

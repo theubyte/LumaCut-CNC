@@ -232,6 +232,9 @@ fun CalibrationScreen(machine: MachineViewModel, editor: de.millione.lumacut.app
                 }
             }
         },
+        CalStep("Automatisch mit Kamera", CalGroup.MATERIAL, Tone.OFF, "je Material", "Gravur Feld für Feld, Schnitt bis das Loch offen ist") {
+            MatcalCard(machine, status, ready && homed && camera && cal != null) { confirm = it }
+        },
         CalStep("Gravur-Test", CalGroup.MATERIAL, Tone.OFF, "je Material", "Leistung und Tempo zum Gravieren finden") {
             EngraveCard(machine, ws, engrave, camOk, motion.maxFeed) { confirm = it }
         },

@@ -67,6 +67,7 @@ Sonstiges → 500 „Interner Fehler – Pi-Protokoll ansehen“.
 | `queue_pause` | nach dem laufenden Auftrag anhalten | Warteschlange läuft |
 | `queue_skip` / `queue_remove` | Eintrag `id` überspringen (nur wartende) / entfernen (nicht den laufenden) | – |
 | `queue_clear` | alle Einträge außer dem laufenden entfernen | – |
+| `matcal` | Materialtest mit Kamera: `kind=engrave` Feld für Feld bis Dunkel/Mittel/Hell, `kind=cut` (Platte hochgelegt, `raised=1`) Durchgang für Durchgang bis das Loch offen ist; Ergebnisse als Materialien (`docs/MATERIAL_KALIBRIERUNG.md`) | gehomed, frei, Material gewählt, Kamera kalibriert |
 | `abort` | Rahmen: Stopp an der nächsten Ecke. Auftrag: Laser aus, Parken. Warteschlange: aktueller Auftrag abgebrochen, Rest bleibt wartend | läuft etwas |
 
 Unbekannte `op` → 400 „Unbekannte Marlin-Aktion: <op>“.
@@ -454,3 +455,15 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
    - [ ] Plausibilitätsprüfung der Materialstärke mit der Bettkarte
          rechnen (Dicke über dem Bett statt Z über Z0).
    - [ ] Android-App: Bettkarte anzeigen und starten.
+11. **Materialtest mit Kamera (2026-10-29).**
+   - [x] `op=matcal`: Gravur Feld für Feld, Schnitt Durchgang für Durchgang
+         auf hochgelegter Platte; Ergebnisse als Materialien; Karte in
+         Weboberfläche und App.
+   - [x] Sperrholz 4 mm von Hand mit denselben Schritten kalibriert:
+         Gravur 12,8 % / 4500 mm/min, Schnitt 500 mm/min × 2.
+   - [ ] Erster echter Lauf über `op=matcal` an der Maschine (bisher nur
+         simuliert und an Fotos des Handtests geprüft).
+   - [ ] Kamera-Höhenfaktor `CAMERA_ABOVE_Z_MM` (88,6) mit einer eigenen
+         Messung bestätigen; die Feldsuche gleicht Abweichungen bis 1,5 mm aus.
+   - [ ] Mittlere Töne auf Holz bleiben fleckig: Fokus +2 mm als Option der
+         Suche prüfen.
