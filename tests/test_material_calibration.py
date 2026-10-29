@@ -130,6 +130,27 @@ class SearchTests(unittest.TestCase):
         s.add(step, {"tone": 0.88, "uneven": 0.02, "stripes": 0.02, "halo": 0.3})
         self.assertEqual(s.next()["speed"], 2250)
 
+    def test_light_tones_go_faster_instead_of_below_the_firing_power(self):
+        s = matcal.EngraveSearch()
+        while (step := s.next()) is not None:
+            self.assertGreaterEqual(step["power"], matcal.MIN_POWER_PCT)
+            self.assertLessEqual(step["speed"], matcal.ENGRAVE_MAX_SPEED)
+            t = plywood_tone(step["power"], step["speed"])
+            s.add(step, {"tone": t, "uneven": 0.05, "stripes": 0.04, "halo": 0.02})
+        hell = s.results["hell"]
+        self.assertEqual(hell["power"], matcal.MIN_POWER_PCT)
+        self.assertGreater(hell["speed"], 4500)
+        self.assertLessEqual(abs(hell["tone"] - 0.30), matcal.TONE_TOL)
+
+    def test_tone_curve_from_the_fields(self):
+        fields = [{"power": 12.8, "speed": 4500, "tone": 0.92, "clean": True},
+                  {"power": 8.0, "speed": 5100, "tone": 0.31, "clean": False}]
+        curve = matcal.tone_curve(fields)
+        self.assertEqual(curve["min_power_pct"], 8.0)
+        self.assertEqual((curve["speed_min"], curve["speed_max"]), (1500.0, 6000.0))
+        self.assertEqual(curve["points"][1], {"power": 8.0, "speed": 5100, "tone": 0.31, "clean": False})
+        self.assertIsNone(matcal.tone_curve(fields[:1]))
+
     def test_never_more_fields_than_the_area_holds(self):
         s = matcal.EngraveSearch()
         while (step := s.next()) is not None:
@@ -276,6 +297,10 @@ assert dark["mode"] == "fill" and dark["passes"] == 1 and dark["thickness_mm"] =
 assert ("Sperrholz Test (mittel)", "Gravieren") in mats and ("Sperrholz Test (hell)", "Gravieren") in mats
 assert mats[("Sperrholz Test (hell)", "Gravieren")]["power_pct"] < dark["power_pct"]
 assert "Automatische Gravur-Kalibrierung" in dark["notes"]
+curve = dark["tone_curve"]
+assert len(curve["points"]) == len(fields) and curve["min_power_pct"] == 8.0, curve
+assert mats[("Sperrholz Test (hell)", "Gravieren")]["tone_curve"] == curve
+assert all(f["power"] >= 8.0 for f in fields), [f["power"] for f in fields]
 # every field lasered at focus, inside the area, one photo per field plus the first
 w = sim.writes
 z = [float(x.split("Z")[1].split()[0]) for x in w if x.startswith("G0 Z") and "F600" in x]

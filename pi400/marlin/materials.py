@@ -48,6 +48,34 @@ DEFAULTS = (
 )
 
 
+def validate_tone_curve(curve):
+    """Checked darkness curve (``tone_curve``, from the camera calibration):
+    measured fields {power, speed, tone}, the lowest reliable power and the
+    speed band the apps may slide in."""
+    if not isinstance(curve, dict):
+        raise ValueError("tone_curve als JSON-Objekt erwartet")
+    points = curve.get("points")
+    if not isinstance(points, list) or not 2 <= len(points) <= 40:
+        raise ValueError("tone_curve.points: 2 bis 40 Messpunkte")
+    clean = []
+    for p in points:
+        if not isinstance(p, dict):
+            raise ValueError("tone_curve.points: {power, speed, tone} erwartet")
+        point = {"power": _number(p, "power", 0.1, 100.0), "speed": _number(p, "speed", 1.0, 30000.0),
+                 "tone": _number(p, "tone", 0.0, 1.0)}
+        if "clean" in p:
+            point["clean"] = bool(p["clean"])
+        clean.append(point)
+    result = {"points": clean,
+              "min_power_pct": _number(curve, "min_power_pct", 0.0, 100.0, 8.0),
+              "interval_mm": _number(curve, "interval_mm", 0.01, 5.0, 0.1),
+              "speed_min": _number(curve, "speed_min", 1.0, 30000.0, min(p["speed"] for p in clean)),
+              "speed_max": _number(curve, "speed_max", 1.0, 30000.0, max(p["speed"] for p in clean))}
+    if result["speed_min"] > result["speed_max"]:
+        raise ValueError("tone_curve: speed_min größer als speed_max")
+    return result
+
+
 class ConflictError(RuntimeError):
     """base_revision is outdated: reload, then try again."""
 
@@ -117,6 +145,8 @@ def validate(data, *, material_id=None, builtin=False):
     if len(json.dumps(extras, ensure_ascii=False)) > MAX_EXTRA_BYTES:
         raise ValueError("Zusatzfelder größer als %d KB" % (MAX_EXTRA_BYTES // 1024))
     material.update(extras)
+    if material.get("tone_curve") is not None:
+        material["tone_curve"] = validate_tone_curve(material["tone_curve"])
     # The apps derive the passes from thickness / depth per pass when set.
     passes = material["passes"]
     if material["depth_per_pass_mm"] > 0 and material["thickness_mm"] > 0:

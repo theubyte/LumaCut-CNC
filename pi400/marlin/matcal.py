@@ -46,6 +46,11 @@ TARGETS = (("dunkel", 0.85), ("mittel", 0.55), ("hell", 0.30))
 TONE_TOL = 0.06
 MAX_PER_TARGET = 4
 POWER_RANGE = (1.0, 80.0)
+# Below about 6 % this diode laser does not fire reliably (dotted, streaky
+# lines on plywood 2026-10-29). Lighter tones therefore keep the energy per
+# area (P / v) and go faster instead of lower, up to ENGRAVE_MAX_SPEED.
+MIN_POWER_PCT = 8.0
+ENGRAVE_MAX_SPEED = 6000.0
 # A field counts as clean below these (fractions of the material brightness);
 # tuned on plywood: 1500 mm/min smoke halo 0.2-0.4, flickering low power
 # stripes 0.1-0.14, good fields 0.02-0.08.
@@ -327,8 +332,13 @@ class EngraveSearch:
             return None
         name, target = TARGETS[self._target]
         power = self._next if self._next is not None else self._propose(target)
-        power = round(min(POWER_RANGE[1], max(POWER_RANGE[0], power)), 1)
-        return {"target": name, "tone_target": target, "power": power, "speed": self.speed}
+        power = min(POWER_RANGE[1], max(POWER_RANGE[0], power))
+        speed = self.speed
+        if power < MIN_POWER_PCT:
+            # same energy faster, at the lowest power the laser fires reliably
+            speed = min(ENGRAVE_MAX_SPEED, max(speed, speed * MIN_POWER_PCT / power))
+            power = MIN_POWER_PCT
+        return {"target": name, "tone_target": target, "power": round(power, 1), "speed": round(speed)}
 
     def add(self, step, measured):
         """``measured`` = measure_field() result for the field lasered with ``step``."""
@@ -376,6 +386,19 @@ class EngraveSearch:
             return p / (1.25 + 2.0 * (t - target))
         p, t = max(lo)
         return p * (1.25 + 2.0 * (target - t))
+
+
+def tone_curve(fields) -> dict | None:
+    """Darkness curve of a material from the measured fields, stored with the
+    engraving materials (``tone_curve``): the apps move speed and power
+    together along it (same tone) or along the tone (lighter/darker)."""
+    points = [{"power": round(f["power"], 2), "speed": round(f["speed"]), "tone": round(f["tone"], 3),
+               "clean": bool(f.get("clean", True))} for f in fields if f.get("tone") is not None]
+    if len(points) < 2:
+        return None
+    speeds = [p["speed"] for p in points]
+    return {"points": points[:40], "min_power_pct": MIN_POWER_PCT, "interval_mm": INTERVAL_MM,
+            "speed_min": float(min(speeds + [1500])), "speed_max": float(max(speeds + [ENGRAVE_MAX_SPEED]))}
 
 
 @dataclass

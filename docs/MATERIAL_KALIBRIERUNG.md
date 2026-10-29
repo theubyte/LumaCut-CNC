@@ -28,6 +28,13 @@ Hände raus, Deckel zu, Schutzbrille, Abluft.
 6. Ziele: Dunkel 0,85 · Mittel 0,55 · Hell 0,30, je ±0,06 und sauber. Höchstens
    4 Felder je Ton, 18 insgesamt; meist reichen 6–10.
 
+7. **Zündgrenze:** Unter etwa 6 % zündet dieser Laser nicht sicher (gepunktete,
+   unlesbare Schrift auf der Einladungskarte 2026-10-29: 6 % bei 3000 mm/min).
+   Die Suche geht deshalb nie unter **8 %**: hellere Töne behalten die Energie
+   (P/v) und werden schneller, höchstens 6000 mm/min.
+8. Alle Felder des Laufs werden als **Schwärze-Kurve** (`tone_curve`) bei allen
+   drei Gravur-Einträgen gespeichert.
+
 **Schnitt, Durchgang für Durchgang:**
 
 - Die Platte muss **hochgelegt** sein (Abstandhalter, ca. 10 mm Luft): nur dann
@@ -59,6 +66,11 @@ Hände raus, Deckel zu, Schutzbrille, Abluft.
 | 14 % bei 6000 | 0,79 | streifig |
 | 14 % bei 1500 | 1,00 | Rauchschatten um das Feld |
 
+Mittel und Hell lagen anfangs bei 6 % / 3000 und 4,5 % / 3000 – unter der
+Zündgrenze. Seit 2026-10-29 mit gleicher Energie: **Mittel 8 % / 4000**,
+**Hell 8 % / 5300 mm/min** (ungefähr, nicht neu gemessen). Die Messwerte oben
+liegen als Schwärze-Kurve bei den Sperrholz-Gravureinträgen.
+
 Das Holz kippt zwischen 4,5 und 8,5 % von hell nach fast schwarz; Zwischentöne
 sind fleckig. Raster (Dithering) mit der Schwarz-Einstellung: 50 % Punkte →
 Ton 0,59, 36 % → 0,21, 26 % → 0,10 – nicht gleichmäßiger. Fokus 2 mm höher
@@ -75,6 +87,24 @@ streifig.
 500 × 2 braucht die wenigste Energie und hatte laut Besitzer die sauberste
 Rückseite → gespeichert. Viele schnelle Durchgänge (1200 × 7) brauchen bei
 diesem Holz mehr Energie insgesamt.
+
+## Regler in der App (Tempo und Leistung zusammen)
+
+Im Ebenen-Fenster (Editor → Ebene antippen → „Abstimmen“):
+
+- **präziser ↔ schneller** – für jede Ebene. Tempo und Leistung ändern sich im
+  selben Verhältnis (gleiche Energie je mm, gleiche Schwärze). Langsamer gibt
+  genauere Ecken und kleine Schrift. Der Regler hält an, wo die Leistung die
+  Zündgrenze (8 % bzw. `min_power_pct`) oder 100 % erreicht, und im Tempo-Band
+  der Kurve (`speed_min`..`speed_max`).
+- **heller ↔ dunkler** – nur für Füll-Ebenen, deren Material eine Kurve hat.
+  Der Ton folgt der Kurve über ln(P/v); ein anderer Zeilenabstand als bei der
+  Messung wird umgerechnet (halber Abstand = halbe Energie je mm). Würde die
+  Leistung unter 8 % fallen, wird stattdessen schneller graviert; geht auch
+  das nicht mehr, sagt die App „Heller geht nicht“.
+
+Beim Sperrholz liegt die Grenze für „präziser“ bei Dunkel (12,8 % / 4500) bei
+etwa 2800 mm/min, darunter würde der Laser unter 8 % fallen.
 
 ## Grenzen
 

@@ -1193,7 +1193,7 @@ def _matcal_worker(kind, origin, centre, head, cam, search, name, thickness):
             _matcal_engrave(run, origin, head, cam, search, surface, focus_z)
             results = search.results
             run["result"] = {k: {a: v[a] for a in ("power", "speed", "tone", "approximate")} for k, v in results.items()}
-            run["saved"] = _matcal_save_engrave(name, thickness, results)
+            run["saved"] = _matcal_save_engrave(name, thickness, results, matcal.tone_curve(search.fields))
         else:
             _matcal_cut(run, origin, head, cam, search, surface, focus_z)
             best = search.best()
@@ -1291,7 +1291,7 @@ def _upsert_material(name, process, body):
     raise RuntimeError("Materialliste wurde gleichzeitig geändert – Ergebnis nicht gespeichert")
 
 
-def _matcal_save_engrave(name, thickness, results):
+def _matcal_save_engrave(name, thickness, results, curve=None):
     today = time.strftime("%Y-%m-%d")
     labels = {"dunkel": name, "mittel": name + " (mittel)", "hell": name + " (hell)"}
     saved = []
@@ -1305,7 +1305,8 @@ def _matcal_save_engrave(name, thickness, results):
         m = _upsert_material(label, "Gravieren", {
             "mode": "fill", "thickness_mm": thickness, "power_pct": f["power"],
             "speed_mm_min": round(f["speed"]), "passes": 1, "interval_mm": matcal.INTERVAL_MM,
-            "z_step_mm": 0.0, "depth_per_pass_mm": 0.0, "notes": note})
+            "z_step_mm": 0.0, "depth_per_pass_mm": 0.0, "notes": note,
+            **({"tone_curve": curve} if curve else {})})
         saved.append({"id": m["id"], "name": label, "process": "Gravieren"})
     return saved
 

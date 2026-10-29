@@ -956,6 +956,7 @@ Material (JSON):
 | `z_step_mm` | number | 0..2 (Standard 0); (Durchgänge − 1) × `z_step_mm` ≤ 3 mm |
 | `builtin` | bool | vom Pi gesetzt (Startwert), bleibt beim Ändern erhalten |
 | `updated` | string | vom Pi gesetzt, UTC `2026-10-26T15:00:00Z` |
+| `tone_curve` | object \| null | optional, Schwärze-Kurve aus dem Materialtest mit Kamera (Gravur-Einträge): `points` (2..40 × `{power` 0.1..100, `speed` 1..30000, `tone` 0..1, `clean`?`}`), `min_power_pct` (Standard 8: darunter zündet der Laser nicht sicher), `interval_mm` (Standard 0.1), `speed_min`/`speed_max` (Tempo-Band für die Regler). Wird geprüft; Schreiben ohne das Feld lässt die Kurve stehen. Die App schiebt damit Tempo und Leistung je Ebene zusammen (`docs/MATERIAL_KALIBRIERUNG.md`). |
 | weitere Felder | beliebig (JSON) | werden unverändert gespeichert und zurückgegeben (z. B. Studio `material_id`, `laser_id`, `notes`); höchstens 32 Felder, zusammen 16 KB |
 
 | Anfrage | Erfolg (200) |

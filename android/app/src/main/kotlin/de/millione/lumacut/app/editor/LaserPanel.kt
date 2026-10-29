@@ -24,6 +24,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,6 +53,7 @@ import de.millione.lumacut.app.ui.LcTypography
 import de.millione.lumacut.app.ui.Segmented
 import de.millione.lumacut.app.ui.SmallText
 import de.millione.lumacut.app.ui.TextInput
+import de.millione.lumacut.core.Darkness
 import de.millione.lumacut.core.Document
 import de.millione.lumacut.core.Element
 import de.millione.lumacut.core.Layer
@@ -214,6 +217,7 @@ private fun LayerDialog(editor: EditorViewModel, layer: Layer, materials: List<M
                         editor.updateLayer(layer.id, "passes") { it.copy(passes = v.toInt().coerceIn(Limits.PASSES)).withSafeZStep() } }
                 }
                 SmallText("Tempo höchstens %.0f mm/min (Maschine → Kalibrieren → Bewegung).".format(maxFeed), Lc.faint)
+                Tuning(editor, layer, maxFeed)
 
                 if (layer.mode == LayerMode.FILL || hasImage) {
                     Section("Gravur")
@@ -276,6 +280,51 @@ private fun LayerDialog(editor: EditorViewModel, layer: Layer, materials: List<M
                 LcButton("Fertig", onClose, kind = BtnKind.PRIMARY)
             }
         }
+    }
+}
+
+/**
+ * Speed and power moved together: "präziser ↔ schneller" keeps power / speed
+ * (same tone, slower = cleaner corners and small text), "heller ↔ dunkler"
+ * walks the material's measured darkness curve. Power never below the firing
+ * limit (Darkness.RELIABLE_POWER_PCT).
+ */
+@Composable
+private fun Tuning(editor: EditorViewModel, layer: Layer, maxFeed: Double) {
+    if (layer.powerPct <= 0 || layer.speed <= 0) return
+    val sliderColors = SliderDefaults.colors(thumbColor = Lc.accent, activeTrackColor = Lc.accent, inactiveTrackColor = Lc.surface3)
+    val range = Darkness.speedRange(layer, maxFeed)
+    Section("Abstimmen")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        SmallText("präziser", Lc.muted)
+        Slider(Darkness.speedPosition(layer, maxFeed).toFloat(), { pos ->
+                editor.updateLayer(layer.id, "tune-speed") { Darkness.atSpeed(it, Darkness.speedAt(it, pos.toDouble(), maxFeed), maxFeed).layer }
+            }, Modifier.weight(1f).padding(horizontal = 8.dp), enabled = range.endInclusive - range.start >= 1.0, colors = sliderColors)
+        SmallText("schneller", Lc.muted)
+    }
+    val atFloor = layer.speed <= range.start + 0.5 && layer.powerPct <= (layer.darkness?.minPowerPct ?: Darkness.RELIABLE_POWER_PCT) + 0.05
+    SmallText(when {
+        atFloor -> "Langsamer geht nicht: der Laser zündet unter %.0f %% nicht sicher.".format(layer.darkness?.minPowerPct ?: Darkness.RELIABLE_POWER_PCT)
+        else -> "Tempo und Leistung zusammen, gleiche Schwärze. Langsamer = genauere Ecken und kleine Schrift."
+    }, if (atFloor) Lc.warn else Lc.faint)
+    val curve = layer.darkness?.takeIf { it.usable && layer.mode == LayerMode.FILL }
+    val tone = Darkness.tone(layer)
+    if (curve != null && tone != null) {
+        var limit by remember(layer.id) { mutableStateOf<String?>(null) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SmallText("heller", Lc.muted)
+            Slider(tone.toFloat(), { t ->
+                    var r: Darkness.Result? = null
+                    editor.updateLayer(layer.id, "tune-tone") { Darkness.atTone(it, t.toDouble(), maxFeed).also { x -> r = x }.layer }
+                    limit = r?.limit
+                }, Modifier.weight(1f).padding(horizontal = 8.dp),
+                valueRange = curve.toneRange.start.toFloat()..curve.toneRange.endInclusive.toFloat(), colors = sliderColors)
+            SmallText("dunkler", Lc.muted)
+        }
+        SmallText(limit ?: "Schwärze ≈ %.2f (0 = unberührt, 1 = schwarz) aus der Kamera-Kalibrierung von „%s“.".format(Locale.GERMANY, tone, layer.materialName ?: "Material"),
+            if (limit != null) Lc.warn else Lc.faint)
+    } else if (layer.mode == LayerMode.FILL) {
+        SmallText("Heller/dunkler gibt es nach der Kamera-Kalibrierung des Materials (Kalibrieren → Je Material → Automatisch mit Kamera).", Lc.faint)
     }
 }
 

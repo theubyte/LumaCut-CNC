@@ -75,6 +75,20 @@ class MaterialStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.create(dict(NEW, base_revision=3, notes="x" * 20000))
 
+    def test_tone_curve_is_checked_and_kept(self):
+        curve = {"points": [{"power": 8, "speed": 3000, "tone": 0.6}, {"power": 12.8, "speed": 4500, "tone": 0.92}]}
+        made = self.store.create(dict(NEW, base_revision=1, tone_curve=curve))["material"]
+        self.assertEqual(made["tone_curve"]["min_power_pct"], 8.0)
+        self.assertEqual((made["tone_curve"]["speed_min"], made["tone_curve"]["speed_max"]), (3000.0, 4500.0))
+        # an app writing only power and speed keeps the curve
+        rev = self.store.list()["revision"]
+        updated = self.store.update(made["id"], {"power_pct": 9.0, "base_revision": rev})["material"]
+        self.assertEqual(updated["tone_curve"], made["tone_curve"])
+        for bad in ({"points": curve["points"][:1]}, {"points": [{"power": 8, "speed": 3000, "tone": 1.5}] * 2},
+                    {"points": curve["points"], "speed_min": 5000, "speed_max": 1000}, "kurve"):
+            with self.assertRaises(ValueError):
+                self.store.create(dict(NEW, base_revision=self.store.list()["revision"], tone_curve=bad))
+
     def test_builtin_stays_builtin_when_edited(self):
         first = self.store.list()["materials"][0]
         result = self.store.update(first["id"], {"builtin": False, "speed_mm_min": 300,

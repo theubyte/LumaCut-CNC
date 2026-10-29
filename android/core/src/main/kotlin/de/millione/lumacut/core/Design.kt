@@ -53,6 +53,8 @@ data class Layer(
      * needed for relative darkness 0, 0.1 … 1 of a picture. Empty = linear.
      */
     val toneCurve: List<Double> = emptyList(),
+    /** Darkness curve of the material the values came from (camera calibration); sliders in the layer settings. */
+    val darkness: DarknessCurve? = null,
 ) {
     val focusDropMm get() = zStepMm * (passes - 1)
 
@@ -199,6 +201,8 @@ data class Material(
     val depthPerPassMm: Double = 0.0,
     val zStepMm: Double = 0.0,
     val builtin: Boolean = false,
+    /** Measured darkness curve (Pi `tone_curve`), engraving entries from the camera calibration only. */
+    val darkness: DarknessCurve? = null,
 ) {
     /** Passes derived from thickness / depth per pass when set, otherwise the stored passes. */
     val effectivePasses get() = if (depthPerPassMm > 0) Document.passesFor(thicknessMm, depthPerPassMm) else passes
@@ -207,7 +211,7 @@ data class Material(
         val p = effectivePasses
         val z = if (p > 1) zStepMm.coerceAtMost(Limits.MAX_FOCUS_DROP_MM / (p - 1)) else 0.0
         return layer.copy(mode = mode, powerPct = powerPct, speed = speed, passes = p, intervalMm = intervalMm,
-            zStepMm = z, materialName = name, thicknessMm = thicknessMm, depthPerPassMm = depthPerPassMm)
+            zStepMm = z, materialName = name, thicknessMm = thicknessMm, depthPerPassMm = depthPerPassMm, darkness = darkness)
     }
 
     companion object {
