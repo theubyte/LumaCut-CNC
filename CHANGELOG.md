@@ -2,6 +2,11 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-10-30
+
+- **Kopf v6: Z mit 80 Schritten/mm.** Die Zahnstange (GT2-Riemen, Ritzel GT2 20 Z = 40 mm je Umdrehung) braucht 80 statt 380 Schritte/mm der alten Gewindespindel. Firmware-Vorgabe geändert; der Pi sendet zusätzlich bei jedem Verbinden `M92 Z80`, weil ein alter EEPROM-Wert sonst gilt – Z stimmt damit schon ohne Flashen.
+- **Doku:** `docs/STAND.md` ist die vollständige Übergabe (Projekt, Zugang, Regeln, Chronik, laufende v6-Umstellung, Fahrplan); `CLAUDE.md` verweist neue Chats darauf.
+
 ## 2026-10-29
 
 - **Projekte auf dem Pi speichern und öffnen:** Editor → Mehr → „Auf dem Pi speichern …“ legt das Projekt unter einem Namen auf dem Pi ab (gleicher Name ersetzt nach Hinweis), „Vom Pi öffnen …“ zeigt die Liste aller Geräte mit Datum, Gerät und Elementzahl, Löschen mit Rückfrage. Neue Pi-Ablage `/api/projects` (Merkmal `projects`); Speichern/Öffnen als Datei auf dem Gerät bleibt.

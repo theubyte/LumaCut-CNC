@@ -72,6 +72,10 @@ PROBE_HOP_MM = 3.0
 # of the Z linear rail. Firmware Z_MAX_POS is the same; the Pi checks it too
 # because a SKR with older firmware still allows 90 mm.
 Z_MAX_MM = 80.0
+# Z steps/mm of head v6: rack and GT2 20T pinion (40 mm per turn). Sent on
+# every connect like M203 Z9: an EEPROM from the lead-screw head (380)
+# would otherwise move Z 4.75 times as far as commanded.
+Z_STEPS_PER_MM = 80.0
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
 BED_BELOW_Z0_MM = 3.0
@@ -472,6 +476,7 @@ class MarlinTransport:
                 # reconnect; do not write permanent EEPROM without an
                 # explicit flash/configuration workflow.
                 self._exchange_locked("M203 Z9", timeout=6.0)
+                self._exchange_locked("M92 Z%g" % Z_STEPS_PER_MM, timeout=6.0)
                 # The same stale EEPROM may still hold the Mega Zero example
                 # probe offset { -40, -10, 2 }. Marlin then shifts every G30
                 # by X+40/Y+10, adds 2 mm to the result and lowers the

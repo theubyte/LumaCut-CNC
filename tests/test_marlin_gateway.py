@@ -124,10 +124,10 @@ class FirmwareDirectionContractTests(unittest.TestCase):
         build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
         self.assertIn('replace_active(cfg, "Z_MAX_POS", "80")',build)
 
-    def test_default_z_steps_match_calibrated_value(self):
+    def test_default_z_steps_match_head_v6_rack(self):
         build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
         self.assertIn(
-            'replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 380 }")',
+            'replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 80 }")',
             build)
 
     def test_lumacut_x_y_reversed_only(self):
@@ -180,14 +180,14 @@ class USBProtocolTests(unittest.TestCase):
     def test_actual_marlin_m115_and_no_grbl_identity_spoof(self):
         serial=FakeSerial([
             "FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin\n",
-            "ok P15 B3\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n"
+            "ok P15 B3\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n"
         ])
         bridge=MarlinTransport("/dev/null",serial_factory=lambda *a,**k:serial)
         bridge.ensure_ready()
         # M851 clears a stale EEPROM probe offset (Mega Zero -40/-10/+2);
         # the X/Y limits (firmware values until the motion calibration) too.
         self.assertEqual(serial.writes,[b"M115\n",b"M5 I\n",b"M203 Z9\n",
-                                        b"M851 X0 Y0 Z0\n", b"M201 X500 Y500\n",
+                                        b"M92 Z80\n", b"M851 X0 Y0 Z0\n", b"M201 X500 Y500\n",
                                         b"M203 X150 Y150 Z9\n", b"M204 P500 T500\n", b"M84 S0\n"])
         self.assertTrue(bridge.status()["connected"])
         self.assertIn("LumaCut CNC",bridge.status()["identity"])

@@ -238,17 +238,35 @@ der Z-Endschalter.
 > mit 380 Schritten/mm (alte Gewindespindel). Mit der Zahnstange sind es 80 –
 > jede Z-Fahrt ist dadurch **4,75-mal so weit und so schnell** wie befohlen
 > (Referenzfahrt, Abtasten, Fokus, Jog). Z nicht über die Software bewegen,
-> bis die neue Firmware drauf ist.
+> bis der Pi mit `M92 Z80` läuft (oder die neue Firmware drauf ist).
 
 **Schritt 2 – Firmware für v6**
-- [ ] `build.py`: Z 380 → 80 Schritte/mm (GT2 20 Z = 40 mm/Umdrehung)
+- [x] `build.py`: Z 380 → 80 Schritte/mm (GT2 20 Z = 40 mm/Umdrehung) – 30.10.
+- [x] Pi sendet beim Verbinden `M92 Z80` (alter EEPROM-Wert wäre sonst wirksam).
+      Damit stimmt Z schon **ohne Flashen**, sobald der Pi aktualisiert ist – 30.10.
 - [ ] Z-Höchsttempo, Homing- und Antast-Tempo neu festlegen (Pi setzt heute `M203 Z9`)
 - [ ] Z-Motor nie abschalten
 - [ ] Flashen (Besitzer vor Ort), danach Z-Weg mit Messschieber prüfen
 
-**Schritt 3 – an der Maschine messen**
-- [ ] Echter X- und Y-Weg mit dem neuen Kopf
-- [ ] Kopfmaße in Y (für das Parkband), Tasterversatz zum Laserpunkt, Kamera-Lage
+**Schritt 3 – Fahrwege aller Achsen messen** (vorgezogen, Besitzer 30.10.)
+
+Voraussetzungen:
+- [ ] Pi mit `M92 Z80` beim Verbinden (Commit nach `3883f16`) installiert und Dienst neu gestartet
+- [ ] SKR eingeschaltet und per USB am Pi (am 30.10. abends nicht verbunden)
+- [ ] Hut auf dem Taster, Papier-Probe bestanden – sonst drückt die
+      Z-Referenzfahrt (G28 Z an X0/Y0 über den Taster) die Düse ins Bett
+- [ ] `M503` lesen: `M92 X80 Y80 Z80`
+
+Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
+1. Referenzfahrt (X/Y, dann Z über den Taster an X0/Y0).
+2. Z: auf 70, 75, 80 mm – Abstand zum oberen Schienenende/Anschlag ansehen.
+3. X: auf 300, 350, dann in 5-mm-Schritten bis zum Anschlag am Rahmen
+   (Besitzer sagt Stopp); Z dabei auf Fahrhöhe.
+4. Y: genauso (alter Kopf lief bei ~350 an).
+5. Kopfmaß für das Parkband: Abstand Düsenmitte → Gehäusekante zur Tür hin
+   (Y+), mit dem Lineal.
+- Ergebnis eintragen: X max ___, Y max ___, Z max ___, Kopfkante Y+ ___ mm
+- [ ] Firmware/Pi-Grenzen auf die gemessenen Werte (minus Reserve) setzen
 
 **Schritt 4 – neue Aufteilung der Fläche**
 - Die 30-mm-Zone in L-Form **entfällt**.

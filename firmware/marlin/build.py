@@ -115,7 +115,11 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
 
 
 
-    cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 380 }")
+    # Head v6 (30.10.2026): Z runs on a rack (GT2 belt) with a GT2 20T
+    # pinion = 40 mm per turn, 200 steps x 16 microsteps -> 80 steps/mm.
+    # The old T8 lead screw was 380. The Pi also sends M92 Z80 on every
+    # connect, because a stale EEPROM would keep the old value.
+    cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 80 }")
     # Z switch and G30 use Marlin's own feedrates, not Pi G0 F values.
     # Original BTT example: Z homing 240 mm/min (4 mm/s),
     # G30 fast 240 mm/min, G30 slow 120 mm/min.
