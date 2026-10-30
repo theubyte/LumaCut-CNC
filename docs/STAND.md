@@ -257,7 +257,14 @@ der Z-Endschalter.
 
 Voraussetzungen:
 - [x] Pi mit `M92 Z80` beim Verbinden installiert und Dienst neu gestartet (2471c3f, 30.10.)
-- [ ] SKR eingeschaltet und per USB am Pi (am 30.10. abends nicht verbunden)
+- [ ] SKR eingeschaltet und per USB am Pi. **Störung 30./31.10.:** Der lose
+      Kühlkörper des STM32 fiel auf die Nachbar-Pins (Kurzschluss). Danach
+      blinken die LEDs schnell (Neustart-Schleife), der Pi meldet beim
+      Anmelden `error -32/-71`. Kühlkörper entfernt (STM32 braucht keinen),
+      blinkt weiter. Nächste Schritte: alle Stecker außer USB ab, auf Späne
+      prüfen; sonst Firmware per SD-Karte neu aufspielen. Bereit liegt die
+      v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
+      31.10., SHA-256 `96ca4fc6…6a9`).
 - [x] Hut auf dem Taster, Papier-Probe bestanden – sonst drückt die
       Z-Referenzfahrt (G28 Z an X0/Y0 über den Taster) die Düse ins Bett
 - [ ] `M503` lesen: `M92 X80 Y80 Z80`
