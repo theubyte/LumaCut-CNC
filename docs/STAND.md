@@ -223,11 +223,16 @@ Sensorless-Antasten über den Z-Motor – drückt die Düse mit Motorkraft ins
 Material, ist ungenauer (±0,3 statt ±0,05 mm), und der Knopf ist zugleich
 der Z-Endschalter.
 - [x] Bremse greift (Vorspannschraube angezogen)
-- [ ] Hut drucken (Besitzer druckt eigenen Entwurf) und prüfen, ob der Knopf sauber schaltet
-- [ ] Prüfen (kein genaues Messen nötig): Kopf auf eine glatte Platte
+- [x] Hut gedruckt und montiert (30.10.): Wenn der Knopf schaltet, passen
+      2 mm unter die Düse; Schaltweg des Knopfs ca. 1 mm.
+- [x] Pi (30.10.): `z_switch_tip_offset_mm` 1,5 → **2,0**, `focus_gap_mm`
+      10,1 (alter Fokus-Test) → **7,0** (Herstellerwert, Fokus-Test verfeinert später).
+- [ ] Taster-X/Y-Versatz steht noch auf dem alten Kopf (−27,4 / +13,0) – neu
+      kalibrieren (Kalibrieren → Taster-Versatz), bis dahin Abtastpunkte ungenau.
+- [x] Prüfen (kein genaues Messen nötig): Kopf auf eine glatte Platte
       absenken, bis der Knopf klickt – ein Blatt Papier muss dann noch unter
       der Düse durchgehen. Abstand grob schätzen (Lineal, ±1 mm reicht), Ziel ~2 mm.
-- [ ] Schätzwert auf dem Pi eintragen (`probe_tip_offset_mm`, heute 1,5)
+- [x] Schätzwert auf dem Pi eintragen (`probe_tip_offset_mm`: 2,0, siehe oben)
 - [ ] Genauigkeit holt der **Fokus-Test** (Kalibrieren → Fokus): er lasert
       13 Linien in 0,5-mm-Stufen von −3 bis +3 mm, die Kamera sucht die
       schmalste, und der Pi korrigiert `focus_gap_mm` selbst. Ein Fehler im
@@ -251,9 +256,9 @@ der Z-Endschalter.
 **Schritt 3 – Fahrwege aller Achsen messen** (vorgezogen, Besitzer 30.10.)
 
 Voraussetzungen:
-- [ ] Pi mit `M92 Z80` beim Verbinden (Commit nach `3883f16`) installiert und Dienst neu gestartet
+- [x] Pi mit `M92 Z80` beim Verbinden installiert und Dienst neu gestartet (2471c3f, 30.10.)
 - [ ] SKR eingeschaltet und per USB am Pi (am 30.10. abends nicht verbunden)
-- [ ] Hut auf dem Taster, Papier-Probe bestanden – sonst drückt die
+- [x] Hut auf dem Taster, Papier-Probe bestanden – sonst drückt die
       Z-Referenzfahrt (G28 Z an X0/Y0 über den Taster) die Düse ins Bett
 - [ ] `M503` lesen: `M92 X80 Y80 Z80`
 
