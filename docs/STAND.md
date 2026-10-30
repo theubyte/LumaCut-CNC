@@ -268,7 +268,11 @@ Voraussetzungen:
       Anmelden `error -32/-71`. Kühlkörper entfernt (STM32 braucht keinen),
       blinkt weiter. Nur an USB: rote Strom-LED und grüne LED blinken, der
       **Extruder-Treiber (unbenutzt) wird warm** → vermutlich schließt ein
-      defekter Treiber 3,3/5 V kurz. USB abgezogen. Weiter: Foto, Widerstand
+      defekter Treiber 3,3/5 V kurz. **Nachtrag 31.10.:** STM32 und der
+      3,3-V-Regler daneben werden nur an USB sehr heiß → STM32 vermutlich
+      intern durchgeschlagen, Board defekt. Ersatz: gleiches SKR Mini MZ V1.0
+      (Firmware und Gehäuse passen unverändert), sonst SKR Mini E3 V3
+      (Firmware-Port nötig). USB abgezogen. Weiter: Foto, Widerstand
       3,3 V/5 V gegen Masse messen; Treiber ablöten lassen oder Ersatz-Board
       (z. B. SKR Mini E3 V3). SD-Neuaufspielen hilft erst nach behobenem
       Kurzschluss. Bereit liegt die
