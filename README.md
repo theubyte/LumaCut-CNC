@@ -43,6 +43,7 @@ Eigene Laser-Steuerung für die LumaCut-Maschine: Raspberry Pi 400 als Steuerrec
 
 ## Dokumentation
 
+- [docs/STAND.md](docs/STAND.md) – **Aktueller Stand:** was gilt, was in Arbeit ist, was als Nächstes kommt
 - [docs/MASCHINE.md](docs/MASCHINE.md) – Hardware, Belegung, Koordinaten, Kalibrierwerte
 - [docs/PI_BETRIEB.md](docs/PI_BETRIEB.md) – Installation, Updates, Bedienung, API, Fehlersuche
 - [docs/PI_API_REFERENZ.md](docs/PI_API_REFERENZ.md) – Vollständige HTTP-API des Pi: jeder Endpunkt, jede `op`, `/api/status`-Schema, Fehler, Sperren, Beispiele (für Web-UI, Studio, Tablet)
