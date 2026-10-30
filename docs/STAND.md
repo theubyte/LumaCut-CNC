@@ -111,6 +111,11 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
 5. Kein Dienst-Neustart während eines Auftrags.
 6. Der Laser zündet unter etwa 6 % nicht sicher; **Untergrenze 8 %**.
 7. Keine Passwörter/Schlüssel eingeben oder ins Repo schreiben.
+8. **Kopf nie schnell von Hand bewegen oder fallen lassen** (an oder aus):
+   ein gedrehter Schrittmotor speist Spannung auf die Motorversorgung zurück,
+   über 29 V sterben TMC2209-Treiber. Der Z-Kopf v6 dreht beim Fallen den
+   Motor über die Zahnstange schnell. (30./31.10.: SKR defekt, Extruder-Treiber
+   warm nur an USB – Ursache Rückspannung oder Kühlkörper-Kurzschluss.)
 
 ## 5. Grundsätze und Entscheidungen
 
