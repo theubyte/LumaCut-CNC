@@ -224,8 +224,21 @@ Material, ist ungenauer (±0,3 statt ±0,05 mm), und der Knopf ist zugleich
 der Z-Endschalter.
 - [x] Bremse greift (Vorspannschraube angezogen)
 - [ ] Hut drucken (Besitzer druckt eigenen Entwurf) und prüfen, ob der Knopf sauber schaltet
-- [ ] Messen: Tasterspitze **unter** Düsenspitze – Ziel ~2 mm, höchstens 5 mm
-- [ ] Wert auf dem Pi eintragen (`probe_tip_offset_mm`, heute 1,5)
+- [ ] Prüfen (kein genaues Messen nötig): Kopf auf eine glatte Platte
+      absenken, bis der Knopf klickt – ein Blatt Papier muss dann noch unter
+      der Düse durchgehen. Abstand grob schätzen (Lineal, ±1 mm reicht), Ziel ~2 mm.
+- [ ] Schätzwert auf dem Pi eintragen (`probe_tip_offset_mm`, heute 1,5)
+- [ ] Genauigkeit holt der **Fokus-Test** (Kalibrieren → Fokus): er lasert
+      13 Linien in 0,5-mm-Stufen von −3 bis +3 mm, die Kamera sucht die
+      schmalste, und der Pi korrigiert `focus_gap_mm` selbst. Ein Fehler im
+      Tasterversatz wird dabei mit ausgeglichen. Voraussetzung: Firmware
+      (Schritt 2) und Kamera (Schritt 6) sind schon umgestellt.
+
+> **Achtung, bis Schritt 2 erledigt ist:** Die Firmware rechnet für Z noch
+> mit 380 Schritten/mm (alte Gewindespindel). Mit der Zahnstange sind es 80 –
+> jede Z-Fahrt ist dadurch **4,75-mal so weit und so schnell** wie befohlen
+> (Referenzfahrt, Abtasten, Fokus, Jog). Z nicht über die Software bewegen,
+> bis die neue Firmware drauf ist.
 
 **Schritt 2 – Firmware für v6**
 - [ ] `build.py`: Z 380 → 80 Schritte/mm (GT2 20 Z = 40 mm/Umdrehung)
