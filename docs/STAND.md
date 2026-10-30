@@ -266,8 +266,12 @@ Voraussetzungen:
       Kühlkörper des STM32 fiel auf die Nachbar-Pins (Kurzschluss). Danach
       blinken die LEDs schnell (Neustart-Schleife), der Pi meldet beim
       Anmelden `error -32/-71`. Kühlkörper entfernt (STM32 braucht keinen),
-      blinkt weiter. Nächste Schritte: alle Stecker außer USB ab, auf Späne
-      prüfen; sonst Firmware per SD-Karte neu aufspielen. Bereit liegt die
+      blinkt weiter. Nur an USB: rote Strom-LED und grüne LED blinken, der
+      **Extruder-Treiber (unbenutzt) wird warm** → vermutlich schließt ein
+      defekter Treiber 3,3/5 V kurz. USB abgezogen. Weiter: Foto, Widerstand
+      3,3 V/5 V gegen Masse messen; Treiber ablöten lassen oder Ersatz-Board
+      (z. B. SKR Mini E3 V3). SD-Neuaufspielen hilft erst nach behobenem
+      Kurzschluss. Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
       31.10., SHA-256 `96ca4fc6…6a9`).
 - [x] Hut auf dem Taster, Papier-Probe bestanden – sonst drückt die
