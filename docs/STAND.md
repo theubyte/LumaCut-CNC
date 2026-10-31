@@ -74,8 +74,10 @@ Nicht ins Repo: die `.xs`-Datei des Besitzers; das Bild `61h3r1EOoeL._SL1500_.jp
 - **Pi:** SSH `lumacut@192.168.2.89` mit Schlüssel `~/.ssh/lumacut_pi`.
   Web/API: `http://192.168.2.89:8080`. `/opt/lumacut` gehört `lumacut`
   (git ohne sudo). sudo nur für `sudo -n systemctl restart lumacut-marlin.service`
-  – und **nur mit ausdrücklicher Zustimmung, nie während ein Auftrag läuft**
-  (vorher `GET /api/status` prüfen: `job.state` darf nicht `running` sein).
+  – **nie während ein Auftrag läuft** (vorher `GET /api/status` prüfen:
+  `activity` idle, `busy` false). Seit 31.10. Freigabe des Besitzers: ist
+  nichts aktiv, ohne Nachfrage neu starten. Fahr- und Laseraufträge brauchen
+  weiter jedes Mal das Go (§4).
 - **GitHub:** Deploy-Key `GIT_SSH_COMMAND="ssh -i ~/.ssh/lumacut_github"`.
   Kein `gh`-CLI; CI-Status per GitHub-API mit `curl`.
 - **Commits:** `git -c user.name=TheUByte -c user.email=83143005+theubyte@users.noreply.github.com commit …`,
@@ -89,7 +91,7 @@ Nicht ins Repo: die `.xs`-Datei des Besitzers; das Bild `61h3r1EOoeL._SL1500_.jp
   Windows-Fehlschläge: `camera_calibration` Speicherort (2×), `marlin_gateway` (2×).
 - **CI (GitHub Actions):** Pi-Tests, Android-APK + Screenshots, Firmware-Build.
 - **Pi aktualisieren:** auf dem Pi `cd /opt/lumacut && git pull`, dann
-  Dienst neu starten (Zustimmung!). Alternativ `sudo bash /opt/lumacut/pi400/update.sh`.
+  Dienst neu starten (nur wenn nichts läuft). Alternativ `sudo bash /opt/lumacut/pi400/update.sh`.
 - **App verteilen:** CI baut die signierte APK als GitHub-Release, der Pi
   holt sie, die App bietet „Update 1.0.N“ an (Einstellungen → App-Update).
 - **Firmware flashen:** über den Pi (`/api/firmware`), **nur wenn der Besitzer daneben steht**.

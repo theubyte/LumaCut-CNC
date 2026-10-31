@@ -7,7 +7,7 @@ Kurzfassung der wichtigsten Regeln (Details in STAND.md §3–§5):
 - Vor jeder Änderung `git fetch` + `pull` – andere Sitzungen arbeiten parallel auf `main`.
 - Vor JEDEM Laser- oder Fahrauftrag ein ausdrückliches Go des Besitzers
   („Hände raus, Deckel zu, Brille – starten?“). Nie auf ungetestetem Material lasern.
-- Pi-Dienst nur mit Zustimmung und nie während eines Auftrags neu starten; Flashen nur mit dem Besitzer vor Ort.
+- Pi-Dienst nie während eines Auftrags neu starten; ist nichts aktiv, ohne Nachfrage (Freigabe 31.10.). Flashen nur mit dem Besitzer vor Ort.
 - Der Pi ist die Zentrale: Einstellungen und Grenzen gehören auf den Pi.
 - Keine Passwörter oder Schlüssel lesen, eingeben oder committen.
 - Nach jeder Änderung `docs/STAND.md` und `CHANGELOG.md` im selben Commit nachziehen.
