@@ -191,7 +191,7 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   Materialtest mit Kamera (`op=matcal`), Bettkarte (`op=bedmap`),
   Arbeitsstand-Sync (`/api/workspace…`), App-Update-Verteilung,
   Firmware-Flash. Vollständig: [PI_API_REFERENZ.md](PI_API_REFERENZ.md).
-- **Android-App 1.0.51** (auf dem Pi bereit seit 31.10.; Arbeitsfläche 370 × 360 mit Park-Ecke, Werte vom Pi): Editor mit Ebenen,
+- **Android-App 1.0.52** (auf dem Pi bereit seit 31.10.; Arbeitsfläche 370 × 360 mit Park-Ecke, Werte vom Pi; realistische Zeitschätzung): Editor mit Ebenen,
   Text/Bild/SVG/xTool-Import, Regler „präziser ↔ schneller“ / „heller ↔
   dunkler“, Projekte auf dem Pi speichern/öffnen, Kalibrier-Assistenten,
   Arbeitsplatz-Scan mit der Kopfkamera. Am Tablet noch nicht ausprobiert:
