@@ -210,7 +210,13 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   `Door` und nimmt erst nach `~` Befehle an – die Brücke setzt fort, wenn der
   Türeingang geschlossen ist. DTR/RTS müssen aus bleiben (ESP32-Reset).
   **Am 31.10. an der Maschine geprüft:** Verbinden, Referenzfahrt (sauber
-  hinten rechts), Fahrt auf X100/Y100 (Richtung stimmt). Laser noch nicht.
+  hinten rechts), Fahrt auf X100/Y100 (Richtung stimmt). **Laser:** am
+  „+12V“-Ausgang des Boards (gibt 24 V durch) zündete er nur bei wenig
+  Leistung oder gar nicht, das Board verlor dabei auch die USB-Verbindung.
+  Lösung: **Laser über die LaserTree-Adapterplatine direkt am 24-V-Netzteil**,
+  vom Board nur TTL (+ Signal, − Masse). Danach Leistungstest 30–100 % alle
+  Stufen sauber (31.10., 11:03), USB ohne Fehler. Die Brücke fragt verlorene
+  Statusmeldungen dreimal nach und meldet ein getrenntes Board sofort.
 - **Windows-Studio:** ruht.
 - **LightBurn** geht übergangsweise noch über TCP 23.
 
