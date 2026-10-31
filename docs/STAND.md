@@ -5,7 +5,7 @@ ein Mensch oder ein neuer Claude-Chat – liest zuerst diese Datei. Sie
 erklärt, was das Projekt ist, wo alles liegt, welche Regeln gelten, was
 schon passiert ist, was gerade läuft und was als Nächstes kommt.
 
-Stand: **30.10.2026**. Wird mit jeder Änderung im selben Commit nachgezogen
+Stand: **31.10.2026**. Wird mit jeder Änderung im selben Commit nachgezogen
 (siehe [Pflege dieser Datei](#14-pflege-dieser-datei)).
 
 Inhalt:
@@ -138,7 +138,14 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
 - Rahmen Atomstack A5 Pro (X-Träger 2020 × 525 mm, X-Motor fährt auf dem
   Wagen mit, Y ein Motor + Synchronwelle).
 - Laser LaserTree LT-80W-AA-PRO (10 W optisch), Fokus 7 mm unter der Düse.
-- SKR Mini MZ V1.0 (TMC2209), Marlin 2.1.2.9; Belegung in [MASCHINE.md](MASCHINE.md).
+- SKR Mini MZ V1.0 (TMC2209), Marlin 2.1.2.9; Belegung in [MASCHINE.md](MASCHINE.md). **Seit 31.10. defekt.**
+- **Notbetrieb seit 31.10.:** Original-Atomstack-Board „Laser 32-A5 V1.0“
+  (ESP32, Grbl ab Werk, USB-Chip CH340) fährt X, Y und den Laser. Es hat
+  keinen Z-Treiber: Z-Motor abgesteckt, **Kopf mit Klebeband auf
+  Fokushöhe fixiert** (Fokus von Hand je Material). Der Pi spricht über
+  `pi400/marlin/grbl_bridge.py` mit ihm (siehe §7). Abtasten und Z-Fahrten
+  sind in dieser Zeit nur gespielt – Material muss so dick sein wie beim
+  Fixieren des Kopfes.
 - Pi 400 mit USB-Kopfkamera, LED-Licht (dimmbar), Abluft.
 - **Kopf v6 ist seit 30.10. eingebaut:** Z über Zahnstange (GT2-Riemen auf
   gedruckter Leiste, Ritzel GT2 20 Z) statt Gewindespindel; der ganze Kopf
@@ -182,6 +189,14 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   Arbeitsplatz-Scan mit der Kopfkamera. Am Tablet noch nicht ausprobiert:
   der Projekte-Dialog.
 - **Web-Oberfläche** (Browser auf Port 8080): gleiches Design wie die App.
+- **Grbl-Brücke (Notbetrieb, 31.10.):** Findet der Pi das SKR nicht am
+  eingestellten Port, nimmt er das Atomstack-Board (CH340, `/dev/ttyUSB*`)
+  und übersetzt Marlin → Grbl: `M3 I` → `M4 S0`, S 0..255 → 0..`$30`,
+  `G28 X Y` → `$H` + `G10 L20 P1 X0 Y0`, `M400/M114/M119` über `?`,
+  `M112` → `!` + Strg-X. Achsen, die in Grbl nach + referenzieren (`$23`),
+  werden gespiegelt. Z: nur gemerkt; `G30` meldet Bettkarte-Mittel +
+  Materialstärke. Tests: `tests/test_grbl_bridge.py`. Wieder SKR: einfach
+  wieder anstecken, der Pi nimmt es zuerst.
 - **Windows-Studio:** ruht.
 - **LightBurn** geht übergangsweise noch über TCP 23.
 
@@ -215,6 +230,9 @@ Ausführlich pro Tag im [CHANGELOG](../CHANGELOG.md); hier der rote Faden.
   scharf, Karte gelasert. Pi-Dienst neu gestartet (Projekte aktiv). **Kopf v6
   eingebaut:** Taster zu hoch, Bremse nachgestellt. Plan für die Umstellung
   (§9) mit dem Besitzer abgestimmt. Diese Datei angelegt.
+- **30./31.10.:** SKR Mini MZ defekt (Kühlkörper auf Pins, Achsen von Hand
+  geschoben). Für ein Geschenk am 31.10. Notbetrieb mit dem
+  Atomstack-Board über die neue Grbl-Brücke auf dem Pi, Z mit Klebeband fixiert.
 
 ## 9. Gerade in Arbeit: Umstellung auf Kopf v6
 

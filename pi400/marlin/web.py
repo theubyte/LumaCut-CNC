@@ -31,6 +31,7 @@ from .workspace import WorkspaceStore, create_blueprint as workspace_api
 from .projects import ProjectStore, create_blueprint as projects_api
 from .line_laser import LineLaser
 from .app_update import AppUpdates
+from .grbl_bridge import open_controller
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "marlin"
@@ -52,7 +53,18 @@ USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
 CAMERA = os.environ.get("LUMACUT_CAMERA", "/dev/video0")
 HTTP = int(os.environ.get("LUMACUT_HTTP", "8080"))
 TCP = int(os.environ.get("LUMACUT_TCP", "23"))
-machine = MarlinTransport(USB)
+
+
+def _fixed_head_surface():
+    """Grbl stand-in board (no Z): where the probe would touch the chosen material."""
+    bed = BED.summary()["mean"] if BED is not None else -1.3
+    return bed + (machine.material_mm or 0.0)
+
+
+# SKR at LUMACUT_SKR; without it the original Atomstack board (Grbl, CH340)
+# through the Marlin bridge (grbl_bridge.py, emergency use since 31.10.2026).
+machine = MarlinTransport(USB, serial_factory=lambda port, baud, timeout=0.1: open_controller(
+    port, baud, timeout, surface_hint=_fixed_head_surface))
 app = Flask(__name__, static_folder=None)
 app.register_blueprint(camera_calibration_api())  # GET/PUT /api/camera/calibration
 app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024

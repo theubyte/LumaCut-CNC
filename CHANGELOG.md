@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-10-31
+
+- **Notbetrieb mit dem Atomstack-Board (Grbl):** Das SKR ist defekt. Der Pi steuert jetzt auch das Original-Board der A5 Pro (ESP32, Grbl ab Werk) über eine Brücke (`grbl_bridge.py`), die sich wie LumaCut-Marlin verhält: Laser, Fahren, Referenzieren, Not-Aus gehen weiter über LumaCut (App, Web). Ohne Z-Treiber ist Z fest von Hand eingestellt; Z-Fahrten und Abtasten werden nur gespielt. Ist das SKR wieder dran, nimmt der Pi es zuerst.
+
 ## 2026-10-30
 
 - **Kopf v6: Z mit 80 Schritten/mm.** Die Zahnstange (GT2-Riemen, Ritzel GT2 20 Z = 40 mm je Umdrehung) braucht 80 statt 380 Schritte/mm der alten Gewindespindel. Firmware-Vorgabe geändert; der Pi sendet zusätzlich bei jedem Verbinden `M92 Z80`, weil ein alter EEPROM-Wert sonst gilt – Z stimmt damit schon ohne Flashen.
