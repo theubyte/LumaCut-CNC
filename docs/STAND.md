@@ -197,6 +197,12 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   werden gespiegelt. Z: nur gemerkt; `G30` meldet Bettkarte-Mittel +
   Materialstärke. Tests: `tests/test_grbl_bridge.py`. Wieder SKR: einfach
   wieder anstecken, der Pi nimmt es zuerst.
+  Board-Werte (`$$`, 31.10.): Grbl 1.1h (Build 2022050902), `$32=1`
+  Lasermodus, `$30=1000`, `$100/$101=80`, `$110/$111=6000`, `$120/$121=1000`,
+  `$22=1` Homing, `$23=3` (X/Y nach −, also nicht gespiegelt), `$21=1`
+  Hardlimits, `$20=0`, `$130/$131=395/365`, `$27=1`. Es startet im Zustand
+  `Door` und nimmt erst nach `~` Befehle an – die Brücke setzt fort, wenn der
+  Türeingang geschlossen ist. DTR/RTS müssen aus bleiben (ESP32-Reset).
 - **Windows-Studio:** ruht.
 - **LightBurn** geht übergangsweise noch über TCP 23.
 

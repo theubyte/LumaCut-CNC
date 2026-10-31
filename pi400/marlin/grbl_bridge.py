@@ -73,7 +73,14 @@ class GrblMarlinBridge:
     def __init__(self, port: str, baud: int = 115200, surface_hint=None, serial_port=None):
         if serial_port is None:
             import serial
-            serial_port = serial.Serial(port, baud, timeout=0.05, write_timeout=1.0, exclusive=True)
+            # DTR/RTS stay released: on the ESP32 board they pull EN/GPIO0
+            # and would hold the chip in reset or the boot loader.
+            serial_port = serial.Serial()
+            serial_port.port, serial_port.baudrate = port, baud
+            serial_port.timeout, serial_port.write_timeout = 0.05, 1.0
+            serial_port.dtr = serial_port.rts = False
+            serial_port.exclusive = True
+            serial_port.open()
         self.port = port
         self.ser = serial_port
         self.surface_hint = surface_hint
@@ -239,6 +246,17 @@ class GrblMarlinBridge:
             time.sleep(0.1)
         self._raw(b"\r\n\r\n")
         time.sleep(0.3)
+        self._status()
+        # The Atomstack firmware boots in "Door" (safety door) and queues
+        # every line until cycle start. Resume only with the door input
+        # closed; Grbl then runs what it queued (here only blank lines).
+        if self.state == "Door" and "D" not in self.pins:
+            self._raw(b"~")
+            time.sleep(0.5)
+            self._status()
+        if self.state == "Door":
+            raise ConnectionError("Grbl meldet Tür offen (Door): Türschalter am Board prüfen")
+        self.reset_input_buffer()
         self._read_settings()
         if not self.settings:
             raise ConnectionError("Board am %s antwortet nicht wie Grbl ($$)" % self.port)

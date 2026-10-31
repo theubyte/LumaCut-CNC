@@ -9,8 +9,9 @@ from pi400.marlin.transport import MarlinTransport
 class FakeGrbl:
     """Grbl 1.1 answering $$, ?, $H and buffered lines; homes X and Y to +."""
 
-    def __init__(self, homing_dir_mask=0):
+    def __init__(self, homing_dir_mask=0, state="Idle"):
         self.lock = threading.Lock()
+        self.state = state
         self.rx = b"Grbl 1.1h ['$' for help]\r\n"
         self.written = []
         self.settings = {23: homing_dir_mask, 30: 1000, 32: 1}
@@ -20,11 +21,13 @@ class FakeGrbl:
 
     def write(self, data):
         with self.lock:
-            for byte in (b"?", b"!", b"\x18"):
+            for byte in (b"?", b"!", b"\x18", b"~"):
                 if data == byte:
                     self.written.append(data.decode("latin1"))
+                    if data == b"~" and self.state == "Door":
+                        self.state = "Idle"
                     if data == b"?":
-                        self.rx += ("<Idle|MPos:%.3f,%.3f,0.000|FS:0,0|WCO:%.3f,%.3f,0.000>\r\n"
+                        self.rx += ("<" + self.state + "|MPos:%.3f,%.3f,0.000|FS:0,0|WCO:%.3f,%.3f,0.000>\r\n"
                                     % (self.pos[0], self.pos[1], self.wco[0], self.wco[1])).encode()
                     return len(data)
             for line in data.decode().splitlines():
@@ -118,6 +121,13 @@ class GrblBridgeTest(unittest.TestCase):
         grbl.settings[32] = 0
         with self.assertRaises(ConnectionError):
             GrblMarlinBridge("/dev/fake", serial_port=grbl)
+
+    def test_resumes_from_door_state_after_boot(self):
+        grbl = FakeGrbl(3, state="Door")
+        bridge = GrblMarlinBridge("/dev/fake", serial_port=grbl)
+        self.addCleanup(bridge.close)
+        self.assertIn("~", grbl.written)
+        self.assertEqual(bridge.state, "Idle")
 
     def test_dwell_milliseconds_become_seconds(self):
         grbl, bridge = self.make()
