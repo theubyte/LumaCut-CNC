@@ -211,6 +211,10 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   Hardlimits, `$20=0`, `$130/$131=395/365`, `$27=1`. Es startet im Zustand
   `Door` und nimmt erst nach `~` Befehle an – die Brücke setzt fort, wenn der
   Türeingang geschlossen ist. DTR/RTS müssen aus bleiben (ESP32-Reset).
+  Vorschub wird auf `$110/$111` gedeckelt (sonst senkt M4 die Leistung),
+  ein stummer USB-Port wird nach 7 s neu geöffnet. Damit kurze Segmente
+  (Kreise) flüssig laufen, liest die Brücke jedes „ok“ sofort und der Pi
+  streamt durch sie mit 16 Zeilen / 600 Bytes Fenster (SKR: 4 / 200).
   **Am 31.10. an der Maschine geprüft:** Verbinden, Referenzfahrt (sauber
   hinten rechts), Fahrt auf X100/Y100 (Richtung stimmt). **Laser:** am
   „+12V“-Ausgang des Boards (gibt 24 V durch) zündete er nur bei wenig

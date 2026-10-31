@@ -475,6 +475,10 @@ class MarlinTransport:
             self._close_locked()
             try:
                 self.serial = self._open()
+                # The Grbl bridge buffers by itself and asks for a deeper window
+                # (short arc segments would starve Grbl's planner otherwise).
+                self.stream_window = getattr(self.serial, "stream_window", STREAM_MAX_LINES)
+                self.stream_bytes = getattr(self.serial, "stream_bytes", STREAM_MAX_BYTES)
                 # STM32 USB may reset at open. Allow boot banner to settle.
                 time.sleep(1.0)
                 # Ignore unsolicited 'start'/welcome, then ask native M115.

@@ -189,6 +189,8 @@ class GrblBridgeTest(unittest.TestCase):
         self.assertIn("$H", grbl.written)
         # the board's own limits (no $110/$120 in the fake: Grbl defaults)
         self.assertEqual(machine.controller_motion(), (1000.0, 100.0))
+        # deeper streaming window than the SKR's 4 lines (smooth arcs)
+        self.assertEqual(machine.stream_window, 16)
 
 
 if __name__ == "__main__":

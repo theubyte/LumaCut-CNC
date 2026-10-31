@@ -91,6 +91,14 @@ IDLE_ACK_S = 1.5
 
 
 class GrblMarlinBridge:
+    # Gateway streaming window through the bridge. A circle in 0.4 mm
+    # segments at 4400 mm/min needs ~180 lines/s; with the SKR's 4 lines the
+    # ok round trip could not keep up, Grbl's planner ran dry and the head
+    # moved stop-and-go (wavy lines). The bridge queues these lines itself
+    # and feeds Grbl's 120-byte buffer as fast as its oks come back.
+    stream_window = 16
+    stream_bytes = 600
+
     def __init__(self, port: str, baud: int = 115200, surface_hint=None, serial_port=None,
                  opener=None):
         # opener() returns a fresh open port: used to reopen a link that went
@@ -191,7 +199,9 @@ class GrblMarlinBridge:
         buf = b""
         while not self.closed:
             try:
-                chunk = self.ser.read(256)
+                # read(256) would wait the full port timeout (50 ms) for
+                # 256 bytes and hold every "ok" back that long.
+                chunk = self.ser.read(max(1, min(256, getattr(self.ser, "in_waiting", 256) or 1)))
             except Exception as exc:
                 if self.reopening:
                     time.sleep(0.05)
