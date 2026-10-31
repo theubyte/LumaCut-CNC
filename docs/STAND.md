@@ -218,7 +218,12 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   Lösung: **Laser über die LaserTree-Adapterplatine direkt am 24-V-Netzteil**,
   vom Board nur TTL (+ Signal, − Masse). Danach Leistungstest 30–100 % alle
   Stufen sauber (31.10., 11:03), USB ohne Fehler. **Testkreis Ø 20 mm in
-  MDF 3 mm (300 mm/min, 100 %, 2×) durch und fällt raus (11:05).** Die Brücke fragt verlorene
+  MDF 3 mm (300 mm/min, 100 %, 2×) durch und fällt raus (11:05).**
+  12:35 erste App-Gravur abgebrochen: USB-Empfang tot („urb stopped“, Linux
+  liest dann nichts mehr bis zum Neuöffnen) und F10199 > Board-Maximum 6000,
+  wodurch der M4-Lasermodus die Leistung auf ~8 % senkte. Brücke deckelt F
+  jetzt auf `$110/$111`, öffnet einen 7 s stummen Port neu und quittiert
+  Zeilen, deren ok verloren ging, sobald Grbl Idle meldet. Die Brücke fragt verlorene
   Statusmeldungen dreimal nach und meldet ein getrenntes Board sofort.
 - **Windows-Studio:** ruht.
 - **LightBurn** geht übergangsweise noch über TCP 23.
@@ -391,6 +396,7 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
 | Ordner | Inhalt |
 |---|---|
 | `A:\LumaCut\Einladung-Maxim` | Einladungskarte „Smaragd“ (Minecraft-Party). `make_smaragd_laser.py` erzeugt Gravur (Füllfläche) und Schnitt in Endgröße 78,8 × 100 mm. Projekt liegt im Arbeitsstand des Pi. |
+| `A:\LumaCut\Projekte\Paar-Hund-Glas` | Geschenk: Paar auf lackiertem Glas 152,5 × 110,5 (gespiegelt, 254 dpi, 1 bit), Hund als Figur aus 3 mm MDF (Gravur + Schnitt), Standfuß „Bühne“ als STEP/STL (CadQuery `build_fuss.py`). Freistellen lokal mit ISNet-Modell (`segment.py`). Anleitung `ANLEITUNG.md`. |
 | `A:\LumaCut\Materialtest`, `Einmesstest` | Testmuster und Anleitungen für Kalibrier-Läufe |
 | `A:\LumaCut\Gehaeuse-SKR-Mini-MZ` | Gehäuse für das SKR-Board |
 | `A:\LumaCut\SKR-Firmware` | ältere Firmware-Stände |

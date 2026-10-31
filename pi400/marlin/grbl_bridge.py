@@ -69,18 +69,36 @@ def open_controller(port: str, baud: int, timeout: float = 0.1, surface_hint=Non
     return GrblMarlinBridge(ports[0], surface_hint=surface_hint)
 
 
+def _open_serial(port: str, baud: int):
+    import serial
+    # DTR/RTS stay released: on the ESP32 board they pull EN/GPIO0
+    # and would hold the chip in reset or the boot loader.
+    ser = serial.Serial()
+    ser.port, ser.baudrate = port, baud
+    ser.timeout, ser.write_timeout = 0.05, 1.0
+    ser.dtr = ser.rts = False
+    ser.exclusive = True
+    ser.open()
+    return ser
+
+
+# Link watchdog: after this much silence ask "?", after LINK_DEAD_S reopen.
+LINK_QUIET_S = 3.0
+LINK_DEAD_S = 7.0
+# Lines still counted in Grbl's buffer while it reports Idle this long:
+# their "ok" got lost on the USB link, Grbl has long executed them.
+IDLE_ACK_S = 1.5
+
+
 class GrblMarlinBridge:
-    def __init__(self, port: str, baud: int = 115200, surface_hint=None, serial_port=None):
+    def __init__(self, port: str, baud: int = 115200, surface_hint=None, serial_port=None,
+                 opener=None):
+        # opener() returns a fresh open port: used to reopen a link that went
+        # deaf (see _watch_loop). Tests pass serial_port and no opener.
         if serial_port is None:
-            import serial
-            # DTR/RTS stay released: on the ESP32 board they pull EN/GPIO0
-            # and would hold the chip in reset or the boot loader.
-            serial_port = serial.Serial()
-            serial_port.port, serial_port.baudrate = port, baud
-            serial_port.timeout, serial_port.write_timeout = 0.05, 1.0
-            serial_port.dtr = serial_port.rts = False
-            serial_port.exclusive = True
-            serial_port.open()
+            opener = opener or (lambda: _open_serial(port, baud))
+            serial_port = opener()
+        self.opener = opener
         self.port = port
         self.ser = serial_port
         self.surface_hint = surface_hint
@@ -102,6 +120,10 @@ class GrblMarlinBridge:
         self.private_active = False
         self.private_reply = None
         self.private_lines: list[str] = []
+        self.last_rx = time.monotonic()
+        self.reopening = False
+        self.reopens = 0
+        self.idle_since = None
         self.reader = threading.Thread(target=self._read_loop, daemon=True)
         self.reader.start()
         try:
@@ -111,6 +133,8 @@ class GrblMarlinBridge:
             raise
         self.worker = threading.Thread(target=self._work_loop, daemon=True)
         self.worker.start()
+        self.watchdog = threading.Thread(target=self._watch_loop, daemon=True)
+        self.watchdog.start()
 
     # ---- pyserial surface used by MarlinTransport -------------------------
 
@@ -150,7 +174,18 @@ class GrblMarlinBridge:
     # ---- Grbl side --------------------------------------------------------
 
     def _raw(self, data: bytes):
-        self.ser.write(data)
+        for attempt in range(2):
+            end = time.monotonic() + 3.0
+            while self.reopening and time.monotonic() < end:
+                time.sleep(0.02)
+            try:
+                self.ser.write(data)
+                return
+            except Exception:
+                # the watchdog may have swapped the port under this write
+                if attempt or self.closed:
+                    raise
+                time.sleep(0.3)
 
     def _read_loop(self):
         buf = b""
@@ -158,6 +193,10 @@ class GrblMarlinBridge:
             try:
                 chunk = self.ser.read(256)
             except Exception as exc:
+                if self.reopening:
+                    time.sleep(0.05)
+                    buf = b""
+                    continue
                 if not self.closed:
                     LOG.warning("Grbl serial read failed: %s", exc)
                 self.closed = True
@@ -166,6 +205,7 @@ class GrblMarlinBridge:
                 return
             if not chunk:
                 continue
+            self.last_rx = time.monotonic()
             buf += chunk
             while b"\n" in buf:
                 raw, buf = buf.split(b"\n", 1)
@@ -179,6 +219,7 @@ class GrblMarlinBridge:
                     line == "ok" or line.startswith("error:")):
                 self.private_reply = line
             elif line == "ok":
+                self.idle_since = None
                 if self.pending:
                     self.pending.pop(0)
                     self.out.put("ok")
@@ -223,6 +264,10 @@ class GrblMarlinBridge:
                 self.wco = nums[:2]
             elif key == "Pn":
                 self.pins = value
+        if self.state != "Idle" or not self.pending:
+            self.idle_since = None
+        elif self.idle_since is None:
+            self.idle_since = time.monotonic()
         self.status_seq += 1
 
     def _status(self, timeout: float = 1.0, tries: int = 3):
@@ -317,6 +362,10 @@ class GrblMarlinBridge:
         wy = self.mpos[1] - self.wco[1]
         return wx * self._sign(0), wy * self._sign(1)
 
+    def max_rate(self) -> float:
+        """Fastest X/Y feed (mm/min) the board runs ($110/$111)."""
+        return min(self.settings.get(110, 6000.0), self.settings.get(111, 6000.0)) or 6000.0
+
     def _power(self, s: float) -> float:
         top = self.settings.get(30, 1000.0) or 1000.0
         return round(max(0.0, min(MARLIN_S_MAX, s)) * top / MARLIN_S_MAX, 1)
@@ -343,7 +392,10 @@ class GrblMarlinBridge:
             elif letter == "S":
                 parts.append("S%g" % self._power(v))
             elif letter == "F":
-                parts.append("F%g" % v)
+                # Above $110/$111 Grbl runs slower than asked, and its dynamic
+                # laser mode (M4) then cuts the power by the same ratio: a
+                # 10200 mm/min fill at 14 % burnt at ~8 %, below ignition.
+                parts.append("F%g" % min(v, self.max_rate()))
             elif letter == "R":
                 parts.append("R%g" % v)
         if not moved and g in (0, 1):
@@ -485,6 +537,55 @@ class GrblMarlinBridge:
                 LOG.warning("bridge %r: %s", line, exc)
                 self.out.put("Error:Grbl-Bridge " + str(exc)[:120])
                 self.out.put("ok")
+
+    def _watch_loop(self):
+        """Keep the USB link and the ok count honest.
+
+        The CH340 driver stops receiving after a stalled transfer ("urb
+        stopped: -32", seen with motors and laser running) until the port
+        is reopened; the board itself keeps working. Silence -> ask "?";
+        still silent -> reopen. Lines Grbl must have executed (it reports
+        Idle for IDLE_ACK_S with lines still counted) are acknowledged,
+        because their "ok" was lost.
+        """
+        while not self.closed:
+            time.sleep(0.5)
+            if self.closed or self.emergency:
+                return
+            quiet = time.monotonic() - self.last_rx
+            try:
+                if quiet > LINK_DEAD_S and self.opener is not None:
+                    self._reopen()
+                elif quiet > LINK_QUIET_S or (self.pending and self.idle_since is not None):
+                    self._raw(b"?")
+                with self.cond:
+                    if (self.pending and self.idle_since is not None
+                            and time.monotonic() - self.idle_since > IDLE_ACK_S):
+                        LOG.warning("Grbl Idle with %d unacknowledged lines: ok lost, acknowledging",
+                                    len(self.pending))
+                        for _ in self.pending:
+                            self.out.put("ok")
+                        self.pending.clear()
+                        self.idle_since = None
+                        self.cond.notify_all()
+            except Exception as exc:
+                LOG.warning("Grbl watchdog: %s", exc)
+
+    def _reopen(self):
+        LOG.warning("Grbl link silent for %.0f s: reopening %s", time.monotonic() - self.last_rx, self.port)
+        self.reopening = True
+        try:
+            try:
+                self.ser.close()
+            except Exception:
+                pass
+            time.sleep(0.2)
+            self.ser = self.opener()
+            self.reopens += 1
+            self.last_rx = time.monotonic()
+        finally:
+            self.reopening = False
+        self._raw(b"?")
 
     def _emergency(self):
         try:

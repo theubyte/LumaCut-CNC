@@ -18,6 +18,8 @@ class FakeGrbl:
         self.pos = [0.0, 0.0]
         self.wco = [0.0, 0.0]
         self.relative = False
+        self.drop_oks = 0
+        self.deaf = False
 
     def write(self, data):
         with self.lock:
@@ -47,12 +49,19 @@ class FakeGrbl:
                         if axis in line:
                             v = float(line.split(axis)[1].split()[0])
                             self.pos[i] = self.wco[i] + v
+                if self.drop_oks:
+                    self.drop_oks -= 1       # lost on the USB link
+                    continue
                 self.rx += b"ok\r\n"
         return len(data)
 
     def read(self, n):
         with self.lock:
-            out, self.rx = self.rx[:n], self.rx[n:]
+            if self.deaf:                    # CH340 after "urb stopped": nothing arrives
+                self.rx = b""
+                out = b""
+            else:
+                out, self.rx = self.rx[:n], self.rx[n:]
         if not out:
             time.sleep(0.01)
         return out
@@ -128,6 +137,34 @@ class GrblBridgeTest(unittest.TestCase):
         self.addCleanup(bridge.close)
         self.assertIn("~", grbl.written)
         self.assertEqual(bridge.state, "Idle")
+
+    def test_feed_is_capped_at_the_board_maximum(self):
+        grbl, bridge = self.make(mask=3)
+        grbl.settings.update({110: 6000, 111: 6000})
+        bridge.settings.update({110: 6000.0, 111: 6000.0})
+        self.ask(bridge, "G1 X10 Y10 F10199 S35")
+        self.assertIn("G1 X10.000 Y10.000 F6000 S137.3", grbl.written)
+
+    def test_lost_ok_is_acknowledged_once_grbl_is_idle(self):
+        grbl, bridge = self.make(mask=3)
+        grbl.drop_oks = 1
+        reply = self.ask(bridge, "G1 X10 Y10 F600 S10", timeout=10.0)
+        self.assertEqual(reply[-1], "ok")
+
+    def test_deaf_link_is_reopened(self):
+        grbl = FakeGrbl(3)
+        opened = []
+
+        def opener():
+            grbl.deaf = False
+            opened.append(1)
+            return grbl
+        bridge = GrblMarlinBridge("/dev/fake", serial_port=grbl, opener=opener)
+        self.addCleanup(bridge.close)
+        grbl.deaf = True
+        reply = self.ask(bridge, "G1 X10 Y10 F600 S10", timeout=15.0)
+        self.assertEqual(reply[-1], "ok")
+        self.assertEqual(bridge.reopens, 1)
 
     def test_dwell_milliseconds_become_seconds(self):
         grbl, bridge = self.make()
