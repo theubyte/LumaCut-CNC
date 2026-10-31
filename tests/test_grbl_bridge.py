@@ -223,6 +223,11 @@ class GrblBridgeTest(unittest.TestCase):
 
 
 class OpenControllerTest(unittest.TestCase):
+    def setUp(self):
+        from pi400.marlin import grbl_bridge
+        old, grbl_bridge.ANET_BOOT_S = grbl_bridge.ANET_BOOT_S, 0.1
+        self.addCleanup(setattr, grbl_bridge, "ANET_BOOT_S", old)
+
     class Port:
         def __init__(self, reply):
             self.reply, self.rx, self.closed, self.timeout = reply, b"", False, 0.05

@@ -99,15 +99,26 @@ def open_controller(port: str, baud: int, timeout: float = 0.1, surface_hint=Non
         return ser
 
 
+# Opening the port on Linux pulses DTR before pyserial can release it: the
+# Anet resets, its boot loader listens ~0.45 s, Marlin prints "start" ~1 s
+# later. M115 sent earlier lands in the boot loader and is lost.
+ANET_BOOT_S = 3.0
+
+
 def _answers_marlin(ser, wait: float = 2.0) -> bool:
-    """M115 at the Anet's baud rate. DTR stays released (_open_serial), so
-    the Anet is not reset and answers at once."""
-    ser.reset_input_buffer()
-    ser.write(b"\nM115\n")
-    data, end = b"", time.monotonic() + wait
-    while time.monotonic() < end and b"FIRMWARE_NAME:Marlin" not in data:
+    """M115 at the Anet's baud rate, after its (possible) reboot."""
+    data, end = b"", time.monotonic() + ANET_BOOT_S
+    while time.monotonic() < end and b"start" not in data:
         data += ser.read(256)
-    return b"FIRMWARE_NAME:Marlin" in data
+    for _ in range(2):
+        ser.reset_input_buffer()
+        ser.write(b"\nM115\n")
+        data, end = b"", time.monotonic() + wait
+        while time.monotonic() < end and b"FIRMWARE_NAME:Marlin" not in data:
+            data += ser.read(256)
+        if b"FIRMWARE_NAME:Marlin" in data:
+            return True
+    return False
 
 
 PLAIN_G1 = re.compile(r"^G1 X([-+]?\d*\.?\d+) Y([-+]?\d*\.?\d+)((?: [FS][-+]?\d*\.?\d+)*)$")
