@@ -1504,6 +1504,34 @@ assert sent[-1] == "M5 I" and m.owner is None and not web.job_lock.locked(), sen
 assert web.job["state"] == "complete"
 """ % self.FRAME_GCODE)
 
+    def test_frame_with_glimmer_power(self):
+        # frame_power_pct > 0: dark move to the outline, then each edge lit
+        # with the set power (0.5 % -> S1.27), never slower than 1200 mm/min.
+        self._run_web_script(r"""
+from marlin import web
+FRAME = %r
+m = web.machine
+m.homing_verified = True
+cmds = web.frame_program(FRAME.replace("F3000", "F600"))
+web.config["frame_power_pct"] = 0.5
+sent = []
+m.command = lambda cmd, **k: sent.append((cmd, m.focused_this_job))
+web.stop_job.clear()
+web.job_lock.acquire()
+m.owner = "frame"
+m.focused_this_job = False
+web.frame.update(state="running")
+web._frame_worker(cmds)
+assert web.frame["state"] == "complete", web.frame
+lines = [c for c, _ in sent]
+assert lines.index("G0 X60.000 Y60.000") < lines.index("M3 I"), lines
+assert "G1 X120.000 Y60.000 F1200 S1.27" in lines, lines
+assert lines[-1] in ("M5 I", "M400") and "M5 I" in lines[lines.index("M3 I"):], lines
+assert all(f for c, f in sent if c.startswith("G1")), "no focus move for the glimmer"
+assert m.focused_this_job is False and m.owner is None and not web.job_lock.locked()
+web.config["frame_power_pct"] = 0.0
+""" % self.FRAME_GCODE)
+
     def test_one_click_end_to_end_against_simulated_marlin(self):
         # Studio output -> Pi preflight -> home -> G30 -> focus -> cut -> park,
         # all through the real transport against a stateful Marlin model.

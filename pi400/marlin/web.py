@@ -93,7 +93,12 @@ config = {
     # Exhaust on at every job start; off this many seconds after the job (fumes).
     "exhaust_auto": False,
     "exhaust_after_s": 60,
+    # Laser power (%) while tracing the frame, 0 = laser off. A visible dot
+    # only: capped at FRAME_POWER_MAX and never slower than FRAME_POWER_MIN_FEED.
+    "frame_power_pct": 0.0,
 }
+FRAME_POWER_MAX = 1.0
+FRAME_POWER_MIN_FEED = 1200.0
 MACHINE_NAME_MAX = 40
 # Bed map and probe planning keep the old 30 mm edge until the probe is
 # recalibrated for head v6 (STAND.md §9).
@@ -409,6 +414,10 @@ def settings():
         exhaust_auto = form["exhaust_auto"] == "1"
     exhaust_after = int(number("exhaust_after_s", *EXHAUST_AFTER_RANGE,
                                "Abluft-Nachlauf muss %d..%d s sein" % EXHAUST_AFTER_RANGE))
+    frame_power = config["frame_power_pct"]
+    if form.get("frame_power_pct", "").strip():
+        frame_power = number("frame_power_pct", 0, FRAME_POWER_MAX,
+                             "Rahmen-Laserleistung muss 0..%g %% sein" % FRAME_POWER_MAX)
     # optional: GPIO of the measuring line laser ("" = none)
     if "line_laser_gpio" in form:
         raw = form.get("line_laser_gpio", "").strip()
@@ -432,7 +441,8 @@ def settings():
     config.update(probe_offset_x_mm=probe_x, probe_offset_y_mm=probe_y,
                   z_clearance_mm=clearance, focus_gap_mm=gap, z_switch_tip_offset_mm=offset,
                   thickness_tolerance_mm=tolerance, machine_name=name,
-                  exhaust_auto=exhaust_auto, exhaust_after_s=exhaust_after)
+                  exhaust_auto=exhaust_auto, exhaust_after_s=exhaust_after,
+                  frame_power_pct=frame_power)
     persist()
     return jsonify(message="Einstellungen dauerhaft auf dem Pi gespeichert",
                    z_clearance_mm=clearance, focus_gap_mm=gap,
@@ -2094,14 +2104,48 @@ def frame_program(text):
     return commands
 
 
+def _frame_glimmer(commands, power_pct):
+    """The frame with a faint laser dot: the first move (from wherever the
+    head stands to the outline) stays dark, every later edge becomes
+    G1 ... S<power> at FRAME_POWER_MIN_FEED or faster, inside M3 I / M5 I."""
+    s = round(min(power_pct, FRAME_POWER_MAX) * 255.0 / 100.0, 2)
+    out, first, lit = [], True, False
+    for command in commands:
+        if not _FRAME_MOVE.match(command):
+            if lit and command.startswith("M5"):
+                lit = False
+            out.append(command)
+            continue
+        if first:
+            out.append(command)
+            first = False
+            continue
+        values = {k: float(v) for k, v in _FRAME_WORD.findall(command)}
+        if not lit:
+            out.append("M3 I")
+            lit = True
+        xy = " ".join("%s%.3f" % (k, values[k]) for k in "XY" if k in values)
+        out.append("G1 %s F%g S%g" % (xy, max(values.get("F", 3000.0), FRAME_POWER_MIN_FEED), s))
+    if lit:
+        out.append("M5 I")
+    return out
+
+
 def _frame_worker(commands):
+    power = float(config.get("frame_power_pct") or 0.0)
+    if power > 0:
+        commands = _frame_glimmer(commands, power)
+    focused = machine.focused_this_job
     try:
         machine.command("M5 I", owner="frame", timeout=30)
         machine.command("G90", owner="frame", timeout=8)
+        if power > 0:
+            # A dot to look at, not a cut: no focus move (and no probing) first.
+            machine.focused_this_job = True
         for i, command in enumerate(commands, 1):
             if stop_job.is_set():
                 raise RuntimeError("Abgebrochen")
-            if machine.laser_enabled:
+            if machine.laser_enabled and power <= 0:
                 raise RuntimeError("Laser unerwartet aktiv – Rahmen gestoppt")
             machine.command(command, owner="frame", timeout=150)
             if _FRAME_MOVE.match(command):
@@ -2125,6 +2169,7 @@ def _frame_worker(commands):
     finally:
         with machine.lock:
             machine.owner = None
+            machine.focused_this_job = focused
         job_lock.release()
 
 
@@ -2157,7 +2202,9 @@ def start_frame():
     frame.update(state="running", mode=mode, line=0, total=len(commands), error="")
     threading.Thread(target=_frame_worker, args=(commands,), daemon=True,
                      name="marlin-frame").start()
-    return jsonify(message="Rahmenfahrt gestartet (%s, Laser aus)" % FRAME_MODES[mode],
+    power = float(config.get("frame_power_pct") or 0.0)
+    laser = "Laser %g %%" % power if power > 0 else "Laser aus"
+    return jsonify(message="Rahmenfahrt gestartet (%s, %s)" % (FRAME_MODES[mode], laser),
                    frame=dict(frame))
 
 

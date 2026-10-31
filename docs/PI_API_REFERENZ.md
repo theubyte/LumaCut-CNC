@@ -259,7 +259,7 @@ Felder aus `web.py` (`status()`):
 | `firmware` | string | immer `"marlin"` |
 | `expected_pwm` | string | `"PA1 / M3 I / S0..255"` (Info) |
 | `io` | object | Klartext-Belegung `laser_supply_switch`, `laser_pwm`, `fan_cooldown`, `exhaust`, `lights`, `aux` (Info) |
-| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware; am Atomstack-Board höchstens dessen `$120`/`$110`, z. B. 1000 mm/s² / 100 mm/s), `thickness_tolerance_mm` (2,0: so weit darf die abgetastete Oberfläche von der Materialstärke abweichen), `line_laser_gpio` (BCM-Pin des Mess-Linienlasers oder `null`), `machine_name` (Gerätename, Standard „LumaCut“), `exhaust_auto` (Abluft beim Auftragsstart an), `exhaust_after_s` (Abluft-Nachlauf nach dem Auftrag, 0..900 s, Standard 60) |
+| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware; am Atomstack-Board höchstens dessen `$120`/`$110`, z. B. 1000 mm/s² / 100 mm/s), `thickness_tolerance_mm` (2,0: so weit darf die abgetastete Oberfläche von der Materialstärke abweichen), `line_laser_gpio` (BCM-Pin des Mess-Linienlasers oder `null`), `machine_name` (Gerätename, Standard „LumaCut“), `exhaust_auto` (Abluft beim Auftragsstart an), `exhaust_after_s` (Abluft-Nachlauf nach dem Auftrag, 0..900 s, Standard 60), `frame_power_pct` (Laserleistung beim Rahmen, 0..1 %, 0 = Laser aus) |
 | `line_laser` | object | `{gpio, on}`: roter Mess-Linienlaser am Kopf (3D-Höhe), geschaltet über einen Pi-GPIO (BCM); `gpio` `null` = nicht eingebaut |
 | `sync` | object | `{workspace, project, scan}`: Revisionen des Arbeitsstands auf dem Pi (Abschnitt 4.15). Ändert sich eine, holt jedes Gerät nur diesen Teil neu. |
 | `travel_z_mm` | number | Fahrhöhe über unbekanntem Gelände = Stärke des gewählten Materials + 20 mm, mindestens `z_clearance_mm`, höchstens 80. Alle Pi-Fahrten (moveto, Abtasten, Parken, nach dem Referenzieren, lange Leerfahrten im Auftrag) gehen mindestens so hoch. |
@@ -663,7 +663,7 @@ Abschnitt 4): Auftrag in Maschinenkoordinaten **ohne Z** hochladen, dann
 | Fehler | 400 `Kein laufender Auftrag` |
 | Hinweis | „angefordert“: Ende über `job.state`/`frame.state` = `aborted` beobachten. Kein Abbruch für LightBurn (dort in LightBurn stoppen oder E-Stop). |
 
-#### `op=frame` (Rahmenfahrt, Laser aus)
+#### `op=frame` (Rahmenfahrt, Laser aus oder Glimmen)
 
 | Parameter | Typ | Erlaubt |
 | --- | --- | --- |
@@ -675,7 +675,7 @@ Abschnitt 4): Auftrag in Maschinenkoordinaten **ohne Z** hochladen, dann
 | | |
 | --- | --- |
 | Vorbedingungen | **frei**, kein Riegel (`Notstopp aktiv – erst quittieren`), **referenziert** (`Vor dem Rahmen referenzieren`), **freigegeben** |
-| Wirkung | asynchron unter Besitzer `frame`: `M5 I`, `G90`, jede Zeile + `M400` nach jeder Kante, am Ende `M5 I`. Prüft vor jeder Zeile, dass der Laser nicht scharf ist. Gespeicherter Auftrag und `job`-Status bleiben unberührt. |
+| Wirkung | asynchron unter Besitzer `frame`: `M5 I`, `G90`, jede Zeile + `M400` nach jeder Kante, am Ende `M5 I`. Prüft vor jeder Zeile, dass der Laser nicht scharf ist. Mit `frame_power_pct` > 0 (Einstellung auf dem Pi) bleibt die Fahrt zum Rahmen dunkel, danach wird jede Kante zu `G1 … S<Leistung>` (0,5 % → S1.27) mit mindestens 1200 mm/min zwischen `M3 I` und `M5 I`, ohne Fokusfahrt. Gespeicherter Auftrag und `job`-Status bleiben unberührt. |
 | Erfolg | 200 `{"message": "Rahmenfahrt gestartet (Rechteck, Laser aus)", "frame": {…}}` |
 | Fehler | 400 `Rahmenprogramm fehlt (Feld gcode)`, `Rahmenprogramm zu groß (max. 64 KB)`, `Rahmen Zeile N: im Rahmen nur G0/G1 X/Y (S0), G21, G90, M5 I, M400`, `… Laserleistung im Rahmen verboten (nur S0)`, `… Punkt außerhalb X0..390 / Y0..370`, `… Vorschub außerhalb 60..9000 mm/min`, `Rahmen enthält keine Fahrbewegung`, `Rahmen mit mehr als 2000 Fahrbewegungen`, `Rahmenart muss box oder hull sein`, `Ein Auftrag oder Rahmen läuft bereits` |
 
@@ -764,6 +764,7 @@ Web-UI jede Gruppe für sich.
 | `machine_name` | string | 1..40 Zeichen (Leerraum wird zusammengefasst) |
 | `exhaust_auto` | `0`/`1` | Abluft beim Auftragsstart einschalten (`M8`) |
 | `exhaust_after_s` | int | 0..900: so lange nach dem Auftrag läuft die Abluft noch, dann `M9` – außer ein neuer Auftrag läuft oder jemand anderes hat die Steuerung |
+| `frame_power_pct` | float | 0..1: Laserleistung in % beim Rahmenfahren (sichtbarer Punkt, keine Spur), 0 = Laser aus |
 
 | | |
 | --- | --- |
