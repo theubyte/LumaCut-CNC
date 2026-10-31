@@ -2242,10 +2242,7 @@ function renderFwRelease(s){
 }
 async function installFirmware(button){
  const r=snapshot?.firmware_release||{};
- if(!await ask("Firmware flashen?","Neue Firmware für "+r.board_name+":
-"+(r.running_build||"?")+" → "+r.release_build+"
-
-Das Board startet neu; danach neu referenzieren. Laser und Motoren sind währenddessen aus.","Flashen"))return;
+ if(!await ask("Firmware flashen?","Neue Firmware für "+r.board_name+":\n"+(r.running_build||"?")+" → "+r.release_build+"\n\nDas Board startet neu; danach neu referenzieren. Laser und Motoren sind währenddessen aus.","Flashen"))return;
  await call("firmware_update_install",{},button);
 }
 $("fwInstall").onclick=ev=>installFirmware(ev.currentTarget);
