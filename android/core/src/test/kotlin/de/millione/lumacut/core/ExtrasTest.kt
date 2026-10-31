@@ -48,8 +48,8 @@ class ImageToolsTest {
         assertTrue(plain != inverted)
         // where the laser first switches on: the end of the laser-off run-up before the first burning G1
         fun burnStart(g: String): String { val l = g.lines(); val i = l.indexOfFirst { it.startsWith("G1") && !it.endsWith(" S0") }; return l[i - 1] }
-        assertTrue(burnStart(plain).contains("X340.000"), "black pixel is column 0 = large X: " + burnStart(plain))
-        assertTrue(burnStart(inverted).contains("X339.000"), "inverted: black pixel is the right one: " + burnStart(inverted))
+        assertTrue(burnStart(plain).contains("X320.000"), "black pixel is column 0 = large X: " + burnStart(plain))
+        assertTrue(burnStart(inverted).contains("X319.000"), "inverted: black pixel is the right one: " + burnStart(inverted))
     }
 }
 

@@ -102,7 +102,7 @@ class ImportLayoutTest {
         val units = ImportLayout.units(result(rectItem(0.0, 0.0, 100.0, 50.0)))
         val l = ImportLayout.arrange(units)
         assertEquals(FitKind.AS_IS, l.kind)
-        assertEquals(Pt(130.0, 145.0), l.offsets[0])
+        assertEquals(Pt(135.0, 155.0), l.offsets[0])
     }
 
     @Test fun `groups that do not fit together are packed in rows with 5 mm gaps`() {
@@ -127,7 +127,7 @@ class ImportLayoutTest {
         assertEquals(FitKind.PARTIAL, l.kind); assertEquals(1, l.leftOut)
         assertNotNull(l.offsets[1]); assertEquals(null, l.offsets[0])
         val k = ImportLayout.shrinkFactor(units)
-        assertEquals((360.0 - 10) / 400.0, k, 1e-9)
+        assertEquals((Work.WIDTH - 10) / 400.0, k, 1e-9)
     }
 
     @Test fun `one big group falls back to its parts`() {
@@ -154,8 +154,8 @@ class CutOrderTest {
         val g = MarlinWriter().write(Document(layers = listOf(cut), elements = listOf(outer, inner, line)))
         val tp = Toolpath.parse(g)
         val cuts = tp.segments.filter { it.cut }
-        // machine X = 390 - x: outer spans X 240..340, inner/line lie in X 270..310
-        fun isOuter(s: Segment) = s.x0 < 255 || s.x0 > 325 || s.y0 < 85 || s.y0 > 165
+        // machine X = 370 - x, Y = y: outer spans X 220..320 / Y 50..150, inner/line lie in X 240..290 / Y 80..120
+        fun isOuter(s: Segment) = s.x0 < 235 || s.x0 > 305 || s.y0 < 55 || s.y0 > 135
         val lastInner = cuts.indexOfLast { !isOuter(it) }
         val firstOuter = cuts.indexOfFirst { isOuter(it) }
         assertTrue(firstOuter > lastInner, "outer contour must come last (first outer $firstOuter, last inner $lastInner)")

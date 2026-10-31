@@ -84,8 +84,8 @@ class MeasureTest {
 
     @Test fun `work area corners and centre are caught`() {
         assertEquals(SnapKind.CORNER, Snap.find(Pt(1.0, 1.5), 3.0, emptyList())!!.kind)
-        val c = Snap.find(Pt(181.0, 170.5), 3.0, emptyList())!!
-        assertEquals(SnapKind.CENTER, c.kind); assertEquals(180.0, c.p.x, 1e-9); assertEquals(170.0, c.p.y, 1e-9)
+        val c = Snap.find(Pt(186.0, 180.5), 3.0, emptyList())!!
+        assertEquals(SnapKind.CENTER, c.kind); assertEquals(185.0, c.p.x, 1e-9); assertEquals(180.0, c.p.y, 1e-9)
     }
 
     @Test fun `image corners are caught`() {
@@ -136,7 +136,7 @@ class MeasureTest {
         val c = el("c", listOf(Shapes.rect(10.0, 10.0)), Transform(5.0, 5.0))
         assertEquals("0.00", MeasureEval.eval(Measurement.Gap("a", "c"), doc(a, c)).copy)
         val r = MeasureEval.eval(Measurement.Edges(listOf("b")), doc(b))
-        assertEquals(listOf("Links 15.00 mm", "Rechts 335.00 mm", "Oben 0.00 mm", "Unten 330.00 mm"), r.lines)
+        assertEquals(listOf("Links 15.00 mm", "Rechts 345.00 mm", "Oben 0.00 mm", "Unten 350.00 mm"), r.lines)
     }
 
     @Test fun `pick takes the nearest outline, else the shape under the finger`() {

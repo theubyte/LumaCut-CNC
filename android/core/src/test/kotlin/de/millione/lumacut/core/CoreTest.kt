@@ -211,7 +211,7 @@ class MarlinWriterTest {
 
     @Test fun `elements outside the work area and hidden layers`() {
         val layers = Document.defaultLayers()
-        val e = assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rect(layers[1], 350.0, 100.0), layers = layers)) }
+        val e = assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rect(layers[1], 360.0, 100.0), layers = layers)) }
         assertTrue(e.message!!.contains("Arbeitsfläche"))
         val hidden = layers.map { it.copy(visible = false) }
         assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rect(hidden[1], 10.0, 10.0), layers = hidden)) }
@@ -227,9 +227,9 @@ class MarlinWriterTest {
                         imageWidthMm = 4.0, imageHeightMm = 2.0)
         val g = MarlinWriter().write(doc(e, layers = listOf(img)))
         assertPiCompatible(g)
-        assertTrue("G1 X318.000 Y100.500 F3000 S255" in g, g)   // two black pixels merged, column 0 at big machine X
-        assertTrue("G1 X316.000 Y100.500 F3000 S127" in g, g)   // gray pixel at half power
-        assertTrue(g.lines().none { it.contains("Y101.500") && Regex("S[1-9]").containsMatchIn(it) }, "white row is skipped")
+        assertTrue("G1 X298.000 Y70.500 F3000 S255" in g, g)    // two black pixels merged, column 0 at big machine X
+        assertTrue("G1 X296.000 Y70.500 F3000 S127" in g, g)    // gray pixel at half power
+        assertTrue(g.lines().none { it.contains("Y71.500") && Regex("S[1-9]").containsMatchIn(it) }, "white row is skipped")
         val rotated = e.copy(transform = e.transform.copy(rotation = 10.0))
         assertFailsWith<JobBuildException> { MarlinWriter().write(doc(rotated, layers = listOf(img))) }
     }
@@ -309,7 +309,7 @@ class GeometryTest {
         for (i in 0 until 4) { val p = h.map(photo[i]); assertEquals(bed[i].x, p.x, 1e-6); assertEquals(bed[i].y, p.y, 1e-6) }
         val back = Homography.fit(bed, photo)
         val (img, w, ht) = Homography.rectify(IntArray(4) { -1 }, 2, 2, back, 0.1)
-        assertEquals(36 * 34, img.size); assertEquals(36, w); assertEquals(34, ht)
+        assertEquals(37 * 36, img.size); assertEquals(37, w); assertEquals(36, ht)
         assertFailsWith<IllegalArgumentException> { Homography.fit(List(4) { Pt(it.toDouble(), it.toDouble()) }, bed) }
     }
 }
@@ -336,7 +336,7 @@ class WorkCoordinatesTest {
         val bar = t.segments.filter { it.cut }.maxByOrNull { kotlin.math.abs(it.x1 - it.x0) }!!
         val stemX = minOf(bar.x0, bar.x1).let { _ -> maxOf(bar.x0, bar.x1) }
         val endX = minOf(bar.x0, bar.x1)
-        assertEquals(290.0, stemX.toDouble(), 1e-3)      // left on screen = large machine X
-        assertEquals(270.0, endX.toDouble(), 1e-3)       // the arm points to small X (screen right)
+        assertEquals(270.0, stemX.toDouble(), 1e-3)      // left on screen = large machine X
+        assertEquals(250.0, endX.toDouble(), 1e-3)       // the arm points to small X (screen right)
     }
 }
