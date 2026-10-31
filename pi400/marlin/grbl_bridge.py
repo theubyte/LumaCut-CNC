@@ -97,6 +97,7 @@ class GrblMarlinBridge:
         self.z = 0.0
         self.relative = False
         self.closed = False
+        self.emergency = False
         self.banner = ""
         self.private_active = False
         self.private_reply = None
@@ -127,6 +128,9 @@ class GrblMarlinBridge:
         try:
             return (self.out.get(timeout=0.1) + "\n").encode()
         except queue.Empty:
+            if self.closed and not self.emergency:
+                # USB gone: fail now instead of the gateway's 150 s timeout.
+                raise ConnectionError("Atomstack-Board nicht mehr per USB erreichbar")
             return b""
 
     def reset_input_buffer(self):
@@ -154,7 +158,8 @@ class GrblMarlinBridge:
             try:
                 chunk = self.ser.read(256)
             except Exception as exc:
-                LOG.warning("Grbl serial read failed: %s", exc)
+                if not self.closed:
+                    LOG.warning("Grbl serial read failed: %s", exc)
                 self.closed = True
                 with self.cond:
                     self.cond.notify_all()
@@ -220,16 +225,24 @@ class GrblMarlinBridge:
                 self.pins = value
         self.status_seq += 1
 
-    def _status(self, timeout: float = 2.0):
+    def _status(self, timeout: float = 1.0, tries: int = 3):
+        # The CH340 link drops a transfer now and then (usb "urb stopped:
+        # -32" while the motors run): ask again before giving up.
         with self.cond:
-            seq = self.status_seq
-            self._raw(b"?")
-            end = time.monotonic() + timeout
-            while self.status_seq == seq and not self.closed:
-                left = end - time.monotonic()
-                if left <= 0:
-                    raise TimeoutError("Grbl antwortet nicht auf ?")
-                self.cond.wait(left)
+            for _ in range(tries):
+                seq = self.status_seq
+                self._raw(b"?")
+                end = time.monotonic() + timeout
+                while self.status_seq == seq and not self.closed:
+                    left = end - time.monotonic()
+                    if left <= 0:
+                        break
+                    self.cond.wait(left)
+                if self.status_seq != seq:
+                    return
+                if self.closed:
+                    break
+            raise TimeoutError("Grbl antwortet nicht auf ?")
 
     def _send_grbl(self, line: str):
         """Queue one line in Grbl's buffer (character counting)."""
@@ -482,6 +495,7 @@ class GrblMarlinBridge:
         with self.cond:
             self.pending.clear()
         # Marlin stays silent after M112; so does the bridge until reopened.
+        self.emergency = True
         while not self.inbox.empty():
             try:
                 self.inbox.get_nowait()
