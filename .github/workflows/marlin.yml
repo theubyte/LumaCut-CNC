@@ -48,3 +48,14 @@ jobs:
             firmware/marlin/dist/manifest.json
           if-no-files-found: error
           retention-days: 14
+      - name: Compile Anet V1.7 stand-in firmware (ATmega1284P)
+        run: python firmware/marlin/build_anet.py
+      - name: Upload Anet firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaCut-Marlin-Anet-${{ github.sha }}
+          path: |
+            firmware/marlin/dist-anet/firmware.hex
+            firmware/marlin/dist-anet/manifest.json
+          if-no-files-found: error
+          retention-days: 14

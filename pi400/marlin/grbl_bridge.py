@@ -60,15 +60,54 @@ def grbl_ports() -> list[str]:
     return found or sorted(glob.glob("/dev/ttyUSB*"))
 
 
-def open_controller(port: str, baud: int, timeout: float = 0.1, surface_hint=None):
-    """The SKR at the configured port, else the Atomstack board through the bridge."""
+# LumaCut Marlin on the Anet V1.7 (firmware/marlin/build_anet.py) also sits
+# behind a CH340, at this baud rate.
+ANET_BAUD = 250000
+
+
+def open_controller(port: str, baud: int, timeout: float = 0.1, surface_hint=None, opener=None,
+                    bridge=None):
+    """The SKR at the configured port, else a CH340 board: the Atomstack
+    board (Grbl) through the bridge, or LumaCut Marlin on the Anet directly.
+
+    Grbl is asked first: the Anet's Marlin (at ANET_BAUD) just drops the
+    garbled bytes of a 115200 "$$". The other way round, garbage reaching
+    Grbl could hit one of its single-byte real-time commands (overrides of
+    feed or laser power), so M115 at ANET_BAUD only goes out after Grbl
+    did not answer.
+    """
     if port and os.path.exists(port) and "ttyUSB" not in port and "1a86" not in port:
         import serial
         return serial.Serial(port, baud, timeout=timeout, write_timeout=1.0, exclusive=True)
     ports = grbl_ports()
     if not ports:
         raise ConnectionError("Kein Controller per USB: weder SKR (%s) noch Atomstack-Board (CH340)" % port)
-    return GrblMarlinBridge(ports[0], surface_hint=surface_hint)
+    try:
+        return (bridge or GrblMarlinBridge)(ports[0], surface_hint=surface_hint)
+    except (ConnectionError, TimeoutError) as grbl_error:
+        ser = (opener or _open_serial)(ports[0], ANET_BAUD)
+        try:
+            found = _answers_marlin(ser)
+        except Exception:
+            ser.close()
+            raise
+        if not found:
+            ser.close()
+            raise grbl_error
+        LOG.info("LumaCut Marlin (Anet) at %s, %d baud", ports[0], ANET_BAUD)
+        ser.timeout = timeout
+        return ser
+
+
+def _answers_marlin(ser, wait: float = 2.0) -> bool:
+    """M115 at the Anet's baud rate. DTR stays released (_open_serial), so
+    the Anet is not reset and answers at once."""
+    ser.reset_input_buffer()
+    ser.write(b"\nM115\n")
+    data, end = b"", time.monotonic() + wait
+    while time.monotonic() < end and b"FIRMWARE_NAME:Marlin" not in data:
+        data += ser.read(256)
+    return b"FIRMWARE_NAME:Marlin" in data
 
 
 PLAIN_G1 = re.compile(r"^G1 X([-+]?\d*\.?\d+) Y([-+]?\d*\.?\d+)((?: [FS][-+]?\d*\.?\d+)*)$")

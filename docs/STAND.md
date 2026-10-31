@@ -412,6 +412,18 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   LaserTree am 24-V-Netzteil, **GND beider Netzteile verbinden**, TTL an einen
   freien Hardware-PWM-Pin, abgespeckte LumaCut-Marlin. Schwäche: 8 Bit, wenig
   Zeilen/s bei Graustufen.
+  **Firmware vorbereitet (31.10., nicht geflasht):** `firmware/marlin/build_anet.py`
+  (Marlin 2.1.2.9 aus dem Anet-A8-Beispiel, Env `sanguino1284p_optimized`,
+  46 KB Flash / 4,9 KB RAM; CI baut sie mit). Kopflos, ohne Heizungen/SD,
+  250000 Baud, Planer 32 / BUFSIZE 16 / RX 256, Z 80 Schritte, Taster am
+  Z-Min wie beim SKR, M300-Motortöne. **Laser-TTL an ISP-Stecker MISO = D6/PB6**
+  (Timer3-Hardware-PWM; Marlins PWM-Liste für den 1284P wird dafür im Build
+  ergänzt) + ISP-GND, **10 kΩ Pull-down TTL→GND** (Pin schwebt beim Reset).
+  Optional Relais für 24 V Laser am FAN-Ausgang D4 (M106/M107). Pi erkennt das
+  Board: CH340 erst als Grbl gefragt, antwortet dort keiner, `M115` bei
+  250000 Baud (`open_controller`). Flashen später mit Besitzer:
+  `avrdude -c arduino -p m1284p -P <port> -b 115200 -U flash:w:firmware.hex:i`.
+  Vor dem ersten Fahren prüfen: M119 (Endschalter-Logik), Motorrichtungen.
 
 ## 12. Ideen (noch nicht geplant)
 

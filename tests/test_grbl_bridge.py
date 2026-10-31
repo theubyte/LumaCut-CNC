@@ -222,6 +222,59 @@ class GrblBridgeTest(unittest.TestCase):
         self.assertIn("G1Y-60F1200S5", grbl.written)
 
 
+class OpenControllerTest(unittest.TestCase):
+    class Port:
+        def __init__(self, reply):
+            self.reply, self.rx, self.closed, self.timeout = reply, b"", False, 0.05
+        def reset_input_buffer(self):
+            self.rx = b""
+        def write(self, data):
+            if b"M115" in data:
+                self.rx += self.reply
+            return len(data)
+        def read(self, n):
+            out, self.rx = self.rx[:n], self.rx[n:]
+            return out
+        def close(self):
+            self.closed = True
+
+    def no_grbl(self, *a, **k):
+        raise ConnectionError("Board am /dev/ttyUSB0 antwortet nicht wie Grbl ($$)")
+
+    def test_grbl_board_is_asked_first(self):
+        from unittest import mock
+        from pi400.marlin import grbl_bridge
+        opened = []
+        with mock.patch.object(grbl_bridge, "grbl_ports", return_value=["/dev/ttyUSB0"]):
+            got = grbl_bridge.open_controller("/dev/skr-missing", 115200, bridge=lambda p, **k: "bridge",
+                                              opener=lambda p, b: opened.append(p))
+        self.assertEqual(got, "bridge")
+        self.assertEqual(opened, [], "no M115 at 250000 towards a Grbl board")
+
+    def test_anet_marlin_on_ch340_is_used_when_grbl_does_not_answer(self):
+        from unittest import mock
+        from pi400.marlin import grbl_bridge
+        port = self.Port(b"FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin Anet\nok\n")
+        opened = []
+        with mock.patch.object(grbl_bridge, "grbl_ports", return_value=["/dev/ttyUSB0"]):
+            got = grbl_bridge.open_controller("/dev/skr-missing", 115200, timeout=0.1, bridge=self.no_grbl,
+                                              opener=lambda p, b: opened.append((p, b)) or port)
+        self.assertIs(got, port)
+        self.assertEqual(opened, [("/dev/ttyUSB0", grbl_bridge.ANET_BAUD)])
+        self.assertEqual(port.timeout, 0.1)
+        self.assertFalse(port.closed)
+
+    def test_neither_board_answering_reports_the_grbl_error(self):
+        from unittest import mock
+        from pi400.marlin import grbl_bridge
+        port = self.Port(b"")
+        with mock.patch.object(grbl_bridge, "grbl_ports", return_value=["/dev/ttyUSB0"]):
+            with self.assertRaisesRegex(ConnectionError, "nicht wie Grbl"):
+                grbl_bridge.open_controller("/dev/skr-missing", 115200, bridge=self.no_grbl,
+                                            opener=lambda p, b: port)
+        self.assertTrue(port.closed)
+
+
 class MergeShortMovesTest(unittest.TestCase):
     def circle(self, r=7.5, n=275, cx=160.0, cy=174.0):
         import math
