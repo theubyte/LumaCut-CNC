@@ -264,6 +264,23 @@ def machine_snapshot():
     return result, True, stale_ms
 
 
+def _status_config():
+    """Saved settings; motion capped to what the connected controller runs.
+
+    The apps take speed and run-up length from config.motion. The SKR
+    calibration (200 mm/s, 2100 mm/s²) is too fast for the Atomstack board
+    (Grbl $110/$120): its dynamic laser mode then burns far too weakly.
+    """
+    cfg = dict(config)
+    caps = machine.controller_motion()
+    if caps is not None:
+        saved = config.get("motion") or {}
+        accel = min(saved.get("accel") or caps[0], caps[0])
+        speed = min(saved.get("speed") or caps[1], caps[1])
+        cfg["motion"] = {"accel": accel, "speed": speed}
+    return cfg
+
+
 @app.get("/api/status")
 def status():
     result, busy, stale_ms = machine_snapshot()
@@ -294,7 +311,7 @@ def status():
                       "exhaust":"BED PC9 M8",
                       "lights":"HE0 PC8 M355 (dimmbar), alte Firmware M7",
                       "aux":"FAN2 PC7 unused"},
-                  config=dict(config),
+                  config=_status_config(),
                   sync=WORKSPACE.revisions(),
                   line_laser=LINE_LASER.status(),
                   travel_z_mm=round(machine.travel_z, 2),

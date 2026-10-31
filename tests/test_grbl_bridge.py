@@ -187,6 +187,8 @@ class GrblBridgeTest(unittest.TestCase):
         machine.safe_home(operator_clear=True)
         self.assertTrue(machine.homed)
         self.assertIn("$H", grbl.written)
+        # the board's own limits (no $110/$120 in the fake: Grbl defaults)
+        self.assertEqual(machine.controller_motion(), (1000.0, 100.0))
 
 
 if __name__ == "__main__":

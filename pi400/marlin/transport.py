@@ -1148,6 +1148,19 @@ class MarlinTransport:
         for cmd in motion_commands(accel, speed):
             self._exchange_locked(cmd, timeout=6.0)
 
+    def controller_motion(self):
+        """(accel mm/s², speed mm/s) the controller itself allows, None = SKR.
+
+        Only the Grbl bridge (Atomstack board) has fixed limits of its own
+        ($110/$111, $120/$121); Marlin takes the Pi's M201/M203.
+        """
+        bridge = self.serial
+        if bridge is None or not hasattr(bridge, "max_rate"):
+            return None
+        s = bridge.settings
+        accel = min(s.get(120, 1000.0), s.get(121, 1000.0))
+        return (accel, bridge.max_rate() / 60.0)
+
     def set_motion_limits(self, limits, owner: str = "web"):
         """Stores (accel, speed) or None (firmware values) and sends them when connected."""
         with self.lock:
