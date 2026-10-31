@@ -100,6 +100,7 @@ class GrblMarlinBridge:
         self.banner = ""
         self.private_active = False
         self.private_reply = None
+        self.private_lines: list[str] = []
         self.reader = threading.Thread(target=self._read_loop, daemon=True)
         self.reader.start()
         try:
@@ -195,6 +196,8 @@ class GrblMarlinBridge:
                 self.settings[int(m.group(1))] = float(m.group(2))
             elif line.lower().startswith("grbl"):
                 self.banner = line
+            elif self.private_active:
+                self.private_lines.append(line)
             self.cond.notify_all()
         LOG.debug("grbl< %s", line)
 
@@ -272,6 +275,7 @@ class GrblMarlinBridge:
             while self.pending:
                 self.cond.wait(0.5)
             self.private_reply = None
+            self.private_lines = []
             self.private_active = True
             self._raw((line + "\n").encode("ascii"))
             end = time.monotonic() + timeout
@@ -403,6 +407,17 @@ class GrblMarlinBridge:
             self.out.put("echo:; Atomstack-Board mit Grbl (%s)" % (self.banner or "?"))
             for key in sorted(self.settings):
                 self.out.put("echo:  $%d=%g" % (key, self.settings[key]))
+            self._idle()
+            # Read-only board information (build, parser state, offsets,
+            # startup lines, ESP32 info where the firmware knows it).
+            for query in ("$I", "$G", "$#", "$N", "[ESP420]", "[ESP800]"):
+                try:
+                    reply = self._private_cmd(query, timeout=3.0)
+                except TimeoutError:
+                    reply = "keine Antwort"
+                for extra in self.private_lines:
+                    self.out.put("echo:  %s -> %s" % (query, extra))
+                self.out.put("echo:  %s: %s" % (query, reply))
             self.out.put("ok")
         elif family == "M410":
             self._raw(b"!")
