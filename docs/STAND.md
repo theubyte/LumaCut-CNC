@@ -63,7 +63,7 @@ ablösen; der Besitzer bedient alles vom Tablet aus.
 | Windows-Studio (ruht) | `software/lumacut-studio-native` |
 | Doku | `docs/` – Einstieg ist diese Datei |
 | Auf dem Pi | Programm `/opt/lumacut` (Git-Checkout), Dienst `lumacut-marlin`, Daten `/var/lib/lumacut/marlin/` (`config.json`, Materialien, Projekte, Bettkarte …) |
-| Kopf-Konstruktion (CAD) | `A:\mfw\zmount\v6\build_kopf_v6.py` (CadQuery, erzeugt STEP/STL/Vorschaubilder), auch auf dem NAS unter `Export\kopf_v6`; ältere Stände `v5`, Idee des Besitzers `A:\mfw\zmount\in\new_laser_head.step` |
+| Kopf-Konstruktion (CAD) | `A:\mfw\zmount\v6\build_kopf_v6.py` (CadQuery, erzeugt STEP/STL/Vorschaubilder), auch auf dem NAS unter `Export\kopf_v6`; ältere Stände `v5`, Idee des Besitzers `A:\mfw\zmount\in\new_laser_head.step`. **Entwurf v7** (Schneckenlift, nicht gebaut): `A:\mfw\zmount\v7\build_kopf_v7.py`, Anleitung `LIESMICH.md` dort |
 | Firmware-Build-Ablage | `A:\mfw\pio`, `A:\mfw\dist`, `A:\mfw\up` |
 | Signatur-Schlüssel Android | `A:\LumaCut\android-signing` – **Passwort nie lesen oder ausgeben** |
 
@@ -473,6 +473,12 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
 - Infrarot-LEDs im Kopfgehäuse als Licht für die Kamera (Besitzer, 30.10.: „erstmal noch nicht“).
 - Roter Linienlaser für 3D-Höhenmessung ohne Brennen (Pi-Unterstützung `op=line_laser` existiert).
 - X-Motor ans Trägerende verlegen (Riemenschleife), um den Kopf leichter zu machen.
+- **Kopf v7 „Schneckenlift“ (konstruiert 01.11., nicht gedruckt):** Schnecke auf der
+  Motorwelle → Schneckenrad 20 Z → GT2-Ritzel auf flacher Zahnstange. Selbsthemmend
+  (Steigung 4,8°): Kopf fällt ohne Strom nicht, keine Rückspannung beim Schieben,
+  Bremse entfällt. 2 mm/Umdrehung, `M92 Z1600`, bis ~25 mm/s. Neu: T2, T3 (Lasche),
+  T5, T7, T8; T1/T4 bleiben. Alle CAD-Prüfungen OK. Nächster Schritt: Prüfstück
+  T7+T8 drucken und Selbsthemmung mit 0,9 kg testen. Details `A:\mfw\zmount\v7\LIESMICH.md`.
 - Weitere Ideen zu Höhe/Kollision: [IDEE_HOEHE_KOLLISION_KAMERA_3D.md](IDEE_HOEHE_KOLLISION_KAMERA_3D.md).
 
 ## 13. Nebenprojekte im Ordner

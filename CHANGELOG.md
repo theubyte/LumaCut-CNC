@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-01
+
+- **Kopf v7 „Schneckenlift“ konstruiert (nicht gebaut):** `A:\mfw\zmount\v7\build_kopf_v7.py` auf Basis von v6. Gedruckte Schnecke auf der Motorwelle treibt ein Schneckenrad 20 Z, auf dessen Achse das GT2-Ritzel auf einer flachen Zahnstange läuft. Selbsthemmend: der Kopf fällt ohne Strom nicht und dreht beim Schieben den Motor nicht hoch (Ursache des SKR-Schadens), die Reibbremse entfällt. 2 mm Z pro Umdrehung (`M92 Z1600`), Vollschritt 10 µm. Prüfbericht ohne Fehler; zuerst Prüfstück drucken.
+
 ## 2026-10-31
 
 - **Anet: Licht am Bett-Ausgang** (D12, MOSFET, 24 V-LED): `M355 S1/S0`, nur an/aus – D12 hängt an Timer1, der die Motoren taktet, Dimmen geht dort nicht. Kommt als Firmware-Update per Knopf.
