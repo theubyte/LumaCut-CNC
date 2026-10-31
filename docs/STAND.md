@@ -403,6 +403,15 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
 - Realer Y-Weg (alt ~350 statt 370) und X-Weg mit v6.
 - Kopftiefe in Y für die Breite des Parkbands.
 - Einladungskarte Smaragd: Ergebnis der gelaserten Karte noch nicht besprochen.
+- **Anet V1.7 als Ersatz mit Z (31.10. am PC ausgelesen, nichts geschrieben):**
+  ATmega1284P (Signatur 1E 97 05), Bootloader vorhanden (avrdude `-c arduino`
+  115200 antwortet, FW 5.0) – Flashen per USB möglich. Drauf: Marlin 2.0.9.7
+  „Anet A8 plus“ (Zemistr, 13.10.2023), 115200 Baud, SD-Unterstützung, freier
+  RAM 11 KB, `M92 Z400` (Spindel; Kopf v6 braucht 80). Plan, falls genutzt:
+  Board an eigenem 12-V-Netzteil (für 24 V nicht ausgelegt), Laser weiter über
+  LaserTree am 24-V-Netzteil, **GND beider Netzteile verbinden**, TTL an einen
+  freien Hardware-PWM-Pin, abgespeckte LumaCut-Marlin. Schwäche: 8 Bit, wenig
+  Zeilen/s bei Graustufen.
 
 ## 12. Ideen (noch nicht geplant)
 
