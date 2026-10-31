@@ -159,10 +159,14 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   Taster schaltet am Referenzpunkt; positives Z = weg vom Material.
 - App-Arbeitsfläche: Nullpunkt oben links wie von der Tür gesehen;
   `Maschine X = 390 − x`, `Maschine Y = y + 30`.
-- **Heute noch:** 30-mm-Sicherheitszone in L-Form (X < 30 oder Y < 30),
-  App-Fläche 360 × 340 mm. Wird mit v6 ersetzt (§9).
-- Fahrwege laut Firmware X 390 / Y 370 / Z 80 – **Y real nur ca. 350**
-  (bei 370 Schritte verloren, 29.10.), noch nicht korrigiert.
+- **Seit 31.10. (Pi):** Fahrwege **X 370 / Y 360** (Besitzer mit den
+  Steuerkreuzen bis an die Enden gefahren, Pi-Einstellung `travel_x_mm`/
+  `travel_y_mm`). Statt der 30-mm-L-Zone gilt nur noch die **Park-Ecke
+  X0–78 / Y0–35** (Kopf v6 laut `build_kopf_v6.py`: 67 mm in +X, 24 mm in +Y
+  vom Strahl, +10 mm); überall sonst darf gelasert werden. Weboberfläche
+  zeigt das so. **Offen:** Android-App rechnet noch mit der alten Fläche
+  (Arbeits-0/0 = Maschine X390/Y30, L-Zone); Bettkarte und Abtastraster
+  behalten vorerst den 30-mm-Rand.
 
 **Kalibrier- und Messwerte (noch für den alten Kopf!)**
 - Tasterversatz X −23 / Y +15 mm, Schalter→Laserspitze 1,5 mm, Fokus 7 mm.

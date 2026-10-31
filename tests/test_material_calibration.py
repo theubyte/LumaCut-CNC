@@ -345,7 +345,7 @@ SPEEDS, ORIGIN = (), (0, 0)
 sim.writes.clear()
 for data, text in (({"kind": "x", "x": "150", "y": "120", "name": "A"}, "kind"),
                    ({"kind": "engrave", "x": "150", "y": "120", "name": ""}, "Materialname"),
-                   ({"kind": "engrave", "x": "10", "y": "120", "name": "A"}, "Arbeitsbereich"),
+                   ({"kind": "engrave", "x": "10", "y": "10", "name": "A"}, "Arbeitsbereich"),
                    ({"kind": "engrave", "x": "360", "y": "120", "name": "A"}, "Arbeitsbereich")):
     r = c.post("/api/action", data=dict(data, op="matcal"))
     assert r.status_code == 400 and text in r.get_json()["error"], (data, r.data)

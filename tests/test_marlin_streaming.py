@@ -171,7 +171,7 @@ class StreamingTests(unittest.TestCase):
             ("G0 X60 Y60 S50", "G0 darf keine"),
             ("G1 X60 S300", "0..255"),
             ("G1 X60 Y60 S10 M3", "Nur|nur|Pro Zeile|freigegeben"),
-            ("G1 X60 Y10 S10", "Sperrzone"),
+            ("G1 X60 Y10 S10", "Park-Ecke"),
             ("G1 X" + "1" * 95, "96"),
             ("G92 X0", "freigegeben"),
         ]

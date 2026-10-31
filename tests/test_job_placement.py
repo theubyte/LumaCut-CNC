@@ -14,7 +14,8 @@ from marlin.transport import MarlinLaserGuard  # noqa: E402
 JOB = ("; studio\nG21\nG90\nM5 I\nM3 I\nG0 X100 Y100 ; start\n"
        "G1 X150 Y100 F1500 S80\nG1 X150 Y120 F1500 S80\nG0 X0 Y0\n"
        "G91\nG0 Z-1 F600\nG90\nM5 I\nM400\n")
-TRAVELS = {"x": 390.0, "y": 370.0}
+TRAVELS = {"x": 370.0, "y": 360.0}
+CORNER = (78.0, 35.0)
 
 
 class PlacementMathTests(unittest.TestCase):
@@ -26,7 +27,7 @@ class PlacementMathTests(unittest.TestCase):
         self.assertIn("G0 Z-1 F600", out)      # relative Z untouched
         self.assertIn("G0 X10.5 Y-20", out)    # rapid to 0/0 moves too ...
         with self.assertRaisesRegex(ValueError, "außerhalb des Arbeitsbereichs"):
-            placing.check_extent(out, TRAVELS, 30.0)  # ... and is then rejected
+            placing.check_extent(out, TRAVELS, CORNER)  # ... and is then rejected
         guard = MarlinLaserGuard()
         for line in out:
             guard.check(line, True)
@@ -48,11 +49,13 @@ class PlacementMathTests(unittest.TestCase):
 
     def test_powered_moves_must_stay_out_of_safe_zone(self):
         cut = ["M3 I", "G0 X100 Y100", "G1 X150 Y100 F1500 S80"]
-        placing.check_extent(placing.translate(cut, -70, 0), TRAVELS, 30.0)
-        with self.assertRaisesRegex(ValueError, "Safezone"):
-            placing.check_extent(placing.translate(cut, -71, 0), TRAVELS, 30.0)
+        # only the park corner X0..78 / Y0..35 is closed, not the whole edge
+        placing.check_extent(placing.translate(cut, -100, -65), TRAVELS, CORNER)
+        placing.check_extent(placing.translate(cut, -70, 0), TRAVELS, CORNER)
+        with self.assertRaisesRegex(ValueError, "Park-Ecke"):
+            placing.check_extent(placing.translate(cut, -70, -70), TRAVELS, CORNER)
         with self.assertRaisesRegex(ValueError, "außerhalb"):
-            placing.check_extent(placing.translate(cut, 241, 0), TRAVELS, 30.0)
+            placing.check_extent(placing.translate(cut, 221, 0), TRAVELS, CORNER)
 
     def test_arc_extremes_count(self):
         # Half circle from (100,100) to (140,100) around (120,100), CCW below? G3 = CCW.
@@ -149,7 +152,7 @@ m.homed = False
 r = post(op="origin_set", x="60", y="60")
 assert r.status_code == 400 and "referenzieren" in r.get_json()["error"], r.data
 m.homed = True
-r = post(op="origin_set", x="20", y="60")
+r = post(op="origin_set", x="20", y="20")   # park corner
 assert r.status_code == 400 and "Schneidbereich" in r.get_json()["error"], r.data
 r = post(op="origin_set", x="60", y="70")
 assert r.status_code == 200, r.data
@@ -190,7 +193,7 @@ r = post(op="start", name="Schild.gcode", placement="1")
 assert r.status_code == 400 and "Platzierung" in r.get_json()["error"], r.data
 # Motif pushed into the safe zone / out of travel: refused, nothing runs.
 n = len(ran)
-r = post(op="origin_set", x="30", y="30")
+r = post(op="origin_set", x="80", y="36")   # motif "bl" of it reaches into the park corner
 assert r.status_code == 200, r.data
 r = post(op="place", name="Schild.gcode", origin="user", anchor="bl")
 assert r.status_code == 400 and "außerhalb" in r.get_json()["error"], r.data

@@ -75,6 +75,7 @@ config = {
     "z_switch_tip_offset_mm": 1.5,
     "probe_offset_x_mm": None,
     "probe_offset_y_mm": None,  # tip height above reference plane at switch trigger
+    # X/Y: settings travel_x_mm/travel_y_mm (head v6 measured 370 x 360, 31.10.2026)
     "travels": {"x": 390.0, "y": 370.0, "z": 80.0},
     "user_origin": None,        # [x, y] machine mm, op=origin_set (job placement)
     "light_brightness": 60,     # % for the dimmable LED strip on PC8
@@ -94,6 +95,13 @@ config = {
     "exhaust_after_s": 60,
 }
 MACHINE_NAME_MAX = 40
+# Machine X/Y of the apps' work point 0/0 (Android Geometry.kt Work:
+# machine_x = 390 - x, machine_y = 30 + y). Still the old layout; changes
+# together with the apps.
+APP_WORK_ORIGIN = (390.0, 30.0)
+# Bed map and probe planning keep the old 30 mm edge until the probe is
+# recalibrated for head v6 (STAND.md §9).
+PROBE_GRID_MIN = 30.0
 EXHAUST_AFTER_RANGE = (0, 900)
 # op=report: Marlin queries that only read (transport.READ_ONLY without M400).
 REPORTS = {"M105": "Temperaturen", "M114": "Position", "M115": "Firmware",
@@ -111,6 +119,7 @@ if CONFIG.is_file():
 # An older config.json may still say 90 mm: never above the rail limit.
 config["travels"]["z"] = min(float(config["travels"].get("z", Z_MAX_MM)), Z_MAX_MM)
 machine.homing_verified = bool(config["validated"])
+machine.travel_xy = (float(config["travels"]["x"]), float(config["travels"]["y"]))
 machine.clearance_mm = float(config["z_clearance_mm"])
 machine.probe_tip_offset_mm = float(config["z_switch_tip_offset_mm"])
 machine.focus_gap_mm = float(config["focus_gap_mm"])
@@ -368,6 +377,13 @@ def settings():
         # how far the probed surface may differ from the material thickness
         tolerance = number("thickness_tolerance_mm", 0.5, 10,
                            "Toleranz der Materialstärke muss 0,5..10 mm sein")
+    # measured X/Y travel (jogged to the ends); Z stays the rail limit
+    travel_x = float(config["travels"]["x"])
+    travel_y = float(config["travels"]["y"])
+    if form.get("travel_x_mm", "").strip():
+        travel_x = number("travel_x_mm", 100, 600, "X-Fahrweg muss 100..600 mm sein")
+    if form.get("travel_y_mm", "").strip():
+        travel_y = number("travel_y_mm", 100, 600, "Y-Fahrweg muss 100..600 mm sein")
     name = config["machine_name"]
     if "machine_name" in form:
         name = " ".join(form.get("machine_name", "").split())
@@ -394,10 +410,12 @@ def settings():
         machine.clearance_mm = clearance
         machine.probe_tip_offset_mm = offset
         machine.focus_gap_mm = gap
+        machine.travel_xy = (travel_x, travel_y)
         if geometry_changed:
             # New probe geometry invalidates the prior measured material height.
             machine.surface_z = None
             machine.focused_this_job = False
+    config["travels"] = dict(config["travels"], x=travel_x, y=travel_y)
     config.update(probe_offset_x_mm=probe_x, probe_offset_y_mm=probe_y,
                   z_clearance_mm=clearance, focus_gap_mm=gap, z_switch_tip_offset_mm=offset,
                   thickness_tolerance_mm=tolerance, machine_name=name,
@@ -724,11 +742,11 @@ def _content_sha(content):
 def _cut_point(x, y, what):
     import math
     travels = config["travels"]
-    limit = machine.safe_zone_xy_mm
     if not (math.isfinite(x) and math.isfinite(y) and
-            limit <= x <= travels["x"] and limit <= y <= travels["y"]):
-        raise ValueError("%s X%.1f Y%.1f außerhalb des Schneidbereichs X%g..%g / Y%g..%g" % (
-            what, x, y, limit, travels["x"], limit, travels["y"]))
+            0 <= x <= travels["x"] and 0 <= y <= travels["y"]) or machine.in_park_corner(x, y):
+        raise ValueError("%s X%.1f Y%.1f außerhalb des Schneidbereichs X0..%g / Y0..%g "
+                         "oder in der Park-Ecke X0..%g / Y0..%g" % (
+                             what, x, y, travels["x"], travels["y"], *machine.park_corner))
     return x, y
 
 
@@ -778,7 +796,7 @@ def _apply_offset(lines, dx, dy):
     if (dx or dy) and placing.has_relative_xy(lines):
         raise ValueError("Auftrag enthält relative X/Y-Bewegungen (G91) – nur absolut platzierbar")
     placed = placing.translate(lines, dx, dy)
-    placing.check_extent(placed, config["travels"], machine.safe_zone_xy_mm)
+    placing.check_extent(placed, config["travels"], machine.park_corner)
     preflight("\n".join(placed))
     return placed
 
@@ -868,9 +886,9 @@ def _optional_point(form):
     x, y = float(raw_x), float(raw_y)
     travels = config["travels"]
     if not (math.isfinite(x) and math.isfinite(y) and
-            machine.safe_zone_xy_mm <= x <= travels["x"] and
-            machine.safe_zone_xy_mm <= y <= travels["y"]):
-        raise ValueError("Abtastpunkt außerhalb X30..390 / Y30..370")
+            0 <= x <= travels["x"] and 0 <= y <= travels["y"]) or machine.in_park_corner(x, y):
+        raise ValueError("Abtastpunkt außerhalb X0..%g / Y0..%g oder in der Park-Ecke" % (
+            travels["x"], travels["y"]))
     return x, y
 
 
@@ -1002,8 +1020,7 @@ def start_bed_map():
     machine.check_reference()
     if not machine.homed:
         raise RuntimeError("Vor der Bettkarte referenzieren")
-    limit = machine.safe_zone_xy_mm
-    grid = bedmap.plan(heightmap.Box(limit, limit, config["travels"]["x"], config["travels"]["y"]),
+    grid = bedmap.plan(heightmap.Box(PROBE_GRID_MIN, PROBE_GRID_MIN, config["travels"]["x"], config["travels"]["y"]),
                        machine.probe_reachable)
     order = [i for i in grid.order() if grid.reachable[i]]
     if not job_lock.acquire(blocking=False):
@@ -1151,10 +1168,11 @@ def start_material_calibration():
             raise ValueError("1..6 Tempi 60..6000 mm/min, Leistung 10..100 %")
         area = matcal.cut_area(origin, len(speeds))
         search = matcal.CutSearch(speeds=speeds, power=power)
-    limit = machine.safe_zone_xy_mm
-    if not all(v == v for v in origin) or area[0] < limit or area[1] < limit or area[2] > 390 or area[3] > 370:
-        raise ValueError("Testbereich X%.0f..%.0f / Y%.0f..%.0f liegt nicht im Arbeitsbereich X%.0f..390 / Y%.0f..370"
-                         % (area[0], area[2], area[1], area[3], limit, limit))
+    tx, ty = config["travels"]["x"], config["travels"]["y"]
+    if (not all(v == v for v in origin) or area[0] < 0 or area[1] < 0 or area[2] > tx or area[3] > ty
+            or machine.in_park_corner(area[0], area[1])):
+        raise ValueError("Testbereich X%.0f..%.0f / Y%.0f..%.0f liegt nicht im Arbeitsbereich X0..%g / Y0..%g "
+                         "(oder in der Park-Ecke)" % (area[0], area[2], area[1], area[3], tx, ty))
     centre = ((area[0] + area[2]) / 2, (area[1] + area[3]) / 2)
     if not machine.probe_reachable(*centre):
         raise ValueError("Die Mitte des Testbereichs ist für den Taster nicht erreichbar")
@@ -1162,7 +1180,7 @@ def start_material_calibration():
         raise ConnectionError("Keine Kamera an " + CAMERA)
     cam = _camera_model()
     head = cam.head_for(*centre)
-    if not (0 <= head[0] <= 390 and 0 <= head[1] <= 370):
+    if not (0 <= head[0] <= config["travels"]["x"] and 0 <= head[1] <= config["travels"]["y"]):
         raise ValueError("Für das Foto müsste der Kopf nach X%.0f Y%.0f – Testbereich weiter zur Mitte legen" % head)
     if not job_lock.acquire(blocking=False):
         raise RuntimeError("Ein Auftrag läuft bereits")
@@ -1448,17 +1466,18 @@ def preflight(text):
     if not lines:
         raise ValueError("G-Code ist leer")
     focus.check_first_cut(text.splitlines())
-    # Reject a motif touching the 30 mm home bands before anything moves,
-    # instead of stopping half-way through the job.
+    # Reject a motif reaching into the park corner (or beyond the travel)
+    # before anything moves, instead of stopping half-way through the job.
     bounds = _powered_bounds(text)
     travels = config["travels"]
-    limit = machine.safe_zone_xy_mm
-    if bounds is not None and (bounds.xmin < limit or bounds.ymin < limit or
-                               bounds.xmax > travels["x"] or bounds.ymax > travels["y"]):
+    if bounds is not None and (bounds.xmin < 0 or bounds.ymin < 0 or
+                               bounds.xmax > travels["x"] or bounds.ymax > travels["y"] or
+                               machine.in_park_corner(bounds.xmin, bounds.ymin)):
         raise ValueError(
-            "Motiv X%.1f..%.1f / Y%.1f..%.1f liegt außerhalb X%g..%g / Y%g..%g "
-            "(30-mm-Safezone)" % (bounds.xmin, bounds.xmax, bounds.ymin, bounds.ymax,
-                                   limit, travels["x"], limit, travels["y"]))
+            "Motiv X%.1f..%.1f / Y%.1f..%.1f liegt außerhalb X0..%g / Y0..%g "
+            "oder in der Park-Ecke X0..%g / Y0..%g" % (
+                bounds.xmin, bounds.xmax, bounds.ymin, bounds.ymax,
+                travels["x"], travels["y"], *machine.park_corner))
 
 
 def _powered_bounds(text):
@@ -1529,15 +1548,14 @@ def auto_plan(commands, point=None):
     # Without the file's G28 the head stands wherever probing left it.
     focus.check_first_cut(commands)
     own_z = focus.has_absolute_z(commands)
-    limit = machine.safe_zone_xy_mm
-    bounds = heightmap.Box(limit, limit, config["travels"]["x"], config["travels"]["y"])
+    bounds = heightmap.Box(PROBE_GRID_MIN, PROBE_GRID_MIN, config["travels"]["x"], config["travels"]["y"])
     tapped = WORKSPACE.probe_points()
     if point is not None:
         grids = heightmap.single_point_plan(point[0], point[1], machine.probe_reachable)
     elif tapped:
         # the operator tapped where material lies (work mm -> machine mm, X mirrored)
         grids = [g for wx, wy in tapped for g in heightmap.single_point_plan(
-            config["travels"]["x"] - wx, machine.safe_zone_xy_mm + wy, machine.probe_reachable)]
+            APP_WORK_ORIGIN[0] - wx, APP_WORK_ORIGIN[1] + wy, machine.probe_reachable)]
     else:
         grids = heightmap.plan_probe(commands, bounds, machine.probe_reachable)
     if not own_z:

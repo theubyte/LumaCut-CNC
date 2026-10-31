@@ -228,9 +228,9 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `workpiece_above_bed_mm` | number \| null | gemessene Oberfläche über dem Bett an der angetasteten Stelle (= Werkstückdicke), nur mit Bettkarte |
 | `material_calibration` | object \| null | letzter oder laufender Materialtest (`op=matcal`): `kind` (`engrave`/`cut`), `material`, `state` (`running`, `complete`, `error`, `aborted`), `steps` (Felder bzw. Durchgänge bisher), `last` (letztes Feld bzw. letzter Durchgang wie in `GET /api/matcal`), `result`, `saved` (`[{id, name, process}]` der gespeicherten Materialien), `error`; `null` = noch keiner |
 | `bed_map` | object \| null | Zusammenfassung der Bettkarte: `measured_at`, `cols`, `rows`, `lowest`, `highest`, `range`, `mean` (mm relativ zu Z0), `missing` (Punkte ohne Bettkontakt); `null` = keine gemessen |
-| `safe_zone_xy_mm` | number | 30.0: Bänder X<30 und Y<30 sind Homing-/Parkzone, dort wird nie geschnitten |
+| `park_corner_mm` | object | `{x: 78, y: 35}`: Park-Ecke an X0/Y0 (Kopf v6 + 1 cm), dort wird nie gelasert; sonst ganze Fläche |
 | `probe_xy_offset_mm` | [dx, dy] \| null | Versatz Taster ↔ Laserpunkt |
-| `cutting_bounds` | object | `{x_min: 30, y_min: 30, x_max: 390, y_max: 370}` |
+| `cutting_bounds` | object | `{x_min: 0, y_min: 0, x_max: travels.x, y_max: travels.y}` ohne die Park-Ecke |
 | `probe_minimum_z` | number \| null | tiefstes erlaubtes Z über dem Werkstück |
 | `laser_focus_z` | number \| null | Fokus-Z = Oberfläche + Fokusabstand − Schalter-zu-Spitze-Offset |
 | `cooldown_remaining_s` | int \| null | Nachlauf der Laserkühlung in s |
@@ -759,6 +759,7 @@ Web-UI jede Gruppe für sich.
 | `z_switch_tip_offset_mm` | number | -20..20 |
 | `probe_offset_x_mm`, `probe_offset_y_mm` | number oder leer | -80..80; beide oder keiner (leer = Versatz löschen) |
 | `thickness_tolerance_mm` | number | 0.5..10 (leer = unverändert) |
+| `travel_x_mm` / `travel_y_mm` | number | 100..600, gemessener X/Y-Fahrweg (leer = unverändert); Kopf v6: 370 / 360 |
 | `line_laser_gpio` | int oder leer | BCM-Pin des Mess-Linienlasers, leer = keiner |
 | `machine_name` | string | 1..40 Zeichen (Leerraum wird zusammengefasst) |
 | `exhaust_auto` | `0`/`1` | Abluft beim Auftragsstart einschalten (`M8`) |

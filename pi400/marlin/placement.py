@@ -202,24 +202,26 @@ def translate(lines, dx: float, dy: float) -> list[str]:
     return out
 
 
-def check_extent(lines, travels: dict, safe_zone: float, start=None):
+def check_extent(lines, travels: dict, park_corner, start=None):
     """Raise ValueError unless the (placed) job stays inside the machine.
 
-    Every move must stay inside X0..travel / Y0..travel; every powered
-    move inside the cutting area safe_zone..travel. Returns (motion, powered).
+    Every move must stay inside X0..travel / Y0..travel; the powered moves
+    must stay out of the park corner X0..cx / Y0..cy (their bounding box,
+    conservative). Returns (motion, powered).
     """
     motion, powered = scan(lines, start)
     tx, ty = float(travels["x"]), float(travels["y"])
+    cx, cy = park_corner
     eps = 1e-6
     if motion is not None and (motion.xmin < -eps or motion.ymin < -eps or
                                motion.xmax > tx + eps or motion.ymax > ty + eps):
         raise ValueError(
             "Platzierter Auftrag fährt außerhalb des Arbeitsbereichs: X%.1f..%.1f / Y%.1f..%.1f "
             "(erlaubt X0..%g / Y0..%g)" % (motion.xmin, motion.xmax, motion.ymin, motion.ymax, tx, ty))
-    if powered is not None and (powered.xmin < safe_zone - eps or powered.ymin < safe_zone - eps or
-                                powered.xmax > tx + eps or powered.ymax > ty + eps):
+    if powered is not None and (powered.xmax > tx + eps or powered.ymax > ty + eps or
+                                (powered.xmin < cx - eps and powered.ymin < cy - eps)):
         raise ValueError(
             "Platziertes Motiv X%.1f..%.1f / Y%.1f..%.1f liegt außerhalb des Schneidbereichs "
-            "X%g..%g / Y%g..%g (30-mm-Safezone)" % (powered.xmin, powered.xmax, powered.ymin,
-                                                    powered.ymax, safe_zone, tx, safe_zone, ty))
+            "X0..%g / Y0..%g oder in der Park-Ecke X0..%g / Y0..%g" % (
+                powered.xmin, powered.xmax, powered.ymin, powered.ymax, tx, ty, cx, cy))
     return motion, powered

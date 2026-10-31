@@ -59,12 +59,17 @@ def _stream_window_setting(raw) -> int:
 STREAM_MAX_LINES = _stream_window_setting(os.environ.get("LUMACUT_STREAM_WINDOW", "4"))
 STREAM_MAX_BYTES = 200
 STREAMABLE = re.compile(r"^G0?[01]\s")
+# X/Y travel until web.py sets the Pi's configured one (config "travels";
+# measured with head v6 on 31.10.2026: 370 x 360, set via /api/settings).
+TRAVEL_XY_MM = (390.0, 370.0)
+# Park corner: at X0/Y0 the v6 housing reaches 67 mm towards +X and 24 mm
+# towards +Y from the beam (build_kopf_v6.py), plus 10 mm. Burning is
+# forbidden only inside this rectangle; everything else is work area.
+PARK_CORNER_MM = (78.0, 35.0)
 # Marlin refuses G30 ("Z Probe Past Bounds") when the head is within
-# PROBING_MARGIN (10 mm in the BTT example config) of X_BED_SIZE/Y_BED_SIZE.
-PROBE_HEAD_MAX = (380.0, 360.0)
-# The same margin on the low side (X/Y_MIN_POS 0). The laser is off while
-# probing, so the head may enter the 30 mm safezone like it does to park;
-# the safezone only forbids burning there.
+# PROBING_MARGIN (10 mm in the BTT example config) of the bed edges, on both
+# sides (the high side is travel - 10). The laser is off while probing, so
+# the head may enter the park corner.
 PROBE_HEAD_MIN = (10.0, 10.0)
 # Fast multi-point probing: low hop between the points of one area.
 PROBE_HOP_MM = 3.0
@@ -134,6 +139,24 @@ def parse_endstops(lines) -> dict:
         if m:
             out[m.group(1).lower()] = m.group(2).upper() == "TRIGGERED"
     return out
+
+
+def segment_enters_corner(p, q, corner) -> bool:
+    """True when the straight line p -> q passes through x < cx and y < cy."""
+    lo, hi = 0.0, 1.0
+    for a, b, limit in ((p[0], q[0], corner[0] - 0.0001), (p[1], q[1], corner[1] - 0.0001)):
+        # a + t (b - a) < limit
+        d = b - a
+        if abs(d) < 1e-12:
+            if a >= limit:
+                return False
+            continue
+        t = (limit - a) / d
+        if d > 0:
+            hi = min(hi, t)
+        else:
+            lo = max(lo, t)
+    return lo < hi
 
 
 def motion_commands(accel: float, speed: float) -> list[str]:
@@ -275,9 +298,10 @@ class MarlinTransport:
         self.probe_tip_offset_mm = 1.5
         self.focus_gap_mm = 7.0
         self.probe_clearance_mm = 2.0
-        # X<30 or Y<30 are permanently reserved for machine homing.
-        # Cutting must occur strictly inside the remaining rectangle.
-        self.safe_zone_xy_mm = 30.0
+        # The head parks and homes in this corner (PARK_CORNER_MM): never
+        # burn inside it. The rest of X0..travel / Y0..travel is work area.
+        self.park_corner = PARK_CORNER_MM
+        self.travel_xy = TRAVEL_XY_MM
         self.probe_xy_offset_mm = None
         # (accel mm/s², speed mm/s) from the tablet's motion calibration,
         # sent on every connect like M203 Z9; None = firmware values.
@@ -577,18 +601,23 @@ class MarlinTransport:
             self.last_xy_commanded = (self.position[0], self.position[1])
         px, py = self.last_xy_commanded
         tx, ty = self._xy_target(coords, px, py)
-        lowest_x, lowest_y = min(px, tx), min(py, ty)
         if "I" in coords or "J" in coords:
-            # Arc: the whole circle is a conservative envelope.
+            # Arc: the whole circle's box is a conservative envelope.
             cx, cy = px + coords.get("I", 0.0), py + coords.get("J", 0.0)
             radius = ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
-            lowest_x, lowest_y = min(lowest_x, cx - radius), min(lowest_y, cy - radius)
-        limit = self.safe_zone_xy_mm
-        if min(lowest_x, lowest_y) < limit - 0.0001:
+            hits = self.in_park_corner(min(px, tx, cx - radius), min(py, ty, cy - radius))
+        else:
+            hits = segment_enters_corner((px, py), (tx, ty), self.park_corner)
+        if hits:
+            ex, ey = self.park_corner
             raise ValueError(
-                f"30mm-Homing-Sperrzone: Schnitt nur ab X={limit:g} "
-                f"und Y={limit:g} mm; Start X{px:.2f} Y{py:.2f}, "
-                f"Ziel X{tx:.2f} Y{ty:.2f}")
+                f"Park-Ecke X0..{ex:g} / Y0..{ey:g} mm: dort wird nicht gelasert; "
+                f"Start X{px:.2f} Y{py:.2f}, Ziel X{tx:.2f} Y{ty:.2f}")
+
+    def in_park_corner(self, x: float, y: float) -> bool:
+        """True when point X/Y (or a box starting there) lies in the park corner."""
+        ex, ey = self.park_corner
+        return x < ex - 0.0001 and y < ey - 0.0001
 
     def _xy_target(self, coords, px, py):
         tx = (coords["X"] if self.absolute_mode else px + coords["X"]) if "X" in coords else px
@@ -1274,7 +1303,7 @@ class MarlinTransport:
             # After M2 parks at X0/Y0, a repeated G30 should use the
             # previously successful measurement location, not the park.
             # Reuse only when the requested position is inside keep-out.
-            if laser_x < self.safe_zone_xy_mm or laser_y < self.safe_zone_xy_mm:
+            if self.in_park_corner(laser_x, laser_y):
                 if self.last_probe_laser_xy is None:
                     raise ValueError("G30 in Parkzone: zuerst eine Werkstueckposition anfahren")
                 laser_x, laser_y = self.last_probe_laser_xy
@@ -1288,8 +1317,8 @@ class MarlinTransport:
             x, y = laser_x - dx, laser_y - dy
             if not self._probe_head_ok(x, y):
                 raise ValueError("Werkstück-Abtastpunkt außerhalb X%g..%g/Y%g..%g" % (
-                    PROBE_HEAD_MIN[0], PROBE_HEAD_MAX[0],
-                    PROBE_HEAD_MIN[1], PROBE_HEAD_MAX[1]))
+                    PROBE_HEAD_MIN[0], self.travel_xy[0] - 10.0,
+                    PROBE_HEAD_MIN[1], self.travel_xy[1] - 10.0))
             if z < self.travel_z:
                 self._exchange_locked(f"G0 Z{self.travel_z:.3f} F600", timeout=45)
                 self._exchange_locked("M400", timeout=45)
@@ -1372,8 +1401,8 @@ class MarlinTransport:
         return stop_z
 
     def _probe_head_ok(self, x: float, y: float) -> bool:
-        return (PROBE_HEAD_MIN[0] <= x <= PROBE_HEAD_MAX[0] and
-                PROBE_HEAD_MIN[1] <= y <= PROBE_HEAD_MAX[1])
+        return (PROBE_HEAD_MIN[0] <= x <= self.travel_xy[0] - 10.0 and
+                PROBE_HEAD_MIN[1] <= y <= self.travel_xy[1] - 10.0)
 
     def probe_reachable(self, x: float, y: float) -> bool:
         """True when the switch can probe laser point X/Y (head = point - offset)."""
@@ -1686,11 +1715,11 @@ class MarlinTransport:
                 "laser_armed": self.laser_enabled,
                 "laser_cooling_fan_on": self.fan_power,
                 "workpiece_surface_z": self.surface_z,
-                "safe_zone_xy_mm": self.safe_zone_xy_mm,
+                "park_corner_mm": {"x": self.park_corner[0], "y": self.park_corner[1]},
                 "probe_xy_offset_mm": self.probe_xy_offset_mm,
-                "cutting_bounds": {"x_min":self.safe_zone_xy_mm,
-                                   "y_min":self.safe_zone_xy_mm,
-                                   "x_max":390.0, "y_max":370.0},
+                # burn anywhere in this box except the park corner
+                "cutting_bounds": {"x_min": 0.0, "y_min": 0.0,
+                                   "x_max": self.travel_xy[0], "y_max": self.travel_xy[1]},
                 "probe_minimum_z": (None if self.surface_z is None else
                                     self.surface_z + self.probe_clearance_mm),
                 "laser_focus_z": (None if self.surface_z is None else

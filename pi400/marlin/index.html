@@ -551,7 +551,7 @@ dialog.danger h2{color:var(--bad)}
     </div>
    </div>
    <div class="legend">
-    <span><i style="background:var(--safe-line)"></i>30-mm-Rand (frei halten)</span>
+    <span><i style="background:var(--safe-line)"></i>Park-Ecke (frei halten)</span>
     <span><i style="background:var(--cut)"></i>Laserwege</span>
     <span><i style="background:var(--accent)"></i>Motiv</span>
     <span><i style="background:var(--info)"></i>Ursprung / Platzierung</span>
@@ -992,7 +992,7 @@ dialog.danger h2{color:var(--bad)}
     <details class="more" style="margin-top:12px"><summary>Einrichtung und Regeln</summary><div class="stack small">
      <p>Marlin-Modus mit <code>M3 I</code>, S-Werte <code>0–255</code>. Nach Leerfahrten braucht die erste G1-Bearbeitung wieder einen S-Wert. <code>M4 I</code> nicht benutzen. Kein GRBL: <code>$$</code>, <code>$H</code>, <code>?</code> gehen nicht.</p>
      <p>Zuerst <code>G28</code> referenzieren, <code>G30</code> nur über dem Werkstück. „Job-Ende“ auf <code>M2</code>: Laser aus, Z hoch, X0/Y0 parken. <code>M5 I</code> bleibt das normale Laser-Aus.</p>
-     <p>30-mm-Rand X0–30 (rechts) und Y0–30 (hinten) bleibt frei; gelasert wird nur bei X≥30 und Y≥30 (nutzbar 360 × 340 mm). LightBurn und diese Oberfläche teilen sich den Controller, führen aber nie gleichzeitig Befehle aus.</p>
+     <p>Die Park-Ecke oben rechts (Kopf v6 + 1 cm, X0–78 / Y0–35) bleibt frei; überall sonst wird gelasert (Arbeitsfläche 370 × 360 mm). LightBurn und diese Oberfläche teilen sich den Controller, führen aber nie gleichzeitig Befehle aus.</p>
     </div></details>
    </section>
    <section class="card">
@@ -1534,7 +1534,10 @@ async function analyse(j){
  return a;
 }
 function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
-function bedDims(){const tr=snapshot?.config?.travels||{x:390,y:370};return {W:Number(tr.x)||390,H:Number(tr.y)||370,safe:Number(snapshot?.safe_zone_xy_mm)||30}}
+// Park-Ecke (Kopf v6): nur dort wird nicht gelasert, Rest = Arbeitsfläche.
+function bedDims(){const tr=snapshot?.config?.travels||{x:370,y:360},pc=snapshot?.park_corner_mm||{x:78,y:35};
+ return {W:Number(tr.x)||370,H:Number(tr.y)||360,cx:Number(pc.x)||78,cy:Number(pc.y)||35}}
+function inParkCorner(x,y){const {cx,cy}=bedDims();return x<cx&&y<cy}
 function drawThumbs(force){
  for(const cv of $$("#jobList canvas")){
   const a=analyses.get(cv.dataset.key);if(!a||(cv.dataset.done===String(isDark())&&!force))continue;
@@ -1542,12 +1545,12 @@ function drawThumbs(force){
  }
 }
 function drawBedCanvas(cv,a,{thumb=false,bounds=null,placedB=null}={}){
- const {W,H,safe}=bedDims(),ctx=cv.getContext("2d"),pad=thumb?6:28;
+ const {W,H,cx,cy}=bedDims(),ctx=cv.getContext("2d"),pad=thumb?6:28;
  const k=Math.min((cv.width-2*pad)/W,(cv.height-2*pad)/H),ox=(cv.width-W*k)/2,oy=(cv.height-H*k)/2;
  const X=x=>ox+(W-x)*k,Y=y=>oy+y*k;   // von vorne gesehen: 0/0 oben rechts
  ctx.clearRect(0,0,cv.width,cv.height);
  ctx.fillStyle=cssVar("--sheet");ctx.fillRect(ox,oy,W*k,H*k);
- ctx.fillStyle=cssVar("--safe");ctx.fillRect(ox+(W-safe)*k,oy,safe*k,H*k);ctx.fillRect(ox,oy,W*k,safe*k);
+ ctx.fillStyle=cssVar("--safe");ctx.fillRect(ox+(W-cx)*k,oy,cx*k,cy*k);
  if(!thumb){ctx.strokeStyle=cssVar("--grid-major");ctx.lineWidth=1;ctx.beginPath();
   for(let x=50;x<W;x+=50){ctx.moveTo(X(x),oy);ctx.lineTo(X(x),oy+H*k)}for(let y=50;y<H;y+=50){ctx.moveTo(ox,Y(y));ctx.lineTo(ox+W*k,Y(y))}ctx.stroke()}
  ctx.strokeStyle=cssVar("--line2");ctx.lineWidth=1;ctx.strokeRect(ox+.5,oy+.5,W*k-1,H*k-1);
@@ -1889,16 +1892,17 @@ function drawBed(s){
  // Ansicht von vorne: X0/Y0 (Endschalter) oben rechts, +X nach links, +Y nach unten (Tür).
  // #bedFlip enthält alles in rohen Maschinen-mm; nur dort wird X gespiegelt.
  // Texte/Pfeile liegen in #bedLabels/#bedAxes in Bildschirmkoordinaten (sx = W − x).
- const {W,H,safe}=bedDims();
- const key=W+"x"+H+"/"+safe;
+ const {W,H,cx,cy}=bedDims();
+ const key=W+"x"+H+"/"+cx+"x"+cy;
  if(key!==bedKey){
   bedKey=key;bedBase=[-16,-22,W+52,H+46];setVB(bedBase.slice());
   $("bedFlip").setAttribute("transform","translate("+W+",0) scale(-1,1)");
   for(const id of ["bedArea","bedGrid","bedGrid50"]){$(id).setAttribute("width",W);$(id).setAttribute("height",H)}
-  const sc=$("bedScan");sc.setAttribute("x",0);sc.setAttribute("y",safe);sc.setAttribute("width",W-safe);sc.setAttribute("height",H-safe);
-  // Sperrzone X<safe oder Y<safe in Maschinen-mm → Streifen rechts und oben.
-  $("bedSafe").setAttribute("d","M0 0H"+W+"V"+safe+"H"+safe+"V"+H+"H0Z");
-  $("bedInfo").textContent="Nutzbar X"+safe+"–"+W+" · Y"+safe+"–"+H+" mm · 0/0 oben rechts";
+  // Scanbild der App: noch deren alte Fläche (Maschine X30..390 gespiegelt, Y30..370).
+  const sc=$("bedScan");sc.setAttribute("x",0);sc.setAttribute("y",30);sc.setAttribute("width",360);sc.setAttribute("height",340);
+  // Park-Ecke X<cx und Y<cy in Maschinen-mm → Rechteck oben rechts.
+  $("bedSafe").setAttribute("d","M0 0H"+cx+"V"+cy+"H0Z");
+  $("bedInfo").textContent="Arbeitsfläche X0–"+W+" · Y0–"+H+" mm · Park-Ecke "+cx+" × "+cy+" mm oben rechts";
   const labels=$("bedLabels"),axes=$("bedAxes");labels.replaceChildren();axes.replaceChildren();
   const NS="http://www.w3.org/2000/svg";
   const mk=(tag,attrs,parent,text)=>{const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;parent.append(e);return e};
@@ -1907,7 +1911,7 @@ function drawBed(s){
   for(let y=50;y<=H;y+=50)add(W+5,y+4,String(y),"start");     // Y-Skala rechts, wächst nach unten
   mk("circle",{cx:W,cy:0,r:4.5,fill:"var(--accent)",stroke:"var(--sheet)","stroke-width":1.5},axes);
   mk("text",{x:W-8,y:-7,"text-anchor":"end",fill:"var(--accent)"},axes,"0/0");
-  const ox=W-safe-8,oy=safe+8;
+  const ox=W-cx-8,oy=cy+8;
   mk("line",{x1:ox,y1:oy,x2:ox-46,y2:oy,stroke:"var(--faint)","stroke-width":1.5,"marker-end":"url(#arrowHead)"},axes);
   mk("line",{x1:ox,y1:oy,x2:ox,y2:oy+46,stroke:"var(--faint)","stroke-width":1.5,"marker-end":"url(#arrowHead)"},axes);
   mk("text",{x:ox-58,y:oy+4,"text-anchor":"end",fill:"var(--faint)"},axes,"+X ←");
@@ -1976,11 +1980,11 @@ $("bed").addEventListener("dblclick",()=>setVB(bedBase.slice()));
 function closePopover(){$$(".popover").forEach(p=>p.remove())}
 function bedMenu(ev){
  closePopover();
- const m=machineAt(svgPoint(ev)),{W,H,safe}=bedDims(),s=snapshot;
+ const m=machineAt(svgPoint(ev)),{W,H}=bedDims(),s=snapshot;
  if(m.x<0||m.x>W||m.y<0||m.y>H)return;
  const x=Math.round(m.x*10)/10,y=Math.round(m.y*10)/10;
  const free=s&&motionFree(s)&&s.config?.validated,homed=s?.homed;
- const inCut=x>=safe&&y>=safe;
+ const inCut=!inParkCorner(x,y);
  const why=!s?"Kein Status":!s.config?.validated?"Gesperrt: Maschinenfreigabe fehlt":!free?"Steuerung belegt":!homed?"Erst referenzieren":"";
  const pop=el("div","popover");pop.setAttribute("role","menu");
  const head=el("header");head.append(el("span",null,"X "+de(x)+"  Y "+de(y)));const xb=el("button","btn ghost sm icon");xb.innerHTML=icon("x");xb.onclick=closePopover;head.append(xb);pop.append(head);
@@ -1988,7 +1992,7 @@ function bedMenu(ev){
  item("move","Hierhin fahren (Laser aus)",()=>call("moveto",{x,y}),!free||!homed);
  item("probe","Hier abtasten",()=>call("probe",{x,y}),!free||!homed||!inCut,inCut?"":"Nur im Schneidbereich");
  item("target","Als Ursprung setzen",()=>call("origin_set",{x,y}),!free||!homed||!inCut,inCut?"":"Nur im Schneidbereich");
- if(why)pop.append(el("div","why",why));else if(!inCut)pop.append(el("div","why","Im 30-mm-Rand: nur Hinfahren"));
+ if(why)pop.append(el("div","why",why));else if(!inCut)pop.append(el("div","why","In der Park-Ecke: nur Hinfahren"));
  document.body.append(pop);
  const r=pop.getBoundingClientRect();
  pop.style.left=Math.max(8,Math.min(innerWidth-r.width-8,ev.clientX+10))+"px";

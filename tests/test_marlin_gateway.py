@@ -534,14 +534,39 @@ class USBProtocolTests(unittest.TestCase):
         bridge.laser_enabled = True
         bridge.guard.inline = True
         bridge.focused_this_job = True
-        bridge.last_xy_commanded = (29.0, 35.0)
-        with self.assertRaisesRegex(ValueError, "30mm-Homing-Sperrzone"):
-            bridge.command("G1 X45 Y40 S40")
+        bridge.last_xy_commanded = (29.0, 20.0)
+        with self.assertRaisesRegex(ValueError, "Park-Ecke"):
+            bridge.command("G1 X45 Y30 S40")
         bridge.last_xy_commanded = (40.0, 40.0)
-        # Arc around X30: the circle reaches X20, inside the home band.
-        with self.assertRaisesRegex(ValueError, "30mm-Homing-Sperrzone"):
+        # Arc around X30/Y40: the circle reaches Y30, inside the park corner.
+        with self.assertRaisesRegex(ValueError, "Park-Ecke"):
             bridge.command("G2 X40 Y40 I-10 J0 S40")
         self.assertEqual(serial.writes, [])
+
+    def test_park_corner_is_the_only_closed_area(self):
+        serial = FakeSerial(["ok\n"] * 3)
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.surface_z = 3.0
+        bridge.laser_enabled = True
+        bridge.guard.inline = True
+        bridge.focused_this_job = True
+        # along the old 30 mm bands, outside the 78 x 35 corner
+        bridge.last_xy_commanded = (5.0, 100.0)
+        bridge.command("G1 X5 Y300 S40")
+        bridge.last_xy_commanded = (100.0, 5.0)
+        bridge.command("G1 X300 Y5 S40")
+        # diagonal passing beside the corner (x + y = 120 never meets x<78 and y<35)
+        bridge.last_xy_commanded = (100.0, 20.0)
+        bridge.command("G1 X20 Y100 S40")
+        # diagonal cutting through it (x + y = 110 meets X76 Y34)
+        bridge.last_xy_commanded = (100.0, 10.0)
+        with self.assertRaisesRegex(ValueError, "Park-Ecke"):
+            bridge.command("G1 X10 Y100 S40")
+        self.assertEqual(len(serial.writes), 3)
 
     def test_lightburn_g1_without_s_after_rapid_reuses_last_power(self):
         # Seen on the machine 25.10.: LightBurn "G1 X175" after G0 without S
@@ -659,7 +684,7 @@ class USBProtocolTests(unittest.TestCase):
 
     def test_reserved_xy_30mm_zone_blocks_laser_cut(self):
         serial=FakeSerial([
-            "ok\n", "X:29 Y:35 Z:20\n", "ok\n",
+            "ok\n", "X:29 Y:20 Z:20\n", "ok\n",
         ])
         bridge=MarlinTransport("/dev/null")
         bridge.serial=serial
@@ -670,9 +695,9 @@ class USBProtocolTests(unittest.TestCase):
         bridge.laser_enabled=True
         bridge.guard.inline=True
         bridge.focused_this_job=True
-        with self.assertRaisesRegex(ValueError,"30mm-Homing-Sperrzone"):
-            bridge.command("G1 X45 Y40 S40")
-        self.assertNotIn(b"G1 X45 Y40 S40\n",serial.writes)
+        with self.assertRaisesRegex(ValueError,"Park-Ecke"):
+            bridge.command("G1 X45 Y30 S40")
+        self.assertNotIn(b"G1 X45 Y30 S40\n",serial.writes)
 
     def test_reserved_xy_30mm_zone_allows_interior_cut(self):
         serial=FakeSerial([
@@ -1022,9 +1047,9 @@ with web.app.test_client() as client:
 from marlin import web
 web.machine.homing_verified = True
 try:
-    web.preflight("G0 X40 Y40\nM3 I\nG1 X20 Y40 S100\nM5 I\n")
+    web.preflight("G0 X40 Y20\nM3 I\nG1 X20 Y20 S100\nM5 I\n")
 except ValueError as exc:
-    assert "Safezone" in str(exc), exc
+    assert "Park-Ecke" in str(exc), exc
 else:
     raise AssertionError("motif in home band accepted")
 web.preflight("G28\nG30\nG0 X40 Y40\nM3 I\nG1 X60 Y40 S100\nM5 I\nM2\n")

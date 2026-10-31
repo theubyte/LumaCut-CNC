@@ -32,7 +32,7 @@ assert items[0]["origin"] == "absolute" and (items[0]["dx"], items[0]["dy"]) == 
 assert (items[1]["dx"], items[1]["dy"]) == (100.0, 50.0), items[1]
 assert all(i["state"] == "queued" and "sha" not in i for i in items)
 # Moving the head later does not move the queued item (frozen at add).
-m.position = [60.0, 60.0, 20.0]
+m.position = [60.0, 40.0, 20.0]
 r = post(op="queue_add", name="Nope.gcode"); assert r.status_code == 400
 r = post(op="queue_add", name="A.gcode", origin="current", anchor="bl")
 assert r.status_code == 400 and "außerhalb" in r.get_json()["error"], r.data
