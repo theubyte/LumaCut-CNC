@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-10-31
 
+- **Anet: Z-Richtung getauscht** (`INVERT_Z_DIR true`), auf Wunsch des Besitzers. Kommt als Firmware-Update per Knopf.
 - **Firmware-Updates wie bei der App:** Die Firmware-CI veröffentlicht jeden Build als GitHub-Release `marlin-<Nr.>` (SKR `.bin`, Anet `.hex`, JSON mit Build-Stempel und SHA-256; nie „latest“). Der Pi holt es beim Start und alle 6 h (`firmware_release.py`), prüft Prüfsumme, Image und Stempel und vergleicht mit dem Build, den das Board per M115 meldet. Ist es neuer, zeigt die Weboberfläche oben eine Meldung „Firmware-Update verfügbar“ mit Knopf „Jetzt flashen“ (System → Firmware zusätzlich „Auf Update prüfen“). Geflasht wird nur per Knopf und Bestätigung, mit denselben Sperren wie beim Hochladen.
 - **Anet-Verkabelung festgelegt:** Board an 24 V (Original-Netzteil war 24 V), Laser-+24 V über ein 24-V-Relais am FAN-Stecker D4 (M106 P0 / M107 P0, schaltet der Pi wie beim SKR schon). Nur Doku/Kommentare, Firmware unverändert.
 - **Android-App auf die neue Arbeitsfläche:** Die App liest Fahrwege und Park-Ecke vom Pi (`config.travels`, `park_corner_mm`) und zeigt die ganze Fläche (370 × 360) mit der schraffierten Park-Ecke oben rechts. Umrechnung jetzt `Maschine X = Fahrweg − x`, `Maschine Y = y` (vorher `390 − x` / `30 + y`); der Auftragsbau lehnt Elemente in der Park-Ecke ab. Alte Projekte und Scans liegen dadurch versetzt – neu ausrichten bzw. neu scannen. Der Pi rechnet angetippte Abtastpunkte gleich um.

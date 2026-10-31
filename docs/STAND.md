@@ -455,6 +455,8 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   Release entsteht nur bei Änderungen unter `firmware/marlin/` (oder manuell).
   **Am Anet getestet (31.10. 22:53):** Release `marlin-53` per Knopf geflasht,
   Board meldet Build Oct 31 2026 21:41:46, kein Update mehr angeboten.
+  **Z-Richtung getauscht (31.10., Besitzer):** `INVERT_Z_DIR true` in
+  `build_anet.py`; kommt als nächstes Firmware-Release per Knopf.
 
 ## 12. Ideen (noch nicht geplant)
 

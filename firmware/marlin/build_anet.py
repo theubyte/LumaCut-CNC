@@ -65,7 +65,8 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "Z_MIN_PROBE_ENDSTOP_INVERTING", "true")
     cfg = replace_active(cfg, "INVERT_X_DIR", "false")
     cfg = replace_active(cfg, "INVERT_Y_DIR", "false")
-    cfg = replace_active(cfg, "INVERT_Z_DIR", "false")
+    # Z motor on the Anet runs the other way round (owner, 31.10.).
+    cfg = replace_active(cfg, "INVERT_Z_DIR", "true")
     cfg = replace_active(cfg, "X_BED_SIZE", "390")
     cfg = replace_active(cfg, "Y_BED_SIZE", "370")
     cfg = replace_active(cfg, "X_MIN_POS", "0")
