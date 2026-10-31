@@ -5,6 +5,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 ## 2026-11-01
 
 - **Kopf v7 „Schneckenlift“ konstruiert (nicht gebaut):** `A:\mfw\zmount\v7\build_kopf_v7.py` auf Basis von v6. Gedruckte Schnecke auf der Motorwelle treibt ein Schneckenrad 20 Z, auf dessen Achse das GT2-Ritzel auf einer flachen Zahnstange läuft. Selbsthemmend: der Kopf fällt ohne Strom nicht und dreht beim Schieben den Motor nicht hoch (Ursache des SKR-Schadens), die Reibbremse entfällt. 2 mm Z pro Umdrehung (`M92 Z1600`), Vollschritt 10 µm. Prüfbericht ohne Fehler; zuerst Prüfstück drucken.
+- **Nachrüstsatz v6 → Schneckenlift (konstruiert, nicht gebaut):** `A:\mfw\zmount\v7\nachruest\build_nachruest_v6.py`. Der vorhandene v6-Kopf bleibt ohne Schnitte; neu sind nur ca. 12 g: Schnecke, Rad 10 Z mit Stirnritzel, gedruckte Zahnstange statt Riemen, Getriebebock (Zapfen im Motorschrauben-Senkloch, Zunge im Sparfenster). `M92 Z1018.59`.
 
 ## 2026-10-31
 

@@ -479,6 +479,11 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   Bremse entfällt. 2 mm/Umdrehung, `M92 Z1600`, bis ~25 mm/s. Neu: T2, T3 (Lasche),
   T5, T7, T8; T1/T4 bleiben. Alle CAD-Prüfungen OK. Nächster Schritt: Prüfstück
   T7+T8 drucken und Selbsthemmung mit 0,9 kg testen. Details `A:\mfw\zmount\v7\LIESMICH.md`.
+  **Bevorzugt (Besitzer: so wenig PLA wie möglich): Nachrüstsatz für den
+  vorhandenen v6-Kopf**, `A:\mfw\zmount\v7\nachruest\` – ohne Schnitte, ca. 12 g:
+  Schnecke, Rad 10 Z mit Ritzel, gedruckte Zahnstange (Modul 1, kein Riemen),
+  Getriebebock hinten an der Wand. `M92 Z1018.59`. Alle CAD-Prüfungen OK; offen:
+  Platz hinter der Plattenunterkante für das Zahnstangenende.
 - Weitere Ideen zu Höhe/Kollision: [IDEE_HOEHE_KOLLISION_KAMERA_3D.md](IDEE_HOEHE_KOLLISION_KAMERA_3D.md).
 
 ## 13. Nebenprojekte im Ordner
