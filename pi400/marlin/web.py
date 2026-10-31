@@ -521,6 +521,8 @@ def firmware_upload():
     incoming = request.files.get("file")
     if incoming is None or not incoming.filename:
         raise ValueError("firmware.bin auswählen")
+    if incoming.filename.lower().endswith(".hex"):
+        return _flash_anet(incoming)
     image = incoming.read(MAX_IMAGE + 1)
     info = validate_image(image)
     local_owner()
@@ -533,6 +535,37 @@ def firmware_upload():
                      name="skr-firmware-update").start()
     return jsonify(message="Firmware-Update gestartet (%d KB, Build %s). SKR startet gleich neu."
                    % (info["bytes"] // 1024, info["build"] or "unbekannt"))
+
+
+def _flash_anet(incoming):
+    """firmware.hex for the Anet stand-in board: flashed through its boot
+    loader over USB (avr_flash.py), also over a foreign firmware."""
+    from .avr_flash import validate_hex
+    raw = incoming.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise ValueError("firmware.hex zu groß")
+    text = raw.decode("ascii", errors="replace")
+    info = validate_hex(text)
+    # Not local_owner(): the first flash replaces a foreign firmware that
+    # the gateway never connects to.
+    with machine.lock:
+        if machine.owner is not None:
+            raise RuntimeError("Steuerung belegt durch " + machine.owner)
+        if machine.serial is not None and machine.identity and machine.state != "Idle":
+            raise RuntimeError("Maschine beschäftigt: " + machine.state)
+    if job_lock.locked():
+        raise RuntimeError("Während eines Auftrags wird nicht geflasht")
+    threading.Thread(target=_flash_anet_worker, args=(text,), daemon=True,
+                     name="anet-firmware-update").start()
+    return jsonify(message="Anet-Firmware wird geflasht (%d KB, Build %s). Board startet gleich neu."
+                   % (info["bytes"] // 1024, info["build"] or "unbekannt"))
+
+
+def _flash_anet_worker(text):
+    try:
+        logging.info("Anet firmware update: %s", machine.flash_avr(text))
+    except Exception:
+        logging.exception("Anet firmware update failed")
 
 
 def _flash_worker(image):

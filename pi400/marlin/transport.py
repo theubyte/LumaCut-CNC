@@ -141,6 +141,26 @@ def parse_endstops(lines) -> dict:
     return out
 
 
+def _ch340_port():
+    from .grbl_bridge import grbl_ports
+    try:
+        return next(iter(grbl_ports()), None)
+    except Exception:
+        return None
+
+
+def _open_boot_port(port: str, baud: int):
+    """Serial port for the Anet boot loader; DTR/RTS start released so that
+    avr_flash's own falling edge is the one reset."""
+    import serial
+    ser = serial.Serial()
+    ser.port, ser.baudrate, ser.timeout, ser.write_timeout = port, baud, 0.05, 2.0
+    ser.dtr = ser.rts = False
+    ser.exclusive = True
+    ser.open()
+    return ser
+
+
 def segment_enters_corner(p, q, corner) -> bool:
     """True when the straight line p -> q passes through x < cx and y < cy."""
     lo, hi = 0.0, 1.0
@@ -1715,6 +1735,85 @@ class MarlinTransport:
                 if self.owner == "firmware":
                     self.owner = None
 
+    def flash_avr(self, hex_text: str, port: str | None = None, opener=None,
+                  settle_timeout: float = 60.0, poll: float = 3.0):
+        """Flash LumaCut Marlin onto the Anet board (ATmega1284P) over USB.
+
+        avr_flash.py talks to the board's boot loader directly (STK500, the
+        CH340's DTR resets the chip), so this also works when the board
+        still runs a foreign firmware the gateway refuses. Runs ~20 s: call
+        from a worker thread. Owner 'firmware' keeps everyone else away.
+        """
+        from .avr_flash import BOOT_BAUD, flash as avr_flash, validate_hex
+        from .grbl_bridge import grbl_ports
+        info = validate_hex(hex_text)
+        expected = info["build"]
+        with self.lock:
+            if self.owner is not None:
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.emergency_latched:
+                raise RuntimeError("Notstopp aktiv – erst quittieren")
+            port = port or next(iter(grbl_ports()), None)
+            if not port:
+                raise RuntimeError("Kein Anet-Board (CH340) per USB gefunden")
+            self.owner = "firmware"
+            self.firmware = {"state": "uploading", "progress": 0,
+                             "message": "Laser aus, Board startet den Bootloader"}
+        try:
+            with self.lock:
+                if self.serial is not None and self.identity:
+                    for cmd in ("M5 I", "M107 P0", "M9"):
+                        try:
+                            self._exchange_locked(cmd, timeout=8)
+                        except Exception:
+                            pass
+                self.laser_enabled = self.fan_power = False
+                self.lights = self.exhaust = False
+                self._close_locked("Firmware-Update: Anet wird geflasht")
+                self.state = "Busy"
+            ser = (opener or _open_boot_port)(port, BOOT_BAUD)
+
+            def progress(done, total):
+                step = "Schreibe" if done <= total // 2 else "Prüfe"
+                self.firmware.update(progress=round(100 * done / total),
+                                     message="%s %d / %d Seiten" % (step, done, total))
+            try:
+                avr_flash(ser, info["image"], progress, log=self.lines.append)
+            finally:
+                try:
+                    ser.dtr = ser.rts = False
+                    ser.close()
+                except Exception:
+                    pass
+            self.firmware.update(state="rebooting", progress=100,
+                                 message="Geschrieben und geprüft, Marlin startet")
+            deadline = time.monotonic() + settle_timeout
+            last_error = ""
+            while time.monotonic() < deadline:
+                time.sleep(poll)
+                try:
+                    self.ensure_ready(owner="firmware")
+                    break
+                except Exception as exc:
+                    last_error = str(exc)
+            else:
+                raise RuntimeError("Anet nach dem Flashen nicht erreichbar: " + last_error[:120])
+            with self.lock:
+                running = self.identity
+            if expected and f"({expected})" not in running:
+                raise RuntimeError(f"Anet meldet nicht den neuen Build ({expected}): " + running[:120])
+            self.firmware = {"state": "done", "progress": 100,
+                             "message": "Neue Firmware aktiv: " + (expected or running[:60])}
+            return self.firmware["message"]
+        except Exception as exc:
+            self.firmware = {"state": "error", "progress": self.firmware.get("progress", 0),
+                             "message": str(exc)[:200]}
+            raise
+        finally:
+            with self.lock:
+                if self.owner == "firmware":
+                    self.owner = None
+
     def status(self):
         with self.lock:
             return {
@@ -1723,6 +1822,8 @@ class MarlinTransport:
                 "identity": self.identity, "homed": self.homed,
                 "z_homed": self.z_homed, "z_probe_supported": self.cap_z_probe, "emergency_latched": self.emergency_latched,
                 "firmware_upload_supported": self.cap_binary_transfer,
+                # CH340 board for an Anet firmware.hex (flash_avr), None = none
+                "firmware_avr_port": _ch340_port(),
                 "firmware_update": dict(self.firmware),
                 "homing_verified": self.homing_verified,
                 "reference": {"switch_check": self.switch_check, "lost": self.reference_lost},

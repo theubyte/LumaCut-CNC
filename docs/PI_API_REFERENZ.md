@@ -211,7 +211,8 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `z_homed` | bool | Z referenziert |
 | `z_probe_supported` | bool \| null | Firmware meldet `Cap:Z_PROBE` (null = noch unbekannt) |
 | `emergency_latched` | bool | M112-Riegel aktiv: alles außer `estop`/`estop_reset` wird abgelehnt |
-| `firmware_upload_supported` | bool | Firmware meldet `Cap:BINARY_FILE_TRANSFER:1` (Voraussetzung für `/api/firmware`) |
+| `firmware_upload_supported` | bool | Firmware meldet `Cap:BINARY_FILE_TRANSFER:1` (Voraussetzung für `/api/firmware` mit `.bin`) |
+| `firmware_avr_port` | string/null | CH340-Port (Anet-Board oder Atomstack) für `/api/firmware` mit `firmware.hex`; `null` = kein CH340 |
 | `firmware_update` | object | `{state, progress, message}`; `state` ∈ `idle`, `uploading`, `rebooting`, `done`, `error`; `progress` 0..100 |
 | `homing_verified` | bool | = Mechanik-Freigabe (`config.validated`) |
 | `reference` | object | `{switch_check, lost}`: Referenzprüfung über die X/Y-Endschalter. `switch_check` `true` = nach dem Referenzieren waren beide Schalter auf X0/Y0 gedrückt, die Prüfung ist aktiv (`false` = Schalter erreichen X0/Y0 nicht, Prüfung aus; `null` = noch nicht referenziert). Steht der Kopf laut Pi auf X0/Y0 (nach Referenzieren/Parken) und ein Schalter ist offen – geprüft nach dem Parken, alle 2 s im Leerlauf und vor `start`/`autorun`/`frame` –, fällt `homed` auf `false` und `lost` nennt den Grund (Kopf von Hand bewegt oder Schritte verloren); `autorun` referenziert dann zuerst. Nach jedem Referenzieren wieder `""`. Beim Verbinden sendet der Pi `M84 S0`: die Motoren halten auch im Leerlauf. |
@@ -804,6 +805,20 @@ deutlich sagen und `enable=1` nur nach bewusster Bestätigung senden.
 | Erfolg | 200 `Firmware-Update gestartet (N KB, Build …). SKR startet gleich neu.` |
 | Fehler (sofort) | 400 `firmware.bin auswählen`, `Dateigröße … unplausibel …`, `Keine SKR-Mini-MZ-Firmware für den BTT-Bootloader …`, `LumaCut-Kennung fehlt: fremde Firmware wird nicht geflasht`, `Firmware ohne BINARY_FILE_TRANSFER: …` |
 | Fehler (Lauf) | `firmware_update.state = "error"`, `message` z. B. `Keine SD-Karte im SKR erkannt (M21): …`, `SKR nach dem Flashen nicht wieder erreichbar: …` |
+
+**`firmware.hex` (Anet-Board, ATmega1284P):** Dateiname endet auf `.hex` →
+`avr_flash.py` statt SD-Weg. Prüfung: Intel-HEX mit Prüfsummen, AVR-Sprungtabelle,
+höchstens 126 976 Byte (nicht in den Bootloader), enthält `LumaCut CNC Marlin Anet`
+(`firmware/marlin/build_anet.py`). Vorbedingungen: kein Besitzer, kein Auftrag,
+Maschine nicht beschäftigt – **kein** verbundener Controller nötig (der erste Flash
+ersetzt eine fremde Firmware). Wirkung: Besitzer `firmware`, Laser/FAN/Abluft aus
+falls verbunden, Port schließen, DTR-Reset in den Bootloader (STK500 v1, 115200),
+Signatur `1E 97 05` prüfen (sonst nichts geschrieben), Seiten schreiben, alles
+zurücklesen und vergleichen, Marlin starten, neu verbinden, Build-Datum in M115
+prüfen. Fortschritt über `firmware_update`. Erfolg 200 `Anet-Firmware wird geflasht
+(N KB, Build …). Board startet gleich neu.` Fehler im Lauf z. B. `Kein Bootloader am
+Port (Sync fehlgeschlagen)`, `Falscher Chip: Signatur …`, `Prüfen nach dem Schreiben
+fehlgeschlagen bei Byte …`. ⚠ Hardware
 
 ### 4.12 Aufträge (Dateien)
 

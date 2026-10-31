@@ -966,9 +966,9 @@ dialog.danger h2{color:var(--bad)}
   <div>
    <section class="card" id="firmwarePanel">
     <div class="card-head"><h2><svg class="i"><use href="#i-chip"/></svg>SKR-Firmware</h2></div>
-    <p class="small muted">Neue <code>firmware.bin</code> über den Pi flashen: die SD-Karte bleibt im SKR, der Pi schreibt die Datei per USB und startet das SKR neu. Danach neu referenzieren.</p>
+    <p class="small muted">Neue Firmware über den Pi flashen: <code>firmware.bin</code> fürs SKR (SD-Karte bleibt drin, der Pi schreibt sie per USB), <code>firmware.hex</code> fürs Anet-Board (direkt über dessen Bootloader, auch über eine fremde Firmware). Danach neu referenzieren.</p>
     <form id="firmwareForm" class="row" style="margin-top:12px">
-     <input type="file" accept=".bin" id="firmwareFile" aria-label="firmware.bin" class="grow">
+     <input type="file" accept=".bin,.hex" id="firmwareFile" aria-label="firmware.bin oder firmware.hex" class="grow">
      <button type="submit" class="btn primary" id="firmwareFlash"><svg class="i"><use href="#i-upload"/></svg>Flashen</button>
     </form>
     <div class="metric" style="margin-top:12px"><small>Status</small><strong id="firmwareStatus" style="font-size:14px">—</strong><div class="bar" style="margin-top:8px"><span id="firmwareProgress"></span></div></div>
@@ -1236,9 +1236,9 @@ function refreshUI(s){
  // Firmware
  const fw=s.firmware_update||{};
  $("firmwareStatus").textContent=fw.state&&fw.state!=="idle"?fw.state+" · "+(fw.message||""):
-  (s.firmware_upload_supported?"Bereit: Update über den Pi möglich":"Aktuelle Firmware kann keine Dateien empfangen – einmalig per SD-Karte flashen");
+  (s.firmware_upload_supported?"Bereit: Update über den Pi möglich":s.firmware_avr_port?"Anet-Board an "+s.firmware_avr_port+": firmware.hex über den Pi flashen":"Aktuelle Firmware kann keine Dateien empfangen – einmalig per SD-Karte flashen");
  $("firmwareProgress").style.width=(fw.progress||0)+"%";
- $("firmwareFlash").disabled=!ownerFree(s)||!s.firmware_upload_supported||["uploading","rebooting"].includes(fw.state);
+ $("firmwareFlash").disabled=(s.firmware_avr_port?s.owner!=="Frei":(!ownerFree(s)||!s.firmware_upload_supported))||["uploading","rebooting"].includes(fw.state);
  // Auftrag
  renderJobStrip(s);
  renderPhase(s);
