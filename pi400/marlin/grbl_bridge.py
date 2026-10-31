@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import glob
 import logging
+import math
 import os
 import queue
 import re
@@ -39,8 +40,9 @@ LOG = logging.getLogger("lumacut.grbl")
 WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 STATUS = re.compile(r"^<([A-Za-z]+)[^|>]*(.*)>$")
 SETTING = re.compile(r"^\$(\d+)=([-+]?\d+(?:\.\d+)?)")
-# Grbl's serial receive buffer (127 usable bytes on classic Grbl).
-RX_BUFFER = 120
+# Grbl's serial receive buffer: "$I" on the Atomstack board reports
+# [OPT:VZ,15,128] (15 planner blocks, 128 bytes); 127 usable.
+RX_BUFFER = 127
 MARLIN_S_MAX = 255.0
 IDENTITY = ("FIRMWARE_NAME:Marlin 2.1.2.9 (LumaCut Grbl-Bridge) "
             "SOURCE_CODE_URL:github.com/theubyte/LumaCut-CNC PROTOCOL_VERSION:1.0 "
@@ -74,6 +76,12 @@ XY_WORD = re.compile(r"\b([XY])([-+]?\d*\.?\d+)")
 # Merged moves stay within this distance of every point they skip.
 MERGE_TOLERANCE_MM = 0.01
 MERGE_MAX_MM = 3.0
+
+
+def _num(v: float, digits: int = 3) -> str:
+    """Shortest exact Grbl number: 116.35, -100, 378.4."""
+    text = ("%.*f" % (digits, v)).rstrip("0").rstrip(".")
+    return "0" if text in ("", "-0") else text
 
 
 def _off_chord(p, a, b) -> float:
@@ -140,6 +148,85 @@ def merge_short_moves(commands, tolerance: float = MERGE_TOLERANCE_MM, max_len: 
     return out
 
 
+# Neighbouring raster pixels whose power differs at most this much (Marlin
+# S 0..255, ~1.2 %) burn as one move with their length-weighted power.
+MERGE_POWER_STEP = 3.0
+
+
+def merge_power_steps(commands, step: float = MERGE_POWER_STEP):
+    """Join raster pixels of (almost) the same grey along one scan line.
+
+    The app writes a grey-scale fill as one G1 per change of power, often
+    every 0.1-0.5 mm: Max-geb had 295 000 lit moves. Moves on the same line,
+    in the same direction, at the same feed, all lit with powers within
+    `step` of each other (or all dark) become one move with their
+    length-weighted power. Like image2gcode's "pixels with same intensity
+    are drawn with one move", plus a tolerance far below what a 10 W diode
+    shows. Everything else passes through untouched.
+    """
+    out, run = [], []
+    pos, absolute = None, True
+
+    def flush():
+        nonlocal run
+        if not run:
+            return
+        if len(run) == 1:
+            out.append(run[0][0])
+        else:
+            total = sum(r[3] for r in run)
+            s = sum(r[2] * r[3] for r in run) / total if total else run[-1][2]
+            x, y = run[-1][1]
+            out.append("G1 X%.3f Y%.3f F%g S%g" % (x, y, run[0][4], round(s, 1)))
+        run = []
+
+    for line in commands:
+        m = PLAIN_G1.match(line.strip()) if absolute and pos is not None else None
+        words = dict(_FS_WORD.findall(m.group(3))) if m else {}
+        if m is None or "F" not in words or "S" not in words:
+            flush()
+            out.append(line)
+            head = line.split(";", 1)[0].strip().upper()
+            if head.startswith("G91"):
+                absolute = False
+            elif head.startswith("G90"):
+                absolute = True
+            elif re.match(r"^G0?[0123]\b", head):
+                xy = dict(XY_WORD.findall(head))
+                if not absolute or (pos is None and not ("X" in xy and "Y" in xy)):
+                    pos = None if not absolute else pos
+                else:
+                    old = pos or (0.0, 0.0)
+                    pos = (float(xy.get("X", old[0])), float(xy.get("Y", old[1])))
+            continue
+        point = (float(m.group(1)), float(m.group(2)))
+        feed, s = float(words["F"]), float(words["S"])
+        start = run[-1][1] if run else pos
+        length = math.hypot(point[0] - start[0], point[1] - start[1])
+        if run:
+            first_start = run[0][5]
+            powers = [r[2] for r in run] + [s]
+            same_line = _collinear(first_start, run[-1][1], point)
+            lit = [p > 0 for p in powers]
+            if not (same_line and feed == run[0][4] and (all(lit) or not any(lit))
+                    and max(powers) - min(powers) <= step):
+                flush()
+        run.append((line, point, s, length, feed, start))
+        pos = point
+    flush()
+    return out
+
+
+_FS_WORD = re.compile(r"([FS])([-+]?\d*\.?\d+)")
+
+
+def _collinear(a, b, c) -> bool:
+    """b and c continue the straight line from a, in the same direction."""
+    abx, aby = b[0] - a[0], b[1] - a[1]
+    bcx, bcy = c[0] - b[0], c[1] - b[1]
+    return abs(abx * bcy - aby * bcx) < 1e-6 and abx * bcx + aby * bcy > 0
+
+
 def _open_serial(port: str, baud: int):
     import serial
     # DTR/RTS stay released: on the ESP32 board they pull EN/GPIO0
@@ -193,6 +280,9 @@ class GrblMarlinBridge:
         self.status_seq = 0
         self.z = 0.0
         self.relative = False
+        # Grbl's modal words as last sent (G, X, Y, F, S): _motion omits
+        # unchanged ones. Cleared whenever Grbl's state may differ.
+        self.modal: dict[str, str] = {}
         self.closed = False
         self.emergency = False
         self.banner = ""
@@ -311,6 +401,7 @@ class GrblMarlinBridge:
                     self.out.put("ok")
             elif line.startswith("ALARM:"):
                 self.state = "Alarm"
+                self.modal.clear()
                 self.out.put("Error:Grbl " + line + " (Grbl gesperrt)")
                 # Grbl drops its buffer on an alarm: answer the lost lines.
                 for _ in self.pending:
@@ -415,6 +506,7 @@ class GrblMarlinBridge:
                 self.cond.wait(0.5)
             self.private_reply = None
             self.private_lines = []
+            self.modal.clear()          # $H, G10, $X, reset ... may change Grbl's state
             self.private_active = True
             self._raw((line + "\n").encode("ascii"))
             end = time.monotonic() + timeout
@@ -452,36 +544,61 @@ class GrblMarlinBridge:
         return round(max(0.0, min(MARLIN_S_MAX, s)) * top / MARLIN_S_MAX, 1)
 
     def _motion(self, cmd: str, words) -> str | None:
+        """One Marlin move as a compact Grbl line.
+
+        Grbl keeps the motion mode, X, Y, F and S modal, so only what changed
+        goes out, without spaces ("X116.35S378" instead of "G1 X116.350
+        Y128.345 F6000 S378.4"). With Grbl's 120-byte receive buffer that
+        keeps ~9 raster lines queued instead of 3: a grey-scale engraving
+        ran at ~80 lines/s, limited by the USB round trip, not the motors.
+        """
         code = cmd.split()[0]
         g = int(float(code[1:]))
         sx, sy = self._sign(0), self._sign(1)
         if g in (2, 3) and sx * sy < 0:
             g = 5 - g
-        parts = ["G%d" % g]
+        new = {"G": "G%d" % g}
+        extra = ""
         moved = False
         for letter, value in words[1:]:
             v = float(value)
             if letter == "Z":
                 self.z = (self.z + v) if self.relative else v
                 continue
-            if letter in "XI":
-                parts.append("%s%.3f" % (letter, v * sx))
-                moved = moved or letter == "X"
-            elif letter in "YJ":
-                parts.append("%s%.3f" % (letter, v * sy))
-                moved = moved or letter == "Y"
+            if letter == "X":
+                new["X"], moved = _num(v * sx), True
+            elif letter == "Y":
+                new["Y"], moved = _num(v * sy), True
+            elif letter == "I":
+                extra += "I" + _num(v * sx)
+            elif letter == "J":
+                extra += "J" + _num(v * sy)
             elif letter == "S":
-                parts.append("S%g" % self._power(v))
+                new["S"] = _num(self._power(v), 1)
             elif letter == "F":
                 # Above $110/$111 Grbl runs slower than asked, and its dynamic
                 # laser mode (M4) then cuts the power by the same ratio: a
                 # 10200 mm/min fill at 14 % burnt at ~8 %, below ignition.
-                parts.append("F%g" % min(v, self.max_rate()))
+                new["F"] = _num(min(v, self.max_rate()), 1)
             elif letter == "R":
-                parts.append("R%g" % v)
+                extra += "R" + _num(v)
         if not moved and g in (0, 1):
             return None     # only Z (fixed head) or only F/S
-        return " ".join(parts)
+        # relative moves and arcs always carry their axes
+        always = self.relative or g in (2, 3)
+        text = new["G"] if new["G"] != self.modal.get("G") else ""
+        for key in ("X", "Y"):
+            if key in new and (always or new[key] != self.modal.get(key)):
+                text += key + new[key]
+        text += extra
+        for key in ("F", "S"):
+            if key in new and new[key] != self.modal.get(key):
+                text += key + new[key]
+        self.modal.update(new)
+        if self.relative:
+            self.modal.pop("X", None)
+            self.modal.pop("Y", None)
+        return text or None     # None: same point, same F/S
 
     def _handle(self, line: str):
         cmd = line.split(";", 1)[0].strip().upper()
@@ -499,18 +616,20 @@ class GrblMarlinBridge:
                 self.out.put("ok")
             else:
                 self._send_grbl(grbl)
-        elif family == "M3":
+        elif family in ("M3", "M4"):
             # Marlin inline mode: power only with each G1 S. Grbl M4 (dynamic)
             # scales power with speed and is off while standing still.
-            self._send_grbl("M4 S0")
-        elif family == "M4":
+            self.modal["S"] = "0"
             self._send_grbl("M4 S0")
         elif family == "M5":
+            self.modal.pop("S", None)
             self._send_grbl("M5")
         elif family in ("M8", "M9"):
             self._send_grbl(family)
         elif family in ("G90", "G91"):
             self.relative = family == "G91"
+            self.modal.pop("X", None)
+            self.modal.pop("Y", None)
             self._send_grbl(family)
         elif family in ("G20", "G21"):
             self._send_grbl(family)
@@ -566,6 +685,7 @@ class GrblMarlinBridge:
                 self.out.put("echo:  %s: %s" % (query, reply))
             self.out.put("ok")
         elif family == "M410":
+            self.modal.clear()
             self._raw(b"!")
             time.sleep(0.2)
             self._raw(b"\x18")
@@ -669,6 +789,7 @@ class GrblMarlinBridge:
         self._raw(b"?")
 
     def _emergency(self):
+        self.modal.clear()
         try:
             self._raw(b"!")
             self._raw(b"\x18")

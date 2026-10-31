@@ -23,6 +23,10 @@ class Toolpath(val segments: List<Segment>, val bounds: Box?, val stats: Toolpat
 
     companion object {
         private const val TRAVEL_FEED = 9000.0   // the Pi adds F9000 to XY rapids without F
+        // Speeding up and slowing down costs about v/a extra wherever the head
+        // stops or turns sharply (> 60°); grey-scale power changes along a
+        // straight line cost nothing. Atomstack board: $120 = 1000 mm/s².
+        private const val ACCEL = 1000.0
         private const val ARC_MM = 0.5
         private val WORD = Regex("([A-Z])\\s*([-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))")
 
@@ -37,6 +41,7 @@ class Toolpath(val segments: List<Segment>, val bounds: Box?, val stats: Toolpat
             var feed = 1000.0; var power = 0; var armed = false
             var cutMm = 0.0; var travelMm = 0.0; var seconds = 0.0; var maxPower = 0; var cuts = 0
             var unpowered = 0
+            var dirX = 0.0; var dirY = 0.0
             var box: Box? = null
             for ((index, raw) in lines.withIndex()) {
                 val line = raw.replace(Regex("\\([^)]*\\)"), "").substringBefore(';').trim().uppercase()
@@ -77,12 +82,14 @@ class Toolpath(val segments: List<Segment>, val bounds: Box?, val stats: Toolpat
                             box = Box(minOf(px, p.x), minOf(py, p.y), maxOf(px, p.x), maxOf(py, p.y)).union(box)
                         } else travelMm += len
                         seconds += len / max(speed, 1.0) * 60
+                        val ux = (p.x - px) / len; val uy = (p.y - py) / len
+                        if (ux * dirX + uy * dirY < 0.5) seconds += speed / 60.0 / ACCEL
+                        dirX = ux; dirY = uy
                     }
                     px = p.x; py = p.y
                 }
                 x = nx; y = ny
             }
-            seconds += cuts * 0.02   // acceleration at every start/stop
             val warnings = mutableListOf<String>()
             if (unpowered > 0) warnings += "$unpowered Laserfahrten nach Leerfahrt ohne S-Wert: Marlin lasert dort mit 0"
             val b = box

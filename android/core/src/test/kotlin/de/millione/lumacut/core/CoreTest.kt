@@ -111,9 +111,17 @@ class ToolpathTest {
         assertEquals(80.0, t.stats.cutMm, 1e-9)
         assertEquals(Box(40.0, 40.0, 60.0, 60.0), t.bounds)
         assertEquals(128, t.stats.maxPower)
-        val expected = 80.0 / 1200 * 60 + kotlin.math.hypot(40.0, 40.0) / 9000 * 60 + 4 * 0.02
+        // + v/a at the start (rapid, 150 mm/s) and at the three 90° corners (20 mm/s)
+        val expected = 80.0 / 1200 * 60 + kotlin.math.hypot(40.0, 40.0) / 9000 * 60 + 0.15 + 3 * 0.02
         assertEquals(expected, t.stats.seconds, 1e-6)
         assertTrue(t.stats.warnings.isEmpty())
+    }
+
+    @Test fun `grey-scale power steps along a line add no acceleration time`() {
+        val row = (1..100).joinToString("\n") { "G1 X${it}.0 Y0 F6000 S${it % 7 * 30 + 10}" }
+        val t = Toolpath.parse("M3 I\nG0 X0 Y0 F6000\n$row\n")
+        // 100 mm at 100 mm/s plus one start: 0.1 s
+        assertEquals(1.0 + 0.1, t.stats.seconds, 1e-6)
     }
 
     @Test fun `Marlin semantics and arcs`() {

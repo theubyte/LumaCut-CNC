@@ -219,6 +219,13 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   zusammen (`merge_short_moves`, höchstens 0,01 mm Abweichung, max. 3 mm):
   ein Kreis aus 275 × 0,175 mm wird zu ~80 Zügen – mehr als ~200 Zeilen/s
   trägt die 115200-Baud-Leitung nicht, die Kreise wurden sonst eckig.
+- **Raster-Durchsatz (31.10.):** Engpass bei Graustufen war die USB-Strecke
+  (Grbl-Puffer 128 Byte laut `$I` `[OPT:VZ,15,128]`, Zeilen ~38 Byte → 3 in
+  Flug, ~80 Zeilen/s). Die Brücke sendet kompakt/modal (~13 Byte, `self.modal`,
+  gelöscht bei $-Befehlen, Alarm, Not-Aus, M5, G90/G91), Puffer 127 Byte;
+  `merge_power_steps` fasst Pixel gleicher Zeile mit ±3 S zusammen. Pi-Software
+  schafft ~1600 Zeilen/s (gemessen auf dem Pi), ist also kein Engpass.
+  Offen/Idee: Board hat „Direct SD“ (`[ESP800]`) – Auftrag von SD statt Streamen.
 - **Rahmen mit Glimmen (31.10.):** Pi-Einstellung `frame_power_pct` (0..1 %),
   auf Wunsch des Besitzers 0,5 %: die Rahmenkanten laufen mit sichtbarem
   Laserpunkt (≥ 1200 mm/min), die Anfahrt bleibt dunkel. `M3 I` ohne

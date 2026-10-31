@@ -1,8 +1,9 @@
+import re
 import threading
 import time
 import unittest
 
-from pi400.marlin.grbl_bridge import GrblMarlinBridge, merge_short_moves
+from pi400.marlin.grbl_bridge import GrblMarlinBridge, merge_power_steps, merge_short_moves
 from pi400.marlin.transport import MarlinTransport
 
 
@@ -44,11 +45,11 @@ class FakeGrbl:
                     self.pos = [0.0, 0.0]
                 elif line.startswith("G10 L20"):
                     self.wco = list(self.pos)
-                elif line.startswith(("G0", "G1")):
-                    for axis, i in (("X", 0), ("Y", 1)):
-                        if axis in line:
-                            v = float(line.split(axis)[1].split()[0])
-                            self.pos[i] = self.wco[i] + v
+                elif line.startswith(("G0", "G1", "X", "Y")):
+                    # compact modal lines ("X116.35S378") as well
+                    for axis, value in re.findall(r"([XY])([-+]?[\d.]+)", line):
+                        i = "XY".index(axis)
+                        self.pos[i] = self.wco[i] + float(value)
                 if self.drop_oks:
                     self.drop_oks -= 1       # lost on the USB link
                     continue
@@ -102,19 +103,19 @@ class GrblBridgeTest(unittest.TestCase):
         self.ask(bridge, "G1 X100 Y50 F3000 S127.5")
         self.assertIn("$H", grbl.written)
         self.assertIn("M4 S0", grbl.written)
-        self.assertIn("G1 X-100.000 Y-50.000 F3000 S500", grbl.written)
+        self.assertIn("G1X-100Y-50F3000S500", grbl.written)
         pos = self.ask(bridge, "M114")[0]
         self.assertTrue(pos.startswith("X:100.00 Y:50.00 Z:0.00"), pos)
 
     def test_axes_homing_to_minus_stay_and_arcs_keep_direction(self):
         grbl, bridge = self.make(mask=3)
         self.ask(bridge, "G2 X10 Y10 I5 J0 F600 S10")
-        self.assertIn("G2 X10.000 Y10.000 I5.000 J0.000 F600 S39.2", grbl.written)
+        self.assertIn("G2X10Y10I5J0F600S39.2", grbl.written)
 
     def test_one_mirrored_axis_swaps_arc_direction(self):
         grbl, bridge = self.make(mask=2)
         self.ask(bridge, "G2 X10 Y10 I5 J0 F600")
-        self.assertIn("G3 X-10.000 Y10.000 I-5.000 J0.000 F600", grbl.written)
+        self.assertIn("G3X-10Y10I-5J0F600", grbl.written)
 
     def test_z_is_remembered_but_never_sent(self):
         grbl, bridge = self.make(hint=lambda: 2.7)
@@ -143,7 +144,7 @@ class GrblBridgeTest(unittest.TestCase):
         grbl.settings.update({110: 6000, 111: 6000})
         bridge.settings.update({110: 6000.0, 111: 6000.0})
         self.ask(bridge, "G1 X10 Y10 F10199 S35")
-        self.assertIn("G1 X10.000 Y10.000 F6000 S137.3", grbl.written)
+        self.assertIn("G1X10Y10F6000S137.3", grbl.written)
 
     def test_lost_ok_is_acknowledged_once_grbl_is_idle(self):
         grbl, bridge = self.make(mask=3)
@@ -165,6 +166,22 @@ class GrblBridgeTest(unittest.TestCase):
         reply = self.ask(bridge, "G1 X10 Y10 F600 S10", timeout=15.0)
         self.assertEqual(reply[-1], "ok")
         self.assertEqual(bridge.reopens, 1)
+
+    def test_raster_lines_are_sent_compact_and_modal(self):
+        grbl, bridge = self.make(mask=3)
+        self.ask(bridge, "M3 I")
+        for line in ("G0 X110 Y128.345", "G1 X116.05 Y128.345 F6000 S0",
+                     "G1 X116.35 Y128.345 F6000 S95", "G1 X116.55 Y128.345 F6000 S95",
+                     "G0 X116.55 Y128.445", "G1 X110 Y128.445 F6000 S0"):
+            self.ask(bridge, line)
+        sent = grbl.written[grbl.written.index("M4 S0") + 1:]
+        self.assertEqual(sent, ["G0X110Y128.345", "G1X116.05F6000", "X116.35S372.5", "X116.55",
+                                "G0Y128.445", "G1X110S0"])
+        # after M5 and homing Grbl's state is not assumed any more
+        self.ask(bridge, "M5 I")
+        self.ask(bridge, "G28 X Y")
+        self.ask(bridge, "G1 X110 Y128.445 F6000 S0")
+        self.assertEqual(grbl.written[-1], "G1X110Y128.445F6000S0")
 
     def test_dwell_milliseconds_become_seconds(self):
         grbl, bridge = self.make()
@@ -202,7 +219,7 @@ class GrblBridgeTest(unittest.TestCase):
         machine.command("G1 X100 Y60 F1200 S1.27", owner="frame")
         machine.command("M5 I", owner="frame")
         self.assertIn("M4 S0", grbl.written)
-        self.assertIn("G1 X-100.000 Y-60.000 F1200 S5", grbl.written)
+        self.assertIn("G1Y-60F1200S5", grbl.written)
 
 
 class MergeShortMovesTest(unittest.TestCase):
@@ -231,6 +248,21 @@ class MergeShortMovesTest(unittest.TestCase):
         lines = ["G90", "G0 X0 Y0", "G1 X0.1 Y0 F1000 S100", "G1 X0.2 Y0 F1000 S50",
                  "G1 X0.3 Y0 Z2 F1000 S50", "G91", "G1 X0.1 Y0 F1000 S50", "G1 X0.1 Y0 F1000 S50"]
         self.assertEqual(merge_short_moves(lines), lines)
+
+    def test_raster_pixels_of_near_equal_power_are_joined(self):
+        lines = ["G0 X0 Y0", "G1 X1 Y0 F6000 S0", "G1 X2 Y0 F6000 S100", "G1 X4 Y0 F6000 S102",
+                 "G1 X5 Y0 F6000 S120", "G1 X6 Y0 F6000 S0", "G0 X6 Y0.1",
+                 "G1 X5 Y0.1 F6000 S50", "G1 X4 Y0.1 F6000 S51"]
+        self.assertEqual(merge_power_steps(lines), [
+            "G0 X0 Y0", "G1 X1 Y0 F6000 S0",
+            "G1 X4.000 Y0.000 F6000 S101.3",       # 1 mm at 100 + 2 mm at 102
+            "G1 X5 Y0 F6000 S120", "G1 X6 Y0 F6000 S0", "G0 X6 Y0.1",
+            "G1 X4.000 Y0.100 F6000 S50.5"])
+
+    def test_power_merge_never_joins_dark_and_lit_or_turns(self):
+        lines = ["G0 X0 Y0", "G1 X1 Y0 F6000 S2", "G1 X2 Y0 F6000 S0",
+                 "G1 X2 Y1 F6000 S0", "G1 X3 Y1 F3000 S0"]
+        self.assertEqual(merge_power_steps(lines), lines)
 
     def test_straight_run_is_joined_up_to_max_length(self):
         lines = ["G0 X0 Y0"] + ["G1 X%.1f Y0 F1000 S100" % (0.5 * i) for i in range(1, 11)]
