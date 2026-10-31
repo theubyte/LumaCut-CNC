@@ -326,7 +326,10 @@ assert 20.0 in hop_z and sorted(set(hop_z)) == [6.0, 9.0, 20.0], hop_z
 # The lowest point was probed last: the Z floor is the thin part.
 assert m.surface_z == 3.0
 # Focus: 3 + 5.5 on the left, 6 + 5.5 on the right.
-cut_z = [float(c.split("Z")[1].split()[0]) for c in w[i1:] if c.startswith(("G0 Z", "G1 X")) and "Z" in c]
+# Up to the final park: only at X0/Y0 the head lowers to the park height.
+i2 = len(w) - 1 - w[::-1].index("G0 X0.000 Y0.000 F9000")
+cut_z = [float(c.split("Z")[1].split()[0]) for c in w[i1:i2] if c.startswith(("G0 Z", "G1 X")) and "Z" in c]
+assert "G0 Z1.000 F600" in w[i2:], w[i2:]
 assert 8.5 in cut_z and 11.5 in cut_z and min(cut_z) >= 5.0, sorted(set(cut_z))
 assert w[-1] != "M112" and "M112" not in w
 assert "G28 X Y R0" in w and w.count("G28 X Y R0") == 1

@@ -457,6 +457,13 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   Board meldet Build Oct 31 2026 21:41:46, kein Update mehr angeboten.
   **Z-Richtung getauscht (31.10., Besitzer):** `INVERT_Z_DIR true` in
   `build_anet.py`; kommt als nächstes Firmware-Release per Knopf.
+  **Anet geflasht (Build 22:15:10).** Halten der Motoren: `M84 S0` beim
+  Verbinden (kein Abschalten im Leerlauf). Stromlos sind sie bei Not-Aus
+  (`M112`), Board-Neustart (Flashen, Port-Öffnen) und Stromausfall; Z an der
+  Zahnstange kann dann fallen. Abhilfe ab 31.10.: **Parken 1 mm über dem Bett**
+  (`park_z_mm`, nur an X0/Y0, Pi hebt vor jeder X/Y-Fahrt auf Fahrhöhe).
+  Offen (Vorschlag, wartet auf Besitzer): Feder/Gummizug am Kopf; Not-Aus am
+  Anet mit `M410` + Relais aus statt `M112`; Port öffnen ohne Reset.
 
 ## 12. Ideen (noch nicht geplant)
 

@@ -77,6 +77,11 @@ PROBE_HOP_MM = 3.0
 # of the Z linear rail. Firmware Z_MAX_POS is the same; the Pi checks it too
 # because a SKR with older firmware still allows 90 mm.
 Z_MAX_MM = 80.0
+# Parked and after homing the head waits this low over the bed in the park
+# corner (owner 31.10.): with the motors unpowered (emergency stop, board
+# reset, power loss) the rack-driven Z can only drop this far.
+PARK_Z_MM = 1.0
+_XY_MOTION = re.compile(r"^G0?[0123](?:\s|$)")
 # Z steps/mm of head v6: rack and GT2 20T pinion (40 mm per turn). Sent on
 # every connect like M203 Z9: an EEPROM from the lead-screw head (380)
 # would otherwise move Z 4.75 times as far as commanded.
@@ -296,6 +301,8 @@ class MarlinTransport:
         self.homing_verified = False
         self.emergency_latched = False
         self.clearance_mm = 20.0
+        self.park_z_mm = PARK_Z_MM     # 0 = stay at the travel height
+        self.parked_low = False        # head down at park_z_mm in the park corner
         # Thickness of the chosen material (Pi workspace), None = not chosen.
         self.material_mm = None
         # Last Z the head is known to be at (machine Z, also commanded job Z),
@@ -373,6 +380,7 @@ class MarlinTransport:
         self.inflight.clear()
         self.state = "Disconnected"
         self.homed = False
+        self.parked_low = False
         self.light_pwm = None          # new firmware may have been flashed
         self.z_homed = False
         self.surface_z = None
@@ -444,6 +452,7 @@ class MarlinTransport:
     def _exchange_locked(self, cmd: str, timeout: float = 15.0):
         if self.serial is None:
             raise ConnectionError("SKR USB nicht verbunden")
+        self._unpark_before_locked(cmd)
         if self.inflight or self.stream_error:
             # Any normal exchange (M114, M5, G30, ...) must not read the
             # ok of a streamed line as its own answer.
@@ -638,6 +647,35 @@ class MarlinTransport:
                 f"Park-Ecke X0..{ex:g} / Y0..{ey:g} mm: dort wird nicht gelasert; "
                 f"Start X{px:.2f} Y{py:.2f}, Ziel X{tx:.2f} Y{ty:.2f}")
 
+    def _unpark_before_locked(self, cmd: str):
+        """Every path to Marlin passes here: the head sitting low in the park
+        corner rises to the travel height before any X/Y move, so it never
+        drags over the bed. Any Z move ends the parked state."""
+        if not self.parked_low or not _XY_MOTION.match(cmd):
+            return
+        coords = {k for k, _ in WORD.findall(cmd)}
+        self.parked_low = False
+        if "Z" in coords or not coords & {"X", "Y"}:
+            return
+        lift = [f"G0 Z{self.travel_z:.3f} F600", "M400"]
+        if not self.absolute_mode:
+            lift = ["G90"] + lift + ["G91"]
+        for line in lift:
+            self._exchange_locked(line, timeout=45)
+
+    def _lower_to_park_locked(self):
+        """At X0/Y0 after homing or parking: down to park_z_mm over the bed
+        (Z0 is where the switch met the bed right there). Never elsewhere."""
+        if not self.park_z_mm or not self.z_homed or self.last_xy_commanded != (0.0, 0.0):
+            return False
+        if not self.absolute_mode:
+            self._exchange_locked("G90", timeout=8)
+            self.absolute_mode = True
+        self._exchange_locked(f"G0 Z{self.park_z_mm:.3f} F600", timeout=45)
+        self._exchange_locked("M400", timeout=45)
+        self.parked_low = True
+        return True
+
     def in_park_corner(self, x: float, y: float) -> bool:
         """True when point X/Y (or a box starting there) lies in the park corner."""
         ex, ey = self.park_corner
@@ -729,6 +767,7 @@ class MarlinTransport:
         return True
 
     def _stream_write_locked(self, normalized: str, timeout: float):
+        self._unpark_before_locked(normalized)
         if self.stream_error:
             self._drain_locked(timeout)
         size = len(normalized) + 1
@@ -1061,6 +1100,8 @@ class MarlinTransport:
             # itself does not lift again (its blind 16 mm could hit the rail top).
             lift = self._lift_before_home_locked(operator_clear)
             final = min(Z_MAX_MM, max(clearance, self.travel_z))
+            if self.park_z_mm:
+                final = self.park_z_mm     # stays low in the park corner (_lower_to_park_locked)
             commands = ["M5 I"] + lift + ["G28 X Y R0", "M400",
                         "G28 Z", "M400", "G91",
                         f"G0 Z{final:.2f} F600", "G90", "M400", "M114"]
@@ -1080,6 +1121,7 @@ class MarlinTransport:
                 self.absolute_mode = True
                 self.last_xy_commanded = (0.0, 0.0)
                 self.reference_lost = ""
+                self._lower_to_park_locked()
                 # Do the switches reach X0/Y0? Only then can they check the reference later.
                 stops = parse_endstops(self._exchange_locked("M119", timeout=8))
                 self.switch_check = bool(stops.get("x_min") and stops.get("y_min"))
@@ -1254,7 +1296,8 @@ class MarlinTransport:
         """LightBurn M2: laser-off, Z retract, then XY park inside keep-out.
 
         Explicit end-of-job only. M5 I is used for intermediate segments,
-        and MUST NOT trigger a park. Never drive Z downward to park.
+        and MUST NOT trigger a park. Z never goes down on the way; only at
+        X0/Y0 it lowers to park_z_mm (_lower_to_park_locked).
         """
         with self.lock:
             if self.owner not in (None, owner):
@@ -1291,6 +1334,8 @@ class MarlinTransport:
             self.last_xy_commanded = (0.0, 0.0)
             # parked at X0/Y0: the switches show whether the job lost steps
             self._check_parked_locked()
+            if self._lower_to_park_locked():
+                result = self._exchange_locked("M114", timeout=8)
             self._light_effect_locked("done")
             if self.job_chime_enabled:
                 self._play_stepper_chime_locked("done")

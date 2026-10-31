@@ -97,6 +97,9 @@ config = {
     # Laser power (%) while tracing the frame, 0 = laser off. A visible dot
     # only: capped at FRAME_POWER_MAX and never slower than FRAME_POWER_MIN_FEED.
     "frame_power_pct": 0.0,
+    # Parked and after homing the head waits this high over the bed in the
+    # park corner, so unpowered motors let it drop at most this far; 0 = off.
+    "park_z_mm": 1.0,
 }
 FRAME_POWER_MAX = 1.0
 FRAME_POWER_MIN_FEED = 1200.0
@@ -123,6 +126,7 @@ config["travels"]["z"] = min(float(config["travels"].get("z", Z_MAX_MM)), Z_MAX_
 machine.homing_verified = bool(config["validated"])
 machine.travel_xy = (float(config["travels"]["x"]), float(config["travels"]["y"]))
 machine.clearance_mm = float(config["z_clearance_mm"])
+machine.park_z_mm = float(config.get("park_z_mm", 1.0) or 0.0)
 machine.probe_tip_offset_mm = float(config["z_switch_tip_offset_mm"])
 machine.focus_gap_mm = float(config["focus_gap_mm"])
 machine.light_pct = int(round(float(config["light_brightness"])))
@@ -420,6 +424,11 @@ def settings():
     if form.get("frame_power_pct", "").strip():
         frame_power = number("frame_power_pct", 0, FRAME_POWER_MAX,
                              "Rahmen-Laserleistung muss 0..%g %% sein" % FRAME_POWER_MAX)
+    park_z = config.get("park_z_mm", 1.0)
+    if form.get("park_z_mm", "").strip():
+        park_z = number("park_z_mm", 0, 20, "Parkhöhe muss 0..20 mm sein (0 = auf Fahrhöhe parken)")
+        if 0 < park_z < 0.5:
+            raise ValueError("Parkhöhe unter 0,5 mm: der Taster läge auf dem Bett")
     # optional: GPIO of the measuring line laser ("" = none)
     if "line_laser_gpio" in form:
         raw = form.get("line_laser_gpio", "").strip()
@@ -432,6 +441,7 @@ def settings():
     with machine.lock:
         machine.probe_xy_offset_mm = (probe_x, probe_y) if probe_x is not None else None
         machine.clearance_mm = clearance
+        machine.park_z_mm = park_z
         machine.probe_tip_offset_mm = offset
         machine.focus_gap_mm = gap
         machine.travel_xy = (travel_x, travel_y)
@@ -444,7 +454,7 @@ def settings():
                   z_clearance_mm=clearance, focus_gap_mm=gap, z_switch_tip_offset_mm=offset,
                   thickness_tolerance_mm=tolerance, machine_name=name,
                   exhaust_auto=exhaust_auto, exhaust_after_s=exhaust_after,
-                  frame_power_pct=frame_power)
+                  frame_power_pct=frame_power, park_z_mm=park_z)
     persist()
     return jsonify(message="Einstellungen dauerhaft auf dem Pi gespeichert",
                    z_clearance_mm=clearance, focus_gap_mm=gap,

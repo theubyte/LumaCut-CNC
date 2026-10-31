@@ -177,6 +177,14 @@ class ZSpeedProfileTests(unittest.TestCase):
 
 
 class USBProtocolTests(unittest.TestCase):
+    # These scripted exchanges predate the low park; ParkLowTests covers it.
+    def setUp(self):
+        from unittest import mock
+        import marlin.transport as transport_module
+        patcher = mock.patch.object(transport_module, "PARK_Z_MM", 0.0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_actual_marlin_m115_and_no_grbl_identity_spoof(self):
         serial=FakeSerial([
             "FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin\n",
@@ -993,6 +1001,66 @@ class USBProtocolTests(unittest.TestCase):
         self.assertTrue(serial.closed)
 
 
+class AnsweringSerial(FakeSerial):
+    """Answers every line with ok, M114 with a fixed position."""
+    def write(self, raw):
+        self.writes.append(raw)
+        if raw.strip() == b"M114":
+            self.replies.append("X:0.00 Y:0.00 Z:1.00 E:0.00\n")
+        self.replies.append("ok\n")
+        return len(raw)
+
+
+class ParkLowTests(unittest.TestCase):
+    """Parked and after homing the head waits 1 mm over the bed at X0/Y0."""
+    def machine(self):
+        ctrl = MarlinTransport("/dev/null")
+        ctrl.serial = AnsweringSerial()
+        ctrl.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC Marlin"
+        ctrl.homed = ctrl.z_homed = True
+        ctrl.job_chime_enabled = False
+        ctrl.position = [120.0, 80.0, 30.0]
+        return ctrl
+
+    def lines(self, ctrl):
+        return [w.decode().strip() for w in ctrl.serial.writes]
+
+    def test_park_lowers_only_at_the_origin(self):
+        ctrl = self.machine()
+        ctrl.park_safezone(owner="web")
+        w = self.lines(ctrl)
+        origin = w.index("G0 X0.000 Y0.000 F9000")
+        self.assertIn("G0 Z1.000 F600", w[origin:])
+        self.assertNotIn("G0 Z1.000 F600", w[:origin])
+        self.assertTrue(ctrl.parked_low)
+
+    def test_xy_move_from_the_low_park_rises_first(self):
+        ctrl = self.machine()
+        ctrl.park_safezone(owner="web")
+        ctrl.serial.writes.clear()
+        with ctrl.lock:
+            ctrl._exchange_locked("G91")
+            ctrl.absolute_mode = False
+            ctrl._exchange_locked("G0 X10.000 F1800")
+        w = self.lines(ctrl)
+        self.assertEqual(w[1:5], ["G90", "G0 Z20.000 F600", "M400", "G91"])
+        self.assertEqual(w[-1], "G0 X10.000 F1800")
+        self.assertFalse(ctrl.parked_low)
+
+    def test_no_low_park_without_z_reference_or_when_off(self):
+        ctrl = self.machine()
+        ctrl.park_z_mm = 0.0
+        ctrl.park_safezone(owner="web")
+        self.assertNotIn("G0 Z1.000 F600", self.lines(ctrl))
+        self.assertFalse(ctrl.parked_low)
+        ctrl = self.machine()
+        with ctrl.lock:
+            ctrl.z_homed = False
+            ctrl.last_xy_commanded = (0.0, 0.0)
+            self.assertFalse(ctrl._lower_to_park_locked())
+        self.assertFalse(ctrl.parked_low)
+
+
 class GatewayFilesTests(unittest.TestCase):
     def test_no_unsafe_marlin_commands_or_unhomed_power(self):
         guard = MarlinLaserGuard()
@@ -1613,7 +1681,11 @@ assert len(probes) == 7 and "G30" not in w, "one measurement per point, no stow/
 stow = w.index("M402")
 order = [w.index("G28 X Y R0"), w.index("G28 Z"), probes[0], probes[-1], stow, w.index("M3 I")]
 assert order == sorted(order), order
-assert w.index("G0 Z20.00 F600") > w.index("G28 Z")
+# After homing the head waits 1 mm over the bed in the park corner and
+# rises to the travel height before the first X/Y move.
+assert w.index("G0 Z1.00 F600") > w.index("G28 Z")
+assert w.index("G0 Z20.000 F600") > w.index("G0 Z1.00 F600")
+assert w.index("G0 Z20.000 F600") < [i for i, c in enumerate(w) if c.startswith("G0 X")][0]
 # Fast: between the points only a low hop (contact + 3 mm), never the 20 mm retract.
 hops = [float(c.split("Z")[1].split()[0]) for c in w[probes[0]:stow] if c.startswith("G0 Z")]
 assert hops and max(hops) < 7.0, hops
