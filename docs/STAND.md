@@ -453,6 +453,8 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   und prüft es (`firmware_release.py`), Weboberfläche meldet „Firmware-Update
   verfügbar“ und flasht auf Knopfdruck (`op=firmware_update_install`). Ein
   Release entsteht nur bei Änderungen unter `firmware/marlin/` (oder manuell).
+  **Am Anet getestet (31.10. 22:53):** Release `marlin-53` per Knopf geflasht,
+  Board meldet Build Oct 31 2026 21:41:46, kein Update mehr angeboten.
 
 ## 12. Ideen (noch nicht geplant)
 
