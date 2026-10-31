@@ -221,7 +221,8 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   trägt die 115200-Baud-Leitung nicht, die Kreise wurden sonst eckig.
 - **Rahmen mit Glimmen (31.10.):** Pi-Einstellung `frame_power_pct` (0..1 %),
   auf Wunsch des Besitzers 0,5 %: die Rahmenkanten laufen mit sichtbarem
-  Laserpunkt (≥ 1200 mm/min), die Anfahrt bleibt dunkel. Auf dunklem
+  Laserpunkt (≥ 1200 mm/min), die Anfahrt bleibt dunkel. `M3 I` ohne
+  abgetastete Oberfläche ist nur dem Besitzer `frame` erlaubt. Auf dunklem
   Kunststoff vorher testen (S3 hat am 29.10. ein Gehäuse angeschmolzen).
   **Am 31.10. an der Maschine geprüft:** Verbinden, Referenzfahrt (sauber
   hinten rechts), Fahrt auf X100/Y100 (Richtung stimmt). **Laser:** am

@@ -191,6 +191,18 @@ class GrblBridgeTest(unittest.TestCase):
         self.assertEqual(machine.controller_motion(), (1000.0, 100.0))
         # deeper streaming window than the SKR's 4 lines (smooth arcs)
         self.assertEqual(machine.stream_window, 16)
+        # no surface probed: a job may not switch the laser on, the frame's glimmer may
+        machine.surface_z = None
+        with self.assertRaises(RuntimeError):
+            machine.command("M3 I", owner="job")
+        machine.owner = "frame"
+        machine.focused_this_job = True      # as web._frame_worker sets it
+        machine.command("G0 X100 Y100", owner="frame")
+        machine.command("M3 I", owner="frame")
+        machine.command("G1 X100 Y60 F1200 S1.27", owner="frame")
+        machine.command("M5 I", owner="frame")
+        self.assertIn("M4 S0", grbl.written)
+        self.assertIn("G1 X-100.000 Y-60.000 F1200 S5", grbl.written)
 
 
 class MergeShortMovesTest(unittest.TestCase):

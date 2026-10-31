@@ -776,7 +776,8 @@ class MarlinTransport:
             return "", True
         if normalized.startswith(("G0 ", "G1 ")) and "Z" in normalized and self.surface_z is None:
             raise RuntimeError("Keine Werkstückhöhe bekannt; keine Z-Fahrt über LightBurn freigeben")
-        if normalized == "M3 I" and self.surface_z is None:
+        # The frame's glimmer (web.py, at most 1 %) needs no focus height.
+        if normalized == "M3 I" and self.surface_z is None and owner != "frame":
             raise RuntimeError("Werkstückkontakt fehlt: Z-Taster auf Material referenzieren")
         motion = re.match(r"^G0?[0123](?:\s|$)", normalized) is not None
         if (motion or normalized == "M3 I") and not self.homed:
