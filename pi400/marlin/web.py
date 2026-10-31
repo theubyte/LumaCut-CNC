@@ -31,6 +31,7 @@ from .workspace import WorkspaceStore, create_blueprint as workspace_api
 from .projects import ProjectStore, create_blueprint as projects_api
 from .line_laser import LineLaser
 from .app_update import AppUpdates
+from .firmware_release import FirmwareReleases
 from .grbl_bridge import merge_power_steps, merge_short_moves, open_controller
 
 ROOT = Path(__file__).resolve().parent
@@ -40,7 +41,7 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # /api/status "features": clients switch on Pi-side behaviour by these names.
 # autorun_mesh: op=autorun probes the motif areas and compensates the focus
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
-FEATURES = ("autorun_mesh", "materials", "app_update", "camera_settings", "workspace",
+FEATURES = ("autorun_mesh", "materials", "app_update", "firmware_release", "camera_settings", "workspace",
             "report", "backup", "exhaust_auto", "bed_map", "material_calibration", "projects")
 JOBS = DATA / "jobs"
 # Camera pictures taken inside a job while the laser runs (measuring spot/line).
@@ -326,7 +327,8 @@ def status():
                   home_needs_confirm=(not machine.z_homed and machine.last_known_z is None),
                   origin=_origin_status(),
                   queue=_queue_status(),
-                  camera={"device": CAMERA, "available": os.path.exists(CAMERA)})
+                  camera={"device": CAMERA, "available": os.path.exists(CAMERA)},
+                  firmware_release=firmware_releases.offer(result.get("identity") or ""))
     return jsonify(result)
 
 
@@ -517,13 +519,17 @@ def commission():
 @app.post("/api/firmware")
 def firmware_upload():
     """Flash a new SKR firmware.bin through USB (no SD card handling)."""
-    from .firmware_flash import MAX_IMAGE, validate_image
+    from .firmware_flash import MAX_IMAGE
     incoming = request.files.get("file")
     if incoming is None or not incoming.filename:
         raise ValueError("firmware.bin auswählen")
     if incoming.filename.lower().endswith(".hex"):
         return _flash_anet(incoming)
-    image = incoming.read(MAX_IMAGE + 1)
+    return _start_skr_flash(incoming.read(MAX_IMAGE + 1))
+
+
+def _start_skr_flash(image):
+    from .firmware_flash import validate_image
     info = validate_image(image)
     local_owner()
     if job_lock.locked():
@@ -540,11 +546,14 @@ def firmware_upload():
 def _flash_anet(incoming):
     """firmware.hex for the Anet stand-in board: flashed through its boot
     loader over USB (avr_flash.py), also over a foreign firmware."""
-    from .avr_flash import validate_hex
     raw = incoming.read(1024 * 1024 + 1)
     if len(raw) > 1024 * 1024:
         raise ValueError("firmware.hex zu groß")
-    text = raw.decode("ascii", errors="replace")
+    return _start_anet_flash(raw.decode("ascii", errors="replace"))
+
+
+def _start_anet_flash(text):
+    from .avr_flash import validate_hex
     info = validate_hex(text)
     # Not local_owner(): the first flash replaces a foreign firmware that
     # the gateway never connects to.
@@ -630,6 +639,28 @@ def action():
         text = ("App-Version %s auf dem Pi bereit" % info["version_name"]) if info["available"] else \
             "Noch keine App-Version auf dem Pi"
         return jsonify(message=text, **info)
+    if op == "firmware_update_check":
+        # Network only, never touches the machine: allowed at any time.
+        firmware_releases.check()
+        info = firmware_releases.offer(machine.status()["identity"])
+        if info["error"]:
+            return jsonify({**info, "error": "Firmware-Update: " + info["error"]}), 503
+        text = ("Firmware-Update für %s bereit (Build %s)" % (info["board_name"], info["release_build"])
+                if info["update_available"] else
+                "Firmware ist aktuell" if info["board"] else "Kein LumaCut-Board verbunden")
+        return jsonify(message=text, **info)
+    if op == "firmware_update_install":
+        # The owner pressed the button in the web UI: flash the stored
+        # release image onto the connected board, same checks as an upload.
+        info = firmware_releases.offer(machine.status()["identity"])
+        if not info["update_available"]:
+            raise RuntimeError("Kein Firmware-Update für das verbundene Board")
+        image = firmware_releases.image(info["board"])
+        if image is None:
+            raise RuntimeError("Firmware-Datei auf dem Pi fehlt – erneut prüfen")
+        if info["board"] == "anet":
+            return _start_anet_flash(image.decode("ascii"))
+        return _start_skr_flash(image)
     if op == "light":
         # Dimmable LED strip on PC8: on=1|0, optional brightness 1..100 %,
         # optional effects=1|0. Without "on" only the settings change.
@@ -949,6 +980,7 @@ def _optional_point(form):
 
 
 app_updates = AppUpdates(DATA)
+firmware_releases = FirmwareReleases(DATA)
 
 
 @app.get("/api/app/android")
@@ -2293,6 +2325,9 @@ def main():
     threading.Thread(target=app_updates.run_forever,
                      args=(lambda: running, lambda: job["state"] in ("homing", "probing", "running")),
                      daemon=True, name="android-app-updates").start()
+    threading.Thread(target=firmware_releases.run_forever,
+                     args=(lambda: running, lambda: job["state"] in ("homing", "probing", "running")),
+                     daemon=True, name="firmware-updates").start()
     threading.Thread(target=serve_tcp,
                      args=(machine,"0.0.0.0",TCP,lambda: running),
                      daemon=True, name="marlin-lightburn-server").start()

@@ -21,6 +21,9 @@ jobs:
   firmware:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    # Release the images so the Pi offers them as an update (owner request 2026-10-31).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,3 +62,37 @@ jobs:
             firmware/marlin/dist-anet/manifest.json
           if-no-files-found: error
           retention-days: 14
+      # Never --latest: releases/latest stays the Android app. The Pi looks
+      # for the newest marlin-* release (pi400/marlin/firmware_release.py),
+      # checks hash, image and build stamp, and flashes only on the owner's
+      # button press in the web UI.
+      - name: Publish firmware release for the Pi
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: pi400
+        run: |
+          set -euo pipefail
+          N=${{ github.run_number }}
+          cp firmware/marlin/dist/firmware.bin LumaCut-Marlin-SKR.bin
+          cp firmware/marlin/dist-anet/firmware.hex LumaCut-Marlin-Anet.hex
+          python3 - "$N" <<'PY'
+          import hashlib, json, os, sys
+          from marlin.avr_flash import validate_hex
+          from marlin.firmware_flash import validate_image
+          boards = {}
+          for board, asset, check in (("skr", "LumaCut-Marlin-SKR.bin", lambda d: validate_image(d)),
+                                      ("anet", "LumaCut-Marlin-Anet.hex", lambda d: validate_hex(d.decode("ascii")))):
+              data = open(asset, "rb").read()
+              build = check(data)["build"]
+              assert build, asset + ": no build stamp"
+              boards[board] = {"asset": asset, "build": build, "size": len(data),
+                               "sha256": hashlib.sha256(data).hexdigest()}
+          json.dump({"number": int(sys.argv[1]), "commit": os.environ["GITHUB_SHA"], "boards": boards},
+                    open("LumaCut-Marlin.json", "w"))
+          PY
+          cat LumaCut-Marlin.json
+          gh release create "marlin-$N" LumaCut-Marlin.json LumaCut-Marlin-SKR.bin LumaCut-Marlin-Anet.hex \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" --latest=false \
+            --title "LumaCut Marlin Firmware $N" \
+            --notes "Firmware-Build $N (${{ github.sha }}) für SKR Mini MZ und Anet V1.7. Der Pi meldet das Update in der Weboberfläche; geflasht wird erst per Knopfdruck."

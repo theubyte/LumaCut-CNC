@@ -213,6 +213,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `emergency_latched` | bool | M112-Riegel aktiv: alles außer `estop`/`estop_reset` wird abgelehnt |
 | `firmware_upload_supported` | bool | Firmware meldet `Cap:BINARY_FILE_TRANSFER:1` (Voraussetzung für `/api/firmware` mit `.bin`) |
 | `firmware_avr_port` | string/null | CH340-Port (Anet-Board oder Atomstack) für `/api/firmware` mit `firmware.hex`; `null` = kein CH340 |
+| `firmware_release` | object | Firmware-Update von GitHub (§4.16): `number`, `commit`, `board` (`skr`/`anet`/null), `board_name`, `running_build` (aus M115), `release_build`, `update_available`, `checked_at`, `error` |
 | `firmware_update` | object | `{state, progress, message}`; `state` ∈ `idle`, `uploading`, `rebooting`, `done`, `error`; `progress` 0..100 |
 | `homing_verified` | bool | = Mechanik-Freigabe (`config.validated`) |
 | `reference` | object | `{switch_check, lost}`: Referenzprüfung über die X/Y-Endschalter. `switch_check` `true` = nach dem Referenzieren waren beide Schalter auf X0/Y0 gedrückt, die Prüfung ist aktiv (`false` = Schalter erreichen X0/Y0 nicht, Prüfung aus; `null` = noch nicht referenziert). Steht der Kopf laut Pi auf X0/Y0 (nach Referenzieren/Parken) und ein Schalter ist offen – geprüft nach dem Parken, alle 2 s im Leerlauf und vor `start`/`autorun`/`frame` –, fällt `homed` auf `false` und `lost` nennt den Grund (Kopf von Hand bewegt oder Schritte verloren); `autorun` referenziert dann zuerst. Nach jedem Referenzieren wieder `""`. Beim Verbinden sendet der Pi `M84 S0`: die Motoren halten auch im Leerlauf. |
@@ -1026,6 +1027,37 @@ sofort und lädt eine neuere APK.
 | Fehler | 503 `{"error": "App-Update: <Grund>", …}` (z. B. kein Internet, Prüfsumme falsch); eine schon vorhandene APK bleibt erhalten |
 
 ---
+
+### 4.16 Firmware-Updates von GitHub
+
+Die Firmware-CI (`.github/workflows/marlin.yml`) veröffentlicht jeden Build auf `main` als
+Release `marlin-<Nr.>` (nie „latest“, das bleibt die App) mit `LumaCut-Marlin.json`,
+`LumaCut-Marlin-SKR.bin` und `LumaCut-Marlin-Anet.hex`. Der Pi (`firmware_release.py`) holt das
+neueste beim Start, alle 6 Stunden (nicht während eines Auftrags) und auf `op=firmware_update_check`,
+prüft Größe, SHA-256, das Image selbst (wie beim Hochladen) und den Build-Stempel und behält je Board
+ein Image. `update_available` in `firmware_release` ist wahr, wenn das verbundene LumaCut-Board
+(M115 `MACHINE_TYPE`) einen älteren Build meldet. Die Grbl-Brücke und fremde Firmware bekommen
+kein Angebot. Geflasht wird nur per Knopf (`op=firmware_update_install`).
+
+#### `op=firmware_update_check`
+
+Keine Parameter, **keine** Vorbedingung (nur Netzwerk).
+
+| | |
+| --- | --- |
+| Erfolg | 200 `{"message": "Firmware-Update für Anet V1.7 bereit (Build …)" \| "Firmware ist aktuell" \| "Kein LumaCut-Board verbunden", …Felder wie `firmware_release`}` |
+| Fehler | 503 `{"error": "Firmware-Update: <Grund>", …}`; ein schon geladenes Image bleibt |
+
+#### `op=firmware_update_install`
+
+Keine Parameter. Flasht das gespeicherte Image auf das verbundene Board, mit denselben Prüfungen wie
+`POST /api/firmware` (§4.11): Steuerung frei, kein Auftrag; SKR braucht Binary-Transfer. Die
+SHA-256 wird vor dem Flashen erneut geprüft. Fortschritt in `firmware_update`.
+
+| | |
+| --- | --- |
+| Erfolg | 200 `{"message": "Anet-Firmware wird geflasht …"}` bzw. SKR-Meldung |
+| Fehler | 409/400 `{"error": "Kein Firmware-Update für das verbundene Board"}`, „Firmware-Datei auf dem Pi fehlt“, Belegt-/Auftragsfehler wie §4.11 |
 
 ### 4.15 Arbeitsstand (Material, Projekt, Scan)
 

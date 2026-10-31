@@ -449,6 +449,10 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   ISP-GND, 10 kΩ Pull-down. Netzteil ≥ 8–10 A. GY-521 (MPU-6050) am Pi-I2C
   geplant (Resonanzmessung, später Stillstands-Wächter); I2C ist auf dem Pi
   noch aus (`sudo raspi-config nonint do_i2c 0` macht der Besitzer).
+  **Firmware-Update per Knopf (31.10.):** CI → Release `marlin-<Nr.>`, Pi lädt
+  und prüft es (`firmware_release.py`), Weboberfläche meldet „Firmware-Update
+  verfügbar“ und flasht auf Knopfdruck (`op=firmware_update_install`). Ein
+  Release entsteht nur bei Änderungen unter `firmware/marlin/` (oder manuell).
 
 ## 12. Ideen (noch nicht geplant)
 
