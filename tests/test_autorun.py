@@ -509,7 +509,7 @@ sim, m = connect(lambda x, y: 3.0)
 web.WORKSPACE.put_state({"probe_points": [[100.0, 120.0], [180.0, 60.0]]}, None)
 auto = web.auto_plan(["G0 X100 Y100", "M3 I", "G1 X150 Y100 F1500 S80", "M5 I"])
 pts = [(g.x0, g.y0) for g in auto["grids"]]
-assert pts == [(290.0, 150.0), (210.0, 90.0)], pts          # work mm -> machine mm, X mirrored
+assert pts == [(290.0, 120.0), (210.0, 60.0)], pts          # work mm -> machine mm: X = travel - x, Y = y
 assert auto["points"] == 2, auto["points"]
 web.WORKSPACE.put_state({"probe_points": []}, None)
 assert len(web.auto_plan(["G0 X100 Y100", "M3 I", "G1 X150 Y100 F1500 S80", "M5 I"])["grids"]) >= 1

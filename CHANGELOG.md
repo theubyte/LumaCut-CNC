@@ -4,6 +4,8 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-10-31
 
+- **Android-App auf die neue Arbeitsfläche:** Die App liest Fahrwege und Park-Ecke vom Pi (`config.travels`, `park_corner_mm`) und zeigt die ganze Fläche (370 × 360) mit der schraffierten Park-Ecke oben rechts. Umrechnung jetzt `Maschine X = Fahrweg − x`, `Maschine Y = y` (vorher `390 − x` / `30 + y`); der Auftragsbau lehnt Elemente in der Park-Ecke ab. Alte Projekte und Scans liegen dadurch versetzt – neu ausrichten bzw. neu scannen. Der Pi rechnet angetippte Abtastpunkte gleich um.
+
 - **Arbeitsfläche Kopf v6:** Fahrwege 370 × 360 mm (gemessen, Pi-Einstellung `travel_x_mm`/`travel_y_mm`). Die 30-mm-L-Zone ist weg; nur die Park-Ecke X0–78 / Y0–35 (Kopf + 1 cm) bleibt frei, überall sonst wird gelasert. Pi-Prüfungen (Schnitt, Platzierung, Ursprung, Materialtest) und Weboberfläche angepasst; Status `park_corner_mm` statt `safe_zone_xy_mm`. Die Android-App folgt.
 
 - **Notbetrieb mit dem Atomstack-Board (Grbl):** Das SKR ist defekt. Der Pi steuert jetzt auch das Original-Board der A5 Pro (ESP32, Grbl ab Werk) über eine Brücke (`grbl_bridge.py`), die sich wie LumaCut-Marlin verhält: Laser, Fahren, Referenzieren, Not-Aus gehen weiter über LumaCut (App, Web). Ohne Z-Treiber ist Z fest von Hand eingestellt; Z-Fahrten und Abtasten werden nur gespielt. Ist das SKR wieder dran, nimmt der Pi es zuerst.

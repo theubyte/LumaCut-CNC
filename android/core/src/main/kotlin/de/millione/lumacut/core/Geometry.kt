@@ -7,32 +7,55 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-/** Machine bed in mm. Origin top-left as seen on the tablet, Y grows downwards. */
+/**
+ * Machine travel in mm (machine coordinates, 0/0 = limit switches). The Pi
+ * keeps the measured values (config "travels", "park_corner_mm") and the app
+ * takes them with every status ([configure]); the defaults are head v6 as
+ * measured on 31.10.2026.
+ */
 object Bed {
-    const val WIDTH = 390.0
-    const val HEIGHT = 370.0
-    /** L-shaped home band: X < 30 or Y < 30 stays free of material and cuts. */
-    const val SAFE = 30.0
+    @Volatile private var width = 370.0
+    @Volatile private var height = 360.0
+    @Volatile private var parkX = 78.0
+    @Volatile private var parkY = 35.0
+    val WIDTH get() = width
+    val HEIGHT get() = height
+    /** Park corner at machine 0/0 (head + 10 mm): never burn inside it. */
+    val PARK_X get() = parkX
+    val PARK_Y get() = parkY
 
-    fun inWorkArea(x: Double, y: Double) = x >= SAFE && y >= SAFE && x <= WIDTH && y <= HEIGHT
+    fun configure(w: Double?, h: Double?, px: Double?, py: Double?) {
+        if (w != null && w in 100.0..600.0) width = w
+        if (h != null && h in 100.0..600.0) height = h
+        if (px != null && px in 0.0..200.0) parkX = px
+        if (py != null && py in 0.0..200.0) parkY = py
+    }
+
+    fun inPark(x: Double, y: Double) = x < PARK_X && y < PARK_Y
+    /** A machine box (min corner) reaching into the park corner. */
+    fun touchesPark(b: Box) = b.minX < PARK_X && b.minY < PARK_Y
+    fun inWorkArea(x: Double, y: Double) = x >= 0.0 && y >= 0.0 && x <= WIDTH && y <= HEIGHT && !inPark(x, y)
 }
 
 /**
- * The area the operator works with: 0..360 x 0..340 mm, origin top-left,
- * Y down, as seen from the door. The 30 mm safe zone (top and right on screen)
- * is not part of it and never shown; machine_x = 390 - x, machine_y = 30 + y.
- * The only conversion to machine millimetres is here (same as the Windows app,
- * software/lumacut-studio-native/src/lumacut_canvas/workarea.py).
+ * The area the operator works with: the whole machine travel, origin
+ * top-left, Y down, as seen from the door; machine_x = WIDTH - x,
+ * machine_y = y. The park corner sits top right on screen ([park]).
+ * The only conversion to machine millimetres is here.
  */
 object Work {
-    const val WIDTH = 360.0
-    const val HEIGHT = 340.0
+    val WIDTH get() = Bed.WIDTH
+    val HEIGHT get() = Bed.HEIGHT
     private const val EPS = 1e-6
 
     /** Seen from the door the limit switches (machine 0/0) are at the back right: a 180° turn, no mirroring. */
-    fun toMachine(p: Pt) = Pt(Bed.WIDTH - p.x, Bed.SAFE + p.y)
+    fun toMachine(p: Pt) = Pt(Bed.WIDTH - p.x, p.y)
     fun fromMachine(p: Pt) = fromMachine(p.x, p.y)
-    fun fromMachine(x: Double, y: Double) = Pt(Bed.WIDTH - x, y - Bed.SAFE)
+    fun fromMachine(x: Double, y: Double) = Pt(Bed.WIDTH - x, y)
+    /** The park corner in work mm (top right on screen). */
+    val park get() = Box(WIDTH - Bed.PARK_X, 0.0, WIDTH, Bed.PARK_Y)
+    /** A work-mm box overlapping the park corner (conservative, like the Pi's check). */
+    fun touchesPark(b: Box) = park.let { k -> b.maxX > k.minX + EPS && b.minY < k.maxY - EPS }
     fun contains(p: Pt) = p.x >= -EPS && p.y >= -EPS && p.x <= WIDTH + EPS && p.y <= HEIGHT + EPS
     fun contains(b: Box) = b.minX >= -EPS && b.minY >= -EPS && b.maxX <= WIDTH + EPS && b.maxY <= HEIGHT + EPS
     val center get() = Pt(WIDTH / 2, HEIGHT / 2)

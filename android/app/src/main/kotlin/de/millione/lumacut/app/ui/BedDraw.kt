@@ -64,6 +64,20 @@ fun DrawScope.drawWorkArea(m: WorkMapper, showGrid: Boolean = true) {
             v += step
         }
     }
+    // Park corner (top right): the head homes and parks there, nothing is burnt.
+    val park = Work.park
+    val pTop = m.at(Pt(park.minX, park.minY)); val pBot = m.at(Pt(park.maxX, park.maxY))
+    val pSize = Size(pBot.x - pTop.x, pBot.y - pTop.y)
+    drawRect(Lc.warn.copy(alpha = .12f), pTop, pSize)
+    var d = 0f
+    val hatch = 8.dp.toPx()
+    while (d < pSize.width + pSize.height) {
+        val a = Offset(pTop.x + minOf(d, pSize.width), pTop.y + maxOf(0f, d - pSize.width))
+        val b = Offset(pTop.x + maxOf(0f, d - pSize.height), pTop.y + minOf(d, pSize.height))
+        drawLine(Lc.warn.copy(alpha = .45f), a, b, 1f)
+        d += hatch
+    }
+    drawRect(Lc.warn.copy(alpha = .7f), pTop, pSize, style = Stroke(1f))
     drawRect(Lc.line2, topLeft, size, style = Stroke(1.5f))
     // In dp, not pixels: 26 px were huge on an mdpi tablet and tiny on an xxhdpi phone.
     labelPaint.textSize = 12.dp.toPx()

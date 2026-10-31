@@ -131,18 +131,28 @@ class MarlinWriterTest {
     private fun doc(vararg elements: Element, layers: List<Layer> = Document.defaultLayers()) =
         Document(title = "Test", layers = layers, elements = elements.toList())
 
-    @Test fun `shape starting in the work-area corner still begins with a rapid`() {
-        // A rectangle dragged from outside is clamped to work (0,0). The head
+    @Test fun `shape starting at the work-area edge still begins with a rapid`() {
+        // A rectangle dragged from outside is clamped to work x 0. The head
         // position is unknown, so the first burn must not start from wherever it is.
         val layers = Document.defaultLayers()
         val line = layers.first { it.mode == LayerMode.LINE }
-        val rect = Element(layerId = line.id, kind = "Rechteck", paths = listOf(Shapes.rect(360.0, 340.0)))
+        val rect = Element(layerId = line.id, kind = "Rechteck", transform = Transform(0.0, 40.0), paths = listOf(Shapes.rect(360.0, 300.0)))
         val gcode = MarlinWriter().write(doc(rect, layers = layers))
         val moves = gcode.lines().filter { it.startsWith("G0 ") || it.startsWith("G1 ") }
-        assertTrue(moves.first().startsWith("G0 X390.000 Y30.000"), moves.first())
+        assertTrue(moves.first().startsWith("G0 X370.000 Y40.000"), moves.first())
         val tp = Toolpath.parse(gcode)
         assertTrue(tp.stats.warnings.isEmpty(), tp.stats.warnings.toString())
-        assertEquals(Box(30.0, 30.0, 390.0, 370.0), tp.bounds)
+        assertEquals(Box(10.0, 40.0, 370.0, 340.0), tp.bounds)
+    }
+
+    @Test fun `nothing is burnt in the park corner`() {
+        val layers = Document.defaultLayers()
+        val line = layers.first { it.mode == LayerMode.LINE }
+        // top right on screen = machine 0/0 (limit switches)
+        val inCorner = Element(layerId = line.id, kind = "Rechteck", transform = Transform(Work.WIDTH - 40.0, 5.0), paths = listOf(Shapes.rect(20.0, 10.0)))
+        assertFailsWith<JobBuildException> { MarlinWriter().write(doc(inCorner, layers = layers)) }
+        val below = inCorner.copy(transform = Transform(Work.WIDTH - 40.0, 40.0))
+        assertPiCompatible(MarlinWriter().write(doc(below, layers = layers)))
     }
 
     private fun rect(layer: Layer, x: Double, y: Double, w: Double = 20.0, h: Double = 10.0) =
@@ -158,11 +168,11 @@ class MarlinWriterTest {
         assertEquals(1, gcode.lines().count { it == "M3 I" }, "genau ein M3 I")
     }
 
-    /** No XY position of the job — burning or not — may lie in the 30 mm safe zone. */
-    private fun assertNeverInSafeZone(gcode: String) {
+    /** No XY position of the job — burning or not — may leave the machine travel. */
+    private fun assertInsideTravel(gcode: String) {
         for (m in Regex("""X([\d.]+) Y([\d.]+)""").findAll(gcode)) {
             val x = m.groupValues[1].toDouble(); val y = m.groupValues[2].toDouble()
-            assertTrue(x >= Bed.SAFE - 1e-9 && y >= Bed.SAFE - 1e-9 && x <= Bed.WIDTH && y <= Bed.HEIGHT, "Safezone berührt: ${m.value}")
+            assertTrue(x >= -1e-9 && y >= -1e-9 && x <= Bed.WIDTH && y <= Bed.HEIGHT, "außerhalb des Fahrwegs: ${m.value}")
         }
     }
 
@@ -174,7 +184,7 @@ class MarlinWriterTest {
         val t = Toolpath.parse(g)
         assertEquals(2 * 60.0, t.stats.cutMm, 1e-6)       // 2 passes
         assertEquals(217, t.stats.maxPower)                // 85 % of 255
-        assertEquals(Box(270.0, 130.0, 290.0, 140.0), t.bounds)   // x: 390 - 120..100, y: 30 + 100..110
+        assertEquals(Box(250.0, 100.0, 270.0, 110.0), t.bounds)   // x: 370 - 120..100, y: 100..110
     }
 
     @Test fun `fill overscan stays inside the work area`() {
@@ -182,10 +192,10 @@ class MarlinWriterTest {
         val fill = layers[0].copy(intervalMm = 1.0, overscanMm = 5.0)
         val g = MarlinWriter().write(doc(rect(fill, 0.0, 0.0, 20.0, 10.0), rect(fill, 340.0, 330.0, 20.0, 10.0), layers = listOf(fill)))
         assertPiCompatible(g)
-        assertNeverInSafeZone(g)
+        assertInsideTravel(g)
         val t = Toolpath.parse(g)
         assertEquals(2 * 10 * 20.0, t.stats.cutMm, 1e-6)
-        assertTrue("G0 X390.000 Y30.500" in g, "run-up clipped at the work area edge (work x 0 = machine X 390)")
+        assertTrue("G0 X370.000 Y0.500" in g, "run-up clipped at the work area edge (work x 0 = machine X 370)")
     }
 
     @Test fun `focus drops between passes and returns afterwards`() {
@@ -306,8 +316,9 @@ class GeometryTest {
 
 class WorkCoordinatesTest {
     @Test fun `conversion is a 180 degree turn and round trips`() {
-        assertEquals(Pt(390.0, 30.0), Work.toMachine(Pt(0.0, 0.0)))        // screen top-left = machine corner next to the safe zone
-        assertEquals(Pt(30.0, 370.0), Work.toMachine(Pt(Work.WIDTH, Work.HEIGHT)))
+        assertEquals(Pt(370.0, 0.0), Work.toMachine(Pt(0.0, 0.0)))         // screen top-left = machine X end, Y 0
+        assertEquals(Pt(0.0, 360.0), Work.toMachine(Pt(Work.WIDTH, Work.HEIGHT)))
+        assertEquals(Box(292.0, 0.0, 370.0, 35.0), Work.park)              // park corner top right on screen
         val p = Pt(123.4, 56.7)
         Work.fromMachine(Work.toMachine(p)).let { assertEquals(p.x, it.x, 1e-9); assertEquals(p.y, it.y, 1e-9) }
         assertTrue(Work.toMachine(Pt(0.0, 0.0)).let { Bed.inWorkArea(it.x, it.y) })

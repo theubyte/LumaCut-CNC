@@ -32,11 +32,13 @@ Der Besitzer steht an der Tür, die **Endschalter-Ecke (Maschine X0/Y0) ist von 
 hinten rechts**. X+ fährt nach links, Y+ zur Tür. Alle Programme zeigen die Maschine so,
 wie man sie von der Tür aus sieht:
 
-- Bildschirm/Arbeitsbereich: 360 × 340 mm, Nullpunkt **oben links**, x nach rechts, y nach unten.
-- Die 30-mm-Safezone (Maschine X < 30 oder Y < 30) liegt damit **oben und rechts** und ist unsichtbar.
+- **Seit 31.10.2026 (Kopf v6):** Bildschirm/Arbeitsbereich = ganzer Fahrweg (370 × 360 mm,
+  Pi `config.travels`), Nullpunkt **oben links**, x nach rechts, y nach unten.
+- Die Park-Ecke (Maschine X < 78 und Y < 35, Pi `park_corner_mm`) liegt **oben rechts**;
+  dort wird nicht gelasert. (Bis 30.10.: 30-mm-L-Zone, 360 × 340, `390 − x` / `30 + y`.)
 - **Umrechnung (einzige Stelle je Programm):**
-  - `maschine_x = 390 − x`, `maschine_y = 30 + y`
-  - `x = 390 − maschine_x`, `y = maschine_y − 30`
+  - `maschine_x = W − x`, `maschine_y = y` (W = Fahrweg X)
+  - `x = W − maschine_x`, `y = maschine_y`
 - Das ist eine Drehung um 180° gegenüber der Standardansicht, **keine Spiegelung**: Text
   wird lesbar gelasert. Die bisherige Umrechnung `maschine = x + 30` hat in X gespiegelt
   und muss in beiden Apps ersetzt werden (Android `Work.toMachine/fromMachine`, Windows

@@ -87,8 +87,8 @@ class Toolpath(val segments: List<Segment>, val bounds: Box?, val stats: Toolpat
             if (unpowered > 0) warnings += "$unpowered Laserfahrten nach Leerfahrt ohne S-Wert: Marlin lasert dort mit 0"
             val b = box
             if (b == null) warnings += "Keine Laserbewegung gefunden"
-            else if (b.minX < Bed.SAFE || b.minY < Bed.SAFE || b.maxX > Bed.WIDTH || b.maxY > Bed.HEIGHT)
-                warnings += "Motiv berührt die 30-mm-Safezone oder liegt außerhalb der Arbeitsfläche"
+            else if (b.minX < 0.0 || b.minY < 0.0 || b.maxX > Bed.WIDTH || b.maxY > Bed.HEIGHT || Bed.touchesPark(b))
+                warnings += "Motiv berührt die Park-Ecke oder liegt außerhalb der Arbeitsfläche"
             return Toolpath(segments, b, ToolpathStats(cutMm, travelMm, seconds, maxPower, warnings), lines.size)
         }
 

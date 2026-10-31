@@ -159,15 +159,17 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
 **Koordinaten** (Details [ZUSAMMENARBEIT_CLAUDE_GROK.md](ZUSAMMENARBEIT_CLAUDE_GROK.md) §2)
 - Maschine 0/0 = Endschalter-Ecke, von der Tür aus **hinten rechts**. Z0 =
   Taster schaltet am Referenzpunkt; positives Z = weg vom Material.
-- App-Arbeitsfläche: Nullpunkt oben links wie von der Tür gesehen;
-  `Maschine X = 390 − x`, `Maschine Y = y + 30`.
+- App-Arbeitsfläche (seit 31.10.): die ganze Maschine, Nullpunkt oben links
+  wie von der Tür gesehen; `Maschine X = Fahrweg X − x`, `Maschine Y = y`
+  (vorher `390 − x` / `y + 30`). Fahrwege und Park-Ecke liest die App vom Pi.
 - **Seit 31.10. (Pi):** Fahrwege **X 370 / Y 360** (Besitzer mit den
   Steuerkreuzen bis an die Enden gefahren, Pi-Einstellung `travel_x_mm`/
   `travel_y_mm`). Statt der 30-mm-L-Zone gilt nur noch die **Park-Ecke
   X0–78 / Y0–35** (Kopf v6 laut `build_kopf_v6.py`: 67 mm in +X, 24 mm in +Y
   vom Strahl, +10 mm); überall sonst darf gelasert werden. Weboberfläche
-  zeigt das so. **Offen:** Android-App rechnet noch mit der alten Fläche
-  (Arbeits-0/0 = Maschine X390/Y30, L-Zone); Bettkarte und Abtastraster
+  zeigt das so, die Android-App ab 31.10. auch (Park-Ecke schraffiert oben
+  rechts). Alte Projekte und Scans liegen dadurch um 20 mm in X / 30 mm in Y
+  versetzt: neu ausrichten bzw. neu scannen. Bettkarte und Abtastraster
   behalten vorerst den 30-mm-Rand.
 
 **Kalibrier- und Messwerte (noch für den alten Kopf!)**

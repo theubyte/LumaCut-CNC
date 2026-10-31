@@ -1898,8 +1898,8 @@ function drawBed(s){
   bedKey=key;bedBase=[-16,-22,W+52,H+46];setVB(bedBase.slice());
   $("bedFlip").setAttribute("transform","translate("+W+",0) scale(-1,1)");
   for(const id of ["bedArea","bedGrid","bedGrid50"]){$(id).setAttribute("width",W);$(id).setAttribute("height",H)}
-  // Scanbild der App: noch deren alte Fläche (Maschine X30..390 gespiegelt, Y30..370).
-  const sc=$("bedScan");sc.setAttribute("x",0);sc.setAttribute("y",30);sc.setAttribute("width",360);sc.setAttribute("height",340);
+  // Scanbild der App: ganze Arbeitsfläche (App-x = W − Maschinen-X, App-y = Maschinen-Y).
+  const sc=$("bedScan");sc.setAttribute("x",0);sc.setAttribute("y",0);sc.setAttribute("width",W);sc.setAttribute("height",H);
   // Park-Ecke X<cx und Y<cy in Maschinen-mm → Rechteck oben rechts.
   $("bedSafe").setAttribute("d","M0 0H"+cx+"V"+cy+"H0Z");
   $("bedInfo").textContent="Arbeitsfläche X0–"+W+" · Y0–"+H+" mm · Park-Ecke "+cx+" × "+cy+" mm oben rechts";

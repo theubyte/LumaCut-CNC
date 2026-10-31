@@ -100,7 +100,7 @@ object Scan {
         require(stepX > 1 && stepY > 1) { "Kamera-Kalibrierung unplausibel (Bildausschnitt zu klein)" }
         val cols = max(1, ceil((a.width - u.width) / stepX).toInt() + 1)
         val rows = max(1, ceil((a.height - u.height) / stepY).toInt() + 1)
-        // Head travel in work mm (machine 0..390 / 0..370, X reversed) (laser off, may cross the safe zone like parking).
+        // Head travel in work mm (machine 0..travel, X reversed) (laser off, may cross the park corner).
         val minHx = Work.fromMachine(Bed.WIDTH, 0.0).x; val maxHx = Work.fromMachine(0.0, 0.0).x   // machine X is reversed
         val minHy = Work.fromMachine(0.0, 0.0).y; val maxHy = Work.fromMachine(0.0, Bed.HEIGHT).y
         val heads = ArrayList<Pt>()
@@ -305,18 +305,18 @@ object Scan {
     /**
      * True when the switch can probe work point [p] directly: the Pi moves
      * the head by the switch offset ([probeOffset] = tip minus laser point)
-     * and keeps it in X10..380 / Y10..360 (Marlin PROBING_MARGIN; the laser
-     * is off, so the head may enter the safezone). Points in the edge strip
+     * and keeps it 10 mm inside the travel (Marlin PROBING_MARGIN; the laser
+     * is off, so the head may enter the park corner). Points in the edge strip
      * the switch never reaches are probed by the Pi up to 40 mm beside them.
      */
     fun reachable(p: Pt, probeOffset: Pt): Boolean {
         val head = Work.toMachine(p) - probeOffset
-        return head.x in PROBE_HEAD_MIN..PROBE_HEAD_MAX_X && head.y in PROBE_HEAD_MIN..PROBE_HEAD_MAX_Y
+        return head.x in PROBE_HEAD_MIN..Bed.WIDTH - PROBE_MARGIN && head.y in PROBE_HEAD_MIN..Bed.HEIGHT - PROBE_MARGIN
     }
 
     private const val PROBE_HEAD_MIN = 10.0
-    private const val PROBE_HEAD_MAX_X = 380.0
-    private const val PROBE_HEAD_MAX_Y = 360.0
+    /** Marlin's PROBING_MARGIN at the far edges (pi400 transport.py). */
+    private const val PROBE_MARGIN = 10.0
 }
 
 /** Point-in-polygon (even-odd) for a closed outline given without repeating the first point. */

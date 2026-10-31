@@ -105,7 +105,7 @@ object FocusCompensation {
         val gap = focusGapMm - tipOffsetMm
         require(gap >= 2.0) { "Fokus läge näher als 2 mm am Werkstück" }
         val out = StringBuilder()
-        var x = Bed.SAFE; var y = Bed.SAFE; var relative = false
+        var x = 0.0; var y = 0.0; var relative = false
         var drop = 0.0; var pendingDrop = false
         var lastZ = Double.NaN; var segments = 0; var outside = 0.0
         var minZ = Double.MAX_VALUE; var maxZ = -Double.MAX_VALUE

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import de.millione.lumacut.app.editor.EditorViewModel
 import de.millione.lumacut.app.editor.calibrationJob
 import de.millione.lumacut.app.machine.MachineViewModel
+import de.millione.lumacut.core.Bed
 import de.millione.lumacut.core.Box
 import de.millione.lumacut.core.CameraCalibration
 import de.millione.lumacut.core.CameraLight
@@ -244,7 +245,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     fun headOverGrid(machine: MachineViewModel) {
         val target = DotGrid.center - (_calibration.value?.usable(0.0)?.center ?: Pt(0.0, 0.0))
         val m = Work.toMachine(target)
-        machine.request("moveto", quietSuccess = true) { it.moveTo(m.x.coerceIn(0.0, 390.0), m.y.coerceIn(0.0, 370.0)) }
+        machine.request("moveto", quietSuccess = true) { it.moveTo(m.x.coerceIn(0.0, Bed.WIDTH), m.y.coerceIn(0.0, Bed.HEIGHT)) }
     }
 
     /** Finds the dot grid in [photo] and fits the lens; the head position and Z come from the Pi. */
@@ -278,7 +279,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     fun headOverRect(machine: MachineViewModel) {
         val target = Work.center - (_calibration.value?.usable(0.0)?.center ?: Pt(0.0, 0.0))
         val m = Work.toMachine(target)
-        machine.request("moveto", quietSuccess = true) { it.moveTo(m.x.coerceIn(0.0, 390.0), m.y.coerceIn(0.0, 370.0)) }
+        machine.request("moveto", quietSuccess = true) { it.moveTo(m.x.coerceIn(0.0, Bed.WIDTH), m.y.coerceIn(0.0, Bed.HEIGHT)) }
     }
 
     /** Keeps [cal] on the tablet and on the Pi (the calibration belongs to the machine). */
@@ -346,7 +347,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     /** Head to work point [head] (laser off, machine travel limits); Z back to [z] when the Pi lifted it. */
     private suspend fun headTo(c: PiClient, machine: MachineViewModel, head: Pt, z: Double?): Pt {
         val m = Work.toMachine(head)
-        val mx = m.x.coerceIn(0.0, 390.0); val my = m.y.coerceIn(0.0, 370.0)
+        val mx = m.x.coerceIn(0.0, Bed.WIDTH); val my = m.y.coerceIn(0.0, Bed.HEIGHT)
         c.moveTo(mx, my)
         if (z != null) {
             val now = machine.refreshStatus()?.position?.getOrNull(2)
@@ -635,7 +636,7 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun tipOver(c: PiClient, machine: MachineViewModel) {
         val off = machine.refreshStatus()?.probeOffset ?: Pt(0.0, 0.0)
         val m = ProbeTarget.headFor(off)
-        c.moveTo(m.x.coerceIn(0.0, 390.0), m.y.coerceIn(0.0, 370.0))
+        c.moveTo(m.x.coerceIn(0.0, Bed.WIDTH), m.y.coerceIn(0.0, Bed.HEIGHT))
         machine.refreshStatus()
     }
 

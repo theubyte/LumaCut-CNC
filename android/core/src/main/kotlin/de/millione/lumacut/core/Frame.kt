@@ -9,7 +9,7 @@ object Frame {
     /**
      * Laser-off program accepted by the Pi's frame_program(): only G21/G90/M5 I and
      * absolute G0 moves. [points] are machine mm (e.g. from [cutPoints]); the outline is
-     * kept inside the work area, never in the safe zone.
+     * kept inside the machine travel (laser off, may cross the park corner).
      */
     fun program(points: List<Pt>, mode: Mode, feed: Int = 3000): String {
         require(points.isNotEmpty()) { "Kein Motiv für den Rahmen" }
@@ -22,7 +22,7 @@ object Frame {
         val f = feed.coerceIn(300, 9000)
         val out = StringBuilder("G21\nG90\nM5 I\n")
         for (p in outline + outline.first()) {
-            val x = p.x.coerceIn(Bed.SAFE, Bed.WIDTH); val y = p.y.coerceIn(Bed.SAFE, Bed.HEIGHT)
+            val x = p.x.coerceIn(0.0, Bed.WIDTH); val y = p.y.coerceIn(0.0, Bed.HEIGHT)
             out.append(String.format(Locale.ROOT, "G0 X%.3f Y%.3f F%d\n", x, y, f))
         }
         return out.toString()

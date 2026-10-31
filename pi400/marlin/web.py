@@ -95,10 +95,6 @@ config = {
     "exhaust_after_s": 60,
 }
 MACHINE_NAME_MAX = 40
-# Machine X/Y of the apps' work point 0/0 (Android Geometry.kt Work:
-# machine_x = 390 - x, machine_y = 30 + y). Still the old layout; changes
-# together with the apps.
-APP_WORK_ORIGIN = (390.0, 30.0)
 # Bed map and probe planning keep the old 30 mm edge until the probe is
 # recalibrated for head v6 (STAND.md §9).
 PROBE_GRID_MIN = 30.0
@@ -1555,7 +1551,7 @@ def auto_plan(commands, point=None):
     elif tapped:
         # the operator tapped where material lies (work mm -> machine mm, X mirrored)
         grids = [g for wx, wy in tapped for g in heightmap.single_point_plan(
-            APP_WORK_ORIGIN[0] - wx, APP_WORK_ORIGIN[1] + wy, machine.probe_reachable)]
+            config["travels"]["x"] - wx, wy, machine.probe_reachable)]
     else:
         grids = heightmap.plan_probe(commands, bounds, machine.probe_reachable)
     if not own_z:

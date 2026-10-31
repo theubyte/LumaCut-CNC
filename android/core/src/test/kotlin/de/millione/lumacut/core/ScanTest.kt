@@ -103,7 +103,7 @@ class ScanPlanTest {
         val plan = Scan.plan(cal, overlap = 0.25)
         assertTrue(plan.heads.size > 20)
         assertTrue(plan.uncovered.isEmpty(), plan.uncovered.toString())
-        assertTrue(plan.heads.all { it.x >= 0.0 && it.y >= -Bed.SAFE && it.x <= Bed.WIDTH && it.y <= Bed.HEIGHT - Bed.SAFE })
+        assertTrue(plan.heads.all { it.x >= 0.0 && it.y >= 0.0 && it.x <= Bed.WIDTH && it.y <= Bed.HEIGHT })
     }
 
     @Test fun `mosaic places a tile pixel at the right work position`() {
@@ -118,8 +118,8 @@ class ScanPlanTest {
     @Test fun `probe reachability follows the Pi rule`() {
         val offset = Pt(-23.0, 15.0)
         assertTrue(Scan.reachable(Pt(100.0, 100.0), offset))
-        assertTrue(!Scan.reachable(Pt(5.0, 100.0), offset), "head would need machine X > 390")
-        assertTrue(Scan.reachable(Pt(100.0, 2.0), offset), "upper edge: head may enter the safezone while probing")
+        assertTrue(!Scan.reachable(Pt(5.0, 100.0), offset), "head would need machine X > 360")
+        assertTrue(Scan.reachable(Pt(Work.WIDTH - 100.0, 30.0), offset), "head may enter the park corner while probing")
     }
 }
 

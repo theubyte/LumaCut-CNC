@@ -151,6 +151,7 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
         try {
             val s = c.status()
             if (c !== client) return          // the address was changed while the request ran
+            s.applyGeometry()                 // measured travel and park corner come from the Pi
             _status.value = s
             _online.value = true
             _readError.value = null
@@ -449,6 +450,6 @@ class MachineViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** False when the switch cannot reach work point [p] (head would leave X30..390/Y30..370); null without offset. */
+    /** False when the switch cannot reach work point [p] (head would leave the probing range); null without offset. */
     fun probeReachable(p: Pt): Boolean? = _status.value?.probeOffset?.let { Scan.reachable(p, it) }
 }

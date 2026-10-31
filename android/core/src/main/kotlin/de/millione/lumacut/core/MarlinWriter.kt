@@ -12,8 +12,8 @@ class JobBuildException(message: String) : IllegalArgumentException(message)
  * Turns a [Document] (work-area mm) into G-code for the LumaCut Pi / Marlin 2.1.
  * Same rules as the Windows app (lumacut_canvas/gcode.py):
  * - one `M3 I` for the whole job, every G1 carries F and S0..255;
- * - output coordinates are machine_x = 390 - x, machine_y = 30 + y (see [Work]); nothing, not even a
- *   laser-off overscan, ever leaves the work area (the safe zone is never entered);
+ * - output coordinates are machine_x = WIDTH - x, machine_y = y (see [Work]); nothing, not even a
+ *   laser-off overscan, ever leaves the work area; no element may reach into the park corner;
  * - layers with zStep lower the focus between passes with
  *   `G91 / G0 Z-… F600 / G90` and return to focus height afterwards;
  * - fills and images run bidirectionally with laser-off run-up (G1 S0), long
@@ -50,6 +50,7 @@ class MarlinWriter(private val appVersion: String = "dev", private val motion: M
         for (element in content) {
             val box = element.worldBounds() ?: continue
             if (!Work.contains(box)) throw JobBuildException("„${element.text ?: element.kind}“ ragt über die Arbeitsfläche hinaus")
+            if (Work.touchesPark(box)) throw JobBuildException("„${element.text ?: element.kind}“ liegt in der Park-Ecke (oben rechts) – dort wird nicht gelasert")
             if (element.isImage && abs(element.transform.rotation) > 1e-6)
                 throw JobBuildException("Gedrehte Bilder werden noch nicht unterstützt – Drehung auf 0° setzen")
         }

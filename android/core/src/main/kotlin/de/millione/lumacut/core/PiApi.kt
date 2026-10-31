@@ -72,7 +72,16 @@ data class PiConfig(
     val camera: CameraSettings? = null,
     /** Measured X/Y acceleration and speed (motion calibration); null values = firmware. */
     val motion: PiMotion? = null,
+    /** Machine travel in mm as measured on the machine (head v6: 370 x 360). */
+    val travels: PiTravels? = null,
 )
+
+@Serializable
+data class PiTravels(val x: Double? = null, val y: Double? = null, val z: Double? = null)
+
+/** Park corner at machine 0/0 where the Pi never burns (head v6 + 10 mm). */
+@Serializable
+data class ParkCorner(val x: Double? = null, val y: Double? = null)
 
 @Serializable
 data class PiMotion(val accel: Double? = null, val speed: Double? = null) {
@@ -124,6 +133,8 @@ data class MachineStatus(
     val job: JobProgress = JobProgress(),
     val frame: FrameProgress = FrameProgress(),
     val config: PiConfig = PiConfig(),
+    /** Null on a Pi older than 31.10.2026 (it still had the 30 mm L zone). */
+    val park_corner_mm: ParkCorner? = null,
     /** Reference check by the X/Y switches at X0/Y0; [ReferenceInfo.lost] says why the machine is no longer homed. */
     val reference: ReferenceInfo = ReferenceInfo(),
     /** Revisions of the shared work state on the Pi (feature "workspace"). */
@@ -146,6 +157,9 @@ data class MachineStatus(
     val coordOk get() = coord_convention == PiClient.COORD_CONVENTION
     val ownerFree get() = owner == "Frei" || owner.isBlank()
     val probeOffset: Pt? get() = probe_xy_offset_mm?.takeIf { it.size == 2 }?.let { Pt(it[0], it[1]) }
+
+    /** Take the Pi's measured travel and park corner for [Bed] / [Work]. */
+    fun applyGeometry() = Bed.configure(config.travels?.x, config.travels?.y, park_corner_mm?.x, park_corner_mm?.y)
 }
 
 @Serializable
