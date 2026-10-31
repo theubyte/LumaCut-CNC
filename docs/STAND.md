@@ -421,8 +421,14 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   ergänzt) + ISP-GND, **10 kΩ Pull-down TTL→GND** (Pin schwebt beim Reset).
   Optional Relais für 24 V Laser am FAN-Ausgang D4 (M106/M107). Pi erkennt das
   Board: CH340 erst als Grbl gefragt, antwortet dort keiner, `M115` bei
-  250000 Baud (`open_controller`). Flashen später mit Besitzer:
-  `avrdude -c arduino -p m1284p -P <port> -b 115200 -U flash:w:firmware.hex:i`.
+  250000 Baud (`open_controller`).
+  **Flashen über den Pi wie beim SKR:** Weboberfläche → System → Firmware,
+  `firmware.hex` wählen (`/api/firmware`, `avr_flash.py`: STK500 direkt über
+  den Bootloader, auch über die fremde Firmware; Signatur 1E 97 05 geprüft,
+  alles zurückgelesen). Am PC mit dem echten Board nur lesend geprüft: Sync,
+  Signatur, 8 KB identisch mit der avrdude-Sicherung; der Bootloader hört
+  ~0,45 s nach dem DTR-Reset. **Sicherung Original-Firmware + EEPROM:**
+  `A:\mfw\anet-backup\` (zurück nur per avrdude am PC, enthält den Bootloader).
   Vor dem ersten Fahren prüfen: M119 (Endschalter-Logik), Motorrichtungen.
 
 ## 12. Ideen (noch nicht geplant)
