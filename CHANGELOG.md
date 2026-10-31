@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-10-31
 
+- **Anet-Verkabelung festgelegt:** Board an 24 V (Original-Netzteil war 24 V), Laser-+24 V über ein 24-V-Relais am FAN-Stecker D4 (M106 P0 / M107 P0, schaltet der Pi wie beim SKR schon). Nur Doku/Kommentare, Firmware unverändert.
 - **Android-App auf die neue Arbeitsfläche:** Die App liest Fahrwege und Park-Ecke vom Pi (`config.travels`, `park_corner_mm`) und zeigt die ganze Fläche (370 × 360) mit der schraffierten Park-Ecke oben rechts. Umrechnung jetzt `Maschine X = Fahrweg − x`, `Maschine Y = y` (vorher `390 − x` / `30 + y`); der Auftragsbau lehnt Elemente in der Park-Ecke ab. Alte Projekte und Scans liegen dadurch versetzt – neu ausrichten bzw. neu scannen. Der Pi rechnet angetippte Abtastpunkte gleich um.
 
 - **Arbeitsfläche Kopf v6:** Fahrwege 370 × 360 mm (gemessen, Pi-Einstellung `travel_x_mm`/`travel_y_mm`). Die 30-mm-L-Zone ist weg; nur die Park-Ecke X0–78 / Y0–35 (Kopf + 1 cm) bleibt frei, überall sonst wird gelasert. Pi-Prüfungen (Schnitt, Platzierung, Ursprung, Materialtest) und Weboberfläche angepasst; Status `park_corner_mm` statt `safe_zone_xy_mm`. Die Android-App folgt.

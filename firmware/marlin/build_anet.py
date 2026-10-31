@@ -8,14 +8,14 @@ Does not write to an attached board; flashing is a separate step with the
 owner present (avrdude -c arduino -b 115200, Optiboot answers on USB).
 
 Wiring this build expects (docs/STAND.md):
-  - board on its own 12 V supply (not rated for 24 V)
-  - laser on the LaserTree adapter at the 24 V supply, GND of both supplies
-    joined; TTL from ISP header MISO = D6/PB6 (Timer3 hardware PWM, ~2.5 kHz)
+  - board on the 24 V supply (its stock A8 supply was 24 V); laser on the
+    LaserTree adapter at the same 24 V; TTL from ISP header MISO = D6/PB6 (Timer3 hardware PWM, ~2.5 kHz)
     and ISP GND, with a 10 kOhm pull-down TTL->GND so the laser stays dark
     while the chip is in reset or in the boot loader (pin floats then)
   - X/Y/Z motors and min switches on the stock connectors
-  - FAN connector (D4, 12 V low-side) may switch a relay for the laser's
-    24 V rail: M106 P0 S255 / M107 P0, as the Pi does on the SKR
+  - FAN connector (D4, 24 V low-side) switches a 24 V relay coil whose
+    contact switches the laser's +24 V: M106 P0 S255 / M107 P0, as the Pi
+    does on the SKR (high side, so the laser GND never floats against TTL)
 """
 from __future__ import annotations
 
@@ -203,9 +203,9 @@ def main():
             "cpu": "ATmega1284P",
             "usb": "CH340, Marlin %s baud; Optiboot upload 115200 (avrdude -c arduino)" % BAUD,
             "laser": {"pwm": "D6 PB6 (ISP MISO), Timer3, 10k pull-down to GND", "enable": "D24 unwired",
-                      "supply": "LaserTree adapter on 24 V; optional relay on FAN D4 (M106/M107)",
+                      "supply": "LaserTree adapter on 24 V; relay on FAN D4 (M106 P0 / M107 P0)",
                       "mode": "M3 I", "s_max": 255},
-            "power": "board 12 V only; GND joined with the 24 V laser supply",
+            "power": "board and laser on one 24 V supply; laser +24 V through the FAN D4 relay",
             "tones": "M300 S<Hz> P<ms> [X] [Y]: stepper coils, no motion, laser must be off",
             "hardware_verified": False,
             "sha256": hashlib.sha256(fw.read_bytes()).hexdigest(),

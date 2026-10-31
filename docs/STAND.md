@@ -410,7 +410,7 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   115200 antwortet, FW 5.0) – Flashen per USB möglich. Drauf: Marlin 2.0.9.7
   „Anet A8 plus“ (Zemistr, 13.10.2023), 115200 Baud, SD-Unterstützung, freier
   RAM 11 KB, `M92 Z400` (Spindel; Kopf v6 braucht 80). Plan, falls genutzt:
-  Board an eigenem 12-V-Netzteil (für 24 V nicht ausgelegt), Laser weiter über
+  (überholt, siehe unten: Board an 24 V) Board an eigenem 12-V-Netzteil, Laser weiter über
   LaserTree am 24-V-Netzteil, **GND beider Netzteile verbinden**, TTL an einen
   freien Hardware-PWM-Pin, abgespeckte LumaCut-Marlin. Schwäche: 8 Bit, wenig
   Zeilen/s bei Graustufen.
@@ -439,6 +439,16 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   TMC2209) – für A4988 an 12 V vermutlich zu viel; vor dem ersten Fahren
   niedriger setzen oder mit Bewegungstest prüfen.
   Vor dem ersten Fahren prüfen: M119 mit Schaltern (Logik), Motorrichtungen.
+  **Verkabelung festgelegt (31.10., Besitzer):** Board an **24 V** (das
+  Original-Netzteil des Anet war 24 V), Laser am selben Netzteil. Der
+  FAN-Stecker (D4, FAN0) schaltet die Spule eines **24-V-Relais** (Diode
+  1N4007 parallel, falls kein Modul), dessen Kontakt die **+24 V des Lasers**
+  (nicht GND, sonst schwebt die Laser-Masse gegen TTL). Firmware hat FAN0 = D4
+  (M106 P0 / M107 P0, geprüft im Build); der Pi schaltet es schon wie beim SKR
+  vor `M3 I` ein und nach dem Auftrag/Not-Aus aus. TTL = ISP-MISO, GND =
+  ISP-GND, 10 kΩ Pull-down. Netzteil ≥ 8–10 A. GY-521 (MPU-6050) am Pi-I2C
+  geplant (Resonanzmessung, später Stillstands-Wächter); I2C ist auf dem Pi
+  noch aus (`sudo raspi-config nonint do_i2c 0` macht der Besitzer).
 
 ## 12. Ideen (noch nicht geplant)
 
