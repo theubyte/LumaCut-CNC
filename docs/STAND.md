@@ -464,6 +464,9 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   (`park_z_mm`, nur an X0/Y0, Pi hebt vor jeder X/Y-Fahrt auf Fahrhöhe).
   Offen (Vorschlag, wartet auf Besitzer): Feder/Gummizug am Kopf; Not-Aus am
   Anet mit `M410` + Relais aus statt `M112`; Port öffnen ohne Reset.
+  **Licht am Bett-Ausgang (31.10.):** D12 (Bett-MOSFET, 24-V-LED-Streifen),
+  `M355 S1/S0`, nur an/aus (Timer1 = Motortakt, kein PWM); Lichteffekte
+  werden dort zu an/aus. Hotend-Ausgang D13 ist noch frei (z. B. Abluft).
 
 ## 12. Ideen (noch nicht geplant)
 

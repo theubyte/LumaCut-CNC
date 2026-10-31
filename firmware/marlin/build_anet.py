@@ -103,6 +103,11 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     if adv.count(laser_default) != 1:
         raise RuntimeError("Marlin laser startup value layout changed")
     adv = adv.replace(laser_default, "#define SPEED_POWER_STARTUP         0    // (%)", 1)
+    # LED light on the heated-bed output (D12, MOSFET, 24 V). D12 is OC1B and
+    # Timer1 drives the steppers: no PWM, only on/off (M355 S1 / S0).
+    adv = uncomment(adv, "CASE_LIGHT_ENABLE")
+    adv = replace_active(adv, "CASE_LIGHT_DEFAULT_ON", "false")
+    adv = uncomment(adv, "CASE_LIGHT_NO_BRIGHTNESS")
     adv = uncomment(adv, "EMERGENCY_PARSER")
     adv = uncomment(adv, "ADVANCED_OK")
     # Grey-scale fills are many short lines: plenty of RAM left (~2.4 of
@@ -133,6 +138,9 @@ PIN_PATCH = """
 #define HEATER_0_PIN -1
 #undef HEATER_BED_PIN
 #define HEATER_BED_PIN -1
+// Heated-bed MOSFET (D12) switches the 24 V LED light: M355 S1 / S0.
+#undef CASE_LIGHT_PIN
+#define CASE_LIGHT_PIN 12
 """
 
 
@@ -207,6 +215,7 @@ def main():
                       "supply": "LaserTree adapter on 24 V; relay on FAN D4 (M106 P0 / M107 P0)",
                       "mode": "M3 I", "s_max": 255},
             "power": "board and laser on one 24 V supply; laser +24 V through the FAN D4 relay",
+            "light": "heated-bed MOSFET D12, 24 V LED, M355 S1/S0 (on/off, no PWM)",
             "tones": "M300 S<Hz> P<ms> [X] [Y]: stepper coils, no motion, laser must be off",
             "hardware_verified": False,
             "sha256": hashlib.sha256(fw.read_bytes()).hexdigest(),

@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-10-31
 
+- **Anet: Licht am Bett-Ausgang** (D12, MOSFET, 24 V-LED): `M355 S1/S0`, nur an/aus – D12 hängt an Timer1, der die Motoren taktet, Dimmen geht dort nicht. Kommt als Firmware-Update per Knopf.
 - **Parken 1 mm über dem Bett:** Nach dem Referenzieren und beim Parken senkt der Pi den Kopf in der Park-Ecke (X0/Y0, dort wo Z0 am Bett gemessen wurde) auf `park_z_mm` (Standard 1 mm, Einstellung in der Weboberfläche, 0 = wie bisher auf Fahrhöhe). Werden die Motoren stromlos (Not-Aus, Board-Neustart, Stromausfall), fällt der Kopf mit der Zahnstange höchstens so weit. Vor jeder X/Y-Fahrt, egal von wo (Weboberfläche, App, LightBurn, Auftrag), hebt der Pi zuerst auf Fahrhöhe.
 - **Anet: Z-Richtung getauscht** (`INVERT_Z_DIR true`), auf Wunsch des Besitzers. Kommt als Firmware-Update per Knopf.
 - **Firmware-Updates wie bei der App:** Die Firmware-CI veröffentlicht jeden Build als GitHub-Release `marlin-<Nr.>` (SKR `.bin`, Anet `.hex`, JSON mit Build-Stempel und SHA-256; nie „latest“). Der Pi holt es beim Start und alle 6 h (`firmware_release.py`), prüft Prüfsumme, Image und Stempel und vergleicht mit dem Build, den das Board per M115 meldet. Ist es neuer, zeigt die Weboberfläche oben eine Meldung „Firmware-Update verfügbar“ mit Knopf „Jetzt flashen“ (System → Firmware zusätzlich „Auf Update prüfen“). Geflasht wird nur per Knopf und Bestätigung, mit denselben Sperren wie beim Hochladen.
