@@ -215,7 +215,8 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   Leistung oder gar nicht, das Board verlor dabei auch die USB-Verbindung.
   Lösung: **Laser über die LaserTree-Adapterplatine direkt am 24-V-Netzteil**,
   vom Board nur TTL (+ Signal, − Masse). Danach Leistungstest 30–100 % alle
-  Stufen sauber (31.10., 11:03), USB ohne Fehler. Die Brücke fragt verlorene
+  Stufen sauber (31.10., 11:03), USB ohne Fehler. **Testkreis Ø 20 mm in
+  MDF 3 mm (300 mm/min, 100 %, 2×) durch und fällt raus (11:05).** Die Brücke fragt verlorene
   Statusmeldungen dreimal nach und meldet ein getrenntes Board sofort.
 - **Windows-Studio:** ruht.
 - **LightBurn** geht übergangsweise noch über TCP 23.
