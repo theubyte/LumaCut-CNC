@@ -69,6 +69,77 @@ def open_controller(port: str, baud: int, timeout: float = 0.1, surface_hint=Non
     return GrblMarlinBridge(ports[0], surface_hint=surface_hint)
 
 
+PLAIN_G1 = re.compile(r"^G1 X([-+]?\d*\.?\d+) Y([-+]?\d*\.?\d+)((?: [FS][-+]?\d*\.?\d+)*)$")
+XY_WORD = re.compile(r"\b([XY])([-+]?\d*\.?\d+)")
+# Merged moves stay within this distance of every point they skip.
+MERGE_TOLERANCE_MM = 0.01
+MERGE_MAX_MM = 3.0
+
+
+def _off_chord(p, a, b) -> float:
+    """Distance of point p from the segment a-b."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length2 = dx * dx + dy * dy
+    t = 0.0 if length2 == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2))
+    return ((p[0] - a[0] - t * dx) ** 2 + (p[1] - a[1] - t * dy) ** 2) ** 0.5
+
+
+def merge_short_moves(commands, tolerance: float = MERGE_TOLERANCE_MM, max_len: float = MERGE_MAX_MM):
+    """Join runs of tiny G1 moves the eye cannot tell from one straight move.
+
+    The app writes circles in chords of 0.2-0.4 mm: at 4400 mm/min that is
+    up to 420 lines/s, more than the board's 115200-baud USB link and the
+    ok round trip carry, so Grbl's planner ran dry and circles came out
+    jerky and flat. A run is joined only while every skipped point stays
+    within `tolerance` of the new move and F/S stay the same; anything else
+    (Z, G0, other commands, relative mode) passes through untouched.
+    """
+    out, run = [], []
+    pos, start, absolute = None, None, True
+
+    def flush():
+        nonlocal start, run
+        if run:
+            out.append(run[-1][0])
+        run, start = [], None
+
+    for line in commands:
+        m = PLAIN_G1.match(line.strip()) if absolute and pos is not None else None
+        if m is None:
+            flush()
+            out.append(line)
+            head = line.split(";", 1)[0].strip().upper()
+            if head.startswith("G91"):
+                absolute = False
+            elif head.startswith("G90"):
+                absolute = True
+            elif re.match(r"^G0?[0123]\b", head):
+                if not absolute:
+                    pos = None
+                else:
+                    words = dict(XY_WORD.findall(head))
+                    if pos is None and not ("X" in words and "Y" in words):
+                        continue
+                    old = pos or (0.0, 0.0)
+                    pos = (float(words.get("X", old[0])), float(words.get("Y", old[1])))
+            continue
+        point = (float(m.group(1)), float(m.group(2)))
+        if run and m.group(3) != run[0][2]:
+            flush()
+        if start is None:
+            start = pos
+        candidate = run + [(line, point, m.group(3))]
+        length = ((point[0] - start[0]) ** 2 + (point[1] - start[1]) ** 2) ** 0.5
+        if run and (length > max_len or any(_off_chord(p, start, point) > tolerance for _, p, _ in run)):
+            out.append(run[-1][0])
+            start = run[-1][1]
+            candidate = [(line, point, m.group(3))]
+        run = candidate
+        pos = point
+    flush()
+    return out
+
+
 def _open_serial(port: str, baud: int):
     import serial
     # DTR/RTS stay released: on the ESP32 board they pull EN/GPIO0

@@ -2,7 +2,7 @@ import threading
 import time
 import unittest
 
-from pi400.marlin.grbl_bridge import GrblMarlinBridge
+from pi400.marlin.grbl_bridge import GrblMarlinBridge, merge_short_moves
 from pi400.marlin.transport import MarlinTransport
 
 
@@ -191,6 +191,39 @@ class GrblBridgeTest(unittest.TestCase):
         self.assertEqual(machine.controller_motion(), (1000.0, 100.0))
         # deeper streaming window than the SKR's 4 lines (smooth arcs)
         self.assertEqual(machine.stream_window, 16)
+
+
+class MergeShortMovesTest(unittest.TestCase):
+    def circle(self, r=7.5, n=275, cx=160.0, cy=174.0):
+        import math
+        pts = [(cx + r * math.cos(2 * math.pi * i / n), cy + r * math.sin(2 * math.pi * i / n))
+               for i in range(n + 1)]
+        lines = ["G90", "G0 X%.3f Y%.3f" % pts[0]]
+        lines += ["G1 X%.3f Y%.3f F4402 S187" % p for p in pts[1:]]
+        return pts, lines
+
+    def test_fine_circle_is_merged_within_tolerance(self):
+        pts, lines = self.circle()
+        out = merge_short_moves(lines)
+        moves = [l for l in out if l.startswith("G1")]
+        self.assertLess(len(moves), 80)
+        self.assertGreater(len(moves), 40)
+        self.assertEqual(out[-1], lines[-1])      # ends exactly where the circle ends
+        # every original point stays within 0.01 mm of the merged path
+        from pi400.marlin.grbl_bridge import _off_chord
+        path = [pts[0]] + [tuple(float(w[1:]) for w in l.split()[1:3]) for l in moves]
+        for p in pts:
+            self.assertLess(min(_off_chord(p, a, b) for a, b in zip(path, path[1:])), 0.0105)
+
+    def test_power_change_z_and_relative_mode_are_kept(self):
+        lines = ["G90", "G0 X0 Y0", "G1 X0.1 Y0 F1000 S100", "G1 X0.2 Y0 F1000 S50",
+                 "G1 X0.3 Y0 Z2 F1000 S50", "G91", "G1 X0.1 Y0 F1000 S50", "G1 X0.1 Y0 F1000 S50"]
+        self.assertEqual(merge_short_moves(lines), lines)
+
+    def test_straight_run_is_joined_up_to_max_length(self):
+        lines = ["G0 X0 Y0"] + ["G1 X%.1f Y0 F1000 S100" % (0.5 * i) for i in range(1, 11)]
+        out = merge_short_moves(lines)
+        self.assertEqual(out, ["G0 X0 Y0", "G1 X3.0 Y0 F1000 S100", "G1 X5.0 Y0 F1000 S100"])
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ from .workspace import WorkspaceStore, create_blueprint as workspace_api
 from .projects import ProjectStore, create_blueprint as projects_api
 from .line_laser import LineLaser
 from .app_update import AppUpdates
-from .grbl_bridge import open_controller
+from .grbl_bridge import merge_short_moves, open_controller
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "marlin"
@@ -1660,6 +1660,12 @@ def _execute_job(filename, commands, auto=None):
                error="", probe=None)
     if auto is not None:
         commands = _auto_prepare(auto)
+    if machine.controller_motion() is not None:
+        # Atomstack board: its USB link cannot carry 0.2 mm arc chords fast enough.
+        before = len(commands)
+        commands = merge_short_moves(commands)
+        job["total"] = len(commands)
+        logging.info("Grbl board: %d job lines merged to %d", before, len(commands))
     if _job_sets_focus(commands):
         machine.focused_this_job = True
     machine.command("M5 I", owner="job")

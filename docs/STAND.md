@@ -215,6 +215,10 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   ein stummer USB-Port wird nach 7 s neu geöffnet. Damit kurze Segmente
   (Kreise) flüssig laufen, liest die Brücke jedes „ok“ sofort und der Pi
   streamt durch sie mit 16 Zeilen / 600 Bytes Fenster (SKR: 4 / 200).
+  Zusätzlich fasst der Pi am Board winzige G1-Stücke gleicher Leistung
+  zusammen (`merge_short_moves`, höchstens 0,01 mm Abweichung, max. 3 mm):
+  ein Kreis aus 275 × 0,175 mm wird zu ~80 Zügen – mehr als ~200 Zeilen/s
+  trägt die 115200-Baud-Leitung nicht, die Kreise wurden sonst eckig.
   **Am 31.10. an der Maschine geprüft:** Verbinden, Referenzfahrt (sauber
   hinten rechts), Fahrt auf X100/Y100 (Richtung stimmt). **Laser:** am
   „+12V“-Ausgang des Boards (gibt 24 V durch) zündete er nur bei wenig
