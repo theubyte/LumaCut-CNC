@@ -431,7 +431,14 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   Signatur, 8 KB identisch mit der avrdude-Sicherung; der Bootloader hört
   ~0,45 s nach dem DTR-Reset. **Sicherung Original-Firmware + EEPROM:**
   `A:\mfw\anet-backup\` (zurück nur per avrdude am PC, enthält den Bootloader).
-  Vor dem ersten Fahren prüfen: M119 (Endschalter-Logik), Motorrichtungen.
+  **31.10. 18:20 über den Pi geflasht** (182 Seiten, zurückgelesen), Pi
+  verbindet sich: `MACHINE_TYPE:LumaCut CNC Marlin Anet`, Build Oct 31 2026
+  16:54:31, `ok P31 B15` (Planer 32, BUFSIZE 16). M503: M92 80/80/80. M119 ohne
+  angeschlossene Schalter: alle `open`. **Achtung:** Der Pi schickt beim
+  Verbinden `config.motion` = 2100 mm/s² / 200 mm/s (SKR-Kalibrierung, 24 V,
+  TMC2209) – für A4988 an 12 V vermutlich zu viel; vor dem ersten Fahren
+  niedriger setzen oder mit Bewegungstest prüfen.
+  Vor dem ersten Fahren prüfen: M119 mit Schaltern (Logik), Motorrichtungen.
 
 ## 12. Ideen (noch nicht geplant)
 
