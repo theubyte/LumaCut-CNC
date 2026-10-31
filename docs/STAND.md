@@ -223,7 +223,9 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   (Grbl-Puffer 128 Byte laut `$I` `[OPT:VZ,15,128]`, Zeilen ~38 Byte → 3 in
   Flug, ~80 Zeilen/s). Die Brücke sendet kompakt/modal (~13 Byte, `self.modal`,
   gelöscht bei $-Befehlen, Alarm, Not-Aus, M5, G90/G91), Puffer 127 Byte;
-  `merge_power_steps` fasst Pixel gleicher Zeile mit ±3 S zusammen. Pi-Software
+  `merge_power_steps` fasst Pixel gleicher Zeile mit ±3 S zusammen (Vorschub
+  modal, wie ihn die Fokus-Kompensation schreibt). **Gemessen 31.10.: Max-geb
+  31 min** (vorher Hochrechnung > 80 min, App schätzte 2 h 4 min). Pi-Software
   schafft ~1600 Zeilen/s (gemessen auf dem Pi), ist also kein Engpass.
   Offen/Idee: Board hat „Direct SD“ (`[ESP800]`) – Auftrag von SD statt Streamen.
 - **Rahmen mit Glimmen (31.10.):** Pi-Einstellung `frame_power_pct` (0..1 %),

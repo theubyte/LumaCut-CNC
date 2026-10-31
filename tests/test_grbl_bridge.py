@@ -312,6 +312,14 @@ class MergeShortMovesTest(unittest.TestCase):
             "G1 X5 Y0 F6000 S120", "G1 X6 Y0 F6000 S0", "G0 X6 Y0.1",
             "G1 X4.000 Y0.100 F6000 S50.5"])
 
+    def test_power_merge_follows_modal_feed_of_focus_compensation(self):
+        # focus_compensation.py: 2 mm pieces, Z once, S on every piece, F only on change
+        lines = ["G0 X0 Y0", "G0 Z6.71 F600", "G1 X2 Y0 Z6.71 S100 F6000",
+                 "G1 X4 Y0 S100", "G1 X6 Y0 S101", "G1 X8 Y0 S0"]
+        self.assertEqual(merge_power_steps(lines), [
+            "G0 X0 Y0", "G0 Z6.71 F600", "G1 X2 Y0 Z6.71 S100 F6000",
+            "G1 X6.000 Y0.000 F6000 S100.5", "G1 X8 Y0 S0"])
+
     def test_power_merge_never_joins_dark_and_lit_or_turns(self):
         lines = ["G0 X0 Y0", "G1 X1 Y0 F6000 S2", "G1 X2 Y0 F6000 S0",
                  "G1 X2 Y1 F6000 S0", "G1 X3 Y1 F3000 S0"]

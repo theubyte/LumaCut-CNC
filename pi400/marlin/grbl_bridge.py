@@ -219,13 +219,17 @@ def merge_power_steps(commands, step: float = MERGE_POWER_STEP):
             out.append("G1 X%.3f Y%.3f F%g S%g" % (x, y, run[0][4], round(s, 1)))
         run = []
 
+    feed_state = None       # modal F: the focus compensation writes F only on change
     for line in commands:
         m = PLAIN_G1.match(line.strip()) if absolute and pos is not None else None
         words = dict(_FS_WORD.findall(m.group(3))) if m else {}
-        if m is None or "F" not in words or "S" not in words:
+        if m is None or "S" not in words or ("F" not in words and feed_state is None):
             flush()
             out.append(line)
             head = line.split(";", 1)[0].strip().upper()
+            f_word = re.search(r"\bF([-+]?\d*\.?\d+)", head)
+            if f_word and re.match(r"^G0?[0123]\b", head):
+                feed_state = float(f_word.group(1))
             if head.startswith("G91"):
                 absolute = False
             elif head.startswith("G90"):
@@ -239,7 +243,9 @@ def merge_power_steps(commands, step: float = MERGE_POWER_STEP):
                     pos = (float(xy.get("X", old[0])), float(xy.get("Y", old[1])))
             continue
         point = (float(m.group(1)), float(m.group(2)))
-        feed, s = float(words["F"]), float(words["S"])
+        feed = float(words["F"]) if "F" in words else feed_state
+        s = float(words["S"])
+        feed_state = feed
         start = run[-1][1] if run else pos
         length = math.hypot(point[0] - start[0], point[1] - start[1])
         if run:
