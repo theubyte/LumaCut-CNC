@@ -203,6 +203,8 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   Hardlimits, `$20=0`, `$130/$131=395/365`, `$27=1`. Es startet im Zustand
   `Door` und nimmt erst nach `~` Befehle an – die Brücke setzt fort, wenn der
   Türeingang geschlossen ist. DTR/RTS müssen aus bleiben (ESP32-Reset).
+  **Am 31.10. an der Maschine geprüft:** Verbinden, Referenzfahrt (sauber
+  hinten rechts), Fahrt auf X100/Y100 (Richtung stimmt). Laser noch nicht.
 - **Windows-Studio:** ruht.
 - **LightBurn** geht übergangsweise noch über TCP 23.
 
