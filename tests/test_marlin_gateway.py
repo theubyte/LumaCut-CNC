@@ -1110,7 +1110,7 @@ class SupplyTestTests(unittest.TestCase):
 
 
 class FireTestTests(unittest.TestCase):
-    """op=fire_test: stationary shot at 1..2 %, always switched off."""
+    """Service menu shot: at most 20 %, beam always switched off."""
     def test_low_power_shot_then_off(self):
         ctrl = ParkLowTests().machine()
         self.assertEqual(ctrl.fire_test(1, 0.1), 3)
@@ -1120,10 +1120,53 @@ class FireTestTests(unittest.TestCase):
 
     def test_limits(self):
         ctrl = ParkLowTests().machine()
-        for pct, sec in ((0, 1), (2.5, 1), (1, 0), (1, 5.5)):
+        for pct, sec in ((0, 1), (20.5, 1), (1, 0), (1, 5.5)):
             with self.assertRaises(ValueError):
                 ctrl.fire_test(pct, sec)
         self.assertEqual(ctrl.serial.writes, [])
+
+
+    def test_shot_keeps_a_manually_switched_rail_on(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.set_laser_supply(True)
+        ctrl.fire_test(1, 0.1)
+        w = ParkLowTests().lines(ctrl)
+        self.assertEqual(w, ["M5 I", "M400", "M106 P0 S255", "M5 I", "M400",
+                             "M3 S3", "G4 P100", "M5"])
+        self.assertTrue(ctrl.fan_power)
+
+
+class LaserSupplySwitchTests(unittest.TestCase):
+    """Service menu: 24 V rail by hand, switches itself off after a while."""
+    def test_on_arms_the_auto_off_and_off_releases(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.set_laser_supply(True)
+        self.assertTrue(ctrl.fan_power)
+        self.assertIsNotNone(ctrl.fan_off_at)
+        ctrl.set_laser_supply(False)
+        w = ParkLowTests().lines(ctrl)
+        self.assertEqual(w, ["M5 I", "M400", "M106 P0 S255", "M5 I", "M400", "M107 P0"])
+        self.assertFalse(ctrl.fan_power)
+
+
+class ServiceAuthTests(unittest.TestCase):
+    """Service password: hash only, old one needed to change it."""
+    def test_set_check_change(self):
+        from marlin.service_auth import ServiceAuth
+        with tempfile.TemporaryDirectory() as tmp:
+            auth = ServiceAuth(Path(tmp) / "pw.json")
+            self.assertFalse(auth.is_set())
+            with self.assertRaises(PermissionError):
+                auth.check("abcd")
+            with self.assertRaises(ValueError):
+                auth.set("abc")
+            auth.set("abcd")
+            self.assertNotIn("abcd", (Path(tmp) / "pw.json").read_text())
+            auth.check("abcd")
+            with self.assertRaises(PermissionError):
+                auth.set("efgh", "falsch")
+            auth.set("efgh", "abcd")
+            auth.check("efgh")
 
 
 class TtlTestTests(unittest.TestCase):

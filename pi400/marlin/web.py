@@ -17,7 +17,8 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import (Aborted, MarlinTransport, MarlinLaserGuard, ProbeFailed, normalize,
-                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM, Z_SPEED_MAX)
+                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM, Z_SPEED_MAX,
+                        SUPPLY_ON_MAX_S)
 from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
@@ -32,6 +33,7 @@ from .projects import ProjectStore, create_blueprint as projects_api
 from .line_laser import LineLaser
 from .app_update import AppUpdates
 from .firmware_release import FirmwareReleases
+from .service_auth import ServiceAuth
 from .grbl_bridge import merge_power_steps, merge_short_moves, open_controller
 
 ROOT = Path(__file__).resolve().parent
@@ -64,6 +66,7 @@ def _fixed_head_surface():
 
 # SKR at LUMACUT_SKR; without it the original Atomstack board (Grbl, CH340)
 # through the Marlin bridge (grbl_bridge.py, emergency use since 31.10.2026).
+service_auth = ServiceAuth(DATA / "service_password.json")
 machine = MarlinTransport(USB, serial_factory=lambda port, baud, timeout=0.1: open_controller(
     port, baud, timeout, surface_hint=_fixed_head_surface))
 app = Flask(__name__, static_folder=None)
@@ -240,6 +243,7 @@ _LIVE_STATUS_FIELDS = {
     "emergency_latched": lambda m: m.emergency_latched,
     "laser_armed": lambda m: m.laser_enabled,
     "laser_cooling_fan_on": lambda m: m.fan_power,
+    "service_password_set": lambda m: service_auth.is_set(),
     "position": lambda m: m.position,
     "fault": lambda m: m.fault,
     "workpiece_surface_z": lambda m: m.surface_z,
@@ -671,12 +675,29 @@ def action():
         local_owner()
         machine.supply_test(seconds)
         return jsonify(message="Laserversorgung %g s an (ohne Strahl), wieder aus." % seconds)
-    if op == "fire_test":
-        # Stationary low-power shot after the owner's go (transport.fire_test).
+    if op == "service_password":
+        # First call sets it; changing needs the old one (service_auth).
+        service_auth.set(request.form.get("new", ""), request.form.get("old"))
+        return jsonify(message="Service-Passwort gespeichert")
+    if op == "service_unlock":
+        service_auth.check(request.form.get("password", ""))
+        return jsonify(message="Service-Menü entsperrt")
+    if op == "service_supply":
+        # Laser 24 V relay on/off by hand, beam stays off (transport.set_laser_supply).
+        service_auth.check(request.form.get("password", ""))
+        on = request.form.get("state") == "on"
+        local_owner()
+        machine.set_laser_supply(on)
+        return jsonify(message="Laserversorgung 24 V " + (
+            "AN (Strahl aus, schaltet nach %d min selbst ab)" % (SUPPLY_ON_MAX_S // 60) if on else "AUS"))
+    if op == "service_fire":
+        # Stationary shot by hand after the owner's go (transport.fire_test).
+        service_auth.check(request.form.get("password", ""))
         percent = float(request.form.get("percent", "1"))
-        seconds = float(request.form.get("seconds", "5"))
+        seconds = float(request.form.get("seconds", "1"))
         local_owner()
         power = machine.fire_test(percent, seconds)
+        logging.warning("Service: Laser %g %% (S%d) %g s im Stillstand gefeuert", percent, power, seconds)
         return jsonify(message="Laser %g %% (S%d) %g s im Stillstand gefeuert, wieder aus."
                        % (percent, power, seconds))
     if op == "ttl_test":

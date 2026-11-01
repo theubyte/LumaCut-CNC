@@ -105,8 +105,9 @@ Z_TEST_FEED_MM_MIN = 120
 Z_SPEED_DEFAULT = 9.0
 Z_SPEED_MAX = 30.0
 SUPPLY_TEST_MAX_S = 30.0  # op=supply_test: laser rail on for measuring, beam off
-FIRE_TEST_MAX_PCT = 2.0  # op=fire_test: stationary shot, very low power only
+FIRE_TEST_MAX_PCT = 20.0  # service menu: stationary shot, password + go
 FIRE_TEST_MAX_S = 5.0
+SUPPLY_ON_MAX_S = 300.0  # service menu: laser rail switches itself off after this
 TTL_TEST_MAX_S = 10.0  # op=ttl_test: PWM pin at full duty, laser relay off
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
@@ -1184,12 +1185,35 @@ class MarlinTransport:
                 self.fan_power = False
                 self.fan_off_at = None
 
+    def set_laser_supply(self, on: bool, owner: str = "web"):
+        """Service menu: laser 24 V rail (relay on FAN0) on or off, beam off.
+
+        On also arms the cooldown timer, so service_cooldown() switches the
+        rail off by itself after SUPPLY_ON_MAX_S if nobody does.
+        """
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+            self._exchange_locked("M5 I", timeout=6.0)
+            self._exchange_locked("M400", timeout=15)
+            if on:
+                self._exchange_locked("M106 P0 S255", timeout=8)
+                self.fan_power = True
+                self.fan_off_at = time.monotonic() + SUPPLY_ON_MAX_S
+            else:
+                self._exchange_locked("M107 P0", timeout=8)
+                self.fan_power = False
+                self.fan_off_at = None
+
     def fire_test(self, percent: float, seconds: float, owner: str = "web"):
-        """Stationary laser shot at very low power (owner 01.11., after go).
+        """Stationary laser shot from the service menu (password + go).
 
         Checks whether the module fires at all when jobs leave no mark.
         At most FIRE_TEST_MAX_PCT for FIRE_TEST_MAX_S; no motion. The beam
-        is switched off in ``finally`` even if the dwell fails.
+        is switched off in ``finally`` even if the dwell fails; the rail is
+        left as it was before the shot.
         """
         if not isinstance(percent, (int, float)) or not 0 < percent <= FIRE_TEST_MAX_PCT:
             raise ValueError("Feuertest: Leistung 0..%g %%" % FIRE_TEST_MAX_PCT)
@@ -1201,20 +1225,23 @@ class MarlinTransport:
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity or self.emergency_latched:
                 raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+            supply_was_on = self.fan_power
             self._exchange_locked("M5 I", timeout=6.0)
             self._exchange_locked("M400", timeout=15)
-            self._exchange_locked("M106 P0 S255", timeout=8)
-            self._exchange_locked(
-                f"G4 P{int(self.laser_supply_settle_ms)}", timeout=10)
+            if not supply_was_on:
+                self._exchange_locked("M106 P0 S255", timeout=8)
+                self._exchange_locked(
+                    f"G4 P{int(self.laser_supply_settle_ms)}", timeout=10)
             try:
                 self._exchange_locked("M3 S%d" % power, timeout=6.0)
                 self._exchange_locked("G4 P%d" % int(seconds * 1000),
                                       timeout=seconds + 10)
             finally:
                 self._exchange_locked("M5", timeout=6.0)
-                self._exchange_locked("M107 P0", timeout=8)
-                self.fan_power = False
-                self.fan_off_at = None
+                if not supply_was_on:
+                    self._exchange_locked("M107 P0", timeout=8)
+                    self.fan_power = False
+                    self.fan_off_at = None
         return power
 
     def ttl_test(self, seconds: float, owner: str = "web"):

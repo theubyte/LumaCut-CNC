@@ -184,7 +184,7 @@ Rahmenkante (M400) halten die Sperre für die ganze Fahrt.
   `stale_ms: 0`. Wird als Cache gemerkt.
 - Sperre belegt: **letzter vollständiger Status aus dem Cache**, darüber
   live gelesen: `state`, `owner`, `homed`, `z_homed`, `emergency_latched`,
-  `laser_armed`, `laser_cooling_fan_on`, `position`, `fault`,
+  `laser_armed`, `laser_cooling_fan_on`, `service_password_set`, `position`, `fault`,
   `workpiece_surface_z`, `connected`. Dazu `busy: true` und `stale_ms` = Alter
   des Cache-Anteils in ms.
 - Sonderfall: Sperre belegt **und noch nie ein Cache** (direkt nach
@@ -226,6 +226,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `exhaust` | bool | Abluft (M8) an |
 | `laser_armed` | bool | Laser per `M3 I` scharf; außerhalb eines Auftrags immer `false` |
 | `laser_cooling_fan_on` | bool | Laserversorgung/Kühlung (FAN1/PC6) an |
+| `service_password_set` | bool | Service-Menü (Laser) hat ein Passwort (`op=service_password`) |
 | `workpiece_surface_z` | number \| null | gemessene Werkstückoberfläche (Z, mm) nach `op=probe`/G30; kann bis −3 mm sein (das Bett liegt unter Z0) |
 | `workpiece_above_bed_mm` | number \| null | gemessene Oberfläche über dem Bett an der angetasteten Stelle (= Werkstückdicke), nur mit Bettkarte |
 | `material_calibration` | object \| null | letzter oder laufender Materialtest (`op=matcal`): `kind` (`engrave`/`cut`), `material`, `state` (`running`, `complete`, `error`, `aborted`), `steps` (Felder bzw. Durchgänge bisher), `last` (letztes Feld bzw. letzter Durchgang wie in `GET /api/matcal`), `result`, `saved` (`[{id, name, process}]` der gespeicherten Materialien), `error`; `null` = noch keiner |
@@ -412,14 +413,27 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | Wirkung | `M5 I`, `M400`, `M106 P0 S255` (Laser-Relais an, kein Strahl), warten, `M5 I`, `M107 P0`. Zum Messen der 24-V-Laserversorgung. ⚠ Hardware |
 | Erfolg | 200 `Laserversorgung 15 s an (ohne Strahl), wieder aus.` |
 
-#### `op=fire_test`
+#### `op=service_password` / `op=service_unlock`
 
 | | |
 | --- | --- |
-| Parameter | `percent`: >0..2 (Standard 1), `seconds`: >0..5 (Standard 5) |
-| Vorbedingungen | **frei**, Referenz nicht nötig; kein Notstopp; **Go des Besitzers, Material unter der Düse geprüft** |
-| Wirkung | `M5 I`, `M400`, `M106 P0 S255`, `G4 P800`, `M3 S<round(percent·2,55)>`, `G4`, danach immer `M5`, `M107 P0`. Laser im Stillstand! ⚠ Hardware |
-| Erfolg | 200 `Laser 1 % (S3) 5 s im Stillstand gefeuert, wieder aus.` |
+| Parameter | `service_password`: `new` (≥ 4 Zeichen), `old` (nötig, wenn schon gesetzt); `service_unlock`: `password` |
+| Wirkung | Passwort des Service-Menüs setzen bzw. prüfen. Gespeichert nur als PBKDF2-Hash (`service_password.json`). Falsches Passwort: 400 nach 1 s. Status: `service_password_set` |
+
+#### `op=service_supply`
+
+| | |
+| --- | --- |
+| Parameter | `password`, `state`: `on` / `off` |
+| Wirkung | `M5 I`, `M400`, dann `M106 P0 S255` (an) bzw. `M107 P0` (aus). Strahl aus; an schaltet nach 5 min selbst ab. Status: `laser_cooling_fan_on`. ⚠ Hardware |
+
+#### `op=service_fire`
+
+| | |
+| --- | --- |
+| Parameter | `password`, `percent`: >0..20 (Standard 1), `seconds`: >0..5 (Standard 1) |
+| Vorbedingungen | frei, Referenz nicht nötig; kein Notstopp; **Go des Besitzers, Material unter der Düse geprüft** |
+| Wirkung | `M5 I`, `M400`, (Relais an + `G4 P800`, falls aus), `M3 S<round(percent·2,55)>`, `G4`, danach immer `M5`; Relais wie vorher. Laser im Stillstand! ⚠ Hardware |
 
 #### `op=ttl_test`
 
