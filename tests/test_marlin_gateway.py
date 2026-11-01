@@ -1092,6 +1092,31 @@ class ZTestTests(unittest.TestCase):
         self.assertEqual(ctrl.serial.writes, [])
 
 
+class ZSpeedSettingTests(unittest.TestCase):
+    """Z max feedrate raised step by step for the worm lift (01.11.)."""
+    def test_speed_test_lifts_the_cap_for_one_move_only(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.z_test(10.0, speed=15)
+        w = ParkLowTests().lines(ctrl)
+        self.assertEqual(w, ["M5 I", "G91", "M203 Z15", "G0 Z+10.000 F900", "M400",
+                             "G90", "M203 Z9", "M114"])
+        with self.assertRaises(ValueError):
+            ctrl.z_test(1.0, speed=31)
+
+    def test_raised_speed_is_sent_and_used_by_z_travel(self):
+        ctrl = ParkLowTests().machine()
+        self.assertEqual(ctrl.z_feed, 600)          # default: unchanged F600
+        ctrl.set_z_speed(20)
+        self.assertEqual(ParkLowTests().lines(ctrl), ["M400", "M203 Z20"])
+        self.assertEqual(ctrl.z_feed, 1200)
+        ctrl.serial.writes.clear()
+        ctrl.park_safezone(owner="web")
+        self.assertTrue(any(l.endswith("F1200") and l.startswith("G0 Z")
+                            for l in ParkLowTests().lines(ctrl)))
+        with self.assertRaises(ValueError):
+            ctrl.set_z_speed(40)
+
+
 class GatewayFilesTests(unittest.TestCase):
     def test_no_unsafe_marlin_commands_or_unhomed_power(self):
         guard = MarlinLaserGuard()

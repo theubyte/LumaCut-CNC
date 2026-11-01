@@ -90,6 +90,11 @@ Z_STEPS_PER_MM = 1018.59
 # op=z_test: Z without homing to check the direction, slow (2 mm/s).
 Z_TEST_MAX_MM = 10.0
 Z_TEST_FEED_MM_MIN = 120
+# Z max feedrate (M203 Z). 9 mm/s from the belt drive; the worm lift reaches
+# ~30 (owner raises it in steps, config z_speed_mm_s). Z travel moves ask
+# for this speed, Marlin caps them at M203.
+Z_SPEED_DEFAULT = 9.0
+Z_SPEED_MAX = 30.0
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
 BED_BELOW_Z0_MM = 3.0
@@ -188,9 +193,9 @@ def segment_enters_corner(p, q, corner) -> bool:
     return lo < hi
 
 
-def motion_commands(accel: float, speed: float) -> list[str]:
-    """Runtime X/Y limits: max acceleration, max feedrate (Z stays 9 mm/s), default accelerations."""
-    return ["M201 X%d Y%d" % (accel, accel), "M203 X%d Y%d Z9" % (speed, speed),
+def motion_commands(accel: float, speed: float, z_speed: float = Z_SPEED_DEFAULT) -> list[str]:
+    """Runtime limits: X/Y max acceleration and feedrate, Z max feedrate, default accelerations."""
+    return ["M201 X%d Y%d" % (accel, accel), "M203 X%d Y%d Z%g" % (speed, speed, z_speed),
             "M204 P%d T%d" % (accel, accel)]
 
 
@@ -306,6 +311,7 @@ class MarlinTransport:
         self.emergency_latched = False
         self.clearance_mm = 20.0
         self.park_z_mm = PARK_Z_MM     # 0 = stay at the travel height
+        self.z_speed_mm_s = Z_SPEED_DEFAULT
         self.parked_low = False        # head down at park_z_mm in the park corner
         # Thickness of the chosen material (Pi workspace), None = not chosen.
         self.material_mm = None
@@ -536,7 +542,7 @@ class MarlinTransport:
                 # User requested 1.8x Z speed. Set 9 mm/s on every SKR USB
                 # reconnect; do not write permanent EEPROM without an
                 # explicit flash/configuration workflow.
-                self._exchange_locked("M203 Z9", timeout=6.0)
+                self._exchange_locked("M203 Z%g" % self.z_speed_mm_s, timeout=6.0)
                 self._exchange_locked("M92 Z%g" % Z_STEPS_PER_MM, timeout=6.0)
                 # The same stale EEPROM may still hold the Mega Zero example
                 # probe offset { -40, -10, 2 }. Marlin then shifts every G30
@@ -661,7 +667,7 @@ class MarlinTransport:
         self.parked_low = False
         if "Z" in coords or not coords & {"X", "Y"}:
             return
-        lift = [f"G0 Z{self.travel_z:.3f} F600", "M400"]
+        lift = [f"G0 Z{self.travel_z:.3f} F{self.z_feed}", "M400"]
         if not self.absolute_mode:
             lift = ["G90"] + lift + ["G91"]
         for line in lift:
@@ -675,7 +681,7 @@ class MarlinTransport:
         if not self.absolute_mode:
             self._exchange_locked("G90", timeout=8)
             self.absolute_mode = True
-        self._exchange_locked(f"G0 Z{self.park_z_mm:.3f} F600", timeout=45)
+        self._exchange_locked(f"G0 Z{self.park_z_mm:.3f} F{self.z_feed}", timeout=45)
         self._exchange_locked("M400", timeout=45)
         self.parked_low = True
         return True
@@ -706,7 +712,7 @@ class MarlinTransport:
             raise ValueError("Automatischer Fokus benötigt absolute Z-Koordinaten (G90)")
         self._exchange_locked("G90", timeout=8)
         self.absolute_mode = True
-        self._exchange_locked(f"G0 Z{goal:.3f} F600", timeout=20)
+        self._exchange_locked(f"G0 Z{goal:.3f} F{self.z_feed}", timeout=20)
         self._exchange_locked("M400", timeout=30)
         self._exchange_locked("M114", timeout=8)
         self.focused_this_job = True
@@ -1058,18 +1064,35 @@ class MarlinTransport:
         """
         if self.z_homed and self.position is not None:
             if self.position[2] < self.travel_z - 0.01:
-                return [f"G0 Z{self.travel_z:.2f} F600"]
+                return [f"G0 Z{self.travel_z:.2f} F{self.z_feed}"]
             return []
         if self.last_known_z is not None:
             last = self.last_known_z
             lift = min(max(self.travel_z - last, MIN_BLIND_LIFT_MM), Z_MAX_MM - last)
-            return ["G91", f"G0 Z{lift:.2f} F600", "G90"] if lift > 0.05 else []
+            return ["G91", f"G0 Z{lift:.2f} F{self.z_feed}", "G90"] if lift > 0.05 else []
         if operator_clear:
             return []
         raise RuntimeError("Kopfhöhe unbekannt: Steht der Kopf frei über allem auf dem Bett? "
                            "Dann das Referenzieren bestätigen.")
 
-    def z_test(self, distance: float, owner: str = "web"):
+    @property
+    def z_feed(self) -> int:
+        """Feed (mm/min) of Z travel moves: the old F600 up to 10 mm/s, else the Z limit."""
+        return max(600, int(round(self.z_speed_mm_s * 60)))
+
+    def set_z_speed(self, speed: float, owner: str = "web"):
+        """Stores the Z max feedrate and sends it (M203 Z) when connected."""
+        if not isinstance(speed, (int, float)) or not 2 <= speed <= Z_SPEED_MAX:
+            raise ValueError("Z-Tempo: 2..%g mm/s" % Z_SPEED_MAX)
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            self.z_speed_mm_s = float(speed)
+            if self.serial is not None and self.identity and not self.emergency_latched:
+                self._exchange_locked("M400", timeout=60)
+                self._exchange_locked("M203 Z%g" % self.z_speed_mm_s, timeout=6.0)
+
+    def z_test(self, distance: float, owner: str = "web", speed: float | None = None):
         """Z only, relative and slow, also without homing (owner 01.11.).
 
         For checking the Z direction after a drive change: homing itself
@@ -1079,6 +1102,11 @@ class MarlinTransport:
         """
         if not isinstance(distance, (int, float)) or not 0 < abs(distance) <= Z_TEST_MAX_MM:
             raise ValueError("Z-Test: höchstens ±%g mm" % Z_TEST_MAX_MM)
+        if speed is not None and not 2 <= speed <= Z_SPEED_MAX:
+            raise ValueError("Z-Test: Tempo 2..%g mm/s" % Z_SPEED_MAX)
+        # A speed test lifts the M203 cap for this one move, then restores it.
+        feed = int(round(speed * 60)) if speed else Z_TEST_FEED_MM_MIN
+        wait = abs(distance) * 60.0 / feed + 15
         with self.lock:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
@@ -1091,11 +1119,14 @@ class MarlinTransport:
             self._exchange_locked("M5 I", timeout=6.0)
             self._exchange_locked("G91", timeout=6.0)
             try:
-                self._exchange_locked("G0 Z%+.3f F%d" % (distance, Z_TEST_FEED_MM_MIN),
-                                      timeout=abs(distance) * 60.0 / Z_TEST_FEED_MM_MIN + 15)
-                self._exchange_locked("M400", timeout=abs(distance) * 60.0 / Z_TEST_FEED_MM_MIN + 15)
+                if speed and speed > self.z_speed_mm_s:
+                    self._exchange_locked("M203 Z%g" % speed, timeout=6.0)
+                self._exchange_locked("G0 Z%+.3f F%d" % (distance, feed), timeout=wait)
+                self._exchange_locked("M400", timeout=wait)
             finally:
                 self._exchange_locked("G90", timeout=6.0)
+                if speed and speed > self.z_speed_mm_s:
+                    self._exchange_locked("M203 Z%g" % self.z_speed_mm_s, timeout=6.0)
             return self._exchange_locked("M114", timeout=6.0)
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
@@ -1137,7 +1168,7 @@ class MarlinTransport:
                 final = self.park_z_mm     # stays low in the park corner (_lower_to_park_locked)
             commands = ["M5 I"] + lift + ["G28 X Y R0", "M400",
                         "G28 Z", "M400", "G91",
-                        f"G0 Z{final:.2f} F600", "G90", "M400", "M114"]
+                        f"G0 Z{final:.2f} F{self.z_feed}", "G90", "M400", "M114"]
             result = []
             try:
                 for cmd in commands:
@@ -1207,7 +1238,7 @@ class MarlinTransport:
                 self._exchange_locked("G90", timeout=8)
                 self.absolute_mode = True
             if self.position[2] < self.travel_z:
-                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F600", timeout=45)
+                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F{self.z_feed}", timeout=45)
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=90)
             self._exchange_locked("M400", timeout=90)
             result = self._exchange_locked("M114", timeout=8)
@@ -1245,7 +1276,7 @@ class MarlinTransport:
 
     def _apply_motion_locked(self, limits=None):
         accel, speed = limits or self.motion_limits or FIRMWARE_MOTION
-        for cmd in motion_commands(accel, speed):
+        for cmd in motion_commands(accel, speed, self.z_speed_mm_s):
             self._exchange_locked(cmd, timeout=6.0)
 
     def controller_motion(self):
@@ -1306,7 +1337,7 @@ class MarlinTransport:
                 self._exchange_locked("G90", timeout=8)
                 self.absolute_mode = True
             if self.position[2] < self.travel_z:
-                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F600", timeout=45)
+                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F{self.z_feed}", timeout=45)
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=90)
             self._exchange_locked("M400", timeout=90)
             feed = speed * 60
@@ -1358,7 +1389,7 @@ class MarlinTransport:
             if not self.absolute_mode:
                 self._exchange_locked("G90", timeout=8)
                 self.absolute_mode = True
-            self._exchange_locked(f"G0 Z{z_target:.3f} F600", timeout=45)
+            self._exchange_locked(f"G0 Z{z_target:.3f} F{self.z_feed}", timeout=45)
             self._exchange_locked("M400", timeout=45)
             self._exchange_locked("G0 X0.000 Y0.000 F9000", timeout=90)
             self._exchange_locked("M400", timeout=90)
@@ -1436,7 +1467,7 @@ class MarlinTransport:
                     PROBE_HEAD_MIN[0], self.travel_xy[0] - 10.0,
                     PROBE_HEAD_MIN[1], self.travel_xy[1] - 10.0))
             if z < self.travel_z:
-                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F600", timeout=45)
+                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F{self.z_feed}", timeout=45)
                 self._exchange_locked("M400", timeout=45)
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=60)
             self._exchange_locked("M400", timeout=60)
@@ -1467,7 +1498,7 @@ class MarlinTransport:
             self.surface_z = contact
             self.last_probe_laser_xy = (laser_x, laser_y)
             lift = min(Z_MAX_MM, max(self.travel_z, contact + self.probe_clearance_mm))
-            self._exchange_locked(f"G0 Z{lift:.3f} F600", timeout=45)
+            self._exchange_locked(f"G0 Z{lift:.3f} F{self.z_feed}", timeout=45)
             self._exchange_locked("M400", timeout=45)
             self._exchange_locked(f"G0 X{laser_x:.3f} Y{laser_y:.3f} F9000", timeout=60)
             self._exchange_locked("M400", timeout=60)
@@ -1610,7 +1641,7 @@ class MarlinTransport:
                 nonlocal z
                 target = min(target, Z_MAX_MM)
                 if z < target - 0.001:
-                    self._exchange_locked(f"G0 Z{target:.3f} F600", timeout=45)
+                    self._exchange_locked(f"G0 Z{target:.3f} F{self.z_feed}", timeout=45)
                     z = target
 
             def go(x, y):
@@ -1668,7 +1699,7 @@ class MarlinTransport:
                 go(x, y)
                 low = values[gi][pi] + hop_mm
                 if z > low + 0.001:
-                    self._exchange_locked(f"G0 Z{low:.3f} F600", timeout=45)
+                    self._exchange_locked(f"G0 Z{low:.3f} F{self.z_feed}", timeout=45)
                     z = low
                 contact = contact_at(x, y)
                 values[gi][pi] = contact

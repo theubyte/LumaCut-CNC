@@ -17,7 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import (Aborted, MarlinTransport, MarlinLaserGuard, ProbeFailed, normalize,
-                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM)
+                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM, Z_SPEED_MAX)
 from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
@@ -100,6 +100,8 @@ config = {
     # Parked and after homing the head waits this high over the bed in the
     # park corner, so unpowered motors let it drop at most this far; 0 = off.
     "park_z_mm": 1.0,
+    # Z max feedrate (M203 Z), raised in steps for the worm lift (01.11.).
+    "z_speed_mm_s": 9.0,
 }
 FRAME_POWER_MAX = 1.0
 FRAME_POWER_MIN_FEED = 1200.0
@@ -127,6 +129,7 @@ machine.homing_verified = bool(config["validated"])
 machine.travel_xy = (float(config["travels"]["x"]), float(config["travels"]["y"]))
 machine.clearance_mm = float(config["z_clearance_mm"])
 machine.park_z_mm = float(config.get("park_z_mm", 1.0) or 0.0)
+machine.z_speed_mm_s = float(config.get("z_speed_mm_s", 9.0) or 9.0)
 machine.probe_tip_offset_mm = float(config["z_switch_tip_offset_mm"])
 machine.focus_gap_mm = float(config["focus_gap_mm"])
 machine.light_pct = int(round(float(config["light_brightness"])))
@@ -429,6 +432,9 @@ def settings():
         park_z = number("park_z_mm", 0, 20, "Parkhöhe muss 0..20 mm sein (0 = auf Fahrhöhe parken)")
         if 0 < park_z < 0.5:
             raise ValueError("Parkhöhe unter 0,5 mm: der Taster läge auf dem Bett")
+    z_speed = config.get("z_speed_mm_s", 9.0)
+    if form.get("z_speed_mm_s", "").strip():
+        z_speed = number("z_speed_mm_s", 2, Z_SPEED_MAX, "Z-Tempo muss 2..%g mm/s sein" % Z_SPEED_MAX)
     # optional: GPIO of the measuring line laser ("" = none)
     if "line_laser_gpio" in form:
         raw = form.get("line_laser_gpio", "").strip()
@@ -454,7 +460,9 @@ def settings():
                   z_clearance_mm=clearance, focus_gap_mm=gap, z_switch_tip_offset_mm=offset,
                   thickness_tolerance_mm=tolerance, machine_name=name,
                   exhaust_auto=exhaust_auto, exhaust_after_s=exhaust_after,
-                  frame_power_pct=frame_power, park_z_mm=park_z)
+                  frame_power_pct=frame_power, park_z_mm=park_z, z_speed_mm_s=z_speed)
+    if z_speed != machine.z_speed_mm_s:
+        machine.set_z_speed(z_speed)
     persist()
     return jsonify(message="Einstellungen dauerhaft auf dem Pi gespeichert",
                    z_clearance_mm=clearance, focus_gap_mm=gap,
@@ -646,11 +654,13 @@ def action():
         distance = float(request.form.get("distance", "0"))
         if distance not in (-10.0, -5.0, -1.0, 1.0, 5.0, 10.0):
             raise ValueError("Z-Test: Schrittweite ±1, ±5 oder ±10 mm")
+        # optional speed test (mm/s) for raising z_speed_mm_s step by step
+        speed = float(request.form["speed"]) if request.form.get("speed", "").strip() else None
         local_owner()
         _forget_current_placement()
-        reply = machine.z_test(distance)
-        return jsonify(message="Z-Test %+g mm gefahren (2 mm/s). Maschine ist nicht referenziert." % distance,
-                       lines=reply)
+        reply = machine.z_test(distance, speed=speed)
+        return jsonify(message="Z-Test %+g mm gefahren (%g mm/s). Maschine ist nicht referenziert."
+                       % (distance, speed or 2), lines=reply)
     if op == "app_update_check":
         # Network only, never touches the machine: allowed at any time.
         info = app_updates.check()

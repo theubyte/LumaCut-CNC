@@ -261,7 +261,7 @@ Felder aus `web.py` (`status()`):
 | `firmware` | string | immer `"marlin"` |
 | `expected_pwm` | string | `"PA1 / M3 I / S0..255"` (Info) |
 | `io` | object | Klartext-Belegung `laser_supply_switch`, `laser_pwm`, `fan_cooldown`, `exhaust`, `lights`, `aux` (Info) |
-| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware; am Atomstack-Board höchstens dessen `$120`/`$110`, z. B. 1000 mm/s² / 100 mm/s), `thickness_tolerance_mm` (2,0: so weit darf die abgetastete Oberfläche von der Materialstärke abweichen), `line_laser_gpio` (BCM-Pin des Mess-Linienlasers oder `null`), `machine_name` (Gerätename, Standard „LumaCut“), `exhaust_auto` (Abluft beim Auftragsstart an), `exhaust_after_s` (Abluft-Nachlauf nach dem Auftrag, 0..900 s, Standard 60), `frame_power_pct` (Laserleistung beim Rahmen, 0..1 %, 0 = Laser aus), `park_z_mm` (Parkhöhe über dem Bett in der Park-Ecke nach Referenzieren und Parken, 0..20 mm, Standard 1, 0 = auf Fahrhöhe) |
+| `config` | object | gespeicherte Einstellungen: `validated`, `z_clearance_mm`, `focus_gap_mm`, `z_switch_tip_offset_mm`, `probe_offset_x_mm`, `probe_offset_y_mm`, `travels` `{x: 390, y: 370, z: 80}` (z wird beim Start auf höchstens 80 begrenzt), `user_origin`, `light_brightness`, `light_effects`, `camera` (wie `GET /api/camera/settings`), `motion` `{accel, speed}` (Bewegungs-Kalibrierung, `null` = Firmware; am Atomstack-Board höchstens dessen `$120`/`$110`, z. B. 1000 mm/s² / 100 mm/s), `thickness_tolerance_mm` (2,0: so weit darf die abgetastete Oberfläche von der Materialstärke abweichen), `line_laser_gpio` (BCM-Pin des Mess-Linienlasers oder `null`), `machine_name` (Gerätename, Standard „LumaCut“), `exhaust_auto` (Abluft beim Auftragsstart an), `exhaust_after_s` (Abluft-Nachlauf nach dem Auftrag, 0..900 s, Standard 60), `frame_power_pct` (Laserleistung beim Rahmen, 0..1 %, 0 = Laser aus), `park_z_mm` (Parkhöhe über dem Bett in der Park-Ecke nach Referenzieren und Parken, 0..20 mm, Standard 1, 0 = auf Fahrhöhe), `z_speed_mm_s` (Z-Höchsttempo `M203 Z`, 2..30 mm/s, Standard 9; Z-Fahrten fordern es an) |
 | `line_laser` | object | `{gpio, on}`: roter Mess-Linienlaser am Kopf (3D-Höhe), geschaltet über einen Pi-GPIO (BCM); `gpio` `null` = nicht eingebaut |
 | `sync` | object | `{workspace, project, scan}`: Revisionen des Arbeitsstands auf dem Pi (Abschnitt 4.15). Ändert sich eine, holt jedes Gerät nur diesen Teil neu. |
 | `travel_z_mm` | number | Fahrhöhe über unbekanntem Gelände = Stärke des gewählten Materials + 20 mm, mindestens `z_clearance_mm`, höchstens 80. Alle Pi-Fahrten (moveto, Abtasten, Parken, nach dem Referenzieren, lange Leerfahrten im Auftrag) gehen mindestens so hoch. |
@@ -407,9 +407,9 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 
 | | |
 | --- | --- |
-| Parameter | `distance`: genau `-10`, `-5`, `-1`, `1`, `5`, `10` (mm, + = hoch) |
+| Parameter | `distance`: genau `-10`, `-5`, `-1`, `1`, `5`, `10` (mm, + = hoch); optional `speed` 2..30 mm/s (Tempotest: hebt `M203 Z` nur für diese Fahrt an, Standard 2) |
 | Vorbedingungen | **frei**, **nicht** referenziert nötig (Richtungsprüfung nach Antriebswechsel); kein Notstopp |
-| Wirkung | `M5 I`, `G91`, `G0 Z±d F120`, `M400`, `G90`, `M114`. Nur Z, 2 mm/s. Setzt `homed`/`z_homed` zurück und verwirft Werkstückhöhe und Platzierung `current`. ⚠ Hardware, Go des Besitzers |
+| Wirkung | `M5 I`, `G91`, `G0 Z±d F120` (bzw. `F<speed·60>`, davor/danach `M203 Z`), `M400`, `G90`, `M114`. Nur Z, Standard 2 mm/s. Setzt `homed`/`z_homed` zurück und verwirft Werkstückhöhe und Platzierung `current`. ⚠ Hardware, Go des Besitzers |
 | Erfolg | 200 `{message: "Z-Test +10 mm gefahren …", lines}` |
 | Fehler | 400 `Z-Test: Schrittweite ±1, ±5 oder ±10 mm`; Abschnitt 1.2 |
 
@@ -776,6 +776,7 @@ Web-UI jede Gruppe für sich.
 | `machine_name` | string | 1..40 Zeichen (Leerraum wird zusammengefasst) |
 | `exhaust_auto` | `0`/`1` | Abluft beim Auftragsstart einschalten (`M8`) |
 | `exhaust_after_s` | int | 0..900: so lange nach dem Auftrag läuft die Abluft noch, dann `M9` – außer ein neuer Auftrag läuft oder jemand anderes hat die Steuerung |
+| `z_speed_mm_s` | float | 2..30: Z-Höchsttempo (`M203 Z`), wird sofort gesendet; Z-Fahrten (Fahrhöhe, Parken) fahren damit, unter 10 mm/s weiter F600 |
 | `park_z_mm` | float | 0 oder 0,5..20: Parkhöhe über dem Bett in der Park-Ecke (X0/Y0) nach dem Referenzieren und beim Parken; vor jeder X/Y-Fahrt hebt der Pi auf Fahrhöhe. 0 = auf Fahrhöhe bleiben |
 | `frame_power_pct` | float | 0..1: Laserleistung in % beim Rahmenfahren (sichtbarer Punkt, keine Spur), 0 = Laser aus |
 

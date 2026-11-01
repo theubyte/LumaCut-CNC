@@ -813,6 +813,7 @@ dialog.danger h2{color:var(--bad)}
     </div>
     <label class="field">Fahrhöhe (Sicherheitsabstand über dem Bett)<span class="unit" data-unit="mm"><input id="zClearance" name="z_clearance_mm" type="number" min="0.5" max="50" step="0.1" required inputmode="decimal"></span></label>
     <label class="field">Parkhöhe in der Park-Ecke (0 = auf Fahrhöhe)<span class="unit" data-unit="mm"><input id="parkZ" name="park_z_mm" type="number" min="0" max="20" step="0.1" required inputmode="decimal"></span></label>
+    <label class="field">Z-Tempo (Höchstwert, Schneckenlift bis 30)<span class="unit" data-unit="mm/s"><input id="zSpeed" name="z_speed_mm_s" type="number" min="2" max="30" step="1" required inputmode="decimal"></span></label>
     <p class="help">Versatz: vom Laserpunkt zur Tastspitze entlang der Maschinenachsen (X+23 = Tastspitze 23 mm in +X). Positiver Schalter-Wert: beim Schalterkontakt steht die Laserspitze so weit über der Fläche. Nach Änderungen vor dem nächsten Schnitt neu abtasten.</p>
     <div class="metrics">
      <div class="metric"><small>Spitze → Fläche</small><strong id="tipGap">—</strong></div>
@@ -1354,7 +1355,7 @@ for(const f of $$("form[data-settings],#motionSettings"))f.addEventListener("inp
 function setIfClean(form,id,value){const i=$(id);if(dirty.has(form)||document.activeElement===i)return;if(i.type==="checkbox")i.checked=Boolean(value);else i.value=value==null?"":String(value)}
 function fillSettings(s){
  const c=s.config||{};
- setIfClean("zSettings","zOffset",c.z_switch_tip_offset_mm);setIfClean("zSettings","zClearance",c.z_clearance_mm);setIfClean("zSettings","parkZ",c.park_z_mm??1);
+ setIfClean("zSettings","zOffset",c.z_switch_tip_offset_mm);setIfClean("zSettings","zClearance",c.z_clearance_mm);setIfClean("zSettings","parkZ",c.park_z_mm??1);setIfClean("zSettings","zSpeed",c.z_speed_mm_s??9);
  setIfClean("zSettings","focusGap",c.focus_gap_mm);setIfClean("zSettings","probeX",c.probe_offset_x_mm);setIfClean("zSettings","probeY",c.probe_offset_y_mm);
  setIfClean("deviceSettings","setName",c.machine_name||"LumaCut");setIfClean("deviceSettings","setTol",c.thickness_tolerance_mm);
  setIfClean("exhaustSettings","setExhaustAuto",c.exhaust_auto);setIfClean("exhaustSettings","setExhaustAfter",c.exhaust_after_s??60);
@@ -1372,7 +1373,7 @@ async function saveSettings(form,fields,button){
  }catch(e){show(e.message,true)}
 }
 $("zSettings").onsubmit=ev=>{ev.preventDefault();saveSettings("zSettings",{
- z_switch_tip_offset_mm:$("zOffset").value,z_clearance_mm:$("zClearance").value,park_z_mm:$("parkZ").value,focus_gap_mm:$("focusGap").value,
+ z_switch_tip_offset_mm:$("zOffset").value,z_clearance_mm:$("zClearance").value,park_z_mm:$("parkZ").value,z_speed_mm_s:$("zSpeed").value,focus_gap_mm:$("focusGap").value,
  probe_offset_x_mm:$("probeX").value,probe_offset_y_mm:$("probeY").value},$("saveZSettings"))};
 $("deviceSettings").onsubmit=ev=>{ev.preventDefault();saveSettings("deviceSettings",{machine_name:$("setName").value,thickness_tolerance_mm:$("setTol").value},ev.submitter)};
 $("exhaustSettings").onsubmit=ev=>{ev.preventDefault();saveSettings("exhaustSettings",{exhaust_auto:$("setExhaustAuto").checked?"1":"0",exhaust_after_s:$("setExhaustAfter").value||"0"},ev.submitter)};
