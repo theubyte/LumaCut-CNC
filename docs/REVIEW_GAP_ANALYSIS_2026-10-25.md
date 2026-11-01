@@ -478,3 +478,65 @@ Still open:
   (Canvas); oblique thick crossings still split into two nearby junctions with a short bridge line.
 - Windows hardware test of cut options, PDF import, image trace (incl. centre line and „Glätten“)
   and the rebuilt exe – needs a Windows machine with the laser.
+
+## 16. Status update 2026-11-01 (review round 9)
+
+Done in this round (review side, `lumacut_job` only, no new runtime dependencies – Android already
+had both features, commits 5329cbd / 6516dec):
+
+- **QR code generator** (`lumacut_job/qr.py`, pure Python, ISO/IEC 18004): byte mode (UTF-8),
+  versions 1–40 chosen automatically, error correction L/M/Q/H, Reed–Solomon over GF(256), block
+  interleaving, format and version information, all 8 masks with the standard penalty rules
+  (N1–N4, ported 1:1 from Nayuki's reference so the chosen mask is identical). Verified offline
+  against Nayuki qrcodegen and the `qrcode` package (identical matrices on 149 random texts × all
+  EC levels, incl. v40), and every result decoded with zxing-cpp. `segno` is *not* a byte-exact
+  reference (it adds a 0x00 byte before the padding – still valid, but a different matrix).
+- Output: dark modules merged row-wise and unioned (shapely) into `polygon` objects with holes as
+  rings, one group per code; filled by the layer's hatch / cross-hatch like any other object (the
+  even-odd fill keeps holes open). Quiet zone 0–10 modules (default 4) is reserved around the code;
+  „Invertiert“ engraves the light modules *and* the quiet zone (materials that turn light, e.g.
+  anodised aluminium / slate). Size 5–340 mm; error below 0.2 mm module size or if the code incl.
+  quiet zone does not fit the work area; hint below 0.8 mm module size.
+- Dialog „QR-Code einfügen“ (Auftrag menu / Design menu, **Alt+Q**): content, Fehlerkorrektur,
+  Größe, Ruhezone, Invertiert, info line (version, modules, module size, warnings). The code goes
+  onto the **active layer** if that layer fills; if it does not fill, the dialog pre-checks
+  „Neue Ebene „QR-Code“ mit Füllung (Schraffur 0,1 mm)“ – otherwise only outlines would be lasered
+  and the code would be unreadable. Inserted centred on the work area, selected, one undo step
+  (incl. the new layer), locked layer → message.
+- **Arc / curved text** (`lumacut_job/arctext.py` + `arctext_qt.py`, „Bogentext…“, **Alt+B**): text
+  along a circle as vector outlines (one grouped `polygon` per glyph, holes as rings). „Oben/außen“
+  runs clockwise with the letters outside, „Unten/innen“ runs counter-clockwise with the letters
+  inside, both reading left to right. Settings: font (system font combo), bold/italic, cap height,
+  radius, angle (0° = 12 o'clock, clockwise), reference point Mitte/Anfang/Ende, letter spacing.
+  Kerning is kept (advances from the font metrics of the whole string). Errors: text longer than
+  the circumference, letters higher than the radius (inside), result larger than the work area.
+  If exactly one text object is selected it pre-fills text / font / height / radius and can
+  replace it in place (same layer and groups, one undo step).
+
+Tests: `tests/test_qr_code.py` (21) – matrices identical to Nayuki reference, ISO byte capacities,
+format info for all EC levels × masks, chosen mask = minimal penalty, version info (v7), quiet zone /
+invert runs, polygon area = dark modules (no overlaps), errors, decoding with OpenCV (already a
+dependency) of the rendered vector shapes, of the inverted code and of the 0.1 mm hatch lines,
+dialog, window action (Alt+Q, Design + Auftrag menu), active layer / new fill layer, one undo step,
+G-code through the Pi guard. `tests/test_arc_text.py` (14) – angles / anchors / orientation for top
+and bottom, alignment, spacing, errors, grouping / centring / clamping, font glyph metrics,
+dialog, window action (Alt+B), replace selected text, undo, G-code through the Pi guard.
+
+Pre-existing failures on clean `origin/main` (Pi side changed, Studio tests not updated – Machine /
+Scan Probe): `test_machine_probe_reach.py` (collection error, `PROBE_HEAD_MAX` removed from
+`pi400/marlin/transport.py` in 9ae8577), `test_probe_reach.py::test_reach_constants_match_pi_source`
+(same) and `test_origin_end_to_end.py::test_default_anchor_at_switch_corner`
+(`placement.check_extent` now expects a park-corner tuple instead of a float).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter – decide if wanted.
+- Trace: true Bézier objects in the document (editable curve handles) would need a model change
+  (Canvas); oblique thick crossings still split into two nearby junctions with a short bridge line.
+- QR / arc text are static vector objects (not re-editable parameters after insertion; re-create
+  via the dialog). Other 2D codes (DataMatrix, barcodes) not covered.
+- The three pre-existing test failures above (Machine / Scan Probe).
+- Windows hardware test of cut options, PDF import, image trace (incl. centre line and „Glätten“),
+  QR code readability on real material and the rebuilt exe – needs a Windows machine with the laser.

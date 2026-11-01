@@ -185,6 +185,17 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Vorschau der ersten Werte. Höhe, Schrift, Drehung, Ebene und Streckung bleiben, die Breite folgt
   dem Text; die Kopien sind gruppiert, alles ist **ein** Rückgängig-Schritt. Passt das Raster
   nicht auf die Arbeitsfläche, wird nichts geändert. Code: `src/lumacut_job/serial.py`.
+- **QR-Code** („QR-Code…“, *Alt+Q*, Toolbar/Menü „Auftrag“ und Design-Menü): Text oder Adresse
+  (UTF-8) als QR-Code nach ISO/IEC 18004, Fehlerkorrektur L/M/Q/H, Version automatisch, Größe
+  5–340 mm, Ruhezone (Standard 4 Module), „Invertiert“ für hell markierende Materialien. Die
+  Module werden zu gefüllten Polygonen (gruppiert) und mit der Ebenen-Füllung graviert: Füllt die
+  aktive Ebene nicht, legt der Dialog standardmäßig eine Ebene „QR-Code“ mit Schraffur 0,1 mm an.
+  Ein Rückgängig-Schritt. Code: `src/lumacut_job/qr.py`, `qr_qt.py` (ohne Zusatzbibliothek).
+- **Bogentext** („Bogentext…“, *Alt+B*): Text entlang eines Kreises als Vektor-Umrisse (ein
+  Polygon je Buchstabe, gruppiert); oben/außen im Uhrzeigersinn oder unten/innen, Radius, Winkel,
+  Bezugspunkt Mitte/Anfang/Ende, Zeichenabstand, Schrift/Fett/Kursiv. Ist genau ein Textobjekt
+  ausgewählt, wird es übernommen und kann ersetzt werden. Code: `src/lumacut_job/arctext.py`,
+  `arctext_qt.py`.
 - **Nur Auswahl** (Toolbar, umschaltbar): Senden, Schätzen, Rahmen und „G-Code speichern“
   verwenden nur die ausgewählten Objekte (Ebenen-Einstellungen bleiben); ohne Auswahl gibt es
   eine Fehlermeldung statt eines Auftrags. Die Pfadvorschau zeigt weiter das ganze Design.
