@@ -24,6 +24,8 @@ object DotGrid {
     const val R_DOT = 1.2
     const val R_MID = 2.0
     const val R_BIG = 3.0
+    // Fewest dots the lens fit keeps when it drops the outer ones (calibrate).
+    const val MIN_FIT_POINTS = 40
 
     /** Shift of the grid from the work-area centre (0 in the app; a calibration run that shares one plate with other tests moves it). */
     var offset: Pt = Pt(0.0, 0.0)
@@ -88,10 +90,27 @@ object DotGrid {
      * grouped, centre weighted by darkness. Spots cut by the image border,
      * long streaks (grain, edges) and specks are dropped.
      */
+    private fun boxBlur(src: IntArray, w: Int, h: Int, r: Int): IntArray {
+        val stride = w + 1
+        val integ = LongArray(stride * (h + 1))
+        for (y in 0 until h) {
+            var row = 0L
+            for (x in 0 until w) { row += src[y * w + x]; integ[(y + 1) * stride + x + 1] = integ[y * stride + x + 1] + row }
+        }
+        return IntArray(w * h) { k ->
+            val x = k % w; val y = k / w
+            val x0 = max(0, x - r); val x1 = min(w, x + r + 1); val y0 = max(0, y - r); val y1 = min(h, y + r + 1)
+            ((integ[y1 * stride + x1] - integ[y0 * stride + x1] - integ[y1 * stride + x0] + integ[y0 * stride + x0]) / ((x1 - x0) * (y1 - y0))).toInt()
+        }
+    }
+
     fun detect(argb: IntArray, w: Int, h: Int): List<Blob> {
         require(argb.size == w * h) { "Ungültige Bilddaten" }
-        val lum = IntArray(w * h) { val c = argb[it]; (((c shr 16) and 255) * 299 + ((c shr 8) and 255) * 587 + (c and 255) * 114) / 1000 }
+        val raw = IntArray(w * h) { val c = argb[it]; (((c shr 16) and 255) * 299 + ((c shr 8) and 255) * 587 + (c and 255) * 114) / 1000 }
         val stride = w + 1
+        // Sharp photos show the engraved dots as rings and spirals (01.11.):
+        // a light blur closes them to spots again.
+        val lum = boxBlur(raw, w, h, max(1, w / 640))
         val integ = LongArray(stride * (h + 1))
         for (y in 0 until h) {
             var row = 0L
@@ -244,14 +263,25 @@ object DotGrid {
     fun calibrate(argb: IntArray, w: Int, h: Int, head: Pt, scanZ: Double): Result {
         val found = index(detect(argb, w, h))
         require(found.size >= 20) { "Nur ${found.size} Rasterpunkte zugeordnet – Raster ganz ins Bild, scharf stellen" }
-        val keys = found.keys.toList()
-        val px = keys.map { found.getValue(it) }
-        val rel = keys.map { (i, j) -> position(i, j) - head }
-        val spacingPx = keys.mapNotNull { (i, j) -> found[i + 1 to j]?.dist(found.getValue(i to j)) }.average()
-        val b = boundsOf(listOf(px))!!
-        val m = spacingPx / 2
-        val valid = Box(max(0.0, b.minX - m), max(0.0, b.minY - m), min(w.toDouble(), b.maxX + m), min(h.toDouble(), b.maxY + m))
-        val lens = Lens.fit(px, rel, w, h, valid)
+        val spacingPx = found.keys.mapNotNull { (i, j) -> found[i + 1 to j]?.dist(found.getValue(i to j)) }.average()
+        val centre = Pt(w / 2.0, h / 2.0)
+        // A sharp wide-angle photo finds dots right into the image corners,
+        // where k1/k2 can no longer follow the lens (01.11.: "kippt am Rand"
+        // at every height). Then the outermost dots are left out step by
+        // step; the usable field shrinks to where the model holds.
+        var keys = found.keys.sortedBy { found.getValue(it).dist(centre) }
+        var lens: Lens
+        var px: List<Pt>
+        while (true) {
+            px = keys.map { found.getValue(it) }
+            val rel = keys.map { (i, j) -> position(i, j) - head }
+            val b = boundsOf(listOf(px))!!
+            val m = spacingPx / 2
+            val valid = Box(max(0.0, b.minX - m), max(0.0, b.minY - m), min(w.toDouble(), b.maxX + m), min(h.toDouble(), b.maxY + m))
+            lens = Lens.fit(px, rel, w, h, valid)
+            if (lens.monotonic() || keys.size <= MIN_FIT_POINTS) break
+            keys = keys.take(max(MIN_FIT_POINTS, (keys.size * 0.9).toInt()))
+        }
         require(lens.monotonic()) { "Linsenmodell kippt am Rand – Raster mittiger ins Bild und erneut versuchen" }
         require(lens.rmsMm < 0.6) { "Rasterpunkte passen schlecht zusammen (%.2f mm) – Bild unscharf oder verwackelt?".format(lens.rmsMm) }
         return Result(CameraCalibration(w, h, scanZ = scanZ, lens = lens), px, lens)

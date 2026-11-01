@@ -86,6 +86,19 @@ class LensTest {
         assertTrue(again.pixelToWork(Pt(100.0, 100.0), head).dist(cal.pixelToWork(Pt(100.0, 100.0), head)) < 1e-9)
     }
 
+    @Test fun `real sharp head camera photo calibrates`() {
+        // 01.11., Kopf v6 bei Z 53 über 3-mm-MDF: scharf gestellt sind die
+        // Punkte Ringe, und die Erkennung fand Punkte bis in die Ecken, wo
+        // k1/k2 kippten ("Linsenmodell kippt am Rand").
+        val img = javax.imageio.ImageIO.read(javaClass.getResource("/dotgrid_head_z53.jpg"))
+        val px = IntArray(img.width * img.height).also { img.getRGB(0, 0, img.width, img.height, it, 0, img.width) }
+        val r = DotGrid.calibrate(px, img.width, img.height, Work.fromMachine(210.0, 190.0), 53.0)
+        assertTrue(r.lens.monotonic())
+        assertTrue(r.lens.rmsMm < 0.2, "rms ${r.lens.rmsMm}")
+        assertTrue(r.points.size >= DotGrid.MIN_FIT_POINTS, "kept ${r.points.size}")
+        assertTrue(r.lens.valid.width > 1000, "usable ${r.lens.valid}")
+    }
+
     @Test fun `mirrored camera is recognised by the direction dots`() {
         val t = trueLens().let { l -> l.copy(g = l.g.mapIndexed { i, v -> if (i < 3) -v else v }) }   // image X flipped
         val r = DotGrid.calibrate(render(t), w, h, head, 30.0)

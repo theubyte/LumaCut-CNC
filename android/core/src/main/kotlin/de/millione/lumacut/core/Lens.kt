@@ -9,7 +9,9 @@ import kotlin.math.sqrt
 /**
  * Wide-angle head camera: a plane-to-image homography plus radial lens
  * distortion, in the OpenCV convention (camera matrix fx = fy = [f],
- * principal point [cx]/[cy], dist_coeffs [k1, k2, 0, 0, 0]).
+ * principal point [cx]/[cy], dist_coeffs [k1, k2, 0, 0, k3]). [k3] (01.11.)
+ * follows the strong wide-angle squeeze into the image corners that k1/k2
+ * alone could not (0 for calibrations stored before).
  *
  * [g] (3×3, row-major) maps millimetres relative to the head to undistorted
  * normalised image coordinates; the distortion then bends them outwards or
@@ -29,6 +31,7 @@ data class Lens(
     val rmsMm: Double = 0.0,
     val maxMm: Double = 0.0,
     val points: Int = 0,
+    val k3: Double = 0.0,
 ) {
     init { require(g.size == 9) { "Linsenmodell ungültig" } }
 
@@ -38,7 +41,7 @@ data class Lens(
     fun toPixel(rel: Pt): Pt {
         val u = Mat3.apply(g.toDoubleArray(), rel)
         val r2 = u.x * u.x + u.y * u.y
-        val d = 1 + k1 * r2 + k2 * r2 * r2
+        val d = 1 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2
         return Pt(cx + f * u.x * d, cy + f * u.y * d)
     }
 
@@ -55,8 +58,8 @@ data class Lens(
         var r = rd
         repeat(30) {
             val r2 = r * r
-            val fr = r * (1 + k1 * r2 + k2 * r2 * r2) - rd
-            val d = 1 + 3 * k1 * r2 + 5 * k2 * r2 * r2
+            val fr = r * (1 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2) - rd
+            val d = 1 + 3 * k1 * r2 + 5 * k2 * r2 * r2 + 7 * k3 * r2 * r2 * r2
             if (abs(d) < 1e-9) return r
             val next = r - fr / d
             if (abs(next - r) < 1e-13) return next
@@ -71,23 +74,23 @@ data class Lens(
         val rdMax = corners.maxOf { hypot((it.x - cx) / f, (it.y - cy) / f) }
         val ru = undistortRadius(rdMax)
         val r2 = ru * ru
-        if (abs(ru * (1 + k1 * r2 + k2 * r2 * r2) - rdMax) > 1e-6) return false
+        if (abs(ru * (1 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2) - rdMax) > 1e-6) return false
         for (i in 0..60) {
             val r = ru * 1.05 * i / 60; val q = r * r
-            if (1 + 3 * k1 * q + 5 * k2 * q * q < 0.15) return false
+            if (1 + 3 * k1 * q + 5 * k2 * q * q + 7 * k3 * q * q * q < 0.15) return false
         }
         return true
     }
 
     /** OpenCV camera matrix and dist_coeffs (the Pi's camera_calibration.json fields). */
     fun openCv(): Pair<List<List<Double>>, List<Double>> =
-        listOf(listOf(f, 0.0, cx), listOf(0.0, f, cy), listOf(0.0, 0.0, 1.0)) to listOf(k1, k2, 0.0, 0.0, 0.0)
+        listOf(listOf(f, 0.0, cx), listOf(0.0, f, cy), listOf(0.0, 0.0, 1.0)) to listOf(k1, k2, 0.0, 0.0, k3)
 
     companion object {
         /**
          * Fits the model to pixel positions [px] of points at [rel] mm
          * (relative to the head) in a [w] × [h] photo: linear homography
-         * first, then Levenberg–Marquardt with the two radial terms. Points
+         * first, then Levenberg–Marquardt with the three radial terms. Points
          * far off the first fit (misdetections) are dropped once.
          */
         fun fit(px: List<Pt>, rel: List<Pt>, w: Int, h: Int, valid: Box = Box(0.0, 0.0, w.toDouble(), h.toDouble())): Lens {
@@ -124,7 +127,7 @@ data class Lens(
                     for (a in 0 until 8) { atb[a] += row[a] * rhs; for (b in 0 until 8) ata[a][b] += row[a] * row[b] }
                 }
             }
-            val theta = Mat3.solve(ata, atb).copyOf(10)       // + k1, k2 = 0
+            val theta = Mat3.solve(ata, atb).copyOf(11)       // + k1, k2, k3 = 0
 
             fun residuals(t: DoubleArray): DoubleArray {
                 val out = DoubleArray(2 * rn.size)
@@ -132,7 +135,7 @@ data class Lens(
                     val (x, y) = rn[i]
                     val wq = t[6] * x + t[7] * y + 1
                     val ux = (t[0] * x + t[1] * y + t[2]) / wq; val uy = (t[3] * x + t[4] * y + t[5]) / wq
-                    val r2 = ux * ux + uy * uy; val d = 1 + t[8] * r2 + t[9] * r2 * r2
+                    val r2 = ux * ux + uy * uy; val d = 1 + t[8] * r2 + t[9] * r2 * r2 + t[10] * r2 * r2 * r2
                     out[2 * i] = (ux * d - q[i].x) * f; out[2 * i + 1] = (uy * d - q[i].y) * f   // pixels
                 }
                 return out
@@ -171,7 +174,7 @@ data class Lens(
             val gp = doubleArrayOf(theta[0], theta[1], theta[2], theta[3], theta[4], theta[5], theta[6], theta[7], 1.0)
             val t = doubleArrayOf(1 / s, 0.0, -mx / s, 0.0, 1 / s, -my / s, 0.0, 0.0, 1.0)
             val g = Mat3.mul(gp, t)
-            return Lens(cx, cy, f, theta[8], theta[9], g.map { it / g[8] }, valid)
+            return Lens(cx, cy, f, theta[8], theta[9], g.map { it / g[8] }, valid, k3 = theta[10])
         }
     }
 }
