@@ -518,6 +518,10 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   der Last). Hält ab μ 0,045 statt 0,076, kein Axialspiel. +3 g, ohne Schnitte. Motorstrom-Empfehlung ~100 mNm
   (Reserve ×2,6, Aufprall < 50 N). Offen (Software, braucht Z-Treiber): Taster als Dauerwächter
   (`ENDSTOPS_ALWAYS_ON`), Referenz-Prüfung vor/nach Auftrag, Haltetest per `M18 Z`.
+- **Schnecke rutscht nicht mehr (01.11., Besitzer: T7n verrutschte, Madenschraube hielt nicht):** T7n hat jetzt
+  eine **Kappe auf der Wellenspitze** (nimmt den Lastschub zum Motor auf, dreht mit, reibt nicht), D-Bohrung
+  gegen Durchdrehen und eine **eingelegte M3-Mutter** für die Madenschraube (Stahl- statt Kunststoffgewinde).
+  T7e (2.0) bekommt nur die Mutter, Anschlag ist dort die Bremsscheibe. Beide Prüfberichte OK, nicht gedruckt.
 - Weitere Ideen zu Höhe/Kollision: [IDEE_HOEHE_KOLLISION_KAMERA_3D.md](IDEE_HOEHE_KOLLISION_KAMERA_3D.md).
 
 ## 13. Nebenprojekte im Ordner
