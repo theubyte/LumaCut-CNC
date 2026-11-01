@@ -104,6 +104,7 @@ Z_TEST_FEED_MM_MIN = 120
 # for this speed, Marlin caps them at M203.
 Z_SPEED_DEFAULT = 9.0
 Z_SPEED_MAX = 30.0
+SUPPLY_TEST_MAX_S = 30.0  # op=supply_test: laser rail on for measuring, beam off
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
 BED_BELOW_Z0_MM = 3.0
@@ -1149,6 +1150,36 @@ class MarlinTransport:
                 if speed and speed > self.z_speed_mm_s:
                     self._exchange_locked("M203 Z%g" % self.z_speed_mm_s, timeout=6.0)
             return self._exchange_locked("M114", timeout=6.0)
+
+    def supply_test(self, seconds: float, owner: str = "web"):
+        """Laser 24 V rail (relay on FAN0) on for a few seconds, beam off.
+
+        For measuring the supply voltage (owner 01.11.: laser fan spun up
+        briefly at job start, then nothing). M5 I keeps the PWM low; no
+        motion, no homing needed. The lock is released while waiting so the
+        heartbeat keeps running.
+        """
+        if not isinstance(seconds, (int, float)) or not 1 <= seconds <= SUPPLY_TEST_MAX_S:
+            raise ValueError("Versorgungstest: 1..%g s" % SUPPLY_TEST_MAX_S)
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+            self._exchange_locked("M5 I", timeout=6.0)
+            self._exchange_locked("M400", timeout=15)
+            self._exchange_locked("M106 P0 S255", timeout=8)
+            self.fan_power = True
+            self.fan_off_at = None
+        try:
+            time.sleep(seconds)
+        finally:
+            with self.lock:
+                if self.serial is not None and not self.emergency_latched:
+                    self._exchange_locked("M5 I", timeout=6.0)
+                    self._exchange_locked("M107 P0", timeout=8)
+                self.fan_power = False
+                self.fan_off_at = None
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
                   probe_contact_confirmed: bool = False, should_stop=None, operator_clear: bool = False):

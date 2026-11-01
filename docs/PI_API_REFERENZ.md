@@ -403,6 +403,15 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | Erfolg | 200 `Bewegung ausgeführt: X 1.0` |
 | Fehler | 400 `Ungültige Achse oder Schrittweite` |
 
+#### `op=supply_test`
+
+| | |
+| --- | --- |
+| Parameter | `seconds`: 1..30 (Standard 15) |
+| Vorbedingungen | **frei**, Referenz nicht nötig; kein Notstopp |
+| Wirkung | `M5 I`, `M400`, `M106 P0 S255` (Laser-Relais an, kein Strahl), warten, `M5 I`, `M107 P0`. Zum Messen der 24-V-Laserversorgung. ⚠ Hardware |
+| Erfolg | 200 `Laserversorgung 15 s an (ohne Strahl), wieder aus.` |
+
 #### `op=z_test`
 
 | | |

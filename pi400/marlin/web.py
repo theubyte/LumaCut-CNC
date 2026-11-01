@@ -665,6 +665,12 @@ def action():
         reply = machine.z_test(distance, speed=speed)
         return jsonify(message="Z-Test %+g mm gefahren (%g mm/s). Maschine ist nicht referenziert."
                        % (distance, speed or 2), lines=reply)
+    if op == "supply_test":
+        # Laser 24 V relay on for measuring, beam stays off (transport.supply_test).
+        seconds = float(request.form.get("seconds", "15"))
+        local_owner()
+        machine.supply_test(seconds)
+        return jsonify(message="Laserversorgung %g s an (ohne Strahl), wieder aus." % seconds)
     if op == "app_update_check":
         # Network only, never touches the machine: allowed at any time.
         info = app_updates.check()

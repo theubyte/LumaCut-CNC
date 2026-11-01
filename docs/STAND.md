@@ -504,6 +504,7 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   gestellt, beste Scanhöhe **Z 53** (Kopf X210/Y190 über Rastermitte). App-Auswertung kippte am Rand → App-Fix
   (Glättung, k3, Feld am Faltrand zuschneiden). **Gespeichert** (App 1.0.54, Rev. 8): 76 Punkte, 0,22 mm,
   scan_z 53, aboveSurface 51,32. Offen: Versatz Kamera↔Laser prüfen (Raster lag evtl. nicht exakt wie gelasert). Offen: Z-Beschleunigung (steht auf 100 mm/s², 30 mm/s erst nach 4,5 mm erreicht).
+  **Laser zündet nicht (01.11. 19:57, Fokus-Test):** Auftrag lief ohne Fehler durch, Board blieb verbunden, kein Strahl; Lüfter am Lasermodul dreht beim Start nur kurz (Besitzer: Spannungsfall). Verdacht: 24-V-Laserzweig (Relais an FAN0) bricht beim Einschalten ein. Neu: `op=supply_test` (`seconds` 1..30) schaltet nur das Relais ein (M5 I, kein Strahl, keine Fahrt, ohne Referenz) und wieder aus – zum Messen der 24 V.
 - **Testerfindung „Schwerkraft-Schleppklinke“ (01.11., Teststand konstruiert, nicht gedruckt):**
   `A:\mfw\zmount\v_test_erfindung_1.0\`. Statt Selbsthemmung (Wirkungsgrad < 50 %, Aufprall >250 N)
   bleibt der schnelle v6-Direktantrieb. Eine Klinke, die ihr Gewicht offen hält und die ein

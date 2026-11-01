@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-01
 
+- **Versorgungstest Laser (`op=supply_test`):** Der Fokus-Test lief fehlerfrei durch, der Laser zündete aber nicht; der Lüfter am Modul drehte nur kurz an. Zum Messen der 24 V schaltet der Pi jetzt nur das Laser-Relais (FAN0, `M106 P0`) für 1..30 s ein, mit `M5 I` (kein Strahl), ohne Fahrt und ohne Referenz, danach wieder aus (`M107 P0`).
 - **Nachrüst-Schnecke T7n hält auf der Welle (konstruiert, nicht gedruckt):** Die Madenschraube in gedrucktem Gewinde gab nach, und der Lastschub schob die Schnecke zum Motor, bis sie das Rad verfehlte. Neu: Kappe auf der Wellenspitze als Anschlag für den Schub (dreht mit, reibt nicht), eingelegte M3-Mutter für die Madenschraube, D-Bohrung bleibt. T7e (Testerfindung 2.0) bekommt nur die Mutter; dort bleibt die Bremsscheibe der Anschlag. `A:\mfw\zmount7
 achruest\`, `vorschau_T7n_fest.png`.
 - **Kopfkamera kalibriert (Kopf v6):** App 1.0.54, Punktraster, Z 53 (51,3 mm über 3-mm-MDF): 76 Punkte, 0,22 mm im Mittel, höchstens 0,53 mm, Bildfeld 1395 × 873 px, `dist_coeffs` mit k3. Die manuelle Kalibrierung speicherte die Höhe über dem Material (`aboveSurface`) nicht – auf dem Pi nachgetragen, die App setzt sie jetzt selbst aus der abgetasteten Oberfläche.

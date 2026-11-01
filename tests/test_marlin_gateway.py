@@ -1092,6 +1092,23 @@ class ZTestTests(unittest.TestCase):
         self.assertEqual(ctrl.serial.writes, [])
 
 
+class SupplyTestTests(unittest.TestCase):
+    """op=supply_test: laser 24 V relay on for measuring, beam off (01.11.)."""
+    def test_relay_on_then_off_with_beam_off(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.supply_test(1)
+        w = ParkLowTests().lines(ctrl)
+        self.assertEqual(w, ["M5 I", "M400", "M106 P0 S255", "M5 I", "M107 P0"])
+        self.assertFalse(ctrl.fan_power)
+
+    def test_limits(self):
+        ctrl = ParkLowTests().machine()
+        for bad in (0, 0.5, 31):
+            with self.assertRaises(ValueError):
+                ctrl.supply_test(bad)
+        self.assertEqual(ctrl.serial.writes, [])
+
+
 class ZSpeedSettingTests(unittest.TestCase):
     """Z max feedrate raised step by step for the worm lift (01.11.)."""
     def test_speed_test_lifts_the_cap_for_one_move_only(self):
