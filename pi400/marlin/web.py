@@ -243,7 +243,6 @@ _LIVE_STATUS_FIELDS = {
     "emergency_latched": lambda m: m.emergency_latched,
     "laser_armed": lambda m: m.laser_enabled,
     "laser_cooling_fan_on": lambda m: m.fan_power,
-    "service_password_set": lambda m: service_auth.is_set(),
     "position": lambda m: m.position,
     "fault": lambda m: m.fault,
     "workpiece_surface_z": lambda m: m.surface_z,
@@ -318,6 +317,7 @@ def status():
                                       job_queue["state"] in QUEUE_ACTIVE)
                             else "idle"),
                   firmware="marlin",
+                  service_password_set=service_auth.is_set(),
                   coord_convention=placing.COORD_CONVENTION,
                   features=list(FEATURES),
                   busy=busy, stale_ms=stale_ms,

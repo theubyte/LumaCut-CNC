@@ -184,7 +184,7 @@ Rahmenkante (M400) halten die Sperre für die ganze Fahrt.
   `stale_ms: 0`. Wird als Cache gemerkt.
 - Sperre belegt: **letzter vollständiger Status aus dem Cache**, darüber
   live gelesen: `state`, `owner`, `homed`, `z_homed`, `emergency_latched`,
-  `laser_armed`, `laser_cooling_fan_on`, `service_password_set`, `position`, `fault`,
+  `laser_armed`, `laser_cooling_fan_on`, `position`, `fault`,
   `workpiece_surface_z`, `connected`. Dazu `busy: true` und `stale_ms` = Alter
   des Cache-Anteils in ms.
 - Sonderfall: Sperre belegt **und noch nie ein Cache** (direkt nach
