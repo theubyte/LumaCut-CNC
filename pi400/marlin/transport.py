@@ -46,6 +46,15 @@ WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 COMMENT = re.compile(r"\([^()]*\)")
 READ_ONLY = frozenset({"M105", "M114", "M115", "M119", "M503", "M400"})
 ERROR_PREFIXES = ("Error:", "echo:Error:", "Resend:", "rs ")
+# Anet firmware: endstops always on (Z guard, 01.11.). Marlin stops Z when
+# the switch closes outside homing/probing and reports "echo:endstops hit:
+# Z:..". The Pi treats that like a Marlin error (job aborts, laser off).
+# X/Y hits only happen at the X0/Y0 switches when parking: not an error.
+Z_ENDSTOP_HIT = re.compile(r"endstops hit:.*[ :]Z:", re.IGNORECASE)
+
+
+def is_marlin_error(line: str) -> bool:
+    return line.startswith(ERROR_PREFIXES) or Z_ENDSTOP_HIT.search(line) is not None
 # Streaming window (#18). Marlin BUFSIZE 8 / RX_BUFFER_SIZE 256 on the SKR:
 # stay at half of both so a slow ok can never overflow the serial buffer.
 # LUMACUT_STREAM_WINDOW=1 restores strict one-line-at-a-time sending.
@@ -104,6 +113,12 @@ TRAVEL_GAP_MM = 20.0
 # Least relative lift before homing when Z is unknown (the head may stand
 # just above the workpiece after an emergency stop).
 MIN_BLIND_LIFT_MM = 5.0
+
+
+def _fault_text(line: str) -> str:
+    if Z_ENDSTOP_HIT.search(line):
+        return "Z-Taster während der Fahrt ausgelöst, Z gestoppt: " + line[:120]
+    return "Marlin: " + line[:150]
 
 
 class MarlinCommandError(RuntimeError):
@@ -439,9 +454,9 @@ class MarlinTransport:
         deadline = time.monotonic() + timeout
         while True:
             line = self._read_line_locked(deadline)
-            if line.startswith(ERROR_PREFIXES):
+            if is_marlin_error(line):
                 self.serial_errors += 1
-                self.fault = "Marlin: " + line[:150]
+                self.fault = _fault_text(line)
                 if not self.stream_error:
                     self.stream_error = self.fault
                 continue
@@ -475,9 +490,9 @@ class MarlinTransport:
             line = self._read_line_locked(deadline)
             responses.append(line)
             lower = line.lower()
-            if line.startswith(ERROR_PREFIXES):
+            if is_marlin_error(line):
                 self.serial_errors += 1
-                self.fault = "Marlin: " + line[:150]
+                self.fault = _fault_text(line)
                 # A Marlin error is usually followed by a normal "ok".
                 # Consume that trailing ACK before the next command;
                 # otherwise M114/G30 will read a stale ACK as its own.

@@ -1117,6 +1117,27 @@ class ZSpeedSettingTests(unittest.TestCase):
             ctrl.set_z_speed(40)
 
 
+class ZGuardTests(unittest.TestCase):
+    """Endstops always on (Anet): a Z hit stops the job, X/Y hits at X0/Y0 do not."""
+    def test_z_hit_is_an_error_and_xy_hit_is_not(self):
+        from marlin.transport import MarlinCommandError, is_marlin_error
+        self.assertTrue(is_marlin_error("echo:endstops hit:  Z:3.25"))
+        self.assertTrue(is_marlin_error("echo:endstops hit:  X:0.00 Z:3.25"))
+        self.assertFalse(is_marlin_error("echo:endstops hit:  X:0.00 Y:0.00"))
+        ctrl = ParkLowTests().machine()
+        ctrl.serial.replies.append("echo:endstops hit:  Z:3.25\n")
+        with self.assertRaisesRegex(MarlinCommandError, "Z-Taster"):
+            with ctrl.lock:
+                ctrl._exchange_locked("G0 Z2.000 F600")
+        ctrl.serial.writes.clear()
+        with ctrl.lock:
+            self.assertEqual(ctrl._exchange_locked("M400"), ["ok"])  # the error's ok was consumed
+
+    def test_anet_firmware_keeps_endstops_on(self):
+        src = (ROOT / "firmware" / "marlin" / "build_anet.py").read_text(encoding="utf-8")
+        self.assertIn('uncomment(adv, "ENDSTOPS_ALWAYS_ON_DEFAULT")', src)
+
+
 class GatewayFilesTests(unittest.TestCase):
     def test_no_unsafe_marlin_commands_or_unhomed_power(self):
         guard = MarlinLaserGuard()

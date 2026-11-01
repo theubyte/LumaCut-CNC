@@ -111,6 +111,11 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     adv = uncomment(adv, "CASE_LIGHT_NO_BRIGHTNESS")
     adv = uncomment(adv, "EMERGENCY_PARSER")
     adv = uncomment(adv, "ADVANCED_OK")
+    # Z guard (01.11.): the worm lift pushes with >250 N and the Anet's
+    # soldered drivers have no current pot. Endstops stay on for every move,
+    # so the Z switch stops Z anywhere, not only while homing; the Pi aborts
+    # the job on "endstops hit: Z" (transport.Z_ENDSTOP_HIT).
+    adv = uncomment(adv, "ENDSTOPS_ALWAYS_ON_DEFAULT")
     # Grey-scale fills are many short lines: plenty of RAM left (~2.4 of
     # 16 KB) for a deeper planner, command queue and serial input buffer.
     block = "#else\n  #define BLOCK_BUFFER_SIZE 16\n#endif"
@@ -217,6 +222,7 @@ def main():
                       "mode": "M3 I", "s_max": 255},
             "power": "board and laser on one 24 V supply; laser +24 V through the FAN D4 relay",
             "light": "heated-bed MOSFET D12, 24 V LED, M355 S1/S0 (on/off, no PWM)",
+            "z_guard": "ENDSTOPS_ALWAYS_ON_DEFAULT: Z switch stops Z on every move, Pi aborts the job",
             "tones": "M300 S<Hz> P<ms> [X] [Y]: stepper coils, no motion, laser must be off",
             "hardware_verified": False,
             "sha256": hashlib.sha256(fw.read_bytes()).hexdigest(),

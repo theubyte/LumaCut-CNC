@@ -492,8 +492,9 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   nachgemessen (Besitzer) – `M92 Z1018.59` bestätigt. Anet V1.7: Treiber aufgelötet, Strom fest
   (kein Poti) – Z-Taster per M119 geprüft, erste Referenzfahrt mit Schneckenlift OK, parkt auf Z 1.
   Z-Tempo-Stufen 15/20/25/30 mm/s je ±10 mm sauber (Besitzer, 01.11.) → `z_speed_mm_s` = 25 gesetzt
-  (M203 Z25 bestätigt). Offen: Dauerwächter `ENDSTOPS_ALWAYS_ON` (Strom nicht begrenzbar),
-  Z-Beschleunigung (steht auf 100 mm/s², 30 mm/s erst nach 4,5 mm erreicht).
+  (M203 Z25 bestätigt). Z-Dauerwächter (`ENDSTOPS_ALWAYS_ON_DEFAULT`, Anet) gebaut: Taster stoppt Z bei
+  jeder Fahrt, Pi bricht bei „endstops hit: Z“ ab (X/Y-Treffer beim Parken kein Fehler) – Flash per Knopf
+  offen, danach am Gerät prüfen. Offen: Z-Beschleunigung (steht auf 100 mm/s², 30 mm/s erst nach 4,5 mm erreicht).
 - **Testerfindung „Schwerkraft-Schleppklinke“ (01.11., Teststand konstruiert, nicht gedruckt):**
   `A:\mfw\zmount\v_test_erfindung_1.0\`. Statt Selbsthemmung (Wirkungsgrad < 50 %, Aufprall >250 N)
   bleibt der schnelle v6-Direktantrieb. Eine Klinke, die ihr Gewicht offen hält und die ein
