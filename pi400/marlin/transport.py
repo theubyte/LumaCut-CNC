@@ -87,6 +87,9 @@ _XY_MOTION = re.compile(r"^G0?[0123](?:\s|$)")
 # per motor turn, 16 microsteps. Sent on every connect like M203 Z9: the
 # old belt value (80) would move Z only 1/12.7 of the commanded distance.
 Z_STEPS_PER_MM = 1018.59
+# op=z_test: Z without homing to check the direction, slow (2 mm/s).
+Z_TEST_MAX_MM = 10.0
+Z_TEST_FEED_MM_MIN = 120
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
 BED_BELOW_Z0_MM = 3.0
@@ -1065,6 +1068,35 @@ class MarlinTransport:
             return []
         raise RuntimeError("Kopfhöhe unbekannt: Steht der Kopf frei über allem auf dem Bett? "
                            "Dann das Referenzieren bestätigen.")
+
+    def z_test(self, distance: float, owner: str = "web"):
+        """Z only, relative and slow, also without homing (owner 01.11.).
+
+        For checking the Z direction after a drive change: homing itself
+        runs Z into the switch and would drive the wrong way at full force.
+        At most Z_TEST_MAX_MM, laser off, X/Y untouched; the machine stays
+        unhomed afterwards (Marlin's Z is no longer the real height).
+        """
+        if not isinstance(distance, (int, float)) or not 0 < abs(distance) <= Z_TEST_MAX_MM:
+            raise ValueError("Z-Test: höchstens ±%g mm" % Z_TEST_MAX_MM)
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+            self.homed = False
+            self.z_homed = False
+            self.surface_z = None
+            self.parked_low = False
+            self._exchange_locked("M5 I", timeout=6.0)
+            self._exchange_locked("G91", timeout=6.0)
+            try:
+                self._exchange_locked("G0 Z%+.3f F%d" % (distance, Z_TEST_FEED_MM_MIN),
+                                      timeout=abs(distance) * 60.0 / Z_TEST_FEED_MM_MIN + 15)
+                self._exchange_locked("M400", timeout=abs(distance) * 60.0 / Z_TEST_FEED_MM_MIN + 15)
+            finally:
+                self._exchange_locked("G90", timeout=6.0)
+            return self._exchange_locked("M114", timeout=6.0)
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
                   probe_contact_confirmed: bool = False, should_stop=None, operator_clear: bool = False):

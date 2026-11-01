@@ -1061,6 +1061,37 @@ class ParkLowTests(unittest.TestCase):
         self.assertFalse(ctrl.parked_low)
 
 
+class ZTestTests(unittest.TestCase):
+    """op=z_test: Z direction check without homing (owner 01.11.)."""
+    def test_slow_relative_z_only_and_stays_unhomed(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.homed = ctrl.z_homed = False
+        ctrl.z_test(10.0)
+        w = ParkLowTests().lines(ctrl)
+        self.assertEqual(w, ["M5 I", "G91", "G0 Z+10.000 F120", "M400", "G90", "M114"])
+        self.assertFalse(ctrl.homed or ctrl.z_homed)
+
+    def test_homed_machine_loses_its_reference(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.z_test(-1.0)
+        self.assertFalse(ctrl.homed or ctrl.z_homed)
+        self.assertIsNone(ctrl.surface_z)
+
+    def test_limits_owner_and_estop(self):
+        ctrl = ParkLowTests().machine()
+        for bad in (0.0, 10.5, -11.0):
+            with self.assertRaises(ValueError):
+                ctrl.z_test(bad)
+        ctrl.owner = "lightburn"
+        with self.assertRaisesRegex(RuntimeError, "belegt"):
+            ctrl.z_test(1.0)
+        ctrl.owner = None
+        ctrl.emergency_latched = True
+        with self.assertRaises(ConnectionError):
+            ctrl.z_test(1.0)
+        self.assertEqual(ctrl.serial.writes, [])
+
+
 class GatewayFilesTests(unittest.TestCase):
     def test_no_unsafe_marlin_commands_or_unhomed_power(self):
         guard = MarlinLaserGuard()

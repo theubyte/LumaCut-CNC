@@ -641,6 +641,16 @@ def action():
         machine.command("G90", owner="web")
         machine.command("M114", owner="web")
         return jsonify(message="Bewegung ausgeführt: " + axis + " " + str(distance))
+    if op == "z_test":
+        # Z direction check after a drive change, also unhomed (transport.z_test).
+        distance = float(request.form.get("distance", "0"))
+        if distance not in (-10.0, -5.0, -1.0, 1.0, 5.0, 10.0):
+            raise ValueError("Z-Test: Schrittweite ±1, ±5 oder ±10 mm")
+        local_owner()
+        _forget_current_placement()
+        reply = machine.z_test(distance)
+        return jsonify(message="Z-Test %+g mm gefahren (2 mm/s). Maschine ist nicht referenziert." % distance,
+                       lines=reply)
     if op == "app_update_check":
         # Network only, never touches the machine: allowed at any time.
         info = app_updates.check()

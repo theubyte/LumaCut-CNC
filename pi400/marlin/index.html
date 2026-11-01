@@ -601,6 +601,11 @@ dialog.danger h2{color:var(--bad)}
      </div>
     </div>
     <p class="help" id="jogHint" style="margin-top:10px">Joggen erst nach dem Referenzieren.</p>
+    <div class="cols3 keep" style="margin-top:8px">
+     <button class="btn" data-ztest="1" type="button" title="Nur Z, 2 mm/s, auch ohne Referenz – zum Prüfen der Richtung">Z-Test +1 hoch</button>
+     <button class="btn" data-ztest="10" type="button" title="Nur Z, 2 mm/s, auch ohne Referenz">Z-Test +10 hoch</button>
+     <button class="btn" data-ztest="-1" type="button" title="Nur Z, 2 mm/s, auch ohne Referenz">Z-Test −1 runter</button>
+    </div>
    </section>
 
    <section class="card" aria-labelledby="hAcc">
@@ -2093,6 +2098,12 @@ async function jog(b){
  finally{jogInFlight=false;if(snapshot)refreshUI(snapshot)}
 }
 for(const b of $$("[data-axis]"))b.onclick=()=>jog(b);
+// Z-Test: Richtung prüfen nach Antriebswechsel, auch ohne Referenz (op=z_test).
+for(const b of $$("[data-ztest]"))b.onclick=async ev=>{
+ const d=Number(b.dataset.ztest),btn=ev.currentTarget;
+ if(!await ask("Z-Test "+(d>0?"+":"")+d+" mm?","Nur Z, langsam (2 mm/s). Hände raus, Deckel zu, Brille. Danach ist die Maschine nicht referenziert.","Fahren",true))return;
+ call("z_test",{distance:String(d)},btn);
+};
 // Nullpunkt oben rechts: Pfeil zeigt die Fahrtrichtung des Kopfes (← = X+, ↓ = Y+ zur Tür).
 const KEYS={ArrowLeft:["X",1],ArrowRight:["X",-1],ArrowUp:["Y",-1],ArrowDown:["Y",1],PageUp:["Z",1],PageDown:["Z",-1]};
 

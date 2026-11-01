@@ -403,6 +403,16 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | Erfolg | 200 `Bewegung ausgeführt: X 1.0` |
 | Fehler | 400 `Ungültige Achse oder Schrittweite` |
 
+#### `op=z_test`
+
+| | |
+| --- | --- |
+| Parameter | `distance`: genau `-10`, `-5`, `-1`, `1`, `5`, `10` (mm, + = hoch) |
+| Vorbedingungen | **frei**, **nicht** referenziert nötig (Richtungsprüfung nach Antriebswechsel); kein Notstopp |
+| Wirkung | `M5 I`, `G91`, `G0 Z±d F120`, `M400`, `G90`, `M114`. Nur Z, 2 mm/s. Setzt `homed`/`z_homed` zurück und verwirft Werkstückhöhe und Platzierung `current`. ⚠ Hardware, Go des Besitzers |
+| Erfolg | 200 `{message: "Z-Test +10 mm gefahren …", lines}` |
+| Fehler | 400 `Z-Test: Schrittweite ±1, ±5 oder ±10 mm`; Abschnitt 1.2 |
+
 #### `op=park`
 
 | | |
