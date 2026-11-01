@@ -1136,6 +1136,8 @@ class ZGuardTests(unittest.TestCase):
     def test_anet_firmware_keeps_endstops_on(self):
         src = (ROOT / "firmware" / "marlin" / "build_anet.py").read_text(encoding="utf-8")
         self.assertIn('uncomment(adv, "ENDSTOPS_ALWAYS_ON_DEFAULT")', src)
+        # Z_MIN doubles as the probe pin: Marlin skips it outside probing unless patched.
+        self.assertIn("LumaCut: Z switch guards every move", src)
 
 
 class GatewayFilesTests(unittest.TestCase):

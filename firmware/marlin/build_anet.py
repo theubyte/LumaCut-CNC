@@ -199,6 +199,16 @@ def main():
             raise RuntimeError("Marlin 1284P PWM_PIN list changed")
         fastio.write_text(text.replace(
             old, "#define PWM_PIN(P)  (P == 3 || P == 4 || P == 6 || P == 7 || P == 14 || P == 15) // LumaCut: + Timer3", 1))
+        # Z guard: with Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN Marlin checks Z_MIN
+        # only while the probe is enabled (G28/G30), so ENDSTOPS_ALWAYS_ON
+        # alone never stopped Z (tested 01.11.: switch held, Z drove 10 mm).
+        # The switch is both: check it on every downward Z move.
+        endstops = src / "Marlin/src/module/endstops.cpp"
+        old = "if ( TERN1(Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN, z_probe_enabled)"
+        text = endstops.read_text()
+        if text.count(old) != 1:
+            raise RuntimeError("Marlin Z_MIN endstop gating changed")
+        endstops.write_text(text.replace(old, "if ( true /* LumaCut: Z switch guards every move */", 1))
         build.patch_motor_tone(src)
         ini = src / "platformio.ini"
         ini.write_text(re.sub(r"(?m)^default_envs\s*=.*$", "default_envs = " + PIO_ENV, ini.read_text(), count=1))
