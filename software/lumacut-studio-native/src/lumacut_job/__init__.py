@@ -4,6 +4,8 @@
 - :mod:`estimate`   job time estimate from G-code, bounding box / rubber-band framing
 - :mod:`material_test`  power x speed test grid as canvas layers
 - :mod:`raster`     grayscale raster and sliced depth (2.5D) engraving planner
+- :mod:`qr`         QR code encoder (byte mode, EC L/M/Q/H) → filled canvas polygons
+- :mod:`arctext`    text along a circular arc → canvas polygons (glyphs via :mod:`arctext_qt`)
 
 All coordinates are *machine* mm (safezone offset already applied by
 ``lumacut_canvas.export.job_layers``). Nothing here talks to the machine.

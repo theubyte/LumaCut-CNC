@@ -312,6 +312,14 @@ class MainView(QObject):
             a = ed.actions_by_name.get(f"tool_{t.value}")
             if a is not None:
                 menu.addAction(a)
+        # QR-Code und Bogentext (lumacut_job.qt_tools) – erzeugen Vektorobjekte.
+        jt = getattr(self.window, "job_tools", None)
+        extra = [getattr(jt, n, None) for n in ("qr_action", "arc_action")]
+        if any(extra):
+            menu.addSeparator()
+            for a in extra:
+                if a is not None:
+                    menu.addAction(a)
         return menu
 
     def _show_design_menu(self) -> None:

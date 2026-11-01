@@ -114,6 +114,13 @@ class JobTools(QObject):
                                        "Ausgewählten Text als Raster fortlaufend nummerierter Kopien "
                                        "(Platzhalter {n}, {n:3}, {date})")
         self.serial_action.setObjectName("serial_numbers_action")
+        self.qr_action = self._add("QR-Code…", self.qr_code, "Alt+Q",
+                                   "QR-Code (Text/Adresse) als gefüllte Vektorflächen einfügen")
+        self.qr_action.setObjectName("qr_code_action")
+        self.arc_action = self._add("Bogentext…", self.arc_text, "Alt+B",
+                                    "Text entlang eines Kreisbogens als Vektorpfade einfügen "
+                                    "(ausgewählter Text wird übernommen)")
+        self.arc_action.setObjectName("arc_text_action")
         self.cut_action = self._add("Schnittoptionen…", self.cut_options, "Alt+K",
                                     "Kerf-Versatz, Haltestege und An-/Abfahrt der aktiven Ebene")
         self.selection_action = self._add("Nur Auswahl", self._selection_toggled, None,
@@ -268,6 +275,52 @@ class JobTools(QObject):
             self._msg(f"Seriennummern: {exc}")
             return []
         self._msg(f"{len(ids)} nummerierte Texte erzeugt (gruppiert)")
+        return ids
+
+    def qr_code(self, spec=None, fill_layer: bool | None = None) -> list[str]:
+        """QR-Code einfügen (ein Undo-Schritt); Standard: aktive Ebene."""
+        from .qr_qt import QrDialog, insert_qr, layer_fills
+        doc = self.editor.document
+        active = doc.active_layer or (doc.layers[0] if doc.layers else None)
+        if spec is None:
+            dlg = QrDialog(self.window, active_layer=active)
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, fill_layer = dlg.spec(), dlg.fill_layer()
+        if fill_layer is None:
+            fill_layer = not layer_fills(active)
+        try:
+            ids = insert_qr(self.editor, spec, fill_layer=fill_layer)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "QR-Code", str(exc))
+            self._msg(f"QR-Code: {exc}")
+            return []
+        layer = doc.shape(ids[0]).layer_id if ids else ""
+        name = doc.layer(layer).name if layer else ""
+        self._msg(f"QR-Code eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
+        return ids
+
+    def arc_text(self, spec=None, replace: bool | None = None) -> list[str]:
+        """Bogentext einfügen (ein Undo-Schritt); ein ausgewählter Text wird übernommen."""
+        from .arctext_qt import ArcTextDialog, insert_arc_text, spec_from_text
+        doc = self.editor.document
+        sel = [i for i in (self.editor.selection or ()) if doc.has_shape(i)]
+        src = doc.shape(sel[0]) if len(sel) == 1 and doc.shape(sel[0]).kind == "text" else None
+        if spec is None:
+            dlg = ArcTextDialog(self.window, spec_from_text(src) if src else None,
+                                can_replace=src is not None)
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, replace = dlg.spec(), dlg.replace_source()
+        replace_id = src.id if (src is not None and replace) else None
+        try:
+            ids = insert_arc_text(self.editor, spec, replace_id)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "Bogentext", str(exc))
+            self._msg(f"Bogentext: {exc}")
+            return []
+        self._msg(f"Bogentext eingefügt ({len(ids)} Zeichen, gruppiert)"
+                  + (" – Text ersetzt" if replace_id else ""))
         return ids
 
     def cut_options(self, values: dict | None = None) -> bool:
