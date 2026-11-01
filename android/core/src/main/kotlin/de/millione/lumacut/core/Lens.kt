@@ -82,6 +82,39 @@ data class Lens(
         return true
     }
 
+    /**
+     * This lens with [valid] shrunk towards the image centre until its
+     * corners stay inside the radius where the distortion is still clearly
+     * one-to-one, or null when that leaves less than [minSide] pixels per
+     * side. For a wide-angle photo whose corners the radial terms cannot
+     * follow (01.11.): the middle stays usable instead of failing.
+     */
+    fun clippedToFold(minSide: Double): Lens? {
+        if (monotonic()) return this
+        var ru = 0.0
+        val stepR = 0.002
+        while (ru < 3.0) {
+            val q = (ru + stepR) * (ru + stepR)
+            if (1 + 3 * k1 * q + 5 * k2 * q * q + 7 * k3 * q * q * q < 0.2) break
+            ru += stepR
+        }
+        val r2 = ru * ru
+        val limit = 0.97 * f * ru * (1 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2)
+        if (limit <= 0) return null
+        var b = valid
+        repeat(60) {
+            val far = listOf(Pt(b.minX, b.minY), Pt(b.maxX, b.minY), Pt(b.maxX, b.maxY), Pt(b.minX, b.maxY))
+                .maxOf { hypot(it.x - cx, it.y - cy) }
+            if (far <= limit) {
+                val c = copy(valid = b)
+                return if (b.width >= minSide && b.height >= minSide && c.monotonic()) c else null
+            }
+            val s = 0.97
+            b = Box(cx + (b.minX - cx) * s, cy + (b.minY - cy) * s, cx + (b.maxX - cx) * s, cy + (b.maxY - cy) * s)
+        }
+        return null
+    }
+
     /** OpenCV camera matrix and dist_coeffs (the Pi's camera_calibration.json fields). */
     fun openCv(): Pair<List<List<Double>>, List<Double>> =
         listOf(listOf(f, 0.0, cx), listOf(0.0, f, cy), listOf(0.0, 0.0, 1.0)) to listOf(k1, k2, 0.0, 0.0, k3)

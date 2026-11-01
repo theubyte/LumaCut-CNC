@@ -26,6 +26,8 @@ object DotGrid {
     const val R_BIG = 3.0
     // Fewest dots the lens fit keeps when it drops the outer ones (calibrate).
     const val MIN_FIT_POINTS = 40
+    // A fit this good (mean mm) is taken before dropping more outer dots.
+    const val GOOD_FIT_MM = 0.25
 
     /** Shift of the grid from the work-area centre (0 in the app; a calibration run that shares one plate with other tests moves it). */
     var offset: Pt = Pt(0.0, 0.0)
@@ -279,7 +281,10 @@ object DotGrid {
             val m = spacingPx / 2
             val valid = Box(max(0.0, b.minX - m), max(0.0, b.minY - m), min(w.toDouble(), b.maxX + m), min(h.toDouble(), b.maxY + m))
             lens = Lens.fit(px, rel, w, h, valid)
-            if (lens.monotonic() || keys.size <= MIN_FIT_POINTS) break
+            // Usable where the model is one-to-one; the far corners may fall away.
+            val clipped = lens.clippedToFold(0.35 * min(w, h))
+            if (clipped != null && clipped.rmsMm < GOOD_FIT_MM) { lens = clipped; break }
+            if (keys.size <= MIN_FIT_POINTS) { if (clipped != null) lens = clipped; break }
             keys = keys.take(max(MIN_FIT_POINTS, (keys.size * 0.9).toInt()))
         }
         require(lens.monotonic()) { "Linsenmodell kippt am Rand – Raster mittiger ins Bild und erneut versuchen" }

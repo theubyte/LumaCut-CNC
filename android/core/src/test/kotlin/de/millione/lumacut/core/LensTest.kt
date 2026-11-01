@@ -94,9 +94,9 @@ class LensTest {
         val px = IntArray(img.width * img.height).also { img.getRGB(0, 0, img.width, img.height, it, 0, img.width) }
         val r = DotGrid.calibrate(px, img.width, img.height, Work.fromMachine(210.0, 190.0), 53.0)
         assertTrue(r.lens.monotonic())
-        assertTrue(r.lens.rmsMm < 0.2, "rms ${r.lens.rmsMm}")
-        assertTrue(r.points.size >= DotGrid.MIN_FIT_POINTS, "kept ${r.points.size}")
-        assertTrue(r.lens.valid.width > 1000, "usable ${r.lens.valid}")
+        assertTrue(r.lens.rmsMm < DotGrid.GOOD_FIT_MM, "rms ${r.lens.rmsMm}")
+        assertTrue(r.points.size >= 60, "kept ${r.points.size}")
+        assertTrue(r.lens.valid.width > 1200 && r.lens.valid.height > 750, "usable ${r.lens.valid}")
     }
 
     @Test fun `mirrored camera is recognised by the direction dots`() {
