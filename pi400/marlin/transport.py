@@ -1247,7 +1247,7 @@ class MarlinTransport:
     def ttl_test(self, seconds: float, owner: str = "web"):
         """Laser PWM pin at full duty with the laser rail OFF (owner 01.11.).
 
-        For measuring the TTL pin (ISP MISO, PB6) with a meter: the relay is
+        For measuring the TTL pin (ISP SCK, PB7; MISO until 01.11.) with a meter: the relay is
         switched off first and stays off, so the module has no supply. With
         S255 the pin reads ~5 V DC; 0 V means pin, firmware or wiring fault.
         """

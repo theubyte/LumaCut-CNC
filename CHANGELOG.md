@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-01
 
+- **Anet: Laser-PWM von MISO auf SCK:** MISO (ISP-Pin 1, D6) gab auch bei `M3 S255` keine Spannung mehr aus. Der Laser liegt jetzt auf SCK (ISP-Pin 3, D7/PB7, gleicher Hardware-Timer 3). TTL-Kabel und 10-kΩ-Pull-down auf Pin 3 umstecken, GND bleibt Pin 6. Kommt als Firmware-Update per Knopf.
 - **Service-Menü Laser (Weboberfläche → System):** mit eigenem Passwort, das der Besitzer beim ersten Öffnen festlegt (auf dem Pi nur als gesalzener Hash). Darin: Laserversorgung 24 V von Hand an/aus (Strahl aus, schaltet nach 5 min selbst ab) und Laser im Stillstand feuern, höchstens 20 % für 5 s, mit Sicherheitsabfrage. `op=fire_test` ist dafür `op=service_fire` (mit Passwort) geworden.
 - **TTL-Pin-Test (`op=ttl_test`):** Laser-Relais aus, PWM-Pin (ISP-MISO, D6/PB6) 1..10 s auf S255 – sollte ~5 V messen. Prüft ohne Strahl, ob das Board den Laser überhaupt ansteuert.
 - **Feuertest im Stillstand (`op=fire_test`):** höchstens 2 % für 5 s, ohne Fahrt; Relais an, `M3 S<n>`, warten, danach immer `M5` und Relais aus. Prüft, ob das Modul überhaupt zündet. Messung beim Versorgungstest: am Laser nur 2,9 V statt 24 V.

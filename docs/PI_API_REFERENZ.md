@@ -441,7 +441,7 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | --- | --- |
 | Parameter | `seconds`: 1..10 (Standard 10) |
 | Vorbedingungen | **frei**, Referenz nicht nötig; kein Notstopp |
-| Wirkung | `M5 I`, `M400`, `M107 P0` (Laser-Relais aus), `M3 S255`, `G4`, `M5`. TTL-Pin (ISP-MISO) ~5 V zum Messen, Laser ohne Versorgung. ⚠ Hardware |
+| Wirkung | `M5 I`, `M400`, `M107 P0` (Laser-Relais aus), `M3 S255`, `G4`, `M5`. TTL-Pin (ISP-SCK, Pin 3; bis 01.11. MISO) ~5 V zum Messen, Laser ohne Versorgung. ⚠ Hardware |
 | Erfolg | 200 `TTL-Pin 10 s auf S255 (Relais aus), wieder aus.` |
 
 #### `op=z_test`

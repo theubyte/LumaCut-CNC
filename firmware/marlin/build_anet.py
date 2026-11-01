@@ -9,7 +9,8 @@ owner present (avrdude -c arduino -b 115200, Optiboot answers on USB).
 
 Wiring this build expects (docs/STAND.md):
   - board on the 24 V supply (its stock A8 supply was 24 V); laser on the
-    LaserTree adapter at the same 24 V; TTL from ISP header MISO = D6/PB6 (Timer3 hardware PWM, ~2.5 kHz)
+    LaserTree adapter at the same 24 V; TTL from ISP header SCK = D7/PB7 (Timer3 hardware PWM, ~2.5 kHz;
+    MISO/D6 gave no output any more on 01.11.)
     and ISP GND, with a 10 kOhm pull-down TTL->GND so the laser stays dark
     while the chip is in reset or in the boot loader (pin floats then)
   - X/Y/Z motors and min switches on the stock connectors
@@ -55,7 +56,7 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
                  "THERMAL_PROTECTION_CHAMBER", "THERMAL_PROTECTION_COOLER"):
         cfg = disable_active(cfg, name)
     # Headless: the Pi is the user interface; no LCD, no SD (SPI pins free,
-    # MISO carries the laser PWM).
+    # SCK carries the laser PWM).
     for name in ("ZONESTAR_LCD", "SDSUPPORT", "SHOW_BOOTSCREEN"):
         cfg = disable_active(cfg, name)
     # Same axes, switches and probing as the SKR build (build.py).
@@ -129,10 +130,11 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
 
 PIN_PATCH = """
 // LumaCut CNC (build_anet.py): headless laser on the Anet V1.0/V1.7.
-// Laser TTL: ISP header MISO = D6 = PB6 = OC3A, Timer3 hardware PWM (Marlin
+// Laser TTL: ISP header SCK = D7 = PB7 = OC3B, Timer3 hardware PWM (Marlin
 // already runs Timer3 at 1 kHz on the 1284P; Timer0/1/2 are taken).
+// Until 01.11. MISO = D6 = OC3A; that pin stopped giving any output.
 // Needs a 10k pull-down to GND: the pin floats during reset/boot loader.
-#define SPINDLE_LASER_PWM_PIN 6
+#define SPINDLE_LASER_PWM_PIN 7
 // Marlin wants an enable pin: the unused hotend thermistor input A7/D24.
 // It MUST NOT be wired to anything that powers the laser.
 #define SPINDLE_LASER_ENA_PIN 24
@@ -227,7 +229,7 @@ def main():
             "environment": PIO_ENV,
             "cpu": "ATmega1284P",
             "usb": "CH340, Marlin %s baud; Optiboot upload 115200 (avrdude -c arduino)" % BAUD,
-            "laser": {"pwm": "D6 PB6 (ISP MISO), Timer3, 10k pull-down to GND", "enable": "D24 unwired",
+            "laser": {"pwm": "D7 PB7 (ISP SCK), Timer3, 10k pull-down to GND", "enable": "D24 unwired",
                       "supply": "LaserTree adapter on 24 V; relay on FAN D4 (M106 P0 / M107 P0)",
                       "mode": "M3 I", "s_max": 255},
             "power": "board and laser on one 24 V supply; laser +24 V through the FAN D4 relay",
