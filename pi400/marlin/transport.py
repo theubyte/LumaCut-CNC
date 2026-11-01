@@ -1450,6 +1450,7 @@ class MarlinTransport:
             self._exchange_locked("M114", timeout=8)
             if self.position is None:
                 raise RuntimeError("Ausgangsposition für G30 unbekannt")
+            self._absolute_locked()
             laser_x, laser_y, z = self.position
             # Some queued M114 reports are stale (for example X0/Y0 from
             # homing arrives after LightBurn has moved to X120/Y120).
@@ -1568,6 +1569,14 @@ class MarlinTransport:
             raise RuntimeError(f"G30-Kontakt Z{stop_z:.2f} unter Maschinenboden: Z-Referenz prüfen")
         return stop_z
 
+    def _absolute_locked(self):
+        """G90 before absolute moves. A relative jog that failed after its
+        G91 left Marlin relative: G30's "G0 X212 Y167" then drove from
+        X185/Y180 into the X end (01.11.)."""
+        if not self.absolute_mode:
+            self._exchange_locked("G90", timeout=8)
+            self.absolute_mode = True
+
     def _probe_head_ok(self, x: float, y: float) -> bool:
         return (PROBE_HEAD_MIN[0] <= x <= self.travel_xy[0] - 10.0 and
                 PROBE_HEAD_MIN[1] <= y <= self.travel_xy[1] - 10.0)
@@ -1636,6 +1645,7 @@ class MarlinTransport:
                     if not self.probe_reachable(x, y):
                         raise ValueError("Abtastpunkt X%.1f Y%.1f für den Taster nicht erreichbar" % (x, y))
             dx, dy = self.probe_xy_offset_mm
+            self._absolute_locked()
             self.surface_z = None
             self.focused_this_job = False
             values = [[None] * len(g) for g in groups]

@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-01
 
+- **Kopf beim Abtasten in die X-Ecke gefahren (behoben):** Abgelehnte Z-Jogs (Pi: „Keine Werkstückhöhe bekannt“) hatten `G91` schon gesendet, das `G90` danach nie. Marlin blieb relativ; das `G0 X212.4 Y167` vor dem G30 fuhr von X185/Y180 aus relativ bis ans X-Ende (X390, Y347) und rödelte dort. Jetzt setzt Jog `G90` auch bei Fehler zurück, und Abtasten/Bettkarte schalten vor ihren absoluten Fahrten selbst auf `G90`.
 - **Z-Wächter, zweite Lücke:** Auch marlin-58 stoppte nicht. Marlin setzt `ENDSTOPS_ALWAYS_ON_DEFAULT` nur beim Zurücksetzen des EEPROM; das Anet lädt sein gültiges EEPROM ohne. Der Pi schaltet die Endschalter jetzt beim Verbinden mit `M120` ein (nur Anet).
 - **Z-Dauerwächter wirkte nicht (Fix):** Test mit marlin-57: Taster gedrückt, Z fuhr trotzdem 10 mm runter. Marlin wertet Z_MIN, wenn derselbe Pin der Taster zum Abtasten ist (`Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN`), nur während G28/G30 aus. Der Anet-Build patcht diese Bedingung in `endstops.cpp` heraus.
 - **Z-Dauerwächter (Anet-Firmware):** `ENDSTOPS_ALWAYS_ON_DEFAULT` – der Z-Taster stoppt Z bei jeder Fahrt, nicht nur beim Referenzieren (der Schneckenlift drückt mit >250 N, die Anet-Treiber haben keinen Strom-Poti). Meldet Marlin `endstops hit: Z`, wertet der Pi das wie einen Marlin-Fehler: Auftrag bricht ab, Laser aus. X/Y-Treffer an X0/Y0 beim Parken sind kein Fehler. Kommt als Firmware-Update per Knopf.

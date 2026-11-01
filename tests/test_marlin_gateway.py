@@ -1144,6 +1144,36 @@ class ZGuardTests(unittest.TestCase):
         self.assertIn("LumaCut: Z switch guards every move", src)
 
 
+class RelativeModeLeftoverTests(unittest.TestCase):
+    """01.11.: a refused Z jog left Marlin in G91; G30's absolute XY move then
+    drove from X185/Y180 relative into the X end."""
+    def test_probe_switches_back_to_absolute_first(self):
+        class Serial(AnsweringSerial):
+            def write(self, raw):
+                self.writes.append(raw)
+                if raw.strip() == b"M114":
+                    self.replies.append("X:185.00 Y:180.00 Z:23.00 E:0.00\n")
+                self.replies.append("ok\n")
+                return len(raw)
+        ctrl = ParkLowTests().machine()
+        ctrl.serial = Serial()
+        ctrl.homing_verified = True
+        ctrl.cap_z_probe = True
+        ctrl.probe_xy_offset_mm = (-27.4, 13.0)
+        ctrl.last_xy_commanded = None
+        ctrl.absolute_mode = False            # left over from the failed jog
+        with self.assertRaises(RuntimeError):  # no G30 result in this fake
+            ctrl.probe_workpiece(owner="web")
+        w = ParkLowTests().lines(ctrl)
+        self.assertLess(w.index("G90"), w.index("G0 X212.400 Y167.000 F9000"))
+
+    def test_jog_restores_absolute_mode_when_refused(self):
+        src = (ROOT / "pi400" / "marlin" / "web.py").read_text(encoding="utf-8")
+        jog = src[src.index('if op == "jog":'):src.index('if op == "z_test":')]
+        self.assertIn("finally:", jog)
+        self.assertLess(jog.index("finally:"), jog.index('machine.command("G90"'))
+
+
 class GatewayFilesTests(unittest.TestCase):
     def test_no_unsafe_marlin_commands_or_unhomed_power(self):
         guard = MarlinLaserGuard()

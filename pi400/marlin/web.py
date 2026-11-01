@@ -643,10 +643,14 @@ def action():
         # Stage a finite move and synchronize before accepting another jog.
         machine.command("M5 I", owner="web")
         machine.command("G91", owner="web")
-        machine.command("G0 %s%+.3f F%d" % (
-            axis, distance, 360 if axis=="Z" else 1800), owner="web", timeout=30)
-        machine.command("M400", owner="web", timeout=45)
-        machine.command("G90", owner="web")
+        try:
+            machine.command("G0 %s%+.3f F%d" % (
+                axis, distance, 360 if axis=="Z" else 1800), owner="web", timeout=30)
+            machine.command("M400", owner="web", timeout=45)
+        finally:
+            # Also when the guard refuses the move: Marlin must not stay
+            # relative (01.11.: the next absolute G0 drove into the X end).
+            machine.command("G90", owner="web")
         machine.command("M114", owner="web")
         return jsonify(message="Bewegung ausgeführt: " + axis + " " + str(distance))
     if op == "z_test":
