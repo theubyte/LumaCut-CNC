@@ -495,7 +495,10 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   (M203 Z25 bestätigt). Z-Dauerwächter (`ENDSTOPS_ALWAYS_ON_DEFAULT`, Anet) gebaut: Taster stoppt Z bei
   jeder Fahrt, Pi bricht bei „endstops hit: Z“ ab (X/Y-Treffer beim Parken kein Fehler) – marlin-57
   geflasht, Test: Taster gehalten, Z fuhr trotzdem 10 mm (Marlin prüft Z_MIN als Tasterpin nur beim
-  Abtasten). Fix: endstops.cpp-Patch im Anet-Build, erneut flashen und testen. Offen: Z-Beschleunigung (steht auf 100 mm/s², 30 mm/s erst nach 4,5 mm erreicht).
+  Abtasten). Fix: endstops.cpp-Patch (marlin-58, geflasht) – Test wieder ohne Stopp:
+  `ENDSTOPS_ALWAYS_ON_DEFAULT` wirkt nur bei EEPROM-Reset, das gültige EEPROM lädt ohne. Pi sendet jetzt
+  beim Verbinden `M120` (Anet). Wächter-Test damit noch offen. Besitzer: Kopf fuhr beim letzten Test
+  nicht, obwohl Marlin 10 186 Schritte zählte – Z-Treiber prüfen (Überhitzung?). Offen: Z-Beschleunigung (steht auf 100 mm/s², 30 mm/s erst nach 4,5 mm erreicht).
 - **Testerfindung „Schwerkraft-Schleppklinke“ (01.11., Teststand konstruiert, nicht gedruckt):**
   `A:\mfw\zmount\v_test_erfindung_1.0\`. Statt Selbsthemmung (Wirkungsgrad < 50 %, Aufprall >250 N)
   bleibt der schnelle v6-Direktantrieb. Eine Klinke, die ihr Gewicht offen hält und die ein

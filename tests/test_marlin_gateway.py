@@ -1133,6 +1133,10 @@ class ZGuardTests(unittest.TestCase):
         with ctrl.lock:
             self.assertEqual(ctrl._exchange_locked("M400"), ["ok"])  # the error's ok was consumed
 
+    def test_pi_switches_anet_endstops_on_at_connect(self):
+        src = (ROOT / "pi400" / "marlin" / "transport.py").read_text(encoding="utf-8")
+        self.assertIn('if "Marlin Anet" in self.identity:\n                    self._exchange_locked("M120"', src)
+
     def test_anet_firmware_keeps_endstops_on(self):
         src = (ROOT / "firmware" / "marlin" / "build_anet.py").read_text(encoding="utf-8")
         self.assertIn('uncomment(adv, "ENDSTOPS_ALWAYS_ON_DEFAULT")', src)

@@ -559,6 +559,12 @@ class MarlinTransport:
                 # explicit flash/configuration workflow.
                 self._exchange_locked("M203 Z%g" % self.z_speed_mm_s, timeout=6.0)
                 self._exchange_locked("M92 Z%g" % Z_STEPS_PER_MM, timeout=6.0)
+                # Z guard (Anet): ENDSTOPS_ALWAYS_ON_DEFAULT only takes effect
+                # on an EEPROM reset; a valid EEPROM loads without it and the
+                # switch stayed unchecked (tested 01.11.). M120 switches the
+                # endstops on for every move until the next board reset.
+                if "Marlin Anet" in self.identity:
+                    self._exchange_locked("M120", timeout=6.0)
                 # The same stale EEPROM may still hold the Mega Zero example
                 # probe offset { -40, -10, 2 }. Marlin then shifts every G30
                 # by X+40/Y+10, adds 2 mm to the result and lowers the
