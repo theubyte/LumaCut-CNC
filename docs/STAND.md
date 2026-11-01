@@ -489,9 +489,9 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   **Eingebaut 01.11.** (Besitzer). Z fuhr danach sehr langsam: der Pi sendete beim Verbinden
   noch `M92 Z80` (Riemen) → Z nur 1/12,7 der Strecke. Jetzt `M92 Z1018.59` (Pi und Anet-Firmware).
   Z-Richtung geprüft 01.11. (`op=z_test` +1 mm: fährt hoch, 1019 Schritte – passt, Firmware bleibt). +10 mm: ruhig, 10 mm am Kopf
-  nachgemessen (Besitzer) – `M92 Z1018.59` bestätigt.
-  Offen: Z-Strom am A4988-Poti klein (~300 mA,
-  sonst > 250 N Druck nach unten), danach Z-Vorschub über 9 mm/s anheben (bis ~30 mm/s möglich).
+  nachgemessen (Besitzer) – `M92 Z1018.59` bestätigt. Anet V1.7: Treiber aufgelötet, Strom fest
+  (kein Poti) – Z-Taster per M119 geprüft, erste Referenzfahrt mit Schneckenlift OK, parkt auf Z 1.
+  Offen: Dauerwächter `ENDSTOPS_ALWAYS_ON` (Strom nicht begrenzbar), Z-Vorschub über 9 mm/s anheben (bis ~30 mm/s möglich).
 - **Testerfindung „Schwerkraft-Schleppklinke“ (01.11., Teststand konstruiert, nicht gedruckt):**
   `A:\mfw\zmount\v_test_erfindung_1.0\`. Statt Selbsthemmung (Wirkungsgrad < 50 %, Aufprall >250 N)
   bleibt der schnelle v6-Direktantrieb. Eine Klinke, die ihr Gewicht offen hält und die ein
