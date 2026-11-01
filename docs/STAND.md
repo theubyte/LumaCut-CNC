@@ -486,6 +486,12 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   Motorschrauben, obere wird M3×20). `M92 Z1018.59`. Alle CAD-Prüfungen OK, jedes
   Teil ein Körper, STL in Drucklage; offen: Platz hinter der Plattenunterkante
   für das Zahnstangenende. Komplett-v7 nicht drucken (T2 bräuchte Stützen).
+- **Testerfindung „Schwerkraft-Schleppklinke“ (01.11., Teststand konstruiert, nicht gedruckt):**
+  `A:\mfw\zmount\v_test_erfindung_1.0\`. Statt Selbsthemmung (Wirkungsgrad < 50 %, Aufprall >250 N)
+  bleibt der schnelle v6-Direktantrieb. Eine Klinke, die ihr Gewicht offen hält und die ein
+  Schleppfinger nur bei Abwärtsbewegung zuzieht, fängt den Kopf erst beim Fall (ab ~0,26 g, Fang nach
+  ≤ 6 mm, Rückspannung ~8 V statt ~28 V). Schwachstelle: Schwelle hängt vom Reibwert ab, daher drei
+  Abstimm-Klinken. Tischtest ca. 42 g; Einbau in den Kopf erst nach bestandenem Test (1.1).
 - Weitere Ideen zu Höhe/Kollision: [IDEE_HOEHE_KOLLISION_KAMERA_3D.md](IDEE_HOEHE_KOLLISION_KAMERA_3D.md).
 
 ## 13. Nebenprojekte im Ordner
