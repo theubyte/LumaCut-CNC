@@ -1109,6 +1109,23 @@ class SupplyTestTests(unittest.TestCase):
         self.assertEqual(ctrl.serial.writes, [])
 
 
+class FireTestTests(unittest.TestCase):
+    """op=fire_test: stationary shot at 1..2 %, always switched off."""
+    def test_low_power_shot_then_off(self):
+        ctrl = ParkLowTests().machine()
+        self.assertEqual(ctrl.fire_test(1, 0.1), 3)
+        w = ParkLowTests().lines(ctrl)
+        self.assertEqual(w, ["M5 I", "M400", "M106 P0 S255", "G4 P800",
+                             "M3 S3", "G4 P100", "M5", "M107 P0"])
+
+    def test_limits(self):
+        ctrl = ParkLowTests().machine()
+        for pct, sec in ((0, 1), (2.5, 1), (1, 0), (1, 5.5)):
+            with self.assertRaises(ValueError):
+                ctrl.fire_test(pct, sec)
+        self.assertEqual(ctrl.serial.writes, [])
+
+
 class ZSpeedSettingTests(unittest.TestCase):
     """Z max feedrate raised step by step for the worm lift (01.11.)."""
     def test_speed_test_lifts_the_cap_for_one_move_only(self):

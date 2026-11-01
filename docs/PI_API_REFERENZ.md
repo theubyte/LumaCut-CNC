@@ -412,6 +412,15 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | Wirkung | `M5 I`, `M400`, `M106 P0 S255` (Laser-Relais an, kein Strahl), warten, `M5 I`, `M107 P0`. Zum Messen der 24-V-Laserversorgung. ⚠ Hardware |
 | Erfolg | 200 `Laserversorgung 15 s an (ohne Strahl), wieder aus.` |
 
+#### `op=fire_test`
+
+| | |
+| --- | --- |
+| Parameter | `percent`: >0..2 (Standard 1), `seconds`: >0..5 (Standard 5) |
+| Vorbedingungen | **frei**, Referenz nicht nötig; kein Notstopp; **Go des Besitzers, Material unter der Düse geprüft** |
+| Wirkung | `M5 I`, `M400`, `M106 P0 S255`, `G4 P800`, `M3 S<round(percent·2,55)>`, `G4`, danach immer `M5`, `M107 P0`. Laser im Stillstand! ⚠ Hardware |
+| Erfolg | 200 `Laser 1 % (S3) 5 s im Stillstand gefeuert, wieder aus.` |
+
 #### `op=z_test`
 
 | | |

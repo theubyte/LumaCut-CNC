@@ -105,6 +105,8 @@ Z_TEST_FEED_MM_MIN = 120
 Z_SPEED_DEFAULT = 9.0
 Z_SPEED_MAX = 30.0
 SUPPLY_TEST_MAX_S = 30.0  # op=supply_test: laser rail on for measuring, beam off
+FIRE_TEST_MAX_PCT = 2.0  # op=fire_test: stationary shot, very low power only
+FIRE_TEST_MAX_S = 5.0
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
 BED_BELOW_Z0_MM = 3.0
@@ -1180,6 +1182,39 @@ class MarlinTransport:
                     self._exchange_locked("M107 P0", timeout=8)
                 self.fan_power = False
                 self.fan_off_at = None
+
+    def fire_test(self, percent: float, seconds: float, owner: str = "web"):
+        """Stationary laser shot at very low power (owner 01.11., after go).
+
+        Checks whether the module fires at all when jobs leave no mark.
+        At most FIRE_TEST_MAX_PCT for FIRE_TEST_MAX_S; no motion. The beam
+        is switched off in ``finally`` even if the dwell fails.
+        """
+        if not isinstance(percent, (int, float)) or not 0 < percent <= FIRE_TEST_MAX_PCT:
+            raise ValueError("Feuertest: Leistung 0..%g %%" % FIRE_TEST_MAX_PCT)
+        if not isinstance(seconds, (int, float)) or not 0 < seconds <= FIRE_TEST_MAX_S:
+            raise ValueError("Feuertest: höchstens %g s" % FIRE_TEST_MAX_S)
+        power = max(1, int(round(percent * 255 / 100)))
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+            self._exchange_locked("M5 I", timeout=6.0)
+            self._exchange_locked("M400", timeout=15)
+            self._exchange_locked("M106 P0 S255", timeout=8)
+            self._exchange_locked(
+                f"G4 P{int(self.laser_supply_settle_ms)}", timeout=10)
+            try:
+                self._exchange_locked("M3 S%d" % power, timeout=6.0)
+                self._exchange_locked("G4 P%d" % int(seconds * 1000),
+                                      timeout=seconds + 10)
+            finally:
+                self._exchange_locked("M5", timeout=6.0)
+                self._exchange_locked("M107 P0", timeout=8)
+                self.fan_power = False
+                self.fan_off_at = None
+        return power
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
                   probe_contact_confirmed: bool = False, should_stop=None, operator_clear: bool = False):

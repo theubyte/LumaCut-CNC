@@ -671,6 +671,14 @@ def action():
         local_owner()
         machine.supply_test(seconds)
         return jsonify(message="Laserversorgung %g s an (ohne Strahl), wieder aus." % seconds)
+    if op == "fire_test":
+        # Stationary low-power shot after the owner's go (transport.fire_test).
+        percent = float(request.form.get("percent", "1"))
+        seconds = float(request.form.get("seconds", "5"))
+        local_owner()
+        power = machine.fire_test(percent, seconds)
+        return jsonify(message="Laser %g %% (S%d) %g s im Stillstand gefeuert, wieder aus."
+                       % (percent, power, seconds))
     if op == "app_update_check":
         # Network only, never touches the machine: allowed at any time.
         info = app_updates.check()
