@@ -82,10 +82,11 @@ Z_MAX_MM = 80.0
 # reset, power loss) the rack-driven Z can only drop this far.
 PARK_Z_MM = 1.0
 _XY_MOTION = re.compile(r"^G0?[0123](?:\s|$)")
-# Z steps/mm of head v6: rack and GT2 20T pinion (40 mm per turn). Sent on
-# every connect like M203 Z9: an EEPROM from the lead-screw head (380)
-# would otherwise move Z 4.75 times as far as commanded.
-Z_STEPS_PER_MM = 80.0
+# Z steps/mm of the worm lift (head v6 retrofit /mfw/zmount/v7/nachruest,
+# 01.11.): worm 1:10, pinion 10 teeth module 1 on a printed rack = 3.1416 mm
+# per motor turn, 16 microsteps. Sent on every connect like M203 Z9: the
+# old belt value (80) would move Z only 1/12.7 of the commanded distance.
+Z_STEPS_PER_MM = 1018.59
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
 BED_BELOW_Z0_MM = 3.0

@@ -195,7 +195,7 @@ class USBProtocolTests(unittest.TestCase):
         # M851 clears a stale EEPROM probe offset (Mega Zero -40/-10/+2);
         # the X/Y limits (firmware values until the motion calibration) too.
         self.assertEqual(serial.writes,[b"M115\n",b"M5 I\n",b"M203 Z9\n",
-                                        b"M92 Z80\n", b"M851 X0 Y0 Z0\n", b"M201 X500 Y500\n",
+                                        b"M92 Z1018.59\n", b"M851 X0 Y0 Z0\n", b"M201 X500 Y500\n",
                                         b"M203 X150 Y150 Z9\n", b"M204 P500 T500\n", b"M84 S0\n"])
         self.assertTrue(bridge.status()["connected"])
         self.assertIn("LumaCut CNC",bridge.status()["identity"])

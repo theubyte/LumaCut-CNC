@@ -83,8 +83,9 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "Z_PROBE_LOW_POINT", "-2")
     cfg = replace_active(cfg, "Z_CLEARANCE_MULTI_PROBE", "16")
     cfg = replace_active(cfg, "Z_CLEARANCE_BETWEEN_PROBES", "16")
-    # A5 Pro belts 80 steps/mm, head v6 Z rack 80 steps/mm (A4988, 1/16).
-    cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 80 }")
+    # A5 Pro belts 80 steps/mm; Z worm lift (head v6 retrofit, 01.11.)
+    # 3.1416 mm per turn = 1018.59 steps/mm (A4988, 1/16).
+    cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 1018.59 }")
     cfg = replace_active(cfg, "HOMING_FEEDRATE_MM_M", "{ (50*60), (50*60), 432 }")
     cfg = replace_active(cfg, "Z_PROBE_FEEDRATE_FAST", "432")
     cfg = replace_active(cfg, "Z_PROBE_FEEDRATE_SLOW", "216")
