@@ -679,6 +679,12 @@ def action():
         power = machine.fire_test(percent, seconds)
         return jsonify(message="Laser %g %% (S%d) %g s im Stillstand gefeuert, wieder aus."
                        % (percent, power, seconds))
+    if op == "ttl_test":
+        # TTL pin at full duty, laser relay off (transport.ttl_test).
+        seconds = float(request.form.get("seconds", "10"))
+        local_owner()
+        machine.ttl_test(seconds)
+        return jsonify(message="TTL-Pin %g s auf S255 (Relais aus), wieder aus." % seconds)
     if op == "app_update_check":
         # Network only, never touches the machine: allowed at any time.
         info = app_updates.check()

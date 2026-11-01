@@ -1126,6 +1126,19 @@ class FireTestTests(unittest.TestCase):
         self.assertEqual(ctrl.serial.writes, [])
 
 
+class TtlTestTests(unittest.TestCase):
+    """op=ttl_test: PWM pin at S255 while the laser relay stays off."""
+    def test_relay_off_before_pin_on(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.fan_power = True
+        ctrl.ttl_test(1)
+        w = ParkLowTests().lines(ctrl)
+        self.assertEqual(w, ["M5 I", "M400", "M107 P0", "M3 S255", "G4 P1000", "M5"])
+        self.assertFalse(ctrl.fan_power)
+        with self.assertRaises(ValueError):
+            ctrl.ttl_test(11)
+
+
 class ZSpeedSettingTests(unittest.TestCase):
     """Z max feedrate raised step by step for the worm lift (01.11.)."""
     def test_speed_test_lifts_the_cap_for_one_move_only(self):

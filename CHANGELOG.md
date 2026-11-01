@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-01
 
+- **TTL-Pin-Test (`op=ttl_test`):** Laser-Relais aus, PWM-Pin (ISP-MISO, D6/PB6) 1..10 s auf S255 – sollte ~5 V messen. Prüft ohne Strahl, ob das Board den Laser überhaupt ansteuert.
 - **Feuertest im Stillstand (`op=fire_test`):** höchstens 2 % für 5 s, ohne Fahrt; Relais an, `M3 S<n>`, warten, danach immer `M5` und Relais aus. Prüft, ob das Modul überhaupt zündet. Messung beim Versorgungstest: am Laser nur 2,9 V statt 24 V.
 - **Versorgungstest Laser (`op=supply_test`):** Der Fokus-Test lief fehlerfrei durch, der Laser zündete aber nicht; der Lüfter am Modul drehte nur kurz an. Zum Messen der 24 V schaltet der Pi jetzt nur das Laser-Relais (FAN0, `M106 P0`) für 1..30 s ein, mit `M5 I` (kein Strahl), ohne Fahrt und ohne Referenz, danach wieder aus (`M107 P0`).
 - **Nachrüst-Schnecke T7n hält auf der Welle (konstruiert, nicht gedruckt):** Die Madenschraube in gedrucktem Gewinde gab nach, und der Lastschub schob die Schnecke zum Motor, bis sie das Rad verfehlte. Neu: Kappe auf der Wellenspitze als Anschlag für den Schub (dreht mit, reibt nicht), eingelegte M3-Mutter für die Madenschraube, D-Bohrung bleibt. T7e (Testerfindung 2.0) bekommt nur die Mutter; dort bleibt die Bremsscheibe der Anschlag. `A:\mfw\zmount7

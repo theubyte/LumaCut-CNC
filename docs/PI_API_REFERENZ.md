@@ -421,6 +421,15 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | Wirkung | `M5 I`, `M400`, `M106 P0 S255`, `G4 P800`, `M3 S<round(percent·2,55)>`, `G4`, danach immer `M5`, `M107 P0`. Laser im Stillstand! ⚠ Hardware |
 | Erfolg | 200 `Laser 1 % (S3) 5 s im Stillstand gefeuert, wieder aus.` |
 
+#### `op=ttl_test`
+
+| | |
+| --- | --- |
+| Parameter | `seconds`: 1..10 (Standard 10) |
+| Vorbedingungen | **frei**, Referenz nicht nötig; kein Notstopp |
+| Wirkung | `M5 I`, `M400`, `M107 P0` (Laser-Relais aus), `M3 S255`, `G4`, `M5`. TTL-Pin (ISP-MISO) ~5 V zum Messen, Laser ohne Versorgung. ⚠ Hardware |
+| Erfolg | 200 `TTL-Pin 10 s auf S255 (Relais aus), wieder aus.` |
+
 #### `op=z_test`
 
 | | |

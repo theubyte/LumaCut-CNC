@@ -107,6 +107,7 @@ Z_SPEED_MAX = 30.0
 SUPPLY_TEST_MAX_S = 30.0  # op=supply_test: laser rail on for measuring, beam off
 FIRE_TEST_MAX_PCT = 2.0  # op=fire_test: stationary shot, very low power only
 FIRE_TEST_MAX_S = 5.0
+TTL_TEST_MAX_S = 10.0  # op=ttl_test: PWM pin at full duty, laser relay off
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
 BED_BELOW_Z0_MM = 3.0
@@ -1215,6 +1216,32 @@ class MarlinTransport:
                 self.fan_power = False
                 self.fan_off_at = None
         return power
+
+    def ttl_test(self, seconds: float, owner: str = "web"):
+        """Laser PWM pin at full duty with the laser rail OFF (owner 01.11.).
+
+        For measuring the TTL pin (ISP MISO, PB6) with a meter: the relay is
+        switched off first and stays off, so the module has no supply. With
+        S255 the pin reads ~5 V DC; 0 V means pin, firmware or wiring fault.
+        """
+        if not isinstance(seconds, (int, float)) or not 1 <= seconds <= TTL_TEST_MAX_S:
+            raise ValueError("TTL-Test: 1..%g s" % TTL_TEST_MAX_S)
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+            self._exchange_locked("M5 I", timeout=6.0)
+            self._exchange_locked("M400", timeout=15)
+            self._exchange_locked("M107 P0", timeout=8)
+            self.fan_power = False
+            self.fan_off_at = None
+            try:
+                self._exchange_locked("M3 S255", timeout=6.0)
+                self._exchange_locked("G4 P%d" % int(seconds * 1000),
+                                      timeout=seconds + 10)
+            finally:
+                self._exchange_locked("M5", timeout=6.0)
 
     def safe_home(self, owner: str = "web", clearance_mm: float | None = None,
                   probe_contact_confirmed: bool = False, should_stop=None, operator_clear: bool = False):
