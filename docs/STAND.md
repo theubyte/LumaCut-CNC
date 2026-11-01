@@ -502,7 +502,8 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   Kamera-Kalibrierung 01.11. begonnen: Abtasten fuhr den Kopf in die X-Ecke (Marlin nach abgelehntem
   Jog in G91 geblieben) – behoben; Mechanik heil (Besitzer). Objektiv von Hand scharf
   gestellt, beste Scanhöhe **Z 53** (Kopf X210/Y190 über Rastermitte). App-Auswertung kippte am Rand → App-Fix
-  (Glättung, k3, Randpunkte weglassen); Auswerten/Speichern mit neuer App offen, danach Laser-Versatz prüfen. Offen: Z-Beschleunigung (steht auf 100 mm/s², 30 mm/s erst nach 4,5 mm erreicht).
+  (Glättung, k3, Feld am Faltrand zuschneiden). **Gespeichert** (App 1.0.54, Rev. 8): 76 Punkte, 0,22 mm,
+  scan_z 53, aboveSurface 51,32. Offen: Versatz Kamera↔Laser prüfen (Raster lag evtl. nicht exakt wie gelasert). Offen: Z-Beschleunigung (steht auf 100 mm/s², 30 mm/s erst nach 4,5 mm erreicht).
 - **Testerfindung „Schwerkraft-Schleppklinke“ (01.11., Teststand konstruiert, nicht gedruckt):**
   `A:\mfw\zmount\v_test_erfindung_1.0\`. Statt Selbsthemmung (Wirkungsgrad < 50 %, Aufprall >250 N)
   bleibt der schnelle v6-Direktantrieb. Eine Klinke, die ihr Gewicht offen hält und die ein

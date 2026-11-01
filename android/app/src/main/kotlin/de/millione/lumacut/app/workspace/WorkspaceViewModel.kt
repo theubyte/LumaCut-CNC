@@ -260,7 +260,10 @@ class WorkspaceViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveGridCalibration(machine: MachineViewModel, result: DotGrid.Result) {
-        val cal = result.calibration
+        // Height over the probed plate like the automatic run, so later scans
+        // keep this distance on thicker material (01.11.: it was missing).
+        val surface = machine.status.value?.workpiece_surface_z
+        val cal = result.calibration.let { c -> if (surface != null) c.copy(aboveSurface = c.scanZ - surface) else c }
         store(machine, cal)
         val u = cal.usable(0.0)
         machine.notify("Kopfkamera kalibriert: Bildfeld %.0f × %.0f mm, Genauigkeit %.2f mm".format(Locale.GERMANY, u.width, u.height, result.lens.rmsMm))
