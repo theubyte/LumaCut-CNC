@@ -492,6 +492,14 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   Schleppfinger nur bei Abwärtsbewegung zuzieht, fängt den Kopf erst beim Fall (ab ~0,26 g, Fang nach
   ≤ 6 mm, Rückspannung ~8 V statt ~28 V). Schwachstelle: Schwelle hängt vom Reibwert ab, daher drei
   Abstimm-Klinken. Tischtest ca. 42 g; Einbau in den Kopf erst nach bestandenem Test (1.1).
+  Besitzer (01.11.): Klinke ist kein selbsthaltender Antrieb – gewünscht ist ein selbsthaltender,
+  schrittverlustsicherer Nachrüst-Antrieb.
+- **Testerfindung 2.0 „Lastbremsende Schnecke“ (01.11., konstruiert, nicht gedruckt) – aktueller Vorschlag:**
+  `A:\mfw\zmount\v_test_erfindung_2.0\`. Nachrüstsatz + Bremsscheibe vor dem Motorbund: Die Kopflast
+  drückt die Schnecke immer zum Motor; dieser Schub bremst sie über die Scheibe selbst (Bremsmoment wächst mit
+  der Last). Hält ab μ 0,045 statt 0,076, kein Axialspiel. +3 g, ohne Schnitte. Motorstrom-Empfehlung ~100 mNm
+  (Reserve ×2,6, Aufprall < 50 N). Offen (Software, braucht Z-Treiber): Taster als Dauerwächter
+  (`ENDSTOPS_ALWAYS_ON`), Referenz-Prüfung vor/nach Auftrag, Haltetest per `M18 Z`.
 - Weitere Ideen zu Höhe/Kollision: [IDEE_HOEHE_KOLLISION_KAMERA_3D.md](IDEE_HOEHE_KOLLISION_KAMERA_3D.md).
 
 ## 13. Nebenprojekte im Ordner
