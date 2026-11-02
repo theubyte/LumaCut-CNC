@@ -14,6 +14,12 @@ Geometry: each bar (run of dark modules) becomes one filled rectangle
 ``x``/``y`` is the top-left corner *including* the quiet zone, which is
 only kept free (it is not engraved). Units are mm, Y points down.
 
+Inverted mode (``invert``, for materials that turn *light* when lasered:
+anodised aluminium, slate, coated metal) engraves the background instead:
+quiet zone, spaces and a border of ``INVERT_MARGIN_*`` above and below,
+with the bars and digits left as holes. The quiet zone is then always on
+and the bar width correction widens the bars (narrows the spaces).
+
 The human-readable line needs glyph outlines, which come from Qt
 (:func:`lumacut_job.arctext_qt.glyphs_for`); callers pass them in as
 ``glyph_fn(text, cap_height_mm) -> list[arctext.Glyph]``. Without it the
@@ -40,6 +46,8 @@ WARN_MODULE_MM = 0.15
 HEIGHT_RANGE = (2.0, 300.0)          # bar height, mm
 TEXT_RANGE = (0.5, 30.0)             # digit (cap) height, mm
 SHRINK_RANGE = (0.0, 0.3)            # bar width reduction, mm (spot compensation)
+INVERT_MARGIN_MM = 1.0               # inverted: engraved border above/below, at least …
+INVERT_MARGIN_MODULES = 5            # … or this many modules
 MAX_CODE128_CHARS = 80
 
 # Minimum quiet zones in modules (left, right): ISO/IEC 15417 / 15420.
@@ -268,6 +276,7 @@ class BarcodeSpec:
     text_mm: float = 2.5              # digit height
     shrink_mm: float = 0.0            # bar width reduction against the burn spread
     font_family: str = "Segoe UI"     # human-readable line (outlines via Qt)
+    invert: bool = False              # laser the background (spaces, quiet zone, margin), not the bars
     x: float = 0.0                    # top-left incl. quiet zone
     y: float = 0.0
 
@@ -277,11 +286,16 @@ class BarcodeSpec:
                            data=str(self.data if self.data is not None else ""),
                            module_mm=float(_clamp(float(self.module_mm), 0.0, MODULE_RANGE[1])),
                            height_mm=float(_clamp(float(self.height_mm), *HEIGHT_RANGE)),
-                           quiet_zone=bool(self.quiet_zone), show_text=bool(self.show_text),
+                           quiet_zone=bool(self.quiet_zone) or bool(self.invert),
+                           show_text=bool(self.show_text),
                            text_mm=float(_clamp(float(self.text_mm), *TEXT_RANGE)),
                            shrink_mm=float(_clamp(float(self.shrink_mm), *SHRINK_RANGE)),
                            font_family=str(self.font_family or "Segoe UI"),
-                           x=float(self.x), y=float(self.y))
+                           invert=bool(self.invert), x=float(self.x), y=float(self.y))
+
+    def margin_mm(self) -> float:
+        """Engraved light border above and below the code in inverted mode (0 otherwise)."""
+        return max(INVERT_MARGIN_MM, INVERT_MARGIN_MODULES * self.module_mm) if self.invert else 0.0
 
     def text_gap(self) -> float:
         return max(self.module_mm, 0.25 * self.text_mm)
@@ -291,7 +305,7 @@ class BarcodeSpec:
         s = self.normalized()
         ql, qr = code.quiet if s.quiet_zone else (0, 0)
         w = (ql + len(code.modules) + qr) * s.module_mm
-        h = s.height_mm + ((s.text_gap() + s.text_mm) if s.show_text else 0.0)
+        h = s.height_mm + ((s.text_gap() + s.text_mm) if s.show_text else 0.0) + 2 * s.margin_mm()
         return w, h
 
 
@@ -313,18 +327,23 @@ def check(spec: BarcodeSpec, code: Barcode) -> None:
 
 
 def bar_rects(spec: BarcodeSpec, code: Barcode) -> list[tuple[float, float, float, float]]:
-    """Bars as (x0, y0, x1, y1) in mm, already reduced by ``shrink_mm``."""
+    """Bars as (x0, y0, x1, y1) in mm, corrected by ``shrink_mm``.
+
+    Normal mode: bars are lasered and become narrower. Inverted: the spaces are
+    lasered, so the (unlasered) bars become wider by the same amount.
+    """
     s = spec.normalized()
     m = s.module_mm
     ql = code.quiet[0] if s.quiet_zone else 0
     long_h = s.height_mm + (s.text_gap() + s.text_mm / 2.0 if s.show_text else 0.0)
-    half = s.shrink_mm / 2.0
+    half = s.shrink_mm / 2.0 * (-1.0 if s.invert else 1.0)
+    top = s.y + s.margin_mm()
     out = []
     for start, width in code.bars():
         guard = any(a <= start and start + width <= b for a, b in code.guards)
         x0 = s.x + (ql + start) * m + half
         x1 = s.x + (ql + start + width) * m - half
-        out.append((x0, s.y, x1, s.y + (long_h if guard else s.height_mm)))
+        out.append((x0, top, x1, top + (long_h if guard else s.height_mm)))
     return out
 
 
@@ -350,7 +369,7 @@ def text_rings(spec: BarcodeSpec, code: Barcode, glyph_fn: GlyphFn) -> list[list
             need = sum(g.advance for g in glyphs)
         if need > room * 0.98 > 0:
             scale = min(scale, room * 0.98 / need)
-    base_y = s.y + s.height_mm + s.text_gap() + s.text_mm * scale
+    base_y = s.y + s.margin_mm() + s.height_mm + s.text_gap() + s.text_mm * scale
     out = []
     for seg, glyphs in zip(code.segments, per_seg):
         x0 = s.x + (ql + seg.start) * m
@@ -383,6 +402,8 @@ def barcode_shapes(spec: BarcodeSpec, layer_id: str, code: Barcode | None = None
     code = code or encode(s.symbology, s.data)
     check(s, code)
     group = new_id()
+    if s.invert:
+        return _inverted_shapes(s, code, layer_id, group, glyph_fn)
     out = []
     for x0, y0, x1, y1 in bar_rects(s, code):
         sh = Shape.from_points("polygon", [(x0, y0), (x1, y0), (x1, y1), (x0, y1)], layer_id)
@@ -398,6 +419,41 @@ def barcode_shapes(spec: BarcodeSpec, layer_id: str, code: Barcode | None = None
             sh = Shape.from_points("polygon", flat, layer_id, rings=starts)
             sh.groups = (group,)
             out.append(sh)
+    return out
+
+
+def _inverted_shapes(s: BarcodeSpec, code: Barcode, layer_id: str, group: str,
+                     glyph_fn: GlyphFn | None) -> list[Shape]:
+    """Background (quiet zone, spaces, margin) minus bars and digits as polygons with holes."""
+    from shapely.geometry import Polygon, box
+    from shapely.ops import unary_union
+
+    w, h = s.size_mm(code)
+    keep = [box(*r) for r in bar_rects(s, code)]
+    if s.show_text and glyph_fn is not None:
+        for rings in text_rings(s, code, glyph_fn):
+            g = Polygon()
+            for ring in rings:
+                g = g.symmetric_difference(Polygon(ring).buffer(0))   # even-odd like the canvas
+            keep.append(g)
+    area = box(s.x, s.y, s.x + w, s.y + h).difference(unary_union(keep))
+    out = []
+    for p in getattr(area, "geoms", [area]):
+        if p.is_empty or p.geom_type != "Polygon":
+            continue
+        p = p.simplify(0)
+
+        def ring(r):
+            pts = list(r.coords)
+            return pts[:-1] if len(pts) > 1 and pts[0] == pts[-1] else pts
+        pts = ring(p.exterior)
+        starts = []
+        for hole in p.interiors:
+            starts.append(len(pts))
+            pts.extend(ring(hole))
+        sh = Shape.from_points("polygon", pts, layer_id, rings=starts)
+        sh.groups = (group,)
+        out.append(sh)
     return out
 
 
@@ -421,8 +477,9 @@ def describe(spec: BarcodeSpec, code: Barcode) -> str:
         extra = f", {len(code.values)} Symbole"
     elif code.text:
         extra = f", Prüfziffer {code.text[-1]}"
+    inv = ", invertiert" if s.invert else ""
     return (f"{LABELS[code.symbology]} „{code.text}“: {len(code.modules)} Module{extra}, "
-            f"{w:.1f} × {h:.1f} mm inkl. Ruhezone")
+            f"{w:.1f} × {h:.1f} mm inkl. Ruhezone{inv}")
 
 
 __all__ = ["Barcode", "BarcodeSpec", "LABELS", "SYMBOLOGIES", "TextSegment", "bar_rects",

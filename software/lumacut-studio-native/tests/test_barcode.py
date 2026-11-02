@@ -319,7 +319,95 @@ def test_hatch_fill_decodes(qapp):
     assert ("LC-0815", "Code128") in _zxing(img)
 
 
+# --- inverted mode ------------------------------------------------------------
+def test_inverted_geometry_holes_margin_and_shrink():
+    from shapely.geometry import Polygon, box
+    from shapely.ops import unary_union
+
+    from lumacut_canvas.shape_paths import shape_polygons
+    spec = bc.BarcodeSpec("code128", "LC-0815", module_mm=0.4, height_mm=10.0, show_text=False,
+                          quiet_zone=False, invert=True, shrink_mm=0.1, x=5, y=7)
+    s = spec.normalized()
+    assert s.quiet_zone                                           # forced on when inverted
+    code = bc.encode("code128", "LC-0815")
+    m = s.margin_mm()
+    assert m == pytest.approx(max(bc.INVERT_MARGIN_MM, 5 * 0.4))
+    w, h = s.size_mm(code)
+    assert h == pytest.approx(10.0 + 2 * m)
+    assert w == pytest.approx((sum(code.quiet) + len(code.modules)) * 0.4)
+    shapes = bc.barcode_shapes(spec, "L1", code)
+    assert len({sh.groups for sh in shapes}) == 1 and shapes[0].groups
+    lasered = unary_union([Polygon(r[0], r[1:]) for r in map(shape_polygons, shapes)])
+    assert lasered.bounds == pytest.approx((5, 7, 5 + w, 7 + h))
+    bars = bc.bar_rects(s, code)
+    for x0, y0, x1, y1 in bars:                                  # widened by the correction
+        assert y0 == pytest.approx(7 + m) and y1 == pytest.approx(7 + m + 10.0)
+    widths = sorted(round(x1 - x0, 6) for x0, _y0, x1, _y1 in bars)
+    assert widths[0] == pytest.approx(0.4 + 0.1)
+    bar_area = sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in bars)
+    assert lasered.area == pytest.approx(w * h - bar_area, rel=1e-9)
+    assert not any(lasered.intersection(box(*r)).area > 1e-9 for r in bars)
+    normal = bc.bar_rects(bc.BarcodeSpec("code128", "LC-0815", module_mm=0.4, height_mm=10.0,
+                                         show_text=False, shrink_mm=0.1, x=5, y=7), code)
+    assert min(x1 - x0 for x0, _y0, x1, _y1 in normal) == pytest.approx(0.4 - 0.1)
+
+
+def test_inverted_text_digits_are_holes(qapp):
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    from lumacut_canvas.shape_paths import shape_polygons
+    from lumacut_job.barcode_qt import glyph_fn
+    spec = bc.BarcodeSpec("ean13", "400638133393", module_mm=0.33, height_mm=12.0, invert=True,
+                          x=5, y=5)
+    code = bc.encode("ean13", "400638133393")
+    with_text = bc.barcode_shapes(spec, "L1", code, glyph_fn=glyph_fn("Sans"))
+    without = bc.barcode_shapes(spec, "L1", code)
+    area = [unary_union([Polygon(r[0], r[1:]) for r in map(shape_polygons, sh)]).area
+            for sh in (with_text, without)]
+    assert area[0] < area[1] - 1.0                               # digits cut out of the background
+
+
+@pytest.mark.parametrize("sym,data,expected,fmt", [
+    ("code128", "LumaCut 2026", "LumaCut 2026", "Code128"),
+    ("ean13", "400638133393", "4006381333931", "EAN13"),
+    ("ean8", "9638507", "96385074", "EAN8"),
+])
+def test_inverted_decodes_on_light_marking(qapp, sym, data, expected, fmt):
+    np = pytest.importorskip("numpy")
+    from lumacut_job.barcode_qt import glyph_fn
+    spec = bc.BarcodeSpec(sym, data, module_mm=0.33, height_mm=12.0, invert=True, x=5, y=5)
+    img, _ = _render(bc.barcode_shapes(spec, "L1", glyph_fn=glyph_fn("Sans")), px=10.0)
+    marked = 255 - img                       # laser turns light, untouched material stays dark
+    assert (expected, fmt) in _zxing(np.pad(marked, 60, constant_values=255))
+
+
+def test_inverted_hatch_fill_decodes(qapp):
+    np = pytest.importorskip("numpy")
+    from lumacut_canvas.model import Layer
+    layer = Layer("Barcode", fill_mode="hatch", line_interval_mm=0.1)
+    spec = bc.BarcodeSpec("code128", "LC-0815", module_mm=0.3, height_mm=10.0, show_text=False,
+                          invert=True, x=5, y=5)
+    img, _ = _render(bc.barcode_shapes(spec, "L1"), px=20.0, layer=layer)
+    assert ("LC-0815", "Code128") in _zxing(np.pad(255 - img, 60, constant_values=255))
+
+
 # --- Qt: dialog and main window ----------------------------------------------
+def test_dialog_invert(qapp):
+    from lumacut_canvas.model import Layer
+    from lumacut_job.barcode_qt import BarcodeDialog
+    dlg = BarcodeDialog(active_layer=Layer("Gravur", fill_mode="hatch"))
+    dlg.quiet.setChecked(False)
+    assert not dlg.spec().invert and dlg.quiet.isEnabled()
+    dlg.invert.setChecked(True)
+    s = dlg.spec()
+    assert s.invert and s.quiet_zone and not dlg.quiet.isEnabled()
+    assert "invertiert" in dlg.info.text() and "breiter" in dlg.shrink.toolTip()
+    dlg.invert.setChecked(False)
+    assert dlg.quiet.isEnabled() and not dlg.spec().quiet_zone
+    dlg.deleteLater()
+
+
 def test_dialog(qapp):
     from lumacut_canvas.model import Layer
     from lumacut_job.barcode_qt import BarcodeDialog
@@ -426,5 +514,24 @@ def test_window_new_fill_layer_one_undo_step(win):
     new = doc.layer(doc.shape(ids[0]).layer_id)
     assert new.name == "Barcode" and new.fill_mode == "hatch" and new.line_interval_mm == 0.1
     assert new.hatch_outline and doc.active_layer_id == new.id
+    win.canvas.undo_stack.undo()
+    assert len(doc.layers) == n_layers and len(doc.shapes) == n_shapes
+
+
+def test_window_inverted_one_undo_step_and_gcode(win):
+    from lumacut_job.planner import optimized_document_gcode
+    tools = win.job_tools
+    doc = win.canvas.document
+    doc.active_layer.fill_mode = "none"
+    n_layers, n_shapes = len(doc.layers), len(doc.shapes)
+    depth = win.canvas.undo_stack.index()
+    ids = tools.barcode(bc.BarcodeSpec("code128", "LC-0815", module_mm=0.4, height_mm=10.0,
+                                       invert=True))
+    assert ids and len(doc.layers) == n_layers + 1
+    assert doc.layer(doc.shape(ids[0]).layer_id).fill_mode == "hatch"
+    assert win.canvas.undo_stack.index() == depth + 1
+    gcode = optimized_document_gcode(doc)
+    assert gcode.count("G1 ") > 50
+    pi_check(gcode)
     win.canvas.undo_stack.undo()
     assert len(doc.layers) == n_layers and len(doc.shapes) == n_shapes

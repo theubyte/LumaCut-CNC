@@ -72,6 +72,11 @@ class BarcodeDialog(QDialog):
         self.shrink = _mm(barcode.SHRINK_RANGE, s.shrink_mm,
                           "Striche um diesen Betrag schmaler machen – gleicht die Verbreiterung "
                           "durch den Laserfleck aus (typisch 0,05–0,1 mm)")
+        self.invert = QCheckBox("Invertiert (Hintergrund lasern – für Material, das hell wird)")
+        self.invert.setChecked(s.invert)
+        self.invert.setToolTip("Lasert Lücken, Ruhezone und einen Rand; Striche und Klartext "
+                               "bleiben unbearbeitet (z. B. eloxiertes Alu, Schiefer, "
+                               "beschichtetes Metall)")
         fills = layer_fills(active_layer)
         name = getattr(active_layer, "name", "")
         self.fill = QCheckBox(f"Neue Ebene „{FILL_LAYER_NAME}“ mit Füllung "
@@ -90,6 +95,7 @@ class BarcodeDialog(QDialog):
         form.addRow("Schrifthöhe", self.text_mm)
         form.addRow("Schrift", self.font_box)
         form.addRow("Strichkorrektur", self.shrink)
+        form.addRow("", self.invert)
         form.addRow("", self.fill)
         self.info = QLabel()
         self.info.setWordWrap(True)
@@ -104,7 +110,7 @@ class BarcodeDialog(QDialog):
         self.data.textChanged.connect(self._update)
         for w in (self.module, self.height, self.text_mm, self.shrink):
             w.valueChanged.connect(self._update)
-        for w in (self.quiet, self.show_text, self.fill):
+        for w in (self.quiet, self.show_text, self.fill, self.invert):
             w.toggled.connect(self._update)
         self.font_box.currentFontChanged.connect(self._update)
         self._kind_changed(keep=True)
@@ -125,7 +131,8 @@ class BarcodeDialog(QDialog):
             module_mm=self.module.value(), height_mm=self.height.value(),
             quiet_zone=self.quiet.isChecked(), show_text=self.show_text.isChecked(),
             text_mm=self.text_mm.value(), shrink_mm=self.shrink.value(),
-            font_family=self.font_box.currentFont().family()).normalized()
+            font_family=self.font_box.currentFont().family(),
+            invert=self.invert.isChecked()).normalized()
 
     def fill_layer(self) -> bool:
         return self.fill.isChecked()
@@ -134,6 +141,11 @@ class BarcodeDialog(QDialog):
         s = self.spec()
         self.text_mm.setEnabled(s.show_text)
         self.font_box.setEnabled(s.show_text)
+        self.quiet.setEnabled(not s.invert)          # inverted: quiet zone is always engraved
+        self.shrink.setToolTip("Striche um diesen Betrag breiter machen (Lücken schmaler) – "
+                               "invertiert wird der Hintergrund gelasert" if s.invert else
+                               "Striche um diesen Betrag schmaler machen – gleicht die "
+                               "Verbreiterung durch den Laserfleck aus (typisch 0,05–0,1 mm)")
         try:
             code = barcode.encode(s.symbology, s.data)
             barcode.check(barcode.centered(s, code=code), code)
