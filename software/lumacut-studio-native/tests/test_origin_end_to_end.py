@@ -96,14 +96,26 @@ def test_anchor_lands_on_target(qapp, anchor):
 
 
 def test_default_anchor_at_switch_corner(qapp):
-    """Default "tr" at user origin (30, 30): motif starts at the endstop corner."""
+    """Default "tr" at user origin (30, 30): motif starts at the endstop corner.
+
+    Since Pi 9ae8577 check_extent takes the park corner (X0..78 / Y0..35 for
+    head v6) instead of the 30 mm safe zone: a motif whose box starts at
+    (30, 30) now overlaps the park corner and is refused; right of it, it is
+    accepted.
+    """
+    from marlin.transport import PARK_CORNER_MM, TRAVEL_XY_MM
+    travels = {"x": TRAVEL_XY_MM[0], "y": TRAVEL_XY_MM[1]}
     lines = document_to_gcode(_doc(100, 100, 40, 20)).splitlines()
     _, box = placing.scan(lines)
     ax, ay = placing.anchor_point(box, DEFAULT_ANCHOR)
     _, moved = placing.scan(placing.translate(lines, 30 - ax, 30 - ay))
     assert (moved.xmin, moved.ymin) == pytest.approx((30.0, 30.0))
-    placing.check_extent(placing.translate(lines, 30 - ax, 30 - ay),
-                         {"x": 390.0, "y": 370.0}, 30.0)
+    with pytest.raises(ValueError, match="Park-Ecke"):
+        placing.check_extent(placing.translate(lines, 30 - ax, 30 - ay), travels, PARK_CORNER_MM)
+    ox = PARK_CORNER_MM[0]
+    _, powered = placing.check_extent(placing.translate(lines, ox - ax, 30 - ay), travels,
+                                      PARK_CORNER_MM)
+    assert (powered.xmin, powered.ymin) == pytest.approx((ox, 30.0))
 
 
 @pytest.mark.parametrize("anchor", CORNERS)

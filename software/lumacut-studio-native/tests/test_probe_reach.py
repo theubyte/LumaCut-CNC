@@ -64,7 +64,10 @@ def test_reach_constants_match_pi_source():
     tr = (ROOT / "pi400" / "marlin" / "transport.py").read_text(encoding="utf-8")
     assert "return self._probe_head_ok(x - dx, y - dy)" in tr
     assert pi_tr.PROBE_HEAD_MIN == reach.PROBE_HEAD_MIN
-    assert pi_tr.PROBE_HEAD_MAX == reach.PROBE_HEAD_MAX
+    # Pi 9ae8577: no fixed PROBE_HEAD_MAX any more, the high side is travel - 10.
+    assert "self.travel_xy[0] - 10.0" in tr and "self.travel_xy[1] - 10.0" in tr
+    assert pi_tr.TRAVEL_XY_MM == reach.TRAVEL
+    assert tuple(v - 10.0 for v in pi_tr.TRAVEL_XY_MM) == reach.PROBE_HEAD_MAX
     for name in ("CELL_MM", "REGION_GAP_MM", "REGION_MARGIN_MM", "GRID_INSET_MM",
                  "GRID_SPACING_MM", "MAX_PER_SIDE", "MAX_REGIONS", "MAX_TOTAL_POINTS",
                  "SUBSTITUTE_MAX_MM", "SUBSTITUTE_STEP_MM"):

@@ -6,7 +6,8 @@ _mark_reachable) with the real plan_probe and MarlinTransport.probe_reachable
 
 Machine mm: X0/Y0 = endstop corner, top right seen from the door; cutting
 area X30-390 / Y30-370; head during G30 X10-380 / Y10-360
-(transport.PROBE_HEAD_MIN/MAX, Marlin PROBING_MARGIN, Pi b966c89); probe offset
+(transport.PROBE_HEAD_MIN .. TRAVEL_XY_MM - 10, Marlin PROBING_MARGIN; the
+fixed PROBE_HEAD_MAX became travel - 10 in Pi 9ae8577); probe offset
 (tip minus laser) X-23 / Y+15 -> probe-able laser points X30-357 / Y30-370.
 Grid points outside are probed up to 40 mm next to them (substitute), so
 since b966c89 every case below is accepted.
@@ -25,7 +26,7 @@ import _paths  # noqa: F401
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "pi400"))
 from marlin import heightmap  # noqa: E402
-from marlin.transport import PROBE_HEAD_MAX, PROBE_HEAD_MIN, MarlinTransport  # noqa: E402
+from marlin.transport import PROBE_HEAD_MIN, TRAVEL_XY_MM, MarlinTransport  # noqa: E402
 
 from machine import client as mc  # noqa: E402
 
@@ -79,7 +80,9 @@ def plan(box, t=None):
 class ProbeReachTests(unittest.TestCase):
     def test_limits_from_pi_code(self):
         t = machine()
-        self.assertEqual(PROBE_HEAD_MAX, mc.PROBE_HEAD_MAX)
+        # Pi 9ae8577: the high limit is the (default) travel minus PROBING_MARGIN.
+        self.assertEqual(t.travel_xy, TRAVEL_XY_MM)
+        self.assertEqual(tuple(v - 10.0 for v in TRAVEL_XY_MM), mc.PROBE_HEAD_MAX)
         self.assertEqual(PROBE_HEAD_MIN, mc.PROBE_HEAD_MIN)
         self.assertTrue(t.probe_reachable(30.0, 25.0))
         self.assertFalse(t.probe_reachable(30.0, 24.99))
