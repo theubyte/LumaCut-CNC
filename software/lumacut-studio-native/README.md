@@ -304,9 +304,9 @@ Im Ebenen-Panel unter **Füllung der Ebene**: *Füllmodus* (Keine / Schraffur /
 Kreuzschraffur / Offset-Füllung), *Linienabstand* in mm (0,05–20), *Winkel* in ° (0 = waagerecht,
 gegen den Uhrzeigersinn; Kreuzschraffur fügt +90° hinzu, beim Einschalten
 mit 0° wird 45° vorgeschlagen), *Kontur mitlasern* und *Bidirektional*
-(abwechselnde Zeilenrichtung, kürzere Leerfahrten), *Füllen* (welche Objekte
-gemeinsam gefüllt werden) und – nur bei Offset-Füllung – *Von innen nach
-außen*. Jede Änderung ist ein Undo-Schritt.
+(abwechselnde Zeilenrichtung, kürzere Leerfahrten), *Überlauf* (nur Schraffur /
+Kreuzschraffur), *Füllen* (welche Objekte gemeinsam gefüllt werden) und – nur bei
+Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt.
 
 - Gefüllt werden geschlossene Objekte: Rechteck, Ellipse, Polygon, Text
   (auch gedreht und gruppiert). Löcher (Buchstaben, Ringe) bleiben frei
@@ -334,17 +334,30 @@ außen*. Jede Änderung ist ein Undo-Schritt.
   einem Rechteck wird zum Loch, auch wenn es zwei getrennte Objekte sind, und
   überlappende Teile bleiben frei. „Alle zusammen“ schraffiert eine Textzeile
   oder mehrere Objekte in einem Zug statt Objekt für Objekt.
+- **Überlauf** (wie LightBurn „Overscanning“, 0–20 mm, Standard *Aus*): jede
+  Schraffurlinie wird an beiden Enden mit ausgeschaltetem Laser verlängert
+  (`G0` zum vorgezogenen Start, `G1 … S0` Anlauf, `G1 … S<p>` Linie, `G1 … S0`
+  Auslauf) – der Kopf hat beim Einschalten schon volle Geschwindigkeit, die
+  Ränder verbrennen nicht stärker. Am Rand der Arbeitsfläche wird der Überlauf
+  gekürzt; Zeitschätzung und Pfadvorschau zeigen ihn als Leerfahrt. Offset-Füllung
+  braucht keinen (Ringe ohne Absetzen), das Feld ist dort ausgegraut.
 - G-Code: je Durchgang zuerst die Füllung (G0 an den Zeilenanfang, G1 mit
   Leistung/Geschwindigkeit der Ebene), danach die Kontur; Durchgangs-Hook
   (Tiefe je Durchgang) gilt auch für reine Füll-Ebenen. Ohne Füllung ist der
   G-Code unverändert.
+- Reihenfolge: Beim Senden (Planer, „Leerfahrten reduzieren“) werden die
+  Füllblöcke einer Ebene (je Objekt, Gruppe oder Ebene) nach dem nächsten
+  Nachbarn sortiert statt in Objekt-Reihenfolge – Schraffurblöcke auch
+  rückwärts, Offset-Blöcke nur vorwärts (Ring-Reihenfolge bleibt); die Konturen
+  beginnen dort, wo die Füllung endet.
 - Auf der Arbeitsfläche erscheint die Schraffur als dünne Linien in der
   Ebenenfarbe (Overlay `fill_preview`, nicht anklickbar). `export_svg` /
   `export_png` zeichnen sie mit `show_fill=True`.
 - Datei: neue Felder (`fill_mode`, `line_interval_mm`, `hatch_angle`,
-  `hatch_bidirectional`, `hatch_outline`, `fill_grouping`, `offset_inside_out`) werden nur geschrieben, wenn sie vom
+  `hatch_bidirectional`, `hatch_outline`, `fill_grouping`, `offset_inside_out`,
+  `fill_overscan_mm`) werden nur geschrieben, wenn sie vom
   Standard abweichen; alte Dateien laden unverändert.
-- Grenzen: kein Overscan; Schnittfuge (Kerf) wirkt nur auf Konturen; mehr als
+- Grenzen: Füllgruppen gelten nur innerhalb einer Ebene; Schnittfuge (Kerf) wirkt nur auf Konturen; mehr als
   20 000 Linien je Richtung werden abgelehnt (Linienabstand vergrößern).
 
 ### Pfadvorschau (Laserbahn, Reihenfolge, Zeit)

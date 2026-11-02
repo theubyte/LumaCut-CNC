@@ -1037,3 +1037,73 @@ Still open:
   cut options incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix
   readability incl. edited, rectangular and GS1 codes with a real scanner, park-corner refusal,
   rebuilt exe).
+
+## 24. Status update 2026-11-02 (review round 17)
+
+Done this round (Review; nothing from Machine / Scan Probe or Materials touched; from the Canvas
+area only one new row „Überlauf“ in the fill box of `layers_panel.py`):
+
+- Gap picked from §23 „Still open“: fill had no overscan and fill blocks always ran in object
+  order. Both are pure G-code / planner work without a user decision.
+- **Fill overscan** (`Layer.fill_overscan_mm`, 0–20 mm, `hatch.OVERSCAN_RANGE`, default 0 = output
+  byte-identical to before): like LightBurn's *Overscanning*, every hatch / crosshatch line is
+  extended at both ends with the laser off – `G0` to the extended start, `G1 … S0` run-in,
+  `G1 … S<p>` the line, `G1 … S0` run-out – so the head is at speed when the beam switches on and
+  line ends do not burn darker. `gcode.overscan_segment` shortens the extension at the edge of the
+  cutting area, so the job never fails the bounds check or the Pi guard. Offset fill ignores it
+  (rings run without stops; `JobLayer.fill_overscan_mm` is 0 there). Since the extension is real
+  G-code, the time estimate and the path preview show it as travel and the park-corner check sees
+  only the powered part.
+- **Fill block order**: with the planner option „Leerfahrten reduzieren“ (`reduce_travel`, on by
+  default) the fill blocks of a layer (per object, group or layer – §23) are now ordered nearest
+  neighbour first (`planner.order_fill_blocks_nearest`) instead of in object order; hatch blocks may
+  still run backwards, offset blocks (`fill_fixed_order`) are moved but never reversed. Contours of
+  the layer start where the fill ends. Plain „G-Code exportieren“ without the planner is unchanged.
+- **Fix**: `optimized_document_gcode` dropped a fill-only layer (outline off) when the document also
+  had an image layer – the layer had no polylines and was not counted as vector work.
+- **Ebenen-Panel**: spin box „Überlauf“ (special value „Aus“) after „Winkel“, enabled only for hatch
+  / crosshatch, one undo step per edit; the layer summary shows „Überlauf X mm“. Saved as
+  `fill_overscan_mm` only when not 0 (older builds ignore it).
+
+Tests:
+
+- `tests/test_fill_overscan.py` (14): defaults, normalization and file round trip; job layer gets
+  the overscan only for line fills; default output unchanged and offset fill ignores it; overscan
+  geometry for hatch 0° / 30° and crosshatch 45° (G0 → G1 S0 → G1 S → G1 S0, exact distance,
+  collinear); Pi guard, estimate, powered bounds and longer job time; clamping at the work-area
+  edge; path preview travel length; panel enable state, undo / redo and summary; nearest-neighbour
+  block order cuts travel, `reduce_travel=False` keeps object order; offset blocks reordered but not
+  reversed; contours start at the fill end; fill-only layer kept next to an image.
+
+Full suite: 1306 passed, 3 skipped (before: 1292 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter and CSV merge
+  (LightBurn „Variable Text“ / „Merge CSV“) – decide if wanted; today only the batch
+  „Seriennummern…“ exists.
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; block order is greedy nearest neighbour (no 2-opt);
+  overscan is clamped to the cutting area, not to the real machine travel.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: PDF417 and Aztec are not covered; Data Matrix EDIFACT mode and DMRE sizes
+  (ISO 21471) not supported; no GS1 Digital Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (fill overscan – line ends even at 2–5 mm on wood / card – and
+  nearest-neighbour block order, fill grouping and inside-out offset fill, offset fill, cut options
+  incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix readability incl.
+  edited, rectangular and GS1 codes with a real scanner, park-corner refusal, rebuilt exe).
