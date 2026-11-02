@@ -14,7 +14,7 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen
 from PySide6.QtSvg import QSvgGenerator
 
-from .hatch import fill_segments
+from .hatch import LINE_FILL_MODES, fill_segments
 from .material import layer_pass_plan
 from .model import CUT_LAYER_FIELDS, FILLABLE_KINDS, Document, Layer, Shape
 from .shape_paths import shape_path, shape_polygons
@@ -57,6 +57,9 @@ class JobLayer:
     # True (Offset-Füllung): Blöcke nie rückwärts fahren – die Ring-Reihenfolge
     # (außen → innen bzw. innen → außen) ist eine Einstellung der Ebene.
     fill_fixed_order: bool = False
+    # Überlauf je Ende einer Schraffurstrecke (Laser aus, Layer.fill_overscan_mm);
+    # 0 bei Offset-Füllung. Erst der G-Code (gcode.overscan_segment) verlängert.
+    fill_overscan_mm: float = 0.0
 
 
 def shape_fill_segments(shape: Shape, layer: Layer):
@@ -150,7 +153,10 @@ def job_layers(doc: Document) -> list[JobLayer]:
                                    layer.passes, polys, layer.z_step,
                                    plan.pass_depths if plan else (),
                                    **{k: getattr(layer, k) for k in CUT_LAYER_FIELDS}, fills=fills,
-                                   fill_fixed_order=layer.fill_mode == "offset"))
+                                   fill_fixed_order=layer.fill_mode == "offset",
+                                   fill_overscan_mm=(getattr(layer, "fill_overscan_mm", 0.0)
+                                                     if layer.fill_mode in LINE_FILL_MODES
+                                                     else 0.0)))
     return result
 
 

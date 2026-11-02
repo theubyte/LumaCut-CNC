@@ -43,6 +43,10 @@ FILL_GROUPINGS = ("individual", "groups", "together")
 FILL_GROUPING_LABELS = {"individual": "Jedes Objekt einzeln",
                         "groups": "Gruppen zusammen",
                         "together": "Alle Objekte zusammen"}
+#: Überlauf (LightBurn „Overscanning“) je Ende einer Schraffurlinie, Laser aus –
+#: der Kopf erreicht vor dem Einschalten die volle Geschwindigkeit (gcode.py).
+#: Gilt nur für LINE_FILL_MODES; 0 = aus (Ausgabe unverändert).
+OVERSCAN_RANGE = (0.0, 20.0)    # mm, wie die Bild-Gravur (ImageSettings.overscan_mm)
 MAX_OFFSET_RINGS = 5000         # Schutz wie MAX_LINES_PER_PASS
 OFFSET_SIMPLIFY_MM = 0.005      # Ringe vereinfachen (weit unter der Strahlbreite)
 OFFSET_ARC_TOL_MM = 0.02        # Sehnenfehler gerundeter Ecken (wie shape_paths)

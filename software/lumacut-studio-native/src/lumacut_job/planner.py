@@ -4,6 +4,13 @@ Mirrors LightBurn's Cut Planner defaults ("Cut inner shapes first",
 "Reduce travel moves", "Choose best starting point") for one layer at a
 time; layer order (bottom layer first) is left unchanged.
 
+Fill blocks (``JobLayer.fills``, one per object / group / layer) are put
+in nearest-neighbour order too when ``reduce_travel`` is on (the default),
+starting where the head is when the layer begins; hatch blocks may run
+backwards, offset blocks (``fill_fixed_order``) always run forwards so
+their ring order is kept. The contours then start from the end of the
+fill, because the G-code lasers each pass fill first.
+
 Polylines are in machine mm. A polyline is *closed* when its first and last
 points coincide (rectangles, ellipses, polygons and text outlines are all
 exported that way by ``job_layers``).
@@ -129,6 +136,46 @@ def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first
     return out
 
 
+def order_fill_blocks_nearest(blocks, start: Point, reversible: bool = True):
+    """Fill blocks in greedy nearest-neighbour order (each possibly reversed).
+
+    A reversed block runs its segments in reverse order and direction (like
+    ``lumacut_canvas.gcode.order_fill_blocks``); with ``reversible=False``
+    every block keeps its internal order and is entered at its first point.
+    Ties keep the object order, so a single block or blocks that are already
+    in the best order stay unchanged.
+    """
+    todo = [b for b in blocks if b]
+    out = []
+    pos = start
+    while todo:
+        best_i, best_d, best_rev = 0, math.inf, False
+        for i, block in enumerate(todo):
+            d = math.dist(pos, block[0][0])
+            if d < best_d:
+                best_i, best_d, best_rev = i, d, False
+            if reversible:
+                d = math.dist(pos, block[-1][1])
+                if d < best_d:
+                    best_i, best_d, best_rev = i, d, True
+        block = todo.pop(best_i)
+        if best_rev:
+            block = [(b, a) for a, b in reversed(block)]
+        out.append(block)
+        pos = block[-1][1]
+    return out
+
+
+def fill_travel_length(blocks, start: Point) -> float:
+    """Travel between fill segments (laser off), in the given order and direction."""
+    total, pos = 0.0, start
+    for block in blocks:
+        for a, b in block:
+            total += math.dist(pos, a)
+            pos = b
+    return total
+
+
 def travel_length(polys: list[Poly], start: Point = (30.0, 30.0)) -> float:
     total, pos = 0.0, start
     for p in polys:
@@ -181,6 +228,13 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
     out = []
     pos = start
     for layer, opts, polys in prepared:
+        fills = getattr(layer, "fills", None) or []
+        if fills and options.get("reduce_travel", True):
+            fills = order_fill_blocks_nearest(
+                fills, pos, not getattr(layer, "fill_fixed_order", False))
+            layer = replace(layer, fills=fills)
+        if fills:
+            pos = fills[-1][-1][1]   # contours follow the fill in every pass
         ordered = order_polylines(polys, pos, **options)
         if opts.active and ordered:
             res = apply_cut_options(ordered, opts, nesting_depth(ordered), obstacles)
@@ -213,9 +267,11 @@ def optimized_document_gcode(doc, **options) -> str:
         return layers_to_gcode(layers)
     from .images import document_image_jobs
     jobs = document_image_jobs(doc)
-    if not jobs and not any(l.polylines for l in layers):
+    # Füllung allein (Kontur aus) zählt auch als Vektor-Auftrag.
+    has_vector = any(l.polylines or getattr(l, "fills", None) for l in layers)
+    if not jobs and not has_vector:
         raise ValueError("Keine sichtbaren Objekte zum Lasern")
-    if not any(l.polylines for l in layers):
+    if not has_vector:
         vector = ["; LUMACUT STUDIO NATIVE CANVAS JOB (homing, focus and park run on the Pi)",
                   "G21", "G90", "M5 I", "M3 I", "M5 I", "M400"]
     else:

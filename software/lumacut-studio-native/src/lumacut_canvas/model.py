@@ -55,7 +55,8 @@ CUT_LAYER_FIELDS = tuple(CUT_LAYER_DEFAULTS)
 # Vektor-Füllung je Ebene (hatch.py); nur gespeichert, wenn vom Standard abweichend.
 FILL_LAYER_DEFAULTS = {"fill_mode": "none", "line_interval_mm": _hatch.DEFAULT_INTERVAL_MM,
                        "hatch_angle": 0.0, "hatch_bidirectional": True, "hatch_outline": True,
-                       "fill_grouping": "individual", "offset_inside_out": False}
+                       "fill_grouping": "individual", "offset_inside_out": False,
+                       "fill_overscan_mm": 0.0}
 FILL_LAYER_FIELDS = tuple(FILL_LAYER_DEFAULTS)
 # Geschlossene Objektarten, die gefüllt werden (Linie/Freihand/Bild nicht).
 FILLABLE_KINDS = ("rect", "ellipse", "polygon", "text")
@@ -197,6 +198,7 @@ class Layer:
     hatch_outline: bool = True       # Kontur zusätzlich zur Füllung lasern
     fill_grouping: str = "individual"  # hatch.FILL_GROUPINGS: einzeln / Gruppen / alle zusammen
     offset_inside_out: bool = False  # Offset-Füllung: Ringe von innen nach außen
+    fill_overscan_mm: float = 0.0    # Schraffur: Überlauf je Linienende (Laser aus), 0 = aus
     material_ref: str = ""          # Bibliotheksbezug, s. LINK_LAYER_FIELDS
     material_link: bool = False     # True: Dicke ändern wendet die Bibliothek neu an
 
@@ -231,6 +233,8 @@ class Layer:
             fill_grouping=(self.fill_grouping if self.fill_grouping in _hatch.FILL_GROUPINGS
                            else "individual"),
             offset_inside_out=bool(self.offset_inside_out),
+            fill_overscan_mm=round(_clamp(float(self.fill_overscan_mm),
+                                          *_hatch.OVERSCAN_RANGE), 3),
             material_ref=str(self.material_ref or "").strip()[:120],
             material_link=bool(self.material_link and self.material_ref),
         )

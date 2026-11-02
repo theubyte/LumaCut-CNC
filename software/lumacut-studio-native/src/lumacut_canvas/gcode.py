@@ -32,6 +32,14 @@ rückwärts – je nachdem, welches Ende näher liegt; Offset-Füllung immer
 vorwärts (Ring-Reihenfolge außen → innen bzw. innen → außen bleibt). Ohne Füllung bleibt
 die Ausgabe unverändert.
 
+Überlauf (``JobLayer.fill_overscan_mm`` > 0, nur Schraffur/Kreuzschraffur,
+LightBurn „Overscanning“): jede Schraffurstrecke wird an beiden Enden mit
+ausgeschaltetem Laser verlängert – ``G0`` zum vorgezogenen Start, ``G1 … S0``
+bis zum Linienanfang (Kopf beschleunigt), ``G1 … S<p>`` über die Linie und
+``G1 … S0`` darüber hinaus (wie die Bild-Gravur in ``lumacut_job.raster``).
+Die Verlängerung wird an der Arbeitsfläche gekürzt (:func:`overscan_segment`);
+bei 0 bleibt die Ausgabe Byte für Byte gleich.
+
 Die Funktion erzeugt nur Text; sie startet nie eine Maschine.
 """
 
@@ -107,6 +115,35 @@ def order_fill_blocks(blocks, pos=None, reversible=True):
     return out
 
 
+def _room_along(p, d) -> float:
+    """Wie weit man von ``p`` in Richtung ``d`` (Einheitsvektor) im erlaubten Bereich bleibt."""
+    t = math.inf
+    for v, dv, lo, hi in ((p[0], d[0], _MIN_X, _MAX_X), (p[1], d[1], _MIN_Y, _MAX_Y)):
+        if dv > 1e-12:
+            t = min(t, (hi - v) / dv)
+        elif dv < -1e-12:
+            t = min(t, (lo - v) / dv)
+    return max(0.0, t)
+
+
+def overscan_segment(a, b, overscan_mm: float):
+    """Schraffurstrecke ``a → b`` mit Überlauf: ``(a', b')`` vor bzw. hinter der Strecke.
+
+    Beide Punkte liegen auf der Verlängerung der Strecke, höchstens
+    ``overscan_mm`` entfernt und nie außerhalb der Arbeitsfläche (Maschinen-mm,
+    an der Grenze gekürzt). Ohne Überlauf oder bei Nulllänge: ``(a, b)``.
+    """
+    length = math.dist(a, b)
+    if overscan_mm <= 0 or length < 1e-9:
+        return a, b
+    u = ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+    back = min(overscan_mm, _room_along(a, (-u[0], -u[1])))
+    fwd = min(overscan_mm, _room_along(b, u))
+    a2 = (a[0] - u[0] * back, a[1] - u[1] * back) if back > 1e-6 else a
+    b2 = (b[0] + u[0] * fwd, b[1] + u[1] * fwd) if fwd > 1e-6 else b
+    return a2, b2
+
+
 def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -> str:
     if not any(_has_moves(l) for l in layers):
         raise ValueError("Keine sichtbaren Objekte zum Lasern")
@@ -138,14 +175,19 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
             if use_hook:
                 acc += depths[p]
                 out += _hook_lines(pass_hook, layer, p, round(acc, 6))
+            overscan = float(getattr(layer, "fill_overscan_mm", 0.0) or 0.0)
             for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos,
                                            not getattr(layer, "fill_fixed_order", False)):
                 for a, b in block:
-                    if pos is None or abs(pos[0] - a[0]) > 1e-6 or abs(pos[1] - a[1]) > 1e-6:
-                        out.append(f"G0 {_xy(*a)}")
-                    pos = b
+                    a2, b2 = overscan_segment(a, b, overscan)
+                    if pos is None or abs(pos[0] - a2[0]) > 1e-6 or abs(pos[1] - a2[1]) > 1e-6:
+                        out.append(f"G0 {_xy(*a2)}")
+                    if a2 != a:   # Anlauf mit Laser aus
+                        out.append(f"G1 {_xy(*a)} F{f} S0")
                     out.append(f"G1 {_xy(*b)} F{f} S{s}")
-                pos = block[-1][1]
+                    if b2 != b:   # Auslauf mit Laser aus
+                        out.append(f"G1 {_xy(*b2)} F{f} S0")
+                    pos = b2
             kinds = getattr(layer, "poly_kinds", ()) or ()
             prev_end = None
             for i, line in enumerate(layer.polylines):
