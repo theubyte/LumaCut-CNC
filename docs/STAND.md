@@ -352,7 +352,10 @@ Voraussetzungen:
       xPack OpenOCD) gelesen: ID 0x10036414, 512 KB, kein Lese-/Schreibschutz.
       Komplett gelöscht, BTT-Bootloader SKR Mini MZ (Sicherung GadgetAngel,
       15 520 B, sha256 78fe4c2f…0e9c2ed4) an 0x08000000 geschrieben, Verify OK.
-      Nächster Schritt: marlin-59 SKR (sha256 db1c9a8e…) ab 0x08007000.
+      marlin-59 SKR (sha256 db1c9a8e…) per ST-Link ab 0x08007000 geschrieben,
+      Verify OK. Nach dem Start reißt die SWD-Verbindung ab (Marlin belegt die
+      SWD-Pins) – erneutes ST-Link-Flashen nur mit RST (connect under reset).
+      Offen: SKR per USB am Pi anmelden, M122 (Treiber nach Heißluft), Achsen.
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
       31.10., SHA-256 `96ca4fc6…6a9`).
