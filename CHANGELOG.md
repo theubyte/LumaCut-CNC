@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-02
+
+- **Neuaufbau ohne Anet-Pads:** Das Anlöten an die Anet-Testpads geht nicht, sie sind zu klein. Vorschlag jetzt: Arduino Uno mit CNC-Shield V3 und steckbaren Schrittmotortreibern (Grbl 1.1), Laser-Relais über den ULN2003AN, Laser-PWM weiter über den Optokoppler, Laser-Minus direkt ans Netzteil.
+
 ## 2026-11-01
 
 - **Anet: Laser-PWM von MISO auf SCK:** MISO (ISP-Pin 1, D6) gab auch bei `M3 S255` keine Spannung mehr aus. Der Laser liegt jetzt auf SCK (ISP-Pin 3, D7/PB7, gleicher Hardware-Timer 3). TTL-Kabel und 10-kΩ-Pull-down auf Pin 3 umstecken, GND bleibt Pin 6. Kommt als Firmware-Update per Knopf.
