@@ -7,7 +7,9 @@ nach der **Gerade-Ungerade-Regel** zu: Löcher (z. B. in „O“, „A“ oder e
 Rahmen aus zwei Rechtecken) bleiben frei. :func:`fill_segments` setzt die
 Ebenen-Einstellung um (``"hatch"`` = eine Richtung, ``"crosshatch"`` =
 zusätzlich um 90° gedreht, ``"offset"`` = konzentrische Konturen nach innen,
-siehe :func:`offset_fill_rings`).
+siehe :func:`offset_fill_rings`). Welche Objekte einer Ebene gemeinsam als
+*eine* Fläche gefüllt werden, legt ``FILL_GROUPINGS`` fest
+(``export.layer_fill_blocks``).
 
 Die Linien liegen auf einem festen Raster ``(k + ½) · interval`` (in der
 gedrehten Lage, gemessen vom Ursprung; der halbe Versatz vermeidet Linien
@@ -33,6 +35,14 @@ FILL_LABELS = {"none": "Keine", "hatch": "Schraffur", "crosshatch": "Kreuzschraf
                "offset": "Offset-Füllung"}
 #: Füllmodi, für die Winkel und Bidirektional eine Bedeutung haben
 LINE_FILL_MODES = ("hatch", "crosshatch")
+#: Welche Objekte einer Ebene gemeinsam gefüllt werden (LightBurn „Fill shapes
+#: individually“ / „Fill groups together“ / „Fill all shapes at once“):
+#: gemeinsam gefüllte Objekte bilden *eine* Fläche nach der Gerade-Ungerade-Regel –
+#: ein Kreis in einem Rechteck wird so zum Loch, auch als getrennte Objekte.
+FILL_GROUPINGS = ("individual", "groups", "together")
+FILL_GROUPING_LABELS = {"individual": "Jedes Objekt einzeln",
+                        "groups": "Gruppen zusammen",
+                        "together": "Alle Objekte zusammen"}
 MAX_OFFSET_RINGS = 5000         # Schutz wie MAX_LINES_PER_PASS
 OFFSET_SIMPLIFY_MM = 0.005      # Ringe vereinfachen (weit unter der Strahlbreite)
 OFFSET_ARC_TOL_MM = 0.02        # Sehnenfehler gerundeter Ecken (wie shape_paths)
@@ -173,7 +183,34 @@ def _quad_segs(distance: float) -> int:
     return max(2, min(32, math.ceil((math.pi / 2) / step)))
 
 
-def offset_fill_rings(polygons: Iterable[Sequence[Point]], interval_mm: float) -> list[list[Point]]:
+def _offset_levels(part, interval: float) -> list[list[list[Point]]]:
+    """Ringe einer zusammenhängenden Fläche, Tiefe für Tiefe (äußerste zuerst)."""
+    levels: list[list[list[Point]]] = []
+    count = 0
+    k = 0
+    while True:
+        d = (k + 0.5) * interval
+        g = part.buffer(-d, quad_segs=_quad_segs(d), join_style="round")
+        if g.is_empty:
+            break
+        if OFFSET_SIMPLIFY_MM > 0:
+            g = g.simplify(OFFSET_SIMPLIFY_MM, preserve_topology=True)
+        level = _rings_of(g)
+        count += len(level)
+        if count > MAX_OFFSET_RINGS:
+            raise ValueError("Zu viele Offset-Ringe; Linienabstand vergrößern")
+        if level:
+            levels.append(level)
+        k += 1
+    return levels
+
+
+def _nearest_index(items: list[list[Point]], pos: Point) -> int:
+    return min(range(len(items)), key=lambda i: min(math.dist(p, pos) for p in items[i]))
+
+
+def offset_fill_rings(polygons: Iterable[Sequence[Point]], interval_mm: float,
+                      inside_out: bool = False) -> list[list[Point]]:
     """Offset-Füllung (LightBurn „Offset Fill“): konzentrische Konturen nach innen.
 
     Die Fläche (Gerade-Ungerade-Regel, Löcher bleiben frei) wird in Schritten
@@ -181,11 +218,16 @@ def offset_fill_rings(polygons: Iterable[Sequence[Point]], interval_mm: float) -
     Intervall innerhalb der Kante (wie die Schraffur-Rasterzeilen), jeder
     weitere ein ganzes Intervall tiefer, bis die Fläche verschwindet. Löcher
     bekommen eigene Ringe, die nach außen wachsen. Ergebnis: geschlossene
-    Ringe (Startpunkt nicht wiederholt) in Fahr-Reihenfolge – von außen nach
-    innen; innerhalb einer Tiefe zuerst der nächstgelegene Ring, begonnen am
-    Punkt, der dem vorigen Start am nächsten liegt (kurze Leerfahrten).
-    Stellen schmaler als ein Intervall bekommen keinen Ring (dort lasert die
-    Kontur, wenn „Kontur mitlasern“ an ist).
+    Ringe (Startpunkt nicht wiederholt) in Fahr-Reihenfolge.
+
+    Getrennte Inseln (z. B. die Buchstaben eines Texts) werden nacheinander
+    ganz gefüllt – zuerst die Insel, die dem vorigen Start am nächsten liegt –,
+    damit der Kopf nicht für jede Tiefe zwischen den Inseln pendelt. Innerhalb
+    einer Insel von außen nach innen (``inside_out=True``: von innen nach
+    außen, die Kante zuletzt); innerhalb einer Tiefe zuerst der
+    nächstgelegene Ring, begonnen am Punkt, der dem vorigen Start am nächsten
+    liegt (kurze Leerfahrten). Stellen schmaler als ein Intervall bekommen
+    keinen Ring (dort lasert die Kontur, wenn „Kontur mitlasern“ an ist).
     """
     interval = float(interval_mm)
     if not interval > 0 or not math.isfinite(interval):
@@ -196,29 +238,33 @@ def offset_fill_rings(polygons: Iterable[Sequence[Point]], interval_mm: float) -
     x0, y0, x1, y1 = area.bounds
     if min(x1 - x0, y1 - y0) / (2 * interval) > MAX_OFFSET_RINGS:
         raise ValueError("Zu viele Offset-Ringe; Linienabstand vergrößern")
+    parts = [g for g in getattr(area, "geoms", [area])
+             if g.geom_type == "Polygon" and not g.is_empty]
+    islands: list[list[list[list[Point]]]] = []
+    count = 0
+    for part in parts:
+        levels = _offset_levels(part, interval)
+        count += sum(len(level) for level in levels)
+        if count > MAX_OFFSET_RINGS:
+            raise ValueError("Zu viele Offset-Ringe; Linienabstand vergrößern")
+        if levels:
+            islands.append(levels[::-1] if inside_out else levels)
     out: list[list[Point]] = []
     pos: Point | None = None
-    k = 0
-    while True:
-        d = (k + 0.5) * interval
-        g = area.buffer(-d, quad_segs=_quad_segs(d), join_style="round")
-        if g.is_empty:
-            break
-        if OFFSET_SIMPLIFY_MM > 0:
-            g = g.simplify(OFFSET_SIMPLIFY_MM, preserve_topology=True)
-        level = _rings_of(g)
-        while level:
-            if pos is None:
-                ring = level.pop(0)
-            else:
-                j = min(range(len(level)),
-                        key=lambda i: min(math.dist(p, pos) for p in level[i]))
-                ring = _start_nearest(level.pop(j), pos)
-            out.append(ring)
-            if len(out) > MAX_OFFSET_RINGS:
-                raise ValueError("Zu viele Offset-Ringe; Linienabstand vergrößern")
-            pos = ring[0]
-        k += 1
+    while islands:
+        # nächste Insel: deren erste Tiefe dem Kopf am nächsten liegt
+        j = 0 if pos is None else min(
+            range(len(islands)),
+            key=lambda i: min(min(math.dist(p, pos) for p in r) for r in islands[i][0]))
+        for level in islands.pop(j):
+            level = list(level)
+            while level:
+                if pos is None:
+                    ring = level.pop(0)
+                else:
+                    ring = _start_nearest(level.pop(_nearest_index(level, pos)), pos)
+                out.append(ring)
+                pos = ring[0]
     return out
 
 
@@ -238,16 +284,18 @@ def rings_to_segments(rings: Iterable[Sequence[Point]]) -> list[Segment]:
 
 
 def fill_segments(polygons: Sequence[Sequence[Point]], mode: str, interval_mm: float,
-                  angle_deg: float = 0.0, bidirectional: bool = True) -> list[Segment]:
+                  angle_deg: float = 0.0, bidirectional: bool = True,
+                  inside_out: bool = False) -> list[Segment]:
     """Füllstrecken nach Füllmodus (``none`` / ``hatch`` / ``crosshatch`` / ``offset``).
 
-    Bei ``offset`` haben Winkel und Bidirektional keine Bedeutung."""
+    Bei ``offset`` haben Winkel und Bidirektional keine Bedeutung, ``inside_out``
+    gilt nur dort (Ring-Reihenfolge von innen nach außen)."""
     if mode not in FILL_MODES:
         raise ValueError(f"Unbekannter Füllmodus: {mode}")
     if mode == "none":
         return []
     if mode == "offset":
-        return rings_to_segments(offset_fill_rings(polygons, interval_mm))
+        return rings_to_segments(offset_fill_rings(polygons, interval_mm, inside_out))
     segs = hatch_lines(polygons, interval_mm, angle_deg, bidirectional)
     if mode == "crosshatch":
         segs += hatch_lines(polygons, interval_mm, angle_deg + 90.0, bidirectional)

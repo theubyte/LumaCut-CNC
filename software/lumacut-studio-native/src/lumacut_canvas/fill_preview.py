@@ -2,7 +2,7 @@
 
 Zeigt die Füllung (Schraffur/Kreuzschraffur) gefüllter Ebenen als dünne
 Linien in der Ebenenfarbe unter den Objekten – dieselbe Geometrie wie im
-G-Code (``export.shape_fill_segments``). Läuft über den Overlay-Hook des
+G-Code (``export.layer_fill_blocks``, auch „Objekte zusammen füllen“). Läuft über den Overlay-Hook des
 Editors, berechnet erst nach kurzer Ruhe neu (Ziehen bleibt flüssig) und
 ändert weder Dokument noch Export.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 from PySide6.QtCore import QLineF, QObject, QRectF, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen
 
-from .export import shape_fill_segments
+from .export import layer_fill_blocks
 
 OVERLAY_KEY = "fill_preview"
 DEBOUNCE_MS = 120
@@ -49,12 +49,12 @@ class FillPreview(QObject):
             if not layer.visible or layer.fill_mode == "none":
                 continue
             lines: list[QLineF] = []
-            for s in doc.shapes_in_layer(layer.id):
-                try:
-                    segs = shape_fill_segments(s, layer)
-                except ValueError:      # zu viele Linien: Hinweis kommt beim Export
-                    self.truncated = True
-                    continue
+            try:
+                blocks = [segs for _ids, segs in layer_fill_blocks(doc, layer)]
+            except ValueError:          # zu viele Linien: Hinweis kommt beim Export
+                self.truncated = True
+                blocks = []
+            for segs in blocks:
                 total += len(segs)
                 if total > MAX_PREVIEW_LINES:
                     self.truncated = True

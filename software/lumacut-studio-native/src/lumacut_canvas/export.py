@@ -49,10 +49,14 @@ class JobLayer:
     # Schnittstück nach einer Steg-Lücke, "perf" = nach einer
     # Perforations-Lücke); leer = alles "cut".
     poly_kinds: tuple[str, ...] = ()
-    # Vektor-Füllung: je gefülltem Objekt ein Block Schraffurstrecken
-    # ((x0, y0), (x1, y1)) in Maschinen-mm, bereits in Fahr-Reihenfolge.
+    # Vektor-Füllung: je Füllgruppe (Objekt, Gruppe oder ganze Ebene, siehe
+    # Layer.fill_grouping) ein Block Schraffurstrecken ((x0, y0), (x1, y1)) in
+    # Maschinen-mm, bereits in Fahr-Reihenfolge.
     # Der G-Code lasert je Durchgang zuerst die Füllungen, dann die Konturen.
     fills: list[list[tuple[tuple[float, float], tuple[float, float]]]] = field(default_factory=list)
+    # True (Offset-Füllung): Blöcke nie rückwärts fahren – die Ring-Reihenfolge
+    # (außen → innen bzw. innen → außen) ist eine Einstellung der Ebene.
+    fill_fixed_order: bool = False
 
 
 def shape_fill_segments(shape: Shape, layer: Layer):
@@ -60,12 +64,57 @@ def shape_fill_segments(shape: Shape, layer: Layer):
 
     Gerade-Ungerade-Regel über alle Teilpfade des Objekts (Löcher in Text,
     Rahmen). Leer, wenn die Ebene nicht füllt oder das Objekt offen ist.
+    Füllt immer nur dieses Objekt (``fill_grouping`` siehe :func:`layer_fill_blocks`).
     """
     if layer.fill_mode == "none" or shape.kind not in FILLABLE_KINDS:
         return []
     polys = shape_polygons(shape)
     return fill_segments(polys, layer.fill_mode, layer.line_interval_mm, layer.hatch_angle,
-                         layer.hatch_bidirectional)
+                         layer.hatch_bidirectional, getattr(layer, "offset_inside_out", False))
+
+
+def _fill_shape_groups(doc: Document, layer: Layer) -> list[list[Shape]]:
+    """Objekte der Ebene, die jeweils gemeinsam gefüllt werden (Objekt-Reihenfolge)."""
+    shapes = [s for s in doc.shapes_in_layer(layer.id) if s.kind in FILLABLE_KINDS]
+    grouping = getattr(layer, "fill_grouping", "individual")
+    if grouping == "together":
+        return [shapes] if shapes else []
+    if grouping != "groups":
+        return [[s] for s in shapes]
+    out: list[list[Shape]] = []
+    by_group: dict[str, list[Shape]] = {}
+    for s in shapes:
+        top = s.groups[0] if s.groups else None
+        if top is None:
+            out.append([s])
+        elif top in by_group:
+            by_group[top].append(s)
+        else:
+            by_group[top] = [s]
+            out.append(by_group[top])
+    return out
+
+
+def layer_fill_blocks(doc: Document, layer: Layer) -> list[tuple[list[str], list]]:
+    """Füllung einer Ebene als Blöcke ``(objekt_ids, strecken)`` (Arbeitsflächen-mm).
+
+    Je nach ``layer.fill_grouping`` ein Block je Objekt, je oberster Gruppe
+    (ungruppierte Objekte einzeln) oder einer für alle Objekte der Ebene.
+    Gemeinsam gefüllte Objekte bilden eine Fläche nach der
+    Gerade-Ungerade-Regel: überlappende Teile und ineinander liegende Objekte
+    bleiben frei (wie LightBurn). Leere Blöcke entfallen.
+    """
+    if layer.fill_mode == "none":
+        return []
+    blocks = []
+    for group in _fill_shape_groups(doc, layer):
+        polys = [poly for s in group for poly in shape_polygons(s)]
+        segs = fill_segments(polys, layer.fill_mode, layer.line_interval_mm, layer.hatch_angle,
+                             layer.hatch_bidirectional,
+                             getattr(layer, "offset_inside_out", False))
+        if segs:
+            blocks.append(([s.id for s in group], segs))
+    return blocks
 
 
 def job_layers(doc: Document) -> list[JobLayer]:
@@ -81,12 +130,11 @@ def job_layers(doc: Document) -> list[JobLayer]:
             continue
         polys: list[list[tuple[float, float]]] = []
         fills = []
+        for _ids, segs in layer_fill_blocks(doc, layer):
+            fills.append([(to_machine(*a), to_machine(*b)) for a, b in segs])
         for s in doc.shapes_in_layer(layer.id):
             if s.kind == "image":
                 continue  # Bilder werden gerastert (lumacut_job.images), nicht umfahren
-            segs = shape_fill_segments(s, layer)
-            if segs:
-                fills.append([(to_machine(*a), to_machine(*b)) for a, b in segs])
             if s.kind in FILLABLE_KINDS and layer.fill_mode != "none" and not layer.hatch_outline:
                 continue  # nur Füllung, keine Kontur
             if s.kind == "line":
@@ -101,7 +149,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
             result.append(JobLayer(layer.id, layer.name, layer.power, layer.speed,
                                    layer.passes, polys, layer.z_step,
                                    plan.pass_depths if plan else (),
-                                   **{k: getattr(layer, k) for k in CUT_LAYER_FIELDS}, fills=fills))
+                                   **{k: getattr(layer, k) for k in CUT_LAYER_FIELDS}, fills=fills,
+                                   fill_fixed_order=layer.fill_mode == "offset"))
     return result
 
 
@@ -111,6 +160,15 @@ def _paint(doc: Document, p: QPainter, line_width_mm: float, show_fill: bool = F
         if not layer.visible:
             continue
         color = QColor(layer.color)
+        filled: set[str] = set()
+        if show_fill:
+            pen = QPen(color, line_width_mm)
+            pen.setCosmetic(False)
+            p.setPen(pen)
+            for ids, segs in layer_fill_blocks(doc, layer):
+                for a, b in segs:
+                    p.drawLine(QPointF(*a), QPointF(*b))
+                filled.update(ids)
         for s in doc.shapes_in_layer(layer.id):
             pen = QPen(color, line_width_mm)
             pen.setCosmetic(False)
@@ -118,12 +176,8 @@ def _paint(doc: Document, p: QPainter, line_width_mm: float, show_fill: bool = F
             if s.kind == "image" and s.image is not None:
                 _paint_image(p, s)
                 continue
-            if show_fill:
-                segs = shape_fill_segments(s, layer)
-                for a, b in segs:
-                    p.drawLine(QPointF(*a), QPointF(*b))
-                if segs and not layer.hatch_outline:
-                    continue
+            if s.id in filled and not layer.hatch_outline:
+                continue
             p.setBrush(QBrush(color) if s.kind == "text" else Qt.NoBrush)
             p.drawPath(shape_path(s))
 

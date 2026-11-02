@@ -79,15 +79,16 @@ def test_circle_rings_are_round_and_outside_in():
     assert radii == pytest.approx([4.5, 3.5, 2.5, 1.5, 0.5], abs=0.02)
 
 
-def test_separate_islands_and_nearest_start():
+def test_separate_islands_one_after_another_with_nearest_start():
     a = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
     b = [(10.0, 0.0), (14.0, 0.0), (14.0, 4.0), (10.0, 4.0)]
     rings = offset_fill_rings([a, b], 1.0)
     assert len(rings) == 4                       # je Insel 2 Ringe (0,5 und 1,5 mm)
-    # Tiefe für Tiefe von außen nach innen
-    assert [round(min(p[1] for p in r), 3) for r in rings] == [0.5, 0.5, 1.5, 1.5]
+    # Insel für Insel (kein Pendeln zwischen den Inseln), je von außen nach innen
+    assert [round(min(p[1] for p in r), 3) for r in rings] == [0.5, 1.5, 0.5, 1.5]
+    assert [max(p[0] for p in r) < 5 for r in rings] == [True, True, False, False]
     # jeder weitere Ring beginnt am Punkt, der dem vorigen Start am nächsten liegt
-    for prev, ring in zip(rings[1:], rings[2:]):
+    for prev, ring in zip(rings, rings[1:]):
         assert math.dist(ring[0], prev[0]) == pytest.approx(
             min(math.dist(p, prev[0]) for p in ring))
 

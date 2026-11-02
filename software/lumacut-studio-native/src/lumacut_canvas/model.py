@@ -54,7 +54,8 @@ CUT_LAYER_DEFAULTS = {
 CUT_LAYER_FIELDS = tuple(CUT_LAYER_DEFAULTS)
 # Vektor-Füllung je Ebene (hatch.py); nur gespeichert, wenn vom Standard abweichend.
 FILL_LAYER_DEFAULTS = {"fill_mode": "none", "line_interval_mm": _hatch.DEFAULT_INTERVAL_MM,
-                       "hatch_angle": 0.0, "hatch_bidirectional": True, "hatch_outline": True}
+                       "hatch_angle": 0.0, "hatch_bidirectional": True, "hatch_outline": True,
+                       "fill_grouping": "individual", "offset_inside_out": False}
 FILL_LAYER_FIELDS = tuple(FILL_LAYER_DEFAULTS)
 # Geschlossene Objektarten, die gefüllt werden (Linie/Freihand/Bild nicht).
 FILLABLE_KINDS = ("rect", "ellipse", "polygon", "text")
@@ -189,11 +190,13 @@ class Layer:
     perf_cut_mm: float = 0.0        # Perforation: Schnittlänge, 0 = aus
     perf_skip_mm: float = 1.0       # Perforation: Lücke (Laser aus)
     # Vektor-Füllung (siehe hatch.py / FILL_LAYER_DEFAULTS)
-    fill_mode: str = "none"          # "none" | "hatch" | "crosshatch"
+    fill_mode: str = "none"          # "none" | "hatch" | "crosshatch" | "offset"
     line_interval_mm: float = _hatch.DEFAULT_INTERVAL_MM  # Linienabstand
     hatch_angle: float = 0.0         # Grad, [0, 180); Kreuzschraffur zusätzlich +90°
     hatch_bidirectional: bool = True  # jede zweite Linie rückwärts (kürzere Leerfahrten)
     hatch_outline: bool = True       # Kontur zusätzlich zur Füllung lasern
+    fill_grouping: str = "individual"  # hatch.FILL_GROUPINGS: einzeln / Gruppen / alle zusammen
+    offset_inside_out: bool = False  # Offset-Füllung: Ringe von innen nach außen
     material_ref: str = ""          # Bibliotheksbezug, s. LINK_LAYER_FIELDS
     material_link: bool = False     # True: Dicke ändern wendet die Bibliothek neu an
 
@@ -225,6 +228,9 @@ class Layer:
             hatch_angle=_hatch.normalize_angle_180(self.hatch_angle),
             hatch_bidirectional=bool(self.hatch_bidirectional),
             hatch_outline=bool(self.hatch_outline),
+            fill_grouping=(self.fill_grouping if self.fill_grouping in _hatch.FILL_GROUPINGS
+                           else "individual"),
+            offset_inside_out=bool(self.offset_inside_out),
             material_ref=str(self.material_ref or "").strip()[:120],
             material_link=bool(self.material_link and self.material_ref),
         )

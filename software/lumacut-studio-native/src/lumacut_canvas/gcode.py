@@ -26,8 +26,10 @@ Leistung/Geschwindigkeit/Durchgänge und derselbe Tiefen-Hook wie die Ebene.
 Jede Schraffurstrecke ist ein ``G0`` zum Anfang und ein ``G1`` zum Ende –
 das ``G0`` entfällt, wenn die Strecke genau dort beginnt, wo die vorige
 endete (Offset-Füllung: Ringe als lückenlose Streckenkette);
-die Blöcke werden in der Reihenfolge der Objekte gefahren, jeweils vorwärts
-oder rückwärts – je nachdem, welches Ende näher liegt. Ohne Füllung bleibt
+die Blöcke (je Objekt, Gruppe oder Ebene, ``Layer.fill_grouping``) werden in
+der Reihenfolge der Objekte gefahren, Schraffur jeweils vorwärts oder
+rückwärts – je nachdem, welches Ende näher liegt; Offset-Füllung immer
+vorwärts (Ring-Reihenfolge außen → innen bzw. innen → außen bleibt). Ohne Füllung bleibt
 die Ausgabe unverändert.
 
 Die Funktion erzeugt nur Text; sie startet nie eine Maschine.
@@ -85,17 +87,20 @@ def _has_moves(layer: JobLayer) -> bool:
     return bool(layer.polylines or getattr(layer, "fills", None))
 
 
-def order_fill_blocks(blocks, pos=None):
+def order_fill_blocks(blocks, pos=None, reversible=True):
     """Schraffurblöcke in Objekt-Reihenfolge, jeder vorwärts oder rückwärts.
 
     Ein rückwärts gefahrener Block kehrt Reihenfolge *und* Richtung seiner
     Strecken um. ``pos`` = aktuelle Kopfposition (``None`` = unbekannt).
+    ``reversible=False`` (Offset-Füllung, ``JobLayer.fill_fixed_order``):
+    jeder Block vorwärts, damit die gewählte Ring-Reihenfolge erhalten bleibt.
     """
     out = []
     for block in blocks:
         if not block:
             continue
-        if pos is not None and math.dist(pos, block[-1][1]) < math.dist(pos, block[0][0]):
+        if (reversible and pos is not None
+                and math.dist(pos, block[-1][1]) < math.dist(pos, block[0][0])):
             block = [(b, a) for a, b in reversed(block)]
         out.append(block)
         pos = block[-1][1]
@@ -133,7 +138,8 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
             if use_hook:
                 acc += depths[p]
                 out += _hook_lines(pass_hook, layer, p, round(acc, 6))
-            for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos):
+            for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos,
+                                           not getattr(layer, "fill_fixed_order", False)):
                 for a, b in block:
                     if pos is None or abs(pos[0] - a[0]) > 1e-6 or abs(pos[1] - a[1]) > 1e-6:
                         out.append(f"G0 {_xy(*a)}")
