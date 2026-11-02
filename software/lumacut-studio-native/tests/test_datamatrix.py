@@ -26,8 +26,8 @@ def test_ascii_encodation_digit_pairs_upper_shift_and_eci():
     assert dm.encode_ascii(b"0815") == [138, 145]
     assert dm.encode_ascii(b"12a3") == [142, 98, 52]       # odd digit stays single
     assert dm.encode_ascii("Ä".encode("latin-1")) == [235, 0xC4 - 127]
-    assert dm.text_codewords("Ä") == [235, 69]               # ISO 8859-1, no ECI needed
-    assert dm.text_codewords("€")[:2] == [241, 27]           # ECI 26 (UTF-8)
+    assert dm.text_codewords("Ä")[:2] == [241, 27]           # umlauts too: ECI 26 (UTF-8)
+    assert dm.text_codewords("€")[:2] == [241, 27]
 
 
 def test_pad_randomisation():
@@ -90,8 +90,8 @@ def test_finder_and_timing_patterns(size):
 def _module_image(code, px=6, quiet=2, invert=False):
     np = pytest.importorskip("numpy")
     n = code.size + 2 * quiet
-    a = np.full((n * px, n * px), 255, np.uint8)
-    for y in range(code.size):
+    a = np.full(((code.rows + 2 * quiet) * px, n * px), 255, np.uint8)
+    for y in range(code.rows):
         for x in range(code.size):
             if code.modules[y][x]:
                 a[(y + quiet) * px:(y + quiet + 1) * px, (x + quiet) * px:(x + quiet + 1) * px] = 0
@@ -100,7 +100,8 @@ def _module_image(code, px=6, quiet=2, invert=False):
 
 def _zxing(img):
     zxingcpp = pytest.importorskip("zxingcpp")
-    return [(r.text, r.format.name) for r in zxingcpp.read_barcodes(img)]
+    return [(r.text, r.format.name)
+            for r in zxingcpp.read_barcodes(img, text_mode=zxingcpp.TextMode.Plain)]
 
 
 @pytest.mark.parametrize("size", dm.SIZES)
@@ -349,3 +350,198 @@ def test_window_new_fill_layer_one_undo_step(win):
     assert new.name == "Data Matrix" and new.fill_mode == "hatch" and new.line_interval_mm == 0.1
     win.canvas.undo_stack.undo()
     assert len(doc.layers) == n_layers and len(doc.shapes) == n_shapes
+
+
+# --- C40 / Text / X12 / Base 256, rectangles, GS1 (review round 13) ------------------------
+def test_c40_text_x12_codewords():
+    aim = [91, 11]                                           # ISO 16022 example: "AIM" in C40
+    assert dm.text_codewords("AIM" * 4) == [230] + aim * 4 + [254]
+    assert dm.text_codewords("aim" * 4) == [239] + aim * 4 + [254]          # Text: same values
+    x12 = dm.text_codewords("*>\r" * 4)
+    assert x12[0] == 238 and x12[-1] == 254 and len(x12) == 10
+    assert dm.text_codewords("AB") == [66, 67]              # short: ASCII wins ties
+    assert dm.text_codewords("123456") == [142, 164, 186]   # digit pairs stay ASCII
+    enc = dm.encode_data("AIM" * 4)
+    assert enc.trailing_unlatch and not dm.encode_data("AB").trailing_unlatch
+
+
+def test_base256_utf8_after_eci():
+    cws = dm.text_codewords("€")
+    assert cws[:3] == [241, 27, 231]                         # ECI 26, latch Base 256
+    # length and bytes are 255-state randomised with their 1-based position
+    raw = [len("€".encode()), *"€".encode()]
+    assert [(cw - (149 * (k + 4)) % 255 - 1) % 256 for k, cw in enumerate(cws[3:])] == raw
+    long = "äöü" * 100                                        # 600 bytes: two length codewords
+    enc = dm.text_codewords(long)
+    assert enc[2] == 231 and len(enc) == 2 + 1 + 2 + 600
+
+
+@pytest.mark.parametrize("text,ascii_size,new_size", [
+    ("LUMACUT LASER 2026 SERIE A", 22, 20),
+    ("lumacut laser gravur werkstatt", 22, 20),
+    ("ABCDEFGHIJKLMNOPQRSTUVWXYZ" * 4, 40, 36),
+])
+def test_modes_make_smaller_symbols(text, ascii_size, new_size):
+    n_ascii = len(dm.encode_ascii(text.encode()))
+    assert dm.choose_size(n_ascii) == ascii_size
+    code = dm.encode(text)
+    assert code.size == new_size
+    assert _zxing(_module_image(code)) == [(text, "DataMatrix")]
+
+
+@pytest.mark.parametrize("text", [
+    "AIM" * 7 + "x", "lower case text 123", "*>\r12345ABC>*", "Größe äöü ß – 12 €",
+    "MiXeD CaSe lumacut LASER 0815 !?#", "a" * 300 + "B" * 300, "\t\x01ctrl\x7f",
+    "0123456789" * 30 + "ABC", "ÄÖÜ" * 40 + "plain ascii" * 10,
+])
+def test_mixed_modes_decode(text):
+    for symbol in (dm.AUTO, dm.AUTO_RECT):
+        try:
+            code = dm.encode(text, symbol)
+        except ValueError:
+            assert symbol == dm.AUTO_RECT
+            continue
+        px = 4 if code.size > 60 else 6
+        assert _zxing(_module_image(code, px=px)) == [(text, "DataMatrix")]
+
+
+@pytest.mark.parametrize("key", dm.RECT_SIZES)
+def test_rectangular_sizes_decode_and_structure(key):
+    f = dm.FORMATS[key]
+    text = ""
+    for ch in "LC-0815/abc " * 20:                          # fill to just below capacity
+        if len(dm.text_codewords(text + ch)) > f.data - 1:
+            break
+        text += ch
+    code = dm.encode(text, key)
+    assert (code.rows, code.size) == (f.rows, f.cols) and not code.square
+    assert code.format is f and len(code.modules) == f.rows
+    m = code.modules
+    (rh, rw), (_nv, nh) = f.region, f.regions
+    assert all(m[f.rows - 1][x] for x in range(f.cols))                 # solid bottom
+    assert all(m[y][0] for y in range(f.rows))                          # solid left
+    assert all(m[0][x] == (x % (rw + 2) % 2 == 0) for x in range(f.cols))
+    for k in range(1, nh):                                              # vertical separator pair
+        assert all(m[y][k * (rw + 2) - 1] == (y % 2 == 1) for y in range(f.rows))
+        assert all(m[y][k * (rw + 2)] for y in range(f.rows))
+    data = list(code.codewords[:f.data])
+    for b in range(f.blocks):
+        block = data[b::f.blocks] + list(code.codewords[f.data + b::f.blocks])
+        n_ecc = len(block) - len(data[b::f.blocks])
+        assert all(_poly_eval(block, dm._EXP[i]) == 0 for i in range(1, n_ecc + 1))
+    assert _zxing(_module_image(code)) == [(text, "DataMatrix")]
+
+
+def test_symbol_keys_and_auto_rect():
+    assert dm.symbol_key("12x36") == "12x36" and dm.symbol_key("12 × 36") == "12x36"
+    assert dm.symbol_key("24x24") == 24 and dm.symbol_key("24") == 24 and dm.symbol_key(-1) == -1
+    for bad in ("12x30", "abc", 30):
+        with pytest.raises(ValueError, match="Unbekannte"):
+            dm.symbol_key(bad)
+    assert (dm.encode("Hi", dm.AUTO_RECT).rows, dm.encode("Hi", dm.AUTO_RECT).size) == (8, 18)
+    assert dm.encode("Hi", "12x26").format.key == "12x26"               # minimum honoured
+    assert dm.encode("x" * 30, "8x18").format.key == "12x36"            # next rectangle
+    with pytest.raises(ValueError, match="quadratische Größe"):
+        dm.encode("x" * 200, dm.AUTO_RECT)
+    spec = dm.DataMatrixSpec("a", symbol="16 x 48").normalized()
+    assert spec.symbol == "16x48"
+    assert dm.DataMatrixSpec("a", symbol="9x9").normalized().symbol == dm.AUTO
+
+
+def test_trailing_unlatch_dropped_at_exact_capacity():
+    text = "AIM" * 24                                        # C40: 1 + 48 + Unlatch = 50
+    enc = dm.encode_data(text)
+    assert len(enc.codewords) == 50 and enc.trailing_unlatch
+    code = dm.encode(text, dm.AUTO_RECT)                     # 16x48 holds 49 data codewords
+    assert code.format.key == "16x48" and code.codewords[48] != 254
+    assert _zxing(_module_image(code, px=5)) == [(text, "DataMatrix")]
+
+
+@pytest.mark.parametrize("text,symbol", [
+    ("(01)09501101530003(17)261231(10)AB-12", dm.AUTO),
+    ("(10)LOT-7(21)SN0815(17)270101", dm.AUTO),
+    ("(01)09501101530003(21)ABCDEFGHIJKLMNOP", dm.AUTO_RECT),
+    ("(10)ABCDEFGHIJ(21)KLMNOPQRS", dm.AUTO),                # FNC1 inside C40 (Shift 2)
+])
+def test_gs1_datamatrix_decodes(text, symbol):
+    zxingcpp = pytest.importorskip("zxingcpp")
+    cws = dm.text_codewords(text, gs1_mode=True)
+    assert cws[0] == 232                                     # FNC1 in first position
+    code = dm.encode(text, symbol, gs1_mode=True)
+    got = [(r.text, r.symbology_identifier) for r in zxingcpp.read_barcodes(_module_image(code))]
+    assert got == [(text, "]d2")]
+    spec = dm.DataMatrixSpec(text, symbol=symbol, gs1=True)
+    assert spec.encode().codewords == code.codewords
+    with pytest.raises(ValueError, match="richtig wäre 3"):
+        dm.encode("(01)09501101530004", gs1_mode=True)
+
+
+def test_rect_spec_size_and_shapes(qapp):
+    spec = dm.DataMatrixSpec("LC-0815", symbol=dm.AUTO_RECT, size_mm=36.0, quiet_zone=1, x=5, y=5)
+    code = spec.encode()
+    assert (code.rows, code.size) == (8, 18)
+    m = 36.0 / code.size
+    assert spec.total(code) == pytest.approx((m * (code.size + 2), m * (code.rows + 2)))
+    shapes = dm.datamatrix_shapes(spec, "L1", code)
+    union, _ = _union(shapes)
+    x0, y0, x1, y1 = union.bounds
+    assert x1 - x0 == pytest.approx(36.0, abs=1e-6) and y1 - y0 == pytest.approx(m * code.rows, abs=1e-6)
+    assert _zxing(_render(shapes, px=10.0)) == [("LC-0815", "DataMatrix")]
+    assert dm.describe(code, 36.0).startswith("8 × 18 Module (5 Datencodewörter), Modul 2.00 mm")
+    from lumacut_job.datamatrix_qt import centered
+    c = centered(spec, (WORK_WIDTH_MM / 2, WORK_HEIGHT_MM / 2), code)
+    tw, th = spec.total(code)
+    assert c.x + tw / 2 == pytest.approx(WORK_WIDTH_MM / 2) and c.y + th / 2 == pytest.approx(WORK_HEIGHT_MM / 2)
+
+
+def test_dialog_rect_and_gs1(qapp):
+    from lumacut_canvas.model import Layer
+    from lumacut_job.datamatrix_qt import DataMatrixDialog
+    dlg = DataMatrixDialog(active_layer=Layer("Gravur", fill_mode="hatch"))
+    keys = [dlg.symbol.itemData(i) for i in range(dlg.symbol.count())]
+    assert keys[:2] == [dm.AUTO, dm.AUTO_RECT] and all(k in keys for k in dm.RECT_SIZES)
+    dlg.text.setText("LC-0815")
+    dlg.symbol.setCurrentIndex(dlg.symbol.findData(dm.AUTO_RECT))
+    assert dlg.spec().symbol == dm.AUTO_RECT and "8 × 18" in dlg.info.text()
+    assert "Höhe" in dlg.info.text() and dlg.ok_button.isEnabled()
+    dlg.symbol.setCurrentIndex(dlg.symbol.findData("12x36"))
+    assert dlg.spec().symbol == "12x36" and "12 × 36" in dlg.info.text()
+    dlg.text.setText("x" * 40)
+    assert "nächste passende" in dlg.info.text()
+    dlg.symbol.setCurrentIndex(0)
+    dlg.gs1.setChecked(True)
+    dlg.text.setText("(01)09501101530004")
+    assert not dlg.ok_button.isEnabled() and "richtig wäre 3" in dlg.info.text()
+    dlg.text.setText(dm.gs1.EXAMPLE)
+    assert dlg.ok_button.isEnabled() and dlg.spec().gs1
+    dlg.deleteLater()
+    edit = DataMatrixDialog(spec=dm.DataMatrixSpec("(10)A", symbol="16x36", gs1=True))
+    assert edit.spec().symbol == "16x36" and edit.gs1.isChecked()
+    edit.deleteLater()
+
+
+def test_window_rect_gs1_insert_gcode_and_edit(win):
+    from lumacut_job import generated
+    from lumacut_job.generated_qt import edit_dialog, unit_spec
+    from lumacut_job.planner import optimized_document_gcode
+    tools, doc = win.job_tools, win.canvas.document
+    doc.active_layer.fill_mode = "hatch"
+    spec = dm.DataMatrixSpec("(01)09501101530003(10)AB-12", symbol=dm.AUTO_RECT, size_mm=30.0,
+                             gs1=True)
+    ids = tools.datamatrix(spec)
+    assert ids
+    union, _ = _union([doc.shape(i) for i in ids])
+    x0, y0, x1, y1 = union.bounds
+    assert x1 - x0 > 2 * (y1 - y0)                                      # flat rectangle
+    gcode = optimized_document_gcode(doc)
+    assert gcode.count("G1 ") > 50
+    pi_check(gcode)
+    unit = generated.find_unit(doc, ids[0])
+    got = unit_spec(unit)
+    assert (got.symbol, got.gs1, got.text) == (dm.AUTO_RECT, True, spec.text)
+    dlg = edit_dialog(unit, got, doc.layer(unit.layer_id), win)
+    assert dlg.spec() == got
+    dlg.deleteLater()
+    new_ids = tools.edit_generated(replace(got, text="(01)09501101530003(10)AB-13"))
+    code = generated.find_unit(doc, new_ids[0])
+    assert code is not None and unit_spec(code).text.endswith("AB-13")

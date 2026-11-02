@@ -18,6 +18,7 @@ from lumacut_canvas.model import Layer
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
 from . import datamatrix as dm
+from . import gs1
 from .generated import tag
 from .qr_qt import FILL_INTERVAL_MM, layer_fills
 
@@ -34,21 +35,31 @@ class DataMatrixDialog(QDialog):
         form = QFormLayout(self)
         self.text = QLineEdit(s.text)
         self.text.setPlaceholderText("Text oder Seriennummer, z. B. LC-2026-0815")
-        self.text.setToolTip("Beliebiger Text; Ziffernpaare werden kompakt codiert, "
-                             "Umlaute/Unicode erlaubt")
+        self.text.setToolTip("Beliebiger Text; Ziffernpaare, Großbuchstaben- und "
+                             "Kleinbuchstaben-Folgen werden kompakt codiert, Umlaute/Unicode "
+                             "erlaubt. GS1: Elementstring, z. B. " + gs1.EXAMPLE)
+        self.gs1 = QCheckBox("GS1-Daten („(AI)Wert“, z. B. (01)…(10)…)")
+        self.gs1.setChecked(s.gs1)
+        self.gs1.setToolTip("GS1 DataMatrix: Application Identifier in Klammern, feste Längen "
+                            "und Prüfziffern werden geprüft, Trennzeichen (FNC1) automatisch")
         self.symbol = QComboBox()
-        self.symbol.addItem("Automatisch (kleinste passende)", dm.AUTO)
-        for n in dm.SIZES:
-            self.symbol.addItem(f"{n} × {n} Module (bis {dm.SYMBOLS[n][2]} Codewörter)", n)
-        self.symbol.setCurrentIndex(self.symbol.findData(s.symbol))
+        self.symbol.addItem("Automatisch quadratisch (kleinste passende)", dm.AUTO)
+        self.symbol.addItem("Automatisch rechteckig (kleinste passende)", dm.AUTO_RECT)
+        for f in dm.SQUARE_FORMATS:
+            self.symbol.addItem(f"{f.label} Module (bis {f.data} Codewörter)", f.key)
+        for f in dm.RECT_FORMATS:
+            self.symbol.addItem(f"{f.label} Module rechteckig (bis {f.data} Codewörter)", f.key)
+        self.symbol.setCurrentIndex(max(0, self.symbol.findData(s.symbol)))
         self.symbol.setToolTip("Mindestgröße des Symbols; reicht sie nicht, wird die nächste "
-                               "passende gewählt")
+                               "passende gleicher Form gewählt. Rechteckig: flache Codes für "
+                               "schmale Flächen (Kabel, Stifte, Kanten)")
         self.size_mm = QDoubleSpinBox()
         self.size_mm.setRange(*dm.SIZE_RANGE)
         self.size_mm.setDecimals(1)
         self.size_mm.setSuffix(" mm")
         self.size_mm.setValue(s.size_mm)
-        self.size_mm.setToolTip("Kantenlänge des Codes ohne Ruhezone")
+        self.size_mm.setToolTip("Breite des Codes ohne Ruhezone (bei quadratischen "
+                                "Symbolen die Kantenlänge)")
         self.quiet = QSpinBox()
         self.quiet.setRange(*dm.QUIET_RANGE)
         self.quiet.setSuffix(" Module")
@@ -67,8 +78,9 @@ class DataMatrixDialog(QDialog):
                              + " – sie muss füllen (Schraffur), sonst werden nur Umrisse gelasert")
         self._active_fills = fills
         form.addRow("Inhalt", self.text)
+        form.addRow("", self.gs1)
         form.addRow("Symbolgröße", self.symbol)
-        form.addRow("Größe", self.size_mm)
+        form.addRow("Breite", self.size_mm)
         form.addRow("Ruhezone", self.quiet)
         form.addRow("", self.invert)
         form.addRow("", self.fill)
@@ -83,15 +95,17 @@ class DataMatrixDialog(QDialog):
         form.addRow(self.buttons)
         self.text.textChanged.connect(self._update)
         self.symbol.currentIndexChanged.connect(self._update)
+        self.gs1.toggled.connect(self._update)
         self.size_mm.valueChanged.connect(self._update)
         self.quiet.valueChanged.connect(self._update)
         self.fill.toggled.connect(self._update)
         self._update()
 
     def spec(self) -> dm.DataMatrixSpec:
-        return dm.DataMatrixSpec(text=self.text.text(), symbol=int(self.symbol.currentData() or 0),
+        return dm.DataMatrixSpec(text=self.text.text(), symbol=self.symbol.currentData() or 0,
                                  size_mm=self.size_mm.value(), quiet_zone=self.quiet.value(),
-                                 invert=self.invert.isChecked()).normalized()
+                                 invert=self.invert.isChecked(),
+                                 gs1=self.gs1.isChecked()).normalized()
 
     def fill_layer(self) -> bool:
         return self.fill.isChecked()
@@ -99,23 +113,26 @@ class DataMatrixDialog(QDialog):
     def _update(self) -> None:
         s = self.spec()
         try:
-            code = dm.encode(s.text, s.symbol)
+            code = s.encode()
         except ValueError as exc:
             self.info.setText(str(exc))
             self.ok_button.setEnabled(False)
             return
         module = s.size_mm / code.size
         text = dm.describe(code, s.size_mm)
-        if s.symbol and code.size != s.symbol:
-            text += f" – {s.symbol} × {s.symbol} reicht nicht, nächste passende Größe gewählt"
+        if s.symbol not in (dm.AUTO, dm.AUTO_RECT) and code.format.key != s.symbol:
+            text += (f" – {dm.FORMATS[s.symbol].label} reicht nicht, nächste passende Größe "
+                     "gewählt")
         ok = module >= dm.HARD_MIN_MODULE_MM
         if not ok:
             text += f" – zu klein (mindestens {dm.HARD_MIN_MODULE_MM:.1f} mm)"
         elif module < dm.MIN_MODULE_MM:
             text += f" – unter {dm.MIN_MODULE_MM:.1f} mm evtl. schlecht lesbar"
-        total = s.total_mm(code)
-        if total > min(WORK_WIDTH_MM, WORK_HEIGHT_MM):
-            text += f" – mit Ruhezone {total:.0f} mm, größer als die Arbeitsfläche"
+        tw, th = s.total(code)
+        if not code.square:
+            text += f", Höhe {s.size_mm * code.rows / code.size:.1f} mm"
+        if tw > WORK_WIDTH_MM or th > WORK_HEIGHT_MM:
+            text += f" – mit Ruhezone {tw:.0f} × {th:.0f} mm, größer als die Arbeitsfläche"
             ok = False
         if not self.fill.isChecked() and not self._active_fills:
             text += " – Achtung: aktive Ebene füllt nicht, es würden nur Umrisse gelasert"
@@ -127,11 +144,11 @@ def centered(spec: dm.DataMatrixSpec, center: tuple[float, float] | None = None,
              code: dm.DataMatrix | None = None) -> dm.DataMatrixSpec:
     """Spec with X/Y so that the symbol (incl. quiet zone) is centred on ``center``."""
     s = spec.normalized()
-    code = code or dm.encode(s.text, s.symbol)
-    total = s.total_mm(code)
+    code = code or s.encode()
+    tw, th = s.total(code)
     cx, cy = center or (WORK_WIDTH_MM / 2.0, WORK_HEIGHT_MM / 2.0)
-    x = min(max(0.0, cx - total / 2.0), max(0.0, WORK_WIDTH_MM - total))
-    y = min(max(0.0, cy - total / 2.0), max(0.0, WORK_HEIGHT_MM - total))
+    x = min(max(0.0, cx - tw / 2.0), max(0.0, WORK_WIDTH_MM - tw))
+    y = min(max(0.0, cy - th / 2.0), max(0.0, WORK_HEIGHT_MM - th))
     return replace(s, x=x, y=y)
 
 
@@ -144,7 +161,7 @@ def insert_datamatrix(editor, spec: dm.DataMatrixSpec, fill_layer: bool = False,
     """
     doc = editor.document
     s = spec.normalized()
-    code = dm.encode(s.text, s.symbol)
+    code = s.encode()
     s = centered(s, center, code)
     active = doc.active_layer or (doc.layers[0] if doc.layers else None)
     layer = None

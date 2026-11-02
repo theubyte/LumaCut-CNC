@@ -33,12 +33,12 @@ def build_shapes(spec, layer_id: str) -> list:
     elif kind == "datamatrix":
         from . import datamatrix as dm
         from .datamatrix_qt import centered
-        code = dm.encode(s.text, s.symbol)
+        code = s.encode()
         shapes = dm.datamatrix_shapes(centered(s, None, code), layer_id, code)
     elif kind == "barcode":
         from . import barcode
         from .barcode_qt import glyph_fn
-        code = barcode.encode(s.symbology, s.data)
+        code = s.encode()
         shapes = barcode.barcode_shapes(barcode.centered(s, None, code), layer_id, code,
                                         glyph_fn(s.font_family))
     else:
