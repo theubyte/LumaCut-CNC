@@ -199,7 +199,10 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   aktive Ebene nicht, legt der Dialog standardmäßig eine Ebene „QR-Code“ mit Schraffur 0,1 mm an.
   Ein Rückgängig-Schritt. Code: `src/lumacut_job/qr.py`, `qr_qt.py` (ohne Zusatzbibliothek).
 - **Barcode** („Barcode einfügen…“, *Alt+C*, Menü „Auftrag“ und Design-Menü): Strichcode
-  **Code 128** (druckbares ASCII, Zeichensatz B/C automatisch und kürzest möglich, Prüfsumme mod 103),
+  **Code 128** (ASCII, Zeichensatz A/B/C automatisch und kürzest möglich, Prüfsumme mod 103;
+  Steuerzeichen für Scanner – Tab, Enter, GS … – über die Option „Steuerzeichen als \t \r \n \g
+  \xHH eingeben“), **GS1-128** (Eingabe als Elementstring „(01)09501101530003(17)261231(10)AB-12“:
+  feste Längen, Ziffern und Prüfziffern werden geprüft, FNC1 automatisch, Klartext mit Klammern),
   **EAN-13**, **EAN-8** und **UPC-A** (Prüfziffer wird ergänzt oder geprüft – falsche Prüfziffer
   → Fehlermeldung mit der richtigen). Modulbreite 0,1–5 mm (Hinweis unter 0,15 mm: Laserfleck),
   Höhe 2–300 mm, Ruhezone (Code 128: 10 Module je Seite, EAN/UPC nach Norm), optional Klartext
@@ -212,11 +215,15 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   auf 360 × 340 mm, wird nichts eingefügt. Code: `src/lumacut_job/barcode.py`, `barcode_qt.py`
   (ohne Zusatzbibliothek).
 - **Data Matrix** („Data Matrix…“, *Alt+X*, Menü „Auftrag“ und Design-Menü): 2D-Code nach
-  ISO/IEC 16022 (ECC 200), alle quadratischen Größen 10 × 10 bis 144 × 144 (automatisch die
-  kleinste passende oder Mindestgröße wählbar), ASCII-Kodierung mit Ziffernpaaren (z. B.
-  Seriennummern), Umlaute nach ISO 8859-1, sonstiges Unicode als UTF-8 (ECI 26), Reed-Solomon
-  mit Block-Verschachtelung. Größe, Ruhezone (Standard 2 Module), Invertiert und Ebenen-Logik
-  wie beim QR-Code, ein Rückgängig-Schritt. Code: `src/lumacut_job/datamatrix.py`,
+  ISO/IEC 16022 (ECC 200), alle quadratischen Größen 10 × 10 bis 144 × 144 und die sechs
+  rechteckigen 8 × 18 bis 16 × 48 (für schmale Flächen; „Automatisch quadratisch“, „Automatisch
+  rechteckig“ oder Mindestgröße wählbar). Die Kodierung wählt automatisch die kürzeste Mischung aus
+  ASCII (Ziffernpaare), C40 (Großbuchstaben), Text (Kleinbuchstaben), X12 und Base 256 – lange
+  Texte passen so in kleinere Symbole. Umlaute und Unicode als UTF-8 mit ECI 26 (Handy-Scanner
+  lesen sie so zuverlässig), Reed-Solomon mit Block-Verschachtelung. Option **GS1-Daten**
+  („(01)…(17)…(10)…“, Prüfung wie bei GS1-128) erzeugt GS1 DataMatrix mit FNC1. „Breite“ ist die
+  Breite ohne Ruhezone (bei Rechtecken ergibt sich die Höhe), Ruhezone (Standard 2 Module),
+  Invertiert und Ebenen-Logik wie beim QR-Code, ein Rückgängig-Schritt. Code: `src/lumacut_job/datamatrix.py`,
   `datamatrix_qt.py` (ohne Zusatzbibliothek).
 - **Bogentext** („Bogentext…“, *Alt+B*): Text entlang eines Kreises als Vektor-Umrisse (ein
   Polygon je Buchstabe, gruppiert); oben/außen im Uhrzeigersinn oder unten/innen, Radius, Winkel,

@@ -747,3 +747,76 @@ Still open:
 - Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
 - Windows hardware tests (cut options, PDF import, trace, QR / barcode / Data Matrix readability
   incl. edited codes, park-corner refusal, rebuilt exe).
+
+## 20. Status update 2026-11-02 (review round 13)
+
+Done this round (Review; nothing from Canvas, Machine / Scan Probe or Materials touched):
+
+- **GS1 element strings** (new `lumacut_job/gs1.py`, shared by GS1-128 and GS1 DataMatrix; LightBurn
+  and XCS both offer GS1 codes for product / batch labels). Input is the printed form
+  „(01)09501101530003(17)261231(10)AB-12“: AIs of 2–4 digits (fixed AI length for known prefixes),
+  predefined fixed-length fields (01, 11–17, 20, 31xx … per GS1 table) must have exactly that length
+  and digits only, mod-10 check digits are verified for (00), (01), (02), (410)–(417) with the
+  correct digit in the German message, GS1 character set 82, variable fields ≤ 90 characters.
+  FNC1 is inserted first and after every variable-length field except the last.
+- **Barcode dialog** (Alt+C):
+  - **Code 128 set A** – the encoder now uses a shortest-path choice over sets A / B / C, so ASCII
+    control characters are encodable (printable text gives the same codewords as before). New
+    checkbox „Steuerzeichen als \t \r \n \g \xHH eingeben (Code 128)“ (opt-in, stored in the spec,
+    so existing texts with a backslash are unchanged): \t Tab, \n LF, \r CR, \e ESC, \g GS, \0 NUL,
+    \xHH, \\ – for scanners that should send Tab / Enter. Human-readable line leaves control
+    characters out.
+  - **GS1-128** as new symbology: Start C/B + FNC1, FNC1 separators, max. 48 data characters,
+    human-readable text with AIs in parentheses, quiet zone 10 modules.
+- **Data Matrix dialog** (Alt+X):
+  - **Encodation modes**: shortest mix of ASCII, C40, Text, X12 and Base 256 by a dynamic program
+    over the input (ASCII wins ties, C40/Text/X12 in whole triples, Unlatch dropped when the data ends
+    exactly at the symbol capacity, Base 256 with 255-state randomisation and 1/2-byte length).
+    Typical gains: upper- or lower-case text one to two sizes smaller (e.g. 104 capitals: 40×40 →
+    36×36). EDIFACT is not used (rarely shorter for engraving texts).
+  - Non-ASCII text (incl. umlauts) is now UTF-8 behind ECI 26: zxing-based phone scanners showed
+    short ISO 8859-1 umlaut texts as Shift JIS („ﾄﾖ“) – found while fuzzing.
+  - **Rectangular sizes** 8×18, 8×32, 12×26, 12×36, 16×36, 16×48 (multi-region placement, own
+    finder / separator pattern); combo „Automatisch quadratisch“, „Automatisch rechteckig“ or a
+    minimum size (next larger one of the same shape; too long for 16×48 → hint to use a square size).
+    „Breite“ is the width; the height follows from the module size; info line shows the height.
+  - **GS1 DataMatrix**: checkbox „GS1-Daten“, FNC1 first (codeword 232), separators inside C40 / Text
+    via Shift 2, decoded by zxing-cpp with symbology identifier ]d2.
+  - Both options are part of the generator metadata, so „Code bearbeiten…“ (Alt+E) reopens rectangular,
+    GS1 and Code 128 control-character codes with their settings.
+
+Tests:
+
+- `tests/test_gs1.py` (17): check digits, parse / HRI / whitespace, FNC1 sequence, 14 German error
+  messages.
+- `tests/test_barcode.py` (+9): escapes and their errors, set-A codewords, unchanged set B for printable
+  text, GS1-128 codewords / limits / spec normalisation; zxing-cpp decodes control characters (]C0, raw
+  text) and GS1-128 (]C1, HRI) from the rendered vector shapes; dialog checkbox and GS1 validation.
+- `tests/test_datamatrix.py` (+29): ISO „AIM“ C40 / Text codewords, X12, Base 256 randomisation and
+  2-byte length, smaller symbols than pure ASCII (zxing-decoded), 9 mixed-mode texts decoded as square and
+  rectangle, all 6 rectangular sizes (structure, Reed-Solomon syndromes, zxing at capacity), symbol keys
+  and auto rectangle, dropped trailing Unlatch (16×48 only fits because of it, decodes), GS1 DataMatrix
+  (]d2, incl. FNC1 inside a C40 run), rectangular spec size / shapes / centring / describe, dialog,
+  window insert with G-code through the Pi guard and edit round trip of a rectangular GS1 code.
+- A random fuzz of 2 400 texts (all modes, square and rectangular) decoded with zxing-cpp without a
+  mismatch (not part of the suite).
+
+Full suite: 1245 passed, 3 skipped (before: 1190 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter – decide if wanted.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: PDF417 and Aztec are not covered; Data Matrix EDIFACT mode and DMRE sizes
+  (ISO 21471) not supported; no GS1 Digital Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Windows hardware tests (cut options, PDF import, trace, QR / barcode / Data Matrix readability
+  incl. edited, rectangular and GS1 codes with a real scanner, park-corner refusal, rebuilt exe).
