@@ -1,11 +1,18 @@
-"""1D barcodes (Code 128, EAN-13, EAN-8, UPC-A) as vector objects for engraving.
+"""1D barcodes (Code 128, GS1-128, EAN-13, EAN-8, UPC-A) as vector objects for engraving.
 
 Pure Python, Qt-free, no third-party encoder. Matches the "Barcode" tool of
 LightBurn and xTool Creative Space:
 
-* **Code 128** – printable ASCII (32–126). Code sets B and C are chosen per
-  character by a shortest-encoding search (digit pairs in C, everything else
-  in B, switching with CODE B / CODE C), modulo-103 check symbol.
+* **Code 128** – ASCII. Code sets A, B and C are chosen per character by a
+  shortest-encoding search (digit pairs in C, control characters in A,
+  everything else in B, switching with CODE A / B / C), modulo-103 check
+  symbol. Control characters (Tab, CR, LF, GS …) are typed as escape
+  sequences when ``escapes`` is on (:func:`unescape`).
+* **GS1-128** – Code 128 with a leading FNC1 and the GS1 element string
+  typed as "(01)09501101530003(17)261231(10)AB-12" (:mod:`lumacut_job.gs1`):
+  fixed-length fields and check digits are verified, variable-length fields
+  are terminated with FNC1, the human-readable line shows the AIs in
+  parentheses.
 * **EAN-13 / EAN-8 / UPC-A** – digits only. Without the check digit
   (12 / 7 / 11 digits) it is appended; with it (13 / 8 / 12) it is verified.
 
@@ -34,10 +41,13 @@ from typing import Callable
 from lumacut_canvas.model import Shape, new_id
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
+from . import gs1
 from .arctext import Glyph
+from .gs1 import FNC1
 
-SYMBOLOGIES = ("code128", "ean13", "ean8", "upca")
-LABELS = {"code128": "Code 128", "ean13": "EAN-13", "ean8": "EAN-8", "upca": "UPC-A"}
+SYMBOLOGIES = ("code128", "gs1_128", "ean13", "ean8", "upca")
+LABELS = {"code128": "Code 128", "gs1_128": "GS1-128", "ean13": "EAN-13", "ean8": "EAN-8",
+          "upca": "UPC-A"}
 # Narrow bar (module) width. Below WARN_MODULE_MM a diode spot (~0.08–0.1 mm)
 # visibly widens the bars and scanners start to fail; below HARD_MIN it is refused.
 MODULE_RANGE = (0.1, 5.0)
@@ -49,9 +59,10 @@ SHRINK_RANGE = (0.0, 0.3)            # bar width reduction, mm (spot compensatio
 INVERT_MARGIN_MM = 1.0               # inverted: engraved border above/below, at least …
 INVERT_MARGIN_MODULES = 5            # … or this many modules
 MAX_CODE128_CHARS = 80
+MAX_GS1_128_CHARS = 48               # GS1 General Specifications 5.4.1: 48 data characters
 
 # Minimum quiet zones in modules (left, right): ISO/IEC 15417 / 15420.
-QUIET_MODULES = {"code128": (10, 10), "ean13": (11, 7), "ean8": (7, 7), "upca": (9, 9)}
+QUIET_MODULES = {"code128": (10, 10), "gs1_128": (10, 10), "ean13": (11, 7), "ean8": (7, 7), "upca": (9, 9)}
 
 # --- Code 128 -----------------------------------------------------------------
 # Bar/space widths of the symbol values 0–105 (bar first), ISO/IEC 15417 Table 1.
@@ -70,7 +81,12 @@ _C128 = (
     "113141", "114131", "311141", "411131", "211412", "211214", "211232",
 )
 _C128_STOP = "2331112"
-CODE_C, CODE_B, START_B, START_C, STOP = 99, 100, 104, 105, 106
+CODE_C, CODE_B, CODE_A, FNC1_VALUE, START_A, START_B, START_C, STOP = \
+    99, 100, 101, 102, 103, 104, 105, 106
+START = (START_A, START_B, START_C)           # by set: 0 = A, 1 = B, 2 = C
+SWITCH = (CODE_A, CODE_B, CODE_C)
+# Escape sequences for control characters in Code 128 (``escapes`` on).
+ESCAPES = {"\\": 92, "t": 9, "n": 10, "r": 13, "e": 27, "g": 29, "0": 0}
 
 # --- EAN / UPC -----------------------------------------------------------------
 _EAN_L = ("0001101", "0011001", "0010011", "0111101", "0100011",
@@ -92,59 +108,110 @@ def _widths_to_modules(widths: str, dark_first: bool = True) -> str:
     return "".join(out)
 
 
-def _c128_pairs(text: str, i: int) -> bool:
-    return i + 1 < len(text) and text[i].isdigit() and text[i + 1].isdigit() \
-        and text[i].isascii() and text[i + 1].isascii()
+def unescape(text: str) -> str:
+    """Control characters from escape sequences: ``\\t`` Tab, ``\\n`` LF, ``\\r`` CR,
+    ``\\e`` ESC, ``\\g`` GS (group separator), ``\\0`` NUL, ``\\xHH`` any ASCII code,
+    ``\\\\`` backslash. ``ValueError`` (German) on an unknown or incomplete sequence."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        nxt = text[i + 1:i + 2].lower()
+        if nxt == "x":
+            hx = text[i + 2:i + 4]
+            if len(hx) != 2 or any(c not in "0123456789abcdefABCDEF" for c in hx) or int(hx, 16) > 127:
+                raise ValueError(f"Escape „\\x{hx}“ ungültig – \\x00 bis \\x7F erwartet")
+            out.append(chr(int(hx, 16)))
+            i += 4
+        elif nxt in ESCAPES:
+            out.append(chr(ESCAPES[nxt]))
+            i += 2
+        else:
+            raise ValueError(f"Unbekanntes Escape „\\{text[i + 1:i + 2]}“ – erlaubt: \\t \\n \\r "
+                             "\\e \\g \\0 \\xHH \\\\")
+    return "".join(out)
+
+
+def readable(text: str) -> str:
+    """Human-readable line: control characters left out."""
+    return "".join(c for c in text if 32 <= ord(c) < 127)
 
 
 def code128_values(text: str) -> list[int]:
-    """Symbol values incl. start, check symbol and stop for ``text``.
-
-    Shortest encoding over code sets B and C (dynamic programming); on equal
-    length the encoder stays in its current set and starts in B.
-    """
+    """Symbol values incl. start, check symbol and stop for ``text`` (ASCII 0–127)."""
     text = str(text)
     if not text:
         raise ValueError("Kein Text für den Barcode")
     if len(text) > MAX_CODE128_CHARS:
         raise ValueError(f"Text zu lang für Code 128 (höchstens {MAX_CODE128_CHARS} Zeichen)")
-    bad = sorted({c for c in text if not 32 <= ord(c) <= 126})
+    bad = sorted({c for c in text if ord(c) > 127})
     if bad:
         shown = ", ".join(repr(c) for c in bad[:5])
         raise ValueError(f"Code 128 erlaubt nur ASCII-Zeichen ohne Umlaute – nicht erlaubt: {shown}")
-    n = len(text)
+    return code128_sequence_values([ord(c) for c in text])
+
+
+def _c128_digit(c) -> bool:
+    return 48 <= c <= 57
+
+
+def _c128_unit(seq, i: int, s: int):
+    """(symbol value(s), length) for the unit at ``seq[i]`` in set ``s`` (0 A, 1 B, 2 C) or None."""
+    c = seq[i]
+    if c == FNC1:
+        return FNC1_VALUE, 1
+    if s == 2:
+        if i + 1 < len(seq) and _c128_digit(c) and seq[i + 1] != FNC1 and _c128_digit(seq[i + 1]):
+            return (c - 48) * 10 + seq[i + 1] - 48, 2
+        return None
+    if s == 0:
+        return (c + 64, 1) if c < 32 else ((c - 32, 1) if c < 96 else None)
+    return (c - 32, 1) if 32 <= c <= 127 else None
+
+
+def code128_sequence_values(seq: list[int]) -> list[int]:
+    """Symbol values incl. start, check symbol and stop for a sequence of codes.
+
+    ``seq`` holds character codes 0–127 and :data:`gs1.FNC1`. Shortest encoding
+    over code sets A, B and C (dynamic programming over the position and the
+    current set); on equal length the encoder stays in its set, a new set is
+    tried in the order B, C, A and the symbol starts in B unless C or A is
+    shorter – so printable text without control characters is encoded
+    exactly as with sets B and C only.
+    """
+    n = len(seq)
     inf = float("inf")
-    # cost[i][s]: symbols needed for text[i:] while in set s (0 = B, 1 = C).
-    cost = [[inf, inf] for _ in range(n + 1)]
-    step: list[list[tuple | None]] = [[None, None] for _ in range(n + 1)]
-    cost[n] = [0, 0]
+    cost = [[inf] * 3 for _ in range(n + 1)]
+    step: list[list[tuple | None]] = [[None] * 3 for _ in range(n + 1)]
+    cost[n] = [0, 0, 0]
     for i in range(n - 1, -1, -1):
-        pair = _c128_pairs(text, i)
-        # in B: one character, or CODE C + pair
-        opts_b = [(1 + cost[i + 1][0], ("B", i + 1, 0))]
-        if pair:
-            opts_b.append((2 + cost[i + 2][1], ("toC", i + 2, 1)))
-        cost[i][0], step[i][0] = min(opts_b, key=lambda o: o[0])
-        # in C: a digit pair, or CODE B + one character
-        opts_c = []
-        if pair:
-            opts_c.append((1 + cost[i + 2][1], ("C", i + 2, 1)))
-        opts_c.append((2 + cost[i + 1][0], ("toB", i + 1, 0)))
-        cost[i][1], step[i][1] = min(opts_c, key=lambda o: o[0])
-    s = 1 if _c128_pairs(text, 0) and cost[0][1] < cost[0][0] else 0
-    values = [START_C if s else START_B]
+        for s in range(3):
+            best, choice = inf, None
+            for t in (s,) + tuple(x for x in (1, 2, 0) if x != s):
+                u = _c128_unit(seq, i, t)
+                if u is None:
+                    continue
+                c = (0 if t == s else 1) + 1 + cost[i + u[1]][t]
+                if c < best:
+                    best, choice = c, (t, u[0], u[1])
+            cost[i][s], step[i][s] = best, choice
+    s = 1
+    for t in (2, 0):
+        if cost[0][t] < cost[0][s]:
+            s = t
+    if cost[0][s] == inf:
+        raise ValueError("Text lässt sich nicht als Code 128 codieren")
+    values = [START[s]]
     i = 0
     while i < n:
-        kind, nxt, ns = step[i][s]
-        if kind == "B":
-            values.append(ord(text[i]) - 32)
-        elif kind == "C":
-            values.append(int(text[i:i + 2]))
-        elif kind == "toC":
-            values += [CODE_C, int(text[i:i + 2])]
-        else:  # toB
-            values += [CODE_B, ord(text[i]) - 32]
-        i, s = nxt, ns
+        t, value, length = step[i][s]
+        if t != s:
+            values.append(SWITCH[t])
+        values.append(value)
+        i, s = i + length, t
     values.append(code128_checksum(values))
     values.append(STOP)
     return values
@@ -235,15 +302,28 @@ class Barcode:
         return out
 
 
-def encode(symbology: str, data: str) -> Barcode:
+def encode(symbology: str, data: str, escapes: bool = False) -> Barcode:
+    """Encode ``data``; ``escapes``: Code 128 escape sequences for control characters."""
     sym = str(symbology).lower()
     if sym not in SYMBOLOGIES:
         raise ValueError(f"Unbekannter Barcode-Typ „{symbology}“")
     if sym == "code128":
-        values = code128_values(data)
+        text = unescape(str(data)) if escapes else str(data)
+        values = code128_values(text)
         mods = code128_modules(values)
-        return Barcode(sym, str(data), mods, tuple(values),
-                       (TextSegment(str(data), 0, len(mods)),))
+        shown = readable(text)
+        return Barcode(sym, text, mods, tuple(values),
+                       (TextSegment(shown, 0, len(mods)),) if shown else ())
+    if sym == "gs1_128":
+        elements = gs1.parse(data)
+        seq = gs1.sequence(elements)
+        if len(seq) - 1 > MAX_GS1_128_CHARS:
+            raise ValueError(f"Zu viele Zeichen für GS1-128 ({len(seq) - 1}, höchstens "
+                             f"{MAX_GS1_128_CHARS} inkl. Datenbezeichnern und Trennzeichen)")
+        values = code128_sequence_values(seq)
+        mods = code128_modules(values)
+        text = gs1.hri(elements)
+        return Barcode(sym, text, mods, tuple(values), (TextSegment(text, 0, len(mods)),))
     d = complete_digits(sym, data)
     mods = ean_modules(sym, d)
     if sym == "ean13":
@@ -277,6 +357,7 @@ class BarcodeSpec:
     shrink_mm: float = 0.0            # bar width reduction against the burn spread
     font_family: str = "Segoe UI"     # human-readable line (outlines via Qt)
     invert: bool = False              # laser the background (spaces, quiet zone, margin), not the bars
+    escapes: bool = False             # Code 128: \\t, \\r, \\n, \\g, \\xHH … are control characters
     x: float = 0.0                    # top-left incl. quiet zone
     y: float = 0.0
 
@@ -291,7 +372,12 @@ class BarcodeSpec:
                            text_mm=float(_clamp(float(self.text_mm), *TEXT_RANGE)),
                            shrink_mm=float(_clamp(float(self.shrink_mm), *SHRINK_RANGE)),
                            font_family=str(self.font_family or "Segoe UI"),
-                           invert=bool(self.invert), x=float(self.x), y=float(self.y))
+                           invert=bool(self.invert), escapes=bool(self.escapes) and sym == "code128",
+                           x=float(self.x), y=float(self.y))
+
+    def encode(self) -> "Barcode":
+        """The encoded barcode for this spec."""
+        return encode(self.symbology, self.data, self.escapes and self.symbology == "code128")
 
     def margin_mm(self) -> float:
         """Engraved light border above and below the code in inverted mode (0 otherwise)."""
@@ -399,7 +485,7 @@ def barcode_shapes(spec: BarcodeSpec, layer_id: str, code: Barcode | None = None
     does not fit the work area.
     """
     s = spec.normalized()
-    code = code or encode(s.symbology, s.data)
+    code = code or s.encode()
     check(s, code)
     group = new_id()
     if s.invert:
@@ -461,7 +547,7 @@ def centered(spec: BarcodeSpec, center: tuple[float, float] | None = None,
              code: Barcode | None = None) -> BarcodeSpec:
     """Spec with X/Y so that the barcode (incl. quiet zone) is centred on ``center``."""
     s = spec.normalized()
-    code = code or encode(s.symbology, s.data)
+    code = code or s.encode()
     w, h = s.size_mm(code)
     cx, cy = center or (WORK_WIDTH_MM / 2.0, WORK_HEIGHT_MM / 2.0)
     x = min(max(0.0, cx - w / 2.0), max(0.0, WORK_WIDTH_MM - w))
@@ -473,16 +559,17 @@ def describe(spec: BarcodeSpec, code: Barcode) -> str:
     s = spec.normalized()
     w, h = s.size_mm(code)
     extra = ""
-    if code.symbology == "code128":
+    if code.values:
         extra = f", {len(code.values)} Symbole"
     elif code.text:
         extra = f", Prüfziffer {code.text[-1]}"
     inv = ", invertiert" if s.invert else ""
-    return (f"{LABELS[code.symbology]} „{code.text}“: {len(code.modules)} Module{extra}, "
+    shown = s.data if s.escapes and code.symbology == "code128" else code.text
+    return (f"{LABELS[code.symbology]} „{shown}“: {len(code.modules)} Module{extra}, "
             f"{w:.1f} × {h:.1f} mm inkl. Ruhezone{inv}")
 
 
 __all__ = ["Barcode", "BarcodeSpec", "LABELS", "SYMBOLOGIES", "TextSegment", "bar_rects",
            "barcode_shapes", "centered", "check", "code128_checksum", "code128_modules",
-           "code128_values", "complete_digits", "describe", "ean_check_digit", "ean_modules",
-           "encode", "text_rings"]
+           "code128_sequence_values", "code128_values", "complete_digits", "describe",
+           "ean_check_digit", "ean_modules", "encode", "readable", "text_rings", "unescape"]

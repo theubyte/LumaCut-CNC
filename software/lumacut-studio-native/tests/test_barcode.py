@@ -535,3 +535,83 @@ def test_window_inverted_one_undo_step_and_gcode(win):
     pi_check(gcode)
     win.canvas.undo_stack.undo()
     assert len(doc.layers) == n_layers and len(doc.shapes) == n_shapes
+
+
+# --- Code 128 set A / control characters, GS1-128 (review round 13) ---------------------
+def test_unescape_and_errors():
+    assert bc.unescape(r"A\tB\r\n\e\g\0\x7F\\") == "A\tB\r\n\x1b\x1d\x00\x7f\\"
+    assert bc.unescape("plain") == "plain"
+    assert bc.readable("A\tB\r") == "AB"
+    for bad, msg in ((r"\q", "Unbekanntes Escape"), ("x\\", "Unbekanntes Escape"),
+                     (r"\x8", "ungültig"), (r"\x80", "ungültig"), (r"\xZZ", "ungültig")):
+        with pytest.raises(ValueError, match=msg):
+            bc.unescape(bad)
+
+
+def test_code128_set_a_for_control_characters():
+    assert bc.code128_values("A\tB") == [103, 33, 73, 34, 75, 106]          # Start A, HT = 73
+    assert bc.code128_values("ab\r") == [104, 65, 66, 101, 77, 88, 106]     # B, Code A for CR
+    assert bc.code128_values("LumaCut")[0] == bc.START_B                     # printable unchanged
+    with pytest.raises(ValueError, match="nur ASCII"):
+        bc.code128_values("Ä")
+    code = bc.encode("code128", r"LC\t42\r", escapes=True)
+    assert code.values[0] == bc.START_A and code.text == "LC\t42\r"
+    assert bc.encode("code128", r"a\tb").values[1:4] == (65, 60, 84)         # escapes off: "\" "t"
+
+
+def test_gs1_128_values_and_errors():
+    code = bc.encode("gs1_128", "(01)09501101530003(10)AB-12")
+    assert code.values[:2] == (bc.START_C, bc.FNC1_VALUE)
+    assert code.text == "(01)09501101530003(10)AB-12"
+    v = bc.encode("gs1_128", "(10)AB(21)7").values
+    assert v.count(bc.FNC1_VALUE) == 2                                       # leading + separator
+    with pytest.raises(ValueError, match="richtig wäre 3"):
+        bc.encode("gs1_128", "(01)09501101530004")
+    with pytest.raises(ValueError, match="höchstens 48"):
+        bc.encode("gs1_128", "(10)" + "A" * 20 + "(21)" + "B" * 30)
+    s = bc.BarcodeSpec("gs1_128", "(10)X", escapes=True).normalized()
+    assert s.escapes is False and bc.BarcodeSpec("code128", "x", escapes=True).normalized().escapes
+
+
+def _zxing_raw(img):
+    zxingcpp = pytest.importorskip("zxingcpp")
+    return [(r.text, r.symbology_identifier)
+            for r in zxingcpp.read_barcodes(img, text_mode=zxingcpp.TextMode.Plain)]
+
+
+@pytest.mark.parametrize("data,expected", [(r"LC\t42\r", "LC\t42\r"), (r"\x01ab\g12", "\x01ab\x1d12"),
+                                           (r"PART\n0815\\x", "PART\n0815\\x")])
+def test_control_characters_decode(qapp, data, expected):
+    spec = bc.BarcodeSpec("code128", data, module_mm=0.33, height_mm=12.0, show_text=False,
+                          escapes=True, x=5, y=5)
+    img, _ = _render(bc.barcode_shapes(spec, "L1"), px=10.0)
+    assert _zxing_raw(img) == [(expected, "]C0")]
+
+
+@pytest.mark.parametrize("data", ["(01)09501101530003(17)261231(10)AB-12", "(10)LOT7(21)SN-0815"])
+def test_gs1_128_decodes_as_gs1(qapp, data):
+    from lumacut_job.barcode_qt import glyph_fn
+    spec = bc.BarcodeSpec("gs1_128", data, module_mm=0.33, height_mm=12.0, x=5, y=5)
+    img, _ = _render(bc.barcode_shapes(spec, "L1", glyph_fn=glyph_fn("Sans")), px=10.0)
+    zxingcpp = pytest.importorskip("zxingcpp")
+    got = [(r.text, r.symbology_identifier) for r in zxingcpp.read_barcodes(img)]
+    assert got == [(data, "]C1")]                                            # HRI with AIs
+
+
+def test_dialog_escapes_and_gs1(qapp):
+    from lumacut_canvas.model import Layer
+    from lumacut_job.barcode_qt import BarcodeDialog
+    dlg = BarcodeDialog(active_layer=Layer("Gravur", fill_mode="hatch"))
+    assert dlg.escapes.isEnabled() and not dlg.escapes.isChecked()
+    dlg.data.setText(r"LC\t42")
+    dlg.escapes.setChecked(True)
+    assert dlg.ok_button.isEnabled() and dlg.spec().escapes
+    dlg.data.setText(r"LC\q")
+    assert not dlg.ok_button.isEnabled() and "Escape" in dlg.info.text()
+    dlg.kind.setCurrentIndex(bc.SYMBOLOGIES.index("gs1_128"))
+    assert not dlg.escapes.isEnabled() and not dlg.spec().escapes
+    dlg.data.setText("(01)09501101530003(10)AB-12")
+    assert dlg.ok_button.isEnabled() and dlg.spec().symbology == "gs1_128"
+    dlg.data.setText("(01)09501101530004")
+    assert not dlg.ok_button.isEnabled() and "richtig wäre 3" in dlg.info.text()
+    dlg.deleteLater()

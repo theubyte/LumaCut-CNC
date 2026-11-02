@@ -23,10 +23,12 @@ from .qr_qt import FILL_INTERVAL_MM, layer_fills
 
 FILL_LAYER_NAME = "Barcode"
 PLACEHOLDERS = {"code128": "Text oder Nummer, z. B. LC-2026-0815",
+                "gs1_128": "(AI)Wert, z. B. (01)09501101530003(17)261231(10)AB-12",
                 "ean13": "12 Ziffern (Prüfziffer wird ergänzt) oder 13",
                 "ean8": "7 Ziffern (Prüfziffer wird ergänzt) oder 8",
                 "upca": "11 Ziffern (Prüfziffer wird ergänzt) oder 12"}
-EXAMPLES = {"code128": "LumaCut", "ean13": "400638133393", "ean8": "9638507", "upca": "03600029145"}
+EXAMPLES = {"code128": "LumaCut", "gs1_128": "(01)09501101530003(10)AB-12",
+            "ean13": "400638133393", "ean8": "9638507", "upca": "03600029145"}
 
 
 def glyph_fn(family: str):
@@ -57,8 +59,15 @@ class BarcodeDialog(QDialog):
         for key in barcode.SYMBOLOGIES:
             self.kind.addItem(barcode.LABELS[key], key)
         self.kind.setCurrentIndex(barcode.SYMBOLOGIES.index(s.symbology))
-        self.kind.setToolTip("Code 128: beliebiger ASCII-Text. EAN/UPC: Artikelnummern (nur Ziffern)")
+        self.kind.setToolTip("Code 128: beliebiger ASCII-Text. GS1-128: GS1-Datenbezeichner in "
+                             "Klammern, z. B. (01) GTIN, (17) Verfallsdatum, (10) Charge. "
+                             "EAN/UPC: Artikelnummern (nur Ziffern)")
         self.data = QLineEdit(s.data)
+        self.escapes = QCheckBox("Steuerzeichen als \\t \\r \\n \\g \\xHH eingeben (Code 128)")
+        self.escapes.setChecked(s.escapes)
+        self.escapes.setToolTip("Für Scanner, die z. B. Tab oder Enter senden sollen: \\t Tab, "
+                                "\\r Enter (CR), \\n Zeilenvorschub, \\g Gruppentrenner (GS), "
+                                "\\e Escape, \\xHH beliebiges ASCII-Zeichen, \\\\ Backslash")
         self.module = _mm((barcode.HARD_MIN_MODULE_MM, barcode.MODULE_RANGE[1]), s.module_mm,
                           "Breite des schmalsten Strichs (Modul). Unter "
                           f"{barcode.WARN_MODULE_MM:.2f} mm verlaufen die Striche mit dem Laserfleck")
@@ -89,6 +98,7 @@ class BarcodeDialog(QDialog):
         self._active_fills = fills
         form.addRow("Typ", self.kind)
         form.addRow("Inhalt", self.data)
+        form.addRow("", self.escapes)
         form.addRow("Modulbreite", self.module)
         form.addRow("Strichhöhe", self.height)
         form.addRow("", self.quiet)
@@ -111,7 +121,7 @@ class BarcodeDialog(QDialog):
         self.data.textChanged.connect(self._update)
         for w in (self.module, self.height, self.text_mm, self.shrink):
             w.valueChanged.connect(self._update)
-        for w in (self.quiet, self.show_text, self.fill, self.invert):
+        for w in (self.quiet, self.show_text, self.fill, self.invert, self.escapes):
             w.toggled.connect(self._update)
         self.font_box.currentFontChanged.connect(self._update)
         self._kind_changed(keep=True)
@@ -119,9 +129,10 @@ class BarcodeDialog(QDialog):
     def _kind_changed(self, *_args, keep: bool = False) -> None:
         sym = self.kind.currentData()
         self.data.setPlaceholderText(PLACEHOLDERS[sym])
+        self.escapes.setEnabled(sym == "code128")
         if not keep:
             try:
-                barcode.encode(sym, self.data.text())
+                barcode.encode(sym, self.data.text(), self.escapes.isChecked() and sym == "code128")
             except ValueError:
                 self.data.setText(EXAMPLES[sym])   # old content does not fit the new type
         self._update()
@@ -133,7 +144,8 @@ class BarcodeDialog(QDialog):
             quiet_zone=self.quiet.isChecked(), show_text=self.show_text.isChecked(),
             text_mm=self.text_mm.value(), shrink_mm=self.shrink.value(),
             font_family=self.font_box.currentFont().family(),
-            invert=self.invert.isChecked()).normalized()
+            invert=self.invert.isChecked(),
+            escapes=self.escapes.isChecked() and self.kind.currentData() == "code128").normalized()
 
     def fill_layer(self) -> bool:
         return self.fill.isChecked()
@@ -148,7 +160,7 @@ class BarcodeDialog(QDialog):
                                "Striche um diesen Betrag schmaler machen – gleicht die "
                                "Verbreiterung durch den Laserfleck aus (typisch 0,05–0,1 mm)")
         try:
-            code = barcode.encode(s.symbology, s.data)
+            code = s.encode()
             barcode.check(barcode.centered(s, code=code), code)
         except ValueError as exc:
             self.info.setText(str(exc))
@@ -173,7 +185,7 @@ def insert_barcode(editor, spec: barcode.BarcodeSpec, fill_layer: bool = False,
     """
     doc = editor.document
     s = spec.normalized()
-    code = barcode.encode(s.symbology, s.data)
+    code = s.encode()
     s = barcode.centered(s, center, code)
     active = doc.active_layer or (doc.layers[0] if doc.layers else None)
     layer = None
