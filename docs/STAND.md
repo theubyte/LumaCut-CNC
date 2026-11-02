@@ -348,6 +348,11 @@ Voraussetzungen:
       war der Kurzschluss. Ersatz: STM32F103RET6 aus Waschmaschinen-Platine
       (gleiches LQFP-64, mehr Flash/RAM), danach per ST-Link V2 an der
       SWD-Leiste entsperren + BTT-Bootloader, Firmware wie gehabt (RC-Build).
+      **02.11. abends:** RET6 eingelötet, per ST-Link V2 (WinUSB via Zadig,
+      xPack OpenOCD) gelesen: ID 0x10036414, 512 KB, kein Lese-/Schreibschutz.
+      Komplett gelöscht, BTT-Bootloader SKR Mini MZ (Sicherung GadgetAngel,
+      15 520 B, sha256 78fe4c2f…0e9c2ed4) an 0x08000000 geschrieben, Verify OK.
+      Nächster Schritt: marlin-59 SKR (sha256 db1c9a8e…) ab 0x08007000.
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
       31.10., SHA-256 `96ca4fc6…6a9`).
