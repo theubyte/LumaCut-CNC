@@ -375,8 +375,8 @@ Voraussetzungen:
       danach im Diodentest über R1 1,35 V / Sperrrichtung OL → lebt. Laser
       flackerte, sobald PA1 angeschlossen war, obwohl Relais aus und M5
       (Pi-Status) → Rot hängt nicht hinter Relais-NO? prüfen. MASCHINE.md
-      korrigiert: PA1 liegt am SERVOS-Header (Marlin SERVO0_PIN), nicht an
-      PT-DET (PC12). PA2 ist TX2 (Serial 2 aktiv) → nicht verwenden.
+      korrigiert: PA1 liegt am BL_Touch-Header (Pin 3 von 5; Marlin
+      SERVO0_PIN), nicht an PWR-DET (PC12). PA2 ist TX2 (Serial 2 aktiv) → nicht verwenden.
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
       31.10., SHA-256 `96ca4fc6…6a9`).

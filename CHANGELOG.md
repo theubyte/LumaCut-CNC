@@ -4,7 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-03
 
-- **Doku-Fehler Laser-PWM am SKR:** PA1 liegt am Stecker **SERVOS** (5 V, GND, PA1), nicht an PT-DET. PT-DET ist PC12, PA2 ist die serielle Sendeleitung zum TFT-Stecker. MASCHINE.md ist korrigiert.
+- **Doku-Fehler Laser-PWM am SKR:** PA1 liegt am Stecker **BL_Touch** (GND, 5 V, PA1, GND, PC14), nicht an PWR-DET. PT-DET ist PC12, PA2 ist die serielle Sendeleitung zum TFT-Stecker. MASCHINE.md ist korrigiert.
 
 ## 2026-11-02
 

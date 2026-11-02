@@ -15,7 +15,7 @@ Ausgänge laut `firmware/marlin/build.py` (`PIN_PATCH`):
 
 | Funktion | Anschluss | STM32 | Befehl |
 |---|---|---|---|
-| Laser PWM | SERVOS-Header (3-polig: 5 V, GND, PA1; über Optokoppler) – **nicht** PT-DET (= PC12) und nicht TFT (PA2 = TX2) | PA1 | `M3 I`, `G1 … S0–255`, `M5 I` |
+| Laser PWM | BL_Touch-Header (5-polig: GND, 5 V, **PA1**, GND, PC14; PA1 + GND daneben, über Optokoppler) – **nicht** PWR-DET (= PC12) und nicht die TFT-Leiste direkt darunter (PA2 = TX2) | PA1 | `M3 I`, `G1 … S0–255`, `M5 I` |
 | Laser-24-V-Versorgung + Lüfter | FAN1-Klemme | PC6 (Marlin FAN0) | `M106 P0 S255` / `M107 P0` (vom Pi gesteuert) |
 | Licht (24-V-LED-Streifen, dimmbar) | HE0 | PC8 | `M355 S1 P0–255` (Hardware-PWM TIM8 ~1,1 kHz), `M355 S0` aus; ältere Firmware: `M7`/`M9` |
 | Abluft | BED | PC9 | `M8` an, `M9` aus |
