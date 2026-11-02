@@ -1,4 +1,5 @@
-"""Dialog „Schnittoptionen der Ebene“: Kerf-Versatz, Haltestege, An-/Abfahrt.
+"""Dialog „Schnittoptionen der Ebene“: Kerf-Versatz, Haltestege, An-/Abfahrt,
+Überschnitt und Perforation.
 
 Bearbeitet die Ebenen-Felder aus :data:`lumacut_canvas.model.CUT_LAYER_DEFAULTS`
 als *einen* Undo-Schritt (``SetLayerAttrsCommand``). Die Werte wirken im Planer
@@ -12,7 +13,8 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpin
 
 from lumacut_canvas.commands import SetLayerAttrsCommand
 from lumacut_canvas.model import (CUT_LAYER_DEFAULTS, CUT_LAYER_FIELDS, KERF_RANGE, LEAD_RANGE,
-                                  TAB_COUNT_RANGE, TAB_SPACING_RANGE, TAB_WIDTH_RANGE, Layer)
+                                  OVERCUT_RANGE, PERF_RANGE, TAB_COUNT_RANGE, TAB_SPACING_RANGE,
+                                  TAB_WIDTH_RANGE, Layer)
 
 
 def _dspin(rng, value, step, suffix=" mm", special="", decimals=2):
@@ -53,10 +55,21 @@ class CutOptionsDialog(QDialog):
         self.lead_arc = QCheckBox("als Bogen (tangential)")
         self.lead_arc.setChecked(layer.lead_in_arc)
         self.lead_out = _dspin(LEAD_RANGE, layer.lead_out_mm, 0.5, special="aus")
+        self.overcut = _dspin(OVERCUT_RANGE, layer.overcut_mm, 0.1, special="aus")
+        self.overcut.setToolTip("Geschlossene Konturen über den Startpunkt hinaus weiter schneiden, "
+                                "damit kein Faden stehen bleibt (z. B. 0,5–1 mm)")
+        self.perf_cut = _dspin(PERF_RANGE, layer.perf_cut_mm, 0.1, special="aus")
+        self.perf_cut.setToolTip("Perforation: so viel schneiden, dann die Lücke mit Laser aus "
+                                 "überspringen (Reiß- und Falzlinien). 0,1–0,3 mm ergibt eine Punktlinie.")
+        self.perf_skip = _dspin(PERF_RANGE, layer.perf_skip_mm, 0.1)
+        self.perf_skip.setToolTip("Perforation: Länge der Lücke ohne Laser")
+        self.perf_cut.valueChanged.connect(self._update_enabled)
         for label, w in (("Kerf-Versatz", self.kerf), ("Haltestege Anzahl", self.tab_count),
                          ("Haltesteg-Breite", self.tab_width), ("Haltesteg-Abstand", self.tab_spacing),
                          ("Anfahrt (Lead-in)", self.lead_in), ("", self.lead_arc),
-                         ("Abfahrt (Lead-out)", self.lead_out)):
+                         ("Abfahrt (Lead-out)", self.lead_out), ("Überschnitt", self.overcut),
+                         ("Perforation Schnitt", self.perf_cut),
+                         ("Perforation Lücke", self.perf_skip)):
             f.addRow(label, w)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel
                               | QDialogButtonBox.RestoreDefaults)
@@ -65,6 +78,10 @@ class CutOptionsDialog(QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         f.addRow(bb)
+        self._update_enabled()
+
+    def _update_enabled(self) -> None:
+        self.perf_skip.setEnabled(self.perf_cut.value() > 0)
 
     def restore_defaults(self) -> None:
         d = CUT_LAYER_DEFAULTS
@@ -75,12 +92,16 @@ class CutOptionsDialog(QDialog):
         self.lead_in.setValue(d["lead_in_mm"])
         self.lead_arc.setChecked(d["lead_in_arc"])
         self.lead_out.setValue(d["lead_out_mm"])
+        self.overcut.setValue(d["overcut_mm"])
+        self.perf_cut.setValue(d["perf_cut_mm"])
+        self.perf_skip.setValue(d["perf_skip_mm"])
 
     def values(self) -> dict:
         return {"kerf_mm": self.kerf.value(), "tab_count": self.tab_count.value(),
                 "tab_width_mm": self.tab_width.value(), "tab_spacing_mm": self.tab_spacing.value(),
                 "lead_in_mm": self.lead_in.value(), "lead_in_arc": self.lead_arc.isChecked(),
-                "lead_out_mm": self.lead_out.value()}
+                "lead_out_mm": self.lead_out.value(), "overcut_mm": self.overcut.value(),
+                "perf_cut_mm": self.perf_cut.value(), "perf_skip_mm": self.perf_skip.value()}
 
 
 def apply_cut_options(editor, layer_id: str, values: dict) -> bool:
@@ -108,4 +129,8 @@ def summary(layer: Layer) -> str:
         parts.append(f"Anfahrt {layer.lead_in_mm:g} mm" + (" Bogen" if layer.lead_in_arc else ""))
     if layer.lead_out_mm:
         parts.append(f"Abfahrt {layer.lead_out_mm:g} mm")
+    if layer.overcut_mm:
+        parts.append(f"Überschnitt {layer.overcut_mm:g} mm")
+    if layer.perf_cut_mm > 0 and layer.perf_skip_mm > 0:
+        parts.append(f"Perforation {layer.perf_cut_mm:g}/{layer.perf_skip_mm:g} mm")
     return ", ".join(parts)
