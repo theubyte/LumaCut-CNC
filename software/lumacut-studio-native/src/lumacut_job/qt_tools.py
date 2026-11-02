@@ -121,6 +121,10 @@ class JobTools(QObject):
                                         "Strichcode (Code 128, EAN-13/-8, UPC-A) als gefüllte "
                                         "Vektorstriche einfügen")
         self.barcode_action.setObjectName("barcode_action")
+        self.datamatrix_action = self._add("Data Matrix…", self.datamatrix, "Alt+X",
+                                           "2D-Code Data Matrix (ECC 200) als gefüllte "
+                                           "Vektorflächen einfügen")
+        self.datamatrix_action.setObjectName("datamatrix_action")
         self.arc_action = self._add("Bogentext…", self.arc_text, "Alt+B",
                                     "Text entlang eines Kreisbogens als Vektorpfade einfügen "
                                     "(ausgewählter Text wird übernommen)")
@@ -343,6 +347,30 @@ class JobTools(QObject):
         layer = doc.shape(ids[0]).layer_id if ids else ""
         name = doc.layer(layer).name if layer else ""
         self._msg(f"Barcode eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
+        return ids
+
+    def datamatrix(self, spec=None, fill_layer: bool | None = None) -> list[str]:
+        """Insert a Data Matrix ECC 200 symbol (one undo step); default: active layer."""
+        from .datamatrix_qt import DataMatrixDialog, insert_datamatrix
+        from .qr_qt import layer_fills
+        doc = self.editor.document
+        active = doc.active_layer or (doc.layers[0] if doc.layers else None)
+        if spec is None:
+            dlg = DataMatrixDialog(self.window, active_layer=active)
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, fill_layer = dlg.spec(), dlg.fill_layer()
+        if fill_layer is None:
+            fill_layer = not layer_fills(active)
+        try:
+            ids = insert_datamatrix(self.editor, spec, fill_layer=fill_layer)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "Data Matrix", str(exc))
+            self._msg(f"Data Matrix: {exc}")
+            return []
+        layer = doc.shape(ids[0]).layer_id if ids else ""
+        name = doc.layer(layer).name if layer else ""
+        self._msg(f"Data Matrix eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
         return ids
 
     def arc_text(self, spec=None, replace: bool | None = None) -> list[str]:
