@@ -304,8 +304,9 @@ Im Ebenen-Panel unter **Füllung der Ebene**: *Füllmodus* (Keine / Schraffur /
 Kreuzschraffur / Offset-Füllung), *Linienabstand* in mm (0,05–20), *Winkel* in ° (0 = waagerecht,
 gegen den Uhrzeigersinn; Kreuzschraffur fügt +90° hinzu, beim Einschalten
 mit 0° wird 45° vorgeschlagen), *Kontur mitlasern* und *Bidirektional*
-(abwechselnde Zeilenrichtung, kürzere Leerfahrten). Jede Änderung ist ein
-Undo-Schritt.
+(abwechselnde Zeilenrichtung, kürzere Leerfahrten), *Füllen* (welche Objekte
+gemeinsam gefüllt werden) und – nur bei Offset-Füllung – *Von innen nach
+außen*. Jede Änderung ist ein Undo-Schritt.
 
 - Gefüllt werden geschlossene Objekte: Rechteck, Ellipse, Polygon, Text
   (auch gedreht und gruppiert). Löcher (Buchstaben, Ringe) bleiben frei
@@ -319,7 +320,20 @@ Undo-Schritt.
   als eine Schraffur mit vielen kurzen Zeilen. *Winkel* und *Bidirektional*
   sind dann ausgegraut. Stellen schmaler als ein Linienabstand bleiben ohne
   Ring (dort lasert die Kontur, wenn *Kontur mitlasern* an ist); mehr als
-  5000 Ringe werden abgelehnt.
+  5000 Ringe werden abgelehnt. Getrennte Inseln (z. B. die Buchstaben eines
+  Texts) werden nacheinander ganz gefüllt, die nächstgelegene zuerst – der Kopf
+  pendelt nicht für jede Tiefe zwischen den Buchstaben. *Von innen nach außen*
+  dreht die Ring-Reihenfolge je Insel um (Kante zuletzt); die gewählte
+  Reihenfolge wird im G-Code nie umgekehrt.
+- **Füllen** (wie LightBurn „Fill shapes individually / Fill groups together /
+  Fill all shapes at once“), gilt für Schraffur, Kreuzschraffur und
+  Offset-Füllung: *Jedes Objekt einzeln* (Standard, wie bisher), *Gruppen
+  zusammen* (alle Objekte einer obersten Gruppe als eine Fläche, ungruppierte
+  einzeln) oder *Alle Objekte zusammen* (die ganze Ebene als eine Fläche).
+  Gemeinsam gefüllte Objekte folgen der Gerade-Ungerade-Regel: ein Kreis in
+  einem Rechteck wird zum Loch, auch wenn es zwei getrennte Objekte sind, und
+  überlappende Teile bleiben frei. „Alle zusammen“ schraffiert eine Textzeile
+  oder mehrere Objekte in einem Zug statt Objekt für Objekt.
 - G-Code: je Durchgang zuerst die Füllung (G0 an den Zeilenanfang, G1 mit
   Leistung/Geschwindigkeit der Ebene), danach die Kontur; Durchgangs-Hook
   (Tiefe je Durchgang) gilt auch für reine Füll-Ebenen. Ohne Füllung ist der
@@ -328,7 +342,7 @@ Undo-Schritt.
   Ebenenfarbe (Overlay `fill_preview`, nicht anklickbar). `export_svg` /
   `export_png` zeichnen sie mit `show_fill=True`.
 - Datei: neue Felder (`fill_mode`, `line_interval_mm`, `hatch_angle`,
-  `hatch_bidirectional`, `hatch_outline`) werden nur geschrieben, wenn sie vom
+  `hatch_bidirectional`, `hatch_outline`, `fill_grouping`, `offset_inside_out`) werden nur geschrieben, wenn sie vom
   Standard abweichen; alte Dateien laden unverändert.
 - Grenzen: kein Overscan; Schnittfuge (Kerf) wirkt nur auf Konturen; mehr als
   20 000 Linien je Richtung werden abgelehnt (Linienabstand vergrößern).

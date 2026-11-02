@@ -958,3 +958,82 @@ Still open:
 - Windows hardware tests (offset fill on wood / card, cut options incl. overcut and perforation,
   PDF import, trace, QR / barcode / Data Matrix readability incl. edited, rectangular and GS1 codes
   with a real scanner, park-corner refusal, rebuilt exe).
+
+## 23. Status update 2026-11-02 (review round 16)
+
+Done this round (Review; nothing from Machine / Scan Probe or Materials touched; from the Canvas
+area only two new rows in the fill box of `layers_panel.py`, and `export.py` / `fill_preview.py`
+now take the fill blocks from one shared function):
+
+- Fresh audit against LightBurn / XCS (verified in code): offset fill, dithering, material test,
+  start-from / job origin, cut options, codes and arc text are present. Open fill gaps were
+  LightBurn's per-layer fill grouping (*Fill shapes individually / Fill groups together / Fill all
+  shapes at once*) – every object was filled on its own, so a circle drawn inside a rectangle was
+  engraved twice instead of becoming a hole, overlapping objects burnt the overlap twice, and a
+  row of separate objects was hatched object by object – and the offset fill order (rings only
+  outside in, and with several islands the head bounced between them at every depth). No user
+  decision needed, pure planner work, so both were picked.
+- **Füllen** (`Layer.fill_grouping`, `hatch.FILL_GROUPINGS`): *Jedes Objekt einzeln* (default,
+  output byte-identical to before), *Gruppen zusammen* (all fillable objects of the same top-level
+  group form one area, ungrouped objects stay single) and *Alle Objekte zusammen* (the whole layer
+  is one area). Applies to hatch, crosshatch and offset fill. Objects filled together follow the
+  even-odd rule like LightBurn: nested objects become holes, overlaps stay free.
+  `export.layer_fill_blocks(doc, layer)` returns `(shape ids, segments)` per block and feeds
+  `job_layers`, the canvas fill preview and the SVG / PNG export (fill-only outlines are skipped
+  for every object of a non-empty block); `shape_fill_segments` stays as the single-object helper.
+- **Offset fill order**: islands of one fill area (e.g. the letters of a text) are now filled one
+  after another, nearest island first, instead of depth by depth across all islands (far fewer
+  long travels). New layer option *Von innen nach außen* (`Layer.offset_inside_out`) reverses the
+  ring order per island (edge last). Offset blocks are marked `JobLayer.fill_fixed_order`, so
+  `order_fill_blocks` never runs them backwards (before, a block could be reversed when its
+  innermost ring was nearer to the head, silently turning the order inside out); hatch blocks
+  still reverse to the nearer end.
+- **Ebenen-Panel**: combo „Füllen“ (enabled when the layer fills) and check box „Von innen nach
+  außen“ (enabled only for offset fill), one undo step each; the layer summary shows „alle
+  zusammen“ / „Gruppen zusammen“. Saved as `fill_grouping` / `offset_inside_out` only when not
+  default (older builds ignore them and fill individually / outside in).
+
+Tests:
+
+- `tests/test_fill_grouping.py` (14): groupings and labels; layer defaults, normalization and file
+  round trip; individual = one block per object; together = frame with hole and overlap free (exact
+  hatch length, nothing inside the hole); groups = per top-level group, nested sub-groups,
+  ungrouped objects single; offset fill together follows the hole; open shapes / no fill; inside
+  out ring order per island and in `fill_segments`, hatch unaffected; offset blocks never reversed
+  in the G-code, hatch blocks still reversible; default output unchanged; G-code, planner, estimate
+  and Pi guard for hatch / crosshatch / offset together; panel combo and check box enable state,
+  undo and summary; canvas preview length; PNG export with hole and overlap free.
+- `tests/test_offset_fill.py`: the islands test now expects island-by-island order.
+
+Full suite: 1292 passed, 3 skipped (before: 1278 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter and CSV merge
+  (LightBurn „Variable Text“ / „Merge CSV“) – decide if wanted; today only the batch
+  „Seriennummern…“ exists.
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: no overscan; no per-object fill order optimisation across blocks (blocks run in object
+  order, hatch blocks only flip to the nearer end); fill grouping does not cross layers.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: PDF417 and Aztec are not covered; Data Matrix EDIFACT mode and DMRE sizes
+  (ISO 21471) not supported; no GS1 Digital Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (fill grouping and inside-out offset fill on wood / card, offset fill,
+  cut options incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix
+  readability incl. edited, rectangular and GS1 codes with a real scanner, park-corner refusal,
+  rebuilt exe).
