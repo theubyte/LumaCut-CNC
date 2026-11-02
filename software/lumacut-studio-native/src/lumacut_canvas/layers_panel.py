@@ -61,6 +61,9 @@ def layer_summary(layer: Layer) -> str:
     text = f"{layer.power:g} % · {layer.speed:g} mm/min · {layer.passes}×"
     if layer.fill_mode != "none":
         text += f" · {_hatch.FILL_LABELS[layer.fill_mode]} {_mm(layer.line_interval_mm)} mm"
+        if layer.fill_grouping != "individual":
+            text += " · " + ("alle zusammen" if layer.fill_grouping == "together"
+                             else "Gruppen zusammen")
     return f"{text} · {layer.material}" if layer.material else text
 
 
@@ -390,6 +393,19 @@ class LayersPanel(QWidget):
             spin.setKeyboardTracking(False)
             spin.setAlignment(Qt.AlignRight)
             spin.valueChanged.connect(lambda v, a=attr: self._param_edited(a, v))
+        self.fill_grouping = QComboBox()
+        for g in _hatch.FILL_GROUPINGS:
+            self.fill_grouping.addItem(_hatch.FILL_GROUPING_LABELS[g], g)
+        self.fill_grouping.setToolTip(
+            "Welche Objekte der Ebene als eine Fläche gefüllt werden: einzeln, je Gruppe oder "
+            "alle zusammen. Gemeinsam gefüllt gilt die Gerade-Ungerade-Regel – ein Objekt "
+            "innerhalb eines anderen wird zum Loch, Überlappungen bleiben frei")
+        self.fill_grouping.activated.connect(self._fill_grouping_chosen)
+        self.fill_inside_out = QCheckBox("Von innen nach außen")
+        self.fill_inside_out.setToolTip("Offset-Füllung: innerste Kontur zuerst, die Kante "
+                                        "zuletzt (Standard: von außen nach innen)")
+        self.fill_inside_out.toggled.connect(
+            lambda on: self._fill_flag_toggled("offset_inside_out", on))
         self.fill_outline = QCheckBox("Kontur mitlasern")
         self.fill_outline.setToolTip("Aus: nur die Füllung lasern (z. B. Text gravieren)")
         self.fill_bidir = QCheckBox("Bidirektional")
@@ -399,8 +415,10 @@ class LayersPanel(QWidget):
         form.addRow("Füllmodus", self.fill_mode)
         form.addRow("Linienabstand", self.fill_interval)
         form.addRow("Winkel", self.fill_angle)
+        form.addRow("Füllen", self.fill_grouping)
         form.addRow(self.fill_outline)    # untereinander: passt auch in schmale Seitenleisten
         form.addRow(self.fill_bidir)
+        form.addRow(self.fill_inside_out)
         return box
 
     def _show_fill(self, layer: Layer) -> None:
@@ -409,12 +427,15 @@ class LayersPanel(QWidget):
         self.fill_angle.setValue(layer.hatch_angle)
         self.fill_outline.setChecked(layer.hatch_outline)
         self.fill_bidir.setChecked(layer.hatch_bidirectional)
+        self.fill_grouping.setCurrentIndex(max(0, self.fill_grouping.findData(layer.fill_grouping)))
+        self.fill_inside_out.setChecked(layer.offset_inside_out)
         on = layer.fill_mode != "none"
         lines = layer.fill_mode in _hatch.LINE_FILL_MODES   # Offset-Füllung: kein Winkel
-        for w in (self.fill_interval, self.fill_outline):
+        for w in (self.fill_interval, self.fill_outline, self.fill_grouping):
             w.setEnabled(on)
         for w in (self.fill_angle, self.fill_bidir):
             w.setEnabled(lines)
+        self.fill_inside_out.setEnabled(layer.fill_mode == "offset")
 
     def _fill_mode_chosen(self, index: int) -> None:
         layer = self.doc.active_layer
@@ -427,11 +448,21 @@ class LayersPanel(QWidget):
         self.stack.push(SetLayerAttrsCommand(self.doc, layer.id, attrs,
                                              f"Füllmodus: {_hatch.FILL_LABELS[mode]}"))
 
+    def _fill_grouping_chosen(self, index: int) -> None:
+        layer = self.doc.active_layer
+        grouping = self.fill_grouping.itemData(index)
+        if self._updating or layer is None or grouping == layer.fill_grouping:
+            return
+        self.stack.push(SetLayerAttrsCommand(
+            self.doc, layer.id, {"fill_grouping": grouping},
+            f"Füllen: {_hatch.FILL_GROUPING_LABELS[grouping]}"))
+
     def _fill_flag_toggled(self, attr: str, on: bool) -> None:
         layer = self.doc.active_layer
         if self._updating or layer is None or getattr(layer, attr) == on:
             return
-        label = "Kontur mitlasern" if attr == "hatch_outline" else "Bidirektional"
+        label = {"hatch_outline": "Kontur mitlasern", "hatch_bidirectional": "Bidirektional",
+                 "offset_inside_out": "Offset von innen nach außen"}[attr]
         self.stack.push(SetLayerAttrsCommand(self.doc, layer.id, {attr: bool(on)}, label))
 
     @staticmethod
