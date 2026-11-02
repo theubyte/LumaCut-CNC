@@ -540,3 +540,67 @@ Still open:
 - The three pre-existing test failures above (Machine / Scan Probe).
 - Windows hardware test of cut options, PDF import, image trace (incl. centre line and „Glätten“),
   QR code readability on real material and the rebuilt exe – needs a Windows machine with the laser.
+
+## 17. Status update 2026-11-02 (review round 10)
+
+Done in this round (`lumacut_job` only, no new runtime dependencies):
+
+- **1D barcode generator** (`lumacut_job/barcode.py`, pure Python): **Code 128** (printable ASCII
+  32–126; code sets B/C chosen by a shortest-path search – digit runs go to C
+  where that saves symbols, ties stay in the current set; checksum mod 103, stop with termination
+  bar), **EAN-13**, **EAN-8** and **UPC-A** (L/G/R patterns, parity from the first digit, guard
+  bars). The check digit is appended if missing or validated if given (wrong digit → German error
+  naming the correct one). Verified offline against python-barcode 0.16.1: identical module
+  strings for all EAN/UPC cases and for Code 128 wherever python-barcode picks the optimal set
+  sequence (it is not optimal for e.g. „X12345“ / „ab1234cd“ – ours is equal or shorter), all
+  decoded with zxing-cpp.
+- Output: every bar (adjacent dark modules merged) is one filled rectangle `polygon`, all bars and
+  text glyphs in one group; filled by the layer's hatch like the QR code. Quiet zone per standard
+  (Code 128 10 modules, EAN-13 11/7, EAN-8 7/7, UPC-A 9/9), optional human-readable text below as
+  vector outlines (EAN/UPC: digits in the standard slots, guard bars extended; Code 128: centred,
+  shrunk if wider than the code), optional bar width reduction for the laser spot. Module width
+  0.1–5 mm (error below 0.1 mm, hint below 0.15 mm), height 2–300 mm; error if the code incl.
+  quiet zone and text does not fit 360 × 340 mm.
+- Dialog „Barcode einfügen“ (Auftrag menu + Design menu, **Alt+C**): type, content (example
+  replaced when switching to a type it does not fit), module width, height, quiet zone, text +
+  size + font, bar correction, info line (modules, symbols / check digit, size, warnings). Same
+  layer logic as the QR code: active layer if it fills, otherwise pre-checked new layer „Barcode“
+  with 0.1 mm hatch; centred, selected, one undo step, locked layer → message.
+- Pre-existing failures fixed (stale Studio tests only, Pi unchanged): `test_machine_probe_reach.py`
+  and `test_probe_reach.py` now take the probe head maximum as `TRAVEL_XY_MM − 10` (Pi 9ae8577),
+  `test_origin_end_to_end.py` uses the real `PARK_CORNER_MM` for `check_extent` (refusal at origin
+  (30, 30), acceptance right of the park corner).
+
+Tests: `tests/test_barcode.py` (31) – module strings identical to python-barcode references,
+Code 128 table / checksum (Wikipedia example), set switching (8 cases) and optimality against a
+brute force, EAN/UPC check digits and errors, EAN structure, bar geometry (widths, positions,
+quiet zone, no overlaps, bar correction), EAN text slots and guards, limits / errors / normalisation,
+read-back of the rendered vector bars scanline by scanline (6 codes), decoding with zxing-cpp of
+the rendered shapes incl. text (5) and of the 0.1 mm hatch lines (skipped without zxing-cpp, now
+in `requirements-dev.txt`), dialog, window action (Alt+C, no clash, Design + Auftrag menu), active
+layer / new fill layer, one undo step, wrong check digit / locked layer messages, G-code through
+the Pi guard. Full suite: 1052 passed, 2 skipped (before: 1012 passed, 2 failed, 1 collection
+error).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter – decide if wanted.
+- Trace: true Bézier objects in the document (editable curve handles) would need a model change
+  (Canvas); oblique thick crossings still split into two nearby junctions with a short bridge line.
+- QR / barcode / arc text are static vector objects (not re-editable parameters after insertion;
+  re-create via the dialog). **DataMatrix** and other 2D codes (PDF417, Aztec) still not covered;
+  barcode has no „Invertiert“ mode yet (QR has one); GS1-128 (FNC1) / Code 128 set A
+  (control characters) not supported.
+- **Park corner in Studio** (decision needed): since Pi 9ae8577 the Pi refuses powered moves inside
+  the park corner (X0–78 / Y0–35 for head v6), but the Studio canvas still assumes the 30 mm
+  L-shaped safe zone and does not know the corner – a motif in the canvas top-right corner (e.g.
+  at the default user origin (30, 30)) is accepted by Studio and refused by the Pi at send time.
+  Studio should read the park corner from the Pi and show / check it (Canvas / Machine).
+- Studio `PROBE_HEAD_MAX` (380, 360) follows the *default* travel 390 × 370; the Pi now derives it
+  from the configured travel (`/api/settings`, measured 370 × 360 on the owner's machine), so the
+  Studio reach preview can be too optimistic there (Machine / Scan Probe).
+- Windows hardware test of cut options, PDF import, image trace (incl. centre line and „Glätten“),
+  QR code and barcode readability on real material and the rebuilt exe – needs a Windows machine
+  with the laser.

@@ -191,6 +191,17 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Module werden zu gefüllten Polygonen (gruppiert) und mit der Ebenen-Füllung graviert: Füllt die
   aktive Ebene nicht, legt der Dialog standardmäßig eine Ebene „QR-Code“ mit Schraffur 0,1 mm an.
   Ein Rückgängig-Schritt. Code: `src/lumacut_job/qr.py`, `qr_qt.py` (ohne Zusatzbibliothek).
+- **Barcode** („Barcode einfügen…“, *Alt+C*, Menü „Auftrag“ und Design-Menü): Strichcode
+  **Code 128** (druckbares ASCII, Zeichensatz B/C automatisch und kürzest möglich, Prüfsumme mod 103),
+  **EAN-13**, **EAN-8** und **UPC-A** (Prüfziffer wird ergänzt oder geprüft – falsche Prüfziffer
+  → Fehlermeldung mit der richtigen). Modulbreite 0,1–5 mm (Hinweis unter 0,15 mm: Laserfleck),
+  Höhe 2–300 mm, Ruhezone (Code 128: 10 Module je Seite, EAN/UPC nach Norm), optional Klartext
+  darunter als Vektor-Umrisse (Schrift wählbar; EAN/UPC mit verlängerten Randzeichen),
+  Strichkorrektur (Striche schmaler um den Laserfleck). Jeder Strich ist ein gefülltes Rechteck
+  (benachbarte Module zusammengefasst), alles gruppiert; Füllung wie beim QR-Code (aktive Ebene
+  oder neue Ebene „Barcode“ mit Schraffur 0,1 mm), ein Rückgängig-Schritt. Passt der Code nicht
+  auf 360 × 340 mm, wird nichts eingefügt. Code: `src/lumacut_job/barcode.py`, `barcode_qt.py`
+  (ohne Zusatzbibliothek).
 - **Bogentext** („Bogentext…“, *Alt+B*): Text entlang eines Kreises als Vektor-Umrisse (ein
   Polygon je Buchstabe, gruppiert); oben/außen im Uhrzeigersinn oder unten/innen, Radius, Winkel,
   Bezugspunkt Mitte/Anfang/Ende, Zeichenabstand, Schrift/Fett/Kursiv. Ist genau ein Textobjekt
