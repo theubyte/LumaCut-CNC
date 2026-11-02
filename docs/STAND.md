@@ -358,7 +358,10 @@ Voraussetzungen:
       SKR meldet sich am Pi (LeafLabs Maple, /dev/ttyACM0), `op=connect` OK,
       M115: Marlin 2.1.2.9 vom 01.11. 20:47 (marlin-59). `M122` ist jetzt als
       reine Abfrage freigegeben (`op=report`, Diagnose-Knopf „Treiber M122“).
-      Offen: M122 mit 24 V (Treiber nach Heißluft), dann Achsen.
+      M122 mit 24 V (02.11.): X, Y, Z „connection OK“ – Treiber überlebt.
+      E-Treiber (früher warm) ist in der Firmware nicht angelegt, ungeprüft.
+      Offen: SKR einbauen, Laser-Minus direkt ans Netzteil, Achsen mit Go
+      testen, danach Relais/PWM ohne Laser prüfen.
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
       31.10., SHA-256 `96ca4fc6…6a9`).
