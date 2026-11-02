@@ -50,7 +50,7 @@ nicht) und **Verbinden** (nur sichtbar, solange keine Verbindung besteht).
 **Mehr ▸** (standardmäßig zu) blendet alles Erweiterte ein: Ablauf, Scan &
 Probe, Maschine (Adresse, Joggen, Homing, Abtasten, Fokus, Rahmen …),
 „Manuell senden“ (Design senden / hochgeladenen Auftrag starten), die
-Werkzeugleiste „Auftrag“ (Schnittoptionen mit Kerf, Haltestege, Anfahrt;
+Werkzeugleiste „Auftrag“ (Schnittoptionen mit Kerf, Haltestege, Anfahrt, Überschnitt, Perforation;
 Rahmen, Zeit, Materialtest …) sowie in der Ebenenliste Leistung/Tempo/Durchgänge
 und Füllung. Die Auftrags-Aktionen sind zusätzlich im Menü **Auftrag** und über
 ihre Tastenkürzel erreichbar, auch wenn „Mehr“ zu ist. NOT-AUS bleibt immer
@@ -170,7 +170,8 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   fahren den Umriss mit ausgeschaltetem Laser ab (`op=frame`). Der gesendete
   Auftrag bleibt geladen: senden → Rahmen → starten, ohne neu zu senden.
 - **Schnittoptionen je Ebene** („Schnittoptionen…“, *Alt+K*, aktive Ebene, ein Undo-Schritt;
-  wirken beim Senden, Schätzen, Rahmen und „G-Code speichern“, nur auf geschlossene Konturen):
+  wirken beim Senden, Schätzen, Rahmen und „G-Code speichern“; alles außer der Perforation nur auf
+  geschlossene Konturen):
   - *Kerf-Versatz* (`kerf_mm`, −2…2 mm): positiv verschiebt den Schnitt zur Abfallseite –
     Außenkonturen wachsen, Löcher schrumpfen (Polygon-Versatz mit `shapely`, spitze Ecken).
   - *Haltestege* (`tab_count` 0–24 bzw. `tab_spacing_mm` = ein Steg je … mm Umfang,
@@ -183,8 +184,16 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     Kreuzt eine An-/Abfahrt die eigene Kontur oder ein anderes Teil (alle Ebenen), wird ein
     anderer Startpunkt bzw. die Gegenrichtung versucht, dann gekürzt, erst zuletzt weggelassen;
     weggelassene Anfahrten meldet ein Hinweis nach Senden, Schätzung und Speichern.
+  - *Überschnitt* (`overcut_mm`, 0–10 mm, wie LightBurns *Overcut*): die Kontur wird über den
+    Startpunkt hinaus weiter geschnitten, damit kein Faden stehen bleibt; mit Haltestegen endet
+    der Überschnitt 0,5 mm vor dem ersten Steg, eine Abfahrt beginnt an seinem Ende.
+  - *Perforation* (`perf_cut_mm` Schnitt / `perf_skip_mm` Lücke, je 0–50 mm, wie LightBurns
+    *Perforation Mode*): jede Linie der Ebene – auch offene Pfade, Steg-Stücke und Überschnitt –
+    wird abwechselnd geschnitten und mit Laser aus übersprungen (Reiß- und Falzlinien in Karton,
+    Abreißkanten). Kurze Schnitte (0,1–0,3 mm) ergeben eine Punktlinie (statt LightBurns
+    *Dot Mode*, der Marlin-Dwell bräuchte). An-/Abfahrten und Füllungen bleiben durchgehend.
   Code: `src/lumacut_job/cutpath.py`; die Art jedes Teilpfads (`cut`, `lead_in`, `lead_out`,
-  `tab`) steht in `JobLayer.poly_kinds` (z. B. für eine Pfadvorschau).
+  `tab`, `perf`) steht in `JobLayer.poly_kinds` (z. B. für eine Pfadvorschau).
 - **Seriennummern** („Seriennummern…“, *Alt+N*, Toolbar „Auftrag“; Stapel-Fall von LightBurns
   „Variable Text“): ersetzt das ausgewählte Textobjekt durch ein Raster nummerierter Kopien.
   Vorlage mit Platzhaltern `{n}` (Nummer), `{n:3}` (mit Nullen, `007`), `{date}` (TT.MM.JJJJ),

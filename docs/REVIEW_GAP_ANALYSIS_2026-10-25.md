@@ -820,3 +820,68 @@ Still open:
 - Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
 - Windows hardware tests (cut options, PDF import, trace, QR / barcode / Data Matrix readability
   incl. edited, rectangular and GS1 codes with a real scanner, park-corner refusal, rebuilt exe).
+
+## 21. Status update 2026-11-02 (review round 14)
+
+Done this round (Review; nothing from Canvas, Machine / Scan Probe or Materials touched – the two
+new layer fields go through the existing cut-option plumbing in `model.py` / `export.py`):
+
+- Audit of the candidates: perforation / dot mode and overcut did not exist; Variable Text exists
+  only as the batch „Seriennummern…“ (no CSV merge, no evaluation at send time); PDF417 is still
+  missing. Perforation and overcut are standard LightBurn Cut Settings options (XCS has no
+  equivalent) and matter for every diode cut, so they were picked over another symbology.
+- **Overcut** (`Layer.overcut_mm`, 0–10 mm, `lumacut_job.cutpath.overcut_path`): closed contours
+  are cut past their start point along the contour, so start and end overlap and no thread is left
+  standing (diode cuts in plywood / card often hang on exactly that spot). At most one perimeter.
+  With tabs the overcut stops 0.5 mm before the first tab (never cuts through a bridge); a
+  lead-out starts at the end of the overcut on the waste side (contour rotated to that point).
+  Open paths are unchanged.
+- **Perforation mode** (`Layer.perf_cut_mm` / `perf_skip_mm`, 0–50 mm, `cutpath.perforate`):
+  every line of the layer – closed contours, tab pieces, overcut and open paths – is cut
+  `perf_cut_mm`, then skipped `perf_skip_mm` with the laser off (G0), pattern starting at each
+  path start, rests under 0.01 mm dropped. Lead-in / lead-out and hatch fills stay continuous;
+  the lead-in still joins the first piece without G0. Pieces after a gap have the new kind `perf`
+  in `JobLayer.poly_kinds`. Short cuts (0.1–0.3 mm) give a dotted line – the practical substitute
+  for LightBurn's *Dot Mode*, which would need laser-on dwells that the inline `M3 I` mode on the
+  SKR does not fire.
+- **Dialog „Schnittoptionen“** (Alt+K): new rows „Überschnitt“ („aus“ at 0), „Perforation
+  Schnitt“ („aus“ at 0) and „Perforation Lücke“ (enabled only when perforation is on), German
+  tooltips, „Zurücksetzen“ covers them; status summary e.g. „Überschnitt 0.8 mm, Perforation
+  2.5/1.5 mm“. The fields are only written to the file when set, so older files and files without
+  the options are byte-identical; values are clamped on load. Estimate, frame, path preview
+  (parses the planner G-code) and „G-Code speichern“ follow automatically.
+
+Tests:
+
+- `tests/test_overcut_perforation.py` (16): perforation pattern on lines and around corners
+  (vertices kept), off / short / tiny rest, dot line; overcut path, rotated start, closed-only
+  overcut, overcut stops before the first tab (no bridge cut), overcut + lead-out on the waste side
+  and joined; perforation kinds incl. open paths and continuous lead-in, perforated tab pieces and
+  overcut; active flags; planner G-code through the Pi guard (cut length × 3/5, no S on G0),
+  overcut adds exactly its length without extra G0, dot mode identical in every pass; layer
+  round trip / defaults not written / clamping; dialog values, enable state, reset and summary.
+
+Full suite: 1261 passed, 3 skipped (before: 1245 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter and CSV merge
+  (LightBurn „Variable Text“ / „Merge CSV“) – decide if wanted; today only the batch
+  „Seriennummern…“ exists.
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: PDF417 and Aztec are not covered; Data Matrix EDIFACT mode and DMRE sizes
+  (ISO 21471) not supported; no GS1 Digital Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Windows hardware tests (cut options incl. overcut and perforation on card / plywood, PDF import,
+  trace, QR / barcode / Data Matrix readability incl. edited, rectangular and GS1 codes with a real
+  scanner, park-corner refusal, rebuilt exe).
