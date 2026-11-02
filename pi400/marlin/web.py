@@ -115,7 +115,8 @@ PROBE_GRID_MIN = 30.0
 EXHAUST_AFTER_RANGE = (0, 900)
 # op=report: Marlin queries that only read (transport.READ_ONLY without M400).
 REPORTS = {"M105": "Temperaturen", "M114": "Position", "M115": "Firmware",
-           "M119": "Endschalter", "M503": "Firmware-Einstellungen"}
+           "M119": "Endschalter", "M122": "Schrittmotortreiber",
+           "M503": "Firmware-Einstellungen"}
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
 JOBS.mkdir(parents=True, exist_ok=True)

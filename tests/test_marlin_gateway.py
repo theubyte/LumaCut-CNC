@@ -48,6 +48,13 @@ class GuardTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     MarlinLaserGuard().check(cmd, True)
 
+    def test_m122_driver_report_is_read_only(self):
+        self.assertEqual(MarlinLaserGuard().check("M122", True), "M122")
+        for cmd in ("M122 I", "M122 S1"):
+            with self.subTest(cmd=cmd):
+                with self.assertRaises(ValueError):
+                    MarlinLaserGuard().check(cmd, True)
+
     def test_requires_explicit_cut_power_after_rapid(self):
         g=MarlinLaserGuard()
         g.check("M3 I",True)

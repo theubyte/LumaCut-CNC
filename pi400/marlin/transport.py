@@ -44,7 +44,7 @@ PROBE_RESULT_RE = re.compile(
     re.IGNORECASE)
 WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 COMMENT = re.compile(r"\([^()]*\)")
-READ_ONLY = frozenset({"M105", "M114", "M115", "M119", "M503", "M400"})
+READ_ONLY = frozenset({"M105", "M114", "M115", "M119", "M122", "M503", "M400"})
 ERROR_PREFIXES = ("Error:", "echo:Error:", "Resend:", "rs ")
 # Anet firmware: endstops always on (Z guard, 01.11.). Marlin stops Z when
 # the switch closes outside homing/probing and reports "echo:endstops hit:

@@ -368,11 +368,11 @@ wiederholen (Abschnitt 9.2).
 
 | | |
 | --- | --- |
-| Parameter | `cmd`: genau eine der Abfragen `M105`, `M114`, `M115`, `M119`, `M503` (nur lesen, ohne Parameter) |
+| Parameter | `cmd`: genau eine der Abfragen `M105`, `M114`, `M115`, `M119`, `M122`, `M503` (nur lesen, ohne Parameter; `M122` = TMC-Treiberstatus, braucht 24 V) |
 | Vorbedingungen | **frei** |
 | Wirkung | sendet die Abfrage (Timeout 15 s); Diagnose-Seite der Web-UI |
 | Erfolg | 200 `{message, cmd, lines: [<Marlin-Antwortzeilen>]}` |
-| Fehler | 400 `Nur Abfragen: M105, M114, M115, M119, M503`; Abschnitt 1.2 |
+| Fehler | 400 `Nur Abfragen: M105, M114, M115, M119, M122, M503`; Abschnitt 1.2 |
 
 ### 4.4 `POST /api/action` – Bewegung
 

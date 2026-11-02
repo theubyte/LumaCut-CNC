@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-02
 
+- **Treiberstatus abfragbar (`M122`):** Diagnose-Seite → „Treiber M122“ bzw. `op=report cmd=M122` zeigt den Zustand der TMC2209-Treiber, nur lesend (`M122 I`/`S` bleiben gesperrt). Der reparierte SKR meldet sich am Pi mit marlin-59.
 - **SKR: Ersatzchip hat den Bootloader:** Der eingelötete STM32F103RET6 wurde per ST-Link gelesen (512 KB, kein Schutz), komplett gelöscht und mit dem BTT-Bootloader des SKR Mini MZ beschrieben, Prüfung bestanden. Danach marlin-59 per ST-Link aufgespielt, ebenfalls geprüft.
 - **SKR Mini MZ wird repariert:** Der STM32 ist ausgelötet. Ohne ihn liefert der 3,3-V-Regler an USB saubere 3,33 V, die Versorgung ist also heil und der Chip war der Kurzschluss. Ersatz ist ein STM32F103RET6 aus einer Waschmaschinen-Platine; danach BTT-Bootloader per ST-Link.
 - **Neuaufbau ohne Anet-Pads:** Das Anlöten an die Anet-Testpads geht nicht, sie sind zu klein. Vorschlag jetzt: Arduino Uno mit CNC-Shield V3 und steckbaren Schrittmotortreibern (Grbl 1.1), Laser-Relais über den ULN2003AN, Laser-PWM weiter über den Optokoppler, Laser-Minus direkt ans Netzteil.
