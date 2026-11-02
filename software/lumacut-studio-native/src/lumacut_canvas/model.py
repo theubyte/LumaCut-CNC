@@ -44,9 +44,12 @@ TAB_COUNT_RANGE = (0, 24)
 TAB_WIDTH_RANGE = (0.0, 10.0)       # mm
 TAB_SPACING_RANGE = (0.0, 500.0)    # mm, 0 = feste Anzahl
 LEAD_RANGE = (0.0, 10.0)            # mm
+OVERCUT_RANGE = (0.0, 10.0)         # mm über den Startpunkt geschlossener Konturen hinaus
+PERF_RANGE = (0.0, 50.0)            # mm Schnitt- bzw. Lückenlänge der Perforation
 CUT_LAYER_DEFAULTS = {
     "kerf_mm": 0.0, "tab_count": 0, "tab_width_mm": 1.0, "tab_spacing_mm": 0.0,
     "lead_in_mm": 0.0, "lead_in_arc": False, "lead_out_mm": 0.0,
+    "overcut_mm": 0.0, "perf_cut_mm": 0.0, "perf_skip_mm": 1.0,
 }
 CUT_LAYER_FIELDS = tuple(CUT_LAYER_DEFAULTS)
 # Vektor-Füllung je Ebene (hatch.py); nur gespeichert, wenn vom Standard abweichend.
@@ -182,6 +185,9 @@ class Layer:
     lead_in_mm: float = 0.0         # Anfahrt (Abfallseite), 0 = aus
     lead_in_arc: bool = False       # Anfahrt als Viertelkreis statt Gerade
     lead_out_mm: float = 0.0        # Abfahrt, 0 = aus
+    overcut_mm: float = 0.0         # Überschnitt geschlossener Konturen, 0 = aus
+    perf_cut_mm: float = 0.0        # Perforation: Schnittlänge, 0 = aus
+    perf_skip_mm: float = 1.0       # Perforation: Lücke (Laser aus)
     # Vektor-Füllung (siehe hatch.py / FILL_LAYER_DEFAULTS)
     fill_mode: str = "none"          # "none" | "hatch" | "crosshatch"
     line_interval_mm: float = _hatch.DEFAULT_INTERVAL_MM  # Linienabstand
@@ -211,6 +217,9 @@ class Layer:
             lead_in_mm=round(_clamp(float(self.lead_in_mm), *LEAD_RANGE), 3),
             lead_in_arc=bool(self.lead_in_arc),
             lead_out_mm=round(_clamp(float(self.lead_out_mm), *LEAD_RANGE), 3),
+            overcut_mm=round(_clamp(float(self.overcut_mm), *OVERCUT_RANGE), 3),
+            perf_cut_mm=round(_clamp(float(self.perf_cut_mm), *PERF_RANGE), 3),
+            perf_skip_mm=round(_clamp(float(self.perf_skip_mm), *PERF_RANGE), 3),
             fill_mode=self.fill_mode if self.fill_mode in _hatch.FILL_MODES else "none",
             line_interval_mm=round(_clamp(float(self.line_interval_mm), *_hatch.INTERVAL_RANGE), 3),
             hatch_angle=_hatch.normalize_angle_180(self.hatch_angle),

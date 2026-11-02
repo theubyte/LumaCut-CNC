@@ -42,8 +42,12 @@ class JobLayer:
     lead_in_mm: float = 0.0
     lead_in_arc: bool = False
     lead_out_mm: float = 0.0
+    overcut_mm: float = 0.0
+    perf_cut_mm: float = 0.0
+    perf_skip_mm: float = 1.0
     # Art je Polylinie nach der Planung ("cut", "lead_in", "lead_out", "tab" =
-    # Schnittstück nach einer Steg-Lücke); leer = alles "cut".
+    # Schnittstück nach einer Steg-Lücke, "perf" = nach einer
+    # Perforations-Lücke); leer = alles "cut".
     poly_kinds: tuple[str, ...] = ()
     # Vektor-Füllung: je gefülltem Objekt ein Block Schraffurstrecken
     # ((x0, y0), (x1, y1)) in Maschinen-mm, bereits in Fahr-Reihenfolge.

@@ -25,6 +25,18 @@ Wie LightBurn *Kerf Offset*, *Tabs/Bridges* und *Lead-In/Lead-Out*
   statt Bogen, senkrecht, kürzer, und ein anderer Startpunkt entlang der
   Kontur (Kantenmitten bzw. gleichmäßig verteilte Punkte bei Kurven, die
   nächstgelegenen zuerst). Erst dann wird sie weggelassen und gemeldet.
+* :func:`overcut_path` – LightBurn *Overcut*: geschlossene Konturen werden
+  über den Startpunkt hinaus ``overcut_mm`` weiter entlang der Kontur
+  geschnitten, damit sich Anfang und Ende sicher überlappen (kein stehen
+  gebliebener Faden am Startpunkt). Höchstens ein Umfang; mit Haltestegen
+  endet der Überschnitt 0,5 mm vor dem ersten Steg. Eine Abfahrt beginnt am
+  Ende des Überschnitts.
+* :func:`perforate` – LightBurn *Perforation Mode*: jede Schnittlinie wird
+  abwechselnd ``perf_cut_mm`` geschnitten und ``perf_skip_mm`` mit Laser aus
+  übersprungen (Reißlinien, Falzlinien in Karton, Abreißkanten). Gilt für
+  Konturen, Steg-Stücke, Überschnitt und offene Pfade; An-/Abfahrten und
+  Füllungen bleiben durchgehend. Sehr kurze Schnittlängen (0,1–0,3 mm)
+  ergeben eine Punktlinie (Ersatz für LightBurns *Dot Mode*).
 
 Alle Koordinaten sind Maschinen-mm; geschlossene Polylinien haben gleichen
 Anfangs- und Endpunkt (siehe :mod:`.planner`).
@@ -55,6 +67,9 @@ KIND_CUT = "cut"
 KIND_LEAD_IN = "lead_in"
 KIND_LEAD_OUT = "lead_out"
 KIND_TAB = "tab"          # Schnittstück, vor dem eine Steg-Lücke (Laser aus) liegt
+KIND_PERF = "perf"        # Schnittstück, vor dem eine Perforations-Lücke liegt
+MIN_PERF_PIECE_MM = 0.01  # kürzere Reststücke einer Perforation fallen weg
+OVERCUT_TAB_CLEAR_MM = 0.5  # Abstand des Überschnitt-Endes zum ersten Steg
 
 
 @dataclass
@@ -66,10 +81,18 @@ class CutOptions:
     lead_in_mm: float = 0.0
     lead_in_arc: bool = False
     lead_out_mm: float = 0.0
+    overcut_mm: float = 0.0
+    perf_cut_mm: float = 0.0     # 0 = Perforation aus
+    perf_skip_mm: float = 1.0
+
+    @property
+    def perforated(self) -> bool:
+        return self.perf_cut_mm > 0 and self.perf_skip_mm > 0
 
     @property
     def active(self) -> bool:
-        return bool(self.kerf_mm or self.lead_in_mm or self.lead_out_mm
+        return bool(self.kerf_mm or self.lead_in_mm or self.lead_out_mm or self.overcut_mm > 0
+                    or self.perforated
                     or (self.tab_width_mm > 0 and (self.tab_count > 0 or self.tab_spacing_mm > 0)))
 
     @staticmethod
@@ -485,6 +508,62 @@ def _with_leads(p: Poly, outer: bool, opts: CutOptions, blocked) -> tuple[Poly, 
     return first, None, False
 
 
+# --- Überschnitt und Perforation ----------------------------------------------
+
+def path_length(poly: Poly) -> float:
+    return sum(math.dist(a, b) for a, b in zip(poly, poly[1:]))
+
+
+def overcut_path(poly: Poly, length: float) -> Poly:
+    """Stück der geschlossenen Kontur ab ihrem Start mit ``length`` mm (≤ Umfang).
+
+    Leer, wenn ``length <= 0`` oder die Kontur nicht geschlossen ist. Der
+    erste Punkt ist der Startpunkt der Kontur (= Endpunkt des Schnitts).
+    """
+    if length <= 0 or not is_closed(poly) or len(poly) < 3:
+        return []
+    cum = _cum_lengths(poly)
+    if cum[-1] <= 1e-9:
+        return []
+    return _sub_path(poly, cum, 0.0, min(length, cum[-1]))
+
+
+def rotate_start(poly: Poly, s: float) -> Poly:
+    """Geschlossene Kontur, die bei Bogenlänge ``s`` beginnt (gleiche Laufrichtung)."""
+    cum = _cum_lengths(poly)
+    per = cum[-1]
+    if s <= 1e-9 or per - s <= 1e-9:
+        return list(poly)
+    return _sub_path(poly, cum, s, per) + _sub_path(poly, cum, 0.0, s)[1:]
+
+
+def perforate(poly: Poly, cut_mm: float, skip_mm: float) -> list[Poly]:
+    """Polylinie in Schnittstücke ``cut_mm`` mit Lücken ``skip_mm`` (Laser aus).
+
+    Das Muster beginnt am Anfang der Polylinie mit einem Schnitt; das letzte
+    Stück darf kürzer sein. Ohne gültiges Muster: die Polylinie unverändert.
+    """
+    if cut_mm <= 0 or skip_mm <= 0 or len(poly) < 2:
+        return [poly]
+    cum = _cum_lengths(poly)
+    L = cum[-1]
+    if L <= cut_mm + 1e-9:
+        return [poly]
+    period = cut_mm + skip_mm
+    pieces = []
+    k = 0
+    while True:
+        s = k * period
+        if s >= L - MIN_PERF_PIECE_MM:
+            break
+        e = min(s + cut_mm, L)
+        piece = _sub_path(poly, cum, s, e)
+        if e - s >= MIN_PERF_PIECE_MM and len(piece) >= 2:
+            pieces.append(piece)
+        k += 1
+    return pieces or [poly]
+
+
 # --- Ebene ------------------------------------------------------------------
 
 def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | None = None,
@@ -500,10 +579,17 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
     if depth is None:
         depth = nesting_depth(polys)
     tabs_on = opts.tab_width_mm > 0 and (opts.tab_count > 0 or opts.tab_spacing_mm > 0)
+
+    def emit(piece: Poly, kind: str) -> None:
+        """Schnittstück ausgeben, bei Perforation in Stücke mit Lücken zerlegt."""
+        parts = perforate(piece, opts.perf_cut_mm, opts.perf_skip_mm) if opts.perforated else [piece]
+        for j, part in enumerate(parts):
+            res.polylines.append(part)
+            res.kinds.append(kind if j == 0 else KIND_PERF)
+
     for p, d in zip(polys, depth):
         if not is_closed(p):
-            res.polylines.append(p)
-            res.kinds.append(KIND_CUT)
+            emit(p, KIND_CUT)
             continue
         outer = d % 2 == 0
         blocked = obstacles.blocker(p) if obstacles is not None and (
@@ -522,11 +608,26 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
             res.skipped_leads += 1
             res.warnings.append("Anfahrt weggelassen (kein Platz)")
         pieces = split_tabs(p, opts.tab_count, opts.tab_width_mm, opts.tab_spacing_mm) if tabs_on else [p]
+        ends_at_start = math.dist(pieces[-1][-1], p[-1]) < 1e-6
+        over = 0.0
+        if opts.overcut_mm > 0 and ends_at_start:
+            over = min(opts.overcut_mm, path_length(p))
+            if len(pieces) > 1:  # Überschnitt endet vor dem ersten Steg
+                over = min(over, path_length(pieces[0]) - OVERCUT_TAB_CLEAR_MM)
+            ext = overcut_path(p, over) if over > 1e-6 else []
+            if len(ext) >= 2:
+                pieces = pieces[:-1] + [pieces[-1] + ext[1:]]
+            else:
+                over = 0.0
         for k, piece in enumerate(pieces):
-            res.polylines.append(piece)
-            res.kinds.append(KIND_TAB if k else KIND_CUT)
-        out = make_lead(p, outer, opts.lead_out_mm, opts.lead_in_arc, False, blocked)
-        if out and math.dist(pieces[-1][-1], p[-1]) < 1e-6:
+            emit(piece, KIND_TAB if k else KIND_CUT)
+        if not ends_at_start or opts.lead_out_mm <= 0:
+            continue
+        # Abfahrt am Ende des Überschnitts (Kontur bis dorthin gedreht). Endet
+        # die Perforation in einer Lücke, fährt der G-Code die Abfahrt mit G0 an.
+        base = rotate_start(p, over) if over > 0 else p
+        out = make_lead(base, outer, opts.lead_out_mm, opts.lead_in_arc, False, blocked)
+        if out:
             res.polylines.append(out)
             res.kinds.append(KIND_LEAD_OUT)
     return res
