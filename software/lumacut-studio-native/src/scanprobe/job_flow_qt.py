@@ -195,6 +195,9 @@ class OneClickController(QObject):
             gcode, _note = tools.job_gcode()
         except ValueError as exc:
             return self._refuse(str(exc))
+        park = tools.park_preflight(gcode) if hasattr(tools, "park_preflight") else ""
+        if park:   # Park-Ecke (Pi 9ae8577): vor dem Hochladen ablehnen
+            return self._refuse(park)
         self.confirm_text = CONFIRM_TEXT + self._reach_warning(mp, gcode, placed)
         if self.ask and QMessageBox.question(
                 None, "Auftrag starten", self.confirm_text) != QMessageBox.StandardButton.Yes:

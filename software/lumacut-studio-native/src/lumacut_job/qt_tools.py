@@ -141,6 +141,10 @@ class JobTools(QObject):
         self.history = JobHistory(default_dir())
         self._send_without_history = (attach_history(machine_panel, self.history)
                                       if hasattr(machine_panel, "send_gcode") else None)
+        if hasattr(machine_panel, "send_gcode"):
+            # Park corner (Pi 9ae8577): refuse before uploading, not at the Pi.
+            from .park_corner import attach_park_check
+            attach_park_check(machine_panel, lambda text: self._msg(text, 15000))
         if hasattr(machine_panel, "set_frame_provider"):
             machine_panel.set_frame_provider(self.frame_program)
         signal = getattr(machine_panel, "frame_available_changed", None)
@@ -204,6 +208,16 @@ class JobTools(QObject):
     def estimate(self):
         return estimate_gcode(self.job_gcode()[0])
 
+    def park_preflight(self, gcode: str, origin: str | None = None) -> str:
+        """German refusal text if the Pi would refuse ``gcode`` because of the
+        park corner (as sent, and at the panel's chosen origin unless
+        ``origin`` is given), else ""."""
+        from .park_corner import check_for_panel
+        res = check_for_panel(self.machine, gcode, "absolute")
+        if res.ok and origin != "absolute":
+            res = check_for_panel(self.machine, gcode, origin)
+        return "" if res.ok else res.message
+
     def show_estimate(self):
         try:
             g, note = self.job_gcode()
@@ -216,6 +230,9 @@ class JobTools(QObject):
             text += f" – {est.layer_summary()}"
         if note:
             text += f" – {note}"
+        park = self.park_preflight(g)
+        if park:
+            text += f" – {park}"
         self._msg(text, 15000)
         return est
 

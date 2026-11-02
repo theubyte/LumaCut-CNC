@@ -38,8 +38,8 @@ def attach_history(machine_panel, history: JobHistory):
     """``send_gcode`` des Panels umhüllen; gibt die ursprüngliche Methode zurück."""
     original = machine_panel.send_gcode
 
-    def send_gcode(name, gcode, start=False):
-        result = original(name, gcode, start=start)
+    def send_gcode(name, gcode, start=False, **kwargs):
+        result = original(name, gcode, start=start, **kwargs)
         if getattr(machine_panel, "_client", None) is not None:
             try:
                 history.record(name, gcode, _summary(gcode))

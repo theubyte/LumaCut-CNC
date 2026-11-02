@@ -334,7 +334,8 @@ class LumaCutStudio(QMainWindow):
             return
         name, gcode, note = job
         stem = name[:-len(".gcode")]
-        self.machine_panel.send_gcode(f"{stem}.gcode", gcode, start=False)
+        if self.machine_panel.send_gcode(f"{stem}.gcode", gcode, start=False) is False:
+            return  # refused (e.g. park corner), the message is already shown
         msg = f"Gesendet: {stem}.gcode {estimate_gcode(gcode).summary()}"
         self.statusBar().showMessage(msg + (f" – {note}" if note else ""), 15000 if note else 10000)
     # --- end canvas integration ---
