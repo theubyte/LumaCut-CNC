@@ -223,6 +223,13 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Bezugspunkt Mitte/Anfang/Ende, Zeichenabstand, Schrift/Fett/Kursiv. Ist genau ein Textobjekt
   ausgewählt, wird es übernommen und kann ersetzt werden. Code: `src/lumacut_job/arctext.py`,
   `arctext_qt.py`.
+- **Code bearbeiten** („Code bearbeiten…“, *Alt+E*, oder Doppelklick auf einen Code): QR-Code,
+  Barcode, Data Matrix und Bogentext bleiben nach dem Einfügen bearbeitbar. Der Dialog öffnet mit
+  den gespeicherten Einstellungen (die Größe folgt einer seither geänderten Skalierung); „Übernehmen“
+  erzeugt das Objekt neu – gleiche Mitte, Drehung, Ebene und Gruppen, ein Rückgängig-Schritt. Die
+  Einstellungen werden in der Datei gespeichert und überstehen Kopieren/Einfügen und Anordnen;
+  nach „Gruppierung aufheben“ oder einer Pfadoperation ist das Objekt wieder eine normale Fläche.
+  Code: `src/lumacut_job/generated.py`, `generated_qt.py`.
 - **Nur Auswahl** (Toolbar, umschaltbar): Senden, Schätzen, Rahmen und „G-Code speichern“
   verwenden nur die ausgewählten Objekte (Ebenen-Einstellungen bleiben); ohne Auswahl gibt es
   eine Fehlermeldung statt eines Auftrags. Die Pfadvorschau zeigt weiter das ganze Design.

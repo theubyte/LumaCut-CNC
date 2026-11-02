@@ -688,3 +688,62 @@ Still open:
 - Windows hardware test of cut options, PDF import, image trace (incl. centre line and „Glätten“),
   QR code, barcode (incl. inverted) and Data Matrix readability on real material, the park-corner
   refusal against the real Pi, and the rebuilt exe – needs a Windows machine with the laser.
+
+## 19. Status update 2026-11-02 (review round 12)
+
+Done this round (Review; nothing from Canvas, Machine / Scan Probe or Materials touched):
+
+- **Re-editable generated objects** (LightBurn / XCS: double-click a QR code or barcode to change
+  its text). QR code, barcode, Data Matrix and arc text now store their generator parameters on
+  every part (`Shape.generator`: kind, version, spec without position, original box). The model
+  key is optional, so older Studio versions still open the files (they drop the key).
+  - Double-click a part with the select tool, or „Code bearbeiten…“ (**Alt+E**, Design and
+    Auftrag menus, no clash, no menu mnemonic) on the selection, opens the generator's own dialog
+    pre-filled, titled „… bearbeiten“, OK button „Übernehmen“, no new-fill-layer option.
+  - The new symbol replaces the old one in one undo step („QR-Code bearbeiten“ etc.) with the same
+    centre, rotation, layer, enclosing groups and group id, and is selected afterwards.
+  - A resize since insertion is carried over: QR / Data Matrix size × √(sx·sy); barcode module
+    width × sx, bar and digit height × sy; arc text radius, height and spacing × k.
+  - The group is found as the innermost group (`groups[-1]`), so it survives copy/paste, arrays
+    and grouping with other objects. After ungrouping or a path operation the parts are plain
+    polygons again. Mixed or individually rotated parts give a German message instead of an edit.
+    A locked layer is refused.
+  - Arc text replacing a grouped text now keeps its own group innermost (before, the arc group
+    was put outside the replaced text's groups).
+
+Tests:
+
+- `tests/test_generated_edit.py` (15):
+  - Meta shared on all parts, JSON / file round trip, unknown kind and newer version refused,
+    unknown keys ignored.
+  - Scale factors per kind; unit frame (centre, size, scale) after move + rotate + resize.
+  - `find_unit` on plain / missing shapes, mixed or individually rotated parts, and after ungroup.
+  - Window: edit a rotated QR code (one undo step, same group / centre / rotation / layer,
+    zxing-cpp decodes the new text, G-code through the Pi guard, undo restores).
+  - A resized Data Matrix pre-fills the scaled size and decodes after the edit.
+  - Code 128 → EAN-13 edit decodes; arc text edit (bottom); copy/paste edits only the copy.
+  - Outer group kept; kind change refused; messages for an empty or double selection, a locked
+    layer, and too long text.
+  - All four dialogs in edit mode reproduce the stored spec.
+  - The double-click hook edits a code, and plain objects fall through.
+  - Action / shortcut / menus.
+
+Full suite: 1190 passed, 3 skipped (before: 1175 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter – decide if wanted.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- Data Matrix: no rectangular sizes, no C40 / Text / Base 256 encodation. PDF417 and Aztec are not
+  covered. GS1-128 / GS1 DataMatrix (FNC1) and Code 128 set A are not supported.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Windows hardware tests (cut options, PDF import, trace, QR / barcode / Data Matrix readability
+  incl. edited codes, park-corner refusal, rebuilt exe).
