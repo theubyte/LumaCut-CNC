@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-03
+
+- **Doku-Fehler Laser-PWM am SKR:** PA1 liegt am Stecker **SERVOS** (5 V, GND, PA1), nicht an PT-DET. PT-DET ist PC12, PA2 ist die serielle Sendeleitung zum TFT-Stecker. MASCHINE.md ist korrigiert.
+
 ## 2026-11-02
 
 - **SKR-Firmware auf Schneckenlift umgestellt:** Bei der ersten Referenzfahrt nach der Reparatur fuhr Z falsch herum, Marlin brach ab. Der SKR-Build hat jetzt wie das Anet: Z-Richtung umgekehrt, 1018,59 Schritte/mm, und den Z-Wächter (Endschalter bei jeder Fahrt aktiv). Der Pi schaltet die Endschalter beim Verbinden jetzt bei beiden Boards ein (`M120`). Kommt als Firmware-Update per Knopf. Mit marlin-60 läuft die Referenzfahrt, X und Y fahren sauber.
