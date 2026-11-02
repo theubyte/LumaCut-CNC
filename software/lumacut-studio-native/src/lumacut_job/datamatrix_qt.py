@@ -18,6 +18,7 @@ from lumacut_canvas.model import Layer
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
 from . import datamatrix as dm
+from .generated import tag
 from .qr_qt import FILL_INTERVAL_MM, layer_fills
 
 FILL_LAYER_NAME = "Data Matrix"
@@ -159,7 +160,7 @@ def insert_datamatrix(editor, spec: dm.DataMatrixSpec, fill_layer: bool = False,
         if active.locked:
             raise ValueError(f"Ebene „{active.name}“ ist gesperrt")
         layer_id = active.id
-    shapes = dm.datamatrix_shapes(s, layer_id, code)
+    shapes = tag(dm.datamatrix_shapes(s, layer_id, code), s)
     stack = editor.undo_stack
     stack.beginMacro("Data Matrix einfügen")
     try:

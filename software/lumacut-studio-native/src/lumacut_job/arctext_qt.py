@@ -19,6 +19,7 @@ from lumacut_canvas.shape_paths import FLATTEN_TOL_MM, text_font, text_path
 
 from . import arctext
 from .arctext import ArcSpec, Glyph
+from .generated import tag
 
 
 def cap_height_pt(font: QFont) -> float:
@@ -216,11 +217,13 @@ def insert_arc_text(editor, spec: ArcSpec, replace_id: str | None = None,
     if layer.locked:
         raise ValueError(f"Ebene „{layer.name}“ ist gesperrt")
     glyphs = glyphs_for(s.text, s.font_family, s.height_mm, s.bold, s.italic)
-    shapes = arctext.arc_shapes(glyphs, s, layer_id, center, cap_height_mm=s.height_mm)
+    shapes = tag(arctext.arc_shapes(glyphs, s, layer_id, center, cap_height_mm=s.height_mm), s)
     if replace_id is not None:
+        # The arc text takes the replaced text's place inside its groups; its own
+        # group stays innermost (``groups[-1]``, see lumacut_job.generated).
         outer = tuple(doc.shape(replace_id).groups)
         for sh in shapes:
-            sh.groups = sh.groups + outer
+            sh.groups = outer + sh.groups
     stack = editor.undo_stack
     stack.beginMacro("Bogentext")
     try:

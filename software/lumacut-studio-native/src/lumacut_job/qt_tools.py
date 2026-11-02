@@ -129,6 +129,13 @@ class JobTools(QObject):
                                     "Text entlang eines Kreisbogens als Vektorpfade einfügen "
                                     "(ausgewählter Text wird übernommen)")
         self.arc_action.setObjectName("arc_text_action")
+        self.edit_generated_action = self._add(
+            "Code bearbeiten…", self.edit_generated, "Alt+E",
+            "Ausgewählten QR-Code, Barcode, Data Matrix oder Bogentext mit seinen Parametern "
+            "neu erzeugen (auch per Doppelklick)")
+        self.edit_generated_action.setObjectName("edit_generated_action")
+        # Double click with the select tool (lumacut_canvas.tools) asks this hook first.
+        editor.generated_edit_handler = self.edit_generated_at
         self.cut_action = self._add("Schnittoptionen…", self.cut_options, "Alt+K",
                                     "Kerf-Versatz, Haltestege und An-/Abfahrt der aktiven Ebene")
         self.selection_action = self._add("Nur Auswahl", self._selection_toggled, None,
@@ -394,6 +401,54 @@ class JobTools(QObject):
             return []
         self._msg(f"Bogentext eingefügt ({len(ids)} Zeichen, gruppiert)"
                   + (" – Text ersetzt" if replace_id else ""))
+        return ids
+
+    def edit_generated_at(self, shape_id: str) -> bool:
+        """Double-click hook: True if ``shape_id`` belongs to a generated object
+        (the dialog was shown, even if cancelled)."""
+        from .generated_qt import generated_unit
+        try:
+            unit = generated_unit(self.editor, shape_id)
+        except ValueError as exc:
+            self._msg(str(exc))
+            return True
+        if unit is None:
+            return False
+        self.edit_generated(shape_id=shape_id)
+        return True
+
+    def edit_generated(self, spec=None, shape_id: str | None = None) -> list[str]:
+        """Re-create the selected QR code / barcode / Data Matrix / arc text with
+        changed parameters (one undo step, same place, rotation and layer)."""
+        from .generated_qt import edit_dialog, generated_unit, replace_unit, unit_spec
+        try:
+            unit = generated_unit(self.editor, shape_id)
+        except ValueError as exc:
+            self._msg(f"Code bearbeiten: {exc}")
+            return []
+        if unit is None:
+            self._msg("Code bearbeiten: bitte einen QR-Code, Barcode, Data Matrix oder "
+                      "Bogentext auswählen (Doppelklick genügt)")
+            return []
+        doc = self.editor.document
+        if spec is None:
+            try:
+                start = unit_spec(unit)
+            except ValueError as exc:
+                self._msg(f"{unit.label} bearbeiten: {exc}")
+                return []
+            dlg = edit_dialog(unit, start, doc.layer(unit.layer_id), self.window)
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec = dlg.spec()
+        try:
+            ids = replace_unit(self.editor, unit, spec)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, f"{unit.label} bearbeiten", str(exc))
+            self._msg(f"{unit.label}: {exc}")
+            return []
+        self._msg(f"{unit.label} neu erzeugt ({len(ids)} Flächen, Ebene "
+                  f"„{doc.layer(unit.layer_id).name}“)")
         return ids
 
     def cut_options(self, values: dict | None = None) -> bool:

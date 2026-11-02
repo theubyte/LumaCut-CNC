@@ -620,6 +620,9 @@ class ToolController:
         if self.tool != Tool.SELECT:
             return
         hit = self.ed.scene.editable_shape_at(pos)
+        gen = getattr(self.ed, "generated_edit_handler", None)  # lumacut_job.qt_tools
+        if hit and gen is not None and self.doc.shape(hit).generator and gen(hit):
+            return
         if hit and self.doc.shape(hit).kind == "image":
             handler = getattr(self.ed, "image_settings_handler", None)  # lumacut_import.qt
             if handler is not None:

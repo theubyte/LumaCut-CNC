@@ -20,6 +20,7 @@ from lumacut_canvas.model import Layer
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
 from . import qr
+from .generated import tag
 
 # Füll-Ebene für neue QR-Codes: Schraffur 0,1 mm, Kontur mitlasern (scharfe Kanten).
 FILL_INTERVAL_MM = 0.1
@@ -162,7 +163,7 @@ def insert_qr(editor, spec: qr.QrSpec, fill_layer: bool = False,
         if active.locked:
             raise ValueError(f"Ebene „{active.name}“ ist gesperrt")
         layer_id = active.id
-    shapes = qr.qr_shapes(s, layer_id, code)
+    shapes = tag(qr.qr_shapes(s, layer_id, code), s)
     stack = editor.undo_stack
     stack.beginMacro("QR-Code einfügen")
     try:

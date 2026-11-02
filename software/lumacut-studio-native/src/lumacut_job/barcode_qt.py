@@ -18,6 +18,7 @@ from lumacut_canvas.model import Layer
 
 from . import barcode
 from .arctext_qt import glyphs_for
+from .generated import tag
 from .qr_qt import FILL_INTERVAL_MM, layer_fills
 
 FILL_LAYER_NAME = "Barcode"
@@ -188,7 +189,7 @@ def insert_barcode(editor, spec: barcode.BarcodeSpec, fill_layer: bool = False,
         if active.locked:
             raise ValueError(f"Ebene „{active.name}“ ist gesperrt")
         layer_id = active.id
-    shapes = barcode.barcode_shapes(s, layer_id, code, glyph_fn(s.font_family))
+    shapes = tag(barcode.barcode_shapes(s, layer_id, code, glyph_fn(s.font_family)), s)
     stack = editor.undo_stack
     stack.beginMacro("Barcode einfügen")
     try:
