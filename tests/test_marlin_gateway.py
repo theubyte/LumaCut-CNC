@@ -134,14 +134,15 @@ class FirmwareDirectionContractTests(unittest.TestCase):
     def test_default_z_steps_match_head_v6_rack(self):
         build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
         self.assertIn(
-            'replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 80 }")',
+            'replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 1018.59 }")',
             build)
 
     def test_lumacut_x_y_reversed_only(self):
         build=(ROOT/"firmware/marlin/build.py").read_text(encoding="utf-8")
         self.assertIn('cfg = replace_active(cfg, "INVERT_X_DIR", "false")',build)
         self.assertIn('cfg = replace_active(cfg, "INVERT_Y_DIR", "false")',build)
-        self.assertIn('cfg = replace_active(cfg, "INVERT_Z_DIR", "false")',build)
+        # Worm lift (01.11.): Z runs the other way round, as on the Anet.
+        self.assertIn('cfg = replace_active(cfg, "INVERT_Z_DIR", "true")',build)
         self.assertIn('cfg = replace_active(cfg, "X_MIN_ENDSTOP_INVERTING", "true")',build)
         self.assertIn('cfg = replace_active(cfg, "Y_MIN_ENDSTOP_INVERTING", "true")',build)
         self.assertIn('cfg = replace_active(cfg, "Z_MIN_ENDSTOP_INVERTING", "true")',build)
@@ -195,14 +196,14 @@ class USBProtocolTests(unittest.TestCase):
     def test_actual_marlin_m115_and_no_grbl_identity_spoof(self):
         serial=FakeSerial([
             "FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin\n",
-            "ok P15 B3\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n"
+            "ok P15 B3\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n", "ok\n"
         ])
         bridge=MarlinTransport("/dev/null",serial_factory=lambda *a,**k:serial)
         bridge.ensure_ready()
         # M851 clears a stale EEPROM probe offset (Mega Zero -40/-10/+2);
         # the X/Y limits (firmware values until the motion calibration) too.
         self.assertEqual(serial.writes,[b"M115\n",b"M5 I\n",b"M203 Z9\n",
-                                        b"M92 Z1018.59\n", b"M851 X0 Y0 Z0\n", b"M201 X500 Y500\n",
+                                        b"M92 Z1018.59\n", b"M120\n", b"M851 X0 Y0 Z0\n", b"M201 X500 Y500\n",
                                         b"M203 X150 Y150 Z9\n", b"M204 P500 T500\n", b"M84 S0\n"])
         self.assertTrue(bridge.status()["connected"])
         self.assertIn("LumaCut CNC",bridge.status()["identity"])
@@ -1230,9 +1231,16 @@ class ZGuardTests(unittest.TestCase):
         with ctrl.lock:
             self.assertEqual(ctrl._exchange_locked("M400"), ["ok"])  # the error's ok was consumed
 
-    def test_pi_switches_anet_endstops_on_at_connect(self):
+    def test_pi_switches_endstops_on_at_connect(self):
+        # Anet and SKR (02.11.): both firmwares guard Z with the switch.
         src = (ROOT / "pi400" / "marlin" / "transport.py").read_text(encoding="utf-8")
-        self.assertIn('if "Marlin Anet" in self.identity:\n                    self._exchange_locked("M120"', src)
+        self.assertIn('self._exchange_locked("M120", timeout=6.0)', src)
+        self.assertNotIn('if "Marlin Anet" in self.identity:\n                    self._exchange_locked("M120"', src)
+
+    def test_skr_firmware_keeps_endstops_on(self):
+        src = (ROOT / "firmware" / "marlin" / "build.py").read_text(encoding="utf-8")
+        self.assertIn('uncomment(adv, "ENDSTOPS_ALWAYS_ON_DEFAULT")', src)
+        self.assertIn("LumaCut: Z switch guards every move", src)
 
     def test_anet_firmware_keeps_endstops_on(self):
         src = (ROOT / "firmware" / "marlin" / "build_anet.py").read_text(encoding="utf-8")

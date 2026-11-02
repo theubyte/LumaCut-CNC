@@ -360,8 +360,13 @@ Voraussetzungen:
       reine Abfrage freigegeben (`op=report`, Diagnose-Knopf „Treiber M122“).
       M122 mit 24 V (02.11.): X, Y, Z „connection OK“ – Treiber überlebt.
       E-Treiber (früher warm) ist in der Firmware nicht angelegt, ungeprüft.
-      Offen: SKR einbauen, Laser-Minus direkt ans Netzteil, Achsen mit Go
-      testen, danach Relais/PWM ohne Laser prüfen.
+      Eingebaut, Laser-Minus direkt am Netzteil. Erste Referenzfahrt (Go)
+      02.11.: Z lief falsch herum, Marlin `kill()` (Homing failed). Die
+      SKR-Firmware stand noch auf Kopf v6 mit Zahnstange. Neu im SKR-Build
+      (wie Anet): `INVERT_Z_DIR true`, Z 1018,59 Schritte/mm (Schnecke),
+      Z-Wächter (`ENDSTOPS_ALWAYS_ON_DEFAULT` + endstops.cpp-Patch); der Pi
+      sendet `M120` jetzt bei beiden Boards. Firmware-Update per Knopf,
+      danach Referenzfahrt erneut mit Go.
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
       31.10., SHA-256 `96ca4fc6…6a9`).

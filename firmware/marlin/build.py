@@ -65,10 +65,12 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     cfg = replace_active(cfg, "Y_MIN_ENDSTOP_INVERTING", "true")
     cfg = replace_active(cfg, "Z_MIN_ENDSTOP_INVERTING", "true")
     # Verified by physical jogging: stock Mega Zero X/Y motor direction
-    # is opposite on LumaCut. Z already moves correctly; leave Z alone.
+    # is opposite on LumaCut. Z: since the worm lift (head v6 retrofit,
+    # 01.11.) Z runs the other way round, as on the Anet (owner, 02.11.:
+    # first G28 after the SKR repair drove Z away from the switch).
     cfg = replace_active(cfg, "INVERT_X_DIR", "false")
     cfg = replace_active(cfg, "INVERT_Y_DIR", "false")
-    cfg = replace_active(cfg, "INVERT_Z_DIR", "false")
+    cfg = replace_active(cfg, "INVERT_Z_DIR", "true")
     cfg = replace_active(cfg, "EXTRUDERS", "0")
     cfg = replace_active(cfg, "TEMP_SENSOR_0", "0")
     cfg = replace_active(cfg, "X_BED_SIZE", "390")
@@ -119,7 +121,9 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     # pinion = 40 mm per turn, 200 steps x 16 microsteps -> 80 steps/mm.
     # The old T8 lead screw was 380. The Pi also sends M92 Z80 on every
     # connect, because a stale EEPROM would keep the old value.
-    cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 80 }")
+    # Since 01.11. Z is a worm lift: 3.1416 mm per turn = 1018.59 steps/mm
+    # (1/16). The Pi sends the same value with M92 on every connect.
+    cfg = replace_active(cfg, "DEFAULT_AXIS_STEPS_PER_UNIT", "{ 80, 80, 1018.59 }")
     # Z switch and G30 use Marlin's own feedrates, not Pi G0 F values.
     # Original BTT example: Z homing 240 mm/min (4 mm/s),
     # G30 fast 240 mm/min, G30 slow 120 mm/min.
@@ -172,6 +176,11 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     adv = replace_active(adv, "CASE_LIGHT_DEFAULT_BRIGHTNESS", "153")
     adv = uncomment(adv, "EMERGENCY_PARSER")
     adv = uncomment(adv, "ADVANCED_OK")
+    # Z guard (as on the Anet, 01.11.): the worm lift pushes with >250 N.
+    # Endstops stay on for every move, so the Z switch stops Z anywhere;
+    # the Pi aborts the job on "endstops hit: Z" and sends M120 on connect.
+    if not re.search(r"(?m)^\s*#define\s+ENDSTOPS_ALWAYS_ON_DEFAULT\b", adv):
+        adv = uncomment(adv, "ENDSTOPS_ALWAYS_ON_DEFAULT")
     # Firmware update from the Pi without removing the SD card:
     # 'M28 B1' binary transfer writes firmware.bin to the onboard SD,
     # M997 reboots (STM32F1 HAL: hal.reboot()) and the BTT bootloader
@@ -294,6 +303,15 @@ def main():
         if pin_text.count(include) != 1:
             raise RuntimeError("Official Marlin board pinout changed")
         pins.write_text(pin_text + PIN_PATCH)
+        # Z guard: with Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN Marlin checks Z_MIN
+        # only while the probe is enabled (G28/G30); the switch is both, so
+        # check it on every move (same patch as build_anet.py).
+        endstops = src / "Marlin/src/module/endstops.cpp"
+        old = "if ( TERN1(Z_MIN_PROBE_USES_Z_MIN_ENDSTOP_PIN, z_probe_enabled)"
+        text = endstops.read_text()
+        if text.count(old) != 1:
+            raise RuntimeError("Marlin Z_MIN endstop gating changed")
+        endstops.write_text(text.replace(old, "if ( true /* LumaCut: Z switch guards every move */", 1))
         patch_motor_tone(src)
         ini = src / "platformio.ini"
         text = ini.read_text()
