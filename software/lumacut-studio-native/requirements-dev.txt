@@ -1,1 +1,2 @@
 pytest>=8
+zxing-cpp>=2.2  # decodes the generated barcodes in tests/test_barcode.py (skipped without it)
