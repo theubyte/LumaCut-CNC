@@ -38,11 +38,11 @@ from .model import FILL_LAYER_FIELDS, MATERIAL_LAYER_FIELDS, PASSES_RANGE, POWER
 
 # Undo-Beschriftungen der Füll-Felder (ohne commands.py anzufassen).
 for _k, _v in {"line_interval_mm": "Linienabstand", "hatch_angle": "Schraffurwinkel",
-               "fill_mode": "Füllmodus"}.items():
+               "fill_mode": "Füllmodus", "fill_overscan_mm": "Überlauf"}.items():
     SetLayerAttrCommand.LABELS.setdefault(_k, _v)
 
 class _FillParamCommand(SetLayerAttrCommand):
-    """Linienabstand/Winkel: aufeinanderfolgende Änderungen = ein Undo-Schritt."""
+    """Linienabstand/Winkel/Überlauf: aufeinanderfolgende Änderungen = ein Undo-Schritt."""
 
     def mergeWith(self, other) -> bool:  # noqa: N802 - Qt API
         if (isinstance(other, _FillParamCommand) and other.layer_id == self.layer_id
@@ -64,6 +64,8 @@ def layer_summary(layer: Layer) -> str:
         if layer.fill_grouping != "individual":
             text += " · " + ("alle zusammen" if layer.fill_grouping == "together"
                              else "Gruppen zusammen")
+        if layer.fill_mode in _hatch.LINE_FILL_MODES and layer.fill_overscan_mm > 0:
+            text += f" · Überlauf {_mm(layer.fill_overscan_mm)} mm"
     return f"{text} · {layer.material}" if layer.material else text
 
 
@@ -393,6 +395,15 @@ class LayersPanel(QWidget):
             spin.setKeyboardTracking(False)
             spin.setAlignment(Qt.AlignRight)
             spin.valueChanged.connect(lambda v, a=attr: self._param_edited(a, v))
+        self.fill_overscan = self._mm_spin(_hatch.OVERSCAN_RANGE, 0.5, "Aus")
+        self.fill_overscan.setDecimals(1)
+        self.fill_overscan.setToolTip(
+            "Überlauf (Overscanning): jede Schraffurlinie an beiden Enden mit "
+            "ausgeschaltetem Laser verlängern, damit der Kopf beim Einschalten schon "
+            "volle Geschwindigkeit hat – gleichmäßigere Ränder. Nur Schraffur und "
+            "Kreuzschraffur; am Rand der Arbeitsfläche gekürzt")
+        self.fill_overscan.valueChanged.connect(
+            lambda v: self._param_edited("fill_overscan_mm", v))
         self.fill_grouping = QComboBox()
         for g in _hatch.FILL_GROUPINGS:
             self.fill_grouping.addItem(_hatch.FILL_GROUPING_LABELS[g], g)
@@ -415,6 +426,7 @@ class LayersPanel(QWidget):
         form.addRow("Füllmodus", self.fill_mode)
         form.addRow("Linienabstand", self.fill_interval)
         form.addRow("Winkel", self.fill_angle)
+        form.addRow("Überlauf", self.fill_overscan)
         form.addRow("Füllen", self.fill_grouping)
         form.addRow(self.fill_outline)    # untereinander: passt auch in schmale Seitenleisten
         form.addRow(self.fill_bidir)
@@ -429,11 +441,12 @@ class LayersPanel(QWidget):
         self.fill_bidir.setChecked(layer.hatch_bidirectional)
         self.fill_grouping.setCurrentIndex(max(0, self.fill_grouping.findData(layer.fill_grouping)))
         self.fill_inside_out.setChecked(layer.offset_inside_out)
+        self.fill_overscan.setValue(layer.fill_overscan_mm)
         on = layer.fill_mode != "none"
         lines = layer.fill_mode in _hatch.LINE_FILL_MODES   # Offset-Füllung: kein Winkel
         for w in (self.fill_interval, self.fill_outline, self.fill_grouping):
             w.setEnabled(on)
-        for w in (self.fill_angle, self.fill_bidir):
+        for w in (self.fill_angle, self.fill_bidir, self.fill_overscan):
             w.setEnabled(lines)
         self.fill_inside_out.setEnabled(layer.fill_mode == "offset")
 
