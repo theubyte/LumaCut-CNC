@@ -392,6 +392,10 @@ class Shape:
     # Schriftschnitt für kind == "text" (Größe = Objektbox).
     font_bold: bool = False
     font_italic: bool = False
+    # Erzeuger-Parameter (QR-Code, Barcode, Data Matrix, Bogentext – lumacut_job.generated):
+    # JSON-fähiges dict, auf allen Teilen der Erzeuger-Gruppe gleich. Damit lässt sich das
+    # Objekt später mit dem Dialog neu erzeugen. Wird nie verändert, nur ersetzt.
+    generator: dict | None = None
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -446,6 +450,8 @@ class Shape:
                 d["curves"] = list(self.curves)
         if self.kind == "image" and self.image is not None:
             d["image"] = self.image.to_dict()
+        if self.generator:
+            d["generator"] = self.generator
         return d
 
     @staticmethod
@@ -465,7 +471,8 @@ class Shape:
                      groups=tuple(str(g) for g in d.get("groups", ()) if g),
                      rings=clean_rings(len(points), d.get("rings", ())),
                      curves=clean_curves(len(points), d.get("curves", ())),
-                     font_bold=bool(d.get("bold", False)), font_italic=bool(d.get("italic", False)))
+                     font_bold=bool(d.get("bold", False)), font_italic=bool(d.get("italic", False)),
+                     generator=dict(d["generator"]) if isinstance(d.get("generator"), dict) else None)
 
 
 def clean_rings(n_points: int, rings: Iterable[int]) -> tuple[int, ...]:
