@@ -298,10 +298,10 @@ layer_pass_plan(layer)           # mit den eingestellten layer.passes (Override)
   wird. Jede Änderung ist ein Undo-Schritt (`SetLayerAttrsCommand`). „manuell“ wird aus
   `passes ≠ ceil(Tiefe/Tiefe je Durchgang)` erkannt (kein eigenes Override-Feld).
 
-### Füllung: Schraffur und Kreuzschraffur je Ebene
+### Füllung: Schraffur, Kreuzschraffur und Offset-Füllung je Ebene
 
 Im Ebenen-Panel unter **Füllung der Ebene**: *Füllmodus* (Keine / Schraffur /
-Kreuzschraffur), *Linienabstand* in mm (0,05–20), *Winkel* in ° (0 = waagerecht,
+Kreuzschraffur / Offset-Füllung), *Linienabstand* in mm (0,05–20), *Winkel* in ° (0 = waagerecht,
 gegen den Uhrzeigersinn; Kreuzschraffur fügt +90° hinzu, beim Einschalten
 mit 0° wird 45° vorgeschlagen), *Kontur mitlasern* und *Bidirektional*
 (abwechselnde Zeilenrichtung, kürzere Leerfahrten). Jede Änderung ist ein
@@ -310,6 +310,16 @@ Undo-Schritt.
 - Gefüllt werden geschlossene Objekte: Rechteck, Ellipse, Polygon, Text
   (auch gedreht und gruppiert). Löcher (Buchstaben, Ringe) bleiben frei
   (Gerade-Ungerade-Regel); Linien/Freihand bleiben reine Konturen.
+- **Offset-Füllung** (wie LightBurn „Offset Fill“): statt paralleler Linien
+  konzentrische Konturen nach innen – erste Kontur einen halben Linienabstand
+  innerhalb der Kante, danach je ein Linienabstand tiefer, bis die Fläche
+  verschwindet; Löcher bekommen eigene Ringe nach außen. Jeder Ring wird ohne
+  Absetzen gelasert (nur ein G0 je Ring), von außen nach innen mit kurzen
+  Leerfahrten – bei Text, Logos und runden Formen oft schneller und sauberer
+  als eine Schraffur mit vielen kurzen Zeilen. *Winkel* und *Bidirektional*
+  sind dann ausgegraut. Stellen schmaler als ein Linienabstand bleiben ohne
+  Ring (dort lasert die Kontur, wenn *Kontur mitlasern* an ist); mehr als
+  5000 Ringe werden abgelehnt.
 - G-Code: je Durchgang zuerst die Füllung (G0 an den Zeilenanfang, G1 mit
   Leistung/Geschwindigkeit der Ebene), danach die Kontur; Durchgangs-Hook
   (Tiefe je Durchgang) gilt auch für reine Füll-Ebenen. Ohne Füllung ist der

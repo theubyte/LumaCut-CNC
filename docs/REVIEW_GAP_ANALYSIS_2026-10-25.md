@@ -885,3 +885,76 @@ Still open:
 - Windows hardware tests (cut options incl. overcut and perforation on card / plywood, PDF import,
   trace, QR / barcode / Data Matrix readability incl. edited, rectangular and GS1 codes with a real
   scanner, park-corner refusal, rebuilt exe).
+
+## 22. Status update 2026-11-02 (review round 15)
+
+Done this round (Review; nothing from Machine / Scan Probe or Materials touched; from the Canvas
+area only the fill-box enable state and two tooltips in `layers_panel.py` – the new combo entry
+comes from `hatch.FILL_MODES` automatically):
+
+- Fresh audit against LightBurn / XCS (verified in code): image dithering modes, material test
+  grid, start-from / job origin (absolute, current position, user origin with anchor), „nur
+  Auswahl“ and cut options are present. Not present and not listed so far: **offset fill**
+  (LightBurn *Offset Fill*), rotary and print-and-cut. Rotary needs extra hardware and
+  print-and-cut needs camera registration (Machine / Scan Probe), so offset fill was picked: pure
+  planner work, useful on every diode engraving of text, logos and round shapes, no user decision.
+- **Offset-Füllung** (`fill_mode = "offset"`, `hatch.offset_fill_rings`): the even-odd area of a
+  closed object (holes stay free) is offset inwards with Shapely – first ring half a line interval
+  inside the edge (same convention as the hatch rows), then one interval deeper per ring until
+  the area vanishes; holes get their own rings growing outwards, rounded concave corners with
+  ≤ 0.02 mm chord error, rings simplified at 0.005 mm. Order: outside in; within one depth the
+  nearest ring first, each started at the vertex nearest to the previous start (short travels).
+  Parts narrower than one interval get no ring (the outline covers them when „Kontur mitlasern“
+  is on); more than 5000 rings are refused like the 20 000-line hatch limit.
+- **G-code**: rings go into `JobLayer.fills` as closed segment chains
+  (`hatch.rings_to_segments`); `layers_to_gcode` now omits the `G0` when a fill segment starts
+  exactly where the previous one ended, so each ring is one `G0` plus continuous `G1 … S`. Hatch
+  and crosshatch output is byte-identical (their segments never chain). Passes, depth hook, fill
+  only / with outline, planner, estimate, path preview, canvas fill preview and SVG/PNG export
+  work unchanged; the Pi guard accepts the output.
+- **Ebenen-Panel**: new entry „Offset-Füllung“ in „Füllmodus“; „Winkel“ and „Bidirektional“ are
+  disabled for it (`hatch.LINE_FILL_MODES`), tooltips mention the offset contours. Saved as
+  `fill_mode: "offset"` (older builds load such a layer as „Keine“).
+
+Tests:
+
+- `tests/test_offset_fill.py` (17): mode / label; square rings at 0.5, 1.5 … mm with exact
+  perimeters and total length = area / interval; rings inside and at constant distance; holes free
+  with their own ring; circle radii; two islands depth by depth with nearest start; thin parts,
+  degenerate input, limits; closed segment chains, angle / bidirectional ignored; rect / ellipse /
+  text fill inside the glyphs; G-code one `G0` per ring with layer power / speed and estimated
+  cut length; passes with outline; crosshatch G-code still `G0`/`G1` per line; planner + Pi
+  guard; reversed block breaks only between rings; file round trip; panel enable state, undo,
+  summary; canvas preview.
+
+Full suite: 1278 passed, 3 skipped (before: 1261 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter and CSV merge
+  (LightBurn „Variable Text“ / „Merge CSV“) – decide if wanted; today only the batch
+  „Seriennummern…“ exists.
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Offset fill: no LightBurn „fill groups together“ option (each object is filled on its own) and no
+  inside-out order switch.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: PDF417 and Aztec are not covered; Data Matrix EDIFACT mode and DMRE sizes
+  (ISO 21471) not supported; no GS1 Digital Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (offset fill on wood / card, cut options incl. overcut and perforation,
+  PDF import, trace, QR / barcode / Data Matrix readability incl. edited, rectangular and GS1 codes
+  with a real scanner, park-corner refusal, rebuilt exe).
