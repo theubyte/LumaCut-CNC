@@ -365,8 +365,12 @@ Voraussetzungen:
       SKR-Firmware stand noch auf Kopf v6 mit Zahnstange. Neu im SKR-Build
       (wie Anet): `INVERT_Z_DIR true`, Z 1018,59 Schritte/mm (Schnecke),
       Z-Wächter (`ENDSTOPS_ALWAYS_ON_DEFAULT` + endstops.cpp-Patch); der Pi
-      sendet `M120` jetzt bei beiden Boards. Firmware-Update per Knopf,
-      danach Referenzfahrt erneut mit Go.
+      sendet `M120` jetzt bei beiden Boards. **marlin-60 geflasht (02.11.)**,
+      Referenzfahrt (Go) OK: X/Y, Z-Boden, Rückzug; Z fährt zum Schalter.
+      Achstest X±10, Y±10 OK; Kopf hob dabei auf Z23 (Freifahrhöhe).
+      Z-Jog ohne Werkstückhöhe vom Pi gesperrt (gewollt). Offen: Relais und
+      PWM ohne Laser prüfen (`op=service_supply`, `op=ttl_test` messen),
+      dann Laser anstecken.
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
       31.10., SHA-256 `96ca4fc6…6a9`).
