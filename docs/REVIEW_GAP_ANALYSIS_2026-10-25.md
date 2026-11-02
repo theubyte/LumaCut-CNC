@@ -604,3 +604,87 @@ Still open:
 - Windows hardware test of cut options, PDF import, image trace (incl. centre line and „Glätten“),
   QR code and barcode readability on real material and the rebuilt exe – needs a Windows machine
   with the laser.
+
+## 18. Status update 2026-11-02 (review round 11)
+
+Done in this round (Studio only, Pi unchanged, no new runtime dependencies):
+
+- **Park corner preflight** (`lumacut_job/park_corner.py`): Studio now mirrors the Pi's check
+  from 9ae8577. `powered_bounds` reproduces `pi400/marlin/placement.scan` (beam off on G0/M5,
+  S word on G1–G3, arcs, G91), `anchor_point`/`placement_offset` reproduce `make_placement`, and
+  the corner comes from the Pi status (`park_corner_mm`, `cutting_bounds`) with
+  `PARK_CORNER_MM = (78, 35)` as fallback. Every `MachinePanel.send_gcode` (design send, Ablauf,
+  relief, history re-send) is wrapped: a job whose absolute powered box reaches into the corner is
+  **not sent**; a send with autorun at a user origin is **not started** when the placed box would
+  hit the corner; a plain send whose later start at the chosen origin would be refused gets a
+  warning. The one-click „Start“ flow (`scanprobe/job_flow_qt.py`) refuses before anything moves,
+  and the time estimate (Alt+P) mentions the problem. Messages are German and name the required
+  shift („Motiv um mindestens … mm nach links (X+) oder … mm nach unten (Y+) verschieben“).
+  `history_qt.attach_history` now passes `send_gcode` keyword arguments through (it dropped
+  `autorun`). The canvas does not draw the corner yet (Canvas agent) – only a 48 × 5 mm strip at
+  the top right of the visible work area is affected.
+- **Data Matrix ECC 200** (`lumacut_job/datamatrix.py`, pure Python): all 24 square sizes
+  10 × 10 … 144 × 144 (data regions, 1–10 interleaved Reed-Solomon blocks over GF(256)/0x12D,
+  generator roots α¹…αⁿ), ASCII encodation with digit-pair compaction, Upper Shift for 128–255
+  (ISO 8859-1), ECI 26 + UTF-8 for other Unicode, 253-state pad randomisation, ISO 16022 Annex F
+  placement incl. the four corner cases and the fixed lower-right pattern. Automatic size or a
+  chosen minimum size. Output exactly like the QR code: merged filled polygons (holes as rings) in
+  one group, quiet zone (default 2 modules), „Invertiert“, active fill layer or new layer
+  „Data Matrix“ with 0.1 mm hatch, centred, one undo step. Dialog „Data Matrix…“ in the Design
+  and Auftrag menus, shortcut **Alt+X** (no clash, no menu mnemonic).
+- **Barcode „Invertiert“**: engraves quiet zone, spaces and a border of max(1 mm, 5 modules) above
+  and below as polygons with the bars and human-readable digits as holes; quiet zone forced on;
+  the bar correction widens the bars (narrows the lasered spaces) in this mode.
+
+Tests:
+
+- `tests/test_park_corner.py` (22): the mirror is checked against the Pi source.
+  - `powered_bounds` vs. Pi `scan` (7 G-code cases), `anchor_point` vs. Pi, and the visible
+    anchor inverting `wire_anchor`.
+  - Random absolute and placed jobs agree with Pi `check_extent`/`translate`.
+  - German message at the default user origin (30, 30), unknown origin / cutting bounds, and
+    status parsing.
+  - Panel hook: refusal, corner taken from the Pi, offline pass, placed origin / autorun / start.
+  - History + autorun pass-through; a refused send is not recorded.
+  - Main window send and estimate; one-click Start refusal.
+- `tests/test_datamatrix.py` (93 + 1 skipped without pylibdmtx):
+  - The ISO 16022 example „123456“ gives codewords 142 164 186 114 25 5 88 102.
+  - Encodation unit tests (digit pairs, Upper Shift, ECI) and pad randomisation.
+  - Reed-Solomon syndromes are zero for every block of every size.
+  - Size choice and limits; finder, timing and region-separator patterns for all 24 sizes.
+  - zxing-cpp decodes every size, Unicode/ECI text, the rendered vector shapes, the inverted
+    shapes and the 0.1 mm hatch lines.
+  - Module matrices are bit-identical to the zxing-cpp writer for ASCII-optimal texts up to
+    144 × 144, with 6 and 10 interleaved blocks.
+  - Geometry (area, bounds, no overlaps, group), errors, dialog, window action / menus /
+    shortcut, one undo step, new fill layer, and G-code through the Pi guard.
+- `tests/test_barcode.py` (+8):
+  - Inverted geometry: background minus bars, margin, forced quiet zone, widened bars.
+  - Digits cut out as holes.
+  - zxing-cpp decodes inverted Code 128 / EAN-13 / EAN-8 from the light marking and from the
+    0.1 mm hatch.
+  - Dialog checkbox, and the window insert with one undo step and the Pi guard.
+
+Full suite: 1175 passed, 3 skipped (pylibdmtx and the existing optional skips; before: 1052 passed, 2 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter – decide if wanted.
+- Trace: true Bézier objects in the document (editable curve handles) would need a model change
+  (Canvas); oblique thick crossings still split into two nearby junctions with a short bridge line.
+- QR / barcode / Data Matrix / arc text are static vector objects (not re-editable after
+  insertion; re-create via the dialog). Data Matrix: no rectangular sizes and no C40/Text/
+  Base 256 encodation (ASCII only – digits are compact, long lowercase text needs larger
+  symbols); PDF417 and Aztec not covered; GS1-128 / GS1 DataMatrix (FNC1) and Code 128 set A
+  (control characters) not supported.
+- Park corner on the canvas: Studio now checks and refuses, but the canvas does not draw the
+  corner as a no-go zone yet and still shows the old 30 mm L-shaped safe-zone assumption
+  (Canvas). Moving the user origin / anchor automatically out of the corner is not offered.
+- Studio `PROBE_HEAD_MAX` (380, 360) follows the *default* travel 390 × 370; the Pi derives it
+  from the configured travel (`/api/settings`, measured 370 × 360 on the owner's machine), so the
+  Studio reach preview can be too optimistic there (Machine / Scan Probe).
+- Windows hardware test of cut options, PDF import, image trace (incl. centre line and „Glätten“),
+  QR code, barcode (incl. inverted) and Data Matrix readability on real material, the park-corner
+  refusal against the real Pi, and the rebuilt exe – needs a Windows machine with the laser.

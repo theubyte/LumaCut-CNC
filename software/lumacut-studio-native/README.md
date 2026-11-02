@@ -158,6 +158,13 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
 - **An die Maschine:** „Design senden“ (Toolbar) erzeugt Marlin-G-Code
   (`lumacut_canvas/gcode.py`, Regeln wie `marlin-postprocessor.mjs`) und lädt
   ihn über das Maschinen-Panel hoch; gestartet wird erst mit „Start Job“.
+- **Park-Ecke prüfen:** Vor jedem Senden (Design, Ablauf, Relief, Verlauf) und vor „Start“
+  prüft Studio wie der Pi, ob der Laser-an-Bereich in die Park-Ecke reicht (Kopf v6:
+  X0–78 / Y0–35 mm, vom Pi-Status `park_corner_mm` gelesen, sonst Standardwert). Absolut
+  betroffen → nicht gesendet; Start am gewählten Ursprung betroffen → nicht gestartet bzw.
+  Hinweis nach dem Senden – jeweils mit der nötigen Verschiebung in mm (X+ = nach links,
+  Y+ = nach unten). Auch die Zeitschätzung (*Alt+P*) nennt das Problem.
+  Code: `src/lumacut_job/park_corner.py`.
 - **Rahmen:** „Rahmen“ (*Strg+Umschalt+F*, Rechteck) bzw. „Gummiband-Rahmen“
   (*Alt+Umschalt+F*, konvexe Hülle) oder der Knopf „Rahmen“ im Maschinen-Panel
   fahren den Umriss mit ausgeschaltetem Laser ab (`op=frame`). Der gesendete
@@ -197,11 +204,20 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   → Fehlermeldung mit der richtigen). Modulbreite 0,1–5 mm (Hinweis unter 0,15 mm: Laserfleck),
   Höhe 2–300 mm, Ruhezone (Code 128: 10 Module je Seite, EAN/UPC nach Norm), optional Klartext
   darunter als Vektor-Umrisse (Schrift wählbar; EAN/UPC mit verlängerten Randzeichen),
-  Strichkorrektur (Striche schmaler um den Laserfleck). Jeder Strich ist ein gefülltes Rechteck
+  Strichkorrektur (Striche schmaler um den Laserfleck), **Invertiert** für Material, das beim
+  Lasern hell wird (Hintergrund, Lücken, Ruhezone und Rand werden gelasert, Striche und Klartext
+  bleiben stehen; Strichkorrektur macht dann die Striche breiter). Jeder Strich ist ein gefülltes Rechteck
   (benachbarte Module zusammengefasst), alles gruppiert; Füllung wie beim QR-Code (aktive Ebene
   oder neue Ebene „Barcode“ mit Schraffur 0,1 mm), ein Rückgängig-Schritt. Passt der Code nicht
   auf 360 × 340 mm, wird nichts eingefügt. Code: `src/lumacut_job/barcode.py`, `barcode_qt.py`
   (ohne Zusatzbibliothek).
+- **Data Matrix** („Data Matrix…“, *Alt+X*, Menü „Auftrag“ und Design-Menü): 2D-Code nach
+  ISO/IEC 16022 (ECC 200), alle quadratischen Größen 10 × 10 bis 144 × 144 (automatisch die
+  kleinste passende oder Mindestgröße wählbar), ASCII-Kodierung mit Ziffernpaaren (z. B.
+  Seriennummern), Umlaute nach ISO 8859-1, sonstiges Unicode als UTF-8 (ECI 26), Reed-Solomon
+  mit Block-Verschachtelung. Größe, Ruhezone (Standard 2 Module), Invertiert und Ebenen-Logik
+  wie beim QR-Code, ein Rückgängig-Schritt. Code: `src/lumacut_job/datamatrix.py`,
+  `datamatrix_qt.py` (ohne Zusatzbibliothek).
 - **Bogentext** („Bogentext…“, *Alt+B*): Text entlang eines Kreises als Vektor-Umrisse (ein
   Polygon je Buchstabe, gruppiert); oben/außen im Uhrzeigersinn oder unten/innen, Radius, Winkel,
   Bezugspunkt Mitte/Anfang/Ende, Zeichenabstand, Schrift/Fett/Kursiv. Ist genau ein Textobjekt
