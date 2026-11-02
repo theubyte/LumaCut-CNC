@@ -23,7 +23,9 @@ Bewegungen in Z sind Sache des Aufrufers (``MAX_FOCUS_DROP_MM`` beachten).
 Vektor-Füllung: ``JobLayer.fills`` (Schraffurblöcke je Objekt, siehe
 ``hatch.py``) wird in jedem Durchgang *vor* den Konturen gelasert – gleiche
 Leistung/Geschwindigkeit/Durchgänge und derselbe Tiefen-Hook wie die Ebene.
-Jede Schraffurstrecke ist ein ``G0`` zum Anfang und ein ``G1`` zum Ende;
+Jede Schraffurstrecke ist ein ``G0`` zum Anfang und ein ``G1`` zum Ende –
+das ``G0`` entfällt, wenn die Strecke genau dort beginnt, wo die vorige
+endete (Offset-Füllung: Ringe als lückenlose Streckenkette);
 die Blöcke werden in der Reihenfolge der Objekte gefahren, jeweils vorwärts
 oder rückwärts – je nachdem, welches Ende näher liegt. Ohne Füllung bleibt
 die Ausgabe unverändert.
@@ -133,7 +135,9 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
                 out += _hook_lines(pass_hook, layer, p, round(acc, 6))
             for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos):
                 for a, b in block:
-                    out.append(f"G0 {_xy(*a)}")
+                    if pos is None or abs(pos[0] - a[0]) > 1e-6 or abs(pos[1] - a[1]) > 1e-6:
+                        out.append(f"G0 {_xy(*a)}")
+                    pos = b
                     out.append(f"G1 {_xy(*b)} F{f} S{s}")
                 pos = block[-1][1]
             kinds = getattr(layer, "poly_kinds", ()) or ()

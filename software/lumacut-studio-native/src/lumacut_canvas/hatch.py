@@ -6,7 +6,8 @@ Bildschirm gemessen) über eine Menge geschlossener Polygone und schneidet sie
 nach der **Gerade-Ungerade-Regel** zu: Löcher (z. B. in „O“, „A“ oder einem
 Rahmen aus zwei Rechtecken) bleiben frei. :func:`fill_segments` setzt die
 Ebenen-Einstellung um (``"hatch"`` = eine Richtung, ``"crosshatch"`` =
-zusätzlich um 90° gedreht).
+zusätzlich um 90° gedreht, ``"offset"`` = konzentrische Konturen nach innen,
+siehe :func:`offset_fill_rings`).
 
 Die Linien liegen auf einem festen Raster ``(k + ½) · interval`` (in der
 gedrehten Lage, gemessen vom Ursprung; der halbe Versatz vermeidet Linien
@@ -27,8 +28,14 @@ from typing import Iterable, Sequence
 Point = tuple[float, float]
 Segment = tuple[Point, Point]
 
-FILL_MODES = ("none", "hatch", "crosshatch")
-FILL_LABELS = {"none": "Keine", "hatch": "Schraffur", "crosshatch": "Kreuzschraffur"}
+FILL_MODES = ("none", "hatch", "crosshatch", "offset")
+FILL_LABELS = {"none": "Keine", "hatch": "Schraffur", "crosshatch": "Kreuzschraffur",
+               "offset": "Offset-Füllung"}
+#: Füllmodi, für die Winkel und Bidirektional eine Bedeutung haben
+LINE_FILL_MODES = ("hatch", "crosshatch")
+MAX_OFFSET_RINGS = 5000         # Schutz wie MAX_LINES_PER_PASS
+OFFSET_SIMPLIFY_MM = 0.005      # Ringe vereinfachen (weit unter der Strahlbreite)
+OFFSET_ARC_TOL_MM = 0.02        # Sehnenfehler gerundeter Ecken (wie shape_paths)
 INTERVAL_RANGE = (0.05, 20.0)   # mm
 DEFAULT_INTERVAL_MM = 0.2
 MAX_LINES_PER_PASS = 20000      # Schutz vor versehentlich winzigen Abständen
@@ -119,13 +126,128 @@ def hatch_lines(polygons: Iterable[Sequence[Point]], interval_mm: float, angle_d
     return out
 
 
+def _even_odd_area(polygons: Iterable[Sequence[Point]]):
+    """Fläche nach der Gerade-Ungerade-Regel (wie :func:`hatch_lines`) als Shapely-Geometrie."""
+    from shapely.geometry import Polygon
+    area = None
+    for poly in polygons:
+        pts = [(float(x), float(y)) for x, y in poly]
+        if len(pts) >= 2 and pts[0] == pts[-1]:
+            pts.pop()
+        if len(pts) < 3:
+            continue
+        g = Polygon(pts).buffer(0)
+        if g.is_empty:
+            continue
+        area = g if area is None else area.symmetric_difference(g)
+    return area
+
+
+def _rings_of(geom) -> list[list[Point]]:
+    """Außen- und Innenringe aller Polygone (offen, ohne wiederholten Endpunkt)."""
+    parts = getattr(geom, "geoms", None)
+    parts = list(parts) if parts is not None else [geom]
+    rings: list[list[Point]] = []
+    for g in parts:
+        if g.geom_type != "Polygon" or g.is_empty:
+            continue
+        for ring in (g.exterior, *g.interiors):
+            pts = [(float(x), float(y)) for x, y in ring.coords]
+            if len(pts) >= 2 and pts[0] == pts[-1]:
+                pts.pop()
+            if len(pts) >= 3:
+                rings.append(pts)
+    return rings
+
+
+def _start_nearest(ring: list[Point], pos: Point) -> list[Point]:
+    i = min(range(len(ring)), key=lambda k: math.dist(ring[k], pos))
+    return ring[i:] + ring[:i]
+
+
+def _quad_segs(distance: float) -> int:
+    """Segmente je Viertelkreis für gerundete Ecken mit Sehnenfehler ≤ OFFSET_ARC_TOL_MM."""
+    if distance <= OFFSET_ARC_TOL_MM:
+        return 2
+    step = 2 * math.acos(1 - OFFSET_ARC_TOL_MM / distance)
+    return max(2, min(32, math.ceil((math.pi / 2) / step)))
+
+
+def offset_fill_rings(polygons: Iterable[Sequence[Point]], interval_mm: float) -> list[list[Point]]:
+    """Offset-Füllung (LightBurn „Offset Fill“): konzentrische Konturen nach innen.
+
+    Die Fläche (Gerade-Ungerade-Regel, Löcher bleiben frei) wird in Schritten
+    von ``interval_mm`` nach innen versetzt; der erste Ring liegt ein halbes
+    Intervall innerhalb der Kante (wie die Schraffur-Rasterzeilen), jeder
+    weitere ein ganzes Intervall tiefer, bis die Fläche verschwindet. Löcher
+    bekommen eigene Ringe, die nach außen wachsen. Ergebnis: geschlossene
+    Ringe (Startpunkt nicht wiederholt) in Fahr-Reihenfolge – von außen nach
+    innen; innerhalb einer Tiefe zuerst der nächstgelegene Ring, begonnen am
+    Punkt, der dem vorigen Start am nächsten liegt (kurze Leerfahrten).
+    Stellen schmaler als ein Intervall bekommen keinen Ring (dort lasert die
+    Kontur, wenn „Kontur mitlasern“ an ist).
+    """
+    interval = float(interval_mm)
+    if not interval > 0 or not math.isfinite(interval):
+        raise ValueError("Linienabstand muss > 0 sein")
+    area = _even_odd_area(polygons)
+    if area is None or area.is_empty:
+        return []
+    x0, y0, x1, y1 = area.bounds
+    if min(x1 - x0, y1 - y0) / (2 * interval) > MAX_OFFSET_RINGS:
+        raise ValueError("Zu viele Offset-Ringe; Linienabstand vergrößern")
+    out: list[list[Point]] = []
+    pos: Point | None = None
+    k = 0
+    while True:
+        d = (k + 0.5) * interval
+        g = area.buffer(-d, quad_segs=_quad_segs(d), join_style="round")
+        if g.is_empty:
+            break
+        if OFFSET_SIMPLIFY_MM > 0:
+            g = g.simplify(OFFSET_SIMPLIFY_MM, preserve_topology=True)
+        level = _rings_of(g)
+        while level:
+            if pos is None:
+                ring = level.pop(0)
+            else:
+                j = min(range(len(level)),
+                        key=lambda i: min(math.dist(p, pos) for p in level[i]))
+                ring = _start_nearest(level.pop(j), pos)
+            out.append(ring)
+            if len(out) > MAX_OFFSET_RINGS:
+                raise ValueError("Zu viele Offset-Ringe; Linienabstand vergrößern")
+            pos = ring[0]
+        k += 1
+    return out
+
+
+def rings_to_segments(rings: Iterable[Sequence[Point]]) -> list[Segment]:
+    """Geschlossene Ringe als lückenlose Streckenkette (innerhalb eines Rings
+    beginnt jede Strecke am Ende der vorigen; der G-Code fährt dort kein ``G0``)."""
+    segs: list[Segment] = []
+    for ring in rings:
+        pts = list(ring)
+        if len(pts) < 3:
+            continue
+        for i, p in enumerate(pts):
+            q = pts[(i + 1) % len(pts)]
+            if math.dist(p, q) > _MIN_SEG:
+                segs.append((p, q))
+    return segs
+
+
 def fill_segments(polygons: Sequence[Sequence[Point]], mode: str, interval_mm: float,
                   angle_deg: float = 0.0, bidirectional: bool = True) -> list[Segment]:
-    """Schraffur nach Füllmodus (``none`` / ``hatch`` / ``crosshatch``)."""
+    """Füllstrecken nach Füllmodus (``none`` / ``hatch`` / ``crosshatch`` / ``offset``).
+
+    Bei ``offset`` haben Winkel und Bidirektional keine Bedeutung."""
     if mode not in FILL_MODES:
         raise ValueError(f"Unbekannter Füllmodus: {mode}")
     if mode == "none":
         return []
+    if mode == "offset":
+        return rings_to_segments(offset_fill_rings(polygons, interval_mm))
     segs = hatch_lines(polygons, interval_mm, angle_deg, bidirectional)
     if mode == "crosshatch":
         segs += hatch_lines(polygons, interval_mm, angle_deg + 90.0, bidirectional)
