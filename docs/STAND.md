@@ -343,7 +343,12 @@ Voraussetzungen:
       (Firmware-Port nötig). USB abgezogen. Weiter: Foto, Widerstand
       3,3 V/5 V gegen Masse messen; Treiber ablöten lassen oder Ersatz-Board
       (z. B. SKR Mini E3 V3). SD-Neuaufspielen hilft erst nach behobenem
-      Kurzschluss. Bereit liegt die
+      Kurzschluss. **Reparatur 02.11.:** STM32 ausgelötet; ohne Chip nur an
+      USB: AMS1117 (U4) 5 V rein, 3,33 V raus → Versorgung heil, der STM32
+      war der Kurzschluss. Ersatz: STM32F103RET6 aus Waschmaschinen-Platine
+      (gleiches LQFP-64, mehr Flash/RAM), danach per ST-Link V2 an der
+      SWD-Leiste entsperren + BTT-Bootloader, Firmware wie gehabt (RC-Build).
+      Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
       31.10., SHA-256 `96ca4fc6…6a9`).
 - [x] Hut auf dem Taster, Papier-Probe bestanden – sonst drückt die
