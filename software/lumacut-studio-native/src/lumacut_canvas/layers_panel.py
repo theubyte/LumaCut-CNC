@@ -370,14 +370,15 @@ class LayersPanel(QWidget):
         for mode in _hatch.FILL_MODES:
             self.fill_mode.addItem(_hatch.FILL_LABELS[mode], mode)
         self.fill_mode.setToolTip("Geschlossene Objekte (Rechteck, Ellipse, Polygon, Text) mit "
-                                  "parallelen Linien füllen; Löcher bleiben frei")
+                                  "parallelen Linien oder – Offset-Füllung – mit konzentrischen "
+                                  "Konturen nach innen füllen; Löcher bleiben frei")
         self.fill_mode.activated.connect(self._fill_mode_chosen)
         self.fill_interval = QDoubleSpinBox()
         self.fill_interval.setRange(*_hatch.INTERVAL_RANGE)
         self.fill_interval.setDecimals(2)
         self.fill_interval.setSingleStep(0.05)
         self.fill_interval.setSuffix(" mm")
-        self.fill_interval.setToolTip("Abstand der Schraffurlinien")
+        self.fill_interval.setToolTip("Abstand der Schraffurlinien bzw. der Offset-Konturen")
         self.fill_angle = QDoubleSpinBox()
         self.fill_angle.setRange(0.0, 179.0)
         self.fill_angle.setDecimals(0)
@@ -409,8 +410,11 @@ class LayersPanel(QWidget):
         self.fill_outline.setChecked(layer.hatch_outline)
         self.fill_bidir.setChecked(layer.hatch_bidirectional)
         on = layer.fill_mode != "none"
-        for w in (self.fill_interval, self.fill_angle, self.fill_outline, self.fill_bidir):
+        lines = layer.fill_mode in _hatch.LINE_FILL_MODES   # Offset-Füllung: kein Winkel
+        for w in (self.fill_interval, self.fill_outline):
             w.setEnabled(on)
+        for w in (self.fill_angle, self.fill_bidir):
+            w.setEnabled(lines)
 
     def _fill_mode_chosen(self, index: int) -> None:
         layer = self.doc.active_layer
