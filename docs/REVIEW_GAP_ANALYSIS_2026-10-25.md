@@ -1509,3 +1509,103 @@ Still open:
   incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
   incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
   park-corner refusal, variable text / CSV merge over several sends, rebuilt exe).
+
+## 30. Status update 2026-11-03 (review round 23)
+
+Done this round (Review/Job layer; Canvas, Machine / Scan Probe and Materials untouched):
+
+- Gap picked from §29 „Still open“: **GS1 QR code and GS1 Digital Link** (LightBurn and xTool
+  Creative Space offer QR codes; GS1 Digital Link QR codes are the format retail moves to with
+  „Sunrise 2027“, so product makers who mark packaging or wooden / metal products need them).
+  Picked over the remaining fill / scan-offset items because it is self-contained in the Job
+  layer, needs no user decision and closes a 2D-code gap next to the existing GS1-128 / GS1
+  DataMatrix; Data Matrix EDIFACT and MicroPDF417 are rarely needed for laser marking.
+- `lumacut_job/gs1_link.py` (pure Python, GS1 Digital Link URI Syntax 1.x):
+  - `build(element_string, domain)`: exactly one primary key (GTIN 01, ITIP 8006, GMN 8013,
+    CPID 8010, GLN 414 / 415 / 417, SSCC 00, GDTI 253, GCN 255, GINC 401, GSIN 402, GRAI 8003,
+    GIAI 8004, GSRN 8017 / 8018) in the path, its key qualifiers in the prescribed order (GTIN:
+    22, 10, 21 or 235), all other AIs as query parameters in input order; values percent-encoded
+    except RFC 3986 unreserved characters; values checked with `gs1.parse` (fixed lengths, digits,
+    check digits, character set 82).
+  - `normalize_domain`: default `https://id.gs1.org`, scheme added, host lower-cased, optional
+    path prefix, no query / fragment; German errors.
+  - `parse(uri)`: any domain with a path prefix, finds the primary key, checks qualifier order,
+    rejects keys in the query, keeps non-AI parameters (`linkType`) separately, ignores the
+    fragment; `resolve(text, domain)` accepts an element string (built) or a complete URI (encoded
+    verbatim after validation); `describe` for the dialog.
+- `lumacut_job/qr.py`:
+  - mixed segments (numeric / alphanumeric / byte) with a shortest-bit dynamic programme per
+    version class (`segments`, `segment_bits`, `encode_items`), version chosen from the exact
+    bit length;
+  - **GS1 QR code** (`encode_gs1`): mode indicator „FNC1 in first position“ (0101), FNC1
+    separators as „%“ in alphanumeric segments (literal „%“ doubled) or GS (0x1D) in byte
+    segments; scanners report `]Q3` and the GS1 element string;
+  - **Digital Link** (`encode_link`): the URI with mixed segments (the GTIN digits go numeric);
+  - `QrSpec.mode` („text“ / „gs1“ / „link“) and `QrSpec.domain` appended to the dataclass
+    (positional callers unchanged), `QrSpec.content()` / `encode()`, `content_info` for the
+    dialog. Plain text mode is byte-for-byte unchanged (still one byte segment, the existing
+    reference matrices still match).
+- Generated objects: mode and domain are part of the generator spec, so files, autosave and
+  „Code bearbeiten“ (*Alt+E* / double click) keep the kind; older files without the fields open
+  as plain text QR codes.
+- Dialog „QR-Code einfügen“: new row „Art“ (Text / Adresse, GS1 QR-Code (Elementstring), GS1
+  Digital Link (Web-Adresse)), „Domain“ (only for Digital Link), „Beispiel“ button, a line with
+  the encoded data / the resulting address, placeholder and tooltip per kind; invalid GS1 data or
+  domain disables „Einfügen“ with the German message. Status line „GS1 QR-Code eingefügt …“ /
+  „GS1-Digital-Link-QR-Code eingefügt …“.
+
+Tests:
+
+- `tests/test_gs1_qr.py` (25): Digital Link build (qualifier order, query attributes,
+  percent-encoding, SSCC / GLN keys), domain variants and errors, build errors (no / two primary
+  keys, duplicate AI, 21 + 235, check digit, no brackets), parse round trip with prefix /
+  `linkType` / fragment and parse errors, resolve; segment choice (byte + numeric, alphanumeric,
+  FNC1 as „%“ / GS, literal „%%“); GS1 QR data streams and Digital Link URIs read back with an
+  independent matrix reader in the test (unmasking, de-interleaving, Reed-Solomon check, segment
+  parser) for all EC levels, versions ≥ 10 and all masks; compactness vs. byte mode; capacity
+  and input errors; text mode unchanged; spec normalisation and positional arguments; zxing-cpp
+  decode (`]Q3` with GS1 text, `]Q1` URIs – skipped without zxing-cpp, pass with it); generator
+  meta round trip incl. old meta; dialog kinds / domain / example / errors / edit mode; window
+  insert of both kinds, G-code with Pi guard, edit keeps kind and domain.
+
+Full suite: 1571 passed, 3 skipped (before: 1546 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; block entry is only „start or end“ (no free start
+  corner inside a block); overscan is clamped to the cutting area, not to the real machine travel.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); speeds only in mm/min (no mm/s view); the canvas fill preview
+  (`fill_preview`) shows unshifted lines (the path preview shows the shift); the test pattern is
+  not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: no per-object counter shown on the canvas (the template is drawn, the values
+  are in the dialog / path preview); „Text in Pfade“ converts the template literally; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes still use one byte segment (mixed segments only for the GS1 kinds); no Micro QR.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (GS1 QR / Digital Link codes with a GS1 scanner and a phone camera,
+  scan offset test pattern and compensated bidirectional hatch / image at
+  3000–6000 mm/min, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options
+  incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
+  incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
+  park-corner refusal, variable text / CSV merge over several sends, rebuilt exe).

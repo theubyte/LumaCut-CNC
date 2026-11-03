@@ -228,6 +228,18 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Module werden zu gefüllten Polygonen (gruppiert) und mit der Ebenen-Füllung graviert: Füllt die
   aktive Ebene nicht, legt der Dialog standardmäßig eine Ebene „QR-Code“ mit Schraffur 0,1 mm an.
   Ein Rückgängig-Schritt. Code: `src/lumacut_job/qr.py`, `qr_qt.py` (ohne Zusatzbibliothek).
+  **Art** „GS1 QR-Code“: GS1-Elementstring „(01)09501101530003(17)261231(10)AB-12“ (feste Längen,
+  Ziffern und Prüfziffern geprüft) mit dem Modusindikator *FNC1 an erster Stelle*, Trenner
+  automatisch – GS1-Scanner lesen GTIN, Charge, MHD (Kennung `]Q3`). **Art** „GS1 Digital Link“
+  (Sunrise 2027): derselbe Elementstring wird zur Web-Adresse
+  `https://id.gs1.org/01/09501101530003/10/AB-12?17=261231` (genau ein Primärschlüssel – GTIN,
+  SSCC, GLN … –, Schlüssel-Qualifier 22/10/21 im Pfad in Normreihenfolge, alle übrigen AIs als
+  Abfrage, Sonderzeichen %-kodiert; eigene Domain wählbar) – oder eine fertige
+  Digital-Link-Adresse wird geprüft und unverändert kodiert. Das Handy öffnet die Produktseite,
+  Kassenscanner lesen die GTIN. Beide GS1-Arten nutzen gemischte Segmente (Ziffern numerisch,
+  „%“/Großbuchstaben alphanumerisch, Rest Byte) und werden dadurch kleiner; „Beispiel“ setzt
+  Musterdaten ein, die Zeile unter dem Inhalt zeigt die kodierten Daten. Code:
+  `src/lumacut_job/gs1_link.py`.
 - **Barcode** („Barcode einfügen…“, *Alt+C*, Menü „Auftrag“ und Design-Menü): Strichcode
   **Code 128** (ASCII, Zeichensatz A/B/C automatisch und kürzest möglich, Prüfsumme mod 103;
   Steuerzeichen für Scanner – Tab, Enter, GS … – über die Option „Steuerzeichen als \t \r \n \g
