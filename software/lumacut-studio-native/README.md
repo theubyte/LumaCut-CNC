@@ -418,11 +418,16 @@ Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt
   G-Code unverändert.
 - Reihenfolge: Beim Senden (Planer, „Leerfahrten reduzieren“) werden die
   Füllblöcke einer Ebene (je Objekt, Gruppe oder Ebene) nach dem nächsten
-  Nachbarn sortiert statt in Objekt-Reihenfolge – Schraffurblöcke auch
-  rückwärts, Offset-Blöcke nur vorwärts (Ring-Reihenfolge bleibt); die Konturen
-  beginnen dort, wo die Füllung endet. Danach verbessert ein 2-opt-/Or-opt-Durchlauf
+  Nachbarn sortiert statt in Objekt-Reihenfolge – Offset-Blöcke nur vorwärts
+  (Ring-Reihenfolge bleibt); die Konturen beginnen dort, wo die Füllung endet.
+  **Freie Startecke:** Schraffur- und Kreuzschraffurblöcke können an jeder ihrer vier
+  Ecken beginnen – vorwärts, ganz rückwärts, Zeilen von der anderen Seite oder jede
+  Zeile umgedreht. Bidirektional bleibt dabei das Hin-und-Her erhalten, unidirektional
+  läuft jede Zeile weiter in dieselbe Richtung; Überlauf und Scan-Versatz folgen der
+  gewählten Fahrtrichtung. Bei Gleichstand gewinnt die alte Wahl (Start oder Ende), ein
+  einzelner Block bleibt Byte für Byte gleich. Danach verbessert ein 2-opt-/Or-opt-Durchlauf
   die Reihenfolge (Abschnitte umdrehen, 1–3 Blöcke verschieben; nur ganze Blöcke,
-  Einstieg wie im G-Code am näheren Ende) – bei bis zu einigen hundert Blöcken oft 5–20 %
+  Einstieg wie im G-Code an der nächsten Ecke) – bei bis zu einigen hundert Blöcken oft 5–20 %
   weniger Leerfahrt als nur „nächster Nachbar“, nie mehr. Deterministisch und mit
   festem Rechenbudget (≈ 0,5 s bei 1500 Blöcken, über 2000 Blöcke bleibt die
   Nachbar-Reihenfolge).

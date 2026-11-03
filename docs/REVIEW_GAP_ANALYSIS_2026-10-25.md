@@ -1609,3 +1609,95 @@ Still open:
   incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
   incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
   park-corner refusal, variable text / CSV merge over several sends, rebuilt exe).
+
+## 31. Status update 2026-11-03 (review round 24)
+
+Done this round (Review/Job layer + fill G-code; Canvas widgets, Machine / Scan Probe and Materials
+untouched):
+
+- Gap picked from §30 „Still open“: **free start corner inside fill blocks** (LightBurn and xTool
+  Creative Space start a hatched shape at whichever corner is nearest; LumaCut could only enter a
+  block at its first or last segment, so with an even / odd row count the head often crossed the
+  whole block before the next one).
+- `lumacut_canvas/hatch.py`:
+  - `fill_block_rows`: splits a hatch block into rows (consecutive collinear segments in the same
+    direction – holes split a row into several segments, crosshatch blocks give the rows of both
+    angles);
+  - four variants `FORWARD`, `REVERSED` (the old „reverse“), `ROWS_REVERSED` (rows from the other
+    side, each row keeps its direction) and `ROWS_FLIPPED` (rows in order, every row reversed);
+    bidirectional blocks keep their back-and-forth, unidirectional blocks keep one scan direction
+    (both corner variants are pure transformations of the existing rows);
+  - `fill_block_entries` / `fill_block_variant` / `nearest_fill_entry`: corner entries only for
+    blocks with at least two rows; on a tie the earlier variant wins, so the old start / end
+    choice is kept wherever it was already optimal.
+- `lumacut_canvas/gcode.py`: `order_fill_blocks(..., corners=False)` uses the same entry rule;
+  `layers_to_gcode` enables corners per layer via the new `JobLayer.fill_free_corner`
+  (`lumacut_canvas/export.py`: set for hatch / crosshatch, never for offset fill – ring order
+  stays fixed). Overscan and scan offset are applied per segment after the variant is chosen, so
+  they follow the new direction automatically.
+- `lumacut_job/planner.py`: nearest-neighbour order and the 2-opt / Or-opt pass work on up to four
+  entries per block (`_block_neighbours` generalised, entry rule identical to the writer), so pass
+  1 lasers exactly the planned order; same budget, deterministic, 1500 blocks well under the time
+  limit.
+- Overscan clamp to the real machine travel: **not implemented**. Studio has no travel setting;
+  the travel (390 × 370 mm) only exists as Machine-owned constants (`machine/client.py`,
+  `scanprobe/reach.py`) and in the Pi config (`travels`). The high side of the cutting area
+  (X30…390 / Y30…370) already equals the travel, so the only gain would be overscan into the
+  30 mm safe-zone bands (X < 30 / Y < 30, homing zone incl. the park corner). That breaks the
+  invariant „all coordinates inside the cutting area“ and needs a **user decision** whether
+  laser-off overscan may enter the safe zone.
+
+Tests:
+
+- `tests/test_fill_block_corners.py` (28): row detection with holes and crosshatch; variants ×
+  bidirectional / unidirectional keep the scan rule and give the right entries / exits; entries
+  per block kind (single row, offset); nearest entry and tie rule; textbook row of blocks with an
+  odd row count (< 0.8 of the old travel, corner variants used), 6 × 6 tile grid (< 0.75), random
+  layouts (never worse); writer order equals plan with corners; fixed order ignores corners;
+  determinism and runtime (1500 blocks); `fill_free_corner` only for hatch / crosshatch; sent
+  G-code passes the Pi guard, travel < 0.85 of the old order, pass-1 burns equal the plan;
+  overscan and scan offset follow the chosen direction; offset fill and single-block output
+  byte-for-byte unchanged.
+
+Full suite: 1599 passed, 3 skipped (before: 1571 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see above); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); speeds only in mm/min (no mm/s view); the canvas fill preview
+  (`fill_preview`) shows unshifted lines (the path preview shows the shift); the test pattern is
+  not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: no per-object counter shown on the canvas (the template is drawn, the values
+  are in the dialog / path preview); „Text in Pfade“ converts the template literally; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes still use one byte segment (mixed segments only for the GS1 kinds); no Micro QR.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (GS1 QR / Digital Link codes with a GS1 scanner and a phone camera,
+  scan offset test pattern and compensated bidirectional hatch / image at
+  3000–6000 mm/min, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options
+  incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
+  incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
+  park-corner refusal, variable text / CSV merge over several sends, rebuilt exe).
