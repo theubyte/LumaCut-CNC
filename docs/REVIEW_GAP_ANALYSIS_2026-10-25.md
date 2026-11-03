@@ -1334,3 +1334,89 @@ Still open:
   incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
   incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
   park-corner refusal, rebuilt exe).
+
+## 28. Status update 2026-11-03 (review round 21)
+
+Done this round (Review/Job layer; Canvas, Machine / Scan Probe and Materials untouched apart from
+one entry in the design-menu list in `lumacut_canvas/main_view.py`):
+
+- Gap picked from §27 „Still open“: **variable text** evaluated at send time (LightBurn „Variable
+  Text“ / „Merge CSV“). Fits the existing model without a format change: the template stays in
+  `Shape.text`, the settings live in `Shape.generator` (`kind: "vartext"`), so file save / load
+  round-trips the template and the stored counter.
+- `lumacut_job/vartext.py` (pure Python):
+  - placeholders `{n}`, `{n:3}`, `{date}` / `{date:FMT}`, `{time}` / `{time:FMT}` (whitelisted
+    strftime codes `%d %m %Y %y %H %M %S %j %V %%`), `{row}`, CSV columns `{Name}` (case-insensitive
+    fallback), `{csv:Name}`, `{csv:2}`, literal `{{` `}}`; unknown column, missing file or a row past
+    the end raise a German `VarTextError` (a `ValueError`) – a job is never sent with literal
+    placeholders;
+  - CSV: delimiter sniffed from the header line (`;` `,` Tab `|`), UTF-8 (BOM) then Windows-1252,
+    empty lines skipped, cached by mtime / size, 20 MB / 200 000 rows limit;
+  - `evaluate_document`: job document with evaluated copies (original untouched, layers shared),
+    only visible layers, copies of one series in reading order get consecutive values / rows
+    (`per_copy`), the width follows the text with the left-mid anchor fixed in the rotated frame,
+    blank results are left out; `advanced_spec` for the next job.
+- `lumacut_job/qt_tools.py`: `job_document()` / `job_gcode()` evaluate, so send, „Senden &
+  Starten“, one-click / scan job, G-code save, frame, estimate and the canvas path preview all use
+  the evaluated text; the planner note shows „Variabler Text: Nr. 007 … Nr. 009“.
+- Advancing (`lumacut_job/vartext_qt.py`, `VarTextTracker`, outermost wrapper of
+  `MachinePanel.send_gcode` after history and park check): a built job carries
+  `; VARIABLE TEXT <token>`; only an upload of exactly that job that the panel reports as done
+  (`command_finished(label, True)` and `_uploaded == name`) advances counter / CSV row – one undo
+  step, document marked modified. Refused (park corner), not dispatched, failed upload, failed start,
+  history re-send and plain G-code files never advance.
+- Dialog „Variabler Text…“ (*Alt+V*, menu „Auftrag“ and design menu): on/off, template with
+  help, counter (start, step, digits, next value, „Auf Start“, copies consecutive), CSV merge (file,
+  remove, next row, advance per send, table preview with click-to-select row), live preview of the
+  next job incl. errors. Applies to the selected texts plus the rest of their series; one undo step;
+  locked layers refused. Double click still edits the template text; `generated.find_unit`
+  ignores variable text.
+- „Seriennummern…“ integration: new option „Beim Senden weiterzählen (variabler Text)“ – the copies
+  keep the template and become one series (first job start … start + (count − 1) × step, then
+  continuing); a literal batch made from a variable text drops the vartext marker.
+
+Tests:
+
+- `tests/test_variable_text.py` (27): tokens, date / time formats, errors, CSV delimiters,
+  quoting, BOM / cp1252, cache, spec meta (future version, clamping), advance rules, job document
+  (texts, widths, rotated anchor, reading order, CSV rows, blank copies, hidden layer, separate
+  series, per-copy off), file round trip, G-code equal to the literal text with Pi guard, marker,
+  tracker (failed / refused / not dispatched / failed start / other labels / history re-send /
+  undo / no signal), apply + undo + locked layer, dialog with CSV table, window action / shortcut /
+  menus / `job_gcode` / advance / save dict / switch off, send refused with an error, serial
+  variable mode (window and dialog).
+
+Full suite: 1513 passed, 3 skipped (before: 1486 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; block entry is only „start or end“ (no free start
+  corner inside a block); overscan is clamped to the cutting area, not to the real machine travel.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: no per-object counter shown on the canvas (the template is drawn, the values
+  are in the dialog / path preview); „Text in Pfade“ converts the template literally; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417; no GS1 Digital
+  Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options
+  incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
+  incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
+  park-corner refusal, variable text / CSV merge over several sends, rebuilt exe).

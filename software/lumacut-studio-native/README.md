@@ -200,7 +200,28 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   `{{`/`}}` für Klammern; Start, Schritt (auch negativ), Anzahl (≤ 500), Spalten, Abstand X/Y,
   Vorschau der ersten Werte. Höhe, Schrift, Drehung, Ebene und Streckung bleiben, die Breite folgt
   dem Text; die Kopien sind gruppiert, alles ist **ein** Rückgängig-Schritt. Passt das Raster
-  nicht auf die Arbeitsfläche, wird nichts geändert. Code: `src/lumacut_job/serial.py`.
+  nicht auf die Arbeitsfläche, wird nichts geändert. Option **„Beim Senden weiterzählen
+  (variabler Text)“**: die Kopien behalten die Vorlage und bilden eine Serie variabler Texte –
+  der erste Auftrag lasert Start … Start + (Anzahl − 1) × Schritt, jeder weitere macht dort
+  weiter. Code: `src/lumacut_job/serial.py`.
+- **Variabler Text** („Variabler Text…“, *Alt+V*, Menü „Auftrag“ und Design-Menü; wie LightBurns
+  „Variable Text“ / „Merge CSV“): ausgewählte Textobjekte behalten auf der Arbeitsfläche und in
+  der Projektdatei ihre **Vorlage**; erst beim Senden, Speichern als G-Code, Rahmen, in der
+  Zeitschätzung und der Pfadvorschau werden die Platzhalter ausgewertet – gelasert wird der
+  ausgewertete Text (Breite folgt dem Text, Höhe/Schrift/Drehung/Streckung bleiben, linke
+  Kante fest). Platzhalter: `{n}` / `{n:3}` Zähler (Start, Schritt, Stellen, „Nächster Wert“,
+  „Auf Start“), `{date}` / `{date:%Y-%m-%d}`, `{time}` / `{time:%H:%M:%S}` (Codes
+  `%d %m %Y %y %H %M %S %j %V %%`), CSV-Spalten `{Name}` bzw. `{csv:Name}` / `{csv:2}`,
+  `{row}` (Datenzeile), `{{`/`}}`. CSV-Serienbrief: Datei wählen (Trennzeichen `;` `,` Tab `|`
+  automatisch, UTF-8 oder Windows-1252), Tabellenvorschau mit Klick auf die nächste Zeile,
+  „Nach jedem Senden nächste Zeile“. Mehrere Kopien einer Serie bekommen fortlaufende Werte /
+  Zeilen in Leserichtung (abschaltbar). Nach einem **erfolgreich hochgeladenen** Auftrag
+  (Senden, Senden & Starten, Ein-Klick-Auftrag) werden Zähler und CSV-Zeile weitergeschaltet –
+  ein Undo-Schritt, im Projekt gespeichert; ein abgelehnter oder fehlgeschlagener Upload, ein
+  fehlgeschlagener Start oder das erneute Senden aus dem Auftragsverlauf schaltet nicht weiter.
+  Fehler (unbekannte Spalte, CSV-Ende erreicht) verhindern das Senden mit einer Meldung.
+  Doppelklick bearbeitet die Vorlage wie normalen Text. „Text in Pfade“ wandelt die Vorlage
+  wörtlich um. Code: `src/lumacut_job/vartext.py`, `vartext_qt.py`.
 - **QR-Code** („QR-Code…“, *Alt+Q*, Toolbar/Menü „Auftrag“ und Design-Menü): Text oder Adresse
   (UTF-8) als QR-Code nach ISO/IEC 18004, Fehlerkorrektur L/M/Q/H, Version automatisch, Größe
   5–340 mm, Ruhezone (Standard 4 Module), „Invertiert“ für hell markierende Materialien. Die
