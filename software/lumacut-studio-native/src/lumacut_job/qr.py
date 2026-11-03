@@ -11,6 +11,13 @@ Größe ``size_mm`` ist die Kantenlänge des Codes *ohne* Ruhezone. Die Ruhezone
 freigehalten (Position X/Y = linke obere Ecke inkl. Ruhezone), invertiert
 (für Materialien, die beim Lasern *hell* werden, z. B. eloxiertes Alu,
 Schiefer) wird sie zusammen mit den hellen Modulen graviert.
+
+GS1 (``QrSpec.mode``): ``"gs1"`` kodiert einen GS1-Elementstring „(01)…(10)…“ als
+GS1 QR-Code (Modusindikator „FNC1 an erster Stelle“, FNC1-Trenner als „%“ im
+alphanumerischen bzw. GS im Byte-Modus), ``"link"`` eine GS1-Digital-Link-Adresse
+(:mod:`lumacut_job.gs1_link`). Beide nutzen gemischte Segmente (numerisch /
+alphanumerisch / Byte, kürzeste Bitfolge), der reine Text-Modus bleibt beim
+Byte-Segment.
 """
 
 from __future__ import annotations
@@ -19,6 +26,8 @@ from dataclasses import dataclass
 
 from lumacut_canvas.model import Shape, new_id
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
+
+from . import gs1, gs1_link
 
 EC_LEVELS = ("L", "M", "Q", "H")
 EC_LABELS = {"L": "L (7 %)", "M": "M (15 %)", "Q": "Q (25 %)", "H": "H (30 %)"}
@@ -29,6 +38,9 @@ MIN_MODULE_MM = 0.8
 HARD_MIN_MODULE_MM = 0.2
 SIZE_RANGE = (5.0, 340.0)        # mm, Kantenlänge des Codes
 QUIET_RANGE = (0, 10)            # Module
+MODES = ("text", "gs1", "link")
+MODE_LABELS = {"text": "Text / Adresse", "gs1": "GS1 QR-Code (Elementstring)",
+               "link": "GS1 Digital Link (Web-Adresse)"}
 
 # Format-Bits je Stufe (Tabelle 12 der Norm).
 _FORMAT_BITS = {"L": 1, "M": 0, "Q": 3, "H": 2}
@@ -344,27 +356,15 @@ def choose_version(n_bytes: int, ec: str, min_version: int = MIN_VERSION) -> int
                      f"höchstens {capacity(MAX_VERSION, ec)} – kürzeren Text oder Stufe L wählen")
 
 
-def encode(text: str, ec: str = "M", min_version: int = MIN_VERSION, mask: int | None = None) -> QrCode:
-    """Text (UTF-8, Byte-Modus) als QR-Code. ``mask`` None = beste Maske."""
-    ec = _check_level(ec)
-    data = (text or "").encode("utf-8")
-    if not data:
-        raise ValueError("Kein Text für den QR-Code")
-    ver = choose_version(len(data), ec, min_version)
+def _bits_to_code(ver: int, ec: str, bits: list[int], mask: int | None) -> QrCode:
+    """Terminator, Auffüllen, Reed-Solomon, Matrix und Maske für fertige Datenbits."""
     cap_bits = data_codewords(ver, ec) * 8
-    bits: list[int] = []
-
-    def put(value: int, n: int) -> None:
-        bits.extend((value >> i) & 1 for i in range(n - 1, -1, -1))
-    put(0b0100, 4)
-    put(len(data), 8 if ver < 10 else 16)
-    for b in data:
-        put(b, 8)
-    put(0, min(4, cap_bits - len(bits)))
-    put(0, (-len(bits)) % 8)
+    bits = list(bits)
+    bits += [0] * min(4, cap_bits - len(bits))
+    bits += [0] * ((-len(bits)) % 8)
     pad = 0xEC
     while len(bits) < cap_bits:
-        put(pad, 8)
+        bits += [(pad >> i) & 1 for i in range(7, -1, -1)]
         pad ^= 0xEC ^ 0x11
     words = bytes(int("".join(map(str, bits[i:i + 8])), 2) for i in range(0, len(bits), 8))
     b = _Builder(ver, ec)
@@ -385,6 +385,174 @@ def encode(text: str, ec: str = "M", min_version: int = MIN_VERSION, mask: int |
     b.apply_mask(int(mask))
     b.draw_format(int(mask))
     return QrCode(ver, ec, int(mask), tuple(tuple(r) for r in b.modules))
+
+
+def _put(bits: list[int], value: int, n: int) -> None:
+    bits.extend((value >> i) & 1 for i in range(n - 1, -1, -1))
+
+
+def encode(text: str, ec: str = "M", min_version: int = MIN_VERSION, mask: int | None = None) -> QrCode:
+    """Text (UTF-8, Byte-Modus) als QR-Code. ``mask`` None = beste Maske."""
+    ec = _check_level(ec)
+    data = (text or "").encode("utf-8")
+    if not data:
+        raise ValueError("Kein Text für den QR-Code")
+    ver = choose_version(len(data), ec, min_version)
+    bits: list[int] = []
+    _put(bits, 0b0100, 4)
+    _put(bits, len(data), 8 if ver < 10 else 16)
+    for b in data:
+        _put(bits, b, 8)
+    return _bits_to_code(ver, ec, bits, mask)
+
+
+# --- Gemischte Segmente (numerisch / alphanumerisch / Byte), GS1 ----------------------
+ALNUM_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
+_ALNUM = {c: i for i, c in enumerate(ALNUM_CHARS)}
+_MODE_IND = {"N": 0b0001, "A": 0b0010, "B": 0b0100}
+_COUNT_BITS = {"N": (10, 12, 14), "A": (9, 11, 13), "B": (8, 16, 16)}
+FNC1_FIRST = 0b0101
+GS = 0x1D
+
+
+def _version_class(ver: int) -> int:
+    return 0 if ver <= 9 else (1 if ver <= 26 else 2)
+
+
+def _units(item: int, mode: str, gs1_mode: bool):
+    """Zeichen eines Eingabe-Elements (Byte 0–255 oder ``gs1.FNC1``) in ``mode``; None = nicht darstellbar.
+
+    GS1: FNC1 ist im alphanumerischen Modus „%“, ein echtes „%“ wird „%%“; im Byte-Modus ist
+    FNC1 das Steuerzeichen GS (0x1D).
+    """
+    if item == gs1.FNC1:
+        return ("%",) if mode == "A" else ((GS,) if mode == "B" else None)
+    if mode == "B":
+        return (item,)
+    c = chr(item)
+    if mode == "N":
+        return (c,) if "0" <= c <= "9" else None
+    if c not in _ALNUM:
+        return None
+    return ("%", "%") if c == "%" and gs1_mode else (c,)
+
+
+def segments(items: list[int], ver: int, gs1_mode: bool = False) -> list[tuple[str, list]]:
+    """Kürzeste Segmentfolge [(Modus, Zeichen)] für die Versionsklasse von ``ver``.
+
+    Dynamische Programmierung über die drei Modi mit Kosten in 1/6 Bit (numerisch 10/3,
+    alphanumerisch 11/2, Byte 8 Bit je Zeichen, Kopf 4 + Zählerbits je Segment) – wie der
+    Segment-Optimierer der Referenz-Implementierung von Project Nayuki.
+    """
+    if not items:
+        return []
+    cls = _version_class(ver)
+    modes = ("N", "A", "B")
+    unit_cost = {"N": 20, "A": 33, "B": 48}
+    head = {m: (4 + _COUNT_BITS[m][cls]) * 6 for m in modes}
+    inf = float("inf")
+    cost = {m: inf for m in modes}
+    back: list[dict] = []
+    for k, item in enumerate(items):
+        new, prev = {}, {}
+        for m in modes:
+            u = _units(item, m, gs1_mode)
+            if u is None:
+                new[m] = inf
+                prev[m] = None
+                continue
+            c = unit_cost[m] * len(u)
+            if k == 0:
+                new[m], prev[m] = head[m] + c, None
+                continue
+            best, arg = cost[m], m
+            for m2 in modes:
+                if cost[m2] + head[m] < best:
+                    best, arg = cost[m2] + head[m], m2
+            new[m], prev[m] = best + c, arg
+        back.append(prev)
+        cost = new
+    mode = min(modes, key=lambda m: cost[m])
+    chosen = []
+    for k in range(len(items) - 1, -1, -1):
+        chosen.append(mode)
+        mode = back[k][mode] or mode
+    chosen.reverse()
+    out: list[tuple[str, list]] = []
+    for item, m in zip(items, chosen):
+        u = list(_units(item, m, gs1_mode))
+        if out and out[-1][0] == m:
+            out[-1][1].extend(u)
+        else:
+            out.append((m, u))
+    return out
+
+
+def segment_bits(segs: list[tuple[str, list]], ver: int, fnc1_first: bool = False) -> list[int]:
+    cls = _version_class(ver)
+    bits: list[int] = []
+    if fnc1_first:
+        _put(bits, FNC1_FIRST, 4)
+    for mode, chars in segs:
+        n = len(chars)
+        if n >= 1 << _COUNT_BITS[mode][cls]:
+            raise ValueError("Segment zu lang")
+        _put(bits, _MODE_IND[mode], 4)
+        _put(bits, n, _COUNT_BITS[mode][cls])
+        if mode == "N":
+            for i in range(0, n, 3):
+                grp = "".join(chars[i:i + 3])
+                _put(bits, int(grp), (4, 7, 10)[len(grp) - 1])
+        elif mode == "A":
+            for i in range(0, n - 1, 2):
+                _put(bits, _ALNUM[chars[i]] * 45 + _ALNUM[chars[i + 1]], 11)
+            if n % 2:
+                _put(bits, _ALNUM[chars[-1]], 6)
+        else:
+            for b in chars:
+                _put(bits, b, 8)
+    return bits
+
+
+def encode_items(items: list[int], ec: str = "M", fnc1_first: bool = False,
+                 min_version: int = MIN_VERSION, mask: int | None = None) -> QrCode:
+    """Bytes (0–255) und ``gs1.FNC1`` mit optimalen Segmenten; ``fnc1_first`` = GS1 QR-Code."""
+    ec = _check_level(ec)
+    items = list(items)
+    if not items:
+        raise ValueError("Kein Inhalt für den QR-Code")
+    if gs1.FNC1 in items and not fnc1_first:
+        raise ValueError("FNC1 nur im GS1-Modus")
+    best_bits = None
+    for v in range(max(MIN_VERSION, int(min_version)), MAX_VERSION + 1):
+        try:
+            bits = segment_bits(segments(items, v, fnc1_first), v, fnc1_first)
+        except ValueError:
+            continue
+        best_bits = bits if best_bits is None or len(bits) < len(best_bits) else best_bits
+        if len(bits) <= data_codewords(v, ec) * 8:
+            return _bits_to_code(v, ec, bits, mask)
+    need = (len(best_bits) + 7) // 8 if best_bits else 0
+    raise ValueError(f"Inhalt zu lang für den QR-Code: {need} Datenbytes, bei Fehlerkorrektur {ec} "
+                     f"höchstens {data_codewords(MAX_VERSION, ec)} – kürzer fassen oder Stufe L wählen")
+
+
+def gs1_items(text: str) -> list[int]:
+    """GS1-Elementstring als Eingabe-Elemente (ohne das führende FNC1, das ist der Modusindikator)."""
+    return gs1.sequence(gs1.parse(text))[1:]
+
+
+def encode_gs1(text: str, ec: str = "M", min_version: int = MIN_VERSION,
+               mask: int | None = None) -> QrCode:
+    """GS1 QR-Code (ISO/IEC 18004, 7.4.8.2) für einen Elementstring „(01)…(17)…“."""
+    return encode_items(gs1_items(text), ec, True, min_version, mask)
+
+
+def encode_link(text: str, ec: str = "M", domain: str = gs1_link.DEFAULT_DOMAIN,
+                min_version: int = MIN_VERSION, mask: int | None = None) -> QrCode:
+    """GS1-Digital-Link-QR-Code; ``text`` = Elementstring oder fertige Digital-Link-Adresse."""
+    uri, _ = gs1_link.resolve(text, domain)
+    return encode_items(list(uri.encode("utf-8")), ec, False, min_version, mask)
 
 
 def _interleave(ver: int, ec: str, data: bytes) -> bytes:
@@ -426,13 +594,38 @@ class QrSpec:
     invert: bool = False
     x: float = 0.0          # linke obere Ecke inkl. Ruhezone
     y: float = 0.0
+    mode: str = "text"      # "text", "gs1" (GS1 QR-Code) oder "link" (GS1 Digital Link)
+    domain: str = gs1_link.DEFAULT_DOMAIN   # nur "link" mit Elementstring
 
     def normalized(self) -> "QrSpec":
         ec = str(self.ec).upper()
+        mode = str(self.mode or "text").lower()
+        domain = "".join(str(self.domain or "").split()) or gs1_link.DEFAULT_DOMAIN
         return QrSpec(text=str(self.text or ""), ec=ec if ec in EC_LEVELS else "M",
                       size_mm=float(_clamp(float(self.size_mm), *SIZE_RANGE)),
                       quiet_zone=int(_clamp(int(self.quiet_zone), *QUIET_RANGE)),
-                      invert=bool(self.invert), x=float(self.x), y=float(self.y))
+                      invert=bool(self.invert), x=float(self.x), y=float(self.y),
+                      mode=mode if mode in MODES else "text", domain=domain)
+
+    def content(self) -> str:
+        """Was ein Scanner liest: Text, GS1-Elementstring (normalisiert) oder Digital-Link-Adresse.
+
+        Wirft ``ValueError`` (deutsch) bei ungültigen GS1-Daten.
+        """
+        s = self.normalized()
+        if s.mode == "gs1":
+            return gs1.hri(gs1.parse(s.text))
+        if s.mode == "link":
+            return gs1_link.resolve(s.text, s.domain)[0]
+        return s.text
+
+    def encode(self, mask: int | None = None) -> QrCode:
+        s = self.normalized()
+        if s.mode == "gs1":
+            return encode_gs1(s.text, s.ec, mask=mask)
+        if s.mode == "link":
+            return encode_link(s.text, s.ec, s.domain, mask=mask)
+        return encode(s.text, s.ec, mask=mask)
 
     def total_mm(self, code: QrCode) -> float:
         s = self.normalized()
@@ -469,7 +662,7 @@ def qr_shapes(spec: QrSpec, layer_id: str, code: QrCode | None = None) -> list[S
     wenn der Code samt Ruhezone nicht auf die Arbeitsfläche passt.
     """
     s = spec.normalized()
-    code = code or encode(s.text, s.ec)
+    code = code or s.encode()
     module = s.size_mm / code.size
     if module < HARD_MIN_MODULE_MM:
         raise ValueError(f"Module {module:.2f} mm sind zu klein (mindestens "
@@ -493,6 +686,17 @@ def qr_shapes(spec: QrSpec, layer_id: str, code: QrCode | None = None) -> list[S
         sh.groups = (group,)
         out.append(sh)
     return out
+
+
+def content_info(spec: QrSpec) -> str:
+    """Deutsche Zeile für den Dialog: was im GS1-Code steht ("" im Text-Modus)."""
+    s = spec.normalized()
+    if s.mode == "gs1":
+        return "GS1-Daten: " + s.content()
+    if s.mode == "link":
+        uri, link = gs1_link.resolve(s.text, s.domain)
+        return f"Adresse: {uri} ({gs1_link.describe(link)})"
+    return ""
 
 
 def describe(code: QrCode, size_mm: float) -> str:
