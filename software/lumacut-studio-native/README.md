@@ -226,7 +226,11 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
 - **Data Matrix** („Data Matrix…“, *Alt+X*, Menü „Auftrag“ und Design-Menü): 2D-Code nach
   ISO/IEC 16022 (ECC 200), alle quadratischen Größen 10 × 10 bis 144 × 144 und die sechs
   rechteckigen 8 × 18 bis 16 × 48 (für schmale Flächen; „Automatisch quadratisch“, „Automatisch
-  rechteckig“ oder Mindestgröße wählbar). Die Kodierung wählt automatisch die kürzeste Mischung aus
+  rechteckig“ oder Mindestgröße wählbar), dazu die 18 **DMRE**-Rechtecke nach ISO/IEC 21471
+  (8 × 48 bis 8 × 144, 12 × 64 bis 26 × 64 – flachere bzw. längere Codes für Kabel, Kanten und
+  Etiketten; „Automatisch rechteckig inkl. DMRE“ oder feste Größe, bei zu wenig Platz zuerst
+  die nächste DMRE-Größe gleicher Höhe). DMRE liest nicht jeder Scanner – der Dialog weist
+  darauf hin; „Automatisch rechteckig“ bleibt bei ISO/IEC 16022. Die Kodierung wählt automatisch die kürzeste Mischung aus
   ASCII (Ziffernpaare), C40 (Großbuchstaben), Text (Kleinbuchstaben), X12 und Base 256 – lange
   Texte passen so in kleinere Symbole. Umlaute und Unicode als UTF-8 mit ECI 26 (Handy-Scanner
   lesen sie so zuverlässig), Reed-Solomon mit Block-Verschachtelung. Option **GS1-Daten**
@@ -369,7 +373,12 @@ Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt
   Füllblöcke einer Ebene (je Objekt, Gruppe oder Ebene) nach dem nächsten
   Nachbarn sortiert statt in Objekt-Reihenfolge – Schraffurblöcke auch
   rückwärts, Offset-Blöcke nur vorwärts (Ring-Reihenfolge bleibt); die Konturen
-  beginnen dort, wo die Füllung endet.
+  beginnen dort, wo die Füllung endet. Danach verbessert ein 2-opt-/Or-opt-Durchlauf
+  die Reihenfolge (Abschnitte umdrehen, 1–3 Blöcke verschieben; nur ganze Blöcke,
+  Einstieg wie im G-Code am näheren Ende) – bei bis zu einigen hundert Blöcken oft 5–20 %
+  weniger Leerfahrt als nur „nächster Nachbar“, nie mehr. Deterministisch und mit
+  festem Rechenbudget (≈ 0,5 s bei 1500 Blöcken, über 2000 Blöcke bleibt die
+  Nachbar-Reihenfolge).
 - Auf der Arbeitsfläche erscheint die Schraffur als dünne Linien in der
   Ebenenfarbe (Overlay `fill_preview`, nicht anklickbar). `export_svg` /
   `export_png` zeichnen sie mit `show_fill=True`.

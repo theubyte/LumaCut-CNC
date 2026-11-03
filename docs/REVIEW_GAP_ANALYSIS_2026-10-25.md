@@ -1256,3 +1256,81 @@ Still open:
   incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
   incl. edited, rectangular, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner, park-corner
   refusal, rebuilt exe).
+
+## 27. Status update 2026-11-03 (review round 20)
+
+Done this round (Review; nothing from Canvas, Machine / Scan Probe or Materials touched – the G-code
+writer is unchanged):
+
+- Gaps picked from §26 „Still open“: the fill block order was greedy nearest neighbour only, and
+  Data Matrix had no DMRE sizes. Neither needs a user decision.
+- **Fill block order: 2-opt / Or-opt** (`lumacut_job/planner.py`, `improve_fill_block_order`), run by
+  the planner („Leerfahrten reduzieren“) after the nearest-neighbour order of commit 0cd8cbe:
+  - moves: 2-opt segment reversal and Or-opt moves of 1–3 consecutive blocks (optionally reversed,
+    or to the front), tried only towards the 8 nearest blocks; first improvement, repeated until no
+    move helps;
+  - entry direction: the cost uses the same rule as `gcode.order_fill_blocks` (a block is entered
+    at its nearer end, reversed only for hatch / scanline blocks), and the result is emitted in
+    that orientation – the first pass lasers exactly the planned tour, later passes keep the
+    writer's own re-orientation;
+  - constraints kept: per layer, blocks stay whole (no segment is moved between blocks), offset
+    rings (`fill_fixed_order`) are never reversed; never longer than the greedy order;
+  - bounded and deterministic: a fixed work budget (1 000 000 block steps, no wall clock), over
+    2000 blocks the greedy order is kept; ≈ 0.2–0.6 s for 300–1500 blocks. Random layouts: about
+    20 % less travel at 100 blocks, 9 % at 300, under 1 % at 1000 (greedy is already good there).
+  - Not covered: a free start corner inside a block (only reversal), overscan length in the cost.
+- **Data Matrix DMRE** (`lumacut_job/datamatrix.py`, ISO/IEC 21471): the 18 rectangular sizes 8 × 48
+  … 8 × 144, 12 × 64, 12 × 88, 16 × 64, 20 × 36 … 20 × 64, 22 × 48, 24 × 48, 24 × 64, 26 × 40 …
+  26 × 64 (one Reed-Solomon block each; row wrap in the placement for the 26-row sizes as in
+  zxing-cpp). New choice „Automatisch rechteckig inkl. DMRE“ (smallest rectangle by data, then area);
+  „Automatisch rechteckig“ stays ISO/IEC 16022 only. A fixed DMRE size that is too small grows to the
+  next DMRE size of the same height first. Dialog lists the sizes as „… Module DMRE“ and hints to
+  test the own scanner; re-edit and file round trip unchanged.
+
+Tests:
+
+- `tests/test_fill_block_order_opt.py` (12): travel never above greedy and clearly below it on
+  random hatch / offset blocks, a textbook case where greedy leaves a block behind, blocks whole and
+  offset blocks never reversed, the G-code writer keeps the planned order, determinism, trivial
+  inputs, budget 0 / small budget and the block limit, runtime at 1500 blocks, sent G-code (hatch and
+  offset, 2 passes) with less travel, same cut length and Pi guard, `optimize_layers` with and
+  without „Leerfahrten reduzieren“.
+- `tests/test_datamatrix.py` (+27): DMRE table geometry, zxing-cpp decodes every DMRE size
+  (structure and RS), auto DMRE vs. auto rectangular and explicit sizes, vector shapes (incl. Unicode,
+  hatch fill) decode, GS1 in DMRE (`]d8`), dialog entries / info, window insert, G-code with
+  Pi guard, re-edit and file round trip.
+
+Full suite: 1486 passed, 3 skipped (before: 1447 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter and CSV merge
+  (LightBurn „Variable Text“ / „Merge CSV“) – decide if wanted; today only the batch
+  „Seriennummern…“ exists.
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; block entry is only „start or end“ (no free start
+  corner inside a block); overscan is clamped to the cutting area, not to the real machine travel.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417; no GS1 Digital
+  Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options
+  incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
+  incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
+  park-corner refusal, rebuilt exe).
