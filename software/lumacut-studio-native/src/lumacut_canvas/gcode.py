@@ -176,6 +176,52 @@ def scan_offset_segment(a, b, offset_mm: float):
     return ((a[0] + u[0] * t, a[1] + u[1] * t), (b[0] + u[0] * t, b[1] + u[1] * t))
 
 
+def _fill_moves(layer: JobLayer, pos):
+    """Füllstrecken eines Durchgangs wie im G-Code: ``[(a, b, a2, b2)]``.
+
+    ``a → b`` wird mit Laser an gefahren (Blockreihenfolge/-variante ab ``pos``,
+    Scan-Versatz bereits angewandt), ``a2``/``b2`` sind die Überlauf-Enden.
+    """
+    overscan = float(getattr(layer, "fill_overscan_mm", 0.0) or 0.0)
+    scan_off = float(getattr(layer, "fill_scan_offset_mm", 0.0) or 0.0)
+    moves = []
+    for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos,
+                                   not getattr(layer, "fill_fixed_order", False),
+                                   getattr(layer, "fill_free_corner", False)):
+        for a, b in block:
+            if scan_off:
+                a, b = scan_offset_segment(a, b, scan_off)
+            a2, b2 = overscan_segment(a, b, overscan)
+            moves.append((a, b, a2, b2))
+    return moves
+
+
+def fill_burn_segments(layers: list[JobLayer]) -> list[list]:
+    """Je Ebene die im 1. Durchgang gelaserten Füllstrecken ``(a, b)`` (Maschinen-mm).
+
+    Dieselbe Fahrt wie :func:`layers_to_gcode` (Kopfposition über alle Ebenen,
+    Durchgänge und Konturen hinweg, Blockvariante, Scan-Versatz; ohne den
+    Überlauf mit Laser aus) – für die Schraffur-Vorschau, damit sie genau das
+    zeigt, was gebrannt wird. Ebenen ohne Füllung liefern ``[]``.
+    """
+    out = []
+    pos = None
+    for layer in layers:
+        burns = []
+        if _has_moves(layer):
+            for p in range(max(1, int(layer.passes))):
+                moves = _fill_moves(layer, pos)
+                if p == 0:
+                    burns = [(a, b) for a, b, _a2, _b2 in moves]
+                if moves:
+                    pos = moves[-1][3]
+                for line in layer.polylines:
+                    if len(line) >= 2:
+                        pos = line[-1]
+        out.append(burns)
+    return out
+
+
 def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -> str:
     if not any(_has_moves(l) for l in layers):
         raise ValueError("Keine sichtbaren Objekte zum Lasern")
@@ -207,23 +253,15 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
             if use_hook:
                 acc += depths[p]
                 out += _hook_lines(pass_hook, layer, p, round(acc, 6))
-            overscan = float(getattr(layer, "fill_overscan_mm", 0.0) or 0.0)
-            scan_off = float(getattr(layer, "fill_scan_offset_mm", 0.0) or 0.0)
-            for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos,
-                                           not getattr(layer, "fill_fixed_order", False),
-                                           getattr(layer, "fill_free_corner", False)):
-                for a, b in block:
-                    if scan_off:
-                        a, b = scan_offset_segment(a, b, scan_off)
-                    a2, b2 = overscan_segment(a, b, overscan)
-                    if pos is None or abs(pos[0] - a2[0]) > 1e-6 or abs(pos[1] - a2[1]) > 1e-6:
-                        out.append(f"G0 {_xy(*a2)}")
-                    if a2 != a:   # Anlauf mit Laser aus
-                        out.append(f"G1 {_xy(*a)} F{f} S0")
-                    out.append(f"G1 {_xy(*b)} F{f} S{s}")
-                    if b2 != b:   # Auslauf mit Laser aus
-                        out.append(f"G1 {_xy(*b2)} F{f} S0")
-                    pos = b2
+            for a, b, a2, b2 in _fill_moves(layer, pos):
+                if pos is None or abs(pos[0] - a2[0]) > 1e-6 or abs(pos[1] - a2[1]) > 1e-6:
+                    out.append(f"G0 {_xy(*a2)}")
+                if a2 != a:   # Anlauf mit Laser aus
+                    out.append(f"G1 {_xy(*a)} F{f} S0")
+                out.append(f"G1 {_xy(*b)} F{f} S{s}")
+                if b2 != b:   # Auslauf mit Laser aus
+                    out.append(f"G1 {_xy(*b2)} F{f} S0")
+                pos = b2
             kinds = getattr(layer, "poly_kinds", ()) or ()
             prev_end = None
             for i, line in enumerate(layer.polylines):

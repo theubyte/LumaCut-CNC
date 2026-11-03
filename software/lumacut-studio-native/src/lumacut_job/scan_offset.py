@@ -182,6 +182,52 @@ def apply_to_layers(layers, table: ScanOffsetTable | None):
     return out
 
 
+_DEFAULT = object()
+
+
+def preview_fill_lines(doc, table=_DEFAULT) -> dict[str, list] | None:
+    """Fill lines for the canvas fill preview as they are burned (scan offset applied).
+
+    Returns ``{layer_id: [(a, b), ...]}`` in work-area mm (the coordinates of
+    ``lumacut_canvas.export.layer_fill_blocks``), or ``None`` when no layer
+    gets a shift (table off / empty, no hatch at a speed with an offset) – the
+    preview then draws the plain fill geometry as before. The direction of a
+    scan line (and therefore the side it moves to) depends on the planned
+    block order and corner variant, so the planner order of the job
+    (:func:`lumacut_job.planner.optimize_layers`, same defaults as send /
+    save) is replayed with :func:`lumacut_canvas.gcode.fill_burn_segments`:
+    the preview equals pass 1 of the G-code. ``table`` default = the active
+    table of the app.
+    """
+    tab = active_table() if table is _DEFAULT else table
+    if tab is None or not tab.active:
+        return None
+    from lumacut_canvas.export import job_layers
+    from lumacut_canvas.gcode import fill_burn_segments
+    from lumacut_canvas.workarea import machine_to_screen
+
+    from .planner import optimize_layers
+    layers = job_layers(doc)
+    if not any(getattr(l, "fills", None) and not getattr(l, "fill_fixed_order", False)
+               and abs(tab.offset_for(l.speed_mm_min)) > 1e-9 for l in layers):
+        return None
+    # The planner is the expensive part (≈1 s for 1500 hatched objects); edits
+    # that leave the job unchanged (colour, names, selection) reuse the last plan.
+    key = (repr(layers), repr(tab))
+    if _PREVIEW_CACHE.get("key") == key:
+        return {k: list(v) for k, v in _PREVIEW_CACHE["value"].items()}
+    layers = apply_to_layers(optimize_layers(layers), tab)
+    out: dict[str, list] = {}
+    for layer, burns in zip(layers, fill_burn_segments(layers)):
+        out[layer.layer_id] = [(machine_to_screen(*a), machine_to_screen(*b)) for a, b in burns]
+    _PREVIEW_CACHE.clear()
+    _PREVIEW_CACHE.update(key=key, value=out)
+    return {k: list(v) for k, v in out.items()}
+
+
+_PREVIEW_CACHE: dict = {}
+
+
 # --- calibration pattern ------------------------------------------------------
 @dataclass
 class ScanTestSpec:

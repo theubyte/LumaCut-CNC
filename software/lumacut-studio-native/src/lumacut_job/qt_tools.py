@@ -631,6 +631,14 @@ class JobTools(QObject):
         table = load_table(default_settings())
         if table is not None:
             set_active_table(table)
+            self._refresh_scan_previews()
+
+    def _refresh_scan_previews(self) -> None:
+        """Pfad- und Schraffur-Vorschau neu berechnen (Scan-Versatz geändert)."""
+        for name in ("path_preview", "fill_preview"):
+            preview = getattr(self.editor, name, None)
+            if callable(getattr(preview, "schedule", None)):
+                preview.schedule()
 
     def scan_offset(self, table=None):
         """Scan-Versatz-Tabelle bearbeiten, aktivieren und speichern.
@@ -652,9 +660,7 @@ class JobTools(QObject):
             return None
         set_active_table(table)
         save_table(default_settings(), table)
-        preview = getattr(self.editor, "path_preview", None)
-        if callable(getattr(preview, "schedule", None)):
-            preview.schedule()   # Pfadvorschau = Auftrag, mit neuem Versatz
+        self._refresh_scan_previews()   # Pfad-/Schraffur-Vorschau = Auftrag, mit neuem Versatz
         self._msg(table.summary() + " – gilt für Bilder und Schraffur" if table.active
                   else "Scan-Versatz aus")
         return table

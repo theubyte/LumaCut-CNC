@@ -5,6 +5,11 @@ Linien in der Ebenenfarbe unter den Objekten – dieselbe Geometrie wie im
 G-Code (``export.layer_fill_blocks``, auch „Objekte zusammen füllen“). Läuft über den Overlay-Hook des
 Editors, berechnet erst nach kurzer Ruhe neu (Ziehen bleibt flüssig) und
 ändert weder Dokument noch Export.
+
+Mit aktivem Scan-Versatz (``lumacut_job.scan_offset``) zeigt sie die Linien so,
+wie sie gebrannt werden – um den halben Versatz entgegen ihrer Fahrtrichtung
+verschoben, in Planer-Reihenfolge (``scan_offset.preview_fill_lines``); ohne
+Versatz bleibt es bei der reinen Füllgeometrie.
 """
 
 from __future__ import annotations
@@ -19,6 +24,18 @@ DEBOUNCE_MS = 120
 MAX_PREVIEW_LINES = 200_000   # darüber wird nicht mehr gezeichnet (nur der G-Code zählt)
 
 
+def _shifted_lines(doc):
+    """Gebrannte Füllstrecken mit Scan-Versatz je Ebene, ``None`` = ohne Versatz."""
+    try:
+        from lumacut_job.scan_offset import preview_fill_lines
+    except Exception:  # pragma: no cover - lumacut_job ist Teil der App
+        return None
+    try:
+        return preview_fill_lines(doc)
+    except ValueError:              # z. B. zu viele Linien: dann die reine Geometrie
+        return None
+
+
 class FillPreview(QObject):
     """Overlay mit ``visible``/``opacity``/``paint`` für ``editor.add_overlay``."""
 
@@ -29,6 +46,7 @@ class FillPreview(QObject):
         self.opacity = 0.75
         self.lines: list[tuple[QColor, list[QLineF]]] = []
         self.truncated = False
+        self.scan_offset_applied = False   # zuletzt mit Scan-Versatz gezeichnet
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(DEBOUNCE_MS)
@@ -45,12 +63,17 @@ class FillPreview(QObject):
         out: list[tuple[QColor, list[QLineF]]] = []
         total = 0
         self.truncated = False
+        shifted = _shifted_lines(doc)
+        self.scan_offset_applied = shifted is not None
         for layer in doc.layers:
             if not layer.visible or layer.fill_mode == "none":
                 continue
             lines: list[QLineF] = []
             try:
-                blocks = [segs for _ids, segs in layer_fill_blocks(doc, layer)]
+                if shifted is not None:
+                    blocks = [shifted.get(layer.id, [])]
+                else:
+                    blocks = [segs for _ids, segs in layer_fill_blocks(doc, layer)]
             except ValueError:          # zu viele Linien: Hinweis kommt beim Export
                 self.truncated = True
                 blocks = []
