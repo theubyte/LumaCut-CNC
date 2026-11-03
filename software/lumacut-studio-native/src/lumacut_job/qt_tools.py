@@ -154,6 +154,12 @@ class JobTools(QObject):
         editor.generated_edit_handler = self.edit_generated_at
         self.cut_action = self._add("Schnittoptionen…", self.cut_options, "Alt+K",
                                     "Kerf-Versatz, Haltestege und An-/Abfahrt der aktiven Ebene")
+        self.scan_offset_action = self._add(
+            "Scan-Versatz…", self.scan_offset, None,
+            "Versatz hin-/rücklaufender Linien je Geschwindigkeit ausgleichen (Bilder und "
+            "Schraffur, wie LightBurn „Scanning Offset Adjustment“) – mit Testmuster")
+        self.scan_offset_action.setObjectName("scan_offset_action")
+        self._load_scan_offset()
         self.selection_action = self._add("Nur Auswahl", self._selection_toggled, None,
                                           "Senden, Schätzen, Rahmen und Speichern nur mit den "
                                           "ausgewählten Objekten (wie „Cut Selected Graphics“)")
@@ -615,6 +621,81 @@ class JobTools(QObject):
                   else "Schnittoptionen unverändert")
         return changed
 
+
+    # --- Scan-Versatz (lumacut_job.scan_offset) ------------------------------
+    def _load_scan_offset(self) -> None:
+        from .scan_offset import set_active_table
+        from .scan_offset_qt import default_settings, load_table
+        table = load_table(default_settings())
+        if table is not None:
+            set_active_table(table)
+
+    def scan_offset(self, table=None):
+        """Scan-Versatz-Tabelle bearbeiten, aktivieren und speichern.
+
+        ``table`` (Tests) überspringt den Dialog. Gibt die neue Tabelle
+        zurück oder None (abgebrochen)."""
+        from .scan_offset import active_table, set_active_table
+        from .scan_offset_qt import ScanOffsetDialog, default_settings, save_table
+        if table is None:
+            dlg = ScanOffsetDialog(active_table(), self.window,
+                                   test_callback=lambda d: self.scan_test(parent=d))
+            if dlg.exec() != QDialog.Accepted:
+                return None
+            table = dlg.table()
+        try:
+            table = table.normalized()
+        except ValueError as exc:
+            self._msg(str(exc))
+            return None
+        set_active_table(table)
+        save_table(default_settings(), table)
+        preview = getattr(self.editor, "path_preview", None)
+        if callable(getattr(preview, "schedule", None)):
+            preview.schedule()   # Pfadvorschau = Auftrag, mit neuem Versatz
+        self._msg(table.summary() + " – gilt für Bilder und Schraffur" if table.active
+                  else "Scan-Versatz aus")
+        return table
+
+    def scan_test(self, spec=None, action: str | None = None, path: str | None = None,
+                  parent=None) -> str:
+        """Kalibrier-Testmuster: Dialog, oder mit ``spec`` direkt ``action``
+        "send" (hochladen ohne Start) / "save" (``path``). Gibt den G-Code zurück."""
+        from .scan_offset import test_pattern_gcode
+        from .scan_offset_qt import ScanTestDialog
+
+        def send(g):
+            if not hasattr(self.machine, "send_gcode"):
+                self._msg("Scan-Test: kein Maschinen-Panel")
+                return
+            self.machine.send_gcode("scan-versatz-test.gcode", g, start=False)
+            self._msg("Scan-Versatz-Test gesendet – mit „Start“ ausführen, dann je Reihe das "
+                      "Feld mit geraden Kanten in die Tabelle übernehmen", 15000)
+
+        def save(g, target=None):
+            from .history_qt import save_gcode_file
+            if target is None:
+                target = save_gcode_file(parent or self.window, g, "scan-versatz-test.gcode")
+            else:
+                from pathlib import Path
+                Path(target).write_text(g, encoding="utf-8", newline="\n")
+            if target:
+                self._msg(f"Scan-Versatz-Test gespeichert: {target}")
+
+        if spec is None:
+            dlg = ScanTestDialog(None, parent or self.window, send, save)
+            dlg.exec()
+            return dlg.result_gcode
+        try:
+            g = test_pattern_gcode(spec)
+        except ValueError as exc:
+            self._msg(str(exc))
+            return ""
+        if action == "send":
+            send(g)
+        elif action == "save":
+            save(g, path)
+        return g
 
     def save_gcode(self, path: str | None = None) -> str:
         """Optimierten G-Code (wie beim Senden, ohne Scan-Fokuskorrektur) speichern."""
