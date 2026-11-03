@@ -1,6 +1,9 @@
 """Data Matrix ECC 200 (ISO/IEC 16022) as vector objects for engraving – pure Python.
 
-Square symbols 10×10 … 144×144 and the six rectangular symbols 8×18 … 16×48
+Square symbols 10×10 … 144×144, the six rectangular symbols 8×18 … 16×48
+and the 18 DMRE rectangles 8×48 … 26×64 of ISO/IEC 21471 (Data Matrix
+Rectangular Extension – longer and taller flat codes; not every scanner reads
+them, so automatic rectangles stay ISO/IEC 16022 unless DMRE is asked for)
 modules, Reed-Solomon over GF(256) (field polynomial 0x12D, generator roots
 α¹…αⁿ), pad codewords with the 253-state randomisation of the standard.
 
@@ -52,8 +55,20 @@ RECT_SYMBOLS: dict[tuple[int, int], tuple[int, int, int, int, int]] = {
     (12, 36): (10, 16, 2, 22, 18), (16, 36): (14, 16, 2, 32, 24), (16, 48): (14, 22, 2, 49, 28),
 }
 RECT_SIZES = tuple(f"{r}x{c}" for r, c in RECT_SYMBOLS)
+# DMRE (ISO/IEC 21471 table 7), same layout as RECT_SYMBOLS – all with one RS block.
+DMRE_SYMBOLS: dict[tuple[int, int], tuple[int, int, int, int, int]] = {
+    (8, 48): (6, 22, 2, 18, 15), (8, 64): (6, 14, 4, 24, 18), (8, 80): (6, 18, 4, 32, 22),
+    (8, 96): (6, 22, 4, 38, 28), (8, 120): (6, 18, 6, 49, 32), (8, 144): (6, 22, 6, 63, 36),
+    (12, 64): (10, 14, 4, 43, 27), (12, 88): (10, 20, 4, 64, 36), (16, 64): (14, 14, 4, 62, 36),
+    (20, 36): (18, 16, 2, 44, 28), (20, 44): (18, 20, 2, 56, 34), (20, 64): (18, 14, 4, 84, 42),
+    (22, 48): (20, 22, 2, 72, 38), (24, 48): (22, 22, 2, 80, 41), (24, 64): (22, 14, 4, 108, 46),
+    (26, 40): (24, 18, 2, 70, 38), (26, 48): (24, 22, 2, 90, 42), (26, 64): (24, 14, 4, 118, 50),
+}
+DMRE_SIZES = tuple(f"{r}x{c}" for r, c in DMRE_SYMBOLS)
 AUTO = 0                          # spec.symbol: smallest square size that fits
 AUTO_RECT = -1                    # spec.symbol: smallest rectangular size that fits
+AUTO_DMRE = -2                    # spec.symbol: smallest rectangle incl. DMRE that fits
+AUTOS = (AUTO, AUTO_RECT, AUTO_DMRE)
 
 
 class Format(tuple):
@@ -78,6 +93,11 @@ class Format(tuple):
         return self[0] if self.square else f"{self[0]}x{self[1]}"
 
     @property
+    def dmre(self) -> bool:
+        """Rectangular extension size (ISO/IEC 21471)."""
+        return (self[0], self[1]) in DMRE_SYMBOLS
+
+    @property
     def label(self) -> str:
         return f"{self[0]} × {self[1]}"
 
@@ -86,7 +106,8 @@ def _formats() -> dict:
     out = {}
     for n, (region, per, data, ecc, blocks) in SYMBOLS.items():
         out[n] = Format((n, n, region, region, per, per, data, ecc, blocks))
-    for (r, c), (rr, rc, across, data, ecc) in RECT_SYMBOLS.items():
+    for (r, c), (rr, rc, across, data, ecc) in (*RECT_SYMBOLS.items(), *DMRE_SYMBOLS.items()):
+        assert c == across * (rc + 2) and r == rr + 2
         out[f"{r}x{c}"] = Format((r, c, rr, rc, 1, across, data, ecc, 1))
     return out
 
@@ -94,11 +115,16 @@ def _formats() -> dict:
 FORMATS = _formats()
 SQUARE_FORMATS = tuple(FORMATS[n] for n in SIZES)
 RECT_FORMATS = tuple(FORMATS[k] for k in RECT_SIZES)
+DMRE_FORMATS = tuple(FORMATS[k] for k in DMRE_SIZES)
+# all rectangles by capacity (ties: smaller area first) – the AUTO_DMRE search order
+ALL_RECT_FORMATS = tuple(sorted(RECT_FORMATS + DMRE_FORMATS,
+                                key=lambda f: (f.data, f.rows * f.cols)))
 
 
 def symbol_key(symbol):
-    """Normalised ``spec.symbol``: 0 / −1 (automatic square / rectangle), the edge of a
-    square symbol (int) or "RxC" for a rectangle; ``ValueError`` if unknown."""
+    """Normalised ``spec.symbol``: 0 / −1 / −2 (automatic square / rectangle / rectangle
+    incl. DMRE), the edge of a square symbol (int) or "RxC" for a rectangle (also DMRE);
+    ``ValueError`` if unknown."""
     if isinstance(symbol, str):
         t = symbol.strip().lower().replace("×", "x").replace(" ", "")
         if "x" in t:
@@ -113,10 +139,10 @@ def symbol_key(symbol):
         except ValueError:
             raise ValueError(f"Unbekannte Data-Matrix-Größe {symbol}") from None
     symbol = int(symbol or 0)
-    if symbol in (AUTO, AUTO_RECT) or symbol in SYMBOLS:
+    if symbol in AUTOS or symbol in SYMBOLS:
         return symbol
     raise ValueError(f"Unbekannte Data-Matrix-Größe {symbol} (möglich: {', '.join(map(str, SIZES))}"
-                     f" oder rechteckig {', '.join(RECT_SIZES)})")
+                     f", rechteckig {', '.join(RECT_SIZES)} oder DMRE {', '.join(DMRE_SIZES)})")
 
 MIN_MODULE_MM = qr.MIN_MODULE_MM
 HARD_MIN_MODULE_MM = qr.HARD_MIN_MODULE_MM
@@ -419,7 +445,15 @@ def _candidates(symbol) -> tuple:
         return SQUARE_FORMATS
     if key == AUTO_RECT:
         return RECT_FORMATS
+    if key == AUTO_DMRE:
+        return ALL_RECT_FORMATS
     f = FORMATS[key]
+    if f.dmre:
+        # the chosen size, then larger ones of the same height, then any larger rectangle
+        same = [g for g in ALL_RECT_FORMATS if g.rows == f.rows and g.data >= f.data]
+        same.sort(key=lambda g: (g is not f, g.data))
+        return tuple(same) + tuple(g for g in ALL_RECT_FORMATS
+                                   if g.data >= f.data and g not in same)
     family = SQUARE_FORMATS if f.square else RECT_FORMATS
     return tuple(g for g in family if g.data >= f.data)
 
@@ -477,6 +511,8 @@ def placement(nrow: int, ncol: int) -> list[list[int]]:
         if c < 0:
             c += ncol
             r += 4 - ((ncol + 4) % 8)
+        if r >= nrow:                     # only DMRE 26 × 40 / 26 × 48 / 26 × 64 (ISO 21471)
+            r -= nrow
         arr[r][c] = cw * 8 + bit
 
     def utah(r, c, cw):
@@ -615,8 +651,9 @@ def build(size, codewords: list[int]) -> DataMatrix:
 def encode(text: str, size=AUTO, gs1_mode: bool = False) -> DataMatrix:
     """Encode ``text``.
 
-    ``size``: 0 = smallest square symbol that fits, −1 = smallest rectangle, an
-    edge (int) or "RxC" = this size or the next larger one of the same shape.
+    ``size``: 0 = smallest square symbol that fits, −1 = smallest rectangle, −2 =
+    smallest rectangle incl. DMRE (ISO/IEC 21471), an edge (int) or "RxC" = this
+    size or the next larger one of the same shape (DMRE: same height first).
     ``gs1_mode``: ``text`` is a GS1 element string "(AI)value…" (GS1 DataMatrix).
     """
     if not text:
@@ -638,7 +675,7 @@ def _clamp(v, lo, hi):
 @dataclass(frozen=True)
 class DataMatrixSpec:
     text: str = "LumaCut"
-    symbol: int | str = AUTO  # edge, "RxC", 0 = automatic square, -1 = automatic rectangle
+    symbol: int | str = AUTO  # edge, "RxC", 0 / -1 / -2 = automatic square / rectangle / DMRE
     size_mm: float = 15.0     # width without quiet zone (edge of square symbols)
     quiet_zone: int = DEFAULT_QUIET
     invert: bool = False
@@ -709,4 +746,6 @@ def datamatrix_shapes(spec: DataMatrixSpec, layer_id: str, code: DataMatrix | No
 def describe(code: DataMatrix, size_mm: float) -> str:
     module = size_mm / code.size
     used = code.data_codewords
-    return f"{code.rows} × {code.size} Module ({used} Datencodewörter), Modul {module:.2f} mm"
+    dmre = " DMRE" if code.format.dmre else ""
+    return (f"{code.rows} × {code.size} Module{dmre} ({used} Datencodewörter), "
+            f"Modul {module:.2f} mm")

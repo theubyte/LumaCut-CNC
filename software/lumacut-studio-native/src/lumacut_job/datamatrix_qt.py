@@ -45,14 +45,19 @@ class DataMatrixDialog(QDialog):
         self.symbol = QComboBox()
         self.symbol.addItem("Automatisch quadratisch (kleinste passende)", dm.AUTO)
         self.symbol.addItem("Automatisch rechteckig (kleinste passende)", dm.AUTO_RECT)
+        self.symbol.addItem("Automatisch rechteckig inkl. DMRE (ISO 21471)", dm.AUTO_DMRE)
         for f in dm.SQUARE_FORMATS:
             self.symbol.addItem(f"{f.label} Module (bis {f.data} Codewörter)", f.key)
         for f in dm.RECT_FORMATS:
             self.symbol.addItem(f"{f.label} Module rechteckig (bis {f.data} Codewörter)", f.key)
+        for f in dm.DMRE_FORMATS:
+            self.symbol.addItem(f"{f.label} Module DMRE (bis {f.data} Codewörter)", f.key)
         self.symbol.setCurrentIndex(max(0, self.symbol.findData(s.symbol)))
         self.symbol.setToolTip("Mindestgröße des Symbols; reicht sie nicht, wird die nächste "
                                "passende gleicher Form gewählt. Rechteckig: flache Codes für "
-                               "schmale Flächen (Kabel, Stifte, Kanten)")
+                               "schmale Flächen (Kabel, Stifte, Kanten). DMRE (ISO 21471): "
+                               "weitere Rechteckgrößen bis 8 × 144 / 26 × 64 – nicht jeder "
+                               "Scanner liest sie")
         self.size_mm = QDoubleSpinBox()
         self.size_mm.setRange(*dm.SIZE_RANGE)
         self.size_mm.setDecimals(1)
@@ -120,9 +125,11 @@ class DataMatrixDialog(QDialog):
             return
         module = s.size_mm / code.size
         text = dm.describe(code, s.size_mm)
-        if s.symbol not in (dm.AUTO, dm.AUTO_RECT) and code.format.key != s.symbol:
+        if s.symbol not in dm.AUTOS and code.format.key != s.symbol:
             text += (f" – {dm.FORMATS[s.symbol].label} reicht nicht, nächste passende Größe "
                      "gewählt")
+        if code.format.dmre:
+            text += " – DMRE: vorher mit dem eigenen Scanner testen"
         ok = module >= dm.HARD_MIN_MODULE_MM
         if not ok:
             text += f" – zu klein (mindestens {dm.HARD_MIN_MODULE_MM:.1f} mm)"

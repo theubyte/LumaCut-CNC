@@ -405,9 +405,10 @@ def test_mixed_modes_decode(text):
         assert _zxing(_module_image(code, px=px)) == [(text, "DataMatrix")]
 
 
-@pytest.mark.parametrize("key", dm.RECT_SIZES)
+@pytest.mark.parametrize("key", dm.RECT_SIZES + dm.DMRE_SIZES)
 def test_rectangular_sizes_decode_and_structure(key):
     f = dm.FORMATS[key]
+    assert f.dmre == (key in dm.DMRE_SIZES)
     text = ""
     for ch in "LC-0815/abc " * 20:                          # fill to just below capacity
         if len(dm.text_codewords(text + ch)) > f.data - 1:
@@ -545,3 +546,103 @@ def test_window_rect_gs1_insert_gcode_and_edit(win):
     new_ids = tools.edit_generated(replace(got, text="(01)09501101530003(10)AB-13"))
     code = generated.find_unit(doc, new_ids[0])
     assert code is not None and unit_spec(code).text.endswith("AB-13")
+
+
+# --- DMRE (ISO/IEC 21471) ---------------------------------------------------------------
+
+def test_dmre_table():
+    assert len(dm.DMRE_SIZES) == 18 and not set(dm.DMRE_SIZES) & set(dm.RECT_SIZES)
+    assert dm.DMRE_SIZES[0] == "8x48" and dm.DMRE_SIZES[-1] == "26x64"
+    for f in dm.DMRE_FORMATS:
+        (rh, rw), (nv, nh) = f.region, f.regions
+        assert nv == 1 and f.blocks == 1 and f.rows == rh + 2 and f.cols == nh * (rw + 2)
+        assert f.data + f.ecc == rh * rw * nh // 8          # every data-region module used
+        assert dm.symbol_key(f.label) == f.key and not f.square
+    assert [f.key for f in dm.ALL_RECT_FORMATS[:3]] == ["8x18", "8x32", "12x26"]
+    assert [f.data for f in dm.ALL_RECT_FORMATS] == sorted(f.data for f in dm.ALL_RECT_FORMATS)
+    assert not any(f.dmre for f in dm.RECT_FORMATS + dm.SQUARE_FORMATS)
+
+
+def test_dmre_auto_and_explicit_sizes():
+    text = "Ab" * 9                                          # 18 ASCII codewords
+    assert len(dm.text_codewords(text)) == 18
+    assert dm.encode(text, dm.AUTO_RECT).format.key == "12x36"   # ISO 16022 only: unchanged
+    assert dm.encode(text, dm.AUTO_DMRE).format.key == "8x48"    # DMRE fits exactly
+    assert dm.encode("Hi", dm.AUTO_DMRE).format.key == "8x18"
+    assert dm.encode("Ab" * 16, dm.AUTO_DMRE).format.key == "16x36"   # tie: smaller area
+    assert dm.encode("Hi", "8x48").format.key == "8x48"          # minimum honoured
+    assert dm.encode("Ab" * 15, "8x48").format.key == "8x80"     # same height first
+    assert dm.encode("Ab" * 35, "8x48").format.key == "26x40"    # then any larger rectangle
+    assert dm.encode("Ab" * 25, "20x36").format.key == "20x44"
+    assert dm.symbol_key(dm.AUTO_DMRE) == dm.AUTO_DMRE and dm.symbol_key("26 × 40") == "26x40"
+    assert dm.DataMatrixSpec("a", symbol="8x144").normalized().symbol == "8x144"
+    assert dm.DataMatrixSpec("a", symbol=-2).normalized().symbol == dm.AUTO_DMRE
+    with pytest.raises(ValueError, match="118 bei 26 × 64"):
+        dm.encode("Ab" * 100, dm.AUTO_DMRE)
+    code = dm.encode("LC-0815", "8x64")
+    assert dm.describe(code, 64.0).startswith("8 × 64 Module DMRE (24 Datencodewörter)")
+    assert "DMRE" not in dm.describe(dm.encode("LC-0815", dm.AUTO_RECT), 36.0)
+
+
+@pytest.mark.parametrize("text,symbol", [("LumaCut-2026-0815", "8x120"), ("Kabel 42 ä", "8x48"),
+                                         ("0123456789" * 12, "26x40"), ("Werkstatt", dm.AUTO_DMRE)])
+def test_dmre_vector_shapes_decode(qapp, text, symbol):
+    spec = dm.DataMatrixSpec(text, symbol=symbol, size_mm=60.0, quiet_zone=2, x=5, y=5)
+    code = spec.encode()
+    assert code.format.dmre or symbol == dm.AUTO_DMRE
+    assert _zxing(_render(dm.datamatrix_shapes(spec, "L1", code), px=8.0)) == [(text, "DataMatrix")]
+
+
+def test_dmre_gs1_and_hatch_fill_decode(qapp):
+    zxingcpp = pytest.importorskip("zxingcpp")
+    text = "(01)09501101530003(10)AB-12"
+    code = dm.encode(text, "8x96", gs1_mode=True)
+    assert code.format.key == "8x96"
+    got = [(r.text, r.symbology_identifier) for r in zxingcpp.read_barcodes(_module_image(code))]
+    assert got == [(text, "]d8")]          # ISO 21471: DMRE adds 6 to the modifier (GS1 ]d2)
+    from lumacut_canvas.model import Layer
+    layer = Layer("Gravur", fill_mode="hatch", line_interval_mm=0.1)
+    spec = dm.DataMatrixSpec("LC-0815", symbol="12x64", size_mm=64.0, quiet_zone=2)
+    assert _zxing(_render(dm.datamatrix_shapes(spec, "L1"), layer, px=10.0)) == [("LC-0815", "DataMatrix")]
+
+
+def test_dialog_dmre(qapp):
+    from lumacut_job.datamatrix_qt import DataMatrixDialog
+    dlg = DataMatrixDialog()
+    dlg.size_mm.setValue(60.0)
+    keys = [dlg.symbol.itemData(i) for i in range(dlg.symbol.count())]
+    assert keys[:3] == [dm.AUTO, dm.AUTO_RECT, dm.AUTO_DMRE]
+    assert all(k in keys for k in dm.DMRE_SIZES) and len(keys) == len(set(keys))
+    dlg.text.setText("Ab" * 9)
+    dlg.symbol.setCurrentIndex(dlg.symbol.findData(dm.AUTO_DMRE))
+    assert dlg.spec().symbol == dm.AUTO_DMRE and "8 × 48 Module DMRE" in dlg.info.text()
+    assert "eigenen Scanner" in dlg.info.text() and "nächste passende" not in dlg.info.text()
+    dlg.text.setText("Ab" * 15)
+    dlg.symbol.setCurrentIndex(dlg.symbol.findData("8x48"))
+    assert "nächste passende" in dlg.info.text() and dlg.ok_button.isEnabled()
+    dlg.symbol.setCurrentIndex(dlg.symbol.findData(dm.AUTO_RECT))
+    assert "eigenen Scanner" not in dlg.info.text()
+    dlg.deleteLater()
+    edit = DataMatrixDialog(spec=dm.DataMatrixSpec("A", symbol="26x64"))
+    assert edit.spec().symbol == "26x64"
+    edit.deleteLater()
+
+
+def test_window_dmre_insert_gcode_and_edit(win):
+    from lumacut_canvas.model import Document
+    from lumacut_job import generated
+    from lumacut_job.generated_qt import unit_spec
+    from lumacut_job.planner import optimized_document_gcode
+    tools, doc = win.job_tools, win.canvas.document
+    doc.active_layer.fill_mode = "hatch"
+    ids = tools.datamatrix(dm.DataMatrixSpec("LC-0815-DMRE", symbol="8x64", size_mm=64.0))
+    union, _ = _union([doc.shape(i) for i in ids])
+    x0, y0, x1, y1 = union.bounds
+    assert x1 - x0 == pytest.approx(64.0, abs=1e-6) and y1 - y0 == pytest.approx(8.0, abs=1e-6)
+    pi_check(optimized_document_gcode(doc))
+    got = unit_spec(generated.find_unit(doc, ids[0]))
+    assert got.symbol == "8x64" and got.encode().format.dmre
+    again = Document.from_dict(doc.to_dict())
+    assert unit_spec(generated.find_unit(again, ids[0])).symbol == "8x64"
+    new_ids = tools.edit_generated(replace(got, symbol=dm.AUTO_DMRE))
+    assert unit_spec(generated.find_unit(doc, new_ids[0])).symbol == dm.AUTO_DMRE
