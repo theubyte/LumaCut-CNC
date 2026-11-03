@@ -228,6 +228,13 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Module werden zu gefüllten Polygonen (gruppiert) und mit der Ebenen-Füllung graviert: Füllt die
   aktive Ebene nicht, legt der Dialog standardmäßig eine Ebene „QR-Code“ mit Schraffur 0,1 mm an.
   Ein Rückgängig-Schritt. Code: `src/lumacut_job/qr.py`, `qr_qt.py` (ohne Zusatzbibliothek).
+  **Gemischte Segmente bei Text:** reiner ASCII-Text wird optimal in numerische,
+  alphanumerische und Byte-Segmente aufgeteilt (dynamische Programmierung), aber nur, wenn das
+  eine kleinere Version ergibt (z. B. „HTTPS://LUMACUT.EXAMPLE/P/4711“ M 3 → 2, Link mit langer
+  Seriennummer M 4 → 3, 1000 Ziffern L 22 → 13) – sonst bleibt der Code Bit für Bit wie bisher
+  (ein Byte-Segment). Der Dialog nennt die Segmente. Text mit Umlauten u. Ä. bleibt ein
+  UTF-8-Byte-Segment. Gespeicherte Dateien öffnen unverändert (Module sind Polygone); erst
+  „Code bearbeiten“ kodiert neu und kann dabei eine kleinere Version wählen.
   **Art** „GS1 QR-Code“: GS1-Elementstring „(01)09501101530003(17)261231(10)AB-12“ (feste Längen,
   Ziffern und Prüfziffern geprüft) mit dem Modusindikator *FNC1 an erster Stelle*, Trenner
   automatisch – GS1-Scanner lesen GTIN, Charge, MHD (Kennung `]Q3`). **Art** „GS1 Digital Link“
@@ -412,6 +419,10 @@ Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt
   Versatz. **Testmuster…**: Kalibrier-Auftrag mit einer Reihe Felder je Geschwindigkeit und
   steigendem Versatz je Spalte (beschriftet); „Senden (ohne Start)“ oder „Speichern…“ – je
   Reihe das Feld mit den geradesten Kanten in die Tabelle übernehmen.
+  Die **Füllvorschau** auf der Arbeitsfläche zeigt bei aktivem Versatz die verschobenen
+  Linien genau wie im G-Code (Blockreihenfolge und Startecke des Planers, Durchgang 1); der
+  Plan wird zwischengespeichert, solange sich der Auftrag nicht ändert (bei ~1500 schraffierten
+  Objekten ≈ 1 s je Änderung). Ohne aktive Tabelle bleibt die Vorschau wie bisher.
 - G-Code: je Durchgang zuerst die Füllung (G0 an den Zeilenanfang, G1 mit
   Leistung/Geschwindigkeit der Ebene), danach die Kontur; Durchgangs-Hook
   (Tiefe je Durchgang) gilt auch für reine Füll-Ebenen. Ohne Füllung ist der

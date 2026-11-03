@@ -1701,3 +1701,103 @@ Still open:
   incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
   incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
   park-corner refusal, variable text / CSV merge over several sends, rebuilt exe).
+
+## 32. Status update 2026-11-03 (review round 25)
+
+Done this round (Review/Job layer, shared G-code helper and a minimal hook in the canvas fill
+preview; Machine / Scan Probe and Materials untouched):
+
+- Gap 1 from §31 „Still open“: **canvas fill preview shows the scan offset** (before, the path
+  preview and the G-code shifted every hatch line by half the offset, the fill preview on the
+  canvas did not – preview ≠ output).
+  - `lumacut_canvas/gcode.py`: the fill loop of `layers_to_gcode` is now `_fill_moves` (block
+    order incl. free start corner, scan offset, overscan); the writer and the new
+    `fill_burn_segments(layers)` share it. `fill_burn_segments` replays the writer's head
+    position over all layers, passes and contours and returns the burned fill lines of pass 1 per
+    layer. G-code output is byte-for-byte unchanged (checked against the previous commit with and
+    without a table, all fill kinds).
+  - `lumacut_job/scan_offset.py`: `preview_fill_lines(doc)` – `None` when the table is off or no
+    hatch / crosshatch layer has a non-zero offset at its speed (offset fill and fixed-order
+    layers are never shifted); otherwise it plans the job exactly like sending
+    (`optimize_layers` + `apply_to_layers`) and maps the burned lines back to canvas mm.
+    Single-entry cache keyed by the job layers and the table, so edits that do not change the
+    job (colour, names, selection) reuse the plan.
+  - `lumacut_canvas/fill_preview.py`: `rebuild()` asks the helper (lazy import, as in the path
+    preview) and draws the shifted lines; on error or without a table the old geometry is used.
+    New flag `scan_offset_applied`. `lumacut_job/qt_tools.py`: loading / changing the table
+    refreshes the fill preview as well as the path preview.
+  - Cost: with an active table each fill-preview rebuild runs the planner (≈ 0.4 s for 100,
+    ≈ 1.2–1.6 s for 1500 hatched objects on the dev box, GUI thread after the 120 ms debounce);
+    unchanged job → cached (≈ 0.05 s). Without a table nothing changes.
+- Gap 2 from §31: **plain-text QR codes use optimal mixed segments** (numeric / alphanumeric /
+  byte, the same DP as the GS1 kinds, `qr.mixed_bits` / `text_segments` / `encode_text`).
+  - Compatibility rule: mixed segments are only used when they give a **smaller version** than
+    one byte segment; otherwise the matrix stays bit-identical to before (reference matrices and
+    e.g. lower-case https URLs unchanged). Non-ASCII text always stays one UTF-8 byte segment
+    (no ECI; scanners guess the charset per segment).
+  - Examples: „HTTPS://LUMACUT.EXAMPLE/P/4711“ M 3 → 2, 35 digits M 3 → 2, URL with a long
+    serial M 4 → 3, Wi-Fi string Q 4 → 3, 1000 digits L 22 → 13; capacity now 7089 digits /
+    4296 alphanumerics at L 40.
+  - Output change for old files: none on opening (documents store the module polygons). Only
+    „Code bearbeiten“ re-encodes; a re-edited plain-text code whose content profits from mixed
+    segments then gets a smaller version (other module pattern, same content). The dialog shows
+    the segments („Segmente: Byte 16, numerisch 14, …“).
+
+Tests:
+
+- `tests/test_fill_preview_scan_offset.py` (17): `None` cases (table off, zero offset, offset
+  fill, no fill); bidirectional lines shift ±offset/2 against travel, unidirectional all the same
+  way; preview = pass-1 burns of the planned G-code for bidirectional, unidirectional,
+  crosshatch, angled, overscan, 3 passes + outline, grouping „together“ and several layers /
+  speeds (offset-fill layer unshifted); clamp at the cutting-area edge; cache reuse and
+  invalidation; `fill_burn_segments` = writer; canvas widget draws shifted lines, flag, hidden
+  layer, fallback on planner error; window: changing the table schedules the fill preview.
+- `tests/test_qr_text_segments.py` (33): version reductions, unchanged matrices without gain,
+  non-ASCII stays byte, capacity, `min_version` / mask honoured, DP never worse than one mode
+  (random), decoding with OpenCV and zxing (also hatch-filled), dialog info, rebuild of an old
+  byte code unchanged.
+
+Full suite: 1650 passed, 3 skipped (before: 1599 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); speeds only in mm/min (no mm/s view); the fill preview shows
+  pass 1 only and runs the planner on the GUI thread (≈ 1 s per job change at ~1500 hatched
+  objects – a background thread would be the next step if that hurts); the test pattern is not
+  yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: no per-object counter shown on the canvas (the template is drawn, the values
+  are in the dialog / path preview); „Text in Pfade“ converts the template literally; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes with non-ASCII characters stay one byte segment (no ECI / Kanji mode); no Micro QR.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (GS1 QR / Digital Link codes with a GS1 scanner and a phone camera,
+  plain-text QR codes with mixed segments, scan offset test pattern and compensated bidirectional
+  hatch / image at 3000–6000 mm/min incl. the shifted fill preview, fill overscan – line ends even
+  at 2–5 mm on wood / card – and 2-opt block order, fill grouping and inside-out offset fill,
+  offset fill, cut options incl. overcut and perforation, PDF import, trace, QR / barcode / Data
+  Matrix / Aztec / PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and
+  (compact) PDF417 codes with a real scanner, park-corner refusal, variable text / CSV merge over
+  several sends, rebuilt exe).
