@@ -30,7 +30,7 @@ def build_shapes(spec, layer_id: str) -> list:
     if kind == "qr":
         from . import qr
         from .qr_qt import centered
-        code = qr.encode(s.text, s.ec)
+        code = s.encode()
         shapes = qr.qr_shapes(centered(s, None, code), layer_id, code)
     elif kind == "datamatrix":
         from . import datamatrix as dm

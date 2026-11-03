@@ -6,25 +6,40 @@ werden dort wie jedes andere Objekt nach der Ebenen-Füllung (Schraffur/
 Kreuzschraffur) graviert. Füllt die aktive Ebene nicht, schlägt der Dialog
 eine eigene Ebene „QR-Code“ mit Schraffur 0,1 mm vor – sonst würden nur die
 Umrisse gelasert und der Code wäre nicht lesbar.
+
+„Art“: Text / Adresse, GS1 QR-Code (Elementstring „(01)…(10)…“, FNC1-Modus) oder
+GS1 Digital Link (Elementstring + Domain → Web-Adresse, oder eine fertige
+Digital-Link-Adresse, die geprüft wird).
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-                               QFormLayout, QLabel, QLineEdit, QSpinBox)
+                               QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSpinBox)
 
 from lumacut_canvas.commands import AddLayerCommand, AddShapesCommand
 from lumacut_canvas.model import Layer
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
-from . import qr
+from . import gs1_link, qr
 from .generated import tag
 
 # Füll-Ebene für neue QR-Codes: Schraffur 0,1 mm, Kontur mitlasern (scharfe Kanten).
 FILL_INTERVAL_MM = 0.1
 FILL_LAYER_NAME = "QR-Code"
+
+PLACEHOLDERS = {"text": "Text oder Adresse, z. B. https://example.com",
+                "gs1": "(AI)Wert, z. B. " + qr.gs1.EXAMPLE,
+                "link": "(01)GTIN… oder https://id.gs1.org/01/…"}
+TOOLTIPS = {"text": "Beliebiger Text (UTF-8, Umlaute erlaubt), Web-Adresse, WLAN-Daten …",
+            "gs1": "GS1-Elementstring: Datenbezeichner in Klammern, feste Längen und Prüfziffern "
+                   "werden geprüft; Trenner (FNC1) setzt der Code selbst",
+            "link": "Elementstring mit genau einem Primärschlüssel (z. B. (01) GTIN) – daraus wird "
+                    "die Adresse gebaut – oder eine fertige Digital-Link-Adresse"}
+EXAMPLES = {"text": "https://example.com", "gs1": qr.gs1.EXAMPLE, "link": gs1_link.EXAMPLE}
 
 
 def layer_fills(layer) -> bool:
@@ -39,9 +54,21 @@ class QrDialog(QDialog):
         self.setWindowTitle("QR-Code einfügen")
         s = (spec or qr.QrSpec()).normalized()
         form = QFormLayout(self)
+        self.mode = QComboBox()
+        for key in qr.MODES:
+            self.mode.addItem(qr.MODE_LABELS[key], key)
+        self.mode.setCurrentIndex(qr.MODES.index(s.mode))
+        self.mode.setToolTip("GS1 QR-Code: Produktdaten (GTIN, Charge, MHD …) für GS1-Scanner. "
+                             "GS1 Digital Link: dieselben Daten als Web-Adresse – Handy öffnet "
+                             "die Produktseite, Kassenscanner lesen die GTIN")
         self.text = QLineEdit(s.text)
-        self.text.setPlaceholderText("Text oder Adresse, z. B. https://example.com")
-        self.text.setToolTip("Beliebiger Text (UTF-8, Umlaute erlaubt), Web-Adresse, WLAN-Daten …")
+        self.domain = QLineEdit(s.domain)
+        self.domain.setPlaceholderText(gs1_link.DEFAULT_DOMAIN)
+        self.domain.setToolTip("Eigene Domain (Resolver) für die Digital-Link-Adresse, z. B. "
+                               "https://marke.example – Standard: " + gs1_link.DEFAULT_DOMAIN)
+        self.example = QPushButton("Beispiel")
+        self.example.setToolTip("Beispieldaten für die gewählte Art einsetzen")
+        self.example.clicked.connect(self._insert_example)
         self.ec = QComboBox()
         for key in qr.EC_LEVELS:
             self.ec.addItem(qr.EC_LABELS[key], key)
@@ -71,7 +98,17 @@ class QrDialog(QDialog):
                              + (f" „{name}“" if name else "")
                              + " – sie muss füllen (Schraffur), sonst werden nur Umrisse gelasert")
         self._active_fills = fills
-        form.addRow("Inhalt", self.text)
+        form.addRow("Art", self.mode)
+        row = QHBoxLayout()
+        row.addWidget(self.text, 1)
+        row.addWidget(self.example)
+        form.addRow("Inhalt", row)
+        form.addRow("Domain", self.domain)
+        self.domain_label = form.labelForField(self.domain)
+        self.content = QLabel()
+        self.content.setWordWrap(True)
+        self.content.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        form.addRow("", self.content)
         form.addRow("Fehlerkorrektur", self.ec)
         form.addRow("Größe", self.size_mm)
         form.addRow("Ruhezone", self.quiet)
@@ -87,16 +124,34 @@ class QrDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         form.addRow(self.buttons)
         self.text.textChanged.connect(self._update)
+        self.mode.currentIndexChanged.connect(self._mode_changed)
+        self.domain.textChanged.connect(self._update)
         self.ec.currentIndexChanged.connect(self._update)
         self.size_mm.valueChanged.connect(self._update)
         self.quiet.valueChanged.connect(self._update)
         self.fill.toggled.connect(self._update)
-        self._update()
+        self._mode_changed()
 
     def spec(self) -> qr.QrSpec:
         return qr.QrSpec(text=self.text.text(), ec=self.ec.currentData(),
                          size_mm=self.size_mm.value(), quiet_zone=self.quiet.value(),
-                         invert=self.invert.isChecked()).normalized()
+                         invert=self.invert.isChecked(), mode=self.mode.currentData(),
+                         domain=self.domain.text()).normalized()
+
+    def _mode_changed(self) -> None:
+        mode = self.mode.currentData()
+        self.text.setPlaceholderText(PLACEHOLDERS[mode])
+        self.text.setToolTip(TOOLTIPS[mode])
+        link = mode == "link"
+        self.domain.setVisible(link)
+        if self.domain_label is not None:
+            self.domain_label.setVisible(link)
+        self.content.setVisible(mode != "text")
+        self._update()
+
+    def _insert_example(self) -> None:
+        mode = self.mode.currentData()
+        self.text.setText(EXAMPLES[mode])
 
     def fill_layer(self) -> bool:
         return self.fill.isChecked()
@@ -104,8 +159,10 @@ class QrDialog(QDialog):
     def _update(self) -> None:
         s = self.spec()
         try:
-            code = qr.encode(s.text, s.ec)
+            self.content.setText(qr.content_info(s) if s.mode != "text" else "")
+            code = s.encode()
         except ValueError as exc:
+            self.content.setText("")
             self.info.setText(str(exc))
             self.ok_button.setEnabled(False)
             return
@@ -130,7 +187,7 @@ def centered(spec: qr.QrSpec, center: tuple[float, float] | None = None,
              code: qr.QrCode | None = None) -> qr.QrSpec:
     """Spec mit X/Y so, dass der Code (inkl. Ruhezone) um ``center`` liegt."""
     s = spec.normalized()
-    code = code or qr.encode(s.text, s.ec)
+    code = code or s.encode()
     total = s.total_mm(code)
     cx, cy = center or (WORK_WIDTH_MM / 2.0, WORK_HEIGHT_MM / 2.0)
     x = min(max(0.0, cx - total / 2.0), max(0.0, WORK_WIDTH_MM - total))
@@ -147,7 +204,7 @@ def insert_qr(editor, spec: qr.QrSpec, fill_layer: bool = False,
     """
     doc = editor.document
     s = spec.normalized()
-    code = qr.encode(s.text, s.ec)
+    code = s.encode()
     s = centered(s, center, code)
     active = doc.active_layer or (doc.layers[0] if doc.layers else None)
     layer = None

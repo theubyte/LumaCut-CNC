@@ -428,7 +428,9 @@ class JobTools(QObject):
             return []
         layer = doc.shape(ids[0]).layer_id if ids else ""
         name = doc.layer(layer).name if layer else ""
-        self._msg(f"QR-Code eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
+        kind = {"gs1": "GS1 QR-Code", "link": "GS1-Digital-Link-QR-Code"}.get(
+            spec.normalized().mode, "QR-Code")
+        self._msg(f"{kind} eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
         return ids
 
     def barcode(self, spec=None, fill_layer: bool | None = None) -> list[str]:
