@@ -1122,7 +1122,8 @@ Version, flasht die Panel-Brücke es selbst, sobald die Maschine im Leerlauf ist
 kein Auftrag, keine laufende Warteschlange, Laser nicht freigegeben): Port freigeben, `esptool
 write_flash 0x10000` über dieselbe USB-Leitung (Reset in den ROM-Lader über USB-Serial/JTAG),
 Neustart. Eine fehlgeschlagene Version wird nicht von selbst wiederholt. Die Maschine selbst wird
-nicht berührt. Braucht `esptool` für den Dienst-Benutzer (`pip install --user esptool`).
+nicht berührt. Braucht `esptool` im Datenordner, weil der Dienst kein Home sieht
+(`pip3 install --target /var/lib/lumacut/pylib --break-system-packages esptool`, eingerichtet 03.11.).
 
 `op=panel_update`: keine Parameter; flasht jetzt, auch dieselbe Version erneut. Erfolg 200
 `{"message": "Panel wird auf 1.1 aktualisiert"}`, Fortschritt in `panel.state`. Fehler 409

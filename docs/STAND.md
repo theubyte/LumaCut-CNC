@@ -521,7 +521,8 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   **Update über den Pi (03.11.):** Firmware 1.1 liegt in `pi400/marlin/panel_fw/` und kommt mit jedem
   Deploy; die Panel-Brücke flasht das Panel per esptool über dasselbe USB-Kabel, automatisch im Leerlauf
   (abschaltbar, Karte „Bedienpanel“ unter System, `op=panel_update`/`panel_auto`). Neue Version:
-  `PANEL_VERSION` in `src/version.h` hochzählen, `tools/release.sh`, committen. Erstes Flashen am PC.
+  `PANEL_VERSION` in `src/version.h` hochzählen, `tools/release.sh`, committen. Erstes Flashen am PC. esptool 5.6
+  auf dem Pi in `/var/lib/lumacut/pylib` (Dienst sieht kein Home).
   Offen: auf dem echten Panel flashen und testen (Bild, Touch, USB zum Pi, Kamerabild).
   Gehäuse-Idee: Dibond schwarz/anthrazit + Alu-Winkel + gedruckte Ecken (Besitzer: kein Holz).
 - Infrarot-LEDs im Kopfgehäuse als Licht für die Kamera (Besitzer, 30.10.: „erstmal noch nicht“).

@@ -67,6 +67,9 @@ ACTIONS = {
 }
 FIRMWARE_DIR = Path(__file__).resolve().parent / "panel_fw"
 FLASH_TIMEOUT_S = 240
+# The service sees no home directory (ProtectHome): esptool lives in the data folder,
+# pip3 install --target /var/lib/lumacut/pylib esptool. Only the esptool process gets it.
+PYLIB = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "pylib"
 SLOW = {"home": 200, "probe": 120, "park": 90, "estop_reset": 30, "jog": 60}
 
 _S = re.compile(r"\bS\s*([-+]?\d*\.?\d+)", re.I)
@@ -141,7 +144,7 @@ def flash_command(port: str, firmware: dict) -> list[str]:
 
 
 def esptool_installed() -> bool:
-    return importlib.util.find_spec("esptool") is not None
+    return (PYLIB / "esptool").is_dir() or importlib.util.find_spec("esptool") is not None
 
 
 class JobTrace:
@@ -421,7 +424,7 @@ class PanelBridge:
         if self.path is None:
             return False, "Kein Bedienpanel angeschlossen"
         if not self.has_esptool():
-            return False, "esptool fehlt auf dem Pi (pip install --user esptool)"
+            return False, "esptool fehlt auf dem Pi (pip3 install --target %s esptool)" % PYLIB
         if not manual and (not self.outdated(fw) or self.failed == fw["version"]):
             return False, "Panel ist aktuell"
         status, s = self.api.json("GET", "/api/status", timeout=5)
@@ -592,7 +595,8 @@ class PanelBridge:
 
 def run_esptool(command: list[str]) -> tuple[bool, str]:
     try:
-        done = subprocess.run(command, capture_output=True, text=True, timeout=FLASH_TIMEOUT_S)
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join(filter(None, [str(PYLIB), os.environ.get("PYTHONPATH")])))
+        done = subprocess.run(command, capture_output=True, text=True, timeout=FLASH_TIMEOUT_S, env=env)
     except subprocess.TimeoutExpired:
         return False, "esptool hängt (Zeitüberschreitung)"
     out = (done.stdout + done.stderr).strip().splitlines()
