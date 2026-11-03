@@ -159,7 +159,9 @@ class QrDialog(QDialog):
     def _update(self) -> None:
         s = self.spec()
         try:
-            self.content.setText(qr.content_info(s) if s.mode != "text" else "")
+            info = qr.content_info(s)
+            self.content.setText(info)
+            self.content.setVisible(s.mode != "text" or bool(info))
             code = s.encode()
         except ValueError as exc:
             self.content.setText("")

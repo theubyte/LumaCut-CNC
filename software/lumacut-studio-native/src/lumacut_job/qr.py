@@ -1,6 +1,6 @@
 """QR-Code (ISO/IEC 18004) als Vektorobjekte für die Gravur – ohne Fremdpaket.
 
-Reiner Python-Encoder im Byte-Modus (UTF-8), Versionen 1–40, Fehlerkorrektur
+Reiner Python-Encoder (Byte-Modus UTF-8 bzw. gemischte Segmente), Versionen 1–40, Fehlerkorrektur
 L/M/Q/H, automatische Maskenwahl nach den Strafpunkten der Norm. Portiert
 und erweitert aus ``android/core/.../Qr.kt`` (dort nur Stufe M, Version 1–10).
 Qt-frei; die Flächen werden mit shapely zu geschlossenen Polygonen
@@ -16,8 +16,15 @@ GS1 (``QrSpec.mode``): ``"gs1"`` kodiert einen GS1-Elementstring „(01)…(10)�
 GS1 QR-Code (Modusindikator „FNC1 an erster Stelle“, FNC1-Trenner als „%“ im
 alphanumerischen bzw. GS im Byte-Modus), ``"link"`` eine GS1-Digital-Link-Adresse
 (:mod:`lumacut_job.gs1_link`). Beide nutzen gemischte Segmente (numerisch /
-alphanumerisch / Byte, kürzeste Bitfolge), der reine Text-Modus bleibt beim
-Byte-Segment.
+alphanumerisch / Byte, kürzeste Bitfolge).
+
+Text-Modus (:func:`encode_text`, ``QrSpec.encode``): ebenfalls gemischte Segmente
+(Ziffernfolgen numerisch, GROSSBUCHSTABEN/Ziffern/„ $%*+-./:“ alphanumerisch, Rest
+Byte), aber nur, wenn das eine *kleinere Version* ergibt als ein einziges
+Byte-Segment – sonst bleibt die Matrix bitgleich zum bisherigen Byte-Segment
+(:func:`encode`), damit bestehende Codes beim Bearbeiten nicht ohne Gewinn
+anders aussehen. Text mit Nicht-ASCII-Zeichen bleibt ein Byte-Segment (UTF-8 ohne
+ECI; Scanner erraten den Zeichensatz je Segment, geteilte Segmente wären unsicher).
 """
 
 from __future__ import annotations
@@ -514,9 +521,9 @@ def segment_bits(segs: list[tuple[str, list]], ver: int, fnc1_first: bool = Fals
     return bits
 
 
-def encode_items(items: list[int], ec: str = "M", fnc1_first: bool = False,
-                 min_version: int = MIN_VERSION, mask: int | None = None) -> QrCode:
-    """Bytes (0–255) und ``gs1.FNC1`` mit optimalen Segmenten; ``fnc1_first`` = GS1 QR-Code."""
+def mixed_bits(items: list[int], ec: str = "M", fnc1_first: bool = False,
+               min_version: int = MIN_VERSION) -> tuple[int, list[int]]:
+    """Kleinste Version und Datenbits mit optimalen Segmenten (ohne Terminator/Auffüllen)."""
     ec = _check_level(ec)
     items = list(items)
     if not items:
@@ -531,10 +538,66 @@ def encode_items(items: list[int], ec: str = "M", fnc1_first: bool = False,
             continue
         best_bits = bits if best_bits is None or len(bits) < len(best_bits) else best_bits
         if len(bits) <= data_codewords(v, ec) * 8:
-            return _bits_to_code(v, ec, bits, mask)
+            return v, bits
     need = (len(best_bits) + 7) // 8 if best_bits else 0
     raise ValueError(f"Inhalt zu lang für den QR-Code: {need} Datenbytes, bei Fehlerkorrektur {ec} "
                      f"höchstens {data_codewords(MAX_VERSION, ec)} – kürzer fassen oder Stufe L wählen")
+
+
+def encode_items(items: list[int], ec: str = "M", fnc1_first: bool = False,
+                 min_version: int = MIN_VERSION, mask: int | None = None) -> QrCode:
+    """Bytes (0–255) und ``gs1.FNC1`` mit optimalen Segmenten; ``fnc1_first`` = GS1 QR-Code."""
+    ec = _check_level(ec)
+    ver, bits = mixed_bits(items, ec, fnc1_first, min_version)
+    return _bits_to_code(ver, ec, bits, mask)
+
+
+def text_segments(text: str, ec: str = "M", min_version: int = MIN_VERSION) -> list[tuple[str, list]]:
+    """Segmente, die :func:`encode_text` für ``text`` verwendet ([("B", Bytes)] = ein Byte-Segment)."""
+    ec = _check_level(ec)
+    data = (text or "").encode("utf-8")
+    if not data:
+        raise ValueError("Kein Text für den QR-Code")
+    byte_ver = None
+    try:
+        byte_ver = choose_version(len(data), ec, min_version)
+    except ValueError:
+        pass
+    if max(data) >= 0x80:          # Nicht-ASCII: ein Byte-Segment (Zeichensatz-Erkennung)
+        if byte_ver is None:
+            choose_version(len(data), ec, min_version)   # deutsche Fehlermeldung
+        return [("B", list(data))]
+    try:
+        ver, _bits = mixed_bits(list(data), ec, False, min_version)
+    except ValueError:
+        if byte_ver is None:
+            raise
+        ver = byte_ver
+    if byte_ver is not None and ver >= byte_ver:
+        return [("B", list(data))]   # kein Gewinn: bitgleich zum bisherigen Byte-Segment
+    return segments(list(data), ver)
+
+
+def encode_text(text: str, ec: str = "M", min_version: int = MIN_VERSION,
+                mask: int | None = None) -> QrCode:
+    """Text als QR-Code mit gemischten Segmenten, wenn das eine kleinere Version ergibt.
+
+    Sonst (und bei Nicht-ASCII-Text) identisch mit :func:`encode` (ein Byte-Segment), so
+    dass bestehende Codes bitgleich bleiben, solange sie nicht kleiner werden können.
+    """
+    ec = _check_level(ec)
+    segs = text_segments(text, ec, min_version)
+    if len(segs) == 1 and segs[0][0] == "B":
+        return encode(text, ec, min_version, mask)
+    data = (text or "").encode("utf-8")
+    ver, bits = mixed_bits(list(data), ec, False, min_version)
+    return _bits_to_code(ver, ec, bits, mask)
+
+
+def segment_summary(segs: list[tuple[str, list]]) -> str:
+    """Kurzbeschreibung für den Dialog, z. B. „Segmente: Byte 8, numerisch 12“."""
+    names = {"N": "numerisch", "A": "alphanumerisch", "B": "Byte"}
+    return "Segmente: " + ", ".join(f"{names[m]} {len(c)}" for m, c in segs)
 
 
 def gs1_items(text: str) -> list[int]:
@@ -625,7 +688,7 @@ class QrSpec:
             return encode_gs1(s.text, s.ec, mask=mask)
         if s.mode == "link":
             return encode_link(s.text, s.ec, s.domain, mask=mask)
-        return encode(s.text, s.ec, mask=mask)
+        return encode_text(s.text, s.ec, mask=mask)
 
     def total_mm(self, code: QrCode) -> float:
         s = self.normalized()
@@ -689,14 +752,21 @@ def qr_shapes(spec: QrSpec, layer_id: str, code: QrCode | None = None) -> list[S
 
 
 def content_info(spec: QrSpec) -> str:
-    """Deutsche Zeile für den Dialog: was im GS1-Code steht ("" im Text-Modus)."""
+    """Deutsche Zeile für den Dialog: was im GS1-Code steht; im Text-Modus die gemischten
+    Segmente, falls sie den Code verkleinern (sonst "")."""
     s = spec.normalized()
     if s.mode == "gs1":
         return "GS1-Daten: " + s.content()
     if s.mode == "link":
         uri, link = gs1_link.resolve(s.text, s.domain)
         return f"Adresse: {uri} ({gs1_link.describe(link)})"
-    return ""
+    try:
+        segs = text_segments(s.text, s.ec)
+    except ValueError:
+        return ""
+    if len(segs) == 1 and segs[0][0] == "B":
+        return ""
+    return segment_summary(segs) + " (kleinere Version als ein Byte-Segment)"
 
 
 def describe(code: QrCode, size_mm: float) -> str:
