@@ -312,12 +312,12 @@ class MainView(QObject):
             a = ed.actions_by_name.get(f"tool_{t.value}")
             if a is not None:
                 menu.addAction(a)
-        # QR code, barcode, Data Matrix, Aztec and arc text (lumacut_job.qt_tools) create vector
+        # QR code, barcode, Data Matrix, Aztec, PDF417 and arc text (lumacut_job.qt_tools) create vector
         # objects; „Code bearbeiten…“ re-creates them with changed parameters.
         jt = getattr(self.window, "job_tools", None)
         extra = [getattr(jt, n, None)
                  for n in ("qr_action", "barcode_action", "datamatrix_action", "aztec_action",
-                           "arc_action", "edit_generated_action")]
+                           "pdf417_action", "arc_action", "edit_generated_action")]
         if any(extra):
             menu.addSeparator()
             for a in extra:

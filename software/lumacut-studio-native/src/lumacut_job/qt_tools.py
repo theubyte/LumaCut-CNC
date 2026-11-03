@@ -129,13 +129,18 @@ class JobTools(QObject):
                                       "2D-Code Aztec (kompakt, ohne Ruhezone) als gefüllte "
                                       "Vektorflächen einfügen")
         self.aztec_action.setObjectName("aztec_action")
+        self.pdf417_action = self._add("PDF417-Code…", self.pdf417, "Alt+F",
+                                       "Gestapelter 2D-Code PDF417 (auch kompakt) als gefüllte "
+                                       "Vektorflächen einfügen")
+        self.pdf417_action.setObjectName("pdf417_action")
         self.arc_action = self._add("Bogentext…", self.arc_text, "Alt+B",
                                     "Text entlang eines Kreisbogens als Vektorpfade einfügen "
                                     "(ausgewählter Text wird übernommen)")
         self.arc_action.setObjectName("arc_text_action")
         self.edit_generated_action = self._add(
             "Code bearbeiten…", self.edit_generated, "Alt+E",
-            "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-Code oder Bogentext mit seinen Parametern "
+            "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-, PDF417-Code oder Bogentext mit seinen "
+            "Parametern "
             "neu erzeugen (auch per Doppelklick)")
         self.edit_generated_action.setObjectName("edit_generated_action")
         # Double click with the select tool (lumacut_canvas.tools) asks this hook first.
@@ -406,6 +411,30 @@ class JobTools(QObject):
         layer = doc.shape(ids[0]).layer_id if ids else ""
         name = doc.layer(layer).name if layer else ""
         self._msg(f"Aztec-Code eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
+        return ids
+
+    def pdf417(self, spec=None, fill_layer: bool | None = None) -> list[str]:
+        """Insert a PDF417 code (one undo step); default: active layer."""
+        from .pdf417_qt import Pdf417Dialog, insert_pdf417
+        from .qr_qt import layer_fills
+        doc = self.editor.document
+        active = doc.active_layer or (doc.layers[0] if doc.layers else None)
+        if spec is None:
+            dlg = Pdf417Dialog(self.window, active_layer=active)
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, fill_layer = dlg.spec(), dlg.fill_layer()
+        if fill_layer is None:
+            fill_layer = not layer_fills(active)
+        try:
+            ids = insert_pdf417(self.editor, spec, fill_layer=fill_layer)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "PDF417-Code", str(exc))
+            self._msg(f"PDF417-Code: {exc}")
+            return []
+        layer = doc.shape(ids[0]).layer_id if ids else ""
+        name = doc.layer(layer).name if layer else ""
+        self._msg(f"PDF417-Code eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
         return ids
 
     def arc_text(self, spec=None, replace: bool | None = None) -> list[str]:

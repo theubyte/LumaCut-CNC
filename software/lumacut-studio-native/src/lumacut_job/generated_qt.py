@@ -1,6 +1,6 @@
 """Edit generated objects again (Qt side of :mod:`lumacut_job.generated`).
 
-Double click on a QR code, barcode, Data Matrix, Aztec code or arc text (select tool) or
+Double click on a QR code, barcode, Data Matrix, Aztec / PDF417 code or arc text (select tool) or
 „Code bearbeiten…“ (Alt+E) opens the generator's dialog with the stored
 parameters – sizes scaled by what the user did with the handles – and replaces
 the group in one undo step: same layer, same centre, same rotation, same
@@ -19,6 +19,7 @@ from .generated import Unit
 
 EDIT_TITLES = {"qr": "QR-Code bearbeiten", "barcode": "Barcode bearbeiten",
                "datamatrix": "Data Matrix bearbeiten", "aztec": "Aztec-Code bearbeiten",
+               "pdf417": "PDF417-Code bearbeiten",
                "arctext": "Bogentext bearbeiten"}
 
 
@@ -41,6 +42,11 @@ def build_shapes(spec, layer_id: str) -> list:
         from .aztec_qt import centered
         code = s.encode()
         shapes = az.aztec_shapes(centered(s, None, code), layer_id, code)
+    elif kind == "pdf417":
+        from . import pdf417 as pd
+        from .pdf417_qt import centered
+        code = s.encode()
+        shapes = pd.pdf417_shapes(centered(s, None, code), layer_id, code)
     elif kind == "barcode":
         from . import barcode
         from .barcode_qt import glyph_fn
@@ -106,6 +112,9 @@ def edit_dialog(unit: Unit, spec, layer, parent=None) -> QDialog:
     elif unit.kind == "aztec":
         from .aztec_qt import AztecDialog
         dlg = AztecDialog(parent, spec, active_layer=layer)
+    elif unit.kind == "pdf417":
+        from .pdf417_qt import Pdf417Dialog
+        dlg = Pdf417Dialog(parent, spec, active_layer=layer)
     elif unit.kind == "barcode":
         from .barcode_qt import BarcodeDialog
         dlg = BarcodeDialog(parent, spec, active_layer=layer)
