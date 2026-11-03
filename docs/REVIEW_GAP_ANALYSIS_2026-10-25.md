@@ -1420,3 +1420,92 @@ Still open:
   incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
   incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
   park-corner refusal, variable text / CSV merge over several sends, rebuilt exe).
+
+## 29. Status update 2026-11-03 (review round 22)
+
+Done this round (Review/Job layer; Canvas, Machine / Scan Probe and Materials untouched apart from
+one new `JobLayer` field in `lumacut_canvas/export.py` and the line shift in
+`lumacut_canvas/gcode.py`):
+
+- Gap picked: **scanning offset adjustment** (LightBurn „Scanning Offset Adjustment“, xTool
+  bidirectional calibration). At high bidirectional speeds a diode laser fires late in the
+  direction of travel, so forward and return lines are offset and vertical edges look ragged.
+  `RasterSettings.scan_offset_mm` existed in the image engine but nothing set it, and hatch fills had
+  no compensation at all. Picked over the remaining §28 fill items (cross-layer grouping, free start
+  corner, travel-clamped overscan) because it is a core calibration for fast diode engraving.
+- `lumacut_job/scan_offset.py` (pure Python):
+  - `ScanOffsetTable`: speed (mm/min) → offset (mm), up to 32 entries, 1–6000 mm/min, −2…2 mm,
+    no duplicate speeds; linear interpolation, nearest entry outside the table (no extrapolation);
+    JSON round trip (version 1); German summary for the planner note.
+  - Process-wide active table (`active_table` / `set_active_table`, default off).
+  - Calibration pattern `ScanTestSpec` / `test_pattern_layers` / `test_pattern_gcode`: one row of
+    hatch patches per speed, one column per trial offset (each patch carries its own fixed offset,
+    `fill_fixed_order`), text labels; validated against the work area; G-code header comment
+    lists the column offsets.
+- Model: every scan line moves by **half** the offset against its own direction of travel, so the
+  engraving stays centred on the contour and the rule is direction-independent (unidirectional
+  hatch is shifted too, consistent with images). The shift is shortened at the cutting-area edge;
+  overscan is added after the shift. Contours and offset fill (rings) are not shifted.
+- `lumacut_canvas/gcode.py`: `scan_offset_segment` and `JobLayer.fill_scan_offset_mm` (applied to
+  hatch / crosshatch lines before overscan). `lumacut_job/images.py`: `image_job(…, scan_offsets)`
+  sets `RasterSettings.scan_offset_mm` from the image speed and shifts the origin by −offset/2
+  (clamped to edge room).
+- `lumacut_job/planner.py`: `optimized_document_gcode` applies the active table by default (send,
+  save, estimate, path preview, workflow and scan job pick it up without call-site changes);
+  `PlanReport.scan_offset` is appended to the planner note. With the table off the G-code is
+  byte-for-byte unchanged.
+- UI (`lumacut_job/scan_offset_qt.py`, `qt_tools.py`): toolbar / menu „Auftrag“ action
+  „Scan-Versatz…“ – on/off, editable table (comma decimals accepted), live check „Prüfen bei …
+  mm/min“, validation disables OK; stored in QSettings `job/scan_offset` (machine setting, not in
+  the document). „Testmuster…“ dialog: speeds, offset range / step, power, line interval, patch
+  size, position, labels; „Senden (ohne Start)“ uploads `scan-versatz-test.gcode` without starting,
+  „Speichern…“ writes a file.
+
+Tests:
+
+- `tests/test_scan_offset.py` (33): table normalisation / errors / interpolation / JSON, default
+  off, segment shift and edge clamp, bidirectional hatch shift, overscan after shift, planner with
+  active table (offset fill and contours unchanged, off = identical G-code, report note), images
+  (half shift per direction, edge clamp), test pattern layers / G-code with Pi guard, spec errors,
+  settings round trip, dialog editing and check label, test dialog callbacks, window action /
+  menu / job note / save / send without start.
+
+Full suite: 1546 passed, 3 skipped (before: 1513 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; block entry is only „start or end“ (no free start
+  corner inside a block); overscan is clamped to the cutting area, not to the real machine travel.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); speeds only in mm/min (no mm/s view); the canvas fill preview
+  (`fill_preview`) shows unshifted lines (the path preview shows the shift); the test pattern is
+  not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: no per-object counter shown on the canvas (the template is drawn, the values
+  are in the dialog / path preview); „Text in Pfade“ converts the template literally; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417; no GS1 Digital
+  Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (scan offset test pattern and compensated bidirectional hatch / image at
+  3000–6000 mm/min, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options
+  incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
+  incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
+  park-corner refusal, variable text / CSV merge over several sends, rebuilt exe).

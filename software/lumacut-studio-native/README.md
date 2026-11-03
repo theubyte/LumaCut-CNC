@@ -386,6 +386,20 @@ Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt
   Ränder verbrennen nicht stärker. Am Rand der Arbeitsfläche wird der Überlauf
   gekürzt; Zeitschätzung und Pfadvorschau zeigen ihn als Leerfahrt. Offset-Füllung
   braucht keinen (Ringe ohne Absetzen), das Feld ist dort ausgegraut.
+- **Scan-Versatz** („Scan-Versatz…“, Menü „Auftrag“; wie LightBurn „Scanning Offset
+  Adjustment“): bei schneller, bidirektionaler Gravur brennt der Laser in Fahrtrichtung
+  etwas zu spät, hin- und rücklaufende Linien liegen versetzt und senkrechte Kanten werden
+  unscharf. Tabelle *Geschwindigkeit (mm/min) → Versatz (mm)* (bis 32 Zeilen, −2…2 mm),
+  dazwischen linear interpoliert, außerhalb gilt der nächste Eintrag. Beim Senden, Speichern,
+  Schätzen und in der Pfadvorschau wird jede Schraffur-/Kreuzschraffurlinie und jede
+  Bild-Rasterzeile um den **halben** Versatz entgegen ihrer Fahrtrichtung verschoben (bei
+  der Geschwindigkeit der Ebene bzw. des Bildes) – die Gravur bleibt mittig zur Kontur.
+  Konturen und Offset-Füllung bleiben unverändert; am Rand der Arbeitsfläche wird die
+  Verschiebung gekürzt. Die Tabelle gilt für die Maschine (App-Einstellung, nicht in der
+  Datei); aus = G-Code Byte für Byte wie vorher. Der Planer-Hinweis nennt den aktiven
+  Versatz. **Testmuster…**: Kalibrier-Auftrag mit einer Reihe Felder je Geschwindigkeit und
+  steigendem Versatz je Spalte (beschriftet); „Senden (ohne Start)“ oder „Speichern…“ – je
+  Reihe das Feld mit den geradesten Kanten in die Tabelle übernehmen.
 - G-Code: je Durchgang zuerst die Füllung (G0 an den Zeilenanfang, G1 mit
   Leistung/Geschwindigkeit der Ebene), danach die Kontur; Durchgangs-Hook
   (Tiefe je Durchgang) gilt auch für reine Füll-Ebenen. Ohne Füllung ist der
