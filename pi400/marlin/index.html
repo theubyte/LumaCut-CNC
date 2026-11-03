@@ -1025,6 +1025,19 @@ dialog.danger h2{color:var(--bad)}
     </div>
     <div class="metric" style="margin-top:12px"><small>Status</small><strong id="firmwareStatus" style="font-size:14px">—</strong><div class="bar" style="margin-top:8px"><span id="firmwareProgress"></span></div></div>
    </section>
+   <section class="card" id="panelPanel">
+    <div class="card-head"><h2><svg class="i"><use href="#i-chip"/></svg>Bedienpanel</h2></div>
+    <p class="small muted">Das 7-Zoll-Panel hängt per USB am Pi. Neue Panel-Firmware kommt mit jedem Update des Pi mit; der Pi flasht sie über dasselbe Kabel, sobald die Maschine im Leerlauf ist. Das Panel ist dabei etwa eine halbe Minute dunkel.</p>
+    <div class="metrics" style="margin-top:12px">
+     <div class="metric"><small>Auf dem Panel</small><strong id="panelVersion" style="font-size:14px">—</strong></div>
+     <div class="metric"><small>Auf dem Pi</small><strong id="panelAvailable" style="font-size:14px">—</strong></div>
+    </div>
+    <label class="switch" style="margin-top:12px"><span class="txt"><b>Automatisch aktualisieren</b><small>Nur im Leerlauf, nie während eines Auftrags</small></span><input type="checkbox" id="panelAuto"></label>
+    <div class="row" style="margin-top:12px">
+     <button class="btn primary" id="panelUpdate" type="button"><svg class="i"><use href="#i-download"/></svg>Panel jetzt aktualisieren</button>
+    </div>
+    <div class="metric" style="margin-top:12px"><small>Status</small><strong id="panelStatus" style="font-size:14px">—</strong></div>
+   </section>
    <section class="card" id="appPanel">
     <div class="card-head"><h2><svg class="i"><use href="#i-phone"/></svg>Android-App</h2></div>
     <p class="small muted">Der Pi holt neue App-Versionen selbst von GitHub (beim Start und alle 6 Stunden). Die App fragt hier nach und aktualisiert sich ohne Deinstallieren.</p>
@@ -1172,7 +1185,7 @@ const PAGES=["steuerung","auftraege","material","kamera","einstellungen","system
 function route(){
  let p=location.hash.replace("#","");
  // alte Links (#calibrationPanel …) führen auf die passende Seite
- p={calibrationPanel:"einstellungen",commissionPanel:"einstellungen",diagnosePanel:"system",firmwarePanel:"system",appPanel:"system",lightburnPanel:"system"}[p]||p;
+ p={calibrationPanel:"einstellungen",commissionPanel:"einstellungen",diagnosePanel:"system",firmwarePanel:"system",panelPanel:"system",appPanel:"system",lightburnPanel:"system"}[p]||p;
  if(!PAGES.includes(p))p=store.get("lumacut.page","steuerung");
  if(!PAGES.includes(p))p="steuerung";
  if(p!==page())scrollTo(0,0);
@@ -1292,6 +1305,7 @@ function refreshUI(s){
   (s.firmware_upload_supported?"Bereit: Update über den Pi möglich":s.firmware_avr_port?"Anet-Board an "+s.firmware_avr_port+": firmware.hex über den Pi flashen":"Aktuelle Firmware kann keine Dateien empfangen – einmalig per SD-Karte flashen");
  $("firmwareProgress").style.width=(fw.progress||0)+"%";
  renderFwRelease(s);
+ renderPanel(s);
  $("firmwareFlash").disabled=(s.firmware_avr_port?s.owner!=="Frei":(!ownerFree(s)||!s.firmware_upload_supported))||["uploading","rebooting"].includes(fw.state);
  // Auftrag
  renderJobStrip(s);
@@ -2327,6 +2341,27 @@ async function installFirmware(button){
 $("fwInstall").onclick=ev=>installFirmware(ev.currentTarget);
 $("fwBannerInstall").onclick=ev=>installFirmware(ev.currentTarget);
 $("fwCheck").onclick=ev=>call("firmware_update_check",{},ev.currentTarget);
+
+/* ================= Bedienpanel (ESP32) ================= */
+function renderPanel(s){
+ const p=s.panel;
+ if(!p){$("panelStatus").textContent="Pi-Dienst ohne Panel-Brücke";$("panelUpdate").disabled=true;return}
+ const flashing=p.state==="flashing";
+ $("panelVersion").textContent=p.port?(p.version||"unbekannt (alt)"):"nicht angeschlossen";
+ $("panelAvailable").textContent=p.available||"keine";
+ if(document.activeElement!==$("panelAuto"))$("panelAuto").checked=Boolean(p.auto);
+ $("panelStatus").textContent=!p.esptool?"esptool fehlt auf dem Pi":
+  p.state!=="idle"?p.message:p.update_available?"Update auf "+p.available+" bereit":p.port?"Aktuell":"—";
+ $("panelUpdate").disabled=flashing||!p.port||!p.available||!p.esptool||s.activity!=="idle";
+}
+$("panelAuto").onchange=ev=>call("panel_auto",{on:ev.currentTarget.checked?"1":"0"});
+$("panelUpdate").onclick=async ev=>{
+ const p=snapshot?.panel||{};
+ if(!await ask("Panel aktualisieren?","Firmware "+(p.version||"?")+" → "+p.available+"
+
+Das Panel ist etwa eine halbe Minute dunkel und startet dann neu. Die Maschine selbst wird nicht berührt.","Aktualisieren"))return;
+ await call("panel_update",{},ev.currentTarget);
+};
 
 /* ================= Android-App auf dem Pi ================= */
 function renderApp(a){

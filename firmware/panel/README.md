@@ -50,11 +50,21 @@ Siehe Kopf von `pi400/marlin/panel.py`. Kurz: Panel → Pi `hello`, `ping`
 
 ```
 python -m platformio run                 # baut .pio/build/panel/firmware.bin
-python -m platformio run -t upload       # flasht über die Buchse "USB" (nur mit dem Besitzer)
+python -m platformio run -t upload --upload-port COMx   # erstes Flashen am PC
 ```
 
+Erstes Flashen am PC, am sichersten über die Buchse **„UART“** (CH343, Auto-Reset).
 Ein Abbild zum direkten Flashen ab 0x0 (z. B. vom NAS):
 `esptool --chip esp32s3 write_flash 0x0 lumacut-panel.bin`.
+
+**Updates über den Pi:** `PANEL_VERSION` in `src/version.h` hochzählen, dann
+`tools/release.sh` (baut und legt App-Image + `manifest.json` nach
+`pi400/marlin/panel_fw/`), committen, auf den Pi deployen. Die Panel-Brücke sieht
+die ältere Version im Ping und flasht das Panel im Leerlauf selbst mit esptool
+über die Buchse „USB“ (ab 0x10000, Bootloader bleibt). Abschaltbar in der
+Web-Oberfläche (System → Bedienpanel); dort auch „Panel jetzt aktualisieren“.
+Schlägt es fehl, startet das Panel evtl. nicht mehr: dann über den Knopf erneut
+oder am PC über „UART“ flashen.
 
 Schriften: `tools/gen_fonts.sh` (Inter 4.0, JetBrains Mono 2.304, FontAwesome 5
 aus LVGL; lv_font_conv 1.5.2). Umlaute und „ “ – − sind enthalten.

@@ -204,5 +204,128 @@ class PortTest(unittest.TestCase):
         self.assertFalse(panel.is_panel("/dev/serial/by-id/usb-LeafLabs_Maple-if00"))
 
 
+class ClosingPort(FakePort):
+    """Closing it frees the port, as serve_forever does after the session ends."""
+
+    def __init__(self, b):
+        super().__init__()
+        self.b = b
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+        self.b.port_free.set()
+
+
+class PanelUpdateTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        folder = Path(self.tmp.name)
+        image = folder / "lumacut-panel.bin"
+        image.write_bytes(b"panel image")
+        import hashlib
+        (folder / "manifest.json").write_text(json.dumps({
+            "version": "1.1", "file": image.name, "address": "0x10000",
+            "sha256": hashlib.sha256(image.read_bytes()).hexdigest()}))
+        self.folder = folder
+        self.flashed = []
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def make(self, status=None, flash_ok=True, auto=True):
+        def flasher(command):
+            self.flashed.append(command)
+            return flash_ok, "Hash of data verified." if flash_ok else "No serial data received."
+        b = panel.PanelBridge(FakeApi(status or {"activity": "idle", "job": {"state": "idle"}}),
+                              firmware=lambda: panel.bundled_firmware(self.folder), auto=lambda: auto,
+                              flasher=flasher, has_esptool=lambda: True)
+        b.port = ClosingPort(b)
+        b.path = "/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_AA-if00"
+        return b
+
+    def wait(self, b):
+        for _ in range(300):
+            if b.update["state"] != "flashing":
+                return
+            threading.Event().wait(0.01)
+        raise AssertionError("update did not finish")
+
+    def test_ping_reports_the_version(self):
+        b = self.make()
+        b.handle_line(b'{"t":"ping","cam":0,"v":"1.0"}')
+        self.assertEqual(b.version, "1.0")
+        info = b.info()
+        self.assertEqual((info["version"], info["available"], info["update_available"]), ("1.0", "1.1", True))
+
+    def test_older_panel_is_flashed_with_esptool_on_its_port(self):
+        b = self.make()
+        b.version = "1.0"
+        ok, text = b.request_update()
+        self.assertTrue(ok, text)
+        self.wait(b)
+        self.assertEqual(b.update["state"], "done")
+        self.assertTrue(b.port.closed)
+        command = self.flashed[0]
+        self.assertEqual(command[command.index("--port") + 1], b.path)
+        self.assertEqual(command[-2:], ["0x10000", str(self.folder / "lumacut-panel.bin")])
+        self.assertIn("Bildschirm ist kurz aus", b.port.messages()[-1]["msg"])
+        self.assertFalse(b.hold)
+
+    def test_current_panel_is_left_alone_unless_asked(self):
+        b = self.make()
+        b.version = "1.1"
+        self.assertFalse(b.request_update()[0])
+        self.assertTrue(b.request_update(manual=True)[0])
+        self.wait(b)
+
+    def test_never_during_a_job_or_with_the_laser_armed(self):
+        for status in ({"activity": "running", "job": {"state": "running"}},
+                       {"activity": "idle", "job": {"state": "idle"}, "queue": {"state": "running"}},
+                       {"activity": "idle", "job": {"state": "idle"}, "laser_armed": True}):
+            b = self.make(status)
+            b.version = "1.0"
+            ok, text = b.request_update(manual=True)
+            self.assertFalse(ok)
+            self.assertIn("später", text)
+        self.assertEqual(self.flashed, [])
+
+    def test_failed_version_is_not_retried_by_itself(self):
+        b = self.make(flash_ok=False)
+        b.version = "1.0"
+        b.connected_at = 0.0
+        b.auto_update(b.api.status)
+        self.wait(b)
+        self.assertEqual(b.update["state"], "error")
+        b.auto_update(b.api.status)
+        self.assertEqual(len(self.flashed), 1)
+        self.assertTrue(b.request_update(manual=True)[0])
+        self.wait(b)
+
+    def test_automatic_update_can_be_switched_off(self):
+        b = self.make(auto=False)
+        b.version = "1.0"
+        b.auto_update(b.api.status)
+        self.assertEqual(b.update["state"], "idle")
+
+    def test_wrong_checksum_is_not_flashed(self):
+        b = self.make()
+        b.version = "1.0"
+        (self.folder / "lumacut-panel.bin").write_bytes(b"other")
+        b.request_update()
+        self.wait(b)
+        self.assertEqual(b.update["state"], "error")
+        self.assertEqual(self.flashed, [])
+
+    def test_versions_compare_as_numbers(self):
+        self.assertLess(panel.version_key("1.9"), panel.version_key("1.10"))
+        self.assertLess(panel.version_key("kaputt"), panel.version_key("1.0"))
+
+    def test_bundled_firmware_of_the_repo_is_readable(self):
+        fw = panel.bundled_firmware()
+        self.assertIsNotNone(fw)
+        self.assertTrue(fw["path"].is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

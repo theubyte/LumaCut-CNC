@@ -11,3 +11,5 @@ artifacts/
 **/secrets/
 **/gh/
 .DS_Store
+# Panel firmware the Pi flashes onto the touch panel (firmware/panel/tools/release.sh)
+!pi400/marlin/panel_fw/*.bin

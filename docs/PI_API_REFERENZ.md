@@ -214,6 +214,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `firmware_upload_supported` | bool | Firmware meldet `Cap:BINARY_FILE_TRANSFER:1` (Voraussetzung für `/api/firmware` mit `.bin`) |
 | `firmware_avr_port` | string/null | CH340-Port (Anet-Board oder Atomstack) für `/api/firmware` mit `firmware.hex`; `null` = kein CH340 |
 | `firmware_release` | object | Firmware-Update von GitHub (§4.16): `number`, `commit`, `board` (`skr`/`anet`/null), `board_name`, `running_build` (aus M115), `release_build`, `update_available`, `checked_at`, `error` |
+| `panel` | object\|null | Bedienpanel am USB (§4.16, `panel.py`): `connected`, `port`, `version` (meldet das Panel), `available` (Firmware in `panel_fw/` auf dem Pi), `update_available`, `auto`, `esptool`, `state` (`idle`/`flashing`/`done`/`error`), `message`, `target`; null ohne Panel-Brücke |
 | `firmware_update` | object | `{state, progress, message}`; `state` ∈ `idle`, `uploading`, `rebooting`, `done`, `error`; `progress` 0..100 |
 | `homing_verified` | bool | = Mechanik-Freigabe (`config.validated`) |
 | `reference` | object | `{switch_check, lost}`: Referenzprüfung über die X/Y-Endschalter. `switch_check` `true` = nach dem Referenzieren waren beide Schalter auf X0/Y0 gedrückt, die Prüfung ist aktiv (`false` = Schalter erreichen X0/Y0 nicht, Prüfung aus; `null` = noch nicht referenziert). Steht der Kopf laut Pi auf X0/Y0 (nach Referenzieren/Parken) und ein Schalter ist offen – geprüft nach dem Parken, alle 2 s im Leerlauf und vor `start`/`autorun`/`frame` –, fällt `homed` auf `false` und `lost` nennt den Grund (Kopf von Hand bewegt oder Schritte verloren); `autorun` referenziert dann zuerst. Nach jedem Referenzieren wieder `""`. Beim Verbinden sendet der Pi `M84 S0`: die Motoren halten auch im Leerlauf. |
@@ -1111,6 +1112,24 @@ SHA-256 wird vor dem Flashen erneut geprüft. Fortschritt in `firmware_update`.
 | --- | --- |
 | Erfolg | 200 `{"message": "Anet-Firmware wird geflasht …"}` bzw. SKR-Meldung |
 | Fehler | 409/400 `{"error": "Kein Firmware-Update für das verbundene Board"}`, „Firmware-Datei auf dem Pi fehlt“, Belegt-/Auftragsfehler wie §4.11 |
+
+#### Bedienpanel-Update (`op=panel_update`, `op=panel_auto`)
+
+Die Panel-Firmware liegt im Repo unter `pi400/marlin/panel_fw/` (App-Image und `manifest.json`
+mit `version`, `address`, `sha256`, geschrieben von `firmware/panel/tools/release.sh`) und kommt
+mit jedem Deploy auf den Pi. Meldet das Panel (`v` in `hello`/`ping`) eine ältere oder gar keine
+Version, flasht die Panel-Brücke es selbst, sobald die Maschine im Leerlauf ist (keine Aktivität,
+kein Auftrag, keine laufende Warteschlange, Laser nicht freigegeben): Port freigeben, `esptool
+write_flash 0x10000` über dieselbe USB-Leitung (Reset in den ROM-Lader über USB-Serial/JTAG),
+Neustart. Eine fehlgeschlagene Version wird nicht von selbst wiederholt. Die Maschine selbst wird
+nicht berührt. Braucht `esptool` für den Dienst-Benutzer (`pip install --user esptool`).
+
+`op=panel_update`: keine Parameter; flasht jetzt, auch dieselbe Version erneut. Erfolg 200
+`{"message": "Panel wird auf 1.1 aktualisiert"}`, Fortschritt in `panel.state`. Fehler 409
+„Maschine beschäftigt – Panel-Update später“, „Kein Bedienpanel angeschlossen“, „esptool fehlt …“.
+
+`op=panel_auto`: `on=1|0`, gespeichert als `panel_auto_update` (Standard an).
+Erfolg 200 `{"message": "Panel-Updates automatisch" | "Panel-Updates nur per Knopf"}`.
 
 ### 4.15 Arbeitsstand (Material, Projekt, Scan)
 

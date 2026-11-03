@@ -16,6 +16,7 @@
 #include "jpeg_decoder.h"
 #include "lvgl_port.h"
 #include "ui.h"
+#include "version.h"
 
 static const char *TAG = "link";
 
@@ -168,14 +169,16 @@ static void rx_task(void *arg)
 
 static void ping_task(void *arg)
 {
-    send_text("{\"t\":\"hello\",\"v\":\"1.0\"}");
+    send_text("{\"t\":\"hello\",\"v\":\"" PANEL_VERSION "\"}");
     for (;;) {
         bool cam = false;
         if (lvgl_port_lock(-1)) {
             cam = ui_camera_wanted();
             lvgl_port_unlock();
         }
-        send_text(cam ? "{\"t\":\"ping\",\"cam\":1}" : "{\"t\":\"ping\",\"cam\":0}");
+        // the version in every ping: the Pi may start after the hello
+        send_text(cam ? "{\"t\":\"ping\",\"cam\":1,\"v\":\"" PANEL_VERSION "\"}"
+                      : "{\"t\":\"ping\",\"cam\":0,\"v\":\"" PANEL_VERSION "\"}");
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

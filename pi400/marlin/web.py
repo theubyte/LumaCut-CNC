@@ -45,7 +45,8 @@ MATERIALS = MaterialStore(DATA.parent / "materials.json")
 # autorun_mesh: op=autorun probes the motif areas and compensates the focus
 # itself (Studio and Android then upload the job without Z, docs/SCAN_PROBE.md).
 FEATURES = ("autorun_mesh", "materials", "app_update", "firmware_release", "camera_settings", "workspace",
-            "report", "backup", "exhaust_auto", "bed_map", "material_calibration", "projects")
+            "report", "backup", "exhaust_auto", "bed_map", "material_calibration", "projects",
+            "panel_update")
 JOBS = DATA / "jobs"
 # Camera pictures taken inside a job while the laser runs (measuring spot/line).
 CAPTURES = DATA / "captures"
@@ -341,7 +342,8 @@ def status():
                   origin=_origin_status(),
                   queue=_queue_status(),
                   camera={"device": CAMERA, "available": os.path.exists(CAMERA)},
-                  firmware_release=firmware_releases.offer(result.get("identity") or ""))
+                  firmware_release=firmware_releases.offer(result.get("identity") or ""),
+                  panel=panel.BRIDGE.info() if panel.BRIDGE else None)
     return jsonify(result)
 
 
@@ -738,6 +740,21 @@ def action():
         if info["board"] == "anet":
             return _start_anet_flash(image.decode("ascii"))
         return _start_skr_flash(image)
+    if op == "panel_update":
+        # Bedienpanel: flash the firmware that came with the last deploy now
+        # (also the same version again, e.g. after a failed automatic try).
+        if panel.BRIDGE is None:
+            raise RuntimeError("Panel-Brücke läuft nicht")
+        ok, text = panel.BRIDGE.request_update(manual=True)
+        if not ok:
+            raise RuntimeError(text)
+        return jsonify(message=text)
+    if op == "panel_auto":
+        # on=1|0: update the panel by itself whenever the machine is idle
+        config["panel_auto_update"] = request.form.get("on") == "1"
+        persist()
+        return jsonify(message="Panel-Updates automatisch" if config["panel_auto_update"]
+                       else "Panel-Updates nur per Knopf")
     if op == "light":
         # Dimmable LED strip on PC8: on=1|0, optional brightness 1..100 %,
         # optional effects=1|0. Without "on" only the settings change.
@@ -2406,7 +2423,7 @@ def main():
                      args=(lambda: running, lambda: job["state"] in ("homing", "probing", "running")),
                      daemon=True, name="firmware-updates").start()
     # Bedienpanel (ESP32 touch display) on USB: one more API client, see panel.py.
-    panel.start(HTTP)
+    panel.start(HTTP, auto=lambda: config.get("panel_auto_update", True))
     threading.Thread(target=serve_tcp,
                      args=(machine,"0.0.0.0",TCP,lambda: running),
                      daemon=True, name="marlin-lightburn-server").start()

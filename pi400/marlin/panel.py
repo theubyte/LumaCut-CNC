@@ -7,7 +7,7 @@ release and G-code guard stay on the Pi. The panel only shows and asks.
 It is connected to the native USB-C socket of the ESP32-S3 (Espressif
 USB-Serial/JTAG, vendor 303a) and talks in JSON lines:
 
-panel -> Pi   {"t": "hello"}  {"t": "ping", "cam": 0|1}  {"t": "jobs"}
+panel -> Pi   {"t": "hello", "v": ver}  {"t": "ping", "cam": 0|1, "v": ver}  {"t": "jobs"}
               {"t": "act", "id": n, "op": ..., <fields>}
 Pi -> panel   {"t": "st", ...}            compact status, every 0.5..1 s
               {"t": "res", "id": n, "ok": bool, "msg": str}
@@ -16,15 +16,26 @@ Pi -> panel   {"t": "st", ...}            compact status, every 0.5..1 s
 
 The panel's serial port is never the SKR: Marlin is found by its own path,
 and grbl_bridge.open_controller() skips Espressif devices.
+
+Updates: panel_fw/ next to this file holds the current panel firmware
+(app image, built by firmware/panel/tools/release.sh) and arrives with every
+deploy. When the panel reports an older version and the machine is idle, the
+bridge lets go of the port and flashes it with esptool over the same USB
+cable (USB-Serial/JTAG reset into the ROM loader). Automatic unless switched
+off in the web UI; a failed version is not retried by itself.
 """
 from __future__ import annotations
 
 import bisect
 import glob
+import hashlib
+import importlib.util
 import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -54,6 +65,8 @@ ACTIONS = {
     "autorun": ("name", "clear"),
     "frame_job": ("name",),
 }
+FIRMWARE_DIR = Path(__file__).resolve().parent / "panel_fw"
+FLASH_TIMEOUT_S = 240
 SLOW = {"home": 200, "probe": 120, "park": 90, "estop_reset": 30, "jog": 60}
 
 _S = re.compile(r"\bS\s*([-+]?\d*\.?\d+)", re.I)
@@ -99,6 +112,36 @@ def frame_gcode(bounds: dict) -> str:
     x0, y0, x1, y1 = (round(float(bounds[k]), 2) for k in ("xmin", "ymin", "xmax", "ymax"))
     return "\n".join(["G21", "G90", "G0 X%s Y%s F6000" % (x0, y0), "G0 X%s Y%s" % (x1, y0),
                       "G0 X%s Y%s" % (x1, y1), "G0 X%s Y%s" % (x0, y1), "G0 X%s Y%s" % (x0, y0)])
+
+
+def version_key(text: str) -> tuple:
+    """"1.10" > "1.9"; anything unreadable sorts first."""
+    try:
+        return tuple(int(part) for part in str(text).split("."))
+    except ValueError:
+        return ()
+
+
+def bundled_firmware(folder: Path = FIRMWARE_DIR) -> dict | None:
+    """panel_fw/manifest.json: {"version", "file", "address", "sha256"}; None without one."""
+    try:
+        meta = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+        image = folder / meta["file"]
+        return {"version": str(meta["version"]), "path": image, "address": meta.get("address", "0x10000"),
+                "sha256": meta["sha256"], "bytes": image.stat().st_size}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def flash_command(port: str, firmware: dict) -> list[str]:
+    # default_reset on the USB-Serial/JTAG port puts the ESP32-S3 into its ROM loader
+    return [sys.executable, "-m", "esptool", "--chip", "esp32s3", "--port", port,
+            "--before", "default_reset", "--after", "hard_reset",
+            "write_flash", firmware["address"], str(firmware["path"])]
+
+
+def esptool_installed() -> bool:
+    return importlib.util.find_spec("esptool") is not None
 
 
 class JobTrace:
@@ -229,7 +272,8 @@ class Api:
 
 
 class PanelBridge:
-    def __init__(self, api, serial_factory=None, finder=find_panel, clock=time.time):
+    def __init__(self, api, serial_factory=None, finder=find_panel, clock=time.time,
+                 firmware=bundled_firmware, auto=lambda: True, flasher=None, has_esptool=esptool_installed):
         self.api = api
         self.serial_factory = serial_factory
         self.finder = finder
@@ -243,6 +287,18 @@ class PanelBridge:
         self.trace: JobTrace | None = None
         self.trace_file = None
         self.running = True
+        # firmware update
+        self.path = None                      # device path of the open panel
+        self.version = None                   # reported by hello/ping
+        self.firmware = firmware              # () -> bundled_firmware()
+        self.auto = auto                      # () -> automatic updates on?
+        self.flasher = flasher                # (command) -> (ok, text)
+        self.has_esptool = has_esptool
+        self.hold = False                     # port left to esptool
+        self.port_free = threading.Event()    # serve_forever holds no port
+        self.update = {"state": "idle", "message": "", "target": None}
+        self.connected_at = 0.0
+        self.failed = None                    # version that failed: no automatic retry
 
     # ---------- sending ----------
     def send(self, msg: dict, payload: bytes = b"") -> None:
@@ -261,6 +317,8 @@ class PanelBridge:
         kind = msg.get("t")
         if kind in ("hello", "ping"):
             self.last_ping = time.monotonic()
+            if msg.get("v"):
+                self.version = str(msg["v"])
             if msg.get("cam"):
                 self.camera_wanted = self.last_ping
             elif kind == "ping":
@@ -330,6 +388,95 @@ class PanelBridge:
         status, data = self.api.json("POST", "/api/action", form)
         return status == 200, data.get("message") or data.get("error") or ""
 
+    # ---------- firmware update ----------
+    def info(self) -> dict:
+        """For /api/status: what runs on the panel, what the Pi has, update state."""
+        fw = self.firmware()
+        connected = self.port is not None and self.running and time.monotonic() - self.last_ping < PING_TIMEOUT_S
+        return {"connected": connected, "port": self.path, "version": self.version,
+                "available": fw["version"] if fw else None, "update_available": self.outdated(fw),
+                "auto": bool(self.auto()), "esptool": self.has_esptool(), **self.update}
+
+    def outdated(self, fw: dict | None) -> bool:
+        # 1.0 sent its version only in hello: unknown after a bridge restart counts as old
+        return bool(fw) and self.path is not None and version_key(self.version or "0") < version_key(fw["version"])
+
+    def update_blocked(self, s: dict) -> str:
+        """Why the panel must not go dark now ("" = it may)."""
+        job = s.get("job") or {}
+        if (s.get("activity") or "idle") != "idle" or job.get("state") in ACTIVE:
+            return "Maschine beschäftigt"
+        if (s.get("queue") or {}).get("state") == "running":
+            return "Warteschlange läuft"
+        if s.get("laser_armed"):
+            return "Laser freigegeben"
+        return ""
+
+    def request_update(self, manual: bool = False) -> tuple[bool, str]:
+        fw = self.firmware()
+        if self.update["state"] == "flashing":
+            return False, "Panel-Update läuft schon"
+        if not fw:
+            return False, "Keine Panel-Firmware auf dem Pi"
+        if self.path is None:
+            return False, "Kein Bedienpanel angeschlossen"
+        if not self.has_esptool():
+            return False, "esptool fehlt auf dem Pi (pip install --user esptool)"
+        if not manual and (not self.outdated(fw) or self.failed == fw["version"]):
+            return False, "Panel ist aktuell"
+        status, s = self.api.json("GET", "/api/status", timeout=5)
+        reason = self.update_blocked(s) if status == 200 else "Pi-Status nicht lesbar"
+        if reason:
+            return False, reason + " – Panel-Update später"
+        self.update = {"state": "flashing", "message": "Panel wird auf %s aktualisiert" % fw["version"],
+                       "target": fw["version"]}
+        threading.Thread(target=self.flash, args=(fw,), daemon=True, name="panel-update").start()
+        return True, self.update["message"]
+
+    def flash(self, fw: dict) -> None:
+        path = self.path
+        try:
+            digest = hashlib.sha256(fw["path"].read_bytes()).hexdigest()
+            if digest != fw["sha256"]:
+                raise RuntimeError("Prüfsumme der Panel-Firmware falsch")
+            try:
+                self.send({"t": "res", "id": 0, "op": "update", "ok": True,
+                           "msg": "Update auf %s – Bildschirm ist kurz aus" % fw["version"]})
+            except Exception:
+                pass
+            self.hold = True
+            self.port_free.clear()
+            port = self.port
+            if port is not None:
+                port.close()                  # ends session(); serve_forever then waits
+            if not self.port_free.wait(40):
+                raise RuntimeError("Panel-Verbindung ließ sich nicht freigeben")
+            ok, text = self.flasher(flash_command(path, fw))
+            if not ok:
+                raise RuntimeError(text)
+            self.version = None               # the new firmware tells its own
+            self.update = {"state": "done", "message": "Panel auf %s aktualisiert" % fw["version"],
+                           "target": fw["version"]}
+            LOG.info("Bedienpanel auf %s aktualisiert", fw["version"])
+        except Exception as exc:
+            LOG.warning("Panel-Update fehlgeschlagen: %s", exc)
+            self.failed = fw["version"]
+            self.update = {"state": "error", "message": "Panel-Update fehlgeschlagen: %s" % str(exc)[:200],
+                           "target": fw["version"]}
+        finally:
+            self.hold = False
+
+    def auto_update(self, s: dict) -> None:
+        fw = self.firmware()
+        if (self.auto() and self.version_known() and self.outdated(fw) and self.failed != fw["version"]
+                and self.update["state"] != "flashing" and not self.update_blocked(s)):
+            ok, text = self.request_update()
+            LOG.info("automatisches Panel-Update: %s", text)
+
+    def version_known(self) -> bool:
+        # give a fresh panel a few pings to report its version first
+        return self.version is not None or time.monotonic() - self.connected_at > 10
+
     # ---------- status and camera ----------
     def update_trace(self, s: dict) -> None:
         job = s.get("job") or {}
@@ -354,6 +501,7 @@ class PanelBridge:
                                   self.track, self.trace)
                     self.send(msg)
                     pause = 0.5 if msg["act"] != "idle" else 1.0
+                    self.auto_update(s)
             except Exception as exc:          # Pi still starting, or the panel stopped reading
                 LOG.debug("panel status: %s", exc)
             time.sleep(pause)
@@ -382,6 +530,7 @@ class PanelBridge:
     def session(self, port) -> None:
         self.port = port
         self.running = True
+        self.connected_at = time.monotonic()
         threads = [threading.Thread(target=self.status_loop, daemon=True, name="panel-status"),
                    threading.Thread(target=self.camera_loop, daemon=True, name="panel-camera")]
         for t in threads:
@@ -401,13 +550,19 @@ class PanelBridge:
         finally:
             self.running = False
             for t in threads:
-                t.join(timeout=30)
+                if t is not threading.current_thread():
+                    t.join(timeout=30)
+            self.port = None
 
     def serve_forever(self) -> None:
         import serial   # pyserial; imported here so tests need no hardware
         factory = self.serial_factory or (lambda p: serial.Serial(p, 115200, timeout=0.2, write_timeout=2,
                                                                   exclusive=True))
         while True:
+            if self.hold:                     # esptool has the port
+                self.port_free.set()
+                time.sleep(0.5)
+                continue
             path = self.finder()
             if not path:
                 time.sleep(3.0)
@@ -419,6 +574,8 @@ class PanelBridge:
                 time.sleep(3.0)
                 continue
             LOG.info("Bedienpanel verbunden: %s", path)
+            self.path = path
+            self.version = None
             try:
                 self.session(port)
             except Exception as exc:
@@ -428,10 +585,27 @@ class PanelBridge:
                     port.close()
                 except Exception:
                     pass
+            if not self.hold:
+                self.path = None
             time.sleep(1.0)
 
 
-def start(http_port: int) -> None:
+def run_esptool(command: list[str]) -> tuple[bool, str]:
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=FLASH_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return False, "esptool hängt (Zeitüberschreitung)"
+    out = (done.stdout + done.stderr).strip().splitlines()
+    LOG.info("esptool: %s", " | ".join(out[-6:]))
+    return done.returncode == 0, (out[-1] if out else "esptool Fehler %d" % done.returncode)
+
+
+BRIDGE: PanelBridge | None = None
+
+
+def start(http_port: int, auto=lambda: True) -> PanelBridge:
     """Run the bridge in the background of the Pi service (marlin.web)."""
-    bridge = PanelBridge(Api(http_port))
-    threading.Thread(target=bridge.serve_forever, daemon=True, name="panel-bridge").start()
+    global BRIDGE
+    BRIDGE = PanelBridge(Api(http_port), auto=auto, flasher=run_esptool)
+    threading.Thread(target=BRIDGE.serve_forever, daemon=True, name="panel-bridge").start()
+    return BRIDGE
