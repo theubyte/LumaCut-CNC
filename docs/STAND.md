@@ -511,6 +511,11 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
 
 ## 12. Ideen (noch nicht geplant)
 
+- **Bedienpanel 7 Zoll am Gehäuse (Design 03.11.):** Waveshare ESP32-S3-Touch-LCD-7
+  (vorhanden) per USB-C am Pi, nur Oberfläche, Pi bleibt Zentrale; Start nur mit Go-Abfrage.
+  Metall-Mockup mit 4 Bildschirmen in `hardware/display-7zoll/` (NAS: `Lasercut Projekte\Display-7-Zoll`).
+  Offen: Freigabe des Designs durch den Besitzer, dann Firmware (LVGL) und Pi-Schnittstelle.
+  Gehäuse-Idee: Dibond schwarz/anthrazit + Alu-Winkel + gedruckte Ecken (Besitzer: kein Holz).
 - Infrarot-LEDs im Kopfgehäuse als Licht für die Kamera (Besitzer, 30.10.: „erstmal noch nicht“).
 - Roter Linienlaser für 3D-Höhenmessung ohne Brennen (Pi-Unterstützung `op=line_laser` existiert).
 - X-Motor ans Trägerende verlegen (Riemenschleife), um den Kopf leichter zu machen.

@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>LumaCut Panel – Metall-Design</title>
+<!-- Mockup fuer das Waveshare ESP32-S3-Touch-LCD-7 (800x480).
+     ?s=1..4 zeigt einen einzelnen Bildschirm, ohne Parameter die Uebersicht. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root{
+  --amber:#ffb21e; --amber-glow:rgba(255,178,30,.55);
+  --cyan:#3fe3ff;  --cyan-glow:rgba(63,227,255,.5);
+  --green:#4dff7a; --red:#ff2a1f;
+  --ink:#1b1f24;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0c0d0f;font-family:Rajdhani,"Arial Narrow",Arial,sans-serif;color:#e8ecf0}
+body.gallery{padding:28px;display:grid;grid-template-columns:repeat(2,800px);gap:34px 30px;justify-content:center;
+  background:radial-gradient(ellipse at 50% 0%,#23272c,#0b0c0e 70%)}
+.cap{font:600 15px Rajdhani,sans-serif;letter-spacing:.25em;color:#8d959e;text-transform:uppercase;margin:0 0 8px 4px}
+body.single{width:800px;height:480px;overflow:hidden}
+
+/* ---------- Grundplatte: dunkles eloxiertes Riffelblech ---------- */
+.screen{position:relative;width:800px;height:480px;overflow:hidden;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26'%3E%3Cg fill='none' stroke-linecap='round'%3E%3Cpath d='M4 9 L10 3' stroke='%23ffffff' stroke-opacity='.07' stroke-width='3'/%3E%3Cpath d='M5 10 L11 4' stroke='%23000' stroke-opacity='.45' stroke-width='2'/%3E%3Cpath d='M16 17 L22 23' stroke='%23ffffff' stroke-opacity='.07' stroke-width='3'/%3E%3Cpath d='M17 16 L23 22' stroke='%23000' stroke-opacity='.45' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E"),
+    radial-gradient(ellipse at 40% 20%,#3a3f46,#1d2024 75%);
+  box-shadow:0 0 0 1px #000,0 20px 50px rgba(0,0,0,.6)}
+
+/* ---------- gebuerstetes Alu ---------- */
+.alu{background:
+    repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 1px,rgba(0,0,0,.035) 1px 2px,rgba(255,255,255,0) 2px 3px),
+    repeating-linear-gradient(90deg,rgba(0,0,0,.025) 0 7px,rgba(255,255,255,.03) 7px 13px),
+    linear-gradient(180deg,#e9edf1 0%,#c3c9cf 38%,#a7aeb6 52%,#c8cdd3 78%,#dde1e5 100%);
+  color:var(--ink)}
+.plate{position:absolute;border-radius:6px;
+  box-shadow:0 0 0 1px #0d0f11,0 4px 10px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.85),inset 0 -1px 0 rgba(0,0,0,.35)}
+.engr{color:#2c3238;text-shadow:0 1px 0 rgba(255,255,255,.75),0 -1px 0 rgba(0,0,0,.18);letter-spacing:.14em;text-transform:uppercase;font-weight:700}
+
+/* ---------- Schrauben (Kreuzschlitz, Innensechskant) ---------- */
+.screw{position:absolute;width:13px;height:13px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#ffffff 0,#cfd4d9 25%,#7d858d 70%,#4b5157 100%);
+  box-shadow:0 0 0 1px rgba(0,0,0,.55),0 1px 1px rgba(255,255,255,.6),inset 0 -1px 2px rgba(0,0,0,.4)}
+.screw::before,.screw::after{content:"";position:absolute;left:50%;top:50%;width:8px;height:2px;background:#2a2e33;
+  box-shadow:0 1px 0 rgba(255,255,255,.5);transform:translate(-50%,-50%) rotate(var(--r,20deg));border-radius:1px}
+.screw::after{transform:translate(-50%,-50%) rotate(calc(var(--r,20deg) + 90deg))}
+.screw.hex::after{display:none}
+.screw.hex::before{width:6px;height:6px;border-radius:1px;clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%);
+  background:#1a1d20;box-shadow:none}
+.tl{left:6px;top:6px}.tr{right:6px;top:6px}.bl{left:6px;bottom:6px}.br{right:6px;bottom:6px}
+
+/* ---------- Kopfleiste ---------- */
+.top{left:8px;top:8px;width:784px;height:50px}
+.logo{position:absolute;left:28px;top:7px;font:700 27px Rajdhani,sans-serif;letter-spacing:.06em;color:#262b30;
+  text-shadow:0 1px 0 rgba(255,255,255,.8),0 -1px 1px rgba(0,0,0,.35)}
+.logo b{color:#c46a00;text-shadow:0 1px 0 rgba(255,255,255,.6)}
+.logo small{font-size:12px;letter-spacing:.35em;margin-left:8px;color:#4b535b}
+.chips{position:absolute;right:26px;top:9px;display:flex;gap:7px}
+.chip{height:32px;padding:0 11px 0 9px;border-radius:5px;display:flex;align-items:center;gap:7px;
+  background:linear-gradient(#15181b,#25292e);box-shadow:inset 0 2px 4px rgba(0,0,0,.8),0 1px 0 rgba(255,255,255,.7);
+  font:600 13px Rajdhani,sans-serif;letter-spacing:.12em;color:#9aa3ac;text-transform:uppercase}
+.led{width:10px;height:10px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#fff 0,var(--c,#4dff7a) 35%,rgba(0,0,0,.4) 100%);
+  box-shadow:0 0 8px 2px var(--c,#4dff7a),0 0 0 1px rgba(0,0,0,.6)}
+.led.off{--c:#3a3f44;box-shadow:0 0 0 1px rgba(0,0,0,.6)}
+.chip.on{color:#eaf0f5}
+.clock{font:20px "Share Tech Mono",monospace;color:var(--cyan);text-shadow:0 0 8px var(--cyan-glow);letter-spacing:.05em}
+
+/* ---------- Navigationsschiene ---------- */
+.rail{left:8px;top:66px;width:92px;height:406px;padding:22px 10px;display:flex;flex-direction:column;gap:10px}
+.nav{height:82px;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  font:700 12px Rajdhani,sans-serif;letter-spacing:.16em;text-transform:uppercase}
+.nav svg{width:34px;height:34px}
+
+/* ---------- Metallknopf ---------- */
+.btn{position:relative;border-radius:8px;color:#232930;
+  background:
+    repeating-linear-gradient(90deg,rgba(255,255,255,.06) 0 1px,rgba(0,0,0,.04) 1px 2px),
+    linear-gradient(180deg,#f6f8fa 0%,#cdd2d8 42%,#a9b0b8 55%,#c6ccd2 85%,#e4e8ec 100%);
+  box-shadow:0 0 0 2px #2f343a,0 0 0 3px rgba(255,255,255,.12),0 4px 0 #15181b,0 6px 10px rgba(0,0,0,.6),
+    inset 0 1px 0 #fff,inset 0 -3px 4px rgba(0,0,0,.22);
+  text-shadow:0 1px 0 rgba(255,255,255,.8)}
+.btn svg{fill:none;stroke:#2a3037;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 1px 0 rgba(255,255,255,.8))}
+.btn.active{color:#06262e;
+  box-shadow:0 0 0 2px #0f4250,0 0 0 3px var(--cyan),0 0 18px 3px var(--cyan-glow),0 4px 0 #15181b,inset 0 1px 0 #fff,inset 0 -3px 4px rgba(0,0,0,.22)}
+.btn.active svg{stroke:#0b4b5a}
+.btn.dark{color:#d9e1e8;text-shadow:0 -1px 0 #000;
+  background:repeating-linear-gradient(90deg,rgba(255,255,255,.035) 0 1px,rgba(0,0,0,.05) 1px 2px),linear-gradient(180deg,#4b5259,#2b3036 55%,#1f2327);
+  box-shadow:0 0 0 2px #0b0d0f,0 4px 0 #050607,0 6px 10px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.25),inset 0 -3px 4px rgba(0,0,0,.4)}
+.btn.dark svg{stroke:#cfd8e0;filter:none}
+
+/* ---------- rechte Spalte: STOPP + Pause ---------- */
+.side{left:692px;top:66px;width:100px;height:406px}
+.hazard{position:absolute;left:8px;top:24px;width:84px;height:192px;border-radius:6px;
+  background:repeating-linear-gradient(-45deg,#ffc400 0 11px,#15171a 11px 22px);
+  box-shadow:inset 0 0 0 2px rgba(0,0,0,.6),inset 0 2px 6px rgba(0,0,0,.6),0 1px 0 rgba(255,255,255,.6)}
+.estop-ring{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;
+  background:conic-gradient(from 20deg,#8e959c,#f1f3f5,#80878e,#d9dde1,#6d747b,#f3f5f7,#8e959c);
+  box-shadow:0 0 0 2px #0b0d0f,0 6px 12px rgba(0,0,0,.7)}
+.estop{position:absolute;left:7px;top:7px;width:62px;height:62px;border-radius:50%;
+  background:radial-gradient(circle at 38% 30%,#ff9b8a 0,#ff3b22 22%,#c2100a 60%,#6d0503 100%);
+  box-shadow:inset 0 -5px 8px rgba(0,0,0,.45),inset 0 3px 3px rgba(255,255,255,.35),0 0 22px 4px rgba(255,40,20,.45);
+  display:flex;align-items:center;justify-content:center;font:700 14px Rajdhani,sans-serif;letter-spacing:.1em;color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,.7)}
+.side .lbl{position:absolute;left:0;width:100%;text-align:center;font-size:11px}
+.pause{position:absolute;left:10px;top:228px;width:80px;height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  font:700 12px Rajdhani,sans-serif;letter-spacing:.16em}
+.pause svg{width:26px;height:26px}
+.resume{top:312px}
+
+/* ---------- Hauptbereich ---------- */
+.main{position:absolute;left:108px;top:66px;width:576px;height:406px}
+.panel{position:absolute}
+.title{position:absolute;font:700 13px Rajdhani,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:#8e979f}
+.title::before{content:"";display:inline-block;width:18px;height:3px;background:var(--amber);margin:0 8px 3px 0;
+  box-shadow:0 0 8px var(--amber-glow);vertical-align:middle}
+
+/* schwarzes Glas mit Leuchtziffern */
+.glass{position:absolute;border-radius:6px;
+  background:linear-gradient(160deg,rgba(255,255,255,.06),rgba(255,255,255,0) 40%),radial-gradient(ellipse at 50% 0%,#14191d,#07090a);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.06),inset 0 3px 10px rgba(0,0,0,.9),0 0 0 2px #0a0b0d,0 0 0 3px #59616a,0 0 0 4px #0d0f11}
+.seg{font-family:"Share Tech Mono",monospace;color:var(--cyan);text-shadow:0 0 10px var(--cyan-glow),0 0 2px #fff}
+.seg.amber{color:var(--amber);text-shadow:0 0 10px var(--amber-glow),0 0 2px #fff6}
+.ghost{position:absolute;color:rgba(63,227,255,.07);text-shadow:none}
+.k{font:600 11px Rajdhani,sans-serif;letter-spacing:.25em;color:#6f7a84;text-transform:uppercase}
+
+/* Fortschrittsring */
+.ring{position:absolute;left:18px;top:30px;width:214px;height:214px;border-radius:50%;
+  background:conic-gradient(from 225deg,#ffb21e 0deg,#ff7a00 calc(270deg*.62),#20252a calc(270deg*.62),#20252a 270deg,transparent 270deg);
+  -webkit-mask:radial-gradient(circle,transparent 78px,#000 79px,#000 95px,transparent 96px);
+  filter:drop-shadow(0 0 10px rgba(255,150,20,.6))}
+.ticks{position:absolute;left:18px;top:30px;width:214px;height:214px;border-radius:50%;
+  background:repeating-conic-gradient(from 225deg,rgba(255,255,255,.35) 0 1deg,transparent 1deg 13.5deg);
+  -webkit-mask:radial-gradient(circle,transparent 99px,#000 100px,#000 106px,transparent 107px)}
+.ring-bezel{position:absolute;left:4px;top:16px;width:242px;height:242px;border-radius:50%;
+  background:conic-gradient(from 0deg,#7d858d,#eef1f3,#7b838b,#dfe3e6,#666e76,#f2f4f6,#7d858d);
+  box-shadow:0 0 0 2px #0b0d0f,0 8px 18px rgba(0,0,0,.7)}
+.ring-face{position:absolute;left:14px;top:26px;width:222px;height:222px;border-radius:50%;
+  background:radial-gradient(circle at 50% 35%,#1b2025,#06080a 70%);box-shadow:inset 0 4px 14px rgba(0,0,0,.9)}
+
+.bar{position:absolute;height:12px;border-radius:3px;background:#0b0e10;box-shadow:inset 0 2px 3px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.08)}
+.bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:repeating-linear-gradient(90deg,var(--amber) 0 6px,rgba(0,0,0,.35) 6px 8px);
+  box-shadow:0 0 10px var(--amber-glow)}
+.bar.cy i{background:repeating-linear-gradient(90deg,var(--cyan) 0 6px,rgba(0,0,0,.35) 6px 8px);box-shadow:0 0 10px var(--cyan-glow)}
+
+.tag{position:absolute;padding:3px 8px;border-radius:3px;font:700 11px Rajdhani,sans-serif;letter-spacing:.2em;text-transform:uppercase}
+
+/* Kippschalter */
+.toggle{position:absolute;width:62px;height:96px}
+.toggle .base{position:absolute;left:6px;top:20px;width:50px;height:56px;border-radius:6px;
+  background:linear-gradient(#d7dce0,#8f969d);box-shadow:0 0 0 2px #1a1d20,inset 0 1px 0 #fff,0 3px 6px rgba(0,0,0,.6)}
+.toggle .nut{position:absolute;left:16px;top:33px;width:30px;height:30px;border-radius:50%;
+  background:conic-gradient(#9aa1a8,#f2f4f6,#8b9299,#e4e7ea,#7b828a,#eef1f3,#9aa1a8);box-shadow:0 0 0 1px #16181b}
+.toggle .lever{position:absolute;left:25px;width:12px;height:46px;border-radius:6px;
+  background:linear-gradient(90deg,#7e858c,#ffffff 45%,#9ba2a9 70%,#5d646b);box-shadow:0 2px 4px rgba(0,0,0,.6)}
+.toggle.up .lever{top:2px}.toggle.down .lever{top:52px}
+.toggle .tip{position:absolute;left:21px;width:20px;height:16px;border-radius:50%;
+  background:radial-gradient(circle at 40% 35%,#fff,#b5bcc2 50%,#666d74)}
+.toggle.up .tip{top:-6px}.toggle.down .tip{top:84px}
+
+.lamp{position:absolute;width:22px;height:22px;border-radius:50%;
+  background:radial-gradient(circle at 38% 32%,#fff 0,var(--c) 30%,rgba(0,0,0,.6) 100%);
+  box-shadow:0 0 0 3px #2b3036,0 0 0 4px #8d959c,0 0 16px 4px var(--c)}
+.lamp.off{background:radial-gradient(circle at 38% 32%,#777,#2a2d30 70%);box-shadow:0 0 0 3px #2b3036,0 0 0 4px #8d959c}
+
+.scan{position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0 1px,transparent 1px 3px);mix-blend-mode:overlay}
+.vignette{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 80px rgba(0,0,0,.6)}
+</style>
+</head>
+<body>
+
+<!-- ======================== gemeinsame Teile ======================== -->
+<template id="chrome">
+  <div class="plate alu top">
+    <span class="screw tl" style="--r:12deg"></span><span class="screw bl" style="--r:70deg"></span>
+    <span class="screw tr" style="--r:40deg"></span><span class="screw br" style="--r:-15deg"></span>
+    <div class="logo">/Luma<b>Cut</b>/<small>CNC · LT-80W</small></div>
+    <div class="chips">
+      <div class="chip on"><span class="led" style="--c:#4dff7a"></span>Pi</div>
+      <div class="chip on"><span class="led" style="--c:#4dff7a"></span>Deckel zu</div>
+      <div class="chip LASERCHIP"><span class="led LASERLED" style="--c:#ff3b22"></span>Laser</div>
+      <div class="chip on"><span class="led AIRLED" style="--c:#3fe3ff"></span>Luft</div>
+      <div class="chip"><span class="clock">14:32</span></div>
+    </div>
+  </div>
+  <div class="plate alu rail">
+    <span class="screw tl hex"></span><span class="screw tr hex"></span><span class="screw bl hex"></span><span class="screw br hex"></span>
+    <div class="btn nav N1"><svg viewBox="0 0 32 32"><circle cx="16" cy="17" r="11"/><path d="M16 17 L22 11"/><path d="M8 25h16"/></svg>Status</div>
+    <div class="btn nav N2"><svg viewBox="0 0 32 32"><path d="M16 3v26M3 16h26M16 3l-4 4M16 3l4 4M16 29l-4-4M16 29l4-4M3 16l4-4M3 16l4 4M29 16l-4-4M29 16l-4 4"/></svg>Bewegen</div>
+    <div class="btn nav N3"><svg viewBox="0 0 32 32"><rect x="3" y="8" width="26" height="18" rx="3"/><circle cx="16" cy="17" r="6"/><path d="M11 8l2-3h6l2 3"/></svg>Kamera</div>
+    <div class="btn nav N4"><svg viewBox="0 0 32 32"><path d="M8 3h11l6 6v20H8z"/><path d="M19 3v6h6M12 16h9M12 21h9"/></svg>Auftrag</div>
+  </div>
+  <div class="plate alu side">
+    <span class="screw tl" style="--r:33deg"></span><span class="screw tr" style="--r:-20deg"></span>
+    <span class="screw bl" style="--r:5deg"></span><span class="screw br" style="--r:58deg"></span>
+    <div class="hazard"><div class="estop-ring"><div class="estop">STOPP</div></div></div>
+    <div class="btn dark pause"><svg viewBox="0 0 32 32"><path d="M11 7v18M21 7v18" stroke-width="4"/></svg>PAUSE</div>
+    <div class="btn pause resume"><svg viewBox="0 0 32 32"><path d="M10 6l16 10-16 10z"/></svg>WEITER</div>
+  </div>
+</template>
+
+<!-- ======================== 1 Status ======================== -->
+<template id="s1">
+  <div class="main">
+    <div class="title" style="left:4px;top:-2px">Auftrag läuft</div>
+    <div class="ring-bezel"></div><div class="ring-face"></div><div class="ring"></div><div class="ticks"></div>
+    <div style="position:absolute;left:18px;top:92px;width:214px;text-align:center">
+      <div class="seg amber" style="font-size:64px;line-height:1">62<span style="font-size:30px">%</span></div>
+      <div class="k" style="margin-top:6px">Rest <span class="seg" style="font-size:18px;letter-spacing:.05em">07:48</span></div>
+    </div>
+    <div class="plate alu" style="left:12px;top:276px;width:226px;height:118px;padding:16px 18px">
+      <span class="screw tl hex"></span><span class="screw tr hex"></span><span class="screw bl hex"></span><span class="screw br hex"></span>
+      <div class="engr" style="font-size:12px;letter-spacing:.25em;color:#59626b">Datei</div>
+      <div style="font:700 21px Rajdhani,sans-serif;color:#1d2227;margin:2px 0 6px">einladung_v3.gcode</div>
+      <div class="engr" style="font-size:12px;letter-spacing:.2em;color:#59626b">Pappel 3 mm · 2 Durchg.</div>
+      <div class="engr" style="font-size:12px;letter-spacing:.2em;color:#59626b">Lauf 12:41 · Zeile 4812</div>
+    </div>
+
+    <div class="glass" style="left:262px;top:18px;width:306px;height:166px;padding:12px 18px">
+      <div class="k">Position mm</div>
+      <div style="display:grid;grid-template-columns:30px 1fr;row-gap:2px;margin-top:4px;align-items:baseline">
+        <div class="k" style="font-size:18px;color:#9aa6b0">X</div><div class="seg" style="font-size:36px;text-align:right">213.40</div>
+        <div class="k" style="font-size:18px;color:#9aa6b0">Y</div><div class="seg" style="font-size:36px;text-align:right">148.05</div>
+        <div class="k" style="font-size:18px;color:#9aa6b0">Z</div><div class="seg" style="font-size:36px;text-align:right">7.00</div>
+      </div>
+      <div class="scan"></div>
+    </div>
+
+    <div class="glass" style="left:262px;top:198px;width:306px;height:104px;padding:12px 18px">
+      <div style="display:flex;justify-content:space-between"><span class="k">Laserleistung</span><span class="seg amber" style="font-size:20px">S 180 · 71%</span></div>
+      <div class="bar" style="left:18px;right:18px;top:42px"><i style="width:71%"></i></div>
+      <div style="display:flex;justify-content:space-between;margin-top:30px"><span class="k">Vorschub</span><span class="seg" style="font-size:20px">F 1800</span></div>
+      <div class="bar cy" style="left:18px;right:18px;top:88px;height:6px"><i style="width:30%"></i></div>
+    </div>
+
+    <div class="plate alu" style="left:262px;top:316px;width:306px;height:78px">
+      <span class="screw tl" style="--r:8deg"></span><span class="screw tr" style="--r:50deg"></span><span class="screw bl" style="--r:-30deg"></span><span class="screw br" style="--r:77deg"></span>
+      <div class="lamp" style="--c:#ff3b22;left:34px;top:18px"></div><div class="engr" style="position:absolute;left:12px;top:50px;width:66px;text-align:center;font-size:11px">Laser</div>
+      <div class="lamp" style="--c:#4dff7a;left:108px;top:18px"></div><div class="engr" style="position:absolute;left:86px;top:50px;width:66px;text-align:center;font-size:11px">24 V</div>
+      <div class="lamp" style="--c:#3fe3ff;left:182px;top:18px"></div><div class="engr" style="position:absolute;left:160px;top:50px;width:66px;text-align:center;font-size:11px">Luft</div>
+      <div class="lamp" style="--c:#4dff7a;left:256px;top:18px"></div><div class="engr" style="position:absolute;left:226px;top:51px;width:82px;text-align:center;font-size:10px;letter-spacing:.06em">Z-Wächter</div>
+    </div>
+  </div>
+</template>
+
+<!-- ======================== 2 Bewegen ======================== -->
+<template id="s2">
+  <div class="main">
+    <div class="title" style="left:4px;top:-2px">Bewegen</div>
+    <!-- Kreuz -->
+    <div class="plate" style="left:8px;top:22px;width:258px;height:258px;border-radius:50%;
+      background:conic-gradient(from 0deg,#7d858d,#eef1f3,#7b838b,#dfe3e6,#666e76,#f2f4f6,#7d858d)"></div>
+    <div style="position:absolute;left:20px;top:34px;width:234px;height:234px;border-radius:50%;
+      background:radial-gradient(circle,#20252a,#0b0d0f 75%);box-shadow:inset 0 6px 16px rgba(0,0,0,.9)"></div>
+    <div class="btn" style="position:absolute;left:105px;top:46px;width:64px;height:62px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700"><svg viewBox="0 0 32 32" width="26" height="26"><path d="M7 21l9-10 9 10"/></svg>Y+</div>
+    <div class="btn" style="position:absolute;left:105px;top:194px;width:64px;height:62px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:700">Y−<svg viewBox="0 0 32 32" width="26" height="26"><path d="M7 11l9 10 9-10"/></svg></div>
+    <div class="btn" style="position:absolute;left:32px;top:120px;width:62px;height:62px;display:flex;align-items:center;justify-content:center;gap:2px;font-weight:700"><svg viewBox="0 0 32 32" width="22" height="22"><path d="M21 7l-10 9 10 9"/></svg>X−</div>
+    <div class="btn" style="position:absolute;left:180px;top:120px;width:62px;height:62px;display:flex;align-items:center;justify-content:center;gap:2px;font-weight:700">X+<svg viewBox="0 0 32 32" width="22" height="22"><path d="M11 7l10 9-10 9"/></svg></div>
+    <div class="btn dark" style="position:absolute;left:109px;top:124px;width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center">
+      <svg viewBox="0 0 32 32" width="28" height="28"><path d="M5 16l11-10 11 10M9 13v13h14V13"/></svg></div>
+
+    <!-- Z -->
+    <div class="plate alu" style="left:282px;top:22px;width:96px;height:258px">
+      <span class="screw tl hex"></span><span class="screw tr hex"></span><span class="screw bl hex"></span><span class="screw br hex"></span>
+      <div class="engr" style="position:absolute;top:22px;width:100%;text-align:center;font-size:13px">Z-Achse</div>
+      <div class="btn" style="position:absolute;left:16px;top:48px;width:64px;height:58px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px">Z+</div>
+      <div class="glass" style="left:12px;top:118px;width:72px;height:34px;display:flex;align-items:center;justify-content:center"><span class="seg" style="font-size:20px">7.00</span></div>
+      <div class="btn" style="position:absolute;left:16px;top:166px;width:64px;height:58px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px">Z−</div>
+    </div>
+
+    <!-- Schrittweite als Drehschalter -->
+    <div class="plate alu" style="left:394px;top:22px;width:174px;height:258px">
+      <span class="screw tl" style="--r:25deg"></span><span class="screw tr" style="--r:-40deg"></span><span class="screw bl" style="--r:62deg"></span><span class="screw br" style="--r:10deg"></span>
+      <div class="engr" style="position:absolute;top:22px;width:100%;text-align:center;font-size:13px">Schritt mm</div>
+      <div style="position:absolute;left:37px;top:66px;width:100px;height:100px;border-radius:50%;
+        background:repeating-conic-gradient(#2a2f35 0 4deg,#5d656d 4deg 8deg);box-shadow:0 0 0 3px #1b1e22,0 6px 12px rgba(0,0,0,.6)"></div>
+      <div style="position:absolute;left:47px;top:76px;width:80px;height:80px;border-radius:50%;
+        background:radial-gradient(circle at 40% 30%,#f3f5f7,#a6adb4 55%,#6b737a);box-shadow:inset 0 -3px 6px rgba(0,0,0,.4)"></div>
+      <div style="position:absolute;left:85px;top:80px;width:4px;height:28px;border-radius:2px;background:#c46a00;box-shadow:0 0 6px var(--amber-glow);transform-origin:2px 36px;transform:rotate(40deg)"></div>
+      <div class="engr" style="position:absolute;left:14px;top:58px;font-size:14px">0.1</div>
+      <div class="engr" style="position:absolute;left:72px;top:46px;font-size:14px">1</div>
+      <div class="engr" style="position:absolute;left:132px;top:58px;font-size:16px;color:#b15d00;text-shadow:0 0 8px rgba(255,170,40,.6)">10</div>
+      <div class="engr" style="position:absolute;left:136px;top:150px;font-size:14px">50</div>
+      <div class="btn dark" style="position:absolute;left:18px;top:188px;width:138px;height:46px;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:700;letter-spacing:.12em">
+        <svg viewBox="0 0 32 32" width="22" height="22"><path d="M16 4v16M10 14l6 6 6-6M6 27h20"/></svg>FOKUS TASTEN</div>
+    </div>
+
+    <!-- Positionsleiste -->
+    <div class="glass" style="left:8px;top:300px;width:560px;height:94px;padding:12px 22px">
+      <div style="display:flex;justify-content:space-between">
+        <div><div class="k">X</div><div class="seg" style="font-size:34px">213.40</div></div>
+        <div><div class="k">Y</div><div class="seg" style="font-size:34px">148.05</div></div>
+        <div><div class="k">Z</div><div class="seg" style="font-size:34px">7.00</div></div>
+        <div style="text-align:right"><div class="k">Referenz</div><div class="seg amber" style="font-size:22px;margin-top:8px">● GEFAHREN</div></div>
+      </div>
+      <div class="scan"></div>
+    </div>
+  </div>
+</template>
+
+<!-- ======================== 3 Kamera ======================== -->
+<template id="s3">
+  <div class="main">
+    <div class="title" style="left:4px;top:-2px">Kamera · Bett live</div>
+    <div class="plate alu" style="left:4px;top:20px;width:442px;height:374px">
+      <span class="screw tl" style="--r:5deg"></span><span class="screw tr" style="--r:48deg"></span><span class="screw bl" style="--r:-22deg"></span><span class="screw br" style="--r:71deg"></span>
+      <div class="glass" style="left:20px;top:20px;width:402px;height:334px;overflow:hidden;padding:0">
+        <svg viewBox="0 0 402 334" width="402" height="334" style="position:absolute;inset:0">
+          <defs>
+            <pattern id="hc" width="14" height="24" patternUnits="userSpaceOnUse">
+              <path d="M7 0l7 4v8l-7 4-7-4V4z M7 16v8" fill="none" stroke="#3b4248" stroke-width="1.2"/></pattern>
+            <linearGradient id="wood" x1="0" x2="1"><stop offset="0" stop-color="#c9a77a"/><stop offset=".5" stop-color="#ddc097"/><stop offset="1" stop-color="#c29d6d"/></linearGradient>
+          </defs>
+          <rect width="402" height="334" fill="#1c2024"/><rect width="402" height="334" fill="url(#hc)"/>
+          <g transform="rotate(-4 200 170)">
+            <rect x="92" y="70" width="210" height="170" rx="3" fill="url(#wood)" opacity=".92"/>
+            <path d="M92 110h210M92 160h210M92 205h210" stroke="#a9875c" stroke-width=".8" opacity=".5"/>
+            <rect x="122" y="96" width="150" height="118" fill="none" stroke="#3fe3ff" stroke-width="1.6" stroke-dasharray="7 5"/>
+            <text x="197" y="160" fill="#7a5a33" font-family="Rajdhani" font-weight="700" font-size="22" text-anchor="middle" opacity=".5">EINLADUNG</text>
+          </g>
+          <g stroke="#ffb21e" stroke-width="1.4" opacity=".95">
+            <path d="M201 120v-26M201 220v26M150 170h-26M252 170h26"/><circle cx="201" cy="170" r="16" fill="none"/>
+            <circle cx="201" cy="170" r="2.5" fill="#ffb21e"/></g>
+          <g fill="none" stroke="#3fe3ff" stroke-width="2.4">
+            <path d="M12 34V12h22M368 12h22v22M390 300v22h-22M34 322H12v-22"/></g>
+          <text x="20" y="318" fill="#3fe3ff" font-family="Share Tech Mono" font-size="12">REC ● 12 fps · 800×480</text>
+          <text x="382" y="30" fill="#ffb21e" font-family="Share Tech Mono" font-size="12" text-anchor="end">X 213.4  Y 148.1</text>
+        </svg>
+        <div class="scan"></div><div class="vignette"></div>
+      </div>
+    </div>
+    <div class="btn" style="position:absolute;left:460px;top:20px;width:108px;height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-weight:700;font-size:13px;letter-spacing:.12em">
+      <svg viewBox="0 0 32 32" width="28" height="28"><path d="M4 4h8M4 4v8M28 4h-8M28 4v8M4 28h8M4 28v-8M28 28h-8M28 28v-8"/></svg>RAHMEN</div>
+    <div class="btn" style="position:absolute;left:460px;top:116px;width:108px;height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-weight:700;font-size:13px;letter-spacing:.12em">
+      <svg viewBox="0 0 32 32" width="28" height="28"><path d="M26 16a10 10 0 1 1-3-7M26 4v6h-6"/></svg>NEU SCANNEN</div>
+    <div class="btn" style="position:absolute;left:460px;top:212px;width:108px;height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-weight:700;font-size:13px;letter-spacing:.12em">
+      <svg viewBox="0 0 32 32" width="28" height="28"><circle cx="14" cy="14" r="9"/><path d="M21 21l7 7M14 10v8M10 14h8"/></svg>ZOOM</div>
+    <div class="btn dark" style="position:absolute;left:460px;top:308px;width:108px;height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-weight:700;font-size:13px;letter-spacing:.12em">
+      <svg viewBox="0 0 32 32" width="28" height="28"><path d="M16 4v24M4 16h24"/><circle cx="16" cy="16" r="6"/></svg>HIER HIN</div>
+  </div>
+</template>
+
+<!-- ======================== 4 Freigabe ======================== -->
+<template id="s4">
+  <div class="main">
+    <div class="title" style="left:4px;top:-2px">Auftrag starten</div>
+    <div class="plate" style="left:4px;top:20px;width:564px;height:374px;border-radius:8px;
+      background:repeating-linear-gradient(-45deg,#ffc400 0 16px,#15171a 16px 32px)"></div>
+    <div class="plate alu" style="left:18px;top:34px;width:536px;height:346px">
+      <span class="screw tl" style="--r:15deg"></span><span class="screw tr" style="--r:-35deg"></span><span class="screw bl" style="--r:60deg"></span><span class="screw br" style="--r:3deg"></span>
+      <div style="position:absolute;left:24px;top:18px;display:flex;align-items:center;gap:12px">
+        <svg viewBox="0 0 40 36" width="40" height="36"><path d="M20 2L38 34H2z" fill="#ffc400" stroke="#15171a" stroke-width="2.5" stroke-linejoin="round"/><path d="M20 13v10" stroke="#15171a" stroke-width="3.5" stroke-linecap="round"/><circle cx="20" cy="28.5" r="2.2" fill="#15171a"/></svg>
+        <div><div class="engr" style="font-size:22px;letter-spacing:.18em">Laserfreigabe</div>
+        <div style="font:600 14px Rajdhani,sans-serif;color:#4a535c;letter-spacing:.05em">einladung_v3.gcode · Pappel 3 mm · Leistungstest bestanden</div></div>
+      </div>
+
+      <div class="glass" style="left:22px;top:84px;width:492px;height:132px"></div>
+      <div class="toggle up" style="left:52px;top:100px"><div class="base"></div><div class="lever"></div><div class="tip"></div><div class="nut"></div></div>
+      <div class="toggle up" style="left:216px;top:100px"><div class="base"></div><div class="lever"></div><div class="tip"></div><div class="nut"></div></div>
+      <div class="toggle up" style="left:380px;top:100px"><div class="base"></div><div class="lever"></div><div class="tip"></div><div class="nut"></div></div>
+      <div class="led" style="--c:#4dff7a;position:absolute;left:126px;top:110px"></div>
+      <div class="led" style="--c:#4dff7a;position:absolute;left:290px;top:110px"></div>
+      <div class="led" style="--c:#4dff7a;position:absolute;left:454px;top:110px"></div>
+      <div class="seg" style="position:absolute;left:22px;top:194px;width:164px;text-align:center;font-size:15px;color:var(--green);text-shadow:0 0 8px rgba(77,255,122,.6)">HÄNDE RAUS</div>
+      <div class="seg" style="position:absolute;left:186px;top:194px;width:164px;text-align:center;font-size:15px;color:var(--green);text-shadow:0 0 8px rgba(77,255,122,.6)">DECKEL ZU</div>
+      <div class="seg" style="position:absolute;left:350px;top:194px;width:164px;text-align:center;font-size:15px;color:var(--green);text-shadow:0 0 8px rgba(77,255,122,.6)">BRILLE AUF</div>
+
+      <!-- Start: Schutzkappe hochgeklappt -->
+      <div style="position:absolute;left:22px;top:236px;width:492px;height:88px;border-radius:8px;
+        background:linear-gradient(#111416,#22262a);box-shadow:inset 0 3px 8px rgba(0,0,0,.9),0 1px 0 rgba(255,255,255,.7)"></div>
+      <div style="position:absolute;left:34px;top:246px;width:468px;height:68px;border-radius:7px;display:flex;align-items:center;justify-content:center;gap:14px;
+        background:linear-gradient(180deg,#ffd27a 0%,#ffb21e 40%,#e08600 60%,#ffbf3d 100%);
+        box-shadow:0 0 0 2px #3a2400,0 4px 0 #1a1000,0 0 26px 6px rgba(255,170,30,.55),inset 0 1px 0 #fff3,inset 0 -3px 5px rgba(0,0,0,.3);
+        font:700 28px Rajdhani,sans-serif;letter-spacing:.24em;color:#2b1700;text-shadow:0 1px 0 rgba(255,240,200,.7)">
+        <svg viewBox="0 0 32 32" width="30" height="30" fill="none" stroke="#2b1700" stroke-width="3" stroke-linecap="round"><path d="M16 3v6M16 23v6M3 16h6M23 16h6M7 7l4 4M21 21l4 4M25 7l-4 4M11 21l-4 4"/><circle cx="16" cy="16" r="3" fill="#2b1700"/></svg>
+        LASER STARTEN</div>
+    </div>
+  </div>
+</template>
+
+<script>
+const names = {1:"Status",2:"Bewegen",3:"Kamera",4:"Auftrag starten"};
+function build(n){
+  const s = document.createElement("div"); s.className = "screen";
+  let chrome = document.getElementById("chrome").innerHTML.replace("N"+n, "active");
+  // Laser leuchtet nur, wenn ein Auftrag laeuft
+  if (n !== 1) chrome = chrome.replace('LASERLED" style="--c:#ff3b22"', 'off"').replace("LASERCHIP", "");
+  else chrome = chrome.replace("LASERCHIP", "on");
+  if (n === 4) chrome = chrome.replace('AIRLED" style="--c:#3fe3ff"', 'off"');
+  s.innerHTML = chrome + document.getElementById("s"+n).innerHTML;
+  return s;
+}
+const p = new URLSearchParams(location.search).get("s");
+if (p) { document.body.className = "single"; document.body.appendChild(build(+p)); }
+else {
+  document.body.className = "gallery";
+  for (let n = 1; n <= 4; n++) {
+    const w = document.createElement("div");
+    w.innerHTML = '<div class="cap">'+n+' · '+names[n]+'</div>';
+    w.appendChild(build(n)); document.body.appendChild(w);
+  }
+}
+</script>
+</body>
+</html>
