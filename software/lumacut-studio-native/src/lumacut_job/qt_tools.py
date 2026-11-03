@@ -9,6 +9,8 @@ that was sent before.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
@@ -114,6 +116,11 @@ class JobTools(QObject):
                                        "Ausgewählten Text als Raster fortlaufend nummerierter Kopien "
                                        "(Platzhalter {n}, {n:3}, {date})")
         self.serial_action.setObjectName("serial_numbers_action")
+        self.vartext_action = self._add("Variabler Text…", self.variable_text, "Alt+V",
+                                        "Ausgewählte Texte beim Senden auswerten: Zähler {n}, "
+                                        "Datum/Uhrzeit, CSV-Spalten {Name} – zählt nach jedem "
+                                        "gesendeten Auftrag weiter")
+        self.vartext_action.setObjectName("variable_text_action")
         self.qr_action = self._add("QR-Code…", self.qr_code, "Alt+Q",
                                    "QR-Code (Text/Adresse) als gefüllte Vektorflächen einfügen")
         self.qr_action.setObjectName("qr_code_action")
@@ -165,6 +172,12 @@ class JobTools(QObject):
             # Park corner (Pi 9ae8577): refuse before uploading, not at the Pi.
             from .park_corner import attach_park_check
             attach_park_check(machine_panel, lambda text: self._msg(text, 15000))
+        # Variable text (lumacut_job.vartext): outermost wrapper, advances after a successful upload.
+        self.vartext_tracker = None
+        if hasattr(machine_panel, "send_gcode"):
+            from .vartext_qt import VarTextTracker
+            self.vartext_tracker = VarTextTracker(editor, machine_panel,
+                                                  lambda text: self._msg(text, 10000), self)
         if hasattr(machine_panel, "set_frame_provider"):
             machine_panel.set_frame_provider(self.frame_program)
         signal = getattr(machine_panel, "frame_available_changed", None)
@@ -204,23 +217,42 @@ class JobTools(QObject):
         self._msg("Auftrag: nur ausgewählte Objekte" if self.selection_only
                   else "Auftrag: ganzes Design")
 
-    def job_document(self):
-        """Dokument für den Auftrag; ValueError bei „Nur Auswahl“ ohne Auswahl."""
+    def _job_source(self):
         doc = self.editor.document
         if not getattr(self, "selection_only", False):
             return doc
         from .selection import selection_document
         return selection_document(doc, getattr(self.editor, "selection", ()) or ())
 
+    def job_document_and_usage(self):
+        """(Auftragsdokument, verwendete variable Texte) – Platzhalter ausgewertet."""
+        from .vartext import evaluate_document
+        return evaluate_document(JobTools._job_source(self))
+
+    def job_document(self):
+        """Dokument für den Auftrag; ValueError bei „Nur Auswahl“ ohne Auswahl.
+
+        Variable Texte sind darin schon ausgewertet (das Original behält die
+        Vorlage); ValueError, wenn ein Platzhalter nicht auswertbar ist."""
+        return JobTools.job_document_and_usage(self)[0]
+
     def job_gcode(self) -> tuple[str, str]:
         """(optimierter G-Code, Hinweis des Planers) – wie beim Senden.
 
         Der Hinweis meldet z. B. weggelassene An-/Abfahrten (Kollision mit
-        anderen Teilen) und ist leer, wenn nichts zu melden ist.
+        anderen Teilen) und ist leer, wenn nichts zu melden ist. Mit variablem
+        Text trägt der G-Code eine Markierung, damit das Hochladen genau dieses
+        Auftrags Zähler/CSV-Zeile weiterschaltet.
         """
         report = PlanReport()
-        g = optimized_document_gcode(self.job_document(), report=report)
+        doc, usage = self.job_document_and_usage()
+        g = optimized_document_gcode(doc, report=report)
         note = report.message()
+        if usage:
+            tracker = getattr(self, "vartext_tracker", None)
+            if tracker is not None:
+                g = tracker.remember(g, usage)
+            note = (note + " " + usage.summary()).strip()
         if self.selection_only:
             note = ("Nur Auswahl. " + note).strip()
         return g, note
@@ -317,6 +349,58 @@ class JobTools(QObject):
             return []
         self._msg(f"{len(ids)} nummerierte Texte erzeugt (gruppiert)")
         return ids
+
+    def variable_text(self, spec=None, template: str | None = None,
+                      enabled: bool = True) -> list[str]:
+        """Ausgewählte Texte als variablen Text einstellen (ein Undo-Schritt).
+
+        Alle ausgewählten Texte (und die übrigen Kopien ihrer Serie) bilden
+        eine Serie. ``spec`` ohne Dialog (Tests/Skripte); ``enabled=False``
+        macht sie wieder zu normalem Text.
+        """
+        from . import vartext as vt
+        from .vartext_qt import VarTextDialog, apply_vartext, describe, series_members
+        doc = self.editor.document
+        sel = [i for i in self.editor.selection
+               if doc.has_shape(i) and doc.shape(i).kind == "text"]
+        if not sel:
+            self._msg("Variabler Text: bitte ein oder mehrere Textobjekte auswählen")
+            return []
+        keys = {vt.series_key(doc.shape(i)) for i in sel if vt.is_variable(doc.shape(i))}
+        ids = list(sel)
+        for key in keys:
+            ids += [s.id for s in series_members(doc, key) if s.id not in ids]
+        first = next((doc.shape(i) for i in ids if vt.is_variable(doc.shape(i))), None)
+        start = vt.spec_of(first) if first is not None else vt.VarTextSpec()
+        same = len(keys) == 1 and all(vt.is_variable(doc.shape(i)) for i in ids)
+        series = start.series if same else ""
+        if spec is None:
+            visible = {l.id for l in doc.layers if l.visible}
+            copies = sum(1 for i in ids if doc.shape(i).layer_id in visible) or 1
+            dlg = VarTextDialog(doc.shape(sel[0]).text, replace(start, series=series), copies,
+                                parent=self.window)
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, template, enabled = dlg.spec(), dlg.template_text(), dlg.is_enabled()
+        else:
+            spec = replace(spec, series=spec.series or series)
+        try:
+            changed = apply_vartext(self.editor, ids, spec if enabled else None, template)
+        except ValueError as exc:
+            self._msg(f"Variabler Text: {exc}")
+            return []
+        if not enabled:
+            self._msg(f"Variabler Text aus – {len(changed)} Text(e) werden wörtlich gelasert")
+            return changed
+        tmpl = doc.shape(changed[0]).text
+        if not vt.has_placeholders(tmpl):
+            self._msg("Variabler Text: die Vorlage enthält noch keinen Platzhalter, z. B. "
+                      "„Nr. {n:3}“ oder „{Name}“")
+        else:
+            self._msg(f"Variabler Text für {len(changed)} Text(e): "
+                      f"{describe(vt.spec_of(doc.shape(changed[0])), tmpl)} – wird beim Senden "
+                      "ausgewertet")
+        return changed
 
     def qr_code(self, spec=None, fill_layer: bool | None = None) -> list[str]:
         """QR-Code einfügen (ein Undo-Schritt); Standard: aktive Ebene."""
@@ -464,6 +548,10 @@ class JobTools(QObject):
         """Double-click hook: True if ``shape_id`` belongs to a generated object
         (the dialog was shown, even if cancelled)."""
         from .generated_qt import generated_unit
+        from .vartext import is_variable
+        doc = self.editor.document
+        if doc.has_shape(shape_id) and is_variable(doc.shape(shape_id)):
+            return False   # variable text: double click edits the template as usual
         try:
             unit = generated_unit(self.editor, shape_id)
         except ValueError as exc:

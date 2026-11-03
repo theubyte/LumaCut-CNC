@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLabel,
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QLabel,
                                QLineEdit, QSpinBox)
 
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand
@@ -32,6 +32,12 @@ class SerialDialog(QDialog):
         form.addRow("Spalten", self.columns)
         form.addRow("Abstand X", self.gap_x)
         form.addRow("Abstand Y", self.gap_y)
+        self.variable = QCheckBox("Beim Senden weiterzählen (variabler Text)")
+        self.variable.setToolTip("Die Kopien behalten die Vorlage; jeder gesendete Auftrag lasert "
+                                 "die nächsten Nummern (Start + Anzahl × Schritt …). "
+                                 "Einstellungen später unter „Variabler Text…“")
+        self.variable.setChecked(spec.variable)
+        form.addRow("", self.variable)
         self.preview = QLabel()
         form.addRow("Vorschau", self.preview)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -64,7 +70,8 @@ class SerialDialog(QDialog):
     def spec(self) -> SerialSpec:
         return SerialSpec(self.template.text(), self.start.value(), self.step.value(),
                           self.count.value(), self.columns.value(),
-                          self.gap_x.value(), self.gap_y.value()).normalized()
+                          self.gap_x.value(), self.gap_y.value(),
+                          self.variable.isChecked()).normalized()
 
     def _update(self) -> None:
         if not has_counter(self.template.text()):
