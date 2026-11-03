@@ -2357,9 +2357,7 @@ function renderPanel(s){
 $("panelAuto").onchange=ev=>call("panel_auto",{on:ev.currentTarget.checked?"1":"0"});
 $("panelUpdate").onclick=async ev=>{
  const p=snapshot?.panel||{};
- if(!await ask("Panel aktualisieren?","Firmware "+(p.version||"?")+" → "+p.available+"
-
-Das Panel ist etwa eine halbe Minute dunkel und startet dann neu. Die Maschine selbst wird nicht berührt.","Aktualisieren"))return;
+ if(!await ask("Panel aktualisieren?","Firmware "+(p.version||"?")+" → "+p.available+"\n\nDas Panel ist etwa eine halbe Minute dunkel und startet dann neu. Die Maschine selbst wird nicht berührt.","Aktualisieren"))return;
  await call("panel_update",{},ev.currentTarget);
 };
 
