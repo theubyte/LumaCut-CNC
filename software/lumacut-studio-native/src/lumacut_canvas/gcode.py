@@ -40,6 +40,13 @@ bis zum Linienanfang (Kopf beschleunigt), ``G1 … S<p>`` über die Linie und
 Die Verlängerung wird an der Arbeitsfläche gekürzt (:func:`overscan_segment`);
 bei 0 bleibt die Ausgabe Byte für Byte gleich.
 
+Scan-Versatz (``JobLayer.fill_scan_offset_mm`` ≠ 0, LightBurn „Scanning Offset
+Adjustment“, Tabelle in ``lumacut_job.scan_offset``): jede Füllstrecke wird
+*nach* der Richtungswahl um den halben Versatz entgegen ihrer Fahrtrichtung
+verschoben (:func:`scan_offset_segment`), damit hin- und rücklaufende Linien
+trotz Laser-Verzögerung auf einer Kante enden; danach folgt der Überlauf.
+Bei 0 bleibt die Ausgabe Byte für Byte gleich.
+
 Die Funktion erzeugt nur Text; sie startet nie eine Maschine.
 """
 
@@ -144,6 +151,27 @@ def overscan_segment(a, b, overscan_mm: float):
     return a2, b2
 
 
+def scan_offset_segment(a, b, offset_mm: float):
+    """Füllstrecke ``a → b`` um ``offset_mm / 2`` entgegen der Fahrtrichtung verschoben.
+
+    Positiver Versatz = der Laser brennt in Fahrtrichtung zu spät; die Strecke
+    wandert darum zurück. Die Verschiebung wird an der Arbeitsfläche gekürzt
+    (Maschinen-mm), bei Nulllänge oder Versatz 0: ``(a, b)``.
+    """
+    length = math.dist(a, b)
+    if abs(offset_mm) < 1e-9 or length < 1e-9:
+        return a, b
+    u = ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+    t = -offset_mm / 2.0          # entlang u
+    if t < 0:
+        t = -min(-t, _room_along(a, (-u[0], -u[1])))
+    else:
+        t = min(t, _room_along(b, u))
+    if abs(t) < 1e-9:
+        return a, b
+    return ((a[0] + u[0] * t, a[1] + u[1] * t), (b[0] + u[0] * t, b[1] + u[1] * t))
+
+
 def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -> str:
     if not any(_has_moves(l) for l in layers):
         raise ValueError("Keine sichtbaren Objekte zum Lasern")
@@ -176,9 +204,12 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
                 acc += depths[p]
                 out += _hook_lines(pass_hook, layer, p, round(acc, 6))
             overscan = float(getattr(layer, "fill_overscan_mm", 0.0) or 0.0)
+            scan_off = float(getattr(layer, "fill_scan_offset_mm", 0.0) or 0.0)
             for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos,
                                            not getattr(layer, "fill_fixed_order", False)):
                 for a, b in block:
+                    if scan_off:
+                        a, b = scan_offset_segment(a, b, scan_off)
                     a2, b2 = overscan_segment(a, b, overscan)
                     if pos is None or abs(pos[0] - a2[0]) > 1e-6 or abs(pos[1] - a2[1]) > 1e-6:
                         out.append(f"G0 {_xy(*a2)}")

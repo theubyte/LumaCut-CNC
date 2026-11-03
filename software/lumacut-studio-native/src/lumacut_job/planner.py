@@ -15,6 +15,11 @@ uses (enter at the nearer end), so the planned order is exactly what pass 1
 lasers. The contours then start from the end of the fill, because the G-code
 lasers each pass fill first.
 
+Scanning offset (:mod:`.scan_offset`): :func:`optimized_document_gcode`
+applies the speed table – by default the process-wide active table – to the
+hatch fills and the image rasters after planning; an inactive table changes
+nothing.
+
 Polylines are in machine mm. A polyline is *closed* when its first and last
 points coincide (rectangles, ellipses, polygons and text outlines are all
 exported that way by ``job_layers``).
@@ -354,15 +359,17 @@ class PlanReport:
     skipped_leads: int = 0
     moved_leads: int = 0
     layers_with_skipped: list[str] = field(default_factory=list)
+    scan_offset: str = ""   # kurze Beschreibung des angewandten Scan-Versatzes
 
     def message(self) -> str:
         """Kurzer Hinweis (leer, wenn nichts zu melden ist)."""
         if not self.skipped_leads:
-            return ""
+            return self.scan_offset
         where = ", ".join(self.layers_with_skipped)
         n = self.skipped_leads
-        return (f"Anfahrt bei {n} Kontur{'en' if n != 1 else ''} weggelassen "
+        text = (f"Anfahrt bei {n} Kontur{'en' if n != 1 else ''} weggelassen "
                 f"(kein Platz / Kollision mit anderen Teilen) – Ebene {where}")
+        return f"{text}. {self.scan_offset}" if self.scan_offset else text
 
 
 def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | None = None,
@@ -416,21 +423,38 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
     return out
 
 
-def optimized_document_gcode(doc, **options) -> str:
+_ACTIVE = object()
+
+
+def optimized_document_gcode(doc, scan_offsets=_ACTIVE, **options) -> str:
     """Like ``lumacut_canvas.gcode.document_to_gcode`` but with the cut planner.
 
     Bildobjekte werden zuerst graviert (Raster/3D, unterste Ebene zuerst),
     danach folgen die Vektorebenen – Gravieren vor Schneiden, damit sich
     ausgeschnittene Teile nicht verschieben. Ohne Bilder ist die Ausgabe
     identisch mit der reinen Vektor-Planung.
+
+    ``scan_offsets``: ``ScanOffsetTable`` für Schraffur und Bilder; Standard
+    = die aktive Tabelle der App (:func:`.scan_offset.active_table`), ``None``
+    = ohne Scan-Versatz.
     """
     from lumacut_canvas.export import job_layers
     from lumacut_canvas.gcode import layers_to_gcode
-    layers = optimize_layers(job_layers(doc), **options)
-    if not any(s.kind == "image" for s in doc.shapes):
+
+    from .scan_offset import active_table, apply_to_layers
+    table = active_table() if scan_offsets is _ACTIVE else scan_offsets
+    if table is not None and not table.active:
+        table = None
+    layers = apply_to_layers(optimize_layers(job_layers(doc), **options), table)
+    report = options.get("report")
+    has_images = any(s.kind == "image" for s in doc.shapes)
+    if report is not None and table is not None and (
+            has_images or any(getattr(l, "fill_scan_offset_mm", 0.0) for l in layers)):
+        report.scan_offset = table.summary()
+    if not has_images:
         return layers_to_gcode(layers)
     from .images import document_image_jobs
-    jobs = document_image_jobs(doc)
+    jobs = document_image_jobs(doc, table)
     # Füllung allein (Kontur aus) zählt auch als Vektor-Auftrag.
     has_vector = any(l.polylines or getattr(l, "fills", None) for l in layers)
     if not jobs and not has_vector:

@@ -60,6 +60,9 @@ class JobLayer:
     # Überlauf je Ende einer Schraffurstrecke (Laser aus, Layer.fill_overscan_mm);
     # 0 bei Offset-Füllung. Erst der G-Code (gcode.overscan_segment) verlängert.
     fill_overscan_mm: float = 0.0
+    # Scan-Versatz der Füllstrecken (mm, lumacut_job.scan_offset): erst der G-Code
+    # verschiebt jede Strecke um die Hälfte entgegen ihrer Fahrtrichtung; 0 = aus.
+    fill_scan_offset_mm: float = 0.0
 
 
 def shape_fill_segments(shape: Shape, layer: Layer):

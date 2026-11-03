@@ -10,6 +10,12 @@ vorhandenen Raster-Engine umgesetzt:
 * ``depth3d`` → :func:`raster.sliced_depth_gcode` (Mehrfach-Durchgänge nach
   Helligkeit, optional Fokus-Absenkung je Stufe).
 
+Scan-Versatz (:mod:`.scan_offset`, Tabelle nach Geschwindigkeit): jede
+Rasterzeile wandert um den halben Versatz entgegen ihrer Fahrtrichtung –
+Ursprung um die Hälfte zurück, Rückwärtszeilen um den ganzen Versatz
+(``RasterSettings.scan_offset_mm``) vor. Am Rand der Arbeitsfläche wird der
+Versatz gekürzt; ohne Tabelle bleibt die Ausgabe gleich.
+
 Der Overscan wird je Bild auf den Platz bis zum Rand der Arbeitsfläche
 begrenzt, damit Bilder am Rand gültig bleiben. Header/Footer schreibt
 :func:`planner.optimized_document_gcode` genau einmal für den ganzen Auftrag.
@@ -92,7 +98,8 @@ def _strip(program: str) -> list[str]:
     return lines[5:-2]
 
 
-def image_job(shape: Shape, layer_name: str = "") -> ImageJob:
+def image_job(shape: Shape, layer_name: str = "", scan_offsets=None) -> ImageJob:
+    """Raster-/3D-Programm eines Bildes; ``scan_offsets`` = ``ScanOffsetTable`` oder None."""
     st = shape.image.settings.normalized()
     gray, (cx, cy) = render_gray(shape, st.line_interval_mm)
     width = gray.shape[1] * st.line_interval_mm
@@ -103,9 +110,16 @@ def image_job(shape: Shape, layer_name: str = "") -> ImageJob:
         ox, oy = to_machine(cx + width, cy)
     else:
         ox, oy = to_machine(cx, cy)
+    # Scan-Versatz: halbe Verschiebung je Richtung, am Rand gekürzt.
+    off = scan_offsets.offset_for(st.speed_mm_min) if scan_offsets is not None else 0.0
+    edge = max(0.0, min(ox - _MIN_X, _MAX_X - (ox + width)))
+    if abs(off) / 2 > edge:
+        off = (2 * edge) if off > 0 else (-2 * edge)
+    ox -= off / 2
     # Overscan am Rand der Arbeitsfläche kürzen statt den Auftrag abzulehnen.
-    room = min(ox - _MIN_X, _MAX_X - (ox + width))
+    room = min(ox - _MIN_X, _MAX_X - (ox + width), ox + off - _MIN_X, _MAX_X - (ox + off + width))
     s = raster_settings(shape, max(0.0, min(st.overscan_mm, room)))
+    s.scan_offset_mm = round(off, 4)
     title = f"; IMAGE {shape.id} {st.mode.upper()}"
     if st.mode == "depth3d":
         prog = sliced_depth_gcode(gray, (ox, oy), width, gray.shape[0] * st.line_interval_mm,
@@ -123,7 +137,7 @@ def image_job(shape: Shape, layer_name: str = "") -> ImageJob:
     return ImageJob(shape.id, layer_name, lines)
 
 
-def document_image_jobs(doc: Document) -> list[ImageJob]:
+def document_image_jobs(doc: Document, scan_offsets=None) -> list[ImageJob]:
     """Bilder sichtbarer Ebenen, unterste Ebene zuerst (wie job_layers)."""
     jobs: list[ImageJob] = []
     for layer in reversed(doc.layers):
@@ -131,7 +145,7 @@ def document_image_jobs(doc: Document) -> list[ImageJob]:
             continue
         for s in doc.shapes_in_layer(layer.id):
             if s.kind == "image" and s.image is not None:
-                jobs.append(image_job(s, layer.name))
+                jobs.append(image_job(s, layer.name, scan_offsets))
     return jobs
 
 
