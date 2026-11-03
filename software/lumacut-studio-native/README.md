@@ -234,13 +234,23 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Breite ohne Ruhezone (bei Rechtecken ergibt sich die Höhe), Ruhezone (Standard 2 Module),
   Invertiert und Ebenen-Logik wie beim QR-Code, ein Rückgängig-Schritt. Code: `src/lumacut_job/datamatrix.py`,
   `datamatrix_qt.py` (ohne Zusatzbibliothek).
+- **Aztec-Code** („Aztec-Code…“, *Alt+Z*, Menü „Auftrag“ und Design-Menü): 2D-Code nach
+  ISO/IEC 24778 mit Zielscheibe in der Mitte – braucht **keine Ruhezone** (Standard 1 Modul) und
+  passt so gut auf kleine Teile und Etiketten. Alle Größen: kompakt 15 × 15 bis 27 × 27 (1–4
+  Lagen) und voll 31 × 31 bis 151 × 151 (4–32 Lagen, mit Referenzgitter); „Automatisch“ oder
+  Mindestgröße wählbar. Fehlerkorrektur einstellbar (10–90 %, Standard 23 % wie empfohlen). Die
+  Kodierung wählt automatisch die kürzeste Mischung aus Groß-, Klein-, Misch-, Satzzeichen-, Ziffern-
+  und Binärmodus; Umlaute und Unicode als UTF-8 mit ECI 26, Option **GS1-Daten** (FNC1, Prüfung wie
+  bei GS1-128). „Kantenlänge“ ohne Ruhezone, Invertiert und Ebenen-Logik (neue Ebene „Aztec“ mit
+  Schraffur 0,1 mm) wie beim QR-Code, ein Rückgängig-Schritt. Code: `src/lumacut_job/aztec.py`,
+  `aztec_qt.py` (ohne Zusatzbibliothek).
 - **Bogentext** („Bogentext…“, *Alt+B*): Text entlang eines Kreises als Vektor-Umrisse (ein
   Polygon je Buchstabe, gruppiert); oben/außen im Uhrzeigersinn oder unten/innen, Radius, Winkel,
   Bezugspunkt Mitte/Anfang/Ende, Zeichenabstand, Schrift/Fett/Kursiv. Ist genau ein Textobjekt
   ausgewählt, wird es übernommen und kann ersetzt werden. Code: `src/lumacut_job/arctext.py`,
   `arctext_qt.py`.
 - **Code bearbeiten** („Code bearbeiten…“, *Alt+E*, oder Doppelklick auf einen Code): QR-Code,
-  Barcode, Data Matrix und Bogentext bleiben nach dem Einfügen bearbeitbar. Der Dialog öffnet mit
+  Barcode, Data Matrix, Aztec-Code und Bogentext bleiben nach dem Einfügen bearbeitbar. Der Dialog öffnet mit
   den gespeicherten Einstellungen (die Größe folgt einer seither geänderten Skalierung); „Übernehmen“
   erzeugt das Objekt neu – gleiche Mitte, Drehung, Ebene und Gruppen, ein Rückgängig-Schritt. Die
   Einstellungen werden in der Datei gespeichert und überstehen Kopieren/Einfügen und Anordnen;

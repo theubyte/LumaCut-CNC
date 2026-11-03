@@ -1107,3 +1107,75 @@ Still open:
   nearest-neighbour block order, fill grouping and inside-out offset fill, offset fill, cut options
   incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix readability incl.
   edited, rectangular and GS1 codes with a real scanner, park-corner refusal, rebuilt exe).
+
+## 25. Status update 2026-11-03 (review round 18)
+
+Done this round (Review; nothing from Canvas, Machine / Scan Probe or Materials touched – only the
+design-menu action list in `main_view.py` gained one entry):
+
+- Gap picked from §24 „Still open“: 2D codes – Aztec was not covered (LightBurn and xTool Creative
+  Space both offer it). No user decision needed and it fits the existing QR / Data Matrix framework;
+  compact Aztec needs no quiet zone, which suits small laser-marked parts.
+- **Aztec generator** (`lumacut_job/aztec.py`, no extra library), ISO/IEC 24778:
+  - all 33 sizes – compact 15 × 15 … 27 × 27 (1–4 layers) and full-range 31 × 31 … 151 × 151
+    (4–32 layers, reference grid); „Automatisch“ or a minimum size;
+  - error correction 10–90 % (default 23 % + 3 words as recommended by ISO), Reed-Solomon over
+    GF(64 / 256 / 1024 / 4096), mode message over GF(16), bit stuffing, bull's eye with
+    orientation marks, layout identical to the zxing reference;
+  - high-level encodation as a dynamic program over Upper / Lower / Mixed / Punct / Digit with
+    latches, P/S and U/S shifts, the Punct pairs (CR LF, „. “, „, “, „: “) and Binary Shift runs
+    (short and long form) – shortest bit stream, so texts fit into smaller symbols;
+  - non-ASCII text as UTF-8 with ECI 26; option GS1 (FNC1 as FLG(0), same element-string check as
+    GS1-128 / GS1 DataMatrix).
+- **Studio**: „Aztec-Code…“ (*Alt+Z*, menu „Auftrag“ and design menu), dialog „Aztec-Code einfügen“
+  with live info / warnings (size too small, work area, next larger size chosen), edge length
+  without quiet zone, quiet zone (default 1 module), invert, new fill layer „Aztec“ (hatch 0.1 mm)
+  when the active layer has no fill; one undo step. Aztec objects are re-editable like the other
+  generated objects (`generated.py` kind „aztec“, dialog „Aztec-Code bearbeiten“, size follows a
+  later scaling, saved in the file).
+
+Tests:
+
+- `tests/test_aztec.py` (81): mode codes, latches, shifts, Punct pairs, binary short / long form,
+  ECI 26 prefix and GS1 FNC1; bit stuffing; RS syndromes zero in GF(16 … 4096); format table, bull's
+  eye, orientation marks and reference grid; capacity (3832 digits in 151 × 151) and errors; every
+  size filled to capacity decodes with zxing-cpp; module matrices identical to the zxing-cpp writer
+  for unambiguous texts; mixed / Unicode / binary / random texts decode; GS1 decodes as `]z1`;
+  12 flipped data modules are corrected; vector shapes (area, no overlap, quiet zone, inverted,
+  hatch fill) decode; dialog warnings; window action, shortcut without clash, menus, insertion at
+  the centre, undo, G-code with Pi guard, new fill layer; re-edit after scaling and file round
+  trip.
+
+Full suite: 1387 passed, 3 skipped (before: 1306 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter and CSV merge
+  (LightBurn „Variable Text“ / „Merge CSV“) – decide if wanted; today only the batch
+  „Seriennummern…“ exists.
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; block order is greedy nearest neighbour (no 2-opt);
+  overscan is clamped to the cutting area, not to the real machine travel.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: PDF417 not covered; Aztec has no rune symbols and no structured append; Data Matrix
+  EDIFACT mode and DMRE sizes (ISO 21471) not supported; no GS1 Digital Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (fill overscan – line ends even at 2–5 mm on wood / card – and
+  nearest-neighbour block order, fill grouping and inside-out offset fill, offset fill, cut options
+  incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec readability
+  incl. edited, rectangular, compact 15 × 15 and GS1 codes with a real scanner, park-corner
+  refusal, rebuilt exe).
