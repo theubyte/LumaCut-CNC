@@ -11,6 +11,11 @@ Platzhalter:
 ``{n:3}``     Nummer mit führenden Nullen auf 3 Stellen (``007``)
 ``{date}``    heutiges Datum ``TT.MM.JJJJ``
 ``{{`` ``}}`` wörtliche geschweifte Klammern
+
+With ``SerialSpec.variable`` the copies keep the template and become one
+variable-text series (:mod:`lumacut_job.vartext`): the first job lasers
+``start … start + (count - 1) × step``, every further job continues from
+there (LightBurn „Variable Text“ with an array of copies).
 """
 
 from __future__ import annotations
@@ -68,6 +73,7 @@ class SerialSpec:
     columns: int = 5
     gap_x_mm: float = 2.0
     gap_y_mm: float = 2.0
+    variable: bool = False      # keep the template, count on at every sent job
 
     def normalized(self) -> "SerialSpec":
         return SerialSpec(
@@ -78,6 +84,7 @@ class SerialSpec:
             columns=int(_clamp(int(self.columns), *COLUMNS_RANGE)),
             gap_x_mm=float(_clamp(float(self.gap_x_mm), *GAP_RANGE)),
             gap_y_mm=float(_clamp(float(self.gap_y_mm), *GAP_RANGE)),
+            variable=bool(self.variable),
         )
 
     def values(self) -> list[int]:
@@ -126,11 +133,21 @@ def serial_shapes(src: Shape, spec: SerialSpec, aspect: Callable[..., float],
     cols = min(s.columns, len(texts))
     rows = (len(texts) + cols - 1) // cols
     group = new_id()
+    meta = None
+    if s.variable:
+        from . import vartext as vt
+        base_spec = vt.spec_of(src) if vt.is_variable(src) else vt.VarTextSpec()
+        meta = vt.make_meta(replace(base_spec, series=vt.new_series(), start=s.start,
+                                    step=s.step, current=s.start, per_copy=True))
+        tw = h * aspect(s.template, src.font_family, src.font_bold, src.font_italic) * stretch
     out: list[Shape] = []
     for i, (text, w) in enumerate(zip(texts, widths)):
         r, c = divmod(i, cols)
         sh = src.copy(new_identity=True)
         sh.text = text
+        sh.generator = None if (src.generator or {}).get("kind") == "vartext" else src.generator
+        if meta is not None:     # variable: template on the canvas, evaluated at send time
+            sh.text, sh.generator, w = s.template, meta, tw
         sh.geom = replace(g.copy(), x=g.x + c * (cell_w + s.gap_x_mm),
                           y=g.y + r * (h + s.gap_y_mm), w=w, h=h)
         sh.groups = (group,) + tuple(src.groups)

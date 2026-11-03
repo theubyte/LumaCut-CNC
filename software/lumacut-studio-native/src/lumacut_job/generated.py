@@ -134,6 +134,8 @@ def find_unit(doc, shape_id: str) -> Unit | None:
     meta = sh.generator
     if not meta or not sh.groups:
         return None
+    if meta.get("kind") == "vartext":   # variable text (lumacut_job.vartext) is a plain text object
+        return None
     group = sh.groups[-1]
     parts = [s for s in doc.shapes if s.groups and s.groups[-1] == group]
     label = LABELS.get(meta.get("kind"), "Objekt")
