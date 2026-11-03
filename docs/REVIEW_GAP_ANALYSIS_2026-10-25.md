@@ -1752,7 +1752,7 @@ Tests:
   speeds (offset-fill layer unshifted); clamp at the cutting-area edge; cache reuse and
   invalidation; `fill_burn_segments` = writer; canvas widget draws shifted lines, flag, hidden
   layer, fallback on planner error; window: changing the table schedules the fill preview.
-- `tests/test_qr_text_segments.py` (33): version reductions, unchanged matrices without gain,
+- `tests/test_qr_text_segments.py` (34): version reductions, unchanged matrices without gain,
   non-ASCII stays byte, capacity, `min_version` / mask honoured, DP never worse than one mode
   (random), decoding with OpenCV and zxing (also hatch-filled), dialog info, rebuild of an old
   byte code unchanged.
