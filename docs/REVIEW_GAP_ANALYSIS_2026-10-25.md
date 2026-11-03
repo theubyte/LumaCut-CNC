@@ -1179,3 +1179,80 @@ Still open:
   incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec readability
   incl. edited, rectangular, compact 15 × 15 and GS1 codes with a real scanner, park-corner
   refusal, rebuilt exe).
+
+## 26. Status update 2026-11-03 (review round 19)
+
+Done this round (Review; nothing from Canvas, Machine / Scan Probe or Materials touched – only the
+design-menu action list in `main_view.py` gained one entry):
+
+- Gap picked from §25 „Still open“: 2D codes – PDF417 was not covered (LightBurn and xTool Creative
+  Space both offer it). No user decision needed and it fits the existing QR / Data Matrix / Aztec
+  framework; the wide, flat stacked code suits strips, edges and labels (IDs, shipping, boarding
+  passes).
+- **PDF417 generator** (`lumacut_job/pdf417.py`, no extra library), ISO/IEC 15438:
+  - 1–30 columns („Automatisch“ picks a width / height ratio near 3 : 1) and 3–90 rows, up to 928
+    codewords (2692 digits); start / stop patterns, left and right row indicators, the three
+    codeword clusters (tables identical to the zxing reference);
+  - Reed-Solomon over GF(929), error correction level 0–8, default „Automatisch“ per the ISO
+    recommendation (level 2 … 5 by data length, lowered to at least 2 when the symbol would be too
+    large);
+  - high-level encodation: text compaction as a shortest path over Alpha / Lower / Mixed / Punct
+    with latches and the PS / AS shifts, numeric compaction (base 900) for digit runs ≥ 13, byte
+    compaction (901 / 924) and the 913 byte shift for single bytes inside text;
+  - non-ASCII text as UTF-8 with ECI 26; option compact PDF417 (no right row indicator, one-module
+    stop);
+  - row height in modules (default 3 = ISO minimum), quiet zone (default 2 modules), invert.
+- **Studio**: „PDF417-Code…“ (*Alt+F*, menu „Auftrag“ and design menu), dialog „PDF417-Code
+  einfügen“ with live info / warnings (modules too narrow / under 0.4 mm, row height under 3,
+  error correction under the ISO recommendation, quiet zone under 2, too many rows, work area),
+  width without quiet zone, new fill layer „PDF417“ (hatch 0.1 mm) when the active layer has no
+  fill; one undo step. PDF417 objects are re-editable like the other generated objects
+  (`generated.py` kind „pdf417“, dialog „PDF417-Code bearbeiten“; width follows a later X scaling,
+  row height the Y / X ratio; saved in the file).
+
+Tests:
+
+- `tests/test_pdf417.py` (60): codeword tables (cluster rule, start / stop), text submodes with
+  latches and shifts, numeric (ISO example) and byte compaction (901 / 924, 913 shift), segmenting
+  and ECI 26; RS roots for all levels and the ISO Annex example; ISO level recommendation; row
+  layout, length descriptor, pads and row indicators, compact layout; columns / rows / auto ratio,
+  maximum capacity and errors; zxing-cpp decodes fixed, Unicode, binary and 60 random texts, every
+  level, 1–30 columns normal and compact, the largest symbol and a damaged symbol; vector shapes
+  (area, no overlap, quiet zone, inverted, hatch fill) decode; dialog warnings; window action,
+  shortcut without clash, menus, insertion at the centre, undo, G-code with Pi guard, new fill
+  layer; re-edit after non-uniform scaling and document file round trip.
+
+Full suite: 1447 passed, 3 skipped (before: 1387 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- Variable text evaluated at send time with an auto-incrementing counter and CSV merge
+  (LightBurn „Variable Text“ / „Merge CSV“) – decide if wanted; today only the batch
+  „Seriennummern…“ exists.
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; block order is greedy nearest neighbour (no 2-opt);
+  overscan is clamped to the cutting area, not to the real machine travel.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode and DMRE
+  sizes (ISO 21471) not supported; PDF417 has no Macro PDF417 (structured append) and no
+  MicroPDF417; no GS1 Digital Link / GS1 QR code.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (fill overscan – line ends even at 2–5 mm on wood / card – and
+  nearest-neighbour block order, fill grouping and inside-out offset fill, offset fill, cut options
+  incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability
+  incl. edited, rectangular, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner, park-corner
+  refusal, rebuilt exe).
