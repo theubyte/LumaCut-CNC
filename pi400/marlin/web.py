@@ -28,6 +28,7 @@ from . import focus_compensation as focus
 from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import CalibrationStore, create_blueprint as camera_calibration_api
 from . import camera as head_camera
+from . import panel
 from .workspace import WorkspaceStore, create_blueprint as workspace_api
 from .projects import ProjectStore, create_blueprint as projects_api
 from .line_laser import LineLaser
@@ -2404,6 +2405,8 @@ def main():
     threading.Thread(target=firmware_releases.run_forever,
                      args=(lambda: running, lambda: job["state"] in ("homing", "probing", "running")),
                      daemon=True, name="firmware-updates").start()
+    # Bedienpanel (ESP32 touch display) on USB: one more API client, see panel.py.
+    panel.start(HTTP)
     threading.Thread(target=serve_tcp,
                      args=(machine,"0.0.0.0",TCP,lambda: running),
                      daemon=True, name="marlin-lightburn-server").start()

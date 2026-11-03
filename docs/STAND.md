@@ -515,7 +515,10 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   (vorhanden) per USB-C am Pi, nur Oberfläche, Pi bleibt Zentrale; Start nur mit Go-Abfrage.
   Metall-Mockup mit 4 Bildschirmen in `hardware/display-7zoll/` (NAS: `Lasercut Projekte\Display-7-Zoll`).
   Zwei Varianten: A Metall, B Weiß (Besitzer 03.11.: „moderner und cleaner, Richtung weiß“).
-  Offen: Freigabe des Designs durch den Besitzer, dann Firmware (LVGL) und Pi-Schnittstelle.
+  **Firmware fertig gebaut (03.11.)**, helles Design: `firmware/panel/` (LVGL, PlatformIO/ESP-IDF 5.3),
+  Pi-Seite `pi400/marlin/panel.py` (läuft in `lumacut-marlin` mit, USB-JSON-Zeilen, nur erlaubte Aktionen),
+  Freigabe per Popup statt drei Schaltern (Besitzer). Abbild `lumacut-panel.bin` auf dem NAS.
+  Offen: auf dem echten Panel flashen und testen (Bild, Touch, USB zum Pi, Kamerabild).
   Gehäuse-Idee: Dibond schwarz/anthrazit + Alu-Winkel + gedruckte Ecken (Besitzer: kein Holz).
 - Infrarot-LEDs im Kopfgehäuse als Licht für die Kamera (Besitzer, 30.10.: „erstmal noch nicht“).
 - Roter Linienlaser für 3D-Höhenmessung ohne Brennen (Pi-Unterstützung `op=line_laser` existiert).

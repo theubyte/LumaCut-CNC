@@ -35,6 +35,8 @@ import re
 import threading
 import time
 
+from .panel import is_panel
+
 LOG = logging.getLogger("lumacut.grbl")
 
 WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
@@ -76,6 +78,9 @@ def open_controller(port: str, baud: int, timeout: float = 0.1, surface_hint=Non
     feed or laser power), so M115 at ANET_BAUD only goes out after Grbl
     did not answer.
     """
+    if port and is_panel(port):
+        # ttyACM numbers follow plug order: the touch panel may hold the SKR's old name
+        port = next((p for p in sorted(glob.glob("/dev/ttyACM*")) if not is_panel(p)), "")
     if port and os.path.exists(port) and "ttyUSB" not in port and "1a86" not in port:
         import serial
         return serial.Serial(port, baud, timeout=timeout, write_timeout=1.0, exclusive=True)

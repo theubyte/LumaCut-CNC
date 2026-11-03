@@ -1,0 +1,6 @@
+.pio/
+managed_components/
+dependencies.lock
+sdkconfig.panel
+sdkconfig.panel.old
+lumacut-panel.bin
