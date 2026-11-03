@@ -140,6 +140,116 @@ def hatch_lines(polygons: Iterable[Sequence[Point]], interval_mm: float, angle_d
     return out
 
 
+# --- Einstieg in einen Füllblock (freie Startecke) -------------------------------
+#
+# Ein Schraffurblock (``hatch_lines`` / ``fill_segments``) besteht aus Zeilen:
+# aufeinanderfolgende Strecken auf derselben Rasterzeile (Löcher teilen eine
+# Zeile in mehrere Strecken) mit derselben Fahrtrichtung. Ein Block kann an
+# jeder seiner vier Ecken begonnen werden – erste oder letzte Zeile, an deren
+# Anfang oder Ende –, ohne dass sich Linien, Abstände oder die
+# Bidirektional-/Unidirektional-Regel ändern:
+#
+# ``FORWARD``  wie erzeugt;
+# ``REVERSED`` Zeilen rückwärts *und* jede Strecke umgedreht (der bisherige
+#              „vom anderen Ende“-Einstieg);
+# ``ROWS_REVERSED`` Zeilen rückwärts, jede Zeile in ihrer Richtung;
+# ``ROWS_FLIPPED``  Zeilen in Reihenfolge, jede Zeile umgedreht.
+#
+# Wechselnde Richtungen bleiben wechselnd, gleiche bleiben gleich; Überlauf und
+# Scan-Versatz hängen nur von der Fahrtrichtung jeder Strecke ab (gcode.py).
+FORWARD, REVERSED, ROWS_REVERSED, ROWS_FLIPPED = range(4)
+_ROW_EPS = 1e-6
+
+
+def _unit(seg: Segment):
+    (ax, ay), (bx, by) = seg
+    d = math.hypot(bx - ax, by - ay)
+    return None if d < 1e-12 else ((bx - ax) / d, (by - ay) / d)
+
+
+def fill_block_rows(block: Sequence[Segment]) -> list[list[Segment]]:
+    """Zeilen eines Schraffurblocks (siehe oben), in Block-Reihenfolge.
+
+    Zwei aufeinanderfolgende Strecken gehören zu einer Zeile, wenn sie dieselbe
+    Richtung haben, auf einer Geraden liegen und die zweite hinter der ersten
+    beginnt. Nulllange Strecken bilden eine eigene Zeile.
+    """
+    rows: list[list[Segment]] = []
+    prev_u = None
+    for seg in block:
+        u = _unit(seg)
+        if rows and u is not None and prev_u is not None:
+            last = rows[-1][-1]
+            dx, dy = seg[0][0] - last[0][0], seg[0][1] - last[0][1]
+            same_dir = u[0] * prev_u[0] + u[1] * prev_u[1] > 1.0 - 1e-9
+            on_line = abs(dx * prev_u[1] - dy * prev_u[0]) <= _ROW_EPS
+            ahead = ((seg[0][0] - last[1][0]) * u[0] + (seg[0][1] - last[1][1]) * u[1]
+                     >= -_ROW_EPS)
+            if same_dir and on_line and ahead:
+                rows[-1].append(seg)
+                prev_u = u
+                continue
+        rows.append([seg])
+        prev_u = u
+    return rows
+
+
+def fill_block_entries(block: Sequence[Segment], reversible: bool = True,
+                       corners: bool = False) -> list[tuple[Point, Point, int]]:
+    """Mögliche Einstiege ``(start, ende, variante)`` eines Füllblocks.
+
+    Immer ``FORWARD``; mit ``reversible`` auch ``REVERSED``; mit ``corners``
+    (nur Schraffur, nie Offset-Ringe) zusätzlich die beiden übrigen Ecken,
+    sofern der Block mindestens zwei Zeilen hat. Die Reihenfolge ist zugleich
+    die Vorrangregel bei gleichem Abstand.
+    """
+    if not block:
+        return []
+    out = [(block[0][0], block[-1][1], FORWARD)]
+    if not reversible:
+        return out
+    out.append((block[-1][1], block[0][0], REVERSED))
+    if corners:
+        rows = fill_block_rows(block)
+        if len(rows) >= 2:
+            out.append((rows[-1][0][0], rows[0][-1][1], ROWS_REVERSED))
+            out.append((rows[0][-1][1], rows[-1][0][0], ROWS_FLIPPED))
+    return out
+
+
+def fill_block_variant(block: Sequence[Segment], variant: int) -> list[Segment]:
+    """Den Block in der Einstiegs-Variante (``FORWARD`` … ``ROWS_FLIPPED``)."""
+    if variant == FORWARD:
+        return list(block)
+    if variant == REVERSED:
+        return [(b, a) for a, b in reversed(block)]
+    rows = fill_block_rows(block)
+    if variant == ROWS_REVERSED:
+        return [seg for row in reversed(rows) for seg in row]
+    if variant == ROWS_FLIPPED:
+        return [(b, a) for row in rows for a, b in reversed(row)]
+    raise ValueError(f"Unbekannte Einstiegs-Variante: {variant}")
+
+
+def nearest_fill_entry(block: Sequence[Segment], pos: Point | None, reversible: bool = True,
+                       corners: bool = False) -> tuple[float, list[Segment]]:
+    """Abstand von ``pos`` und der Block ab dem nächsten erlaubten Einstieg.
+
+    Bei Gleichstand gewinnt die frühere Variante (``FORWARD`` vor ``REVERSED``
+    vor den Ecken), ohne Position (``None``) bleibt der Block, wie er ist.
+    """
+    if not block:
+        return 0.0, []
+    if pos is None:
+        return 0.0, list(block)
+    best_d, best_v = math.inf, FORWARD
+    for entry, _exit, v in fill_block_entries(block, reversible, corners):
+        d = math.dist(pos, entry)
+        if d < best_d:
+            best_d, best_v = d, v
+    return best_d, fill_block_variant(block, best_v)
+
+
 def _even_odd_area(polygons: Iterable[Sequence[Point]]):
     """Fläche nach der Gerade-Ungerade-Regel (wie :func:`hatch_lines`) als Shapely-Geometrie."""
     from shapely.geometry import Polygon

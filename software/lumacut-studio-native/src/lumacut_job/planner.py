@@ -11,8 +11,9 @@ backwards, offset blocks (``fill_fixed_order``) always run forwards so
 their ring order is kept. A deterministic 2-opt / Or-opt pass
 (``improve_fill_block_order``, bounded work budget) then shortens the
 nearest-neighbour tour; block entry follows the same rule the G-code writer
-uses (enter at the nearer end), so the planned order is exactly what pass 1
-lasers. The contours then start from the end of the fill, because the G-code
+uses (enter at the nearer end – for hatch at the nearest of the four block
+corners, ``JobLayer.fill_free_corner``), so the planned order is exactly
+what pass 1 lasers. The contours then start from the end of the fill, because the G-code
 lasers each pass fill first.
 
 Scanning offset (:mod:`.scan_offset`): :func:`optimized_document_gcode`
@@ -145,31 +146,42 @@ def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first
     return out
 
 
-def order_fill_blocks_nearest(blocks, start: Point, reversible: bool = True):
+def _entries(blocks, reversible: bool, corners: bool):
+    from lumacut_canvas.hatch import fill_block_entries
+    return [fill_block_entries(b, reversible, corners) for b in blocks]
+
+
+def _apply_variant(block, variant):
+    from lumacut_canvas.hatch import fill_block_variant
+    return fill_block_variant(block, variant)
+
+
+def order_fill_blocks_nearest(blocks, start: Point, reversible: bool = True,
+                              corners: bool = False):
     """Fill blocks in greedy nearest-neighbour order (each possibly reversed).
 
     A reversed block runs its segments in reverse order and direction (like
     ``lumacut_canvas.gcode.order_fill_blocks``); with ``reversible=False``
     every block keeps its internal order and is entered at its first point.
+    ``corners`` (hatch, ``JobLayer.fill_free_corner``) also allows the other
+    two corners of a block (rows in reverse order, or every row flipped –
+    ``lumacut_canvas.hatch.fill_block_entries``).
     Ties keep the object order, so a single block or blocks that are already
     in the best order stay unchanged.
     """
     todo = [b for b in blocks if b]
+    opts = _entries(todo, reversible, corners)
     out = []
     pos = start
     while todo:
-        best_i, best_d, best_rev = 0, math.inf, False
-        for i, block in enumerate(todo):
-            d = math.dist(pos, block[0][0])
-            if d < best_d:
-                best_i, best_d, best_rev = i, d, False
-            if reversible:
-                d = math.dist(pos, block[-1][1])
+        best_i, best_d, best_v = 0, math.inf, 0
+        for i, entries in enumerate(opts):
+            for entry, _exit, v in entries:
+                d = math.dist(pos, entry)
                 if d < best_d:
-                    best_i, best_d, best_rev = i, d, True
-        block = todo.pop(best_i)
-        if best_rev:
-            block = [(b, a) for a, b in reversed(block)]
+                    best_i, best_d, best_v = i, d, v
+        block = _apply_variant(todo.pop(best_i), best_v)
+        opts.pop(best_i)
         out.append(block)
         pos = block[-1][1]
     return out
@@ -181,19 +193,21 @@ FILL_OPT_MAX_BLOCKS = 2000    # above this the nearest-neighbour order is kept
 _FILL_OPT_EPS = 1e-9
 
 
-def _block_neighbours(ends, reversible: bool, k: int) -> list[list[int]]:
-    """For each block the ``k`` nearest other blocks (exit of one to entry of the other)."""
+def _block_neighbours(opts, k: int) -> list[list[int]]:
+    """For each block the ``k`` nearest other blocks (any exit of one to any entry of the other)."""
     import numpy as np
-    n = len(ends)
-    s = np.array([e[0] for e in ends], float)
-    e = np.array([e[1] for e in ends], float)
-
-    def d(a, b):
-        return np.hypot(a[:, None, 0] - b[None, :, 0], a[:, None, 1] - b[None, :, 1])
-
-    dist = d(e, s)
-    if reversible:
-        dist = np.minimum.reduce([dist, d(e, e), d(s, s), d(s, e)])
+    n = len(opts)
+    width = max(len(o) for o in opts)
+    # pad every block to the same number of entry/exit options (repeat the first)
+    ent = np.array([[o[min(v, len(o) - 1)][0] for v in range(width)] for o in opts], float)
+    ext = np.array([[o[min(v, len(o) - 1)][1] for v in range(width)] for o in opts], float)
+    dist = None
+    for vi in range(width):
+        e = ext[:, vi]
+        for vj in range(width):
+            s = ent[:, vj]
+            d = np.hypot(e[:, None, 0] - s[None, :, 0], e[:, None, 1] - s[None, :, 1])
+            dist = d if dist is None else np.minimum(dist, d)
     np.fill_diagonal(dist, np.inf)
     k = min(k, n - 1)
     out = []
@@ -207,7 +221,8 @@ def _block_neighbours(ends, reversible: bool, k: int) -> list[list[int]]:
 
 def improve_fill_block_order(blocks, start: Point, reversible: bool = True,
                              budget: int = FILL_OPT_BUDGET,
-                             neighbours: int = FILL_OPT_NEIGHBOURS):
+                             neighbours: int = FILL_OPT_NEIGHBOURS,
+                             corners: bool = False):
     """Shorten the travel of an ordered fill-block list with 2-opt and Or-opt moves.
 
     Works on top of :func:`order_fill_blocks_nearest`: blocks stay whole (fill
@@ -215,7 +230,8 @@ def improve_fill_block_order(blocks, start: Point, reversible: bool = True,
     their order changes. Each block is entered at its nearer end (``reversible``)
     exactly like ``lumacut_canvas.gcode.order_fill_blocks`` decides, so the
     G-code writer reproduces the planned tour; with ``reversible=False`` every
-    block keeps its direction. Moves: reverse a stretch of the tour (2-opt) and
+    block keeps its direction; with ``corners`` (hatch) a block is entered at
+    the nearest of its four corners, again exactly like the writer. Moves: reverse a stretch of the tour (2-opt) and
     move a run of 1–3 blocks elsewhere, optionally reversed (Or-opt), each only
     towards the ``neighbours`` nearest blocks. The search is first-improvement
     in a fixed scan order and stops after ``budget`` evaluated block steps, so
@@ -226,28 +242,29 @@ def improve_fill_block_order(blocks, start: Point, reversible: bool = True,
     n = len(blocks)
     if n < 2 or n > FILL_OPT_MAX_BLOCKS or budget <= 0:
         return blocks
-    ends = [(b[0][0], b[-1][1]) for b in blocks]
+    opts = _entries(blocks, reversible, corners)
     dist = math.dist
     order = list(range(n))
     left = budget
 
+    def enter(pos, k):
+        """(travel, exit, variant) of block ``k`` entered from ``pos`` (writer rule)."""
+        best_d, best_x, best_v = math.inf, pos, 0
+        for entry, exit_, v in opts[k]:
+            d = dist(pos, entry)
+            if d < best_d:
+                best_d, best_x, best_v = d, exit_, v
+        return best_d, best_x, best_v
+
     def states(seq):
-        pos, c, ps, cs, rv = start, 0.0, [], [], []
+        pos, c, ps, cs, vs = start, 0.0, [], [], []
         for k in seq:
-            s, e = ends[k]
-            ds = dist(pos, s)
-            de = dist(pos, e) if reversible else math.inf
-            if de < ds:
-                c += de
-                pos = s
-                rv.append(True)
-            else:
-                c += ds
-                pos = e
-                rv.append(False)
+            d, pos, v = enter(pos, k)
+            c += d
+            vs.append(v)
             ps.append(pos)
             cs.append(c)
-        return ps, cs, rv
+        return ps, cs, vs
 
     pos_after, cum, _ = states(order)
 
@@ -260,22 +277,15 @@ def improve_fill_block_order(blocks, start: Point, reversible: bool = True,
         for t in range(t0, n):
             left -= 1
             k = cand[t]
-            s, e = ends[k]
-            ds = dist(pos, s)
-            de = dist(pos, e) if reversible else math.inf
-            if de < ds:
-                c += de
-                pos = s
-            else:
-                c += ds
-                pos = e
+            d, pos, _ = enter(pos, k)
+            c += d
             if c >= total - _FILL_OPT_EPS:
                 return math.inf
             if t >= t1 and k == order[t] and pos == pos_after[t]:
                 return c + total - cum[t]   # rest of the tour is unchanged
         return c
 
-    near = _block_neighbours(ends, reversible, neighbours)
+    near = _block_neighbours(opts, neighbours)
     improved = True
     while improved and left > 0:
         improved = False
@@ -326,12 +336,8 @@ def improve_fill_block_order(blocks, start: Point, reversible: bool = True,
                 for t, k in enumerate(order):
                     at[k] = t
                 improved = True
-    _, _, rev = states(order)
-    out = []
-    for k, r in zip(order, rev):
-        block = blocks[k]
-        out.append([(b, a) for a, b in reversed(block)] if r else block)
-    return out
+    _, _, variants = states(order)
+    return [_apply_variant(blocks[k], v) for k, v in zip(order, variants)]
 
 
 def fill_travel_length(blocks, start: Point) -> float:
@@ -401,8 +407,10 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
         fills = getattr(layer, "fills", None) or []
         if fills and options.get("reduce_travel", True):
             reversible = not getattr(layer, "fill_fixed_order", False)
+            corners = reversible and getattr(layer, "fill_free_corner", False)
             fills = improve_fill_block_order(
-                order_fill_blocks_nearest(fills, pos, reversible), pos, reversible)
+                order_fill_blocks_nearest(fills, pos, reversible, corners), pos, reversible,
+                corners=corners)
             layer = replace(layer, fills=fills)
         if fills:
             pos = fills[-1][-1][1]   # contours follow the fill in every pass

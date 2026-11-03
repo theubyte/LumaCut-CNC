@@ -27,8 +27,9 @@ Jede Schraffurstrecke ist ein ``G0`` zum Anfang und ein ``G1`` zum Ende –
 das ``G0`` entfällt, wenn die Strecke genau dort beginnt, wo die vorige
 endete (Offset-Füllung: Ringe als lückenlose Streckenkette);
 die Blöcke (je Objekt, Gruppe oder Ebene, ``Layer.fill_grouping``) werden in
-der Reihenfolge der Objekte gefahren, Schraffur jeweils vorwärts oder
-rückwärts – je nachdem, welches Ende näher liegt; Offset-Füllung immer
+der Reihenfolge der Objekte gefahren, Schraffur ab der nächstgelegenen ihrer
+vier Ecken (erste/letzte Zeile × Zeilenanfang/-ende, ``JobLayer.fill_free_corner``;
+sonst vorwärts oder rückwärts – je nachdem, welches Ende näher liegt); Offset-Füllung immer
 vorwärts (Ring-Reihenfolge außen → innen bzw. innen → außen bleibt). Ohne Füllung bleibt
 die Ausgabe unverändert.
 
@@ -57,6 +58,7 @@ import re
 from typing import Callable, Iterable
 
 from .export import JobLayer, job_layers
+from .hatch import nearest_fill_entry
 from .model import (MAX_FOCUS_DROP_MM, PASSES_RANGE, POWER_RANGE, SPEED_RANGE,
                     Z_STEP_RANGE, Document)
 from .workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine,
@@ -102,21 +104,23 @@ def _has_moves(layer: JobLayer) -> bool:
     return bool(layer.polylines or getattr(layer, "fills", None))
 
 
-def order_fill_blocks(blocks, pos=None, reversible=True):
-    """Schraffurblöcke in Objekt-Reihenfolge, jeder vorwärts oder rückwärts.
+def order_fill_blocks(blocks, pos=None, reversible=True, corners=False):
+    """Schraffurblöcke in Objekt-Reihenfolge, jeder ab dem nächsten Einstieg.
 
     Ein rückwärts gefahrener Block kehrt Reihenfolge *und* Richtung seiner
     Strecken um. ``pos`` = aktuelle Kopfposition (``None`` = unbekannt).
     ``reversible=False`` (Offset-Füllung, ``JobLayer.fill_fixed_order``):
     jeder Block vorwärts, damit die gewählte Ring-Reihenfolge erhalten bleibt.
+    ``corners`` (Schraffur, ``JobLayer.fill_free_corner``): zusätzlich die
+    beiden übrigen Ecken – Zeilen rückwärts bzw. jede Zeile umgedreht
+    (:func:`lumacut_canvas.hatch.nearest_fill_entry`); bei Gleichstand bleibt
+    der Block vorwärts.
     """
     out = []
     for block in blocks:
         if not block:
             continue
-        if (reversible and pos is not None
-                and math.dist(pos, block[-1][1]) < math.dist(pos, block[0][0])):
-            block = [(b, a) for a, b in reversed(block)]
+        _, block = nearest_fill_entry(block, pos, reversible, corners)
         out.append(block)
         pos = block[-1][1]
     return out
@@ -206,7 +210,8 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
             overscan = float(getattr(layer, "fill_overscan_mm", 0.0) or 0.0)
             scan_off = float(getattr(layer, "fill_scan_offset_mm", 0.0) or 0.0)
             for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos,
-                                           not getattr(layer, "fill_fixed_order", False)):
+                                           not getattr(layer, "fill_fixed_order", False),
+                                           getattr(layer, "fill_free_corner", False)):
                 for a, b in block:
                     if scan_off:
                         a, b = scan_offset_segment(a, b, scan_off)

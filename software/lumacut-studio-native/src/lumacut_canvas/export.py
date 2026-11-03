@@ -63,6 +63,10 @@ class JobLayer:
     # Scan-Versatz der Füllstrecken (mm, lumacut_job.scan_offset): erst der G-Code
     # verschiebt jede Strecke um die Hälfte entgegen ihrer Fahrtrichtung; 0 = aus.
     fill_scan_offset_mm: float = 0.0
+    # Freie Startecke (Schraffur/Kreuzschraffur): ein Block darf an jeder seiner
+    # vier Ecken beginnen – Zeilen rückwärts und/oder jede Zeile umgedreht
+    # (hatch.fill_block_entries); Planer und G-Code wählen den nächsten Einstieg.
+    fill_free_corner: bool = False
 
 
 def shape_fill_segments(shape: Shape, layer: Layer):
@@ -157,6 +161,7 @@ def job_layers(doc: Document) -> list[JobLayer]:
                                    plan.pass_depths if plan else (),
                                    **{k: getattr(layer, k) for k in CUT_LAYER_FIELDS}, fills=fills,
                                    fill_fixed_order=layer.fill_mode == "offset",
+                                   fill_free_corner=layer.fill_mode in LINE_FILL_MODES,
                                    fill_overscan_mm=(getattr(layer, "fill_overscan_mm", 0.0)
                                                      if layer.fill_mode in LINE_FILL_MODES
                                                      else 0.0)))
