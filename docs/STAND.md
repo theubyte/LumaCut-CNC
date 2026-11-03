@@ -514,6 +514,7 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
 - **Bedienpanel 7 Zoll am Gehäuse (Design 03.11.):** Waveshare ESP32-S3-Touch-LCD-7
   (vorhanden) per USB-C am Pi, nur Oberfläche, Pi bleibt Zentrale; Start nur mit Go-Abfrage.
   Metall-Mockup mit 4 Bildschirmen in `hardware/display-7zoll/` (NAS: `Lasercut Projekte\Display-7-Zoll`).
+  Zwei Varianten: A Metall, B Weiß (Besitzer 03.11.: „moderner und cleaner, Richtung weiß“).
   Offen: Freigabe des Designs durch den Besitzer, dann Firmware (LVGL) und Pi-Schnittstelle.
   Gehäuse-Idee: Dibond schwarz/anthrazit + Alu-Winkel + gedruckte Ecken (Besitzer: kein Holz).
 - Infrarot-LEDs im Kopfgehäuse als Licht für die Kamera (Besitzer, 30.10.: „erstmal noch nicht“).

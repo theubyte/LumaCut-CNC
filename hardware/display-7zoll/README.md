@@ -18,6 +18,12 @@ Nur Design (Mockup), noch keine Firmware.
 - `design/screen_1..4.png`: Status, Bewegen, Kamera, Laserfreigabe (2× gerendert).
 - `design/uebersicht.png`: alle vier auf einem Bild.
 
-Stil: gebürstetes Alu, Riffelblech, Schrauben, Metallknöpfe, Leuchtziffern
+Zwei Varianten:
+
+- **A Metall** (`mockup.html`, `screen_*.png`, `uebersicht.png`): gebürstetes Alu, Riffelblech, Schrauben, Metallknöpfe, Leuchtziffern
 (Cyan für Werte, Amber für Laser), Warnstreifen. Für die Firmware (LVGL)
 werden Alu- und Riffelblech-Flächen als Bitmaps eingebunden.
+- **B Weiß** (`mockup_weiss.html`, `weiss_*.png`, `weiss_uebersicht.png`), Wunsch des
+  Besitzers 03.11. „moderner und cleaner, Richtung weiß“: helle Karten mit weichen
+  Schatten, nur ein Akzent (Orange für Laser/Start), dunkle aktive Taste, feiner
+  Alu-Rand mit kleinen Inbusschrauben an der Kopfleiste. In LVGL ohne Bitmaps machbar.

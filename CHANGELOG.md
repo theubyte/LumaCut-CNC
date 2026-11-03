@@ -5,6 +5,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 ## 2026-11-03
 
 - **Bedienpanel 7 Zoll, Design-Entwurf:** Für das vorhandene Waveshare ESP32-S3-Touch-LCD-7 (800 × 480) gibt es ein Metall-Design mit vier Bildschirmen: Status, Bewegen, Kamera und Laserfreigabe mit Go-Abfrage. Dazu kommen Riffelblech, gebürstetes Alu, Schrauben, STOPP- und Pause-Taste immer sichtbar. In `hardware/display-7zoll/`, noch ohne Firmware.
+- **Bedienpanel, helle Variante:** Auf Wunsch moderner und cleaner gibt es eine zweite Variante in Weiß. Helle Karten, nur Orange als Akzent, aktive Taste dunkel, Laserfreigabe mit drei Schaltern. Die Metall-Variante bleibt zum Vergleich.
 - **Laser-Interface V2 (neue Platine):** Laserversorgung und PWM auf einer Platine: Relais Omron G5LE-1 mit Sicherung und Freilaufdiode an SKR-FAN1, PWM über Optokoppler (SFH618A oder PC817) auf geregelte 5 V vom 7805 mit 2,2 kΩ nach Masse. Damit bricht das Signal unter Last nicht mehr ein (Punkte statt Linie) und der Laser glimmt im Leerlauf nicht. In `hardware/laser-interface-v2/`: KiCad-Platine mit Gerber-ZIP für JLCPCB, Schaltplan und Bauplan für die 7 × 9 cm Lochrasterplatine.
 - **Doku-Fehler Laser-PWM am SKR:** PA1 liegt am Stecker **BL_Touch** (GND, 5 V, PA1, GND, PC14), nicht an PWR-DET. PT-DET ist PC12, PA2 ist die serielle Sendeleitung zum TFT-Stecker. MASCHINE.md ist korrigiert.
 

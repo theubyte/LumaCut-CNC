@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>LumaCut Panel – Weiß</title>
+<!-- Variante B: hell, modern, clean. Fuer das Waveshare ESP32-S3-Touch-LCD-7 (800x480).
+     ?s=1..4 zeigt einen einzelnen Bildschirm, ohne Parameter die Uebersicht. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#eef0f3; --card:#ffffff; --line:#e3e6ea; --ink:#16191d; --mute:#8a929b; --soft:#f5f6f8;
+  --accent:#ff6a13; --accent-soft:#fff1e8; --ok:#1fbf6a; --info:#1c9bf0; --stop:#e5261d;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,Arial,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+body.gallery{padding:28px;display:grid;grid-template-columns:repeat(2,800px);gap:34px 30px;justify-content:center;background:#d9dde2}
+.cap{font:600 13px Inter,sans-serif;letter-spacing:.2em;color:#69727c;text-transform:uppercase;margin:0 0 8px 4px}
+body.single{width:800px;height:480px;overflow:hidden}
+
+.screen{position:relative;width:800px;height:480px;overflow:hidden;background:
+  radial-gradient(ellipse at 20% 0%,#ffffff 0%,rgba(255,255,255,0) 60%),var(--bg);
+  box-shadow:0 20px 50px rgba(20,30,40,.25)}
+.card{position:absolute;background:var(--card);border-radius:16px;
+  box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 0 0 1px rgba(20,30,40,.05),0 6px 18px rgba(20,30,40,.07)}
+/* feiner Alu-Rand als einziges Metall-Detail */
+.alu-edge{background:linear-gradient(180deg,#fafbfc,#e7eaee);box-shadow:0 0 0 1px #d4d9de,0 1px 0 #fff inset,0 6px 18px rgba(20,30,40,.07)}
+.screw{position:absolute;width:7px;height:7px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#fff,#c3c9cf 60%,#9aa2aa);box-shadow:0 0 0 .5px rgba(0,0,0,.25)}
+.screw::after{content:"";position:absolute;left:2px;top:2px;width:3px;height:3px;background:#7d858d;
+  clip-path:polygon(25% 0,75% 0,100% 50%,75% 100%,25% 100%,0 50%)}
+
+.lbl{font:600 10px Inter,sans-serif;letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.num{font-family:"JetBrains Mono",monospace;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+
+/* Kopfleiste */
+.top{left:12px;top:10px;width:776px;height:48px;border-radius:14px}
+.logo{position:absolute;left:22px;top:11px;font:800 21px Inter,sans-serif;letter-spacing:-.02em}
+.logo b{color:var(--accent);font-weight:800}
+.logo span{font:500 11px Inter,sans-serif;letter-spacing:.18em;color:var(--mute);margin-left:10px;vertical-align:3px}
+.pills{position:absolute;right:14px;top:9px;display:flex;gap:6px;align-items:center}
+.pill{height:30px;padding:0 12px 0 10px;border-radius:15px;display:flex;align-items:center;gap:7px;background:var(--soft);
+  font:600 12px Inter,sans-serif;color:#4c545d;box-shadow:inset 0 0 0 1px var(--line)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--c,#c8cdd2)}
+.pill:not(.on) .dot{background:#c8cdd2}
+.pill.on .dot{box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent)}
+.pill.hot{background:var(--accent-soft);color:#b5470a;box-shadow:inset 0 0 0 1px #ffd2b6}
+.time{font:600 15px "JetBrains Mono",monospace;color:var(--ink);padding:0 4px 0 8px}
+
+/* Navigation */
+.rail{left:12px;top:68px;width:84px;height:400px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.nav{height:88px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+  font:600 11px Inter,sans-serif;color:#5d656e}
+.nav svg{width:26px;height:26px;fill:none;stroke:#5d656e;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.nav.active{background:var(--ink);color:#fff;box-shadow:0 6px 14px rgba(20,25,30,.28)}
+.nav.active svg{stroke:#fff}
+
+/* rechte Spalte */
+.side{left:704px;top:68px;width:84px;height:400px}
+.stop-wrap{position:absolute;left:8px;top:10px;width:68px;height:68px}
+.stop{position:absolute;left:4px;top:24px;width:76px;height:76px;border-radius:50%;
+  background:radial-gradient(circle at 40% 30%,#ff6a5f,#e5261d 55%,#b8150e);
+  box-shadow:0 0 0 5px #fff,0 0 0 6px #e3e6ea,0 10px 22px rgba(229,38,29,.45);
+  display:flex;align-items:center;justify-content:center;font:800 13px Inter,sans-serif;letter-spacing:.08em;color:#fff}
+.side .hint{position:absolute;top:116px;width:100%;text-align:center}
+.sbtn{position:absolute;left:10px;width:64px;height:84px;border-radius:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+  font:600 11px Inter,sans-serif;color:#4c545d;background:var(--soft);box-shadow:inset 0 0 0 1px var(--line)}
+.sbtn svg{width:22px;height:22px;fill:var(--ink)}
+
+/* Hauptbereich */
+.main{position:absolute;left:106px;top:68px;width:588px;height:400px}
+.h{position:absolute;font:700 17px Inter,sans-serif;letter-spacing:-.01em}
+.h small{font:500 12px Inter,sans-serif;color:var(--mute);margin-left:8px;letter-spacing:0}
+
+.ring{position:absolute;width:200px;height:200px;border-radius:50%;
+  background:conic-gradient(var(--accent) 0 calc(360deg*.62),#eceef1 0);
+  -webkit-mask:radial-gradient(circle,transparent 86px,#000 87px)}
+.track{position:absolute;height:6px;border-radius:3px;background:#eceef1}
+.track i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--c,var(--accent))}
+
+.chipline{display:flex;gap:6px}
+.st{flex:1;height:58px;border-radius:12px;background:var(--soft);box-shadow:inset 0 0 0 1px var(--line);
+  display:flex;flex-direction:column;justify-content:center;padding:0 10px;gap:4px;font:600 13px Inter,sans-serif}
+.st .lbl{font-size:9px}
+.st b{display:flex;align-items:center;gap:6px;font-weight:600}
+
+/* Bewegen */
+.pad{position:absolute;border-radius:50%;background:linear-gradient(180deg,#fafbfc,#eef0f3);
+  box-shadow:0 0 0 1px #dfe3e7,inset 0 2px 6px rgba(20,30,40,.06)}
+.key{position:absolute;border-radius:14px;background:#fff;display:flex;align-items:center;justify-content:center;gap:4px;
+  font:700 15px Inter,sans-serif;color:var(--ink);box-shadow:0 0 0 1px #e1e5e9,0 3px 8px rgba(20,30,40,.09)}
+.key svg{width:18px;height:18px;fill:none;stroke:var(--ink);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.key.dark{background:var(--ink);color:#fff;box-shadow:0 6px 14px rgba(20,25,30,.28)}
+.key.dark svg{stroke:#fff}
+.seg{display:flex;background:var(--soft);border-radius:11px;padding:4px;box-shadow:inset 0 0 0 1px var(--line)}
+.seg div{flex:1 0 auto;height:38px;border-radius:8px;display:flex;align-items:center;justify-content:center;font:600 14px Inter,sans-serif;color:#5d656e}
+.seg .on{background:#fff;color:var(--ink);box-shadow:0 1px 4px rgba(20,30,40,.14)}
+
+/* Freigabe */
+.sw{position:absolute;width:52px;height:30px;border-radius:15px;background:var(--ok);box-shadow:inset 0 0 0 1px rgba(0,0,0,.05)}
+.sw::after{content:"";position:absolute;right:3px;top:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+.go{position:absolute;border-radius:14px;background:linear-gradient(180deg,#ff7a2a,#f35d05);color:#fff;
+  display:flex;align-items:center;justify-content:center;gap:12px;font:700 19px Inter,sans-serif;letter-spacing:.06em;
+  box-shadow:0 10px 24px rgba(243,93,5,.35),inset 0 1px 0 rgba(255,255,255,.35)}
+</style>
+</head>
+<body>
+
+<template id="chrome">
+  <div class="card alu-edge top">
+    <span class="screw" style="left:8px;top:8px"></span><span class="screw" style="left:8px;bottom:8px"></span>
+    <span class="screw" style="right:8px;top:8px"></span><span class="screw" style="right:8px;bottom:8px"></span>
+    <div class="logo">/Luma<b>Cut</b>/<span>CNC · LT-80W</span></div>
+    <div class="pills">
+      <div class="pill on" style="--c:var(--ok)"><span class="dot"></span>Pi</div>
+      <div class="pill on" style="--c:var(--ok)"><span class="dot"></span>Deckel zu</div>
+      <div class="pill LASERP" style="--c:var(--accent)"><span class="dot"></span>Laser</div>
+      <div class="pill AIRP" style="--c:var(--info)"><span class="dot"></span>Luft</div>
+      <span class="time">14:32</span>
+    </div>
+  </div>
+  <div class="card rail">
+    <div class="nav N1"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 13l4-4"/></svg>Status</div>
+    <div class="nav N2"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg>Bewegen</div>
+    <div class="nav N3"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13.5" r="3.5"/><path d="M9 7l1.5-2.5h3L15 7"/></svg>Kamera</div>
+    <div class="nav N4"><svg viewBox="0 0 24 24"><path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5M9 13h7M9 17h7"/></svg>Auftrag</div>
+  </div>
+  <div class="card side">
+    <div class="stop">STOPP</div>
+    <div class="lbl hint">Not-Halt</div>
+    <div class="sbtn" style="top:150px"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>Pause</div>
+    <div class="sbtn" style="top:244px"><svg viewBox="0 0 24 24"><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.8l-12-7.5A1 1 0 0 0 7 4.5z"/></svg>Weiter</div>
+  </div>
+</template>
+
+<!-- 1 Status -->
+<template id="s1">
+  <div class="main">
+    <div class="card" style="left:0;top:0;width:250px;height:400px">
+      <div class="h" style="left:20px;top:18px">Auftrag läuft</div>
+      <div class="ring" style="left:25px;top:58px"></div>
+      <div style="position:absolute;left:25px;top:118px;width:200px;text-align:center">
+        <div class="num" style="font-size:54px;line-height:1;font-family:Inter;font-weight:800;letter-spacing:-.04em">62<span style="font-size:24px;color:var(--mute)">%</span></div>
+        <div class="lbl" style="margin-top:8px">noch <span class="num" style="font-size:13px;color:var(--ink);letter-spacing:0">07:48</span></div>
+      </div>
+      <div style="position:absolute;left:20px;right:20px;top:282px;border-top:1px solid var(--line);padding-top:14px">
+        <div style="font:700 15px Inter,sans-serif">einladung_v3.gcode</div>
+        <div style="font:500 12px Inter,sans-serif;color:var(--mute);margin-top:4px">Pappel 3 mm · 2 Durchgänge</div>
+        <div style="font:500 12px Inter,sans-serif;color:var(--mute);margin-top:2px">Laufzeit 12:41 · Zeile 4812</div>
+      </div>
+    </div>
+
+    <div class="card" style="left:262px;top:0;width:326px;height:150px;padding:18px 20px">
+      <div class="lbl">Position · mm</div>
+      <div style="display:grid;grid-template-columns:1.15fr 1.15fr .8fr;margin-top:18px">
+        <div><div class="lbl" style="color:var(--ink)">X</div><div class="num" style="font-size:25px;margin-top:6px">213.40</div></div>
+        <div><div class="lbl" style="color:var(--ink)">Y</div><div class="num" style="font-size:25px;margin-top:6px">148.05</div></div>
+        <div><div class="lbl" style="color:var(--ink)">Z</div><div class="num" style="font-size:25px;margin-top:6px">7.00</div></div>
+      </div>
+    </div>
+
+    <div class="card" style="left:262px;top:162px;width:326px;height:120px;padding:18px 20px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="lbl">Laserleistung</span><span class="num" style="font-size:17px;color:var(--accent)">71 %</span></div>
+      <div class="track" style="left:20px;right:20px;top:44px"><i style="width:71%"></i></div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:36px"><span class="lbl">Vorschub</span><span class="num" style="font-size:17px">1800 <span style="font-size:11px;color:var(--mute)">mm/min</span></span></div>
+      <div class="track" style="left:20px;right:20px;top:100px;--c:var(--ink)"><i style="width:30%"></i></div>
+    </div>
+
+    <div class="card" style="left:262px;top:294px;width:326px;height:106px;padding:14px">
+      <div class="chipline">
+        <div class="st"><span class="lbl">Laser</span><b><span class="dot" style="--c:var(--accent);background:var(--accent)"></span>An</b></div>
+        <div class="st"><span class="lbl">24 V</span><b><span class="dot" style="background:var(--ok)"></span>OK</b></div>
+        <div class="st"><span class="lbl">Luft</span><b><span class="dot" style="background:var(--info)"></span>An</b></div>
+        <div class="st"><span class="lbl" style="letter-spacing:.06em">Z-Wache</span><b><span class="dot" style="background:var(--ok)"></span>OK</b></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- 2 Bewegen -->
+<template id="s2">
+  <div class="main">
+    <div class="card" style="left:0;top:0;width:300px;height:400px">
+      <div class="h" style="left:20px;top:18px">Bewegen <small>X · Y</small></div>
+      <div class="pad" style="left:30px;top:66px;width:240px;height:240px"></div>
+      <div class="key" style="left:118px;top:78px;width:64px;height:60px;flex-direction:column;gap:0"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>Y+</div>
+      <div class="key" style="left:118px;top:234px;width:64px;height:60px;flex-direction:column;gap:0">Y−<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+      <div class="key" style="left:42px;top:156px;width:64px;height:60px"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>X−</div>
+      <div class="key" style="left:194px;top:156px;width:64px;height:60px">X+<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></div>
+      <div class="key dark" style="left:124px;top:160px;width:52px;height:52px;border-radius:50%"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7M7 9v11h10V9"/></svg></div>
+      <div class="lbl" style="position:absolute;left:0;width:100%;top:328px;text-align:center">Mitte = Referenzfahrt</div>
+      <div class="num" style="position:absolute;left:0;width:100%;top:350px;text-align:center;font-size:15px;color:#4c545d">X 213.40 · Y 148.05</div>
+    </div>
+
+    <div class="card" style="left:312px;top:0;width:100px;height:400px">
+      <div class="h" style="left:0;width:100%;text-align:center;top:18px">Z</div>
+      <div class="key" style="left:18px;top:62px;width:64px;height:84px;flex-direction:column;gap:2px"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg>Z+</div>
+      <div style="position:absolute;left:0;width:100%;top:172px;text-align:center"><div class="num" style="font-size:24px">7.00</div><div class="lbl" style="margin-top:2px">mm</div></div>
+      <div class="key" style="left:18px;top:240px;width:64px;height:84px;flex-direction:column;gap:2px">Z−<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+    </div>
+
+    <div class="card" style="left:424px;top:0;width:164px;height:400px;padding:18px 14px">
+      <div class="lbl">Schrittweite</div>
+      <div class="seg" style="margin-top:10px;flex-direction:column;gap:4px">
+        <div>0,1 mm</div><div>1 mm</div><div class="on">10 mm</div><div>50 mm</div>
+      </div>
+      <div class="key dark" style="left:14px;right:14px;bottom:16px;height:64px;flex-direction:column;gap:2px;font-size:13px">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 20h14"/></svg>Fokus tasten</div>
+    </div>
+  </div>
+</template>
+
+<!-- 3 Kamera -->
+<template id="s3">
+  <div class="main">
+    <div class="card" style="left:0;top:0;width:470px;height:400px;padding:14px">
+      <div style="position:relative;width:442px;height:372px;border-radius:10px;overflow:hidden">
+        <svg viewBox="0 0 442 372" width="442" height="372" style="position:absolute;inset:0">
+          <defs>
+            <pattern id="hc" width="14" height="24" patternUnits="userSpaceOnUse"><path d="M7 0l7 4v8l-7 4-7-4V4z M7 16v8" fill="none" stroke="#c9ced3" stroke-width="1"/></pattern>
+            <linearGradient id="wood" x1="0" x2="1"><stop offset="0" stop-color="#d9bb92"/><stop offset=".5" stop-color="#e8d2b0"/><stop offset="1" stop-color="#d4b285"/></linearGradient>
+          </defs>
+          <rect width="442" height="372" fill="#e9ecef"/><rect width="442" height="372" fill="url(#hc)"/>
+          <g transform="rotate(-4 221 186)">
+            <rect x="106" y="80" width="230" height="186" rx="3" fill="url(#wood)"/>
+            <rect x="138" y="108" width="166" height="130" fill="none" stroke="#ff6a13" stroke-width="1.8" stroke-dasharray="7 5"/>
+            <text x="221" y="180" fill="#9c7a4f" font-family="Inter" font-weight="800" font-size="20" text-anchor="middle" opacity=".45">EINLADUNG</text>
+          </g>
+          <g stroke="#16191d" stroke-width="1.4"><circle cx="221" cy="186" r="14" fill="none"/><path d="M221 162v10M221 200v10M197 186h10M235 186h10"/></g>
+        </svg>
+        <div style="position:absolute;left:12px;top:12px;padding:5px 10px;border-radius:12px;background:rgba(255,255,255,.88);font:600 11px Inter,sans-serif;display:flex;gap:6px;align-items:center">
+          <span class="dot" style="background:var(--stop)"></span>Live · 12 fps</div>
+        <div class="num" style="position:absolute;right:12px;top:12px;padding:5px 10px;border-radius:12px;background:rgba(255,255,255,.88);font-size:11px">X 213.4  Y 148.1</div>
+      </div>
+    </div>
+    <div class="key" style="left:482px;top:0;width:106px;height:92px;flex-direction:column;gap:6px;font-size:12px;font-weight:600"><svg viewBox="0 0 24 24" style="width:24px;height:24px"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>Rahmen</div>
+    <div class="key" style="left:482px;top:102px;width:106px;height:92px;flex-direction:column;gap:6px;font-size:12px;font-weight:600"><svg viewBox="0 0 24 24" style="width:24px;height:24px"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>Neu scannen</div>
+    <div class="key" style="left:482px;top:204px;width:106px;height:92px;flex-direction:column;gap:6px;font-size:12px;font-weight:600"><svg viewBox="0 0 24 24" style="width:24px;height:24px"><circle cx="11" cy="11" r="7"/><path d="M16 16l5 5M11 8v6M8 11h6"/></svg>Zoom</div>
+    <div class="key dark" style="left:482px;top:306px;width:106px;height:94px;flex-direction:column;gap:6px;font-size:12px;font-weight:600"><svg viewBox="0 0 24 24" style="width:24px;height:24px"><circle cx="12" cy="12" r="5"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg>Hier hin</div>
+  </div>
+</template>
+
+<!-- 4 Freigabe -->
+<template id="s4">
+  <div class="main">
+    <div class="card" style="left:0;top:0;width:588px;height:400px">
+      <div style="position:absolute;left:24px;top:22px;width:44px;height:44px;border-radius:12px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#f35d05" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/></svg></div>
+      <div class="h" style="left:82px;top:22px;font-size:20px">Laser starten?</div>
+      <div style="position:absolute;left:82px;top:50px;font:500 13px Inter,sans-serif;color:var(--mute)">einladung_v3.gcode · Pappel 3 mm · Leistungstest bestanden</div>
+
+      <div style="position:absolute;left:24px;right:24px;top:92px;border-radius:14px;background:var(--soft);box-shadow:inset 0 0 0 1px var(--line)">
+        <div style="position:relative;height:56px;display:flex;align-items:center;padding:0 18px;border-bottom:1px solid var(--line);font:600 15px Inter,sans-serif">Hände aus der Maschine<div class="sw" style="right:18px"></div></div>
+        <div style="position:relative;height:56px;display:flex;align-items:center;padding:0 18px;border-bottom:1px solid var(--line);font:600 15px Inter,sans-serif">Deckel geschlossen<span class="lbl" style="margin-left:10px;color:var(--ok)">Schalter meldet zu</span><div class="sw" style="right:18px"></div></div>
+        <div style="position:relative;height:56px;display:flex;align-items:center;padding:0 18px;font:600 15px Inter,sans-serif">Schutzbrille auf<div class="sw" style="right:18px"></div></div>
+      </div>
+      <style>.main .sw{top:13px}</style>
+      <div class="go" style="left:24px;right:24px;top:296px;height:76px">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="#fff"><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.8l-12-7.5A1 1 0 0 0 7 4.5z"/></svg>
+        LASER STARTEN</div>
+    </div>
+  </div>
+</template>
+
+<script>
+const names = {1:"Status",2:"Bewegen",3:"Kamera",4:"Auftrag starten"};
+function build(n){
+  const s = document.createElement("div"); s.className = "screen";
+  let chrome = document.getElementById("chrome").innerHTML.replace("N"+n, "active");
+  // Laser nur waehrend eines Auftrags hervorgehoben, Luft laeuft nur mit Auftrag
+  chrome = chrome.replace("LASERP", n === 1 ? "on hot" : "").replace("AIRP", n === 4 ? "" : "on");
+  s.innerHTML = chrome + document.getElementById("s"+n).innerHTML;
+  return s;
+}
+const p = new URLSearchParams(location.search).get("s");
+if (p) { document.body.className = "single"; document.body.appendChild(build(+p)); }
+else {
+  document.body.className = "gallery";
+  for (let n = 1; n <= 4; n++) {
+    const w = document.createElement("div");
+    w.innerHTML = '<div class="cap">'+n+' · '+names[n]+'</div>';
+    w.appendChild(build(n)); document.body.appendChild(w);
+  }
+}
+</script>
+</body>
+</html>
