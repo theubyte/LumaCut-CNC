@@ -60,7 +60,7 @@ def test_tag_meta_is_shared_json_and_round_trips():
 
 def test_spec_from_meta_errors_and_unknown_keys():
     with pytest.raises(ValueError, match="Unbekannt"):
-        generated.spec_from_meta({"kind": "pdf417", "spec": {}})
+        generated.spec_from_meta({"kind": "maxicode", "spec": {}})
     with pytest.raises(ValueError, match="neueren Version"):
         generated.spec_from_meta({"kind": "qr", "version": generated.VERSION + 1, "spec": {}})
     s = generated.spec_from_meta({"kind": "datamatrix", "version": 1,

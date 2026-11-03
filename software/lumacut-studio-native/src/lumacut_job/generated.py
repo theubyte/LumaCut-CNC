@@ -1,4 +1,5 @@
-"""Re-editable generated objects (QR code, barcode, Data Matrix, Aztec, arc text).
+"""Re-editable generated objects (QR code, barcode, Data Matrix, Aztec, PDF417,
+arc text).
 
 The generators create static ``polygon`` groups. To make them editable like in
 LightBurn / xTool Creative Space, every part of such a group carries the same
@@ -32,13 +33,14 @@ from .arctext import ArcSpec
 from .aztec import AztecSpec
 from .barcode import BarcodeSpec
 from .datamatrix import DataMatrixSpec
+from .pdf417 import Pdf417Spec
 from .qr import QrSpec
 
 VERSION = 1
 SPECS = {"qr": QrSpec, "barcode": BarcodeSpec, "datamatrix": DataMatrixSpec, "aztec": AztecSpec,
-         "arctext": ArcSpec}
+         "pdf417": Pdf417Spec, "arctext": ArcSpec}
 LABELS = {"qr": "QR-Code", "barcode": "Barcode", "datamatrix": "Data Matrix", "aztec": "Aztec-Code",
-          "arctext": "Bogentext"}
+          "pdf417": "PDF417-Code", "arctext": "Bogentext"}
 _POSITION = ("x", "y")
 # Below this relative change the user did not scale the object (rounding of moves etc.).
 SCALE_EPS = 0.002
@@ -174,7 +176,8 @@ def scaled_spec(spec, scale: tuple[float, float]):
 
     QR / Data Matrix / Aztec / arc text are scaled uniformly (mean of both factors),
     the barcode keeps its proportions per axis: module width with X, bar and
-    text height with Y. Unscaled specs are returned unchanged.
+    text height with Y; PDF417 takes its width from X and the row height
+    (in module widths) from the ratio Y / X. Unscaled specs are returned unchanged.
     """
     sx, sy = scale
     if abs(sx - 1.0) <= SCALE_EPS and abs(sy - 1.0) <= SCALE_EPS:
@@ -182,6 +185,9 @@ def scaled_spec(spec, scale: tuple[float, float]):
     k = math.sqrt(max(sx, 1e-9) * max(sy, 1e-9))
     if isinstance(spec, (QrSpec, DataMatrixSpec, AztecSpec)):
         return replace(spec, size_mm=_r(spec.size_mm * k)).normalized()
+    if isinstance(spec, Pdf417Spec):
+        return replace(spec, width_mm=_r(spec.width_mm * sx),
+                       row_height=round(spec.row_height * sy / max(sx, 1e-9), 2)).normalized()
     if isinstance(spec, BarcodeSpec):
         return replace(spec, module_mm=round(spec.module_mm * sx, 3),
                        height_mm=_r(spec.height_mm * sy),
