@@ -1,4 +1,4 @@
-"""Re-editable generated objects (QR code, barcode, Data Matrix, arc text).
+"""Re-editable generated objects (QR code, barcode, Data Matrix, Aztec, arc text).
 
 The generators create static ``polygon`` groups. To make them editable like in
 LightBurn / xTool Creative Space, every part of such a group carries the same
@@ -29,13 +29,16 @@ from dataclasses import asdict, dataclass, fields, replace
 from lumacut_canvas.model import Geometry, keep_inside_together, rotate_point
 
 from .arctext import ArcSpec
+from .aztec import AztecSpec
 from .barcode import BarcodeSpec
 from .datamatrix import DataMatrixSpec
 from .qr import QrSpec
 
 VERSION = 1
-SPECS = {"qr": QrSpec, "barcode": BarcodeSpec, "datamatrix": DataMatrixSpec, "arctext": ArcSpec}
-LABELS = {"qr": "QR-Code", "barcode": "Barcode", "datamatrix": "Data Matrix", "arctext": "Bogentext"}
+SPECS = {"qr": QrSpec, "barcode": BarcodeSpec, "datamatrix": DataMatrixSpec, "aztec": AztecSpec,
+         "arctext": ArcSpec}
+LABELS = {"qr": "QR-Code", "barcode": "Barcode", "datamatrix": "Data Matrix", "aztec": "Aztec-Code",
+          "arctext": "Bogentext"}
 _POSITION = ("x", "y")
 # Below this relative change the user did not scale the object (rounding of moves etc.).
 SCALE_EPS = 0.002
@@ -169,7 +172,7 @@ def _r(v: float) -> float:
 def scaled_spec(spec, scale: tuple[float, float]):
     """Spec that reproduces a group the user resized by ``scale`` (sx, sy).
 
-    QR / Data Matrix / arc text are scaled uniformly (mean of both factors),
+    QR / Data Matrix / Aztec / arc text are scaled uniformly (mean of both factors),
     the barcode keeps its proportions per axis: module width with X, bar and
     text height with Y. Unscaled specs are returned unchanged.
     """
@@ -177,7 +180,7 @@ def scaled_spec(spec, scale: tuple[float, float]):
     if abs(sx - 1.0) <= SCALE_EPS and abs(sy - 1.0) <= SCALE_EPS:
         return spec
     k = math.sqrt(max(sx, 1e-9) * max(sy, 1e-9))
-    if isinstance(spec, (QrSpec, DataMatrixSpec)):
+    if isinstance(spec, (QrSpec, DataMatrixSpec, AztecSpec)):
         return replace(spec, size_mm=_r(spec.size_mm * k)).normalized()
     if isinstance(spec, BarcodeSpec):
         return replace(spec, module_mm=round(spec.module_mm * sx, 3),

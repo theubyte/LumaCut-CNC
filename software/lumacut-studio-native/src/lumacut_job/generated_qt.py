@@ -1,6 +1,6 @@
 """Edit generated objects again (Qt side of :mod:`lumacut_job.generated`).
 
-Double click on a QR code, barcode, Data Matrix or arc text (select tool) or
+Double click on a QR code, barcode, Data Matrix, Aztec code or arc text (select tool) or
 „Code bearbeiten…“ (Alt+E) opens the generator's dialog with the stored
 parameters – sizes scaled by what the user did with the handles – and replaces
 the group in one undo step: same layer, same centre, same rotation, same
@@ -18,7 +18,8 @@ from . import generated
 from .generated import Unit
 
 EDIT_TITLES = {"qr": "QR-Code bearbeiten", "barcode": "Barcode bearbeiten",
-               "datamatrix": "Data Matrix bearbeiten", "arctext": "Bogentext bearbeiten"}
+               "datamatrix": "Data Matrix bearbeiten", "aztec": "Aztec-Code bearbeiten",
+               "arctext": "Bogentext bearbeiten"}
 
 
 def build_shapes(spec, layer_id: str) -> list:
@@ -35,6 +36,11 @@ def build_shapes(spec, layer_id: str) -> list:
         from .datamatrix_qt import centered
         code = s.encode()
         shapes = dm.datamatrix_shapes(centered(s, None, code), layer_id, code)
+    elif kind == "aztec":
+        from . import aztec as az
+        from .aztec_qt import centered
+        code = s.encode()
+        shapes = az.aztec_shapes(centered(s, None, code), layer_id, code)
     elif kind == "barcode":
         from . import barcode
         from .barcode_qt import glyph_fn
@@ -97,6 +103,9 @@ def edit_dialog(unit: Unit, spec, layer, parent=None) -> QDialog:
     elif unit.kind == "datamatrix":
         from .datamatrix_qt import DataMatrixDialog
         dlg = DataMatrixDialog(parent, spec, active_layer=layer)
+    elif unit.kind == "aztec":
+        from .aztec_qt import AztecDialog
+        dlg = AztecDialog(parent, spec, active_layer=layer)
     elif unit.kind == "barcode":
         from .barcode_qt import BarcodeDialog
         dlg = BarcodeDialog(parent, spec, active_layer=layer)

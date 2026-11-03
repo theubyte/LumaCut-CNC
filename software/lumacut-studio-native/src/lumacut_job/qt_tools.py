@@ -125,13 +125,17 @@ class JobTools(QObject):
                                            "2D-Code Data Matrix (ECC 200) als gefüllte "
                                            "Vektorflächen einfügen")
         self.datamatrix_action.setObjectName("datamatrix_action")
+        self.aztec_action = self._add("Aztec-Code…", self.aztec, "Alt+Z",
+                                      "2D-Code Aztec (kompakt, ohne Ruhezone) als gefüllte "
+                                      "Vektorflächen einfügen")
+        self.aztec_action.setObjectName("aztec_action")
         self.arc_action = self._add("Bogentext…", self.arc_text, "Alt+B",
                                     "Text entlang eines Kreisbogens als Vektorpfade einfügen "
                                     "(ausgewählter Text wird übernommen)")
         self.arc_action.setObjectName("arc_text_action")
         self.edit_generated_action = self._add(
             "Code bearbeiten…", self.edit_generated, "Alt+E",
-            "Ausgewählten QR-Code, Barcode, Data Matrix oder Bogentext mit seinen Parametern "
+            "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-Code oder Bogentext mit seinen Parametern "
             "neu erzeugen (auch per Doppelklick)")
         self.edit_generated_action.setObjectName("edit_generated_action")
         # Double click with the select tool (lumacut_canvas.tools) asks this hook first.
@@ -378,6 +382,30 @@ class JobTools(QObject):
         layer = doc.shape(ids[0]).layer_id if ids else ""
         name = doc.layer(layer).name if layer else ""
         self._msg(f"Data Matrix eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
+        return ids
+
+    def aztec(self, spec=None, fill_layer: bool | None = None) -> list[str]:
+        """Insert an Aztec code (one undo step); default: active layer."""
+        from .aztec_qt import AztecDialog, insert_aztec
+        from .qr_qt import layer_fills
+        doc = self.editor.document
+        active = doc.active_layer or (doc.layers[0] if doc.layers else None)
+        if spec is None:
+            dlg = AztecDialog(self.window, active_layer=active)
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, fill_layer = dlg.spec(), dlg.fill_layer()
+        if fill_layer is None:
+            fill_layer = not layer_fills(active)
+        try:
+            ids = insert_aztec(self.editor, spec, fill_layer=fill_layer)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "Aztec-Code", str(exc))
+            self._msg(f"Aztec-Code: {exc}")
+            return []
+        layer = doc.shape(ids[0]).layer_id if ids else ""
+        name = doc.layer(layer).name if layer else ""
+        self._msg(f"Aztec-Code eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
         return ids
 
     def arc_text(self, spec=None, replace: bool | None = None) -> list[str]:
