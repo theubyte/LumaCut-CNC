@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-03
 
+- **Laser-Interface V2 (neue Platine):** Laserversorgung und PWM auf einer Platine: Relais Omron G5LE-1 mit Sicherung und Freilaufdiode an SKR-FAN1, PWM über Optokoppler (SFH618A oder PC817) auf geregelte 5 V vom 7805 mit 2,2 kΩ nach Masse. Damit bricht das Signal unter Last nicht mehr ein (Punkte statt Linie) und der Laser glimmt im Leerlauf nicht. In `hardware/laser-interface-v2/`: KiCad-Platine mit Gerber-ZIP für JLCPCB, Schaltplan und Bauplan für die 7 × 9 cm Lochrasterplatine.
 - **Doku-Fehler Laser-PWM am SKR:** PA1 liegt am Stecker **BL_Touch** (GND, 5 V, PA1, GND, PC14), nicht an PWR-DET. PT-DET ist PC12, PA2 ist die serielle Sendeleitung zum TFT-Stecker. MASCHINE.md ist korrigiert.
 
 ## 2026-11-02

@@ -1,0 +1,73 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Laser-IF V2 Lochraster</title>
+<style>
+body{margin:0;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#111;width:1900px}
+h1{font-size:30px;margin:18px 24px 4px}
+.sub{margin:0 24px 10px;font-size:17px}
+.imgs{display:flex;gap:16px;padding:0 24px}
+.imgs div{flex:1}
+.imgs img{width:100%;border:1px solid #ccc}
+h2{font-size:21px;margin:6px 0}
+.cols{display:flex;gap:28px;padding:6px 24px 20px}
+table{border-collapse:collapse;font-size:15.5px}
+td,th{border:1px solid #bbb;padding:3px 7px;text-align:left;vertical-align:top}
+th{background:#e8efe8}
+.thick{color:#b0331a;font-weight:bold}
+.note{font-size:15.5px;line-height:1.45;max-width:560px}
+.note b{color:#b0331a}
+</style></head><body>
+<h1>LumaCut Laser-Interface V2 – Bauplan Lochraster 7 × 9 cm</h1>
+<p class="sub">Koordinate = <b>Spalte + Zeile</b>, z. B. <b>GS</b> = Spalte G, Zeile S. Rechts kommen die Spalten A–F ein zweites Mal: hier <b>A'–F'</b> geschrieben. Gelbe Linien = Draht auf der Lötseite.</p>
+<div class="imgs">
+<div><h2>Bestückungsseite (von oben)</h2><img src="lochraster_top.png"></div>
+<div><h2>Lötseite (Platine umgedreht – gespiegelt)</h2><img src="lochraster_bottom.png"></div>
+</div>
+<div class="cols">
+<div><h2>Bauteile → Löcher</h2>
+<table>
+<tr><th>Teil</th><th>Wert</th><th>Löcher</th></tr>
+<tr><td>J4 Klemme</td><td>SKR FAN1 (Spule)</td><td>+ CF, − CH</td></tr>
+<tr><td>J3 Klemme</td><td>SKR BL_Touch</td><td>PA1 CR, GND CT</td></tr>
+<tr><td>J1 Klemme</td><td>Netzteil</td><td>+24 V D'C, GND D'E</td></tr>
+<tr><td>J2 Klemme</td><td>Laser</td><td>rot D'N, schwarz D'P, gelb D'R</td></tr>
+<tr><td>F1</td><td>Sicherung 5×20, 2 A träge</td><td>Clip 1: PC + RC, Clip 2: VC + XC</td></tr>
+<tr><td>K1</td><td>Relais G5LE-1 24 VDC</td><td>COM in II; Pins 2–5 neben dem Raster → <b>bohren</b></td></tr>
+<tr><td>D1</td><td>1N4007</td><td>Ring (Kathode) GF, Anode GJ</td></tr>
+<tr><td>R1</td><td>680 Ω (PC817: 470 Ω)</td><td>GS – KS</td></tr>
+<tr><td>U1</td><td>SFH618A-3 / PC817</td><td>Pin 1 (Punkt) MS, 2 MT, 3 PT, 4 PS</td></tr>
+<tr><td>U2</td><td>7805</td><td>OUT SQ, GND TQ, IN UQ (Metallfahne nach unten)</td></tr>
+<tr><td>C1</td><td>100 nF</td><td>VO – VQ</td></tr>
+<tr><td>C3</td><td>10 µF 35 V</td><td>+ XO, − XP</td></tr>
+<tr><td>C2</td><td>100 nF</td><td>RS – RU</td></tr>
+<tr><td>R4</td><td>2,2 kΩ</td><td>YT – YX</td></tr>
+<tr><td>R5</td><td>4,7 kΩ</td><td>A'O – A'S</td></tr>
+<tr><td>LED1</td><td>LED 3 mm</td><td>Anode (langes Bein) A'T, Kathode B'T</td></tr>
+</table></div>
+<div><h2>Drähte (Lötseite)</h2>
+<table>
+<tr><th>Signal</th><th>Weg</th></tr>
+<tr><td class="thick">+24 V Netzteil</td><td class="thick">XC → D'C (dick)</td></tr>
+<tr><td class="thick">Sicherung → COM</td><td class="thick">PC → PD → MD → MI → K1-COM (dick, isoliert)</td></tr>
+<tr><td class="thick">+24 V geschaltet</td><td class="thick">K1-NO → OK → ON → D'N (dick)</td></tr>
+<tr><td class="thick">GND Netzteil → Laser</td><td class="thick">D'E → E'E → E'P → D'P (dick)</td></tr>
+<tr><td>GND-Schiene</td><td>D'P → C'P → C'U → RU</td></tr>
+<tr><td>+24 V Abzweige</td><td>UN → UQ · VN → VO · XN → XO · A'N → A'O</td></tr>
+<tr><td>GND Abzweige</td><td>TQ → TU · VQ → VU · XP → XU · YT → YU · B'T → B'U</td></tr>
+<tr><td>LED</td><td>A'S → A'T</td></tr>
+<tr><td>+5 V</td><td>SQ → SS → PS</td></tr>
+<tr><td>PWM</td><td>PT → PX → D'X → D'R</td></tr>
+<tr><td>Spule +</td><td>CF → IF → K1-Pin 5</td></tr>
+<tr><td>Spule −</td><td>CH → EH → EL → IL → K1-Pin 2 · GJ → GL</td></tr>
+<tr><td>PA1</td><td>CR → ER → ES → GS</td></tr>
+<tr><td>LED Optokoppler</td><td>KS → MS</td></tr>
+<tr><td>SKR-GND</td><td>CT → MT</td></tr>
+</table></div>
+<div class="note"><h2>Hinweise</h2>
+<b>Dick</b> = Laserstrom (bis 1,5 A): Draht ≥ 0,75 mm² oder Litze, sauber an jedem Loch verlöten.<br>
+<b>Relais K1:</b> Nur COM (II) passt ins Raster. Relais auflegen, die vier anderen Pins markieren, Löcher mit 1,5 mm bohren. NC bleibt frei. Alternativ das Relais aufkleben (Pins nach oben) und mit Draht anschließen.<br>
+<b>Trennung:</b> SKR-Seite (Spalten C–M, Zeilen R–T) und Laser-Seite haben <b>keine</b> gemeinsame Verbindung – nur über den Optokoppler U1.<br>
+<b>Benachbarte Löcher</b> mit verschiedenen Signalen (z. B. UQ/VQ, SQ/TQ/UQ am 7805) beim Löten nicht verbinden.<br>
+<b>Vor dem ersten Einschalten</b> durchmessen: CT ↔ D'P kein Durchgang · D'C ↔ D'E kein Kurzschluss · SQ (5 V) ↔ TQ kein Kurzschluss.<br>
+<b>Test ohne Laser:</b> Relais an → LED leuchtet, SQ = 5 V; PWM an → D'R ≈ 4,7 V, PWM aus → 0 V.
+</div>
+</div>
+</body></html>

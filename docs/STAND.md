@@ -377,6 +377,12 @@ Voraussetzungen:
       (Pi-Status) → Rot hängt nicht hinter Relais-NO? prüfen. MASCHINE.md
       korrigiert: PA1 liegt am BL_Touch-Header (Pin 3 von 5; Marlin
       SERVO0_PIN), nicht an PWR-DET (PC12). PA2 ist TX2 (Serial 2 aktiv) → nicht verwenden.
+      Laser zeichnete bei S255 Punkte statt Linie und glimmte nach dem
+      Auftrag (Gelb 0,05 V, 24 V stabil): PWM-Teiler zu hochohmig. Neu:
+      **Laser-Interface V2** (`hardware/laser-interface-v2/`): Relais G5LE-1
+      + Sicherung + SFH618A/PC817 + 7805 (5 V geregelt) + 2,2 kΩ Pull-down
+      auf einer Platine; KiCad-Platine (DRC 0) mit Gerber-ZIP für JLCPCB und
+      Lochraster-Bauplan 7 × 9 cm. Kopie: \NAS\Projekte\Lasercut Projekte\n      Laser-Interface-V2. Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
       31.10., SHA-256 `96ca4fc6…6a9`).

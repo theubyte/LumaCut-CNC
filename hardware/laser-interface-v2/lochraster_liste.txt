@@ -1,0 +1,44 @@
+saved A:\LumaCut\LumaCut-CNC-android\hardware\laser-interface-v2\lochraster.kicad_pcb
+
+BAUTEILE (Pin -> Loch):
+  C1    100n           1:VO 2:VQ
+  C2    100n           1:RS 2:RU
+  C3    10u            1:XO 2:XP
+  D1    1N4007         1:GF 2:GJ
+  F1    2A T           1:PC 1:RC 2:VC 2:XC
+  J1    Netzteil       1:D'E 2:D'C
+  J2    Laser          1:D'R 2:D'P 3:D'N
+  J3    SKR BL_Touch   1:CR 2:CT
+  J4    SKR FAN1       1:CF 2:CH
+  K1    G5LE-1 24VDC   1:II 2:JK~ 3:OK~ 4:OG~ 5:JG~
+  LED1  LED            1:B'T 2:A'T
+  R1    680            1:GS 2:KS
+  R4    2k2            1:YX 2:YT
+  R5    4k7            1:A'O 2:A'S
+  U1    SFH618A/PC817  1:MS 2:MT 3:PT 4:PS
+  U2    7805           1:UQ 2:TQ 3:SQ
+
+DRAEHTE (Loetseite):
+  +24V_IN  XC -> D'C  [dick]
+  +24V_F   K1-Pin1 -> MI -> MD -> PD -> PC  [dick, isoliert]
+  +24V_SW  K1-Pin3 -> OK -> ON -> D'N  [dick]
+  GND      D'E -> E'E -> E'P -> D'P  [dick]
+  GND      D'P -> C'P -> C'U -> RU
+  +24V_SW  UN -> UQ
+  +24V_SW  VN -> VO
+  +24V_SW  XN -> XO
+  +24V_SW  A'N -> A'O
+  GND      TQ -> TU
+  GND      VQ -> VU
+  GND      XP -> XU
+  GND      YT -> YU
+  GND      B'T -> B'U
+  LED_A    A'S -> A'T
+  +5V      SQ -> SS -> PS
+  PWM      PT -> PX -> D'X -> D'R
+  FAN+     CF -> IF -> K1-Pin5
+  FAN-     CH -> EH -> EL -> IL -> K1-Pin2
+  FAN-     GJ -> GL
+  PA1      CR -> ER -> ES -> GS
+  OPTO_A   KS -> MS
+  GND_SKR  CT -> MT
