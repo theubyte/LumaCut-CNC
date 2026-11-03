@@ -72,6 +72,7 @@ TB = "TerminalBlock_Phoenix"
 T2 = "TerminalBlock_Phoenix_MKDS-1,5-2_1x02_P5.00mm_Horizontal"
 T3 = "TerminalBlock_Phoenix_MKDS-1,5-3_1x03_P5.00mm_Horizontal"
 R = ("Resistor_THT", "R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal")
+RV = ("Resistor_THT", "R_Axial_DIN0207_L6.3mm_D2.5mm_P2.54mm_Vertical")    # standing
 # Right edge (wire entry outwards): rot 90, pin 1 at the bottom.
 place("J1", "Netzteil", TB, T2, 29, 4, 90, {"2": "+24V_IN", "1": "GND"})
 place("J2", "Laser", TB, T3, 29, 17, 90, {"3": "+24V_SW", "2": "GND", "1": "PWM"})
@@ -89,9 +90,13 @@ place("D1", "1N4007", "Diode_THT", "D_DO-41_SOD81_P10.16mm_Horizontal", 6, 5, 27
 place("U1", "SFH618A/PC817", "Package_DIP", "DIP-4_W7.62mm", 12, 18, 0,
       {"1": "OPTO_A", "2": "GND_SKR", "3": "PWM", "4": "+5V"})
 place("R1", "680", *R, 6, 18, 0, {"1": "PA1", "2": "OPTO_A"})
-# 7805 turned round: OUT left, IN right.
-place("U2", "7805", "Package_TO_SOT_THT", "TO-220-3_Vertical", 20, 16, 180,
-      {"1": "+24V_SW", "2": "GND", "3": "+5V"})
+# LM317T from the owner's gas-heating board instead of a 7805 (03.11.):
+# pin 1 ADJ, 2 OUT (also the tab!), 3 IN. Turned round: IN left, ADJ right,
+# tab towards row Z. 1.25 V x (1 + 680/220) = 5.1 V.
+place("U2", "LM317T", "Package_TO_SOT_THT", "TO-220-3_Vertical", 20, 16, 180,
+      {"1": "ADJ", "2": "+5V", "3": "+24V_SW"})
+place("R6", "220", *RV, 19, 18, 0, {"1": "+5V", "2": "ADJ"})
+place("R7", "680", *RV, 20, 19, 270, {"1": "ADJ", "2": "GND"})
 place("C1", "100n", "Capacitor_THT", "C_Disc_D5.0mm_W2.5mm_P5.00mm", 21, 14, 270,
       {"1": "+24V_SW", "2": "GND"})
 place("C3", "10u", "Capacitor_THT", "CP_Radial_D5.0mm_P2.50mm", 23, 14, 270,
@@ -116,17 +121,17 @@ WIRES = [
     ("+24V_SW", 1.4, [("K1", "3"), (14, 10), (14, 13), (29, 13)], "dick"),
     ("GND", 1.4, [(29, 4), (30, 4), (30, 15), (29, 15)], "dick"),
     ("GND", 0.8, [(29, 15), (28, 15), (28, 20), (17, 20)], ""),
-    ("+24V_SW", 0.8, [(20, 13), (20, 16)], ""),
+    ("+24V_SW", 0.8, [(18, 13), (18, 16)], ""),
     ("+24V_SW", 0.8, [(21, 13), (21, 14)], ""),
     ("+24V_SW", 0.8, [(23, 13), (23, 14)], ""),
     ("+24V_SW", 0.8, [(26, 13), (26, 14)], ""),
-    ("GND", 0.8, [(19, 16), (19, 20)], ""),
     ("GND", 0.8, [(21, 16), (21, 20)], ""),
     ("GND", 0.8, [(23, 15), (23, 20)], ""),
     ("GND", 0.8, [(24, 19), (24, 20)], ""),
     ("GND", 0.8, [(27, 19), (27, 20)], ""),
     ("LED_A", 0.8, [(26, 18), (26, 19)], ""),
-    ("+5V", 0.8, [(18, 16), (18, 18), (15, 18)], ""),
+    ("+5V", 0.8, [(19, 16), (19, 18), (15, 18)], ""),
+    ("ADJ", 0.8, [(20, 16), (20, 19)], ""),
     ("PWM", 0.8, [(15, 19), (15, 23), (29, 23), (29, 17)], ""),
     ("FAN+", 0.8, [(2, 5), (8, 5), ("K1", "5")], ""),
     ("FAN-", 0.8, [(2, 7), (4, 7), (4, 11), (8, 11), ("K1", "2")], ""),

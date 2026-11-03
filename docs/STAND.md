@@ -383,6 +383,8 @@ Voraussetzungen:
       + Sicherung + SFH618A/PC817 + 7805 (5 V geregelt) + 2,2 kΩ Pull-down
       auf einer Platine; KiCad-Platine (DRC 0) mit Gerber-ZIP für JLCPCB und
       Lochraster-Bauplan 7 × 9 cm. Kopie: `\\NAS\Projekte\Lasercut Projekte\Laser-Interface-V2`.
+      Lochraster seit 03.11. mit **LM317T** (aus der Gasheizungsplatine, Besitzer hat keinen
+      7805) und R6 220 Ω / R7 680 Ω stehend → 5,1 V; Fahne = Ausgang. Platine (JLCPCB) bleibt 7805.
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut

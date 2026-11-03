@@ -34,7 +34,9 @@ th{background:#e8efe8}
 <tr><td>D1</td><td>1N4007</td><td>Ring (Kathode) GF, Anode GJ</td></tr>
 <tr><td>R1</td><td>680 Ω (PC817: 470 Ω)</td><td>GS – KS</td></tr>
 <tr><td>U1</td><td>SFH618A-3 / PC817</td><td>Pin 1 (Punkt) MS, 2 MT, 3 PT, 4 PS</td></tr>
-<tr><td>U2</td><td>7805</td><td>OUT SQ, GND TQ, IN UQ (Metallfahne nach unten)</td></tr>
+<tr><td>U2</td><td>LM317T</td><td>IN SQ, OUT TQ, ADJ UQ (Schrift nach oben, Metallfahne nach unten)</td></tr>
+<tr><td>R6</td><td>220 Ω (rot-rot-braun)</td><td>stehend: TS – US</td></tr>
+<tr><td>R7</td><td>680 Ω (blau-grau-braun)</td><td>stehend: UT – UU</td></tr>
 <tr><td>C1</td><td>100 nF</td><td>VO – VQ</td></tr>
 <tr><td>C3</td><td>10 µF 35 V</td><td>+ XO, − XP</td></tr>
 <tr><td>C2</td><td>100 nF</td><td>RS – RU</td></tr>
@@ -50,10 +52,11 @@ th{background:#e8efe8}
 <tr><td class="thick">+24 V geschaltet</td><td class="thick">K1-NO → OK → ON → D'N (dick)</td></tr>
 <tr><td class="thick">GND Netzteil → Laser</td><td class="thick">D'E → E'E → E'P → D'P (dick)</td></tr>
 <tr><td>GND-Schiene</td><td>D'P → C'P → C'U → RU</td></tr>
-<tr><td>+24 V Abzweige</td><td>UN → UQ · VN → VO · XN → XO · A'N → A'O</td></tr>
-<tr><td>GND Abzweige</td><td>TQ → TU · VQ → VU · XP → XU · YT → YU · B'T → B'U</td></tr>
+<tr><td>+24 V Abzweige</td><td>SN → SQ · VN → VO · XN → XO · A'N → A'O</td></tr>
+<tr><td>GND Abzweige</td><td>VQ → VU · XP → XU · YT → YU · B'T → B'U</td></tr>
 <tr><td>LED</td><td>A'S → A'T</td></tr>
-<tr><td>+5 V</td><td>SQ → SS → PS</td></tr>
+<tr><td>+5 V</td><td>TQ → TS → PS</td></tr>
+<tr><td>ADJ (LM317)</td><td>UQ → UT</td></tr>
 <tr><td>PWM</td><td>PT → PX → D'X → D'R</td></tr>
 <tr><td>Spule +</td><td>CF → IF → K1-Pin 5</td></tr>
 <tr><td>Spule −</td><td>CH → EH → EL → IL → K1-Pin 2 · GJ → GL</td></tr>
@@ -65,9 +68,10 @@ th{background:#e8efe8}
 <b>Dick</b> = Laserstrom (bis 1,5 A): Draht ≥ 0,75 mm² oder Litze, sauber an jedem Loch verlöten.<br>
 <b>Relais K1:</b> Nur COM (II) passt ins Raster. Relais auflegen, die vier anderen Pins markieren, Löcher mit 1,5 mm bohren. NC bleibt frei. Alternativ das Relais aufkleben (Pins nach oben) und mit Draht anschließen.<br>
 <b>Trennung:</b> SKR-Seite (Spalten C–M, Zeilen R–T) und Laser-Seite haben <b>keine</b> gemeinsame Verbindung – nur über den Optokoppler U1.<br>
-<b>Benachbarte Löcher</b> mit verschiedenen Signalen (z. B. UQ/VQ, SQ/TQ/UQ am 7805) beim Löten nicht verbinden.<br>
-<b>Vor dem ersten Einschalten</b> durchmessen: CT ↔ D'P kein Durchgang · D'C ↔ D'E kein Kurzschluss · SQ (5 V) ↔ TQ kein Kurzschluss.<br>
-<b>Test ohne Laser:</b> Relais an → LED leuchtet, SQ = 5 V; PWM an → D'R ≈ 4,7 V, PWM aus → 0 V.
+<b>Benachbarte Löcher</b> mit verschiedenen Signalen (z. B. UQ/VQ, SQ/TQ/UQ am LM317) beim Löten nicht verbinden.<br>
+<b>Vor dem ersten Einschalten</b> durchmessen: CT ↔ D'P kein Durchgang · D'C ↔ D'E kein Kurzschluss · SQ (24 V) ↔ TQ (5 V) ↔ UQ (ADJ) kein Kurzschluss.<br>
+<b>LM317:</b> Die Metallfahne ist der 5-V-Ausgang – sie darf nichts berühren. Die stehenden Widerstände R6/R7 nicht an die Fahne lehnen. 1,25 V × (1 + 680/220) = 5,1 V.<br>
+<b>Test ohne Laser:</b> Relais an → LED leuchtet, TQ = 4,9–5,3 V (mehr: R6/R7 vertauscht); PWM an → D'R ≈ 4,7 V, PWM aus → 0 V.
 </div>
 </div>
 </body></html>
