@@ -345,7 +345,7 @@ Voraussetzungen:
       (z. B. SKR Mini E3 V3). SD-Neuaufspielen hilft erst nach behobenem
       Kurzschluss. **Reparatur 02.11.:** STM32 ausgelötet; ohne Chip nur an
       USB: AMS1117 (U4) 5 V rein, 3,33 V raus → Versorgung heil, der STM32
-      war der Kurzschluss. Ersatz: STM32F103RET6 aus Waschmaschinen-Platine
+      war der Kurzschluss. Ersatz: STM32F103RET6 aus der Platine einer Gasheizung
       (gleiches LQFP-64, mehr Flash/RAM), danach per ST-Link V2 an der
       SWD-Leiste entsperren + BTT-Bootloader, Firmware wie gehabt (RC-Build).
       **02.11. abends:** RET6 eingelötet, per ST-Link V2 (WinUSB via Zadig,
