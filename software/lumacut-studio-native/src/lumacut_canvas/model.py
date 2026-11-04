@@ -72,7 +72,9 @@ POINT_KINDS = {"polygon": 3, "path": 2}  # Art -> Mindestanzahl Punkte
 # Bildmodi: Rastermodi der Engine (lumacut_job.raster) plus 3D-Tiefe
 # (sliced depth). Leistung/Geschwindigkeit eines Bildes kommen aus seinen
 # Bildeinstellungen, nicht aus der Ebene (wie bei LightBurn "Image"-Ebenen).
-IMAGE_MODES = ("threshold", "floyd", "atkinson", "ordered", "grayscale", "depth3d")
+# Reihenfolge = alte Modi zuerst; Jarvis/Stucki/Sierra/Halbton/Zeitungsdruck seit Runde 27.
+IMAGE_MODES = ("threshold", "floyd", "atkinson", "ordered", "grayscale", "depth3d",
+               "jarvis", "stucki", "sierra", "halftone", "newsprint")
 
 
 @dataclass(frozen=True)
@@ -91,8 +93,12 @@ class ImageSettings:
     negative: bool = False
     depth_levels: int = 8             # nur 3D-Tiefe
     z_step_mm: float = 0.0            # nur 3D-Tiefe: Fokus je Stufe tiefer
+    halftone_cpi: float = 30.0        # nur Halbton: Zellen je Zoll (LightBurn „Cells per Inch“)
+    halftone_angle: float = 45.0      # nur Halbton: Rasterwinkel in Grad
+    dot_width_mm: float = 0.0         # Punktbreitenkorrektur (0 = aus, max. Linienabstand)
 
     def normalized(self) -> "ImageSettings":
+        interval = _clamp(float(self.line_interval_mm), 0.03, 2.0)
         return ImageSettings(
             mode=self.mode if self.mode in IMAGE_MODES else "floyd",
             line_interval_mm=_clamp(float(self.line_interval_mm), 0.03, 2.0),
@@ -105,7 +111,10 @@ class ImageSettings:
             overscan_mm=_clamp(float(self.overscan_mm), 0.0, 20.0),
             negative=bool(self.negative),
             depth_levels=int(_clamp(int(self.depth_levels), 2, 64)),
-            z_step_mm=_clamp(float(self.z_step_mm), 0.0, 2.0))
+            z_step_mm=_clamp(float(self.z_step_mm), 0.0, 2.0),
+            halftone_cpi=_clamp(float(self.halftone_cpi), 5.0, 150.0),
+            halftone_angle=_clamp(float(self.halftone_angle), -90.0, 90.0),
+            dot_width_mm=_clamp(float(self.dot_width_mm), 0.0, interval))
 
     def to_dict(self) -> dict:
         return asdict(self)

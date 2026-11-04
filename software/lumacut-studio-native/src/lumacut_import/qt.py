@@ -12,11 +12,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QPointF, Qt
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
+from PySide6.QtGui import QAction, QKeySequence, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog, QLabel,
-                               QMessageBox, QSpinBox, QVBoxLayout)
+                               QHBoxLayout, QMessageBox, QSpinBox, QVBoxLayout)
 
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand, SetImageSettingsCommand
 from lumacut_canvas.document_io import FILE_SUFFIX
@@ -28,10 +28,17 @@ MODE_LABELS = {
     "threshold": "Schwellwert (Schwarz/Weiß)",
     "floyd": "Floyd-Steinberg (Dithering)",
     "atkinson": "Atkinson (Dithering)",
+    "jarvis": "Jarvis (Dithering, Fotos)",
+    "stucki": "Stucki (Dithering, Fotos)",
+    "sierra": "Sierra (Dithering)",
     "ordered": "Geordnet (Bayer)",
+    "halftone": "Halbton (Rasterpunkte, Zellen + Winkel)",
+    "newsprint": "Zeitungsdruck (45°-Rasterpunkte)",
     "grayscale": "Graustufen (Leistung je Pixel)",
     "depth3d": "3D-Tiefe (Mehrfach-Durchgänge)",
 }
+PREVIEW_SIZE = 300          # px, längste Kante der Vorschau im Dialog
+PREVIEW_DEBOUNCE_MS = 150
 
 FILTER = ("Alle unterstützten (" + " ".join(f"*{s}" for s in ALL_SUFFIXES) + ");;"
           "Vektor (*.svg *.dxf *.pdf *.ai *.eps);;"
@@ -44,11 +51,17 @@ FILTER = ("Alle unterstützten (" + " ".join(f"*{s}" for s in ALL_SUFFIXES) + ")
 class ImageSettingsDialog(QDialog):
     """Gravur-Einstellungen eines Bildobjekts (LightBurn „Bildmodus“)."""
 
-    def __init__(self, settings: ImageSettings, width_mm: float, px_width: int, parent=None) -> None:
+    def __init__(self, settings: ImageSettings, width_mm: float, px_width: int, parent=None,
+                 png: bytes | None = None, height_mm: float | None = None) -> None:
+        """``png`` + ``height_mm``: Bilddaten für die Vorschau (ohne: keine Vorschau)."""
         super().__init__(parent)
         self.setWindowTitle("Bildeinstellungen")
         self._width_mm = width_mm
+        self._height_mm = height_mm
         self._px = px_width
+        self._gray = None
+        self.preview_runs = 0
+        self.last_preview = None
         st = settings.normalized()
         form = QFormLayout()
         self.mode = QComboBox()
@@ -76,6 +89,14 @@ class ImageSettingsDialog(QDialog):
         self.levels.setValue(st.depth_levels)
         self.z_step = self._dspin(0, 2, st.z_step_mm, 2, 0.05, " mm")
         self.z_step.setToolTip("Fokus je Tiefenstufe absenken (0 = aus, max. 3 mm gesamt)")
+        self.cpi = self._dspin(5, 150, st.halftone_cpi, 1, 1, " /Zoll")
+        self.cpi.setToolTip("Rasterzellen je Zoll (LightBurn „Cells per Inch“) – je Zelle ein Punkt")
+        self.angle = self._dspin(-90, 90, st.halftone_angle, 1, 7.5, " °")
+        self.angle.setToolTip("Winkel des Halbtonrasters")
+        self.dot_width = self._dspin(0, 2, st.dot_width_mm, 3, 0.01, " mm")
+        self.dot_width.setToolTip("Punktbreitenkorrektur: jede gelaserte Strecke wird um diesen Wert "
+                                  "kürzer (je Ende die Hälfte), damit der Strahl Punkte nicht "
+                                  "verbreitert. Etwa die halbe Strahlbreite; höchstens der Linienabstand.")
         form.addRow("Modus", self.mode)
         form.addRow("Linienabstand", self.interval)
         form.addRow("", self.dpi_label)
@@ -89,22 +110,64 @@ class ImageSettingsDialog(QDialog):
         form.addRow("", self.negative)
         form.addRow("Tiefenstufen (3D)", self.levels)
         form.addRow("Z-Schritt je Stufe (3D)", self.z_step)
+        form.addRow("Rasterzellen (Halbton)", self.cpi)
+        form.addRow("Rasterwinkel (Halbton)", self.angle)
+        form.addRow("Punktbreitenkorrektur", self.dot_width)
         self.hint = QLabel()
         self.hint.setWordWrap(True)
+        self.preview = QLabel()
+        self.preview.setObjectName("image_preview")
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setMinimumSize(PREVIEW_SIZE, PREVIEW_SIZE)
+        self.preview.setStyleSheet("background: white; border: 1px solid #bbb;")
+        self.preview_label = QLabel()
+        self.preview_label.setWordWrap(True)
+        self.preview_label.setMaximumWidth(PREVIEW_SIZE)
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(PREVIEW_DEBOUNCE_MS)
+        self._preview_timer.timeout.connect(self.update_preview)
+        if png is not None and height_mm:
+            try:
+                from .image_preview import gray_from_png
+                self._gray = gray_from_png(png)
+            except (ValueError, RuntimeError):
+                self._gray = None
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Übernehmen")
         buttons.button(QDialogButtonBox.Cancel).setText("Abbrechen")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        left = QVBoxLayout()
+        left.addLayout(form)
+        left.addWidget(self.hint)
         lay = QVBoxLayout(self)
-        lay.addLayout(form)
-        lay.addWidget(self.hint)
+        row = QHBoxLayout()
+        row.addLayout(left)
+        if self._gray is not None:
+            right = QVBoxLayout()
+            right.addWidget(self.preview)
+            right.addWidget(self.preview_label)
+            right.addStretch(1)
+            row.addLayout(right)
+        else:
+            self.preview.hide()
+            self.preview_label.hide()
+        lay.addLayout(row)
         lay.addWidget(buttons)
         self.mode.currentIndexChanged.connect(self._update)
         self.interval.valueChanged.connect(self._update)
         self.levels.valueChanged.connect(self._update)
         self.z_step.valueChanged.connect(self._update)
+        self.cpi.valueChanged.connect(self._update)
+        self.dot_width.valueChanged.connect(self._update)
+        for w in (self.power, self.min_power, self.threshold, self.angle, self.levels):
+            w.valueChanged.connect(self._schedule_preview)
+        self.negative.toggled.connect(self._schedule_preview)
         self._update()
+        if self._gray is not None:
+            self._preview_timer.stop()
+            self.update_preview()
 
     @staticmethod
     def _dspin(lo, hi, value, decimals, step, suffix) -> QDoubleSpinBox:
@@ -122,6 +185,9 @@ class ImageSettingsDialog(QDialog):
         self.threshold.setEnabled(mode == "threshold")
         self.levels.setEnabled(mode == "depth3d")
         self.z_step.setEnabled(mode == "depth3d")
+        self.cpi.setEnabled(mode == "halftone")
+        self.angle.setEnabled(mode == "halftone")
+        self.dot_width.setMaximum(self.interval.value())
         dpi = 25.4 / self.interval.value()
         src_dpi = self._px / self._width_mm * 25.4 if self._width_mm > 0 else 0
         self.dpi_label.setText(f"= {dpi:.0f} DPI (Bild: {src_dpi:.0f} DPI)")
@@ -131,8 +197,43 @@ class ImageSettingsDialog(QDialog):
         elif mode == "depth3d":
             self.hint.setText("Dunkle Bereiche werden öfter gelasert und damit tiefer. "
                               "Fokuskorrektur aus dem Scan ist mit Z-Schritten nicht kombinierbar.")
+        elif mode == "halftone":
+            cell = 25.4 / self.cpi.value()
+            px = cell / self.interval.value()
+            text = f"Zelle {cell:.2f} mm = {px:.1f} Punkte"
+            if px < 3:
+                text += " – zu klein für den Linienabstand, weniger Zellen je Zoll wählen."
+            self.hint.setText(text)
         else:
             self.hint.setText("")
+        self._schedule_preview()
+
+    def _schedule_preview(self, *_args) -> None:
+        if self._gray is not None:
+            self._preview_timer.start()
+
+    def update_preview(self) -> None:
+        """Vorschau sofort neu rechnen (sonst entprellt nach jeder Änderung)."""
+        if self._gray is None:
+            return
+        from .image_preview import preview_array, to_qimage
+        self._preview_timer.stop()
+        try:
+            pv = preview_array(self._gray, self._width_mm, self._height_mm, self.settings())
+        except ValueError as exc:
+            self.preview.clear()
+            self.preview_label.setText(f"Keine Vorschau: {exc}")
+            return
+        self.preview_runs += 1
+        self.last_preview = pv
+        pix = QPixmap.fromImage(to_qimage(pv.pixels))
+        self.preview.setPixmap(pix.scaled(PREVIEW_SIZE, PREVIEW_SIZE, Qt.KeepAspectRatio,
+                                          Qt.SmoothTransformation))
+        h, w = pv.pixels.shape
+        text = f"Vorschau: {w} × {h} Laserpunkte, {pv.burn_share * 100:.0f} % gelasert"
+        if pv.cropped:
+            text += " (Ausschnitt aus der Bildmitte)"
+        self.preview_label.setText(text)
 
     def settings(self) -> ImageSettings:
         return ImageSettings(
@@ -141,7 +242,9 @@ class ImageSettingsDialog(QDialog):
             speed_mm_min=self.speed.value(), passes=self.passes.value(),
             threshold=self.threshold.value(), bidirectional=self.bidirectional.isChecked(),
             overscan_mm=self.overscan.value(), negative=self.negative.isChecked(),
-            depth_levels=self.levels.value(), z_step_mm=self.z_step.value()).normalized()
+            depth_levels=self.levels.value(), z_step_mm=self.z_step.value(),
+            halftone_cpi=self.cpi.value(), halftone_angle=self.angle.value(),
+            dot_width_mm=self.dot_width.value()).normalized()
 
 
 class ImportTools(QObject):
@@ -335,7 +438,8 @@ class ImportTools(QObject):
         sh = doc.shape(shape_id)
         old = sh.image.settings
         if settings is None:
-            dlg = ImageSettingsDialog(old, sh.geom.w, sh.image.px_width, self.window)
+            dlg = ImageSettingsDialog(old, sh.geom.w, sh.image.px_width, self.window,
+                                      png=sh.image.png, height_mm=sh.geom.h)
             if dlg.exec() != QDialog.Accepted:
                 return False
             settings = dlg.settings()

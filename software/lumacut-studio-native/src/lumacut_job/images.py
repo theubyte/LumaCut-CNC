@@ -5,8 +5,10 @@ Linienabstand seiner Einstellungen in ein Graustufen-Array gerendert
 (achsparallele Hüllbox, außerhalb des Bildes = nicht lasern) und mit der
 vorhandenen Raster-Engine umgesetzt:
 
-* ``threshold``/``floyd``/``atkinson``/``ordered``/``grayscale`` →
-  :func:`raster.power_map` + :func:`raster.scanlines`;
+* ``threshold``/``floyd``/``atkinson``/``ordered``/``grayscale``/``jarvis``/
+  ``stucki``/``sierra``/``halftone``/``newsprint`` →
+  :func:`raster.power_map` + :func:`raster.scanlines` (Punktbreitenkorrektur
+  ``dot_width_mm`` gilt für alle Modi inkl. 3D);
 * ``depth3d`` → :func:`raster.sliced_depth_gcode` (Mehrfach-Durchgänge nach
   Helligkeit, optional Fokus-Absenkung je Stufe).
 
@@ -50,7 +52,8 @@ def raster_settings(shape: Shape, overscan_mm: float | None = None) -> RasterSet
                           min_power=min(st.min_power, st.power), speed_mm_min=st.speed_mm_min,
                           mode=mode, threshold=st.threshold, bidirectional=st.bidirectional,
                           overscan_mm=st.overscan_mm if overscan_mm is None else overscan_mm,
-                          negative=st.negative)
+                          negative=st.negative, halftone_cpi=st.halftone_cpi,
+                          halftone_angle=st.halftone_angle, dot_width_mm=st.dot_width_mm)
 
 
 def render_gray(shape: Shape, interval_mm: float) -> tuple[np.ndarray, tuple[float, float]]:
@@ -108,8 +111,10 @@ def image_job(shape: Shape, layer_name: str = "", scan_offsets=None) -> ImageJob
         # nach links. Raster laufen in +X ab Spalte 0 → Spalte 0 = rechte Bildkante.
         gray = np.ascontiguousarray(gray[:, ::-1])
         ox, oy = to_machine(cx + width, cy)
+        flipped = True
     else:
         ox, oy = to_machine(cx, cy)
+        flipped = False
     # Scan-Versatz: halbe Verschiebung je Richtung, am Rand gekürzt.
     off = scan_offsets.offset_for(st.speed_mm_min) if scan_offsets is not None else 0.0
     edge = max(0.0, min(ox - _MIN_X, _MAX_X - (ox + width)))
@@ -120,6 +125,10 @@ def image_job(shape: Shape, layer_name: str = "", scan_offsets=None) -> ImageJob
     room = min(ox - _MIN_X, _MAX_X - (ox + width), ox + off - _MIN_X, _MAX_X - (ox + off + width))
     s = raster_settings(shape, max(0.0, min(st.overscan_mm, room)))
     s.scan_offset_mm = round(off, 4)
+    if flipped:
+        # Gespiegeltes Array: Rasterwinkel spiegeln, damit der Halbton auf dem
+        # Werkstück unter dem eingestellten Winkel liegt (wie in der Vorschau).
+        s.halftone_angle = -s.halftone_angle
     title = f"; IMAGE {shape.id} {st.mode.upper()}"
     if st.mode == "depth3d":
         prog = sliced_depth_gcode(gray, (ox, oy), width, gray.shape[0] * st.line_interval_mm,
