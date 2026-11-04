@@ -189,6 +189,11 @@ class JobTools(QObject):
             # Park corner (Pi 9ae8577): refuse before uploading, not at the Pi.
             from .park_corner import attach_park_check
             attach_park_check(machine_panel, lambda text: self._msg(text, 15000))
+        # Park corner as a red hatched no-go zone on the canvas (absolute origin only).
+        self.park_zone = None
+        if hasattr(editor, "add_overlay"):
+            from .park_zone import install_park_zone
+            self.park_zone = install_park_zone(editor, machine_panel, self)
         # Variable text (lumacut_job.vartext): outermost wrapper, advances after a successful upload.
         self.vartext_tracker = None
         if hasattr(machine_panel, "send_gcode"):
