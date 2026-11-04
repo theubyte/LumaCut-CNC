@@ -219,8 +219,11 @@ def test_curve_widget_end_points_and_keyboard(qapp):
     i = w.add_point(100, 50)
     assert i == 1 and w.points()[1] == (100, 50)
     assert w.add_point(100) is None                  # input already used
-    w.setFocus()
-    QTest.keyClick(w, Qt.Key_Delete)
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+    over = QKeyEvent(QEvent.ShortcutOverride, Qt.Key_Delete, Qt.NoModifier)
+    assert w.event(over) and over.isAccepted()       # wins against app shortcuts
+    w.keyPressEvent(QKeyEvent(QEvent.KeyPress, Qt.Key_Delete, Qt.NoModifier))
     assert w.points() == [(0, 0), (255, 255)]
     w.set_curve(S_CURVE)
     QTest.mouseDClick(w, Qt.LeftButton, Qt.NoModifier, w.to_widget(64, 44).toPoint())

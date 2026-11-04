@@ -21,7 +21,7 @@ Schwarz-/Weißpunkt, vor Helligkeit, Kontrast und Gamma.
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -201,6 +201,16 @@ class CurveWidget(QWidget):
         if i is not None:
             self._drag = None
             self.remove_point(i)
+
+    def event(self, event) -> bool:
+        # Delete/Backspace remove the selected point even where an application
+        # shortcut (e.g. "delete object") uses the same key.
+        if (event.type() == QEvent.ShortcutOverride
+                and event.key() in (Qt.Key_Delete, Qt.Key_Backspace)
+                and self._selected is not None):
+            event.accept()
+            return True
+        return super().event(event)
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace) and self._selected is not None:
