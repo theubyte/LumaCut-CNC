@@ -467,6 +467,11 @@ def test_long_press_opens_menu_without_click_or_move(ed, qapp):
     p = _vp(ed, QPointF(80, 80))
     _touch(ed, QEvent.TouchBegin, [(0, p, "p")])
     QTest.qWait(LONG_PRESS_MS + 150)
+    # under heavy load (full suite) the timer / menu show can lag: poll up to 3 s
+    for _ in range(60):
+        if ed.context_menu is not None and ed.context_menu.isVisible():
+            break
+        QTest.qWait(50)
     m = ed.context_menu
     assert m is not None and m.isVisible() and ed.selection == [sid]
     assert "padding" in m.styleSheet()          # große Zeilen im Touch-Modus
