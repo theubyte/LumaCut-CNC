@@ -1991,3 +1991,107 @@ Still open:
   PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
   codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
   incl. the canvas value labels, rebuilt exe).
+
+## 35. Status update 2026-11-04 (review round 28)
+
+Done this round (Job raster engine, image model / job builder, image preview and the image settings
+dialog; no change to the canvas widget, Machine / Scan Probe and Materials untouched):
+
+- Gap picked from the §34 list: **per-image adjustments and the Sketch mode**. LightBurn's *Adjust
+  Image* (brightness, contrast, gamma, enhance / sharpen) and xTool's image adjustments are the
+  usual first step for photo engraving – without them every photo had to be edited in an external
+  program before import. The *Sketch* mode was the last LightBurn image mode from §2 missing.
+  - `lumacut_job/raster.py`: `RasterSettings.brightness` (−100…100 %, added), `contrast`
+    (−100…100, slope 10^(c/100) around mid grey), `gamma` (0.2…5, `v ** (1/γ)`, > 1 lightens mid
+    tones, black and white stay), `sharpen` (unsharp mask 0…500 %) with `sharpen_radius`
+    (Gaussian σ 0.5…10 dots), validation. `adjust_gray()` (order: sharpen, brightness, contrast,
+    gamma) runs inside `power_map()` before every mode, `adjusted_height()` in
+    `sliced_depth_gcode()` for 3D depth – so all modes incl. grayscale and 3D use it. New mode
+    `sketch`: Sobel gradient of the lightly smoothed darkness (a hard step = full edge, flat areas –
+    light or dark – = nothing), dithered with Jarvis; works with negative, dot width correction
+    and the adjustments (contrast / sharpen strengthen the lines). Separable `gaussian_blur()`
+    (numpy, edge pixels repeated; 1 MP sharpen + sketch ≈ 0.3 s). `power_map(..., inside=mask)`:
+    pixels outside the real image never burn from adjustments or sketch edges; `margin=` lets a
+    crop carry filter context (`filter_margin()`).
+  - `lumacut_canvas/model.py`: `IMAGE_MODES` + `sketch`, `ImageSettings.brightness`, `contrast`,
+    `gamma`, `sharpen`, `sharpen_radius` with clamping. `lumacut_job/images.py`: passes the
+    fields; `render_inside()` renders the rotated image's footprint so a darkened or sketched
+    rotated image does not burn the corners of its bounding box (mirrored with `IMAGE_FLIP_X`).
+  - `lumacut_import/image_preview.py`: the live preview uses the same `power_map` /
+    `adjusted_height`; a cropped preview of a big image takes the filter margin along, so sharpen
+    and sketch at the crop edge give exactly the job's pixels.
+  - `lumacut_import/qt.py`: group **Bildanpassung** in the image settings dialog (Helligkeit,
+    Kontrast, Gamma, Schärfen, Schärferadius – only active with sharpen > 0 – and *Zurücksetzen*),
+    debounced preview on every change, mode „Skizze (Kanten, Zeichenstil)“ with a hint.
+  - Invert was already available as *Negativ* and is not duplicated.
+
+Tests:
+
+- `tests/test_image_adjustments.py` (47): defaults are a bit-identical no-op (mask ignored),
+  brightness shift / clip and less burn when brighter, contrast slope and order, gamma keeps
+  black / white and bends mid tones, Gaussian blur (flat areas, kernel), unsharp mask overshoot
+  and radius, exact order of operations, validation, Pi-safe adjusted G-code, inside mask keeps
+  box corners unburned, negative, 3D height map uses the adjustments; sketch listed everywhere,
+  edges only (flat black / white free), disc outline in both polarities, shorter than dithering,
+  with contrast / sharpen / dot width, filter margin = whole-image result; settings roundtrip and
+  clamping, job settings carry the fields, adjusted image objects (Jarvis / sketch / grayscale /
+  3D) send Pi-safe, old (rotated) documents give byte-identical G-code in five modes,
+  `render_inside()` for rotated images, darkened rotated image never burns the corners; preview
+  = engine with adjustments (Jarvis / sketch / grayscale), 3D preview, cropped preview with filter
+  margin, unchanged preview without adjustments; dialog fields roundtrip / reset / radius
+  enabling, old settings unchanged by the dialog, sketch hint and preview, debounced preview on
+  adjustment changes, `edit_image_settings` stores the adjustments with undo.
+
+Full suite: 1789 passed, 3 skipped (before: 1742 passed, 3 skipped).
+
+Output change for old files: none – G-code is byte-for-byte unchanged (all adjustments default to
+„unchanged“ and are skipped entirely; the inside mask is only used with adjustments or sketch);
+saved image settings gain `brightness`, `contrast`, `gamma`, `sharpen`, `sharpen_radius`.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Image: no scan angle / angle increment per pass (Marlin raster runs along X only), no
+  histogram / auto-levels button, the preview ignores rotation and the material's real dot size;
+  mode and adjustment presets are not linked to the material library (Materials).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); speeds only in mm/min (no mm/s view); the fill preview shows
+  pass 1 only (shifted lines appear ≈ 1.5 s after a change at ~1500 hatched objects, the canvas
+  stays usable meanwhile); the test pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes with non-ASCII characters stay one byte segment (no ECI / Kanji mode); no Micro QR.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera, plain-text QR codes with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417
+  readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
+  with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
+  the canvas value labels, rebuilt exe).

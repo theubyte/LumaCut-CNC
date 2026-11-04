@@ -670,8 +670,14 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
 - **PNG/JPG/BMP**: wird als **Bildobjekt** eingefügt (Größe aus der DPI-Angabe, sonst 96 dpi).
   *Datei › Bildeinstellungen…* (Strg+Umschalt+I) öffnet den Dialog (Modus Schwellwert / Floyd-Steinberg /
   Atkinson / **Jarvis / Stucki / Sierra** / Bayer / **Halbton** (Rasterzellen je Zoll + Winkel) /
-  **Zeitungsdruck** (45°-Rasterpunkte) / Graustufen / 3D-Tiefe, Linienabstand, Leistung max./min.,
-  Geschwindigkeit, Durchgänge, bidirektional, Negativ, **Punktbreitenkorrektur**). Rechts zeigt
+  **Zeitungsdruck** (45°-Rasterpunkte) / **Skizze** (nur Kanten, Zeichenstil) / Graustufen /
+  3D-Tiefe, Linienabstand, Leistung max./min., Geschwindigkeit, Durchgänge, bidirektional, Negativ,
+  **Punktbreitenkorrektur**). Die Gruppe **Bildanpassung** (wie LightBurn „Adjust Image“) ändert
+  das Bild vor dem Modus: **Helligkeit** und **Kontrast** (−100…100 %), **Gamma** (0.2…5, > 1
+  hellt die Mitteltöne auf) und **Schärfen** (Unscharf maskieren, Stärke und Radius in
+  Laserpunkten); *Zurücksetzen* stellt „unverändert“ wieder her. Die Anpassung gilt für alle Modi
+  inkl. 3D-Tiefe und wird gespeichert; bei gedrehten Bildern bleiben die Ecken der Hüllbox
+  ungelasert. Rechts zeigt
   eine **Live-Vorschau** das Bild so, wie es gelasert wird (ein Vorschaupunkt = ein Laserpunkt im
   eingestellten Linienabstand, große Bilder als Ausschnitt aus der Mitte, Anteil gelaserter
   Punkte). Für Fotos auf dem Diodenlaser sind Jarvis oder Stucki meist die beste Wahl. Die
