@@ -172,10 +172,18 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Code: `src/lumacut_job/park_corner.py`.
   Auf der Zeichenfläche ist der sichtbare Teil der Park-Ecke als **rot schraffierte
   Sperrzone** „Park-Ecke“ eingezeichnet (Kopf v6: Streifen 48 × 5 mm oben rechts; folgt
-  `park_corner_mm` des Pi), unter den Objekten, nicht anklickbar und nicht im Export. Sie
-  gilt nur für absolut gesendete Aufträge; bei Ursprung „Aktuelle Position“ / „Benutzer-
-  Ursprung“ wird sie ausgeblendet (die Lage auf der Fläche sagt dann nichts über die Ecke).
-  Code: `src/lumacut_job/park_zone.py`.
+  `park_corner_mm` des Pi), unter den Objekten, nicht anklickbar und nicht im Export. Bei
+  Ursprung „Aktuelle Position“ / „Benutzer-Ursprung“ zeigt sie die Stelle **relativ zum
+  Design**, die am Kopf / Benutzer-Ursprung mit dem gewählten Bezugspunkt in der Ecke landen
+  würde (Beschriftung „Park-Ecke (am Ursprung …)“; ohne bekannte Kopfposition / gespeicherten
+  Ursprung ausgeblendet). **Live-Warnung:** Schon beim Verschieben, Einfügen oder Einblenden
+  einer Ebene prüft Studio nach derselben Regel wie der Pi (umschließendes Rechteck des
+  Auftrags – sichtbare Ebenen, mit „Nur Auswahl“ nur die Auswahl), ob der Auftrag abgelehnt
+  würde: die Zone wird kräftiger rot, nennt die Zahl der Objekte darin (bzw. „Motiv-Umriss
+  reicht hinein“, wenn nur das Gesamtrechteck die Ecke berührt) und die Statusleiste meldet es
+  einmal – „Park-Ecke wieder frei.“, sobald es behoben ist. Die Live-Prüfung nutzt die
+  Objektboxen (etwas vorsichtiger als der G-Code-Laser-an-Bereich beim Senden, z. B. bei Text
+  oder weißen Bildrändern). Code: `src/lumacut_job/park_zone.py`.
 - **Rahmen:** „Rahmen“ (*Strg+Umschalt+F*, Rechteck) bzw. „Gummiband-Rahmen“
   (*Alt+Umschalt+F*, konvexe Hülle) oder der Knopf „Rahmen“ im Maschinen-Panel
   fahren den Umriss mit ausgeschaltetem Laser ab (`op=frame`). Der gesendete
@@ -691,7 +699,16 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   Laserpunkten); *Zurücksetzen* stellt „unverändert“ wieder her, **Auto-Tonwert** setzt Schwarz-
   und Weißpunkt auf den Tonwertumfang des (geschärften) Bildes ohne je 0,5 % Ausreißer – exakt
   linear von Schwarz bis Weiß gestreckt – und Helligkeit / Kontrast auf 0 (Gamma und Schärfen
-  bleiben; erneutes Klicken ändert nichts, flaches Bild: 0 / 255). Die Anpassung gilt für alle Modi
+  bleiben; erneutes Klicken ändert nichts, flaches Bild: 0 / 255). Die **Kurve** (Gradationskurve, wie
+  LightBurn / Photoshop „Curves“) wirkt nach Schwarz- / Weißpunkt: über dem Histogramm des
+  Bildes (nach Tonwertkorrektur) Punkte per Klick setzen und ziehen, Rechtsklick / Doppelklick
+  / *Entf* entfernt einen Punkt (Endpunkte springen in ihre Ecke zurück), höchstens 16 Punkte;
+  die Kurve verläuft monoton ohne Überschwinger durch alle Punkte. Vorlagen: Linear, Kontrast
+  verstärken (S-Kurve) / stark verstärken / verringern, Mitteltöne aufhellen / abdunkeln,
+  Schatten aufhellen (dunkle Holzstellen), Lichter abdunkeln (helle Flächen gravieren); die
+  Histogramm-Zeile nennt die aktive Kurve. Auto-Tonwert lässt die Kurve unverändert,
+  *Zurücksetzen* stellt sie auf linear. Gespeichert wird die Kurve nur, wenn sie nicht linear
+  ist (ältere Dateien unverändert). Die Anpassung gilt für alle Modi
   inkl. 3D-Tiefe und wird gespeichert; bei gedrehten Bildern bleiben die Ecken der Hüllbox
   ungelasert. Rechts zeigt
   eine **Live-Vorschau** das Bild so, wie es gelasert wird (ein Vorschaupunkt = ein Laserpunkt im

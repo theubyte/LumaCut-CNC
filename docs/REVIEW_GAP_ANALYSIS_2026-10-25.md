@@ -2423,3 +2423,129 @@ Still open:
   readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
   with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
   the canvas value labels, rebuilt exe).
+
+## 39. Status update 2026-11-04 (review round 32)
+
+Done this round (image adjustment, image settings dialog, job park-corner overlay; canvas editing,
+Machine / Scan Probe and Materials untouched):
+
+- Gaps picked from the §38 list: **no image curves**, **no live warning when an object is moved
+  into the park corner** and **park zone not shown for „Aktuelle Position“ / „Benutzer-Ursprung“**.
+- **Tone curve (Gradationskurve)** for images (LightBurn / Photoshop „Curves“):
+  - Engine (`lumacut_job/raster.py`): `RasterSettings.curve` (2–16 points (in, out), 0–255,
+    strictly rising inputs, validated); applied in `adjust_gray` after black / white point and
+    before brightness / contrast / gamma. Monotone cubic Hermite through all points
+    (Fritsch–Butland slopes with Fritsch–Carlson limiting: no overshoot, rising points give a
+    rising curve), flat beyond the end points, evaluated via a cached 4096-entry LUT
+    (`curve_lut`, `apply_curve`). An empty curve is bit-identical to before.
+  - Model (`lumacut_canvas/model.py`): `ImageSettings.curve`, `normalize_curve` (round / clamp,
+    sort, duplicate inputs → last wins, max. 16 points, identity → empty); `to_dict` only writes
+    `curve` when it is not linear. Job (`lumacut_job/images.py`) and dialog preview
+    (`lumacut_import/image_preview.py`) pass it through; `curve_input_histogram` gives the
+    histogram after the black / white point (what the curve sees); Auto-Tonwert ignores and keeps
+    the curve.
+  - Widget (`lumacut_import/curve_widget.py` `CurveWidget`): square plot with the input histogram
+    as background, grid, diagonal; click adds a point, drag moves it (kept between its
+    neighbours), right / double click or Delete / Backspace removes it (end points snap back to
+    their corner; the key wins against application shortcuts), 16-point limit. Presets
+    `CURVE_PRESETS` (linear, S-curve, strong S-curve, less contrast, lighten / darken midtones,
+    lift shadows for dark wood, darken highlights for light areas), „Benutzerdefiniert“ when
+    edited.
+  - Dialog (`lumacut_import/qt.py` `ImageSettingsDialog`): row „Kurve“ (preset combo + widget)
+    after the white point; live preview / histogram follow, the histogram line names the curve,
+    *Zurücksetzen* makes it linear, `settings()` returns it (undoable via `edit_image_settings`).
+- **Live park-corner warning** (`lumacut_job/park_zone.py` `ParkZoneSync`, hooked into
+  `JobTools`): after every `documentChanged` / `selectionChanged` (drag, nudge, paste, layer
+  visibility, „Nur Auswahl“ toggled) the design box of what would be sent (visible layers, only
+  the selection with „Nur Auswahl“) is checked with the Pi's rule (`design_hits_zone`: the whole
+  placed box reaching into the corner is refused – even if no single object lies in it). The zone
+  is drawn stronger with „N Objekte darin!“ / „Motiv-Umriss reicht hinein!“, and the status bar
+  gets one message per change (incl. „Park-Ecke wieder frei.“); redraws only on a change.
+- **Park zone for placed jobs**: with „Aktuelle Position“ / „Benutzer-Ursprung“ the zone is the
+  machine corner shifted back by the Pi's `placement_offset` for the current design box, anchor
+  (visible corner, older-Pi l/r swap undone) and head position / stored user origin
+  (`placed_zone_rect`), clipped to the work area and labelled „Park-Ecke (am Ursprung …)“; hidden
+  while that point is unknown. Follows panel status, origin and anchor combos.
+- Test fix: the curve widget keyboard test failed in a full run (an application Delete shortcut
+  of a leftover window ate the key); the widget now accepts the shortcut override and the test
+  sends the events directly.
+
+Tests:
+
+- `tests/test_image_curve.py` (34): LUT through the points / monotone / flat ends / no overshoot,
+  validation, empty curve bit-identical, order in the adjustment chain, `normalize_curve` cases,
+  `to_dict` / `from_dict` incl. old documents without `curve`, job and dialog preview use the
+  curve, Auto-Tonwert keeps it, curve input histogram, widget mouse add / drag / remove, keyboard,
+  point limit, presets and „Benutzerdefiniert“, dialog row / reset / histogram label,
+  `edit_image_settings` with undo.
+- `tests/test_park_zone_live.py` (15): machine design box, the box rule incl. two objects whose
+  common box reaches the corner and the unknown-target case, agreement with
+  `park_corner.check_job` (absolute and placed with anchors bl / center / tr over a grid of
+  positions), placed zone hidden without head position, live warning on move in / move within /
+  move out (one message each, „wieder frei“), hidden layers and „Nur Auswahl“, rotated object
+  boxes, real `CanvasEditor` + `JobTools` + `MachinePanel` status-bar message.
+
+Full suite: 1948 passed, 3 skipped (before: 1899 passed, 3 skipped).
+
+Output change for old files: none – documents without `curve` engrave bit-identically and are saved
+without it; the park-zone changes are display / warning only (the send-time check is unchanged).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Image: no scan angle / angle increment per pass (Marlin raster runs along X only); the preview
+  shows one pixel per dot and does not model the material's real dot size / beam spread (needs
+  the material library – Materials); mode and adjustment presets (incl. the curve presets) are
+  not linked to the material library (Materials); no per-channel / colour curves (images are
+  grey only).
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes (slightly stricter than the powered G-code extent
+  at send, e.g. text with small glyphs or images with white margins); with „Aktuelle Position“
+  the zone follows the head only as often as the Pi status updates; overscan / lead-ins are not
+  part of the live box (the send check still covers them).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes with non-ASCII characters stay one byte segment (no ECI / Kanji mode); no Micro QR.
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (speeds typed in mm/s on the layer panel and dialogs against the sent
+  G-code, the park-corner zone against a real refusal incl. the live warning and the placed zone at
+  „Aktuelle Position“ / „Benutzer-Ursprung“, photos with tone curves (S-curve, shadows lifted)
+  against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera, plain-text QR codes with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417
+  readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
+  with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
+  the canvas value labels, rebuilt exe).
