@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-05
+
+- **Bedienpanel 1.2, erstes Flashen:** Am PC über COM4 geflasht. Version 1.1 startete in einer Schleife neu, weil `esp_lcd_new_panel_io_i2c` mit dem alten I2C-Treiber keine Busgeschwindigkeit in der Touch-Konfiguration erlaubt (ESP_ERR_INVALID_ARG). Jetzt `scl_speed_hz = 0`, das Panel startet und sendet hello und ping mit Version 1.2. `pi400/marlin/panel_fw/` enthält 1.2, damit der Pi nicht die defekte 1.1 aufspielt. Bild und Touch am Panel noch nicht bestätigt.
+
 ## 2026-11-04
 
 - **SKR: Laser-PWM flackerte im Takt der Motoren:** PA1 hängt an Timer 2, und den benutzt Marlin auf dem STM32F1 auch für die Temperaturmessung. Der Zähler wurde jede Millisekunde per Interrupt zurückgesetzt. Ab S72 war das schon volle Leistung, und weil die Schrittmotoren diesen Interrupt verzögern, schwankte die Leistung bei jeder Bewegung. Jetzt läuft Timer 2 frei mit etwa 1 kHz, die Laser-PWM entsteht in Hardware und S 0..255 ist linear. Kommt als Firmware-Update per Knopf; danach die Laserleistungen auf dem SKR neu prüfen.

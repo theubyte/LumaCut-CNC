@@ -73,6 +73,7 @@ static esp_lcd_touch_handle_t touch_init(void)
 
     esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_panel_io_i2c_config_t io_conf = ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    io_conf.scl_speed_hz = 0;   // legacy i2c driver: the bus speed is set above, must be 0 here
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c((esp_lcd_i2c_bus_handle_t)I2C_PORT, &io_conf, &io_handle));
     esp_lcd_touch_config_t tp_conf = {
         .x_max = LVGL_PORT_H_RES,

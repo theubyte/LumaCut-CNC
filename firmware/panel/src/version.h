@@ -2,4 +2,4 @@
 // (tools/release.sh writes pi400/marlin/panel_fw/manifest.json from this).
 #pragma once
 
-#define PANEL_VERSION "1.1"
+#define PANEL_VERSION "1.2"

@@ -395,6 +395,10 @@ Voraussetzungen:
       (`patch_laser_pwm_timer`): TIM2 läuft frei 0..254 bei ~1 kHz, CH1 = Temperatur-ISR,
       CH2 = Laser-PWM in Hardware, S 0..255 linear. Lokal gebaut (SHA `b9156d10…`); kommt als
       Firmware-Update per Knopf. Danach Leistungen auf dem SKR neu prüfen (vorher zu stark).
+      05.11.: marlin-61 per Knopf geflasht. Testauftrag (Kreis, S255, F6000) graviert nichts und
+      flackert weiter. Bei S255 ist die PWM dauerhaft an, die Firmware scheidet damit aus. Verdacht:
+      Kabel/Klemmen (Kabelkette) oder Netzteil; Laser und SKR hängen am selben 24-V-Netzteil
+      (Typenschild offen). Nächster Schritt: Kabel durchpiepsen, Kopf von Hand verfahren.
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
