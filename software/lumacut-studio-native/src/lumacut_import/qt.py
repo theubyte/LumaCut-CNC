@@ -13,11 +13,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
-from PySide6.QtGui import QAction, QKeySequence, QPixmap
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog, QLabel,
                                QGroupBox, QHBoxLayout, QMessageBox, QPushButton, QSpinBox,
-                               QVBoxLayout)
+                               QVBoxLayout, QWidget)
 
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand, SetImageSettingsCommand
 from lumacut_canvas.document_io import FILE_SUFFIX
@@ -50,13 +50,69 @@ FILTER = ("Alle unterstützten (" + " ".join(f"*{s}" for s in ALL_SUFFIXES) + ")
           "Bild (" + " ".join(f"*{s}" for s in IMAGE_SUFFIXES) + ")")
 
 
+HISTOGRAM_HEIGHT = 70       # px
+
+
+class HistogramWidget(QWidget):
+    """Histogramm der Grauwerte (links Schwarz, rechts Weiß): hell = Bild,
+    dunkel = nach der Bildanpassung (Wurzel-Skala, damit kleine Spitzen
+    sichtbar bleiben). Rote Randstriche = reines Schwarz / Weiß nach Anpassung."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setObjectName("image_histogram")
+        self.setMinimumSize(PREVIEW_SIZE, HISTOGRAM_HEIGHT)
+        self.setMaximumHeight(HISTOGRAM_HEIGHT)
+        self.data = None
+
+    def set_data(self, data) -> None:
+        self.data = data
+        self.update()
+
+    def paintEvent(self, _event) -> None:  # noqa: N802
+        p = QPainter(self)
+        w, h = self.width(), self.height()
+        p.fillRect(0, 0, w, h, QColor(255, 255, 255))
+        p.setPen(QColor(187, 187, 187))
+        p.drawRect(0, 0, w - 1, h - 1)
+        d = self.data
+        if d is not None:
+            import numpy as np
+            peak = max(float(np.sqrt(d.source.max())), float(np.sqrt(d.adjusted.max())), 1.0)
+            for hist, color in ((d.source, QColor(190, 205, 225)), (d.adjusted, QColor(60, 60, 60))):
+                vals = np.sqrt(hist.astype(float)) / peak
+                p.setPen(color)
+                for i in range(256):
+                    x = 1 + int(i * (w - 2) / 256)
+                    top = h - 1 - int(vals[i] * (h - 3))
+                    p.drawLine(x, h - 2, x, top)
+            p.setPen(QColor(200, 30, 30))
+            if d.black_share > 0.01:
+                p.drawLine(1, 1, 1, h - 2)
+            if d.white_share > 0.01:
+                p.drawLine(w - 2, 1, w - 2, h - 2)
+        p.end()
+
+
 class ImageSettingsDialog(QDialog):
     """Gravur-Einstellungen eines Bildobjekts (LightBurn „Bildmodus“)."""
 
     def __init__(self, settings: ImageSettings, width_mm: float, px_width: int, parent=None,
-                 png: bytes | None = None, height_mm: float | None = None) -> None:
-        """``png`` + ``height_mm``: Bilddaten für die Vorschau (ohne: keine Vorschau)."""
+                 png: bytes | None = None, height_mm: float | None = None,
+                 shape=None) -> None:
+        """``png`` + ``height_mm``: Bilddaten für die Vorschau (ohne: keine Vorschau).
+
+        ``shape``: das Bildobjekt – dann rendert die Vorschau es wie der Auftrag
+        (Drehung, Glättung, Spiegelung im Maschinen-Nullpunkt)."""
         super().__init__(parent)
+        if shape is not None and getattr(shape, "image", None) is not None:
+            png = shape.image.png if png is None else png
+            height_mm = shape.geom.h if height_mm is None else height_mm
+        self._shape = shape
+        self._render_key = None
+        self._rendered = None
+        self.histogram_runs = 0
+        self.last_histograms = None
         self.setWindowTitle("Bildeinstellungen")
         self._width_mm = width_mm
         self._height_mm = height_mm
@@ -114,13 +170,23 @@ class ImageSettingsDialog(QDialog):
         self.reset_adjust = QPushButton("Zurücksetzen")
         self.reset_adjust.setToolTip("Helligkeit, Kontrast, Gamma und Schärfen auf „unverändert“")
         self.reset_adjust.clicked.connect(self.reset_adjustments)
+        self.auto_levels = QPushButton("Auto-Tonwert")
+        self.auto_levels.setToolTip("Helligkeit und Kontrast so setzen, dass der Tonwertumfang des "
+                                    "Bildes (ohne je 0,5 % Ausreißer) von Schwarz bis Weiß reicht")
+        self.auto_levels.clicked.connect(self.apply_auto_levels)
+        self.histogram = HistogramWidget()
+        self.histogram_label = QLabel()
+        self.histogram_label.setWordWrap(True)
         adjust_form = QFormLayout()
         adjust_form.addRow("Helligkeit", self.brightness)
         adjust_form.addRow("Kontrast", self.contrast)
         adjust_form.addRow("Gamma", self.gamma)
         adjust_form.addRow("Schärfen", self.sharpen)
         adjust_form.addRow("Schärferadius", self.sharpen_radius)
-        adjust_form.addRow("", self.reset_adjust)
+        adjust_buttons = QHBoxLayout()
+        adjust_buttons.addWidget(self.auto_levels)
+        adjust_buttons.addWidget(self.reset_adjust)
+        adjust_form.addRow("", adjust_buttons)
         self.adjust_box = QGroupBox("Bildanpassung")
         self.adjust_box.setLayout(adjust_form)
         form.addRow("Modus", self.mode)
@@ -175,11 +241,17 @@ class ImageSettingsDialog(QDialog):
             right = QVBoxLayout()
             right.addWidget(self.preview)
             right.addWidget(self.preview_label)
+            right.addWidget(self.histogram)
+            right.addWidget(self.histogram_label)
             right.addStretch(1)
             row.addLayout(right)
         else:
             self.preview.hide()
             self.preview_label.hide()
+            self.histogram.hide()
+            self.histogram_label.hide()
+            self.auto_levels.setEnabled(False)
+            self.auto_levels.setToolTip("Ohne Bilddaten nicht verfügbar")
         lay.addLayout(row)
         lay.addWidget(buttons)
         self.mode.currentIndexChanged.connect(self._update)
@@ -249,10 +321,19 @@ class ImageSettingsDialog(QDialog):
         """Vorschau sofort neu rechnen (sonst entprellt nach jeder Änderung)."""
         if self._gray is None:
             return
-        from .image_preview import preview_array, to_qimage
+        from .image_preview import preview_array, preview_shape, render_for_preview, to_qimage
         self._preview_timer.stop()
+        st = self.settings()
+        self.update_histogram(st)
         try:
-            pv = preview_array(self._gray, self._width_mm, self._height_mm, self.settings())
+            if self._shape is not None:
+                key = (st.line_interval_mm, st.negative)
+                if key != self._render_key:
+                    self._rendered = render_for_preview(self._shape, st)
+                    self._render_key = key
+                pv = preview_shape(self._shape, st, rendered=self._rendered)
+            else:
+                pv = preview_array(self._gray, self._width_mm, self._height_mm, st)
         except ValueError as exc:
             self.preview.clear()
             self.preview_label.setText(f"Keine Vorschau: {exc}")
@@ -266,7 +347,39 @@ class ImageSettingsDialog(QDialog):
         text = f"Vorschau: {w} × {h} Laserpunkte, {pv.burn_share * 100:.0f} % gelasert"
         if pv.cropped:
             text += " (Ausschnitt aus der Bildmitte)"
+        rot = self._shape.geom.rot if self._shape is not None else 0.0
+        if rot:
+            text += f", gedreht um {rot:g}°"
         self.preview_label.setText(text)
+
+    def update_histogram(self, st: ImageSettings | None = None) -> None:
+        """Histogramm vor/nach der Bildanpassung neu rechnen."""
+        if self._gray is None:
+            return
+        from .image_preview import histograms
+        try:
+            h = histograms(self._gray, self._width_mm, self._height_mm, st or self.settings())
+        except ValueError:
+            return
+        self.histogram_runs += 1
+        self.last_histograms = h
+        self.histogram.set_data(h)
+        text = (f"Histogramm: hell = Bild, dunkel = angepasst – reines Schwarz "
+                f"{h.black_share * 100:.1f} %, reines Weiß {h.white_share * 100:.1f} %")
+        if h.levels is not None:
+            text += f"; Tonwertumfang {h.levels[0]}–{h.levels[1]}"
+        self.histogram_label.setText(text)
+
+    def apply_auto_levels(self) -> bool:
+        """„Auto-Tonwert“: Helligkeit/Kontrast aus dem Histogramm; True bei Änderung."""
+        if self._gray is None:
+            return False
+        from .image_preview import auto_levels_for
+        b, c = auto_levels_for(self._gray, self._width_mm, self._height_mm, self.settings())
+        changed = (b, c) != (self.brightness.value(), self.contrast.value())
+        self.brightness.setValue(b)
+        self.contrast.setValue(c)
+        return changed
 
     def reset_adjustments(self) -> None:
         """Bildanpassung auf „unverändert“ (Vorgaben)."""
@@ -484,7 +597,7 @@ class ImportTools(QObject):
         old = sh.image.settings
         if settings is None:
             dlg = ImageSettingsDialog(old, sh.geom.w, sh.image.px_width, self.window,
-                                      png=sh.image.png, height_mm=sh.geom.h)
+                                      png=sh.image.png, height_mm=sh.geom.h, shape=sh)
             if dlg.exec() != QDialog.Accepted:
                 return False
             settings = dlg.settings()

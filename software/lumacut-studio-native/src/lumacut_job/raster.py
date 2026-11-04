@@ -35,6 +35,11 @@ inside :func:`power_map` before any mode, so preview and job match):
 then ``brightness`` (-100..100, added), ``contrast`` (-100..100, slope
 10**(c/100) around mid grey) and ``gamma`` (0.2..5, > 1 lightens the mid
 tones). All at their defaults = the image is used unchanged (bit-identical).
+:func:`gray_histogram` counts the grey values (optionally only inside a mask)
+and :func:`auto_levels` finds the brightness / contrast that stretch the
+image's tonal range (``AUTO_LEVELS_CLIP`` ignored at each end) to full black
+.. white - the "Auto" button of the image settings dialog; it only sets the
+existing adjustment fields, so the job needs nothing new.
 
 Coordinates: ``origin`` is the machine-mm position of the image's top-left
 pixel; image rows go towards +Y (same as the canvas).
@@ -62,6 +67,7 @@ CONTRAST_RANGE = (-100.0, 100.0)      # slope 10**(c/100): 0.1 .. 10
 GAMMA_RANGE = (0.2, 5.0)              # v ** (1/gamma), > 1 = lighter mid tones
 SHARPEN_RANGE = (0.0, 500.0)          # unsharp mask amount in %
 SHARPEN_RADIUS_RANGE = (0.5, 10.0)    # Gaussian sigma in pixels (= line intervals)
+AUTO_LEVELS_CLIP = 0.005              # share of pixels ignored at each end
 SKETCH_GAIN = 2.0                     # edge darkness = |Sobel| / 4 * gain
 MAX_DEPTH_DROP_MM = 3.0  # same budget as the canvas focus drop limit
 
@@ -377,6 +383,53 @@ def adjust_gray(gray: np.ndarray, s: RasterSettings) -> np.ndarray:
     if abs(s.gamma - 1.0) > 1e-9:
         v = v ** (1.0 / s.gamma)
     return (v * 255.0).astype(np.float32)
+
+
+def gray_histogram(gray: np.ndarray, inside: np.ndarray | None = None) -> np.ndarray:
+    """256 counts of the grey values (0 = black) of ``gray`` (uint8 or float
+    0..255, rounded); ``inside``: only pixels where the mask is True."""
+    g = np.asarray(gray)
+    if g.dtype != np.uint8:
+        g = np.clip(np.rint(g), 0, 255).astype(np.uint8)
+    if inside is not None:
+        g = g[np.asarray(inside, dtype=bool)]
+    return np.bincount(g.ravel(), minlength=256).astype(np.int64)
+
+
+def levels_points(hist: np.ndarray, clip: float = AUTO_LEVELS_CLIP) -> tuple[int, int] | None:
+    """Darkest / lightest grey value of a histogram after ignoring ``clip``
+    of the pixels at each end; None for an empty histogram."""
+    h = np.asarray(hist, dtype=np.float64)
+    total = h.sum()
+    if total <= 0:
+        return None
+    clip = min(max(clip, 0.0), 0.49)
+    cum = np.cumsum(h)
+    lo = int(np.searchsorted(cum, clip * total, side="right"))
+    hi = int(np.searchsorted(cum, (1.0 - clip) * total, side="left"))
+    lo, hi = min(lo, 255), min(max(hi, lo), 255)
+    return lo, hi
+
+
+def auto_levels(hist: np.ndarray, clip: float = AUTO_LEVELS_CLIP) -> tuple[float, float]:
+    """``(brightness, contrast)`` that map the histogram's tonal range
+    (:func:`levels_points`) onto black .. white with :func:`adjust_gray`.
+
+    Linear stretch ``v' = (v - lo) / (hi - lo)`` written as
+    ``(v + b - 0.5) * k + 0.5``: ``k = 1 / (hi - lo)`` and
+    ``b = 0.5 - (lo + hi) / 2``. Rounded to whole percent (dialog steps) and
+    clamped to the ranges (a range under 10 % of the grey scale gets the
+    maximum contrast, centred). Flat or empty images give ``(0, 0)``.
+    """
+    pts = levels_points(hist, clip)
+    if pts is None or pts[1] - pts[0] < 1:
+        return 0.0, 0.0
+    lo, hi = pts[0] / 255.0, pts[1] / 255.0
+    b = 100.0 * (0.5 - (lo + hi) / 2.0)
+    c = 100.0 * float(np.log10(1.0 / (hi - lo)))
+    b = float(np.clip(round(b), *BRIGHTNESS_RANGE))
+    c = float(np.clip(round(c), *CONTRAST_RANGE))
+    return b + 0.0, c + 0.0
 
 
 def adjusted_height(gray: np.ndarray, s: RasterSettings,
