@@ -170,6 +170,12 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Hinweis nach dem Senden – jeweils mit der nötigen Verschiebung in mm (X+ = nach links,
   Y+ = nach unten). Auch die Zeitschätzung (*Alt+P*) nennt das Problem.
   Code: `src/lumacut_job/park_corner.py`.
+  Auf der Zeichenfläche ist der sichtbare Teil der Park-Ecke als **rot schraffierte
+  Sperrzone** „Park-Ecke“ eingezeichnet (Kopf v6: Streifen 48 × 5 mm oben rechts; folgt
+  `park_corner_mm` des Pi), unter den Objekten, nicht anklickbar und nicht im Export. Sie
+  gilt nur für absolut gesendete Aufträge; bei Ursprung „Aktuelle Position“ / „Benutzer-
+  Ursprung“ wird sie ausgeblendet (die Lage auf der Fläche sagt dann nichts über die Ecke).
+  Code: `src/lumacut_job/park_zone.py`.
 - **Rahmen:** „Rahmen“ (*Strg+Umschalt+F*, Rechteck) bzw. „Gummiband-Rahmen“
   (*Alt+Umschalt+F*, konvexe Hülle) oder der Knopf „Rahmen“ im Maschinen-Panel
   fahren den Umriss mit ausgeschaltetem Laser ab (`op=frame`). Der gesendete
