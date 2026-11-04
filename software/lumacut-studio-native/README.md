@@ -150,6 +150,11 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
 - **Ebenen:** Farbe, Name, sichtbar, gesperrt, Reihenfolge; je Ebene
   Leistung (1–100 %), Geschwindigkeit (1–6000 mm/min) und Durchgänge (1–30),
   optional Material/Dicke/Tiefe je Durchgang (siehe „Material-Grundlage“).
+  Die **Geschwindigkeits-Einheit** (Auswahl neben dem Feld: *mm/min* oder *mm/s*, wie
+  LightBurn) gilt für Ebenen-Liste, Ebenen-Feld, Bild-Einstellungen, Materialtest und
+  Scan-Versatz zugleich und wird als App-Einstellung gemerkt; intern und in Datei/G-Code
+  bleibt es mm/min (gleicher G-Code in beiden Ansichten, Eingaben in mm/s werden auf
+  0,001 mm/min genau umgerechnet).
   Objekte übernehmen Farbe und Parameter ihrer Ebene. Ausgeblendete Ebenen
   werden nicht gelasert; die unterste Ebene läuft zuerst.
 - **Dateien:** Speichern/Öffnen als `*.lumacut.json` (Format `lumacut-canvas`, v3, mm;
@@ -677,9 +682,10 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   Schwarzpunkt werden reines Schwarz, ab dem Weißpunkt reines Weiß, dazwischen linear gestreckt;
   0 / 255 = unverändert), **Helligkeit** und **Kontrast** (−100…100 %), **Gamma** (0.2…5, > 1
   hellt die Mitteltöne auf) und **Schärfen** (Unscharf maskieren, Stärke und Radius in
-  Laserpunkten); *Zurücksetzen* stellt „unverändert“ wieder her, **Auto-Tonwert** setzt Helligkeit
-  und Kontrast so, dass der Tonwertumfang des Bildes (ohne je 0,5 % Ausreißer) von Schwarz bis Weiß
-  reicht (Gamma, Schärfen und Schwarz-/Weißpunkt bleiben). Die Anpassung gilt für alle Modi
+  Laserpunkten); *Zurücksetzen* stellt „unverändert“ wieder her, **Auto-Tonwert** setzt Schwarz-
+  und Weißpunkt auf den Tonwertumfang des (geschärften) Bildes ohne je 0,5 % Ausreißer – exakt
+  linear von Schwarz bis Weiß gestreckt – und Helligkeit / Kontrast auf 0 (Gamma und Schärfen
+  bleiben; erneutes Klicken ändert nichts, flaches Bild: 0 / 255). Die Anpassung gilt für alle Modi
   inkl. 3D-Tiefe und wird gespeichert; bei gedrehten Bildern bleiben die Ecken der Hüllbox
   ungelasert. Rechts zeigt
   eine **Live-Vorschau** das Bild so, wie es gelasert wird (ein Vorschaupunkt = ein Laserpunkt im
