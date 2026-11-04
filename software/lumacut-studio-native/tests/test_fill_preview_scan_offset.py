@@ -199,10 +199,12 @@ def test_canvas_fill_preview_draws_shifted_lines(qapp):
     doc = _doc(((40, 40, 20, 10), (90, 60, 15, 15)), speed=3000)
     ed = CanvasEditor(doc)
     ed.fill_preview.rebuild()
+    assert ed.fill_preview.wait()
     plain = _preview_segments(ed)
     assert not ed.fill_preview.scan_offset_applied
     set_active_table(_table((3000, 0.4)))
     ed.fill_preview.rebuild()
+    assert ed.fill_preview.wait()
     shifted = _preview_segments(ed)
     assert ed.fill_preview.scan_offset_applied and len(shifted) == len(plain)
     assert sorted(shifted) != sorted(plain)
@@ -210,6 +212,7 @@ def test_canvas_fill_preview_draws_shifted_lines(qapp):
     assert all(_close(s, w, 1e-9) for s, w in zip(shifted, want))
     set_active_table(None)
     ed.fill_preview.rebuild()
+    assert ed.fill_preview.wait()
     assert _preview_segments(ed) == plain and not ed.fill_preview.scan_offset_applied
     ed.grab()
 
@@ -221,15 +224,17 @@ def test_canvas_preview_hidden_layer_and_planner_error(qapp, monkeypatch):
     scan_offset.set_active_table(_table((3000, 0.4)))
     ed = CanvasEditor(doc)
     ed.fill_preview.rebuild()
+    assert ed.fill_preview.wait()
     assert ed.fill_preview.line_count() > 0
     doc.update_layer(doc.layers[0].id, visible=False)
     ed.fill_preview.rebuild()
+    assert ed.fill_preview.wait()
     assert ed.fill_preview.line_count() == 0
     doc.update_layer(doc.layers[0].id, visible=True)
 
     def boom(*_a, **_k):
         raise ValueError("zu viele Linien")
-    monkeypatch.setattr(scan_offset, "preview_fill_lines", boom)
+    monkeypatch.setattr(scan_offset, "preview_fill_request", boom)
     ed.fill_preview.rebuild()                       # falls back to the plain fill geometry
     assert ed.fill_preview.line_count() > 0 and not ed.fill_preview.scan_offset_applied
 
@@ -258,6 +263,7 @@ def test_changing_the_table_refreshes_the_fill_preview(win):
     doc.add_shape(Shape("rect", Geometry(20, 20, 20, 10), lid))
     fp = win.canvas.fill_preview
     fp.rebuild()
+    assert fp.wait()
     before = _preview_segments(win.canvas)
     calls = []
     orig = fp.schedule
@@ -265,7 +271,9 @@ def test_changing_the_table_refreshes_the_fill_preview(win):
     tools.scan_offset(_table((2000, 0.4)))
     assert calls
     fp.rebuild()
+    assert fp.wait()
     assert fp.scan_offset_applied and sorted(_preview_segments(win.canvas)) != sorted(before)
     tools.scan_offset(_table((2000, 0.4), enabled=False))
     fp.rebuild()
+    assert fp.wait()
     assert sorted(_preview_segments(win.canvas)) == sorted(before)

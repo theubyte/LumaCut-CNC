@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from dataclasses import dataclass, field
 
 SPEED_RANGE = (1.0, 6000.0)       # mm/min, like the layer speed
@@ -185,6 +186,61 @@ def apply_to_layers(layers, table: ScanOffsetTable | None):
 _DEFAULT = object()
 
 
+class FillPreviewJob:
+    """Planner run for the shifted fill preview, safe to execute in a worker thread.
+
+    Built on the GUI thread by :func:`preview_fill_request` (``job_layers``
+    may lay out text with Qt fonts); :meth:`run` only touches plain Python
+    data – planner, G-code replay, coordinate mapping – so the canvas can run
+    it off the GUI thread and drop it when the document changes.
+    """
+
+    def __init__(self, key, layers, table) -> None:
+        self.key = key
+        self.layers = layers
+        self.table = table
+
+    def run(self, should_stop=None) -> dict[str, list]:
+        """``{layer_id: [(a, b), ...]}`` (work-area mm), stored in the cache.
+
+        ``should_stop``: callable polled by the planner; raises
+        :class:`lumacut_job.planner.PlanCancelled` when it returns true."""
+        from lumacut_canvas.gcode import fill_burn_segments
+        from lumacut_canvas.workarea import machine_to_screen
+
+        from .planner import optimize_layers
+        layers = apply_to_layers(optimize_layers(self.layers, should_stop=should_stop),
+                                 self.table)
+        out: dict[str, list] = {}
+        for layer, burns in zip(layers, fill_burn_segments(layers)):
+            out[layer.layer_id] = [(machine_to_screen(*a), machine_to_screen(*b))
+                                   for a, b in burns]
+        with _CACHE_LOCK:
+            _PREVIEW_CACHE.clear()
+            _PREVIEW_CACHE.update(key=self.key, value=out)
+        return {k: list(v) for k, v in out.items()}
+
+
+def preview_fill_request(doc, table=_DEFAULT):
+    """What the fill preview needs: ``None`` (no shift), a ready dict (cached
+    plan) or a :class:`FillPreviewJob` to run (see :func:`preview_fill_lines`)."""
+    tab = active_table() if table is _DEFAULT else table
+    if tab is None or not tab.active:
+        return None
+    from lumacut_canvas.export import job_layers
+    layers = job_layers(doc)
+    if not any(getattr(l, "fills", None) and not getattr(l, "fill_fixed_order", False)
+               and abs(tab.offset_for(l.speed_mm_min)) > 1e-9 for l in layers):
+        return None
+    # The planner is the expensive part (≈1 s for 1500 hatched objects); edits
+    # that leave the job unchanged (colour, names, selection) reuse the last plan.
+    key = (repr(layers), repr(tab))
+    with _CACHE_LOCK:
+        if _PREVIEW_CACHE.get("key") == key:
+            return {k: list(v) for k, v in _PREVIEW_CACHE["value"].items()}
+    return FillPreviewJob(key, layers, tab)
+
+
 def preview_fill_lines(doc, table=_DEFAULT) -> dict[str, list] | None:
     """Fill lines for the canvas fill preview as they are burned (scan offset applied).
 
@@ -197,35 +253,15 @@ def preview_fill_lines(doc, table=_DEFAULT) -> dict[str, list] | None:
     (:func:`lumacut_job.planner.optimize_layers`, same defaults as send /
     save) is replayed with :func:`lumacut_canvas.gcode.fill_burn_segments`:
     the preview equals pass 1 of the G-code. ``table`` default = the active
-    table of the app.
+    table of the app. Synchronous; the canvas uses :func:`preview_fill_request`
+    and runs the job in a worker thread.
     """
-    tab = active_table() if table is _DEFAULT else table
-    if tab is None or not tab.active:
-        return None
-    from lumacut_canvas.export import job_layers
-    from lumacut_canvas.gcode import fill_burn_segments
-    from lumacut_canvas.workarea import machine_to_screen
-
-    from .planner import optimize_layers
-    layers = job_layers(doc)
-    if not any(getattr(l, "fills", None) and not getattr(l, "fill_fixed_order", False)
-               and abs(tab.offset_for(l.speed_mm_min)) > 1e-9 for l in layers):
-        return None
-    # The planner is the expensive part (≈1 s for 1500 hatched objects); edits
-    # that leave the job unchanged (colour, names, selection) reuse the last plan.
-    key = (repr(layers), repr(tab))
-    if _PREVIEW_CACHE.get("key") == key:
-        return {k: list(v) for k, v in _PREVIEW_CACHE["value"].items()}
-    layers = apply_to_layers(optimize_layers(layers), tab)
-    out: dict[str, list] = {}
-    for layer, burns in zip(layers, fill_burn_segments(layers)):
-        out[layer.layer_id] = [(machine_to_screen(*a), machine_to_screen(*b)) for a, b in burns]
-    _PREVIEW_CACHE.clear()
-    _PREVIEW_CACHE.update(key=key, value=out)
-    return {k: list(v) for k, v in out.items()}
+    req = preview_fill_request(doc, table)
+    return req.run() if isinstance(req, FillPreviewJob) else req
 
 
 _PREVIEW_CACHE: dict = {}
+_CACHE_LOCK = threading.Lock()
 
 
 # --- calibration pattern ------------------------------------------------------

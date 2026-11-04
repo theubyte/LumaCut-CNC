@@ -21,6 +21,11 @@ applies the speed table – by default the process-wide active table – to the
 hatch fills and the image rasters after planning; an inactive table changes
 nothing.
 
+Cancellation: the canvas fill preview plans in a background thread and passes
+``should_stop`` (a callable) to :func:`optimize_layers`; it is polled between
+blocks / shapes and :class:`PlanCancelled` is raised once it returns true.
+Without it (send, save, estimate) nothing changes.
+
 Polylines are in machine mm. A polyline is *closed* when its first and last
 points coincide (rectangles, ellipses, polygons and text outlines are all
 exported that way by ``job_layers``).
@@ -35,6 +40,15 @@ Point = tuple[float, float]
 Poly = list[Point]
 
 CLOSE_EPS = 0.01  # mm
+
+
+class PlanCancelled(Exception):
+    """Raised by the planner when ``should_stop()`` asks to give up (preview worker)."""
+
+
+def _check(should_stop) -> None:
+    if should_stop is not None and should_stop():
+        raise PlanCancelled()
 
 
 def is_closed(poly: Poly) -> bool:
@@ -106,7 +120,8 @@ def _best_entry(poly: Poly, pos: Point, best_start: bool) -> tuple[float, Poly]:
 
 
 def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first: bool = True,
-                    reduce_travel: bool = True, best_start: bool = True) -> list[Poly]:
+                    reduce_travel: bool = True, best_start: bool = True,
+                    should_stop=None) -> list[Poly]:
     """Return the polylines in cutting order (each possibly reversed/rotated).
 
     Greedy nearest-neighbour over the shapes that are *ready*: with
@@ -129,6 +144,7 @@ def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first
     out: list[Poly] = []
     pos = start
     for _ in range(n):
+        _check(should_stop)
         ready = [i for i in range(n) if not done[i] and waiting[i] == 0]
         if not ready:  # cyclic containment (degenerate geometry): fall back
             ready = [i for i in range(n) if not done[i]]
@@ -157,7 +173,7 @@ def _apply_variant(block, variant):
 
 
 def order_fill_blocks_nearest(blocks, start: Point, reversible: bool = True,
-                              corners: bool = False):
+                              corners: bool = False, should_stop=None):
     """Fill blocks in greedy nearest-neighbour order (each possibly reversed).
 
     A reversed block runs its segments in reverse order and direction (like
@@ -174,6 +190,7 @@ def order_fill_blocks_nearest(blocks, start: Point, reversible: bool = True,
     out = []
     pos = start
     while todo:
+        _check(should_stop)
         best_i, best_d, best_v = 0, math.inf, 0
         for i, entries in enumerate(opts):
             for entry, _exit, v in entries:
@@ -222,7 +239,7 @@ def _block_neighbours(opts, k: int) -> list[list[int]]:
 def improve_fill_block_order(blocks, start: Point, reversible: bool = True,
                              budget: int = FILL_OPT_BUDGET,
                              neighbours: int = FILL_OPT_NEIGHBOURS,
-                             corners: bool = False):
+                             corners: bool = False, should_stop=None):
     """Shorten the travel of an ordered fill-block list with 2-opt and Or-opt moves.
 
     Works on top of :func:`order_fill_blocks_nearest`: blocks stay whole (fill
@@ -295,6 +312,7 @@ def improve_fill_block_order(blocks, start: Point, reversible: bool = True,
         for i in range(n):
             if left <= 0:
                 break
+            _check(should_stop)
             accepted = None
             # 2-opt: reverse order[i..j] so that a near neighbour of the
             # predecessor (or of order[i] itself at the tour start) comes next.
@@ -379,7 +397,7 @@ class PlanReport:
 
 
 def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | None = None,
-                    **options):
+                    should_stop=None, **options):
     """Copy of ``JobLayer`` list with each layer's polylines reordered.
 
     The end position of one layer is the start position of the next.
@@ -388,6 +406,8 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
     after ordering (they depend on the chosen start point). Leads are
     checked against the contours of *all* layers (no lead may cut into
     another part); what had to be dropped is counted in ``report``.
+    ``should_stop``: optional callable polled during planning; raises
+    :class:`PlanCancelled` when it returns true (background preview).
     """
     from .cutpath import (CutOptions, LeadObstacles, apply_cut_options, nesting_depth,
                           offset_closed)
@@ -404,17 +424,18 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
     out = []
     pos = start
     for layer, opts, polys in prepared:
+        _check(should_stop)
         fills = getattr(layer, "fills", None) or []
         if fills and options.get("reduce_travel", True):
             reversible = not getattr(layer, "fill_fixed_order", False)
             corners = reversible and getattr(layer, "fill_free_corner", False)
             fills = improve_fill_block_order(
-                order_fill_blocks_nearest(fills, pos, reversible, corners), pos, reversible,
-                corners=corners)
+                order_fill_blocks_nearest(fills, pos, reversible, corners, should_stop),
+                pos, reversible, corners=corners, should_stop=should_stop)
             layer = replace(layer, fills=fills)
         if fills:
             pos = fills[-1][-1][1]   # contours follow the fill in every pass
-        ordered = order_polylines(polys, pos, **options)
+        ordered = order_polylines(polys, pos, should_stop=should_stop, **options)
         if opts.active and ordered:
             res = apply_cut_options(ordered, opts, nesting_depth(ordered), obstacles)
             if report is not None:
