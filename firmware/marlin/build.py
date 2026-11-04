@@ -253,6 +253,39 @@ def patch_motor_tone(src: pathlib.Path) -> None:
     shutil.copyfile(ROOT / "motor_tone.cpp", target / "motor_tone.cpp")
 
 
+def patch_laser_pwm_timer(src: pathlib.Path) -> None:
+    """Laser PWM on PA1 shares TIM2 with the temperature ISR (maple HAL).
+
+    Stock Marlin runs TIM2 at 72 kHz and the temperature ISR resets the
+    counter every ~72 ticks, so S>=72 was already full power and the PWM
+    period stretched whenever the stepper ISR (higher priority) delayed the
+    reset: the laser flickered in step with the motors. Now TIM2 runs free
+    0..254 at ~1 kHz, CH1 fires the temperature ISR once per period and CH2
+    (PA1) compares against S 0..255 in hardware, untouched by the steppers.
+    """
+    timers_cpp = src / "Marlin/src/HAL/STM32F1/timers.cpp"
+    timers_h = src / "Marlin/src/HAL/STM32F1/timers.h"
+    old_start = ("      timer_set_prescaler(TEMP_TIMER_DEV, (uint16_t)(TEMP_TIMER_PRESCALE - 1));\n"
+                 "      timer_set_reload(TEMP_TIMER_DEV, 0xFFFF);\n"
+                 "      timer_set_compare(TEMP_TIMER_DEV, TEMP_TIMER_CHAN, _MIN(hal_timer_t(HAL_TIMER_TYPE_MAX), "
+                 "(F_CPU) / (TEMP_TIMER_PRESCALE) / frequency));\n")
+    new_start = ("      // LumaCut: free-running 0..254, also the laser PWM on PA1 (TIM2 CH2)\n"
+                 "      timer_set_prescaler(TEMP_TIMER_DEV, (uint16_t)((F_CPU) / 255 / frequency - 1));\n"
+                 "      timer_set_reload(TEMP_TIMER_DEV, 254);\n"
+                 "      timer_set_compare(TEMP_TIMER_DEV, TEMP_TIMER_CHAN, 1);\n")
+    old_isr = ("    case MF_TIMER_TEMP:\n"
+               "      timer_set_count(TEMP_TIMER_DEV, 0);\n"
+               "      timer_generate_update(TEMP_TIMER_DEV);\n"
+               "      return;\n")
+    new_isr = ("    case MF_TIMER_TEMP:\n"
+               "      return; // LumaCut: counter runs free, the laser PWM shares it\n")
+    cpp, h = timers_cpp.read_text(), timers_h.read_text()
+    if cpp.count(old_start) != 1 or h.count(old_isr) != 1:
+        raise RuntimeError("Marlin STM32F1 temperature timer changed; laser PWM patch needs review")
+    timers_cpp.write_text(cpp.replace(old_start, new_start, 1))
+    timers_h.write_text(h.replace(old_isr, new_isr, 1))
+
+
 def run(*argv: str, cwd: pathlib.Path | None = None, timeout: int = 600):
     print("+", " ".join(argv), flush=True)
     subprocess.run(argv, cwd=cwd, check=True, timeout=timeout)
@@ -313,6 +346,7 @@ def main():
             raise RuntimeError("Marlin Z_MIN endstop gating changed")
         endstops.write_text(text.replace(old, "if ( true /* LumaCut: Z switch guards every move */", 1))
         patch_motor_tone(src)
+        patch_laser_pwm_timer(src)
         ini = src / "platformio.ini"
         text = ini.read_text()
         text = re.sub(r"(?m)^default_envs\s*=.*$",
@@ -333,7 +367,7 @@ def main():
             "environment": PIO_ENV,
             "cpu": "STM32F103RC",
             "usb": "Marlin native USB CDC",
-            "laser": {"supply": "FAN1 PC6 / FAN0 M106-M107 (Pi 180s cooldown)", "enable": "PC7 unwired", "pwm": "PA1",
+            "laser": {"supply": "FAN1 PC6 / FAN0 M106-M107 (Pi 180s cooldown)", "enable": "PC7 unwired", "pwm": "PA1 (TIM2 CH2, ~1 kHz, hardware)",
                       "mode": "M3 I", "s_max": 255},
             "accessories": {"lights": "M355 S<0|1> P<0-255> HE0 PC8 (PWM, dimmable)",
                             "exhaust": "M8 BED PC9"},

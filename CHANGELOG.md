@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-04
 
+- **SKR: Laser-PWM flackerte im Takt der Motoren:** PA1 hängt an Timer 2, und den benutzt Marlin auf dem STM32F1 auch für die Temperaturmessung. Der Zähler wurde jede Millisekunde per Interrupt zurückgesetzt. Ab S72 war das schon volle Leistung, und weil die Schrittmotoren diesen Interrupt verzögern, schwankte die Leistung bei jeder Bewegung. Jetzt läuft Timer 2 frei mit etwa 1 kHz, die Laser-PWM entsteht in Hardware und S 0..255 ist linear. Kommt als Firmware-Update per Knopf; danach die Laserleistungen auf dem SKR neu prüfen.
 - **Laser-Interface V2, Klemmen-Beschriftung:** `hardware/laser-interface-v2/beschriftung_anschluesse.pdf` mit Übersicht der Lochrasterplatine, Belegungstabelle und Etiketten im Maßstab 1:1 (5,08 mm Raster) zum Ausschneiden für J1 Netzteil (+24 V, GND), J2 Laser (+24 V, GND, PWM), J3 BL-Touch (PA1, GND) und J4 FAN1 (+, −). Quelle `beschriftung.html`. Beim Aufbau: R5 darf 5,6 kΩ sein, das Relais ist ein NAIS JS1-24V statt G5LE (Pins messen).
 
 ## 2026-11-03

@@ -388,6 +388,13 @@ Voraussetzungen:
       04.11.: Besitzer bestückt; Relais ist ein NAIS JS1-24V (Pins vor dem Verdrahten messen),
       R5 = 5,6 kΩ (kein 4,7 k da), C1 104K63, C2 1M63, C3 Elko 47–56 µF. Klemmen-Etiketten 1:1:
       `beschriftung_anschluesse.pdf`.
+      **Laser flackert im Takt der Motoren (04.11.) – Ursache Firmware:** PA1 ist TIM2 CH2, TIM2
+      ist im Maple-HAL der Temperatur-Timer (72 kHz, ISR setzt den Zähler alle ~72 Takte zurück).
+      Folge: S ≥ 72 war schon volle Leistung, und weil die Schrittmotor-ISR (höhere Priorität)
+      das Zurücksetzen verzögert, schwankte die PWM mit jeder Motorbewegung. Fix in `build.py`
+      (`patch_laser_pwm_timer`): TIM2 läuft frei 0..254 bei ~1 kHz, CH1 = Temperatur-ISR,
+      CH2 = Laser-PWM in Hardware, S 0..255 linear. Lokal gebaut (SHA `b9156d10…`); kommt als
+      Firmware-Update per Knopf. Danach Leistungen auf dem SKR neu prüfen (vorher zu stark).
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut

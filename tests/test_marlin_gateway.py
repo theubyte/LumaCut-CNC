@@ -119,6 +119,38 @@ class FirmwareDirectionContractTests(unittest.TestCase):
         self.assertIn("#define FAN1_PIN -1",pins)
         self.assertNotIn("#define SPINDLE_LASER_ENA_PIN PC6",pins)
 
+    def test_laser_pwm_timer_runs_free_at_1khz(self):
+        # PA1 is TIM2 CH2, TIM2 is the temperature timer (maple HAL): the
+        # ISR must not reset the counter, or the PWM follows the steppers.
+        import importlib.util, tempfile
+        spec=importlib.util.spec_from_file_location(
+            "lumacut_build",ROOT/"firmware"/"marlin"/"build.py")
+        module=importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as tmp:
+            hal=Path(tmp)/"Marlin/src/HAL/STM32F1"
+            hal.mkdir(parents=True)
+            (hal/"timers.cpp").write_text(
+                "    case MF_TIMER_TEMP:\n      timer_pause(TEMP_TIMER_DEV);\n"
+                "      timer_set_prescaler(TEMP_TIMER_DEV, (uint16_t)(TEMP_TIMER_PRESCALE - 1));\n"
+                "      timer_set_reload(TEMP_TIMER_DEV, 0xFFFF);\n"
+                "      timer_set_compare(TEMP_TIMER_DEV, TEMP_TIMER_CHAN, _MIN(hal_timer_t(HAL_TIMER_TYPE_MAX), "
+                "(F_CPU) / (TEMP_TIMER_PRESCALE) / frequency));\n")
+            (hal/"timers.h").write_text(
+                "    case MF_TIMER_TEMP:\n"
+                "      timer_set_count(TEMP_TIMER_DEV, 0);\n"
+                "      timer_generate_update(TEMP_TIMER_DEV);\n"
+                "      return;\n")
+            module.patch_laser_pwm_timer(Path(tmp))
+            cpp=(hal/"timers.cpp").read_text()
+            h=(hal/"timers.h").read_text()
+        self.assertIn("timer_set_reload(TEMP_TIMER_DEV, 254);",cpp)
+        self.assertIn("(F_CPU) / 255 / frequency - 1",cpp)
+        self.assertNotIn("timer_set_count",h)
+        self.assertNotIn("timer_generate_update",h)
+        self.assertIn("patch_laser_pwm_timer(src)",
+                      (ROOT/"firmware"/"marlin"/"build.py").read_text(encoding="utf-8"))
+
     def test_firmware_native_probe_has_fixed_bed_origin(self):
         build=(ROOT/"firmware"/"marlin"/"build.py").read_text()
         self.assertIn('cfg = uncomment(cfg, "FIX_MOUNTED_PROBE")',build)
