@@ -1896,3 +1896,98 @@ Still open:
   edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
   park-corner refusal, variable text / CSV merge over several sends incl. the canvas value
   labels, rebuilt exe).
+
+## 34. Status update 2026-11-04 (review round 27)
+
+Done this round (Job raster engine, image model / job builder and the image settings dialog; no
+change to the canvas widget, Machine / Scan Probe and Materials untouched):
+
+- Gap picked outside the §33 list: **image engraving modes**. The §2 references list LightBurn's
+  Jarvis, Stucki, Newsprint, Halftone (cells per inch + angle), Sketch and *Dot Width
+  Correction*, xTool offers Jarvis / Stucki / Sierra; LumaCut had only threshold, Floyd, Atkinson,
+  Bayer, grayscale and 3D depth, no dot width correction and no preview of the dithered result –
+  photo engraving is the main image use on a diode laser, so this was the most valuable untracked
+  gap.
+  - `lumacut_job/raster.py`: new modes `jarvis`, `stucki`, `sierra` (textbook kernels /48, /42,
+    /32, row-vectorised diffusion – 1 MP in ≈ 0.3 s; Floyd / Atkinson keep the old loop and stay
+    bit-identical), `halftone` (rotated AM screen, `halftone_cpi` 5–150 cells per inch,
+    `halftone_angle` −90…90°, round dots grown from the cell centre, cell area = exact mean tone)
+    and `newsprint` (45° clustered-dot 12 × 12 threshold tile, 72 levels). `dot_mask()` is the
+    shared on/off decision; `halftone_cell_px()`. **Dot width correction** (`dot_width_mm`,
+    0 … line interval): every burning run is shortened by half the value at each end that borders
+    an unburned pixel (minimum 0.1 px so single dots survive), applied before reversing / scan
+    offset, works for every mode incl. grayscale and 3D depth.
+  - `lumacut_canvas/model.py`: `IMAGE_MODES` extended, `ImageSettings.halftone_cpi`,
+    `halftone_angle`, `dot_width_mm` with clamping. `lumacut_job/images.py`: passes the fields;
+    with `IMAGE_FLIP_X` the halftone angle is mirrored with the image, so the dots on the
+    workpiece keep the chosen angle.
+  - `lumacut_import/image_preview.py` (Qt-free) + `lumacut_import/qt.py`: the image settings
+    dialog shows a **live preview** of the engraved result (one preview pixel = one laser dot at
+    the line interval, big images as a centre crop ≤ 360 000 dots, debounced 150 ms, share of
+    burned dots), fields for cells / angle / dot width, a cell-size hint („Zelle 0.85 mm = 8.5
+    Punkte“, warning below 3 dots). Preview uses the same `power_map` as the job.
+
+Tests:
+
+- `tests/test_image_modes.py` (69): modes listed in engine / model / dialog, Pi-safe on/off
+  G-code for every new mode, tone kept (mean burned share ≈ grey level), white / black, row
+  diffusion = pixel loop, kernel weights, old modes unchanged, halftone round clusters per cell,
+  cell size / angle change the pattern, exact 45° newsprint tile (72 levels, each once per cell),
+  validation, speed, dot width (0 = unchanged, both run ends, tiny dots and grayscale edges,
+  reversed lines and scan offset, shorter burned length in G-code, 3D depth), settings roundtrip
+  and clamping, image objects send Pi-safe, angle mirrored with `IMAGE_FLIP_X`, old documents
+  give byte-identical G-code, preview = engine, preview grayscale / depth / crop, dialog fields,
+  debounced preview, `edit_image_settings` passes the image.
+
+Full suite: 1742 passed, 3 skipped (before: 1673 passed, 3 skipped).
+
+Output change for old files: none – G-code is byte-for-byte unchanged (default dot width 0, old
+modes untouched); saved image settings gain `halftone_cpi`, `halftone_angle`, `dot_width_mm`.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Image: no *Sketch* mode (edge-enhanced engraving), no scan angle / angle increment per pass,
+  no per-image brightness / contrast / gamma / sharpen adjustments in the dialog, the preview
+  ignores rotation and the material's real dot size; mode presets are not linked to the material
+  library (Materials).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); speeds only in mm/min (no mm/s view); the fill preview shows
+  pass 1 only (shifted lines appear ≈ 1.5 s after a change at ~1500 hatched objects, the canvas
+  stays usable meanwhile); the test pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes with non-ASCII characters stay one byte segment (no ECI / Kanji mode); no Micro QR.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (Jarvis / Stucki / Sierra / halftone / newsprint photos and dot width
+  correction on wood / card at 3000–6000 mm/min incl. the dialog preview, GS1 QR / Digital Link
+  codes with a GS1 scanner and a phone camera, plain-text QR codes with mixed segments, scan
+  offset test pattern and compensated bidirectional hatch / image incl. the shifted fill preview
+  and its background planning on the Windows app, fill overscan – line ends even at 2–5 mm on
+  wood / card – and 2-opt block order, fill grouping and inside-out offset fill, offset fill, cut
+  options incl. overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec /
+  PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
+  codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
+  incl. the canvas value labels, rebuilt exe).

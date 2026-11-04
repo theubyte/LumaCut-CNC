@@ -669,8 +669,15 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   Tabelle und Grenzen: [Anforderungen §9.2](../../docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md).
 - **PNG/JPG/BMP**: wird als **Bildobjekt** eingefügt (Größe aus der DPI-Angabe, sonst 96 dpi).
   *Datei › Bildeinstellungen…* (Strg+Umschalt+I) öffnet den Dialog (Modus Schwellwert / Floyd-Steinberg /
-  Atkinson / Bayer / Graustufen / 3D-Tiefe, Linienabstand, Leistung max./min., Geschwindigkeit,
-  Durchgänge, bidirektional, Negativ). Bilder werden im
+  Atkinson / **Jarvis / Stucki / Sierra** / Bayer / **Halbton** (Rasterzellen je Zoll + Winkel) /
+  **Zeitungsdruck** (45°-Rasterpunkte) / Graustufen / 3D-Tiefe, Linienabstand, Leistung max./min.,
+  Geschwindigkeit, Durchgänge, bidirektional, Negativ, **Punktbreitenkorrektur**). Rechts zeigt
+  eine **Live-Vorschau** das Bild so, wie es gelasert wird (ein Vorschaupunkt = ein Laserpunkt im
+  eingestellten Linienabstand, große Bilder als Ausschnitt aus der Mitte, Anteil gelaserter
+  Punkte). Für Fotos auf dem Diodenlaser sind Jarvis oder Stucki meist die beste Wahl. Die
+  Punktbreitenkorrektur (LightBurn „Dot Width Correction“) kürzt jede gelaserte Strecke um den
+  eingestellten Wert (je Ende die Hälfte), damit der Strahl Punkte nicht verbreitert – Startwert
+  etwa die halbe Strahlbreite, höchstens der Linienabstand; 0 = aus. Bilder werden im
   Auftrag vor den Vektor-Ebenen graviert.
 - **Bild nachzeichnen** (*Datei › Bild nachzeichnen…*, *Alt+T*, wie LightBurn „Trace Image“):
   wandelt das ausgewählte Bild in Vektorkonturen. Schwellwert (dunkler = Kontur; Startwert aus den
