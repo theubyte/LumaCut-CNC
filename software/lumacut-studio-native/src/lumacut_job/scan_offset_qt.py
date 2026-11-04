@@ -8,6 +8,12 @@
 * :class:`ScanTestDialog` – calibration job (rows = speeds, columns = trial
   offsets): „Senden“ uploads it to the Pi without starting, „Speichern…“
   writes the G-code file.
+
+Speeds are shown and typed in the app's speed unit (mm/min or mm/s,
+:func:`lumacut_canvas.unit_ui.display_speed_units`); the table, the test spec
+and the settings stay in mm/min. A cell / field whose text still shows the
+stored value keeps the exact mm/min value (1000 mm/min shown as „16.67“ mm/s
+does not turn into 1000.2).
 """
 
 from __future__ import annotations
@@ -17,6 +23,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QDialogBut
                                QDoubleSpinBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
                                QLineEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
                                QVBoxLayout)
+
+from lumacut_canvas.units import format_speed, parse_speed
+from lumacut_canvas.unit_ui import SpeedUnitCombo, display_speed_units
 
 from .scan_offset import ScanOffsetTable, ScanTestSpec, test_pattern_gcode
 
@@ -66,6 +75,49 @@ def _parse(text: str) -> float:
     return float(str(text).strip().replace(",", ".").replace("−", "-"))
 
 
+SPEED_ROLE = Qt.UserRole  # exact mm/min value behind a speed cell
+
+
+class _SpeedText:
+    """Speeds (mm/min) in a QLineEdit, shown in the display speed unit.
+
+    The text written by :meth:`set_values` maps back to the exact values;
+    edited text is parsed in the current unit (``ValueError`` for non-numbers)."""
+
+    def __init__(self, edit: QLineEdit, values, unit: str):
+        self.edit = edit
+        self.unit = unit
+        self._cache: tuple[str, list[float]] | None = None
+        self.set_values(values)
+
+    @staticmethod
+    def _parts(text: str) -> list[str]:
+        return [p for p in text.replace(";", " ").split() if p]
+
+    def set_values(self, values) -> None:
+        vals = [float(v) for v in values]
+        text = " ".join(format_speed(v, self.unit, with_unit=False) for v in vals)
+        self._cache = (text, vals)
+        self.edit.setText(text)
+
+    def values(self) -> list[float]:
+        text = self.edit.text()
+        if self._cache is not None and text == self._cache[0]:
+            return list(self._cache[1])
+        return [parse_speed(p, self.unit) for p in self._parts(text)]
+
+    def set_unit(self, unit: str) -> None:
+        """Re-show the same speeds in ``unit`` (unparsable text stays as is)."""
+        try:
+            vals = self.values()
+        except ValueError:
+            self.unit = unit
+            self._cache = None
+            return
+        self.unit = unit
+        self.set_values(vals)
+
+
 class ScanOffsetDialog(QDialog):
     """Edit the speed table; ``table()`` returns the validated result."""
 
@@ -81,8 +133,9 @@ class ScanOffsetDialog(QDialog):
         self.enabled = QCheckBox("Scan-Versatz anwenden")
         self.enabled.setChecked(bool(t.enabled))
         lay.addWidget(self.enabled)
+        self._unit = display_speed_units().unit
         self.grid = QTableWidget(0, 2)
-        self.grid.setHorizontalHeaderLabels(["Geschwindigkeit (mm/min)", "Versatz (mm)"])
+        self._set_header()
         self.grid.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.grid.setSelectionBehavior(QAbstractItemView.SelectRows)
         for speed, off in t.entries:
@@ -102,14 +155,19 @@ class ScanOffsetDialog(QDialog):
             self.test_btn.clicked.connect(lambda: test_callback(self))
         for b in (self.add_btn, self.remove_btn, self.test_btn):
             row.addWidget(b)
+        row.addStretch(1)
+        self.speed_unit = SpeedUnitCombo()
+        row.addWidget(self.speed_unit)
         lay.addLayout(row)
         check = QHBoxLayout()
         check.addWidget(QLabel("Prüfen bei"))
-        self.probe = QLineEdit("3000")
+        self.probe = QLineEdit()
         self.probe.setMaximumWidth(80)
+        self._probe = _SpeedText(self.probe, [3000.0], self._unit)
         self.probe.textChanged.connect(lambda _t: self._update_check())
         check.addWidget(self.probe)
-        check.addWidget(QLabel("mm/min:"))
+        self.probe_unit = QLabel(f"{self._unit}:")
+        check.addWidget(self.probe_unit)
         self.check_label = QLabel()
         self.check_label.setObjectName("scan_offset_check")
         check.addWidget(self.check_label, 1)
@@ -123,21 +181,67 @@ class ScanOffsetDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         lay.addWidget(self.buttons)
         self.enabled.toggled.connect(lambda _on: self._update_check())
+        display_speed_units().changed.connect(self.set_speed_unit)
+        self._update_check()
+
+    # --- speed unit ---------------------------------------------------------
+    def _set_header(self) -> None:
+        self.grid.setHorizontalHeaderLabels([f"Geschwindigkeit ({self._unit})", "Versatz (mm)"])
+
+    def _cell_speed(self, r: int) -> float:
+        """Speed of row ``r`` in mm/min (``ValueError`` / ``AttributeError`` if bad)."""
+        item = self.grid.item(r, 0)
+        text = item.text().strip()
+        stored = item.data(SPEED_ROLE)
+        if stored is not None and text == format_speed(float(stored), self._unit, with_unit=False):
+            return float(stored)
+        return parse_speed(text, self._unit)
+
+    def probe_speed(self) -> float:
+        """„Prüfen bei“ speed in mm/min (``ValueError`` if not a number)."""
+        vals = self._probe.values()
+        if len(vals) != 1:
+            raise ValueError("Prüfgeschwindigkeit")
+        return vals[0]
+
+    def set_speed_unit(self, unit: str) -> None:
+        """Show speeds in ``unit``; the values (mm/min) stay exactly the same."""
+        if unit == self._unit:
+            return
+        self.grid.blockSignals(True)
+        for r in range(self.grid.rowCount()):
+            try:
+                v = self._cell_speed(r)
+            except (AttributeError, ValueError):
+                continue  # bad cell keeps its text, table() reports it
+            self.grid.item(r, 0).setText(format_speed(v, unit, with_unit=False))
+            self.grid.item(r, 0).setData(SPEED_ROLE, v)
+        self.grid.blockSignals(False)
+        self._unit = unit
+        self._set_header()
+        self.probe_unit.setText(f"{unit}:")
+        self.probe.blockSignals(True)
+        self._probe.set_unit(unit)
+        self.probe.blockSignals(False)
         self._update_check()
 
     def _append(self, speed: float, offset: float) -> None:
         r = self.grid.rowCount()
         self.grid.insertRow(r)
-        for c, v in enumerate((f"{speed:g}", f"{offset:.3f}".rstrip("0").rstrip(".") or "0")):
+        texts = (format_speed(speed, self._unit, with_unit=False),
+                 f"{offset:.3f}".rstrip("0").rstrip(".") or "0")
+        for c, v in enumerate(texts):
             item = QTableWidgetItem(v)
             item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            if c == 0:
+                item.setData(SPEED_ROLE, float(speed))
             self.grid.setItem(r, c, item)
 
     def add_row(self) -> None:
         speeds = []
         for r in range(self.grid.rowCount()):
             try:
-                speeds.append(_parse(self.grid.item(r, 0).text()))
+                speeds.append(self._cell_speed(r))
             except (AttributeError, ValueError):
                 pass
         nxt = min(6000.0, (max(speeds) + 1000.0) if speeds else 1000.0)
@@ -173,8 +277,8 @@ class ScanOffsetDialog(QDialog):
             if not any(texts):
                 continue
             try:
-                entries.append((_parse(texts[0]), _parse(texts[1])))
-            except ValueError:
+                entries.append((self._cell_speed(r), _parse(texts[1])))
+            except (AttributeError, ValueError):
                 raise ValueError(f"Scan-Versatz: Zeile {r + 1} ist keine Zahl") from None
         return ScanOffsetTable(self.enabled.isChecked(), entries).normalized()
 
@@ -189,7 +293,7 @@ class ScanOffsetDialog(QDialog):
         self.error.setText("")
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(True)
         try:
-            v = _parse(self.probe.text())
+            v = self.probe_speed()
         except ValueError:
             self.check_label.setText("–")
             return
@@ -222,8 +326,12 @@ class ScanTestDialog(QDialog):
         self._send, self._save = send, save
         self.result_gcode = ""
         f = QFormLayout(self)
-        self.speeds = QLineEdit(" ".join(f"{v:g}" for v in s.speeds))
-        self.speeds.setToolTip("Geschwindigkeiten in mm/min, durch Leerzeichen oder ; getrennt")
+        self._unit = display_speed_units().unit
+        self.speeds = QLineEdit()
+        self._speeds = _SpeedText(self.speeds, s.speeds, self._unit)
+        self.speeds_label = QLabel()
+        self.speed_unit = SpeedUnitCombo()
+        self._show_speed_unit()
         self.off_min = _dspin(-2, 2, s.offset_min, 0.05, 2, " mm")
         self.off_max = _dspin(-2, 2, s.offset_max, 0.05, 2, " mm")
         self.off_step = _dspin(0.01, 1, s.offset_step, 0.01, 2, " mm")
@@ -238,7 +346,8 @@ class ScanTestDialog(QDialog):
         self.y = _dspin(0, 340, s.y, 5, 1, " mm")
         self.labels = QCheckBox("Beschriftung (Versatz oben, Geschwindigkeit links)")
         self.labels.setChecked(s.labels)
-        for label, w in (("Geschwindigkeiten", self.speeds), ("Versatz von", self.off_min),
+        for label, w in ((self.speeds_label, self.speeds), ("Einheit", self.speed_unit),
+                         ("Versatz von", self.off_min),
                          ("Versatz bis", self.off_max), ("Schrittweite", self.off_step),
                          ("Leistung", self.power), ("Linienabstand", self.interval),
                          ("Feldbreite", self.patch_w), ("Feldhöhe", self.patch_h),
@@ -263,12 +372,28 @@ class ScanTestDialog(QDialog):
         self.power.valueChanged.connect(lambda _v: self._update())
         self.speeds.textChanged.connect(lambda _t: self._update())
         self.labels.toggled.connect(lambda _on: self._update())
+        display_speed_units().changed.connect(self.set_speed_unit)
+        self._update()
+
+    def _show_speed_unit(self) -> None:
+        self.speeds_label.setText(f"Geschwindigkeiten ({self._unit})")
+        self.speeds.setToolTip(f"Geschwindigkeiten in {self._unit}, durch Leerzeichen oder ; "
+                               "getrennt (gespeichert und gesendet wird mm/min)")
+
+    def set_speed_unit(self, unit: str) -> None:
+        """Show the speeds in ``unit``; the values (mm/min) stay exactly the same."""
+        if unit == self._unit:
+            return
+        self._unit = unit
+        self.speeds.blockSignals(True)
+        self._speeds.set_unit(unit)
+        self.speeds.blockSignals(False)
+        self._show_speed_unit()
         self._update()
 
     def spec(self) -> ScanTestSpec:
-        parts = [p for p in self.speeds.text().replace(";", " ").split() if p]
         try:
-            speeds = [_parse(p) for p in parts]
+            speeds = self._speeds.values()
         except ValueError:
             raise ValueError("Scan-Test: Geschwindigkeiten als Zahlen eingeben") from None
         return ScanTestSpec(speeds=speeds, offset_min=self.off_min.value(),

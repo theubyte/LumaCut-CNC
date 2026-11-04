@@ -2,7 +2,9 @@
 
 Jede Zeile zeigt Farbe, Name und die Laser-Einstellung der Ebene in
 Kurzform ("80 % · 600 mm/min · 1×"), damit die Zuordnung Ebene → Parameter
-ohne Klicken sichtbar ist. Darunter werden die Parameter der aktiven Ebene
+ohne Klicken sichtbar ist. Geschwindigkeiten erscheinen in der gewählten
+Anzeige-Einheit mm/min oder mm/s (:func:`.unit_ui.display_speed_units`, Auswahl
+neben dem Feld); gespeichert wird immer mm/min. Darunter werden die Parameter der aktiven Ebene
 bearbeitet. Alle Änderungen laufen über den Undo-Stack des Editors.
 
 Der Abschnitt „Material der Ebene“ wählt ein Material (eingebaute
@@ -29,6 +31,8 @@ from PySide6.QtWidgets import (QColorDialog, QGridLayout, QComboBox, QDoubleSpin
 from . import hatch as _hatch
 from . import icons, theme
 from .fit import enable_touch_scroll
+from .units import format_speed
+from .unit_ui import SpeedSpin, SpeedUnitCombo, display_speed_units
 from .commands import (AddLayerCommand, MoveLayerCommand, RemoveLayerCommand, SetLayerAttrCommand,
                        SetLayerAttrsCommand)
 from .material import (BUILTIN_MATERIALS, DEPTH_PER_PASS_RANGE, THICKNESS_RANGE, Material,
@@ -57,8 +61,11 @@ START_VALUES_HINT = ("Eingebaute Materialien sind editierbare Startwerte, nicht 
                      "vor dem Schneiden einen Materialtest machen.")
 
 
-def layer_summary(layer: Layer) -> str:
-    text = f"{layer.power:g} % · {layer.speed:g} mm/min · {layer.passes}×"
+def layer_summary(layer: Layer, speed_unit: str | None = None) -> str:
+    """Kurzform der Ebene; Geschwindigkeit in ``speed_unit`` (Standard: die
+    gewählte Anzeige-Einheit)."""
+    unit = speed_unit or display_speed_units().unit
+    text = f"{layer.power:g} % · {format_speed(layer.speed, unit)} · {layer.passes}×"
     if layer.fill_mode != "none":
         text += f" · {_hatch.FILL_LABELS[layer.fill_mode]} {_mm(layer.line_interval_mm)} mm"
         if layer.fill_grouping != "individual":
@@ -243,11 +250,8 @@ class LayersPanel(QWidget):
         self.power.setRange(*POWER_RANGE)
         self.power.setDecimals(0)
         self.power.setSuffix(" %")
-        self.speed = QDoubleSpinBox()
-        self.speed.setRange(*SPEED_RANGE)
-        self.speed.setDecimals(0)
-        self.speed.setSingleStep(50)
-        self.speed.setSuffix(" mm/min")
+        self.speed = SpeedSpin(*SPEED_RANGE)  # Wert mm/min, Anzeige mm/min oder mm/s
+        self.speed_unit = SpeedUnitCombo()
         self.passes = QSpinBox()
         self.passes.setRange(*PASSES_RANGE)
         self.passes.setSuffix(" ×")
@@ -258,7 +262,11 @@ class LayersPanel(QWidget):
         form.addRow("Name", self.name)
         form.addRow("Farbe", self.color)
         form.addRow("Leistung", self.power)
-        form.addRow("Geschwindigkeit", self.speed)
+        speed_row = QHBoxLayout()
+        speed_row.setSpacing(6)
+        speed_row.addWidget(self.speed, 1)
+        speed_row.addWidget(self.speed_unit)
+        form.addRow("Geschwindigkeit", speed_row)
         passes_row = QHBoxLayout()
         passes_row.setSpacing(6)
         passes_row.addWidget(self.passes, 1)
@@ -282,6 +290,7 @@ class LayersPanel(QWidget):
 
         self.reload_presets()
         self.doc.add_listener(self.refresh)
+        display_speed_units().changed.connect(self._speed_unit_changed)
         self.refresh()
 
     def _build_material_box(self) -> QGroupBox:
@@ -350,7 +359,9 @@ class LayersPanel(QWidget):
             text = "Kein Material – oben unter „1 Material“ wählen."
         else:
             t = f" · {layer.thickness_mm:g} mm".replace(".", ",") if layer.thickness_mm else ""
-            text = (f"{layer.material}{t}\n{layer.power:.0f} % · {layer.speed:.0f} mm/min · "
+            speed = format_speed(layer.speed, display_speed_units().unit, decimals=(
+                0 if display_speed_units().unit == "mm/min" else 1))
+            text = (f"{layer.material}{t}\n{layer.power:.0f} % · {speed} · "
                     f"{layer.passes}× Durchgang")
         self.material_summary.setText(text)
 
@@ -590,6 +601,12 @@ class LayersPanel(QWidget):
             self.material_box.setEnabled(False)
             self.fill_box.setEnabled(False)
         self._updating = False
+
+    def _speed_unit_changed(self, _unit: str) -> None:
+        """Ebenenzeilen und Materialzusammenfassung in der neuen Einheit zeigen
+        (das Feld selbst folgt über :class:`.unit_ui.SpeedSpin`)."""
+        self._signature = None
+        self.refresh()
 
     def _show_material(self, layer: Layer) -> None:
         combo = self.material

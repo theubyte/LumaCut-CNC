@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand, SetImageSettingsCommand
 from lumacut_canvas.document_io import FILE_SUFFIX
 from lumacut_canvas.model import ImageSettings
+from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 
 from .placement import ALL_SUFFIXES, IMAGE_SUFFIXES, PDF_LIKE_SUFFIXES, import_file
 
@@ -137,7 +138,9 @@ class ImageSettingsDialog(QDialog):
         self.dpi_label = QLabel()
         self.power = self._dspin(1, 100, st.power, 1, 1, " %")
         self.min_power = self._dspin(0, 100, st.min_power, 1, 1, " %")
-        self.speed = self._dspin(1, 6000, st.speed_mm_min, 0, 100, " mm/min")
+        self.speed = SpeedSpin(1, 6000, st.speed_mm_min)  # Wert mm/min, Anzeige mm/min oder mm/s
+        self.speed.setKeyboardTracking(True)
+        self.speed_unit = SpeedUnitCombo()
         self.passes = QSpinBox()
         self.passes.setRange(1, 30)
         self.passes.setValue(st.passes)
@@ -218,7 +221,10 @@ class ImageSettingsDialog(QDialog):
         form.addRow("", self.dpi_label)
         form.addRow("Leistung (max.)", self.power)
         form.addRow("Leistung (min., Graustufen)", self.min_power)
-        form.addRow("Geschwindigkeit", self.speed)
+        speed_row = QHBoxLayout()
+        speed_row.addWidget(self.speed, 1)
+        speed_row.addWidget(self.speed_unit)
+        form.addRow("Geschwindigkeit", speed_row)
         form.addRow("Durchgänge", self.passes)
         form.addRow("Schwellwert", self.threshold)
         form.addRow("Overscan", self.overscan)

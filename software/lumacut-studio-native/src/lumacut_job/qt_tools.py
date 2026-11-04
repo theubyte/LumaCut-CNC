@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 
 from lumacut_canvas.commands import AddLayerCommand, AddShapesCommand
 from lumacut_canvas.export import job_layers
+from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 
 from .estimate import estimate_gcode, frame_gcode
 from .material_test import MaterialTestSpec, build_material_test
@@ -45,8 +46,12 @@ class MaterialTestDialog(QDialog):
         self.p_min = _spin(1, 100, s.power_min, suffix=" %")
         self.p_max = _spin(1, 100, s.power_max, suffix=" %")
         self.cols = _spin(1, 12, s.columns)
-        self.s_min = _spin(1, 6000, s.speed_min, 100, suffix=" mm/min")
-        self.s_max = _spin(1, 6000, s.speed_max, 100, suffix=" mm/min")
+        # Geschwindigkeit: Wert mm/min, Anzeige mm/min oder mm/s (unit_ui)
+        self.s_min = SpeedSpin(1, 6000, s.speed_min)
+        self.s_max = SpeedSpin(1, 6000, s.speed_max)
+        for w in (self.s_min, self.s_max):
+            w.setKeyboardTracking(True)
+        self.speed_unit = SpeedUnitCombo()
         self.rows = _spin(1, 12, s.rows)
         self.cell = _spin(2, 60, s.cell_mm, 1, 1, " mm")
         self.gap = _spin(0, 30, s.gap_mm, 1, 1, " mm")
@@ -60,7 +65,8 @@ class MaterialTestDialog(QDialog):
         self.labels.setChecked(s.labels)
         for label, w in (("Leistung von", self.p_min), ("Leistung bis", self.p_max),
                          ("Spalten (Leistung)", self.cols), ("Geschw. von", self.s_min),
-                         ("Geschw. bis", self.s_max), ("Zeilen (Geschw.)", self.rows),
+                         ("Geschw. bis", self.s_max), ("Geschw.-Einheit", self.speed_unit),
+                         ("Zeilen (Geschw.)", self.rows),
                          ("Zellgröße", self.cell), ("Abstand", self.gap), ("Position X", self.x),
                          ("Position Y", self.y), ("Durchgänge", self.passes), ("Art", self.mode),
                          ("Linienabstand", self.interval), ("", self.labels)):
