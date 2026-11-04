@@ -189,11 +189,13 @@ class JobTools(QObject):
             # Park corner (Pi 9ae8577): refuse before uploading, not at the Pi.
             from .park_corner import attach_park_check
             attach_park_check(machine_panel, lambda text: self._msg(text, 15000))
-        # Park corner as a red hatched no-go zone on the canvas (absolute origin only).
+        # Park corner as a red hatched no-go zone on the canvas (follows the origin; live warning).
         self.park_zone = None
         if hasattr(editor, "add_overlay"):
             from .park_zone import install_park_zone
-            self.park_zone = install_park_zone(editor, machine_panel, self)
+            self.park_zone = install_park_zone(
+                editor, machine_panel, self, report=lambda text: self._msg(text, 10000),
+                selection_only=lambda: bool(getattr(self, "selection_only", False)))
         # Variable text (lumacut_job.vartext): outermost wrapper, advances after a successful upload.
         self.vartext_tracker = None
         if hasattr(machine_panel, "send_gcode"):
@@ -239,6 +241,9 @@ class JobTools(QObject):
         values = getattr(self, "vartext_values", None)
         if values is not None:
             values.schedule()
+        zone = getattr(self, "park_zone", None)
+        if zone is not None:
+            zone.update()
         self._msg("Auftrag: nur ausgewählte Objekte" if self.selection_only
                   else "Auftrag: ganzes Design")
 
