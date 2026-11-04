@@ -16,7 +16,8 @@ from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                QDoubleSpinBox, QFileDialog, QFormLayout, QInputDialog, QLabel,
-                               QHBoxLayout, QMessageBox, QSpinBox, QVBoxLayout)
+                               QGroupBox, QHBoxLayout, QMessageBox, QPushButton, QSpinBox,
+                               QVBoxLayout)
 
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand, SetImageSettingsCommand
 from lumacut_canvas.document_io import FILE_SUFFIX
@@ -34,6 +35,7 @@ MODE_LABELS = {
     "ordered": "Geordnet (Bayer)",
     "halftone": "Halbton (Rasterpunkte, Zellen + Winkel)",
     "newsprint": "Zeitungsdruck (45°-Rasterpunkte)",
+    "sketch": "Skizze (Kanten, Zeichenstil)",
     "grayscale": "Graustufen (Leistung je Pixel)",
     "depth3d": "3D-Tiefe (Mehrfach-Durchgänge)",
 }
@@ -97,6 +99,30 @@ class ImageSettingsDialog(QDialog):
         self.dot_width.setToolTip("Punktbreitenkorrektur: jede gelaserte Strecke wird um diesen Wert "
                                   "kürzer (je Ende die Hälfte), damit der Strahl Punkte nicht "
                                   "verbreitert. Etwa die halbe Strahlbreite; höchstens der Linienabstand.")
+        # Bildanpassung (LightBurn „Adjust Image“): vor dem Modus, auch in der Vorschau.
+        self.brightness = self._dspin(-100, 100, st.brightness, 0, 5, " %")
+        self.brightness.setToolTip("Helligkeit: + hellt auf (weniger lasern), − dunkelt ab")
+        self.contrast = self._dspin(-100, 100, st.contrast, 0, 5, " %")
+        self.contrast.setToolTip("Kontrast um Mittelgrau: +100 = 10-fach, −100 = ein Zehntel")
+        self.gamma = self._dspin(0.2, 5.0, st.gamma, 2, 0.05, "")
+        self.gamma.setToolTip("Gamma: > 1 hellt die Mitteltöne auf, < 1 dunkelt sie ab; "
+                              "Schwarz und Weiß bleiben")
+        self.sharpen = self._dspin(0, 500, st.sharpen, 0, 10, " %")
+        self.sharpen.setToolTip("Schärfen (Unscharf maskieren): betont Kanten und feine Details")
+        self.sharpen_radius = self._dspin(0.5, 10, st.sharpen_radius, 1, 0.5, " Punkte")
+        self.sharpen_radius.setToolTip("Radius des Schärfens in Laserpunkten (Linienabstand)")
+        self.reset_adjust = QPushButton("Zurücksetzen")
+        self.reset_adjust.setToolTip("Helligkeit, Kontrast, Gamma und Schärfen auf „unverändert“")
+        self.reset_adjust.clicked.connect(self.reset_adjustments)
+        adjust_form = QFormLayout()
+        adjust_form.addRow("Helligkeit", self.brightness)
+        adjust_form.addRow("Kontrast", self.contrast)
+        adjust_form.addRow("Gamma", self.gamma)
+        adjust_form.addRow("Schärfen", self.sharpen)
+        adjust_form.addRow("Schärferadius", self.sharpen_radius)
+        adjust_form.addRow("", self.reset_adjust)
+        self.adjust_box = QGroupBox("Bildanpassung")
+        self.adjust_box.setLayout(adjust_form)
         form.addRow("Modus", self.mode)
         form.addRow("Linienabstand", self.interval)
         form.addRow("", self.dpi_label)
@@ -140,6 +166,7 @@ class ImageSettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         left = QVBoxLayout()
         left.addLayout(form)
+        left.addWidget(self.adjust_box)
         left.addWidget(self.hint)
         lay = QVBoxLayout(self)
         row = QHBoxLayout()
@@ -161,7 +188,9 @@ class ImageSettingsDialog(QDialog):
         self.z_step.valueChanged.connect(self._update)
         self.cpi.valueChanged.connect(self._update)
         self.dot_width.valueChanged.connect(self._update)
-        for w in (self.power, self.min_power, self.threshold, self.angle, self.levels):
+        self.sharpen.valueChanged.connect(self._update)
+        for w in (self.power, self.min_power, self.threshold, self.angle, self.levels,
+                  self.brightness, self.contrast, self.gamma, self.sharpen_radius):
             w.valueChanged.connect(self._schedule_preview)
         self.negative.toggled.connect(self._schedule_preview)
         self._update()
@@ -188,6 +217,7 @@ class ImageSettingsDialog(QDialog):
         self.cpi.setEnabled(mode == "halftone")
         self.angle.setEnabled(mode == "halftone")
         self.dot_width.setMaximum(self.interval.value())
+        self.sharpen_radius.setEnabled(self.sharpen.value() > 0)
         dpi = 25.4 / self.interval.value()
         src_dpi = self._px / self._width_mm * 25.4 if self._width_mm > 0 else 0
         self.dpi_label.setText(f"= {dpi:.0f} DPI (Bild: {src_dpi:.0f} DPI)")
@@ -204,6 +234,9 @@ class ImageSettingsDialog(QDialog):
             if px < 3:
                 text += " – zu klein für den Linienabstand, weniger Zellen je Zoll wählen."
             self.hint.setText(text)
+        elif mode == "sketch":
+            self.hint.setText("Lasert nur Kanten und Strukturen, gleichmäßige Flächen bleiben frei. "
+                              "Kontrast und Schärfen verstärken die Linien.")
         else:
             self.hint.setText("")
         self._schedule_preview()
@@ -235,6 +268,15 @@ class ImageSettingsDialog(QDialog):
             text += " (Ausschnitt aus der Bildmitte)"
         self.preview_label.setText(text)
 
+    def reset_adjustments(self) -> None:
+        """Bildanpassung auf „unverändert“ (Vorgaben)."""
+        d = ImageSettings()
+        self.brightness.setValue(d.brightness)
+        self.contrast.setValue(d.contrast)
+        self.gamma.setValue(d.gamma)
+        self.sharpen.setValue(d.sharpen)
+        self.sharpen_radius.setValue(d.sharpen_radius)
+
     def settings(self) -> ImageSettings:
         return ImageSettings(
             mode=self.mode.currentData(), line_interval_mm=self.interval.value(),
@@ -244,7 +286,10 @@ class ImageSettingsDialog(QDialog):
             overscan_mm=self.overscan.value(), negative=self.negative.isChecked(),
             depth_levels=self.levels.value(), z_step_mm=self.z_step.value(),
             halftone_cpi=self.cpi.value(), halftone_angle=self.angle.value(),
-            dot_width_mm=self.dot_width.value()).normalized()
+            dot_width_mm=self.dot_width.value(), brightness=self.brightness.value(),
+            contrast=self.contrast.value(), gamma=self.gamma.value(),
+            sharpen=self.sharpen.value(),
+            sharpen_radius=self.sharpen_radius.value()).normalized()
 
 
 class ImportTools(QObject):

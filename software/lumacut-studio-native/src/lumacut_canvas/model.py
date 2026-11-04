@@ -74,7 +74,7 @@ POINT_KINDS = {"polygon": 3, "path": 2}  # Art -> Mindestanzahl Punkte
 # Bildeinstellungen, nicht aus der Ebene (wie bei LightBurn "Image"-Ebenen).
 # Reihenfolge = alte Modi zuerst; Jarvis/Stucki/Sierra/Halbton/Zeitungsdruck seit Runde 27.
 IMAGE_MODES = ("threshold", "floyd", "atkinson", "ordered", "grayscale", "depth3d",
-               "jarvis", "stucki", "sierra", "halftone", "newsprint")
+               "jarvis", "stucki", "sierra", "halftone", "newsprint", "sketch")
 
 
 @dataclass(frozen=True)
@@ -96,6 +96,12 @@ class ImageSettings:
     halftone_cpi: float = 30.0        # nur Halbton: Zellen je Zoll (LightBurn „Cells per Inch“)
     halftone_angle: float = 45.0      # nur Halbton: Rasterwinkel in Grad
     dot_width_mm: float = 0.0         # Punktbreitenkorrektur (0 = aus, max. Linienabstand)
+    # Bildanpassung vor dem Modus (LightBurn „Adjust Image“); Vorgaben = unverändert.
+    brightness: float = 0.0           # −100..100 (% des Grauwertbereichs, addiert)
+    contrast: float = 0.0             # −100..100 (Steigung 10^(c/100) um Mittelgrau)
+    gamma: float = 1.0                # 0.2..5 (> 1 hellt Mitteltöne auf)
+    sharpen: float = 0.0              # Unscharf maskieren, Stärke 0..500 %
+    sharpen_radius: float = 1.0       # Radius 0.5..10 Laserpunkte
 
     def normalized(self) -> "ImageSettings":
         interval = _clamp(float(self.line_interval_mm), 0.03, 2.0)
@@ -114,7 +120,12 @@ class ImageSettings:
             z_step_mm=_clamp(float(self.z_step_mm), 0.0, 2.0),
             halftone_cpi=_clamp(float(self.halftone_cpi), 5.0, 150.0),
             halftone_angle=_clamp(float(self.halftone_angle), -90.0, 90.0),
-            dot_width_mm=_clamp(float(self.dot_width_mm), 0.0, interval))
+            dot_width_mm=_clamp(float(self.dot_width_mm), 0.0, interval),
+            brightness=_clamp(float(self.brightness), -100.0, 100.0),
+            contrast=_clamp(float(self.contrast), -100.0, 100.0),
+            gamma=_clamp(float(self.gamma), 0.2, 5.0),
+            sharpen=_clamp(float(self.sharpen), 0.0, 500.0),
+            sharpen_radius=_clamp(float(self.sharpen_radius), 0.5, 10.0))
 
     def to_dict(self) -> dict:
         return asdict(self)

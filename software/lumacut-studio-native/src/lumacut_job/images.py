@@ -6,11 +6,16 @@ Linienabstand seiner Einstellungen in ein Graustufen-Array gerendert
 vorhandenen Raster-Engine umgesetzt:
 
 * ``threshold``/``floyd``/``atkinson``/``ordered``/``grayscale``/``jarvis``/
-  ``stucki``/``sierra``/``halftone``/``newsprint`` →
+  ``stucki``/``sierra``/``halftone``/``newsprint``/``sketch`` →
   :func:`raster.power_map` + :func:`raster.scanlines` (Punktbreitenkorrektur
   ``dot_width_mm`` gilt für alle Modi inkl. 3D);
 * ``depth3d`` → :func:`raster.sliced_depth_gcode` (Mehrfach-Durchgänge nach
   Helligkeit, optional Fokus-Absenkung je Stufe).
+
+Bildanpassung (Helligkeit, Kontrast, Gamma, Schärfen) rechnet
+:func:`raster.power_map` bzw. :func:`raster.sliced_depth_gcode` vor dem Modus;
+bei gedrehten Bildern verhindert eine Innen-Maske (:func:`render_inside`), dass
+die Ecken der Hüllbox durch Anpassung oder Skizzen-Kanten gelasert werden.
 
 Scan-Versatz (:mod:`.scan_offset`, Tabelle nach Geschwindigkeit): jede
 Rasterzeile wandert um den halben Versatz entgegen ihrer Fahrtrichtung –
@@ -53,7 +58,9 @@ def raster_settings(shape: Shape, overscan_mm: float | None = None) -> RasterSet
                           mode=mode, threshold=st.threshold, bidirectional=st.bidirectional,
                           overscan_mm=st.overscan_mm if overscan_mm is None else overscan_mm,
                           negative=st.negative, halftone_cpi=st.halftone_cpi,
-                          halftone_angle=st.halftone_angle, dot_width_mm=st.dot_width_mm)
+                          halftone_angle=st.halftone_angle, dot_width_mm=st.dot_width_mm,
+                          brightness=st.brightness, contrast=st.contrast, gamma=st.gamma,
+                          sharpen=st.sharpen, sharpen_radius=st.sharpen_radius)
 
 
 def render_gray(shape: Shape, interval_mm: float) -> tuple[np.ndarray, tuple[float, float]]:
@@ -95,6 +102,35 @@ def render_gray(shape: Shape, interval_mm: float) -> tuple[np.ndarray, tuple[flo
     return arr.reshape(rows, stride)[:, :cols].copy(), (b.x, b.y)
 
 
+def render_inside(shape: Shape, interval_mm: float) -> np.ndarray | None:
+    """Bool-Maske „Pixel liegt im (gedrehten) Bild“ im Raster von :func:`render_gray`.
+
+    ``None`` bei ungedrehten Bildern (Hüllbox = Bild, alles innen).
+    """
+    if not shape.geom.rot:
+        return None
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from lumacut_canvas.shape_paths import geometry_transform
+
+    b = shape.geom.bounds()
+    cols = max(1, int(round(b.w / interval_mm)))
+    rows = max(1, int(round(b.h / interval_mm)))
+    canvas = QImage(cols, rows, QImage.Format_Grayscale8)
+    canvas.fill(QColor(0, 0, 0))
+    p = QPainter(canvas)
+    p.scale(cols / b.w if b.w else 1.0, rows / b.h if b.h else 1.0)
+    p.translate(-b.x, -b.y)
+    p.setTransform(geometry_transform(shape.geom), True)
+    lb = shape.geom.local_bounds()
+    p.fillRect(QRectF(lb.x, lb.y, lb.w, lb.h), QColor(255, 255, 255))
+    p.end()
+    stride = canvas.bytesPerLine()
+    arr = np.frombuffer(canvas.constBits(), dtype=np.uint8, count=stride * rows)
+    return arr.reshape(rows, stride)[:, :cols] >= 128
+
+
 def _strip(program: str) -> list[str]:
     """Header (5 Zeilen) und Footer (M5 I, M400) eines Teilprogramms entfernen."""
     lines = program.strip().splitlines()
@@ -106,10 +142,16 @@ def image_job(shape: Shape, layer_name: str = "", scan_offsets=None) -> ImageJob
     st = shape.image.settings.normalized()
     gray, (cx, cy) = render_gray(shape, st.line_interval_mm)
     width = gray.shape[1] * st.line_interval_mm
+    adjusts = st.mode == "sketch" or raster_settings(shape).adjusted()
+    inside = render_inside(shape, st.line_interval_mm) if adjusts else None
+    if inside is not None and inside.shape != gray.shape:
+        inside = None
     if IMAGE_FLIP_X:
         # Nullpunkt oben rechts (Anforderungen 2026-10-26 §2.1): Maschinen-X wächst
         # nach links. Raster laufen in +X ab Spalte 0 → Spalte 0 = rechte Bildkante.
         gray = np.ascontiguousarray(gray[:, ::-1])
+        if inside is not None:
+            inside = np.ascontiguousarray(inside[:, ::-1])
         ox, oy = to_machine(cx + width, cy)
         flipped = True
     else:
@@ -132,10 +174,12 @@ def image_job(shape: Shape, layer_name: str = "", scan_offsets=None) -> ImageJob
     title = f"; IMAGE {shape.id} {st.mode.upper()}"
     if st.mode == "depth3d":
         prog = sliced_depth_gcode(gray, (ox, oy), width, gray.shape[0] * st.line_interval_mm,
-                                  s, levels=st.depth_levels, z_step_mm=st.z_step_mm)
+                                  s, levels=st.depth_levels, z_step_mm=st.z_step_mm,
+                                  inside=inside)
         body = _strip(prog)
     else:
-        body = scanlines(power_map(gray, s), (ox, oy), s)
+        pm = power_map(gray, s) if inside is None else power_map(gray, s, inside=inside)
+        body = scanlines(pm, (ox, oy), s)
     if not body:
         raise ValueError("Bild enthält nichts zu gravieren")
     lines = [title]

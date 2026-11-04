@@ -9,6 +9,9 @@ into Pi-safe Marlin laser G-code:
   ``halftone_cpi`` cells per inch at ``halftone_angle``) and ``newsprint``
   (45° clustered-dot screen with a fixed cell of a few pixels) -> on/off dots
   at full layer power (the LightBurn / xTool image modes);
+* mode ``sketch`` (LightBurn "Sketch") -> edges of the image (Sobel gradient
+  of the slightly smoothed darkness) dithered with Jarvis, so outlines and
+  texture are engraved while flat areas - light or dark - stay unburned;
 * mode ``grayscale`` -> per-pixel ``S`` between ``min_power`` and ``power``;
 * :func:`depth_slices` + :func:`sliced_depth_gcode` -> multi-pass depth
   engraving from a height map: pass *k* burns every pixel whose darkness is
@@ -26,6 +29,13 @@ power are merged into one ``G1`` to keep the serial stream small.
 by half the value at each end where it borders an unburned pixel, so the beam
 width does not make dots and lines wider than the pixels; 0 = unchanged.
 
+Image adjustments (LightBurn "Adjust Image", applied by :func:`adjust_gray`
+inside :func:`power_map` before any mode, so preview and job match):
+``sharpen`` (unsharp mask, amount in % with ``sharpen_radius`` in pixels),
+then ``brightness`` (-100..100, added), ``contrast`` (-100..100, slope
+10**(c/100) around mid grey) and ``gamma`` (0.2..5, > 1 lightens the mid
+tones). All at their defaults = the image is used unchanged (bit-identical).
+
 Coordinates: ``origin`` is the machine-mm position of the image's top-left
 pixel; image rows go towards +Y (same as the canvas).
 """
@@ -41,12 +51,18 @@ from lumacut_canvas.workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine,
 
 PWM_MAX = 255
 MODES = ("threshold", "floyd", "atkinson", "ordered", "grayscale",
-         "jarvis", "stucki", "sierra", "halftone", "newsprint")
+         "jarvis", "stucki", "sierra", "halftone", "newsprint", "sketch")
 #: On/off modes based on error diffusion (the slow, sequential ones).
 DIFFUSION_MODES = ("floyd", "atkinson", "jarvis", "stucki", "sierra")
 HALFTONE_CPI_RANGE = (5.0, 150.0)     # cells per inch (LightBurn "Cells per Inch")
 HALFTONE_ANGLE_RANGE = (-90.0, 90.0)  # degrees
 NEWSPRINT_CELL_PX = 6 * 2 ** 0.5      # 45° screen: 6 px along the image axes
+BRIGHTNESS_RANGE = (-100.0, 100.0)    # % of the grey range, added
+CONTRAST_RANGE = (-100.0, 100.0)      # slope 10**(c/100): 0.1 .. 10
+GAMMA_RANGE = (0.2, 5.0)              # v ** (1/gamma), > 1 = lighter mid tones
+SHARPEN_RANGE = (0.0, 500.0)          # unsharp mask amount in %
+SHARPEN_RADIUS_RANGE = (0.5, 10.0)    # Gaussian sigma in pixels (= line intervals)
+SKETCH_GAIN = 2.0                     # edge darkness = |Sobel| / 4 * gain
 MAX_DEPTH_DROP_MM = 3.0  # same budget as the canvas focus drop limit
 
 # Erlaubter Bereich in Maschinen-mm (Nullpunkt oben rechts: to_machine(0, 0)
@@ -72,6 +88,16 @@ class RasterSettings:
     halftone_cpi: float = 30.0        # halftone: cells per inch
     halftone_angle: float = 45.0      # halftone: screen angle in degrees
     dot_width_mm: float = 0.0         # dot width correction (0 = off)
+    brightness: float = 0.0           # image adjustments, see adjust_gray()
+    contrast: float = 0.0
+    gamma: float = 1.0
+    sharpen: float = 0.0
+    sharpen_radius: float = 1.0
+
+    def adjusted(self) -> bool:
+        """True if any image adjustment differs from "unchanged"."""
+        return bool(self.brightness or self.contrast or self.sharpen
+                    or abs(self.gamma - 1.0) > 1e-9)
 
     def validate(self) -> None:
         if self.mode not in MODES:
@@ -92,6 +118,13 @@ class RasterSettings:
             raise ValueError(f"Raster-Winkel {lo:g}..{hi:g}°")
         if not 0 <= self.dot_width_mm <= self.line_interval_mm + 1e-9:
             raise ValueError("Punktbreitenkorrektur 0..Linienabstand")
+        for value, (lo, hi), name in ((self.brightness, BRIGHTNESS_RANGE, "Helligkeit"),
+                                      (self.contrast, CONTRAST_RANGE, "Kontrast"),
+                                      (self.gamma, GAMMA_RANGE, "Gamma"),
+                                      (self.sharpen, SHARPEN_RANGE, "Schärfen"),
+                                      (self.sharpen_radius, SHARPEN_RADIUS_RANGE, "Schärferadius")):
+            if not lo <= value <= hi:
+                raise ValueError(f"{name} {lo:g}..{hi:g}")
 
 
 def resample(gray: np.ndarray, width_mm: float, height_mm: float, interval_mm: float) -> np.ndarray:
@@ -296,14 +329,114 @@ def dot_mask(darkness: np.ndarray, s: "RasterSettings") -> np.ndarray:
         return _halftone(darkness, halftone_cell_px(s), s.halftone_angle)
     if s.mode == "newsprint":
         return _newsprint(darkness)
+    if s.mode == "sketch":
+        return _error_diffuse_rows(darkness, _JARVIS)
     raise ValueError(f"Kein Punktmodus: {s.mode}")
 
 
-def power_map(gray: np.ndarray, s: RasterSettings) -> np.ndarray:
-    """Per-pixel ``S`` (0..255, int) for the given mode."""
-    s.validate()
+def _gauss_kernel(sigma: float) -> np.ndarray:
+    r = max(1, int(np.ceil(3.0 * sigma)))
+    x = np.arange(-r, r + 1, dtype=np.float64)
+    k = np.exp(-0.5 * (x / sigma) ** 2)
+    return (k / k.sum()).astype(np.float32)
+
+
+def gaussian_blur(img: np.ndarray, sigma: float) -> np.ndarray:
+    """Separable Gaussian blur (edge pixels repeated), float32."""
+    a = np.asarray(img, dtype=np.float32)
+    k = _gauss_kernel(sigma)
+    r = len(k) // 2
+    p = np.pad(a, ((0, 0), (r, r)), mode="edge")
+    out = np.zeros_like(a)
+    for i, w in enumerate(k):
+        out += w * p[:, i:i + a.shape[1]]
+    p = np.pad(out, ((r, r), (0, 0)), mode="edge")
+    out = np.zeros_like(a)
+    for i, w in enumerate(k):
+        out += w * p[i:i + a.shape[0], :]
+    return out
+
+
+def adjust_gray(gray: np.ndarray, s: RasterSettings) -> np.ndarray:
+    """Brightness / contrast / gamma / sharpen on a grey image (0 = black).
+
+    Returns float32 0..255. Order: unsharp mask, brightness, contrast, gamma.
+    Without adjustments the input is returned unchanged (as float32).
+    """
     g = np.asarray(gray, dtype=np.float32)
+    if not s.adjusted():
+        return g
+    v = g / 255.0
+    if s.sharpen:
+        v = np.clip(v + s.sharpen / 100.0 * (v - gaussian_blur(v, s.sharpen_radius)), 0.0, 1.0)
+    if s.brightness:
+        v = v + s.brightness / 100.0
+    if s.contrast:
+        v = (v - 0.5) * (10.0 ** (s.contrast / 100.0)) + 0.5
+    v = np.clip(v, 0.0, 1.0)
+    if abs(s.gamma - 1.0) > 1e-9:
+        v = v ** (1.0 / s.gamma)
+    return (v * 255.0).astype(np.float32)
+
+
+def adjusted_height(gray: np.ndarray, s: RasterSettings,
+                    inside: np.ndarray | None = None) -> np.ndarray:
+    """Adjusted grey image for 3D depth; pixels outside ``inside`` keep
+    their value (the not-burn background). Unchanged without adjustments."""
+    if not s.adjusted():
+        return np.asarray(gray)
+    a = adjust_gray(gray, s)
+    return a if inside is None else np.where(inside, a, np.asarray(gray, dtype=np.float32))
+
+
+def sketch_darkness(darkness: np.ndarray) -> np.ndarray:
+    """Edge strength 0..1 (LightBurn "Sketch"): Sobel gradient of the
+    lightly smoothed darkness; a hard black/white step gives 1."""
+    d = gaussian_blur(darkness, 0.7)
+    p = np.pad(d, 1, mode="edge")
+    h, w = d.shape
+
+    def c(dy: int, dx: int) -> np.ndarray:
+        return p[1 + dy:1 + dy + h, 1 + dx:1 + dx + w]
+
+    gx = (c(-1, 1) + 2 * c(0, 1) + c(1, 1)) - (c(-1, -1) + 2 * c(0, -1) + c(1, -1))
+    gy = (c(1, -1) + 2 * c(1, 0) + c(1, 1)) - (c(-1, -1) + 2 * c(-1, 0) + c(-1, 1))
+    return np.clip(np.hypot(gx, gy) / 4.0 * SKETCH_GAIN, 0.0, 1.0)
+
+
+def filter_margin(s: RasterSettings) -> int:
+    """Pixels a neighbourhood filter (sharpen, sketch) reaches beyond a pixel."""
+    m = 0
+    if s.sharpen:
+        m += max(1, int(np.ceil(3.0 * s.sharpen_radius)))
+    if s.mode == "sketch":
+        m += max(1, int(np.ceil(3.0 * 0.7))) + 1
+    return m
+
+
+def power_map(gray: np.ndarray, s: RasterSettings, inside: np.ndarray | None = None,
+              margin: int | tuple[int, int, int, int] = 0) -> np.ndarray:
+    """Per-pixel ``S`` (0..255, int) for the given mode.
+
+    ``inside`` (optional bool mask, same shape): pixels outside the real image
+    (e.g. the corners of a rotated image's bounding box) are never burned by
+    adjustments or sketch edges. Without adjustments and outside sketch mode
+    the mask is ignored, so old output stays bit-identical. ``margin``:
+    ``gray`` carries that many extra context pixels on every side (a crop of
+    a bigger image) - or ``(top, bottom, left, right)``; filters see them,
+    the result leaves them out.
+    """
+    s.validate()
+    g = adjust_gray(gray, s)
     darkness = (g if s.negative else 255.0 - g) / 255.0
+    if s.mode == "sketch":
+        darkness = sketch_darkness(darkness)
+    if inside is not None and (s.adjusted() or s.mode == "sketch"):
+        darkness = np.where(inside, darkness, 0.0).astype(np.float32)
+    if margin:
+        t, b, lft, r = (margin,) * 4 if isinstance(margin, int) else margin
+        h, w = darkness.shape
+        darkness = darkness[t:h - b, lft:w - r]
     full = round(s.power / 100 * PWM_MAX)
     if s.mode == "grayscale":
         lo = s.min_power / 100 * PWM_MAX
@@ -455,7 +588,7 @@ def depth_slices(height: np.ndarray, levels: int, negative: bool = False) -> lis
 
 def sliced_depth_gcode(height: np.ndarray, origin: tuple[float, float], width_mm: float,
                        height_mm: float, s: RasterSettings, levels: int = 8,
-                       z_step_mm: float = 0.0) -> str:
+                       z_step_mm: float = 0.0, inside: np.ndarray | None = None) -> str:
     """Multi-pass depth engraving: one constant-power raster pass per slice.
 
     Deeper areas are engraved more often. With ``z_step_mm`` the focus is
@@ -463,7 +596,8 @@ def sliced_depth_gcode(height: np.ndarray, origin: tuple[float, float], width_mm
     restored at the end; the total drop is limited to
     ``MAX_DEPTH_DROP_MM``. Slice direction alternates by 90° is *not* done
     (Marlin raster only along X); instead odd slices start bottom-up to
-    spread heat.
+    spread heat. Image adjustments of ``s`` are applied to the height map
+    (``inside`` as in :func:`power_map`, same shape as the resampled map).
     """
     s.validate()
     if not 0 <= z_step_mm <= 2:
@@ -471,7 +605,7 @@ def sliced_depth_gcode(height: np.ndarray, origin: tuple[float, float], width_mm
     drop = z_step_mm * (levels - 1)
     if drop > MAX_DEPTH_DROP_MM + 1e-9:
         raise ValueError(f"Fokus-Absenkung zu groß ({drop:.2f} mm > {MAX_DEPTH_DROP_MM:g} mm)")
-    g = resample(height, width_mm, height_mm, s.line_interval_mm)
+    g = adjusted_height(resample(height, width_mm, height_mm, s.line_interval_mm), s, inside)
     full = round(s.power / 100 * PWM_MAX)
     masks = depth_slices(g, levels, s.negative)
     out = _header(f"SLICED DEPTH JOB {levels} LEVELS")
