@@ -53,7 +53,8 @@ def preview_settings(st: ImageSettings) -> RasterSettings:
                           dot_width_mm=st.dot_width_mm, brightness=st.brightness,
                           contrast=st.contrast, gamma=st.gamma, sharpen=st.sharpen,
                           sharpen_radius=st.sharpen_radius,
-                          black_point=st.black_point, white_point=st.white_point)
+                          black_point=st.black_point, white_point=st.white_point,
+                          curve=st.curve)
 
 
 def preview_array(gray: np.ndarray, width_mm: float, height_mm: float,
@@ -176,7 +177,7 @@ def _adjust_settings(st: ImageSettings, factor: float, levels: bool = True):
     s = preview_settings(st)
     s.sharpen_radius = max(0.5, s.sharpen_radius / factor)
     if not levels:
-        s.brightness, s.contrast, s.gamma = 0.0, 0.0, 1.0
+        s.brightness, s.contrast, s.gamma, s.curve = 0.0, 0.0, 1.0, ()
     return s
 
 
@@ -214,6 +215,21 @@ def histograms_rendered(gray: np.ndarray, inside: np.ndarray | None, settings: I
     total = max(1, int(adj.sum()))
     return Histograms(src, adj, float(adj[0]) / total, float(adj[255]) / total,
                       levels_points(src), (st.black_point, st.white_point))
+
+
+def curve_input_histogram(source: np.ndarray, black_point: int = 0,
+                          white_point: int = 255) -> np.ndarray:
+    """Histogramm am Eingang der Gradationskurve: das Bildhistogramm durch
+    den Schwarz-/Weißpunkt gestreckt (die Kurve läuft danach), für den
+    Hintergrund des Kurven-Editors."""
+    src = np.asarray(source, dtype=np.float64)
+    if (black_point, white_point) == (0, 255):
+        return src.copy()
+    v = (np.arange(256) - black_point) / float(max(1, white_point - black_point))
+    idx = np.clip(np.rint(v * 255.0), 0, 255).astype(int)
+    out = np.zeros(256)
+    np.add.at(out, idx, src)
+    return out
 
 
 def auto_levels_for(gray: np.ndarray, width_mm: float, height_mm: float,

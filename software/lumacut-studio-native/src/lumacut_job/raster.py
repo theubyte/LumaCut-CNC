@@ -34,7 +34,9 @@ inside :func:`power_map` before any mode, so preview and job match):
 ``sharpen`` (unsharp mask, amount in % with ``sharpen_radius`` in pixels),
 then levels (``black_point`` / ``white_point``: grey values at or below the
 black point become black, at or above the white point white, linear in
-between), then ``brightness`` (-100..100, added), ``contrast`` (-100..100, slope
+between), then the tone ``curve`` (control points ``(in, out)`` in grey
+values, monotone cubic through the points, flat beyond the first / last
+point; :func:`curve_lut`), then ``brightness`` (-100..100, added), ``contrast`` (-100..100, slope
 10**(c/100) around mid grey) and ``gamma`` (0.2..5, > 1 lightens the mid
 tones). All at their defaults = the image is used unchanged (bit-identical).
 :func:`gray_histogram` counts the grey values (optionally only inside a mask)
@@ -70,6 +72,7 @@ GAMMA_RANGE = (0.2, 5.0)              # v ** (1/gamma), > 1 = lighter mid tones
 SHARPEN_RANGE = (0.0, 500.0)          # unsharp mask amount in %
 SHARPEN_RADIUS_RANGE = (0.5, 10.0)    # Gaussian sigma in pixels (= line intervals)
 LEVELS_RANGE = (0, 255)               # black / white point (grey values, black < white)
+CURVE_MAX_POINTS = 16                 # tone curve control points (incl. the end points)
 AUTO_LEVELS_CLIP = 0.005              # share of pixels ignored at each end
 SKETCH_GAIN = 2.0                     # edge darkness = |Sobel| / 4 * gain
 MAX_DEPTH_DROP_MM = 3.0  # same budget as the canvas focus drop limit
@@ -104,6 +107,7 @@ class RasterSettings:
     sharpen_radius: float = 1.0
     black_point: int = 0              # levels: grey value that becomes black
     white_point: int = 255            # levels: grey value that becomes white
+    curve: tuple = ()                 # tone curve ((in, out), ...) grey values, () = linear
 
     def levels_set(self) -> bool:
         """True if the black / white point differ from 0 / 255."""
@@ -112,7 +116,8 @@ class RasterSettings:
     def adjusted(self) -> bool:
         """True if any image adjustment differs from "unchanged"."""
         return bool(self.brightness or self.contrast or self.sharpen
-                    or abs(self.gamma - 1.0) > 1e-9 or self.levels_set())
+                    or abs(self.gamma - 1.0) > 1e-9 or self.levels_set()
+                    or bool(self.curve))
 
     def validate(self) -> None:
         if self.mode not in MODES:
@@ -143,6 +148,14 @@ class RasterSettings:
         lo, hi = LEVELS_RANGE
         if not lo <= self.black_point < self.white_point <= hi:
             raise ValueError(f"Schwarzpunkt < Weißpunkt, {lo}..{hi}")
+        if self.curve:
+            pts = list(self.curve)
+            if not 2 <= len(pts) <= CURVE_MAX_POINTS:
+                raise ValueError(f"Kurve: 2..{CURVE_MAX_POINTS} Punkte")
+            xs = [p[0] for p in pts]
+            if any(not (0 <= v <= 255) for p in pts for v in p) or \
+                    any(b <= a for a, b in zip(xs, xs[1:])):
+                raise ValueError("Kurve: Punkte 0..255, Eingänge aufsteigend")
 
 
 def resample(gray: np.ndarray, width_mm: float, height_mm: float, interval_mm: float) -> np.ndarray:
@@ -379,8 +392,8 @@ def adjust_gray(gray: np.ndarray, s: RasterSettings) -> np.ndarray:
     """Brightness / contrast / gamma / sharpen on a grey image (0 = black).
 
     Returns float32 0..255. Order: unsharp mask, levels (black / white
-    point: ``(v - black) / (white - black)``, clipped), brightness, contrast,
-    gamma. Without adjustments the input is returned unchanged (as float32).
+    point: ``(v - black) / (white - black)``, clipped), tone curve,
+    brightness, contrast, gamma. Without adjustments the input is returned unchanged (as float32).
     """
     g = np.asarray(gray, dtype=np.float32)
     if not s.adjusted():
@@ -391,6 +404,8 @@ def adjust_gray(gray: np.ndarray, s: RasterSettings) -> np.ndarray:
     if s.levels_set():
         lo, hi = s.black_point / 255.0, s.white_point / 255.0
         v = np.clip((v - lo) / (hi - lo), 0.0, 1.0)
+    if s.curve:
+        v = apply_curve(v, s.curve)
     if s.brightness:
         v = v + s.brightness / 100.0
     if s.contrast:
@@ -399,6 +414,69 @@ def adjust_gray(gray: np.ndarray, s: RasterSettings) -> np.ndarray:
     if abs(s.gamma - 1.0) > 1e-9:
         v = v ** (1.0 / s.gamma)
     return (v * 255.0).astype(np.float32)
+
+
+def curve_lut(points, n: int = 4096) -> np.ndarray:
+    """Tone curve sampled at ``n`` evenly spaced inputs 0..1 (outputs 0..1).
+
+    ``points``: ``(in, out)`` grey values (0..255, inputs strictly rising).
+    Monotone cubic Hermite (Fritsch-Carlson, like the "Curves" tool of image
+    editors without overshoot): the curve passes through every point, rises
+    / falls only where the points do, and is flat before the first and after
+    the last point. Fewer than two points = identity.
+    """
+    t = np.linspace(0.0, 1.0, n)
+    pts = sorted((float(a) / 255.0, float(b) / 255.0) for a, b in points)
+    if len(pts) < 2:
+        return t
+    x = np.array([p[0] for p in pts])
+    y = np.array([p[1] for p in pts])
+    h = np.diff(x)
+    d = np.diff(y) / h
+    m = np.empty_like(x)
+    m[0], m[-1] = d[0], d[-1]
+    for i in range(1, len(x) - 1):
+        if d[i - 1] * d[i] <= 0:
+            m[i] = 0.0
+        else:   # weighted harmonic mean (Fritsch-Butland), keeps monotone
+            w1, w2 = 2 * h[i] + h[i - 1], h[i] + 2 * h[i - 1]
+            m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i])
+    for i in range(len(d)):     # flat segments stay flat; Fritsch-Carlson limit
+        if d[i] == 0:
+            m[i] = m[i + 1] = 0.0
+            continue
+        a, b = m[i] / d[i], m[i + 1] / d[i]
+        r = a * a + b * b
+        if r > 9.0:
+            tau = 3.0 / np.sqrt(r)
+            m[i], m[i + 1] = tau * a * d[i], tau * b * d[i]
+    tc = np.clip(t, x[0], x[-1])
+    k = np.clip(np.searchsorted(x, tc, side="right") - 1, 0, len(x) - 2)
+    hk = h[k]
+    s = (tc - x[k]) / hk
+    h00 = (1 + 2 * s) * (1 - s) ** 2
+    h10 = s * (1 - s) ** 2
+    h01 = s * s * (3 - 2 * s)
+    h11 = s * s * (s - 1)
+    out = h00 * y[k] + h10 * hk * m[k] + h01 * y[k + 1] + h11 * hk * m[k + 1]
+    return np.clip(out, 0.0, 1.0)
+
+
+_CURVE_CACHE: dict = {}
+
+
+def apply_curve(v: np.ndarray, points) -> np.ndarray:
+    """Map ``v`` (0..1) through the tone curve (4096-entry table, linear
+    interpolation between entries; cached per curve)."""
+    key = tuple(tuple(p) for p in points)
+    lut = _CURVE_CACHE.get(key)
+    if lut is None:
+        if len(_CURVE_CACHE) > 64:
+            _CURVE_CACHE.clear()
+        lut = _CURVE_CACHE[key] = curve_lut(key).astype(np.float32)
+    n = len(lut) - 1
+    return np.interp(np.clip(v, 0.0, 1.0) * n, np.arange(n + 1, dtype=np.float32),
+                     lut).astype(np.float32)
 
 
 def gray_histogram(gray: np.ndarray, inside: np.ndarray | None = None) -> np.ndarray:

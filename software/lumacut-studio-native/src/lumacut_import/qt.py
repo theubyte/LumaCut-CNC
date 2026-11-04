@@ -24,6 +24,7 @@ from lumacut_canvas.document_io import FILE_SUFFIX
 from lumacut_canvas.model import ImageSettings
 from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 
+from .curve_widget import CURVE_PRESETS, CUSTOM_LABEL, CurveWidget, preset_name
 from .placement import ALL_SUFFIXES, IMAGE_SUFFIXES, PDF_LIKE_SUFFIXES, import_file
 
 MODE_LABELS = {
@@ -191,9 +192,22 @@ class ImageSettingsDialog(QDialog):
                                     "(nicht gelasert); 255 = unverändert")
         self.black_point.valueChanged.connect(self._levels_changed_black)
         self.white_point.valueChanged.connect(self._levels_changed_white)
+        # Gradationskurve (nach dem Schwarz-/Weißpunkt, vor Helligkeit/Kontrast/Gamma).
+        self.curve = CurveWidget(st.curve)
+        self.curve_preset = QComboBox()
+        self.curve_preset.setObjectName("image_curve_preset")
+        for name in CURVE_PRESETS:
+            self.curve_preset.addItem(name)
+        self.curve_preset.addItem(CUSTOM_LABEL)
+        self.curve_preset.setToolTip("Gradationskurve: Vorlage wählen oder die Kurve unten "
+                                     "bearbeiten (Mitteltöne gezielt heller/dunkler, S-Kurve "
+                                     "für mehr Kontrast)")
+        self._sync_curve_preset(st.curve)
+        self.curve_preset.activated.connect(self._curve_preset_chosen)
+        self.curve.curve_changed.connect(self._curve_edited)
         self.reset_adjust = QPushButton("Zurücksetzen")
-        self.reset_adjust.setToolTip("Tonwert, Helligkeit, Kontrast, Gamma und Schärfen auf "
-                                     "„unverändert“")
+        self.reset_adjust.setToolTip("Tonwert, Kurve, Helligkeit, Kontrast, Gamma und Schärfen "
+                                     "auf „unverändert“")
         self.reset_adjust.clicked.connect(self.reset_adjustments)
         self.auto_levels = QPushButton("Auto-Tonwert")
         self.auto_levels.setToolTip("Schwarz- und Weißpunkt so setzen, dass der Tonwertumfang des "
@@ -206,6 +220,8 @@ class ImageSettingsDialog(QDialog):
         adjust_form = QFormLayout()
         adjust_form.addRow("Schwarzpunkt", self.black_point)
         adjust_form.addRow("Weißpunkt", self.white_point)
+        adjust_form.addRow("Kurve", self.curve_preset)
+        adjust_form.addRow("", self.curve)
         adjust_form.addRow("Helligkeit", self.brightness)
         adjust_form.addRow("Kontrast", self.contrast)
         adjust_form.addRow("Gamma", self.gamma)
@@ -408,12 +424,16 @@ class ImageSettingsDialog(QDialog):
         self.histogram_runs += 1
         self.last_histograms = h
         self.histogram.set_data(h)
+        from .image_preview import curve_input_histogram
+        self.curve.set_histogram(curve_input_histogram(h.source, *h.points))
         text = (f"Histogramm: hell = Bild, dunkel = angepasst – reines Schwarz "
                 f"{h.black_share * 100:.1f} %, reines Weiß {h.white_share * 100:.1f} %")
         if h.levels is not None:
             text += f"; Tonwertumfang {h.levels[0]}–{h.levels[1]}"
         if h.points != (0, 255):
             text += f"; Schwarz-/Weißpunkt {h.points[0]} / {h.points[1]} (blau)"
+        if st.curve:
+            text += f"; Kurve: {preset_name(st.curve)}"
         self.histogram_label.setText(text)
 
     def apply_auto_levels(self) -> bool:
@@ -443,9 +463,26 @@ class ImageSettingsDialog(QDialog):
         if self.black_point.value() >= value:
             self.black_point.setValue(value - 1)
 
+    def _sync_curve_preset(self, curve) -> None:
+        idx = self.curve_preset.findText(preset_name(curve))
+        self.curve_preset.blockSignals(True)
+        self.curve_preset.setCurrentIndex(max(0, idx))
+        self.curve_preset.blockSignals(False)
+
+    def _curve_preset_chosen(self, index: int) -> None:
+        name = self.curve_preset.itemText(index)
+        if name in CURVE_PRESETS:
+            self.curve.set_curve(CURVE_PRESETS[name], emit=True)
+        self._sync_curve_preset(self.curve.curve())
+
+    def _curve_edited(self, curve) -> None:
+        self._sync_curve_preset(curve)
+        self._schedule_preview()
+
     def reset_adjustments(self) -> None:
         """Bildanpassung auf „unverändert“ (Vorgaben)."""
         d = ImageSettings()
+        self.curve.set_curve(d.curve, emit=True)
         self.black_point.setValue(d.black_point)
         self.white_point.setValue(d.white_point)
         self.brightness.setValue(d.brightness)
@@ -468,7 +505,8 @@ class ImageSettingsDialog(QDialog):
             sharpen=self.sharpen.value(),
             sharpen_radius=self.sharpen_radius.value(),
             black_point=self.black_point.value(),
-            white_point=self.white_point.value()).normalized()
+            white_point=self.white_point.value(),
+            curve=self.curve.curve()).normalized()
 
 
 class ImportTools(QObject):

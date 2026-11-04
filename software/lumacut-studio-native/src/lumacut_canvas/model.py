@@ -77,6 +77,31 @@ IMAGE_MODES = ("threshold", "floyd", "atkinson", "ordered", "grayscale", "depth3
                "jarvis", "stucki", "sierra", "halftone", "newsprint", "sketch")
 
 
+CURVE_MAX_POINTS = 16     # Stützpunkte der Gradationskurve (inkl. Endpunkte)
+
+
+def normalize_curve(points) -> tuple:
+    """Gradationskurve säubern: Punkte ``(ein, aus)`` auf 0..255 runden und
+    begrenzen, nach Eingang sortieren (gleicher Eingang: der letzte gilt),
+    höchstens :data:`CURVE_MAX_POINTS`. Weniger als zwei Punkte oder die
+    Diagonale (0,0)…(255,255) ohne Abweichung = ``()`` (linear)."""
+    by_x: dict[int, int] = {}
+    try:
+        for p in points or ():
+            a, b = p
+            by_x[int(_clamp(round(float(a)), 0, 255))] = int(_clamp(round(float(b)), 0, 255))
+    except (TypeError, ValueError):
+        return ()
+    pts = tuple(sorted(by_x.items()))
+    if len(pts) > CURVE_MAX_POINTS:      # Endpunkte behalten, innen kürzen
+        pts = pts[:CURVE_MAX_POINTS - 1] + pts[-1:]
+    if len(pts) < 2:
+        return ()
+    if pts[0] == (0, 0) and pts[-1] == (255, 255) and all(a == b for a, b in pts):
+        return ()
+    return pts
+
+
 @dataclass(frozen=True)
 class ImageSettings:
     """Gravur-Einstellungen eines Bildobjekts (unveränderlich, Undo-sicher)."""
@@ -104,6 +129,8 @@ class ImageSettings:
     sharpen_radius: float = 1.0       # Radius 0.5..10 Laserpunkte
     black_point: int = 0              # Tonwert: Grauwert, der Schwarz wird (0..254)
     white_point: int = 255            # Tonwert: Grauwert, der Weiß wird (> Schwarzpunkt)
+    # Gradationskurve: Stützpunkte ((ein, aus), ...) als Grauwerte, () = linear.
+    curve: tuple = ()
 
     def normalized(self) -> "ImageSettings":
         interval = _clamp(float(self.line_interval_mm), 0.03, 2.0)
@@ -129,10 +156,16 @@ class ImageSettings:
             sharpen=_clamp(float(self.sharpen), 0.0, 500.0),
             sharpen_radius=_clamp(float(self.sharpen_radius), 0.5, 10.0),
             black_point=(bp := int(_clamp(int(self.black_point), 0, 254))),
-            white_point=int(_clamp(int(self.white_point), bp + 1, 255)))
+            white_point=int(_clamp(int(self.white_point), bp + 1, 255)),
+            curve=normalize_curve(self.curve))
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if d.get("curve"):
+            d["curve"] = [list(p) for p in d["curve"]]
+        else:
+            d.pop("curve", None)          # linear: alte Dateien bleiben gleich
+        return d
 
     @staticmethod
     def from_dict(d: dict) -> "ImageSettings":
