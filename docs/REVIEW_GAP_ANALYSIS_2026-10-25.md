@@ -1801,3 +1801,98 @@ Still open:
   Matrix / Aztec / PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and
   (compact) PDF417 codes with a real scanner, park-corner refusal, variable text / CSV merge over
   several sends, rebuilt exe).
+
+## 33. Status update 2026-11-04 (review round 26)
+
+Done this round (Review/Job layer, the fill-preview module and the canvas overlay hook; no
+change to the canvas widget, Machine / Scan Probe and Materials untouched):
+
+- Gap from §32 „Still open“ (scan offset): **the fill preview plans the scan offset in a
+  background thread** (before: ≈ 1–1.6 s frozen GUI per job change at ~1500 hatched objects).
+  - `lumacut_job/planner.py`: optional `should_stop` callable for `optimize_layers`,
+    `order_polylines`, `order_fill_blocks_nearest` and `improve_fill_block_order`; a true result
+    raises `PlanCancelled`. Without it the output is unchanged (G-code byte-for-byte).
+  - `lumacut_job/scan_offset.py`: `preview_fill_request(doc)` builds the job layers on the GUI
+    thread and returns `None` (no shift), the cached lines, or a `FillPreviewJob` whose `run()`
+    holds no Qt objects and can run in a worker thread; the cache is guarded by a lock.
+    `preview_fill_lines` is now request + synchronous run (same result).
+  - `lumacut_canvas/fill_preview.py`: `rebuild()` first draws the plain geometry, then starts a
+    daemon worker (starting it after drawing avoids GIL contention: GUI part 0.52 s → 0.13 s at
+    1500 objects); a 25 ms timer on the GUI thread collects the result and draws the shifted
+    lines. A new edit (debounce) cancels the running plan and bumps a generation counter, so a
+    stale plan is never drawn; worker errors keep the plain geometry. `busy()`, `wait()`,
+    `background_runs`, `scan_offset_pending`; `BACKGROUND = False` keeps the old synchronous
+    path. Preview = output stays guaranteed (same planner call as sending).
+- Gap from §32 (variable text): **the canvas shows the next value of every variable text**
+  (LightBurn draws the evaluated text; LumaCut drew only the template).
+  - `lumacut_job/vartext.py`: `preview_values(doc, now)` → `{shape_id: PreviewValue(text,
+    error)}` with exactly the job evaluation (series, reading order, copies in a row, CSV row,
+    hidden layers skipped); an error only marks its own series. `evaluate_document` shares the
+    series code (`_series_members`, `_series_texts`), output unchanged. `uses_clock(template)`.
+  - `lumacut_job/vartext_preview.py`: overlay on `editor.add_overlay` (z 60, never in export /
+    G-code): a small label under each object („→ Nr. 042“, green; „⚠ …“ red for errors; above
+    the object at the bottom edge; height 1.6–5 mm with the zoom), debounced on document /
+    selection changes, refreshed every 30 s while a template uses date / time. Source is the
+    Studio's job source, so „Nur Auswahl“ shows the values the selected objects really get.
+  - `lumacut_job/qt_tools.py`, `vartext_qt.py`: checkbox „Nächste Werte auf der Arbeitsfläche
+    anzeigen“ in the dialog, persisted (`vartext/show_values`).
+
+Tests:
+
+- `tests/test_fill_preview_background.py` (12): `should_stop` unchanged / raises / stops mid-plan
+  in all ordering functions; request kinds and copies, run in a worker thread = synchronous
+  lines and G-code; widget: plain lines drawn at once, shifted lines from a non-GUI thread equal
+  `preview_fill_lines`, cached rebuild without a new run, poll timer in the event loop, edit
+  while planning cancels, stale result never drawn, worker errors, synchronous mode, 1500-object
+  rebuild returns before the planner finishes. `tests/test_fill_preview_scan_offset.py` waits for
+  the worker.
+- `tests/test_vartext_canvas_values.py` (11): values = job document texts, date / CSV row /
+  per-series errors / hidden layer, `evaluate_document` unchanged, label text (truncation,
+  newlines, empty, error), label position / height / colour / painting, label above at the
+  bottom edge, debounce and enable / disable, clock timer only with date / time, settings
+  roundtrip, window: copies in a series, „Nur Auswahl“, toggle; dialog checkbox.
+
+Full suite: 1673 passed, 3 skipped (before: 1650 passed, 3 skipped).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); speeds only in mm/min (no mm/s view); the fill preview shows
+  pass 1 only (shifted lines appear ≈ 1.5 s after a change at ~1500 hatched objects, the canvas
+  stays usable meanwhile); the test pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes with non-ASCII characters stay one byte segment (no ECI / Kanji mode); no Micro QR.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (GS1 QR / Digital Link codes with a GS1 scanner and a phone camera,
+  plain-text QR codes with mixed segments, scan offset test pattern and compensated bidirectional
+  hatch / image at 3000–6000 mm/min incl. the shifted fill preview and its background planning
+  on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and 2-opt block
+  order, fill grouping and inside-out offset fill, offset fill, cut options incl. overcut and
+  perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417 readability incl.
+  edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes with a real scanner,
+  park-corner refusal, variable text / CSV merge over several sends incl. the canvas value
+  labels, rebuilt exe).

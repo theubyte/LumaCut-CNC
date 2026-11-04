@@ -221,7 +221,12 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   fehlgeschlagener Start oder das erneute Senden aus dem Auftragsverlauf schaltet nicht weiter.
   Fehler (unbekannte Spalte, CSV-Ende erreicht) verhindern das Senden mit einer Meldung.
   Doppelklick bearbeitet die Vorlage wie normalen Text. „Text in Pfade“ wandelt die Vorlage
-  wörtlich um. Code: `src/lumacut_job/vartext.py`, `vartext_qt.py`.
+  wörtlich um. Auf der Arbeitsfläche steht unter jedem variablen Text der **nächste Wert**
+  („→ Nr. 042“, grün) – genau der Wert, den der nächste Auftrag lasert (Serie, Leserichtung,
+  CSV-Zeile, „Nur Auswahl“); ein Fehler (fehlende CSV, unbekannte Spalte, CSV-Ende) erscheint
+  rot als „⚠ …“. Datum/Uhrzeit werden alle 30 s aktualisiert. Ein-/ausschaltbar im Dialog
+  („Nächste Werte auf der Arbeitsfläche anzeigen“, wird gespeichert); nur Anzeige, nie im
+  Export. Code: `vartext_preview.py`. Code: `src/lumacut_job/vartext.py`, `vartext_qt.py`.
 - **QR-Code** („QR-Code…“, *Alt+Q*, Toolbar/Menü „Auftrag“ und Design-Menü): Text oder Adresse
   (UTF-8) als QR-Code nach ISO/IEC 18004, Fehlerkorrektur L/M/Q/H, Version automatisch, Größe
   5–340 mm, Ruhezone (Standard 4 Module), „Invertiert“ für hell markierende Materialien. Die
@@ -421,8 +426,11 @@ Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt
   Reihe das Feld mit den geradesten Kanten in die Tabelle übernehmen.
   Die **Füllvorschau** auf der Arbeitsfläche zeigt bei aktivem Versatz die verschobenen
   Linien genau wie im G-Code (Blockreihenfolge und Startecke des Planers, Durchgang 1); der
-  Plan wird zwischengespeichert, solange sich der Auftrag nicht ändert (bei ~1500 schraffierten
-  Objekten ≈ 1 s je Änderung). Ohne aktive Tabelle bleibt die Vorschau wie bisher.
+  Plan wird zwischengespeichert, solange sich der Auftrag nicht ändert. Die Planung läuft im
+  Hintergrund: die Arbeitsfläche bleibt bedienbar, bis dahin sind die unverschobenen Linien zu
+  sehen; eine weitere Änderung bricht eine laufende Planung ab (bei ~1500 schraffierten
+  Objekten ≈ 1,5 s im Hintergrund statt eingefrorener Oberfläche). Ohne aktive Tabelle bleibt
+  die Vorschau wie bisher.
 - G-Code: je Durchgang zuerst die Füllung (G0 an den Zeilenanfang, G1 mit
   Leistung/Geschwindigkeit der Ebene), danach die Kontur; Durchgangs-Hook
   (Tiefe je Durchgang) gilt auch für reine Füll-Ebenen. Ohne Füllung ist der
