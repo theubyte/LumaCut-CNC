@@ -2204,3 +2204,104 @@ Still open:
   readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
   with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
   the canvas value labels, rebuilt exe).
+
+## 37. Status update 2026-11-04 (review round 30)
+
+Done this round (Job raster engine, image settings model field, image preview and the image
+settings dialog; canvas widget, Machine / Scan Probe and Materials untouched):
+
+- Gaps picked from the §36 list: **manual levels (black / white point)** and **the histogram of a
+  rotated image**. The kerf / tabs / lead-in, vector fill / hatch, path preview and touch gaps
+  from the priority list are all done (§3 #11, #12, #14; touch polish ff638ef, §11), so the next open item of the
+  image chain was taken. A black / white point is the usual first correction for a photo
+  (image editors' *Levels*; xTool and LightBurn users do it before import) – with brightness /
+  contrast alone the dark end and the light end cannot be set independently.
+  - `lumacut_job/raster.py`: `RasterSettings.black_point` / `white_point` (0..255, black <
+    white, validated; `levels_set()`, counted by `adjusted()`); `adjust_gray()` applies
+    `(v − black) / (white − black)`, clipped, after the unsharp mask and before brightness /
+    contrast / gamma. 0 / 255 = unchanged (bit-identical). All modes incl. Sketch and 3D depth
+    get it through `power_map` / `adjusted_height`; rotated box corners stay unburnt (inside
+    mask as before).
+  - `lumacut_canvas/model.py`: `ImageSettings.black_point` / `white_point` (defaults 0 / 255;
+    `normalized()` clamps the black point to 0..254 and keeps the white point above it); older
+    files without the keys load as 0 / 255. `lumacut_job/images.py` and the preview pass them on.
+  - `lumacut_import/image_preview.py`: `Histograms.points` (set black / white point);
+    `histograms_rendered(gray, inside, settings)` – histogram of the image rendered like the job
+    (rotation, smoothing), only pixels inside the rotated image, big images sampled with a
+    stride (sharpen radius scaled). `auto_levels_for()` keeps the black / white point (Auto-Tonwert
+    stretches what is left after them).
+  - `lumacut_import/qt.py`: spin boxes **Schwarzpunkt** / **Weißpunkt** at the top of
+    *Bildanpassung* (they push each other instead of crossing; live preview; *Zurücksetzen*
+    resets them too); the histogram draws blue markers at the points and the text line names
+    them; for a rotated object the histogram uses the dialog's job render (same cache as the
+    preview, no extra render).
+
+Tests:
+
+- `tests/test_image_black_white_point.py` (29): linear mapping and clipping, defaults
+  bit-identical / not `adjusted()`, white point lightens / black point darkens, order (after
+  sharpen, before brightness / contrast / gamma), validation (4 cases), `ImageSettings`
+  clamping / round trip / old dicts, Auto-Tonwert on top of levels; job G-code changes with
+  levels while an old document without the keys gives identical G-code; shape preview = job
+  `power_map` with levels in four modes × rotated / unrotated, grayscale values identical to
+  the job, rotated box corners stay white even with an extreme black point, 3D depth preview
+  follows the black point; histogram points and clipped shares, rotated histogram counts only
+  the inside pixels, sampled big rendered images; dialog spin boxes / histogram text / markers
+  paint / mutual push / reset, darker preview with a black point, rotated dialog histogram
+  from the shared render (one render), `edit_image_settings` stores the points with undo.
+
+Full suite: 1858 passed, 3 skipped (before: 1829 passed, 3 skipped).
+
+Output change for old files: none – documents without `black_point` / `white_point` load as
+0 / 255 and give byte-identical G-code; saved files gain the two keys in the image settings.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Image: no scan angle / angle increment per pass (Marlin raster runs along X only); the preview
+  shows one pixel per dot and does not model the material's real dot size / beam spread (needs
+  the material library – Materials); no curves (only black / white point, brightness, contrast,
+  gamma); Auto-Tonwert sets brightness / contrast, not the black / white point; mode and
+  adjustment presets are not linked to the material library (Materials).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); speeds only in mm/min (no mm/s view); the fill preview shows
+  pass 1 only (shifted lines appear ≈ 1.5 s after a change at ~1500 hatched objects, the canvas
+  stays usable meanwhile); the test pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes with non-ASCII characters stay one byte segment (no ECI / Kanji mode); no Micro QR.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (photos with black / white point, auto-levelled photos and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera, plain-text QR codes with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417
+  readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
+  with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
+  the canvas value labels, rebuilt exe).

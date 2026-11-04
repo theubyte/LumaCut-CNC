@@ -673,18 +673,21 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   **Zeitungsdruck** (45°-Rasterpunkte) / **Skizze** (nur Kanten, Zeichenstil) / Graustufen /
   3D-Tiefe, Linienabstand, Leistung max./min., Geschwindigkeit, Durchgänge, bidirektional, Negativ,
   **Punktbreitenkorrektur**). Die Gruppe **Bildanpassung** (wie LightBurn „Adjust Image“) ändert
-  das Bild vor dem Modus: **Helligkeit** und **Kontrast** (−100…100 %), **Gamma** (0.2…5, > 1
+  das Bild vor dem Modus: **Schwarzpunkt** / **Weißpunkt** (Tonwertkorrektur: Grauwerte bis zum
+  Schwarzpunkt werden reines Schwarz, ab dem Weißpunkt reines Weiß, dazwischen linear gestreckt;
+  0 / 255 = unverändert), **Helligkeit** und **Kontrast** (−100…100 %), **Gamma** (0.2…5, > 1
   hellt die Mitteltöne auf) und **Schärfen** (Unscharf maskieren, Stärke und Radius in
   Laserpunkten); *Zurücksetzen* stellt „unverändert“ wieder her, **Auto-Tonwert** setzt Helligkeit
   und Kontrast so, dass der Tonwertumfang des Bildes (ohne je 0,5 % Ausreißer) von Schwarz bis Weiß
-  reicht (Gamma und Schärfen bleiben). Die Anpassung gilt für alle Modi
+  reicht (Gamma, Schärfen und Schwarz-/Weißpunkt bleiben). Die Anpassung gilt für alle Modi
   inkl. 3D-Tiefe und wird gespeichert; bei gedrehten Bildern bleiben die Ecken der Hüllbox
   ungelasert. Rechts zeigt
   eine **Live-Vorschau** das Bild so, wie es gelasert wird (ein Vorschaupunkt = ein Laserpunkt im
   eingestellten Linienabstand, große Bilder als Ausschnitt aus der Mitte, Anteil gelaserter
   Punkte) – samt **Drehung** des Objekts und mit genau den Pixeln des Auftrags; darunter ein
   **Histogramm** der Grauwerte (hell = Bild, dunkel = nach der Bildanpassung) mit dem Anteil
-  reinen Schwarz / Weiß und dem Tonwertumfang. Für Fotos auf dem Diodenlaser sind Jarvis oder Stucki meist die beste Wahl. Die
+  reinen Schwarz / Weiß und dem Tonwertumfang, blaue Striche markieren Schwarz- und Weißpunkt;
+  bei gedrehten Bildern zählt das Histogramm nur das gedrehte Bild (ohne die Ecken). Für Fotos auf dem Diodenlaser sind Jarvis oder Stucki meist die beste Wahl. Die
   Punktbreitenkorrektur (LightBurn „Dot Width Correction“) kürzt jede gelaserte Strecke um den
   eingestellten Wert (je Ende die Hälfte), damit der Strahl Punkte nicht verbreitert – Startwert
   etwa die halbe Strahlbreite, höchstens der Linienabstand; 0 = aus. Bilder werden im
