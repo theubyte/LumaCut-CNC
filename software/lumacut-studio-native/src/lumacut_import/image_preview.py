@@ -12,7 +12,9 @@ samt Drehung und Glättung und rechnet im Maschinen-Nullpunkt oben rechts
 gespiegelt (Fehlerverteilung, Halbtonwinkel) – Vorschau = Pixel des Auftrags;
 :func:`preview_array` (nur Bilddaten) ignoriert die Drehung.
 :func:`histograms` / :func:`auto_levels_for`: Histogramm vor/nach der
-Bildanpassung und Helligkeit/Kontrast für „Auto-Tonwert“.
+Bildanpassung und Helligkeit/Kontrast für „Auto-Tonwert“;
+:func:`histograms_rendered`: Histogramm des wie im Auftrag gerenderten
+(gedrehten) Bildes ohne die Ecken der Hüllbox.
 Bildanpassung (Helligkeit, Kontrast, Gamma, Schärfen) und der Skizzen-Modus
 laufen über dieselben Funktionen wie der Auftrag (``power_map`` /
 ``adjusted_height``); Nachbarschaftsfilter (Schärfen, Skizze) werden bei einem
@@ -49,7 +51,8 @@ def preview_settings(st: ImageSettings) -> RasterSettings:
                           halftone_cpi=st.halftone_cpi, halftone_angle=st.halftone_angle,
                           dot_width_mm=st.dot_width_mm, brightness=st.brightness,
                           contrast=st.contrast, gamma=st.gamma, sharpen=st.sharpen,
-                          sharpen_radius=st.sharpen_radius)
+                          sharpen_radius=st.sharpen_radius,
+                          black_point=st.black_point, white_point=st.white_point)
 
 
 def preview_array(gray: np.ndarray, width_mm: float, height_mm: float,
@@ -155,6 +158,7 @@ class Histograms:
     black_share: float            # Anteil reines Schwarz nach Anpassung (0..1)
     white_share: float            # Anteil reines Weiß nach Anpassung (0..1)
     levels: tuple[int, int] | None  # Tonwertumfang (Auto-Tonwert-Grenzen) des Bildes
+    points: tuple[int, int] = (0, 255)  # eingestellter Schwarz-/Weißpunkt
 
 
 def _sample(gray: np.ndarray, width_mm: float, height_mm: float, st: ImageSettings,
@@ -186,7 +190,29 @@ def histograms(gray: np.ndarray, width_mm: float, height_mm: float, settings: Im
     adj = gray_histogram(adjust_gray(g, _adjust_settings(st, factor)))
     total = max(1, int(adj.sum()))
     return Histograms(src, adj, float(adj[0]) / total, float(adj[255]) / total,
-                      levels_points(src))
+                      levels_points(src), (st.black_point, st.white_point))
+
+
+def histograms_rendered(gray: np.ndarray, inside: np.ndarray | None, settings: ImageSettings,
+                        max_pixels: int = MAX_PREVIEW_PIXELS) -> Histograms:
+    """Wie :func:`histograms`, aber für das wie im Auftrag gerenderte Bild
+    (:func:`render_for_preview`, samt Drehung): nur Pixel innerhalb des
+    gedrehten Bildes (``inside``) zählen, die weißen Ecken der Hüllbox nicht.
+    Große Bilder werden mit Schrittweite abgetastet (Schärferadius skaliert)."""
+    st = settings.normalized()
+    g = np.asarray(gray)
+    step = 1
+    if max_pixels > 0 and g.size > max_pixels:
+        step = int(np.ceil((g.size / max_pixels) ** 0.5))
+    g = g[::step, ::step]
+    mask = None if inside is None else np.asarray(inside, dtype=bool)[::step, ::step]
+    if mask is not None and mask.shape != g.shape:
+        mask = None
+    src = gray_histogram(g, mask)
+    adj = gray_histogram(adjust_gray(g, _adjust_settings(st, float(step))), mask)
+    total = max(1, int(adj.sum()))
+    return Histograms(src, adj, float(adj[0]) / total, float(adj[255]) / total,
+                      levels_points(src), (st.black_point, st.white_point))
 
 
 def auto_levels_for(gray: np.ndarray, width_mm: float, height_mm: float,

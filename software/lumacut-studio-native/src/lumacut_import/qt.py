@@ -56,7 +56,8 @@ HISTOGRAM_HEIGHT = 70       # px
 class HistogramWidget(QWidget):
     """Histogramm der Grauwerte (links Schwarz, rechts Weiß): hell = Bild,
     dunkel = nach der Bildanpassung (Wurzel-Skala, damit kleine Spitzen
-    sichtbar bleiben). Rote Randstriche = reines Schwarz / Weiß nach Anpassung."""
+    sichtbar bleiben). Rote Randstriche = reines Schwarz / Weiß nach Anpassung,
+    blaue Striche = eingestellter Schwarz-/Weißpunkt."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -86,6 +87,12 @@ class HistogramWidget(QWidget):
                     x = 1 + int(i * (w - 2) / 256)
                     top = h - 1 - int(vals[i] * (h - 3))
                     p.drawLine(x, h - 2, x, top)
+            bp, wp = getattr(d, "points", (0, 255))
+            if (bp, wp) != (0, 255):
+                p.setPen(QColor(30, 90, 200))
+                for v in (bp, wp):
+                    x = 1 + int((v + 0.5) * (w - 2) / 256)
+                    p.drawLine(x, 1, x, h - 2)
             p.setPen(QColor(200, 30, 30))
             if d.black_share > 0.01:
                 p.drawLine(1, 1, 1, h - 2)
@@ -167,8 +174,23 @@ class ImageSettingsDialog(QDialog):
         self.sharpen.setToolTip("Schärfen (Unscharf maskieren): betont Kanten und feine Details")
         self.sharpen_radius = self._dspin(0.5, 10, st.sharpen_radius, 1, 0.5, " Punkte")
         self.sharpen_radius.setToolTip("Radius des Schärfens in Laserpunkten (Linienabstand)")
+        # Tonwert (Schwarz-/Weißpunkt): Grauwerte ≤ Schwarzpunkt werden Schwarz,
+        # ≥ Weißpunkt Weiß, dazwischen linear gestreckt (nach dem Schärfen).
+        self.black_point = QSpinBox()
+        self.black_point.setRange(0, 254)
+        self.black_point.setValue(st.black_point)
+        self.black_point.setToolTip("Schwarzpunkt: Grauwerte bis hier werden reines Schwarz "
+                                    "(volle Leistung); 0 = unverändert")
+        self.white_point = QSpinBox()
+        self.white_point.setRange(1, 255)
+        self.white_point.setValue(st.white_point)
+        self.white_point.setToolTip("Weißpunkt: Grauwerte ab hier werden reines Weiß "
+                                    "(nicht gelasert); 255 = unverändert")
+        self.black_point.valueChanged.connect(self._levels_changed_black)
+        self.white_point.valueChanged.connect(self._levels_changed_white)
         self.reset_adjust = QPushButton("Zurücksetzen")
-        self.reset_adjust.setToolTip("Helligkeit, Kontrast, Gamma und Schärfen auf „unverändert“")
+        self.reset_adjust.setToolTip("Tonwert, Helligkeit, Kontrast, Gamma und Schärfen auf "
+                                     "„unverändert“")
         self.reset_adjust.clicked.connect(self.reset_adjustments)
         self.auto_levels = QPushButton("Auto-Tonwert")
         self.auto_levels.setToolTip("Helligkeit und Kontrast so setzen, dass der Tonwertumfang des "
@@ -178,6 +200,8 @@ class ImageSettingsDialog(QDialog):
         self.histogram_label = QLabel()
         self.histogram_label.setWordWrap(True)
         adjust_form = QFormLayout()
+        adjust_form.addRow("Schwarzpunkt", self.black_point)
+        adjust_form.addRow("Weißpunkt", self.white_point)
         adjust_form.addRow("Helligkeit", self.brightness)
         adjust_form.addRow("Kontrast", self.contrast)
         adjust_form.addRow("Gamma", self.gamma)
@@ -262,7 +286,8 @@ class ImageSettingsDialog(QDialog):
         self.dot_width.valueChanged.connect(self._update)
         self.sharpen.valueChanged.connect(self._update)
         for w in (self.power, self.min_power, self.threshold, self.angle, self.levels,
-                  self.brightness, self.contrast, self.gamma, self.sharpen_radius):
+                  self.brightness, self.contrast, self.gamma, self.sharpen_radius,
+                  self.black_point, self.white_point):
             w.valueChanged.connect(self._schedule_preview)
         self.negative.toggled.connect(self._schedule_preview)
         self._update()
@@ -321,16 +346,13 @@ class ImageSettingsDialog(QDialog):
         """Vorschau sofort neu rechnen (sonst entprellt nach jeder Änderung)."""
         if self._gray is None:
             return
-        from .image_preview import preview_array, preview_shape, render_for_preview, to_qimage
+        from .image_preview import preview_array, preview_shape, to_qimage
         self._preview_timer.stop()
         st = self.settings()
         self.update_histogram(st)
         try:
             if self._shape is not None:
-                key = (st.line_interval_mm, st.negative)
-                if key != self._render_key:
-                    self._rendered = render_for_preview(self._shape, st)
-                    self._render_key = key
+                self._render_cached(st)
                 pv = preview_shape(self._shape, st, rendered=self._rendered)
             else:
                 pv = preview_array(self._gray, self._width_mm, self._height_mm, st)
@@ -352,13 +374,28 @@ class ImageSettingsDialog(QDialog):
             text += f", gedreht um {rot:g}°"
         self.preview_label.setText(text)
 
+    def _render_cached(self, st: ImageSettings):
+        """Bildobjekt wie im Auftrag rendern (Cache je Linienabstand / Negativ)."""
+        from .image_preview import render_for_preview
+        key = (st.line_interval_mm, st.negative)
+        if key != self._render_key:
+            self._rendered = render_for_preview(self._shape, st)
+            self._render_key = key
+        return self._rendered
+
     def update_histogram(self, st: ImageSettings | None = None) -> None:
-        """Histogramm vor/nach der Bildanpassung neu rechnen."""
+        """Histogramm vor/nach der Bildanpassung neu rechnen; bei gedrehtem
+        Bildobjekt vom gedrehten Bild wie im Auftrag (ohne die Ecken der Hüllbox)."""
         if self._gray is None:
             return
-        from .image_preview import histograms
+        from .image_preview import histograms, histograms_rendered
+        st = st or self.settings()
         try:
-            h = histograms(self._gray, self._width_mm, self._height_mm, st or self.settings())
+            if self._shape is not None and self._shape.geom.rot:
+                gray, inside = self._render_cached(st)
+                h = histograms_rendered(gray, inside, st)
+            else:
+                h = histograms(self._gray, self._width_mm, self._height_mm, st)
         except ValueError:
             return
         self.histogram_runs += 1
@@ -368,6 +405,8 @@ class ImageSettingsDialog(QDialog):
                 f"{h.black_share * 100:.1f} %, reines Weiß {h.white_share * 100:.1f} %")
         if h.levels is not None:
             text += f"; Tonwertumfang {h.levels[0]}–{h.levels[1]}"
+        if h.points != (0, 255):
+            text += f"; Schwarz-/Weißpunkt {h.points[0]} / {h.points[1]} (blau)"
         self.histogram_label.setText(text)
 
     def apply_auto_levels(self) -> bool:
@@ -381,9 +420,21 @@ class ImageSettingsDialog(QDialog):
         self.contrast.setValue(c)
         return changed
 
+    def _levels_changed_black(self, value: int) -> None:
+        """Schwarzpunkt bleibt unter dem Weißpunkt (schiebt ihn mit)."""
+        if self.white_point.value() <= value:
+            self.white_point.setValue(value + 1)
+
+    def _levels_changed_white(self, value: int) -> None:
+        """Weißpunkt bleibt über dem Schwarzpunkt (schiebt ihn mit)."""
+        if self.black_point.value() >= value:
+            self.black_point.setValue(value - 1)
+
     def reset_adjustments(self) -> None:
         """Bildanpassung auf „unverändert“ (Vorgaben)."""
         d = ImageSettings()
+        self.black_point.setValue(d.black_point)
+        self.white_point.setValue(d.white_point)
         self.brightness.setValue(d.brightness)
         self.contrast.setValue(d.contrast)
         self.gamma.setValue(d.gamma)
@@ -402,7 +453,9 @@ class ImageSettingsDialog(QDialog):
             dot_width_mm=self.dot_width.value(), brightness=self.brightness.value(),
             contrast=self.contrast.value(), gamma=self.gamma.value(),
             sharpen=self.sharpen.value(),
-            sharpen_radius=self.sharpen_radius.value()).normalized()
+            sharpen_radius=self.sharpen_radius.value(),
+            black_point=self.black_point.value(),
+            white_point=self.white_point.value()).normalized()
 
 
 class ImportTools(QObject):

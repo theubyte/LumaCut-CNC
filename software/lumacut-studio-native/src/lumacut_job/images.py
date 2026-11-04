@@ -60,7 +60,8 @@ def raster_settings(shape: Shape, overscan_mm: float | None = None) -> RasterSet
                           negative=st.negative, halftone_cpi=st.halftone_cpi,
                           halftone_angle=st.halftone_angle, dot_width_mm=st.dot_width_mm,
                           brightness=st.brightness, contrast=st.contrast, gamma=st.gamma,
-                          sharpen=st.sharpen, sharpen_radius=st.sharpen_radius)
+                          sharpen=st.sharpen, sharpen_radius=st.sharpen_radius,
+                          black_point=st.black_point, white_point=st.white_point)
 
 
 def render_gray(shape: Shape, interval_mm: float) -> tuple[np.ndarray, tuple[float, float]]:

@@ -32,7 +32,9 @@ width does not make dots and lines wider than the pixels; 0 = unchanged.
 Image adjustments (LightBurn "Adjust Image", applied by :func:`adjust_gray`
 inside :func:`power_map` before any mode, so preview and job match):
 ``sharpen`` (unsharp mask, amount in % with ``sharpen_radius`` in pixels),
-then ``brightness`` (-100..100, added), ``contrast`` (-100..100, slope
+then levels (``black_point`` / ``white_point``: grey values at or below the
+black point become black, at or above the white point white, linear in
+between), then ``brightness`` (-100..100, added), ``contrast`` (-100..100, slope
 10**(c/100) around mid grey) and ``gamma`` (0.2..5, > 1 lightens the mid
 tones). All at their defaults = the image is used unchanged (bit-identical).
 :func:`gray_histogram` counts the grey values (optionally only inside a mask)
@@ -67,6 +69,7 @@ CONTRAST_RANGE = (-100.0, 100.0)      # slope 10**(c/100): 0.1 .. 10
 GAMMA_RANGE = (0.2, 5.0)              # v ** (1/gamma), > 1 = lighter mid tones
 SHARPEN_RANGE = (0.0, 500.0)          # unsharp mask amount in %
 SHARPEN_RADIUS_RANGE = (0.5, 10.0)    # Gaussian sigma in pixels (= line intervals)
+LEVELS_RANGE = (0, 255)               # black / white point (grey values, black < white)
 AUTO_LEVELS_CLIP = 0.005              # share of pixels ignored at each end
 SKETCH_GAIN = 2.0                     # edge darkness = |Sobel| / 4 * gain
 MAX_DEPTH_DROP_MM = 3.0  # same budget as the canvas focus drop limit
@@ -99,11 +102,17 @@ class RasterSettings:
     gamma: float = 1.0
     sharpen: float = 0.0
     sharpen_radius: float = 1.0
+    black_point: int = 0              # levels: grey value that becomes black
+    white_point: int = 255            # levels: grey value that becomes white
+
+    def levels_set(self) -> bool:
+        """True if the black / white point differ from 0 / 255."""
+        return self.black_point != 0 or self.white_point != 255
 
     def adjusted(self) -> bool:
         """True if any image adjustment differs from "unchanged"."""
         return bool(self.brightness or self.contrast or self.sharpen
-                    or abs(self.gamma - 1.0) > 1e-9)
+                    or abs(self.gamma - 1.0) > 1e-9 or self.levels_set())
 
     def validate(self) -> None:
         if self.mode not in MODES:
@@ -131,6 +140,9 @@ class RasterSettings:
                                       (self.sharpen_radius, SHARPEN_RADIUS_RANGE, "Schärferadius")):
             if not lo <= value <= hi:
                 raise ValueError(f"{name} {lo:g}..{hi:g}")
+        lo, hi = LEVELS_RANGE
+        if not lo <= self.black_point < self.white_point <= hi:
+            raise ValueError(f"Schwarzpunkt < Weißpunkt, {lo}..{hi}")
 
 
 def resample(gray: np.ndarray, width_mm: float, height_mm: float, interval_mm: float) -> np.ndarray:
@@ -366,8 +378,9 @@ def gaussian_blur(img: np.ndarray, sigma: float) -> np.ndarray:
 def adjust_gray(gray: np.ndarray, s: RasterSettings) -> np.ndarray:
     """Brightness / contrast / gamma / sharpen on a grey image (0 = black).
 
-    Returns float32 0..255. Order: unsharp mask, brightness, contrast, gamma.
-    Without adjustments the input is returned unchanged (as float32).
+    Returns float32 0..255. Order: unsharp mask, levels (black / white
+    point: ``(v - black) / (white - black)``, clipped), brightness, contrast,
+    gamma. Without adjustments the input is returned unchanged (as float32).
     """
     g = np.asarray(gray, dtype=np.float32)
     if not s.adjusted():
@@ -375,6 +388,9 @@ def adjust_gray(gray: np.ndarray, s: RasterSettings) -> np.ndarray:
     v = g / 255.0
     if s.sharpen:
         v = np.clip(v + s.sharpen / 100.0 * (v - gaussian_blur(v, s.sharpen_radius)), 0.0, 1.0)
+    if s.levels_set():
+        lo, hi = s.black_point / 255.0, s.white_point / 255.0
+        v = np.clip((v - lo) / (hi - lo), 0.0, 1.0)
     if s.brightness:
         v = v + s.brightness / 100.0
     if s.contrast:

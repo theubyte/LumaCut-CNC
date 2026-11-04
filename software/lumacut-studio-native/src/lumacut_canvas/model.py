@@ -102,6 +102,8 @@ class ImageSettings:
     gamma: float = 1.0                # 0.2..5 (> 1 hellt Mitteltöne auf)
     sharpen: float = 0.0              # Unscharf maskieren, Stärke 0..500 %
     sharpen_radius: float = 1.0       # Radius 0.5..10 Laserpunkte
+    black_point: int = 0              # Tonwert: Grauwert, der Schwarz wird (0..254)
+    white_point: int = 255            # Tonwert: Grauwert, der Weiß wird (> Schwarzpunkt)
 
     def normalized(self) -> "ImageSettings":
         interval = _clamp(float(self.line_interval_mm), 0.03, 2.0)
@@ -125,7 +127,9 @@ class ImageSettings:
             contrast=_clamp(float(self.contrast), -100.0, 100.0),
             gamma=_clamp(float(self.gamma), 0.2, 5.0),
             sharpen=_clamp(float(self.sharpen), 0.0, 500.0),
-            sharpen_radius=_clamp(float(self.sharpen_radius), 0.5, 10.0))
+            sharpen_radius=_clamp(float(self.sharpen_radius), 0.5, 10.0),
+            black_point=(bp := int(_clamp(int(self.black_point), 0, 254))),
+            white_point=int(_clamp(int(self.white_point), bp + 1, 255)))
 
     def to_dict(self) -> dict:
         return asdict(self)
