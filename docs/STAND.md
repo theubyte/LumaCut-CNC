@@ -385,6 +385,9 @@ Voraussetzungen:
       Lochraster-Bauplan 7 × 9 cm. Kopie: `\\NAS\Projekte\Lasercut Projekte\Laser-Interface-V2`.
       Lochraster seit 03.11. mit **LM317T** (aus der Gasheizungsplatine, Besitzer hat keinen
       7805) und R6 220 Ω / R7 680 Ω stehend → 5,1 V; Fahne = Ausgang. Platine (JLCPCB) bleibt 7805.
+      04.11.: Besitzer bestückt; Relais ist ein NAIS JS1-24V (Pins vor dem Verdrahten messen),
+      R5 = 5,6 kΩ (kein 4,7 k da), C1 104K63, C2 1M63, C3 Elko 47–56 µF. Klemmen-Etiketten 1:1:
+      `beschriftung_anschluesse.pdf`.
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut

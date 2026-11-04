@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-04
+
+- **Laser-Interface V2, Klemmen-Beschriftung:** `hardware/laser-interface-v2/beschriftung_anschluesse.pdf` mit Übersicht der Lochrasterplatine, Belegungstabelle und Etiketten im Maßstab 1:1 (5,08 mm Raster) zum Ausschneiden für J1 Netzteil (+24 V, GND), J2 Laser (+24 V, GND, PWM), J3 BL-Touch (PA1, GND) und J4 FAN1 (+, −). Quelle `beschriftung.html`. Beim Aufbau: R5 darf 5,6 kΩ sein, das Relais ist ein NAIS JS1-24V statt G5LE (Pins messen).
+
 ## 2026-11-03
 
 - **Laser-Interface V2, Lochraster mit LM317:** Statt des 7805 ist U2 jetzt ein LM317T aus der Gasheizungsplatine. Zwei stehende Widerstände legen die Spannung fest: R6 220 Ω (TS–US) und R7 680 Ω (UT–UU), das ergibt 5,1 V. Neue Belegung: IN SQ, OUT TQ, ADJ UQ. Die Metallfahne ist hier der Ausgang. Bauplan, Bilder und Teileliste sind neu erzeugt. Keine Kurzschlüsse zwischen Signalen; die zwei offenen DRC-Stellen sind wie vorher die Doppel-Lötfahnen des Sicherungsclips. Die JLCPCB-Platine bleibt beim 7805.

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Laser-Interface V2 – Anschlussbeschriftung</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff; margin: 0; }
+  h1 { font-size: 15pt; margin: 0 0 2mm; }
+  h2 { font-size: 11pt; margin: 6mm 0 2mm; }
+  p, li { font-size: 9pt; margin: 1mm 0; }
+  .row { display: flex; gap: 8mm; align-items: flex-start; }
+  /* label strips at 1:1: one box per screw terminal pin, 5.08 mm pitch */
+  .strip { display: inline-block; border: 0.3mm solid #000; margin: 0 6mm 4mm 0; vertical-align: top; }
+  .strip .head { font-size: 6pt; font-weight: bold; text-align: center; background: #000; color: #fff;
+                 padding: 0.4mm 1mm; }
+  .strip .pin { height: 5.08mm; box-sizing: border-box; border-top: 0.2mm solid #000;
+                font-size: 7.5pt; font-weight: bold; line-height: 5.08mm; padding: 0 1.2mm; white-space: nowrap; }
+  .strip .pin small { font-weight: normal; font-size: 5.5pt; }
+  .cut { font-size: 8pt; color: #555; }
+  table { border-collapse: collapse; font-size: 9pt; }
+  td, th { border: 0.2mm solid #888; padding: 1mm 2mm; text-align: left; }
+  th { background: #eee; }
+</style>
+</head>
+<body>
+<h1>Laser-Interface V2 – Beschriftung der Schraubklemmen</h1>
+<p>Lochraster 7×9 cm, Ansicht von der Bauteilseite, Reihe A oben. Die Etiketten unten sind
+<b>1:1</b> (Rastermaß 5,08 mm): mit 100 % drucken (nicht „an Seite anpassen“), ausschneiden und
+neben die Klemme kleben. Die oberste Zeile jedes Etiketts gehört zur obersten Schraube.</p>
+
+<div class="row">
+<svg width="100mm" height="80mm" viewBox="-5 -5 100 80" xmlns="http://www.w3.org/2000/svg"
+     font-family="Arial, Helvetica, sans-serif">
+  <rect x="0" y="0" width="90" height="70" rx="1.5" fill="#e8f3ec" stroke="#000" stroke-width="0.4"/>
+  <text x="45" y="68" font-size="2.6" text-anchor="middle" fill="#555">7cm×9cm – Reihe A oben, Reihe Z unten</text>
+  <!-- hole row y = 3.5 + 2.54*(row index); A=0 -->
+  <!-- J1 Netzteil: right edge, rows C (24V) and E (GND) -->
+  <rect x="80" y="6.6" width="8" height="10" fill="#4caf50" stroke="#000" stroke-width="0.3"/>
+  <text x="79" y="9.9" font-size="2.6" text-anchor="end">+24 V Netzteil</text>
+  <text x="79" y="15" font-size="2.6" text-anchor="end">GND Netzteil</text>
+  <text x="84" y="5.4" font-size="2.6" text-anchor="middle" font-weight="bold">J1</text>
+  <!-- J2 Laser: right edge, rows N, P, R -->
+  <rect x="80" y="34.6" width="8" height="15.2" fill="#4caf50" stroke="#000" stroke-width="0.3"/>
+  <text x="79" y="37.8" font-size="2.6" text-anchor="end">+24 V Laser (geschaltet)</text>
+  <text x="79" y="42.9" font-size="2.6" text-anchor="end">GND Laser</text>
+  <text x="79" y="48" font-size="2.6" text-anchor="end">PWM Laser (TTL 5 V)</text>
+  <text x="84" y="33.4" font-size="2.6" text-anchor="middle" font-weight="bold">J2</text>
+  <!-- J4 FAN1: left edge, rows F, H -->
+  <rect x="2" y="14.2" width="8" height="10" fill="#4caf50" stroke="#000" stroke-width="0.3"/>
+  <text x="11" y="17.5" font-size="2.6">FAN+ ← SKR FAN1 +</text>
+  <text x="11" y="22.6" font-size="2.6">FAN− ← SKR FAN1 −</text>
+  <text x="6" y="13" font-size="2.6" text-anchor="middle" font-weight="bold">J4</text>
+  <!-- J3 BL-Touch: left edge, rows R, T -->
+  <rect x="2" y="44.8" width="8" height="10" fill="#4caf50" stroke="#000" stroke-width="0.3"/>
+  <text x="11" y="48.1" font-size="2.6">Signal ← SKR BL-Touch PA1</text>
+  <text x="11" y="53.2" font-size="2.6">GND ← SKR BL-Touch GND</text>
+  <text x="6" y="43.6" font-size="2.6" text-anchor="middle" font-weight="bold">J3</text>
+  <!-- relay + fuse for orientation -->
+  <rect x="42" y="9" width="16" height="16" fill="#333"/>
+  <text x="50" y="18" font-size="2.6" fill="#fff" text-anchor="middle">Relais</text>
+  <rect x="37" y="0.5" width="22" height="5" fill="#bbb" stroke="#000" stroke-width="0.2"/>
+  <text x="48" y="4" font-size="2.6" text-anchor="middle">Sicherung F1</text>
+</svg>
+
+<table>
+  <tr><th>Klemme</th><th>Loch</th><th>Anschluss</th></tr>
+  <tr><td rowspan="2"><b>J1</b> Netzteil</td><td>D'C</td><td>+24 V vom Netzteil</td></tr>
+  <tr><td>D'E</td><td>GND vom Netzteil</td></tr>
+  <tr><td rowspan="3"><b>J2</b> Laser</td><td>D'N</td><td>+24 V zum Laser (über Relais)</td></tr>
+  <tr><td>D'P</td><td>GND zum Laser</td></tr>
+  <tr><td>D'R</td><td>PWM zum Laser (5 V TTL)</td></tr>
+  <tr><td rowspan="2"><b>J4</b> SKR FAN1</td><td>CF</td><td>FAN1 + (Relais-Spule)</td></tr>
+  <tr><td>CH</td><td>FAN1 − (Relais-Spule)</td></tr>
+  <tr><td rowspan="2"><b>J3</b> SKR BL-Touch</td><td>CR</td><td>PA1 (Signal → Optokoppler)</td></tr>
+  <tr><td>CT</td><td>GND der SKR</td></tr>
+</table>
+</div>
+
+<h2>Etiketten 1:1 zum Ausschneiden</h2>
+<p class="cut">✂ An der Außenlinie ausschneiden. Rechte Klemmen (J1, J2): Etikett links daneben kleben.
+Linke Klemmen (J3, J4): Etikett rechts daneben kleben.</p>
+
+<div class="strip"><div class="head">J1 NETZTEIL</div>
+  <div class="pin">+24V <small>IN</small></div><div class="pin">GND</div></div>
+<div class="strip"><div class="head">J2 LASER</div>
+  <div class="pin">+24V</div><div class="pin">GND</div><div class="pin">PWM</div></div>
+<div class="strip"><div class="head">J4 FAN1</div>
+  <div class="pin">FAN +</div><div class="pin">FAN −</div></div>
+<div class="strip"><div class="head">J3 BL-TOUCH</div>
+  <div class="pin">SIG <small>PA1</small></div><div class="pin">GND</div></div>
+
+<p class="cut">Zweiter Satz (Reserve):</p>
+<div class="strip"><div class="head">J1 NETZTEIL</div>
+  <div class="pin">+24V <small>IN</small></div><div class="pin">GND</div></div>
+<div class="strip"><div class="head">J2 LASER</div>
+  <div class="pin">+24V</div><div class="pin">GND</div><div class="pin">PWM</div></div>
+<div class="strip"><div class="head">J4 FAN1</div>
+  <div class="pin">FAN +</div><div class="pin">FAN −</div></div>
+<div class="strip"><div class="head">J3 BL-TOUCH</div>
+  <div class="pin">SIG <small>PA1</small></div><div class="pin">GND</div></div>
+
+<h2>Wichtig</h2>
+<ul>
+  <li><b>J1 nie verpolen:</b> +24 V oben (Reihe C), GND darunter (Reihe E).</li>
+  <li><b>J2 PWM</b> nie an +24 V: Der PWM-Eingang des Lasers verträgt nur 5 V.</li>
+  <li>J3 und J4 kommen von der SKR. FAN1 schaltet das Relais (Laser-Strom an/aus), PA1 ist der PWM-Ausgang
+      der SKR auf dem BL-Touch-Stecker.</li>
+</ul>
+</body>
+</html>
