@@ -2095,3 +2095,112 @@ Still open:
   readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
   with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
   the canvas value labels, rebuilt exe).
+
+## 36. Status update 2026-11-04 (review round 29)
+
+Done this round (Job raster engine helpers, image preview and the image settings dialog; no change
+to the job builder output, the canvas widget, Machine / Scan Probe and Materials untouched):
+
+- Gaps picked from the §35 list: **histogram / auto-levels** and **a preview that honours the
+  object's rotation**. A histogram is the usual way to judge a photo before engraving (LightBurn
+  shows the effect of *Adjust Image* only on the image, xTool has an automatic image adjustment);
+  without it the brightness / contrast fields had to be found by trial. The old preview drew the
+  unrotated source image with nearest-neighbour sampling, so a rotated photo looked different
+  from what the laser burns.
+  - `lumacut_job/raster.py`: `gray_histogram(gray, inside=None)` (256 counts, float input
+    rounded, optional mask), `levels_points(hist, clip)` (darkest / lightest grey after ignoring
+    `AUTO_LEVELS_CLIP` = 0.5 % of the pixels at each end) and `auto_levels(hist, clip)`: the
+    linear stretch `(v − lo) / (hi − lo)` expressed with the existing adjustments – contrast
+    `100·log10(1/(hi − lo))`, brightness `100·(0.5 − (lo + hi)/2)` – rounded to whole percent and
+    clamped (a range under 10 % of the grey scale gets contrast 100, centred; flat images give
+    0 / 0). No new settings field, so the job needs nothing new.
+  - `lumacut_import/image_preview.py`: `preview_pixels()` (preview of an array already in the
+    line interval, with the job's inside mask, crop + filter margin as before);
+    `render_for_preview(shape, settings)` renders the image object exactly like
+    `images.render_gray()` / `render_inside()` (rotation, smooth scaling) with the dialog's not
+    yet applied settings; `preview_shape()` computes it mirrored like the job at origin top right
+    (`IMAGE_FLIP_X`: error diffusion direction and negated halftone angle) and mirrors it back for
+    display – preview pixels = the job's `power_map` pixels incl. rotated box corners staying
+    white. `histograms()` (source and adjusted histogram of the whole image in the line interval,
+    big images sampled coarser with the sharpen radius scaled, share of pure black / white after
+    adjustment, tonal range) and `auto_levels_for()` (levels of the sharpened image – sharpen runs
+    before the stretch; existing brightness / contrast are replaced, gamma and sharpen stay).
+    `preview_array()` (image data only) is unchanged.
+  - `lumacut_import/qt.py`: `HistogramWidget` under the preview (light = image, dark = adjusted,
+    square-root scale, red edge marks when > 1 % is clipped to pure black / white) with a text
+    line (pure black / white share, tonal range); button **Auto-Tonwert** next to *Zurücksetzen*
+    (disabled without image data). The dialog takes `shape=`; `edit_image_settings()` passes the
+    object, the preview then renders it like the job (cached per line interval / negative, so
+    power / mode / adjustment changes don't re-render) and says „gedreht um N°“.
+
+Tests:
+
+- `tests/test_image_levels.py` (40): histogram counts / mask / float rounding, level points
+  ignore outliers, auto-levels stretch maps the range to ≈ black / white and the middle to mid
+  grey, exact formula, dark / light images shift brightness in opposite directions, flat / full /
+  very narrow ranges and validation; preview histograms before / after adjustment, sampled big
+  images, `auto_levels_for` replaces existing brightness / contrast and sees sharpen; shape
+  preview = job `power_map` in five modes (Floyd, Jarvis, halftone, threshold, sketch) × rotated /
+  unrotated × with / without adjustments, grayscale values identical to the job, rotated box
+  corners white (plain, darkened, negative), rotated preview has the bounding-box size, dialog
+  settings used instead of the stored ones, crop of big rotated images, 3D depth preview, old
+  documents give byte-identical G-code; dialog histogram and idempotent Auto-Tonwert (gamma kept,
+  preview and histogram follow), no auto-levels without image data, dialog with shape = job
+  preview with render cache, `edit_image_settings` passes the shape and stores auto levels with
+  undo.
+
+Full suite: 1829 passed, 3 skipped (before: 1789 passed, 3 skipped).
+
+Output change for old files: none – G-code is byte-for-byte unchanged (the job builder was not
+touched; Auto-Tonwert only fills the existing brightness / contrast fields); saved files unchanged.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Image: no scan angle / angle increment per pass (Marlin raster runs along X only); the preview
+  shows one pixel per dot and does not model the material's real dot size / beam spread (needs
+  the material library – Materials); no manual levels (black / white point sliders) – auto-levels
+  uses brightness / contrast; the histogram is of the unrotated source image; mode and
+  adjustment presets are not linked to the material library (Materials).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); speeds only in mm/min (no mm/s view); the fill preview shows
+  pass 1 only (shifted lines appear ≈ 1.5 s after a change at ~1500 hatched objects, the canvas
+  stays usable meanwhile); the test pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes with non-ASCII characters stay one byte segment (no ECI / Kanji mode); no Micro QR.
+- Park corner on the canvas: the corner is not drawn as a no-go zone yet (Canvas).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (auto-levelled photos and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera, plain-text QR codes with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417
+  readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
+  with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
+  the canvas value labels, rebuilt exe).

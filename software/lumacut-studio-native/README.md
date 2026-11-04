@@ -675,12 +675,16 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   **Punktbreitenkorrektur**). Die Gruppe **Bildanpassung** (wie LightBurn „Adjust Image“) ändert
   das Bild vor dem Modus: **Helligkeit** und **Kontrast** (−100…100 %), **Gamma** (0.2…5, > 1
   hellt die Mitteltöne auf) und **Schärfen** (Unscharf maskieren, Stärke und Radius in
-  Laserpunkten); *Zurücksetzen* stellt „unverändert“ wieder her. Die Anpassung gilt für alle Modi
+  Laserpunkten); *Zurücksetzen* stellt „unverändert“ wieder her, **Auto-Tonwert** setzt Helligkeit
+  und Kontrast so, dass der Tonwertumfang des Bildes (ohne je 0,5 % Ausreißer) von Schwarz bis Weiß
+  reicht (Gamma und Schärfen bleiben). Die Anpassung gilt für alle Modi
   inkl. 3D-Tiefe und wird gespeichert; bei gedrehten Bildern bleiben die Ecken der Hüllbox
   ungelasert. Rechts zeigt
   eine **Live-Vorschau** das Bild so, wie es gelasert wird (ein Vorschaupunkt = ein Laserpunkt im
   eingestellten Linienabstand, große Bilder als Ausschnitt aus der Mitte, Anteil gelaserter
-  Punkte). Für Fotos auf dem Diodenlaser sind Jarvis oder Stucki meist die beste Wahl. Die
+  Punkte) – samt **Drehung** des Objekts und mit genau den Pixeln des Auftrags; darunter ein
+  **Histogramm** der Grauwerte (hell = Bild, dunkel = nach der Bildanpassung) mit dem Anteil
+  reinen Schwarz / Weiß und dem Tonwertumfang. Für Fotos auf dem Diodenlaser sind Jarvis oder Stucki meist die beste Wahl. Die
   Punktbreitenkorrektur (LightBurn „Dot Width Correction“) kürzt jede gelaserte Strecke um den
   eingestellten Wert (je Ende die Hälfte), damit der Strahl Punkte nicht verbreitert – Startwert
   etwa die halbe Strahlbreite, höchstens der Linienabstand; 0 = aus. Bilder werden im
