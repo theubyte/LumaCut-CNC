@@ -2305,3 +2305,121 @@ Still open:
   readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
   with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
   the canvas value labels, rebuilt exe).
+
+## 38. Status update 2026-11-04 (review round 31)
+
+Done this round (unit helpers / speed widgets, image preview and image settings dialog, job
+park-corner overlay; canvas editing, Machine / Scan Probe and Materials untouched):
+
+- Gaps picked from the §37 list: **speeds only in mm/min (no mm/s view)**, **Auto-Tonwert sets
+  brightness / contrast, not the black / white point** and **park corner not drawn on the
+  canvas**.
+- **Speed display unit mm/min or mm/s** (LightBurn shows mm/s by default; diode users switch
+  between both all the time):
+  - `lumacut_canvas/units.py`: `MM_PER_MIN` / `MM_PER_S`, `speed_to_display` /
+    `speed_from_display` (rounded to 0.001 mm/min), `format_speed` (trailing zeros dropped) and
+    `parse_speed` (comma or point, an explicitly typed unit wins, e.g. „3000 mm/min“ in mm/s
+    mode).
+  - `lumacut_canvas/unit_ui.py`: `DisplaySpeedUnits` (one app-wide unit, stored in the app
+    settings as `canvas/speed_unit`, change signal), `SpeedSpin` (value always mm/min, text in
+    the display unit, validate / fixup) and `SpeedUnitCombo`.
+  - Used in the layer list and layer speed field (`layers_panel.py`), the image settings dialog
+    (`lumacut_import/qt.py`), the material test dialog (`lumacut_job/qt_tools.py`) and the scan
+    offset table (`lumacut_job/scan_offset_qt.py`); all follow a change at once. Documents,
+    material presets, scan offset settings and G-code stay mm/min – identical G-code in both
+    views.
+- **Auto-Tonwert sets the black / white point** (`lumacut_import/image_preview.py`
+  `auto_levels_for()`, dialog in `lumacut_import/qt.py`): the black / white point are set to the
+  tonal range of the (sharpened) image without 0.5 % outliers at each end, brightness / contrast
+  go to 0, gamma and sharpen stay. The stretch is now exactly linear from black to white (the old
+  brightness / contrast approximation clipped slightly); a second click changes nothing, a flat
+  image gives 0 / 255.
+- **Park corner on the canvas** (`lumacut_job/park_zone.py`, installed by `JobTools`): the part
+  of the Pi's park corner inside the visible work area (head v6: machine X0–78 / Y0–35 → a
+  48 × 5 mm strip at the top right) is drawn as a red hatched, dashed-outline background overlay
+  „Park-Ecke“ (under the objects, not clickable, not exported). It follows `park_corner_mm` from
+  `/api/status` (mirror `PARK_CORNER_MM` without a Pi) and is hidden while the panel's origin is
+  „Aktuelle Position“ / „Benutzer-Ursprung“ (the Pi moves the motif then; the send-time check
+  still covers it). Only public APIs are used (`editor.add_overlay`, panel `status_changed`,
+  `job_origin()`, `origin_combo`); redraw only when corner or visibility change.
+- Test fix: `test_touch.py::test_long_press_opens_menu_without_click_or_move` failed once in a
+  full run under load (the 550 ms long-press timer fired late); it now polls up to 3 s for the
+  menu instead of a fixed wait.
+
+Tests:
+
+- `tests/test_speed_units.py` (14): conversion / rounding / formatting, parsing with comma and
+  explicit units, the shared unit (toggle, signal, stored in the app settings), `SpeedSpin`
+  value stays mm/min, `SpeedUnitCombo` follows / sets the shared unit, layer panel list and field
+  in mm/s, layer material summary, image / material test dialogs return mm/min, scan offset test
+  dialog in mm/s gives identical G-code.
+- `tests/test_image_auto_points.py` (9): Auto-Tonwert points from the outlier-trimmed range,
+  exact stretch, idempotent, flat image, sharpened source, dialog and `edit_image_settings`
+  store the points with undo; `tests/test_image_levels.py` adjusted to the new behaviour.
+- `tests/test_park_zone.py` (15): zone rectangle for the default corner, corners inside the safe
+  zone are invisible (5 cases), clamping, 45° hatch inside the zone, object overlap, a motif in
+  the drawn zone is exactly what `park_corner.check_job` refuses, rendering only inside the zone,
+  sync with the Pi corner / origin and redraw only on a change, real `JobTools` + `MachinePanel`
+  install the overlay.
+
+Full suite: 1899 passed, 3 skipped (before: 1858 passed, 3 skipped).
+
+Output change for old files: none – speeds are stored and sent in mm/min as before; Auto-Tonwert
+only changes what the button sets (existing documents keep their saved settings); the park zone
+is display only.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Image: no scan angle / angle increment per pass (Marlin raster runs along X only); the preview
+  shows one pixel per dot and does not model the material's real dot size / beam spread (needs
+  the material library – Materials); no curves (only black / white point, brightness, contrast,
+  gamma); mode and adjustment presets are not linked to the material library (Materials).
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the zone is not shown for a job placed at „Aktuelle Position“ / „Benutzer-Ursprung“
+  (would need the placed extent drawn relative to the head / user origin); moving an object into
+  the zone gives no live warning (the send / start check refuses it).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); plain-text QR
+  codes with non-ASCII characters stay one byte segment (no ECI / Kanji mode); no Micro QR.
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (speeds typed in mm/s on the layer panel and dialogs against the sent
+  G-code, the park-corner zone against a real refusal, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera, plain-text QR codes with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417
+  readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
+  with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
+  the canvas value labels, rebuilt exe).
