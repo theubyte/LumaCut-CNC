@@ -428,6 +428,71 @@ def _default_aspect():
     return text_aspect
 
 
+def _series_members(doc: Document) -> dict[str, list[Shape]]:
+    """Variable texts on visible layers, grouped by series (document order)."""
+    visible = {l.id for l in doc.layers if l.visible}
+    members: dict[str, list[Shape]] = {}
+    for s in doc.shapes:
+        if is_variable(s) and s.layer_id in visible:
+            members.setdefault(series_key(s), []).append(s)
+    return members
+
+
+def _series_texts(shapes: list[Shape], now: _dt.datetime):
+    """(spec, copies in reading order, evaluated texts) of one series."""
+    spec = spec_of(shapes[0])
+    table = None
+    if spec.csv_path or any(uses_csv(s.text) for s in shapes):
+        if not spec.csv_path:
+            raise VarTextError("Variabler Text nutzt CSV-Spalten, aber keine CSV-Datei ist gewählt")
+        table = load_csv(spec.csv_path)
+    ordered = reading_order(shapes)
+    texts = []
+    for i, s in enumerate(ordered):
+        k = i if spec.per_copy else 0
+        texts.append(evaluate(s.text, value=spec.current + k * spec.step, pad=spec.pad,
+                              table=table, row=spec.csv_row + k, now=now))
+    return spec, ordered, texts
+
+
+@dataclass(frozen=True)
+class PreviewValue:
+    """Value one variable text gets in the next job (``error`` = cannot be sent)."""
+
+    text: str
+    error: str = ""
+
+
+def preview_values(doc: Document, now: _dt.datetime | None = None) -> dict[str, PreviewValue]:
+    """``{shape_id: PreviewValue}`` for every variable text of the next job.
+
+    Same evaluation as :func:`evaluate_document` (visible layers, series,
+    reading order, ``per_copy``, CSV row, one ``now`` for the whole job), but
+    an error only marks the copies of its own series instead of raising – the
+    canvas shows it next to the objects. Never changes ``doc``.
+    """
+    now = now or _dt.datetime.now()
+    out: dict[str, PreviewValue] = {}
+    for _key, shapes in _series_members(doc).items():
+        try:
+            _spec, ordered, texts = _series_texts(shapes, now)
+        except ValueError as exc:          # VarTextError and malformed specs
+            for s in shapes:
+                out[s.id] = PreviewValue("", str(exc))
+            continue
+        for s, text in zip(ordered, texts):
+            out[s.id] = PreviewValue(text)
+    return out
+
+
+def uses_clock(template: str) -> bool:
+    """Template shows the date or time (the preview must refresh now and then)."""
+    try:
+        return any(k in ("date", "time") for k, _a in placeholders(template))
+    except VarTextError:
+        return False
+
+
 def evaluate_document(doc: Document, aspect: Callable[..., float] | None = None,
                       now: _dt.datetime | None = None) -> tuple[Document, JobUsage]:
     """Job document with evaluated variable texts, plus what was used.
@@ -440,11 +505,7 @@ def evaluate_document(doc: Document, aspect: Callable[..., float] | None = None,
     :class:`VarTextError` (a ``ValueError``) if a template cannot be
     evaluated – the job must not be sent with literal placeholders.
     """
-    visible = {l.id for l in doc.layers if l.visible}
-    members: dict[str, list[Shape]] = {}
-    for s in doc.shapes:
-        if is_variable(s) and s.layer_id in visible:
-            members.setdefault(series_key(s), []).append(s)
+    members = _series_members(doc)
     if not members:
         return doc, JobUsage()
     aspect = aspect or _default_aspect()
@@ -452,19 +513,8 @@ def evaluate_document(doc: Document, aspect: Callable[..., float] | None = None,
     replaced: dict[str, Shape | None] = {}
     usage = JobUsage()
     for key, shapes in members.items():
-        spec = spec_of(shapes[0])
-        table = None
-        if spec.csv_path or any(uses_csv(s.text) for s in shapes):
-            if not spec.csv_path:
-                raise VarTextError("Variabler Text nutzt CSV-Spalten, aber keine CSV-Datei ist gewählt")
-            table = load_csv(spec.csv_path)
-        ordered = reading_order(shapes)
-        texts = []
-        for i, s in enumerate(ordered):
-            k = i if spec.per_copy else 0
-            text = evaluate(s.text, value=spec.current + k * spec.step, pad=spec.pad,
-                            table=table, row=spec.csv_row + k, now=now)
-            texts.append(text)
+        spec, ordered, texts = _series_texts(shapes, now)
+        for s, text in zip(ordered, texts):
             replaced[s.id] = refit_text(s, text, aspect) if text.strip() else None
         usage.series.append(SeriesUse(key, spec, [s.id for s in ordered], texts))
     out = Document(with_default_layer=False)
@@ -487,5 +537,5 @@ def new_series() -> str:
 __all__ = ["CsvTable", "JobUsage", "KIND", "SeriesUse", "VarTextError", "VarTextSpec",
            "advanced_spec", "evaluate", "evaluate_document", "format_counter", "format_datetime",
            "has_placeholders", "is_variable", "load_csv", "make_meta", "new_series", "parse_csv",
-           "placeholders", "reading_order", "refit_text", "series_key", "spec_of", "uses_counter",
-           "uses_csv"]
+           "placeholders", "PreviewValue", "preview_values", "reading_order", "refit_text", "series_key", "spec_of", "uses_counter",
+           "uses_clock", "uses_csv"]

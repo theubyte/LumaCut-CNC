@@ -193,7 +193,7 @@ class VarTextDialog(QDialog):
     """Settings of one variable-text series (template, counter, CSV)."""
 
     def __init__(self, template: str, spec: vt.VarTextSpec | None = None, copies: int = 1,
-                 enabled: bool = True, parent=None):
+                 enabled: bool = True, parent=None, show_values: bool = True):
         super().__init__(parent)
         self.setWindowTitle("Variabler Text")
         self.copies = max(1, int(copies))
@@ -275,6 +275,10 @@ class VarTextDialog(QDialog):
         self.preview.setWordWrap(True)
         self.preview.setTextInteractionFlags(Qt.TextSelectableByMouse)
         lay.addWidget(self.preview)
+        self.show_values = QCheckBox("Nächste Werte auf der Arbeitsfläche anzeigen "
+                                     "(Hinweis unter jedem variablen Text)")
+        self.show_values.setChecked(show_values)
+        lay.addWidget(self.show_values)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)

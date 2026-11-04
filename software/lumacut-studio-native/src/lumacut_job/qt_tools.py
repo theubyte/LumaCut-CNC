@@ -164,6 +164,11 @@ class JobTools(QObject):
                                           "Senden, Schätzen, Rahmen und Speichern nur mit den "
                                           "ausgewählten Objekten (wie „Cut Selected Graphics“)")
         self.selection_action.setCheckable(True)
+        # Variable text: next value of every variable text as a label on the canvas.
+        from .scan_offset_qt import default_settings
+        from .vartext_preview import VarTextValues, load_enabled
+        self.vartext_values = VarTextValues(editor, lambda: JobTools._job_source(self),
+                                            load_enabled(default_settings()))
         self.save_action = self._add("G-Code speichern…", self.save_gcode, "Alt+G",
                                      "Optimierten G-Code des Designs als Datei speichern")
         self.history_action = self._add("Verlauf…", self.show_history, "Ctrl+H",
@@ -220,6 +225,9 @@ class JobTools(QObject):
         self._selection_toggled()
 
     def _selection_toggled(self) -> None:
+        values = getattr(self, "vartext_values", None)
+        if values is not None:
+            values.schedule()
         self._msg("Auftrag: nur ausgewählte Objekte" if self.selection_only
                   else "Auftrag: ganzes Design")
 
@@ -383,11 +391,14 @@ class JobTools(QObject):
         if spec is None:
             visible = {l.id for l in doc.layers if l.visible}
             copies = sum(1 for i in ids if doc.shape(i).layer_id in visible) or 1
+            values = getattr(self, "vartext_values", None)
             dlg = VarTextDialog(doc.shape(sel[0]).text, replace(start, series=series), copies,
-                                parent=self.window)
+                                parent=self.window,
+                                show_values=values.enabled if values is not None else True)
             if dlg.exec() != QDialog.Accepted:
                 return []
             spec, template, enabled = dlg.spec(), dlg.template_text(), dlg.is_enabled()
+            self.set_vartext_values_shown(dlg.show_values.isChecked())
         else:
             spec = replace(spec, series=spec.series or series)
         try:
@@ -551,6 +562,15 @@ class JobTools(QObject):
         self._msg(f"Bogentext eingefügt ({len(ids)} Zeichen, gruppiert)"
                   + (" – Text ersetzt" if replace_id else ""))
         return ids
+
+    def set_vartext_values_shown(self, on: bool) -> None:
+        """Labels with the next values of variable texts on/off (stored in the settings)."""
+        from .scan_offset_qt import default_settings
+        from .vartext_preview import save_enabled
+        values = getattr(self, "vartext_values", None)
+        if values is not None and values.enabled != bool(on):
+            values.set_enabled(on)
+        save_enabled(default_settings(), on)
 
     def edit_generated_at(self, shape_id: str) -> bool:
         """Double-click hook: True if ``shape_id`` belongs to a generated object
