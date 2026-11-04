@@ -196,8 +196,9 @@ class ImageSettingsDialog(QDialog):
                                      "„unverändert“")
         self.reset_adjust.clicked.connect(self.reset_adjustments)
         self.auto_levels = QPushButton("Auto-Tonwert")
-        self.auto_levels.setToolTip("Helligkeit und Kontrast so setzen, dass der Tonwertumfang des "
-                                    "Bildes (ohne je 0,5 % Ausreißer) von Schwarz bis Weiß reicht")
+        self.auto_levels.setToolTip("Schwarz- und Weißpunkt so setzen, dass der Tonwertumfang des "
+                                    "Bildes (ohne je 0,5 % Ausreißer) von Schwarz bis Weiß reicht; "
+                                    "Helligkeit und Kontrast auf 0, Gamma bleibt")
         self.auto_levels.clicked.connect(self.apply_auto_levels)
         self.histogram = HistogramWidget()
         self.histogram_label = QLabel()
@@ -416,15 +417,21 @@ class ImageSettingsDialog(QDialog):
         self.histogram_label.setText(text)
 
     def apply_auto_levels(self) -> bool:
-        """„Auto-Tonwert“: Helligkeit/Kontrast aus dem Histogramm; True bei Änderung."""
+        """„Auto-Tonwert“: Schwarz-/Weißpunkt aus dem Histogramm, Helligkeit und
+        Kontrast auf 0 (Gamma und Schärfen bleiben); True bei Änderung."""
         if self._gray is None:
             return False
-        from .image_preview import auto_levels_for
-        b, c = auto_levels_for(self._gray, self._width_mm, self._height_mm, self.settings())
-        changed = (b, c) != (self.brightness.value(), self.contrast.value())
-        self.brightness.setValue(b)
-        self.contrast.setValue(c)
-        return changed
+        from .image_preview import auto_points_for
+        black, white = auto_points_for(self._gray, self._width_mm, self._height_mm,
+                                       self.settings())
+        before = (self.black_point.value(), self.white_point.value(),
+                  self.brightness.value(), self.contrast.value())
+        self.white_point.setValue(255)    # erst Platz schaffen, dann setzen –
+        self.black_point.setValue(black)  # die Felder schieben sich sonst gegenseitig
+        self.white_point.setValue(white)
+        self.brightness.setValue(0.0)
+        self.contrast.setValue(0.0)
+        return (black, white, 0.0, 0.0) != before
 
     def _levels_changed_black(self, value: int) -> None:
         """Schwarzpunkt bleibt unter dem Weißpunkt (schiebt ihn mit)."""

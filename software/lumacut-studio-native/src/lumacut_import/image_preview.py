@@ -11,8 +11,9 @@ so bleibt die echte Punktstruktur sichtbar statt einer verkleinerten.
 samt Drehung und Glättung und rechnet im Maschinen-Nullpunkt oben rechts
 gespiegelt (Fehlerverteilung, Halbtonwinkel) – Vorschau = Pixel des Auftrags;
 :func:`preview_array` (nur Bilddaten) ignoriert die Drehung.
-:func:`histograms` / :func:`auto_levels_for`: Histogramm vor/nach der
-Bildanpassung und Helligkeit/Kontrast für „Auto-Tonwert“;
+:func:`histograms` / :func:`auto_points_for`: Histogramm vor/nach der
+Bildanpassung und Schwarz-/Weißpunkt für „Auto-Tonwert“ (:func:`auto_levels_for`
+liefert die ältere Näherung über Helligkeit/Kontrast);
 :func:`histograms_rendered`: Histogramm des wie im Auftrag gerenderten
 (gedrehten) Bildes ohne die Ecken der Hüllbox.
 Bildanpassung (Helligkeit, Kontrast, Gamma, Schärfen) und der Skizzen-Modus
@@ -225,6 +226,25 @@ def auto_levels_for(gray: np.ndarray, width_mm: float, height_mm: float,
     g, factor = _sample(gray, width_mm, height_mm, st, max_pixels)
     base = adjust_gray(g, _adjust_settings(st, factor, levels=False))
     return auto_levels(gray_histogram(base), clip)
+
+
+def auto_points_for(gray: np.ndarray, width_mm: float, height_mm: float,
+                    settings: ImageSettings, clip: float = AUTO_LEVELS_CLIP,
+                    max_pixels: int = MAX_PREVIEW_PIXELS) -> tuple[int, int]:
+    """``(black_point, white_point)`` für „Auto-Tonwert“ (wie *Tonwertkorrektur
+    → Auto* in Bildbearbeitungen): der Tonwertumfang des Bildes nach dem
+    Schärfen (je ``clip`` Ausreißer unten/oben, :func:`levels_points`) wird
+    exakt auf Schwarz … Weiß gestreckt. Gerechnet wird ohne die eingestellten
+    Punkte, Helligkeit, Kontrast und Gamma – wiederholtes Klicken ändert nichts.
+    Flaches oder leeres Bild: ``(0, 255)`` (unverändert)."""
+    st = settings.normalized()
+    g, factor = _sample(gray, width_mm, height_mm, st, max_pixels)
+    s = _adjust_settings(st, factor, levels=False)
+    s.black_point, s.white_point = 0, 255
+    pts = levels_points(gray_histogram(adjust_gray(g, s)), clip)
+    if pts is None or pts[1] <= pts[0]:
+        return 0, 255
+    return int(pts[0]), int(pts[1])
 
 
 def gray_from_png(png: bytes) -> np.ndarray:

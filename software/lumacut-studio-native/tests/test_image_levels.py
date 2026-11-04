@@ -279,14 +279,16 @@ def test_dialog_histogram_and_auto_levels(qapp):
     assert "Tonwertumfang" in dlg.histogram_label.text()
     before = dlg.last_preview.pixels.copy()
     assert dlg.apply_auto_levels()
-    b, c = dlg.brightness.value(), dlg.contrast.value()
-    assert c > 20 and dlg.gamma.value() == 1.4
+    # Auto-Tonwert sets the black / white point (§38), brightness / contrast 0
+    assert (dlg.black_point.value(), dlg.white_point.value()) == (lo, hi)
+    assert (dlg.brightness.value(), dlg.contrast.value()) == (0.0, 0.0)
+    assert dlg.gamma.value() == 1.4
     assert not dlg.apply_auto_levels()                 # idempotent
     dlg.update_preview()
     assert dlg.last_histograms.adjusted.nonzero()[0].min() < lo
     assert (dlg.last_preview.pixels != before).any()
     out = dlg.settings()
-    assert (out.brightness, out.contrast) == (b, c)
+    assert (out.black_point, out.white_point, out.brightness, out.contrast) == (lo, hi, 0.0, 0.0)
     dlg.histogram.grab()                               # paints without errors
 
 
@@ -355,10 +357,11 @@ def test_edit_image_settings_passes_the_shape_and_stores_auto_levels(qapp, tmp_p
         assert w.import_tools.edit_image_settings(ids[0])
         assert seen["shape"].id == ids[0]
         st = w.canvas.document.shape(ids[0]).image.settings
-        assert st.contrast > 20
+        assert (st.black_point, st.white_point) == (90, 139)   # gradient 90..139
+        assert (st.brightness, st.contrast) == (0.0, 0.0)
         w.canvas.undo_stack.undo()
         st = w.canvas.document.shape(ids[0]).image.settings
-        assert (st.brightness, st.contrast) == (0.0, 0.0)
+        assert (st.black_point, st.white_point) == (0, 255)
     finally:
         w.canvas.undo_stack.setClean()
         w.close()
