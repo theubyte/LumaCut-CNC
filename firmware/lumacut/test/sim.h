@@ -49,6 +49,7 @@ typedef struct {
     const char *inject_at_link_check; // between reading the clock and comparing it
 
     bool tmc_dead;
+    uint32_t tmc_drop_writes; // the next writes are lost on the wire
     uint32_t tmc_gstat_reads;
     bool tmc_spread[4];
     uint32_t tmc_reg[4][128];

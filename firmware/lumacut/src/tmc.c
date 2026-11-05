@@ -126,7 +126,9 @@ static void reg_write(uint8_t axis, uint8_t reg, uint32_t value)
 {
     uint8_t f[8];
     size_t n = tmc_frame_write(f, ADDR[axis], reg, value);
+    hal_tmc_bus_lock(true); // a long gap inside a frame makes the node drop it
     hal_tmc_send(f, n);
+    hal_tmc_bus_lock(false);
 }
 
 static bool reg_read(uint8_t axis, uint8_t reg, uint32_t *value)
@@ -150,25 +152,48 @@ static void bus_setup(void)
     for (uint8_t a = 0; a < AXES; a++) reg_write(a, REG_NODECONF, SENDDELAY << 8);
 }
 
+// Why the last setup attempt failed, for M122: 0 none, then the failing step.
+enum { CFG_OK, CFG_READ_BEFORE, CFG_READ_AFTER, CFG_WRITE_COUNT, CFG_CHOPCONF };
+static uint8_t cfg_fail_axis, cfg_fail_step, cfg_fail_writes;
+static uint32_t cfg_failures;
+
+static int configure_axis(uint8_t a)
+{
+    uint32_t before, after, chop;
+    if (!reg_read(a, REG_IFCNT, &before)) return CFG_READ_BEFORE;
+    // Stealth on all axes: STEALTHCHOP_XY and STEALTHCHOP_Z in the same
+    // example, HYBRID_THRESHOLD off.
+    reg_write(a, REG_NODECONF, SENDDELAY << 8);
+    reg_write(a, REG_GCONF, tmc_gconf(false));
+    reg_write(a, REG_CHOPCONF, tmc_chopconf());
+    reg_write(a, REG_IHOLD_IRUN, tmc_ihold_irun());
+    reg_write(a, REG_TPOWERDOWN, TPOWERDOWN);
+    reg_write(a, REG_PWMCONF, tmc_pwmconf());
+    reg_write(a, REG_GSTAT, 0x7u);
+    if (!reg_read(a, REG_IFCNT, &after)) return CFG_READ_AFTER;
+    cfg_fail_writes = (uint8_t)(after - before);
+    if (((after - before) & 0xFFu) != WRITES_IN_SETUP) return CFG_WRITE_COUNT;
+    if (!reg_read(a, REG_CHOPCONF, &chop) || chop != tmc_chopconf()) return CFG_CHOPCONF;
+    return CFG_OK;
+}
+
 bool tmc_configure_all(uint8_t *failed_axis)
 {
     bus_setup();
     for (uint8_t a = 0; a < AXES; a++) {
-        uint32_t before, after, chop;
-        *failed_axis = a;
-        if (!reg_read(a, REG_IFCNT, &before)) return false;
-        // Stealth on all axes: STEALTHCHOP_XY and STEALTHCHOP_Z in the same
-        // example, HYBRID_THRESHOLD off.
-        reg_write(a, REG_NODECONF, SENDDELAY << 8);
-        reg_write(a, REG_GCONF, tmc_gconf(false));
-        reg_write(a, REG_CHOPCONF, tmc_chopconf());
-        reg_write(a, REG_IHOLD_IRUN, tmc_ihold_irun());
-        reg_write(a, REG_TPOWERDOWN, TPOWERDOWN);
-        reg_write(a, REG_PWMCONF, tmc_pwmconf());
-        reg_write(a, REG_GSTAT, 0x7u);
-        if (!reg_read(a, REG_IFCNT, &after)) return false;
-        if (((after - before) & 0xFFu) != WRITES_IN_SETUP) return false;
-        if (!reg_read(a, REG_CHOPCONF, &chop) || chop != tmc_chopconf()) return false;
+        int step = CFG_OK;
+        // A lost frame only costs a repeat: IFCNT catches it and the writes are harmless.
+        for (int attempt = 0; attempt < 3; attempt++) {
+            step = configure_axis(a);
+            if (step == CFG_OK) break;
+            cfg_fail_axis = a;
+            cfg_fail_step = (uint8_t)step;
+            cfg_failures++;
+        }
+        if (step != CFG_OK) {
+            *failed_axis = a;
+            return false;
+        }
     }
     return true;
 }
@@ -197,6 +222,17 @@ void tmc_spreadcycle(uint8_t axes, bool on)
 
 void tmc_report(void)
 {
+    if (cfg_failures) {
+        out_str("setup retries=");
+        out_u32(cfg_failures);
+        out_str(" last axis=");
+        out_u32(ADDR[cfg_fail_axis]);
+        out_str(" step=");
+        out_u32(cfg_fail_step);
+        out_str(" writes=");
+        out_u32(cfg_fail_writes);
+        out_str("\n");
+    }
     bus_setup();
     for (uint8_t a = 0; a < AXES; a++) {
         char head[3] = {AXIS_NAME[a], ':', 0};

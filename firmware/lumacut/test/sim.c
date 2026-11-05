@@ -117,6 +117,10 @@ void hal_tmc_send(const uint8_t *data, size_t len)
     if (sim.tmc_dead) return;
     uint8_t addr = data[1];
     if (addr > 3) return;
+    if (len == 8 && sim.tmc_drop_writes) {
+        sim.tmc_drop_writes--;
+        return;
+    }
     if (len == 8 && tmc_crc8(data, 7) == data[7] && (data[2] & 0x80u)) {
         uint8_t reg = data[2] & 0x7Fu;
         uint32_t v = ((uint32_t)data[3] << 24) | ((uint32_t)data[4] << 16) |

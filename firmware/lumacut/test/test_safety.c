@@ -358,6 +358,20 @@ void test_endstops(void)
     CHECK(!sim_out_has("Error"));
     CHECK(sim.phys[0] <= sim.trip[0] && sim.phys[0] >= sim.trip[0] - 8);
 
+    // One lost frame during the driver setup costs a repeat, not the move.
+    // (3 bus_setup writes, then the first of the seven for X.)
+    sim_reset();
+    sim.tmc_drop_writes = 4;
+    sim_out_clear();
+    sim_cmd("G92 X100");
+    sim_cmd("G0 X110 F3000");
+    CHECK(sim_run_until_idle(5000));
+    CHECK(!sim_out_has("Driver not responding"));
+    CHECK(sim.phys[0] != 0);
+    sim_out_clear();
+    sim_cmd("M122");
+    CHECK(sim_out_has("setup retries=") && sim_out_has("step=3")); // the counter runs over all tests
+
     // M119 reports the switches.
     sim_reset();
     sim.force_open = 2;
