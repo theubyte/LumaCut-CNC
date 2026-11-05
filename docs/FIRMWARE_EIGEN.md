@@ -31,7 +31,7 @@ Quelle der Belegung: BTT-Plan des Mini MZ V1.0 vom Besitzer und `docs/MASCHINE.m
 | X STEP / DIR / EN | PB13 / PB12 / PB14 | EN aktiv Low |
 | Y STEP / DIR / EN | PB10 / PB2 / PB11 | |
 | Z STEP / DIR / EN | PB0 / PC5 / PB1 | |
-| Endschalter X / Y / Z | PC0 / PC1 / PC2 | Öffner: offen = ausgelöst. Z ist auch der Werkstücktaster |
+| Endschalter X / Y / Z | PC0 / PC1 / PC2 | Gedrückt zieht den Pin auf Low, ungedrückt High (wie Marlin `*_ENDSTOP_INVERTING true`, am Gerät gemessen). Ein Drahtbruch liest sich als nicht gedrückt: Schalter vor jeder ersten Referenz prüfen. Z ist auch der Werkstücktaster |
 | TMC2209 UART | UART4 TX PC10 / RX PC11 | Eindraht-Bus, Adressen aus dem BTT-Schaltplan oder Marlin 2.1.2.9 prüfen und im Code nennen |
 | USB | PA11 / PA12, Pull-up PA14 | PA14 High = getrennt, Low = verbunden (Marlin `pins_BTT_SKR_MINI_E3_V2_0.h`, gilt für den MZ). SWD ist dafür abgeschaltet, Rettung über die SD-Karte. PC13 ist PS_ON und bleibt frei |
 

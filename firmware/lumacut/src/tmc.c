@@ -133,7 +133,7 @@ static bool reg_read(uint8_t axis, uint8_t reg, uint32_t *value)
 {
     uint8_t f[4], rx[8]; // hal_tmc_send already took our echo off the wire
     size_t n = tmc_frame_read(f, ADDR[axis], reg);
-    for (int attempt = 0; attempt < 2; attempt++) {
+    for (int attempt = 0; attempt < 4; attempt++) {
         hal_tmc_send(f, n);
         size_t got = hal_tmc_recv(rx, sizeof rx, 4000);
         if (tmc_find_reply(rx, got, reg, value)) return true;
@@ -141,8 +141,16 @@ static bool reg_read(uint8_t axis, uint8_t reg, uint32_t *value)
     return false;
 }
 
+// Three nodes share the wire, and SENDDELAY 0 from reset is not allowed then:
+// reads fail at random until every node has it. Writes need no answer.
+static void bus_setup(void)
+{
+    for (uint8_t a = 0; a < AXES; a++) reg_write(a, REG_NODECONF, SENDDELAY << 8);
+}
+
 bool tmc_configure_all(uint8_t *failed_axis)
 {
+    bus_setup();
     for (uint8_t a = 0; a < AXES; a++) {
         uint32_t before, after, chop;
         *failed_axis = a;
@@ -183,6 +191,7 @@ void tmc_spreadcycle(uint8_t axes, bool on)
 
 void tmc_report(void)
 {
+    bus_setup();
     for (uint8_t a = 0; a < AXES; a++) {
         char head[3] = {AXIS_NAME[a], ':', 0};
         uint32_t gconf, gstat, chop, drv;

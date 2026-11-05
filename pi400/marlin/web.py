@@ -58,7 +58,11 @@ CAPTURES = DATA / "captures"
 _CAPTURE = re.compile(r"^\s*;\s*LUMACUT-CAPTURE\b(.*)$", re.I)
 _CAPTURE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 _CAPTURE_WORD = re.compile(r"(id|w|h|delay)=([A-Za-z0-9-]+)")
+SKR_BY_ID = "/dev/serial/by-id/usb-LumaCut_LumaCut_CNC_SKR-MINI-MZ-if00"
+# The name our own firmware reports wins over a path installed for Marlin.
 USB = os.environ.get("LUMACUT_SKR", "/dev/ttyACM0")
+if "LeafLabs" in USB:
+    USB = SKR_BY_ID
 # Head camera (USB/UVC or CSI via V4L2) for the workspace scan.
 CAMERA = os.environ.get("LUMACUT_CAMERA", "/dev/video0")
 HTTP = int(os.environ.get("LUMACUT_HTTP", "8080"))

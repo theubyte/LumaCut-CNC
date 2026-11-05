@@ -44,7 +44,7 @@ static float accel_print = 500.0f, accel_travel = 500.0f;
 static bool relative;
 static volatile bool relay_on, exhaust_on, light_on; // cleared by M112 in the USB interrupt
 static uint8_t light_level;
-static bool link_was_ok, boot_reported;
+static bool link_was_ok;
 static uint32_t continuous_since;
 
 void cmd_init(void)
@@ -63,7 +63,6 @@ void cmd_init(void)
     light_on = false;
     link_was_ok = false;
     driver_check_at = 0;
-    boot_reported = false;
     sg_init();
     motion_init();
     planner_init(motion_limits());
@@ -640,6 +639,9 @@ static step_t dispatch(void)
         case 115: return m_identify();
         case 119: return m_endstops();
         case 122:
+            out_str("reset=");
+            out_str(hal_reset_cause());
+            out_nl();
             tmc_report();
             return finish_ok();
         case 201: return m_axis_values(motion_limits()->max_accel, false);
@@ -785,12 +787,6 @@ static void check_link(uint32_t now)
         update_cancel();
     }
     link_was_ok = ok;
-    if (ok && !boot_reported) {
-        boot_reported = true;
-        out_str("echo:LumaCut reset=");
-        out_str(hal_reset_cause());
-        out_nl();
-    }
     // Signed: a line can arrive after `now` was read, then the difference is -1.
     if (laser_continuous() && (int32_t)(now - rx_last_line_ms()) > (int32_t)USB_SILENCE_MS &&
         (int32_t)(now - continuous_since) > (int32_t)USB_SILENCE_MS) {

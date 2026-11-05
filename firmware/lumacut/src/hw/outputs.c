@@ -66,7 +66,8 @@ void outputs_init(void)
                   X_EN | Y_EN | Z_EN | X_STEP | Y_STEP | Z_STEP | X_DIR | Y_DIR);
     gpio_set_mode(GPIOC, GPIO_MODE_OUTPUT_50_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, Z_DIR);
 
-    // Normally-closed switches to ground: open or a broken wire reads high.
+    // Pressed pulls the pin low, unpressed reads high: Marlin needed
+    // *_ENDSTOP_INVERTING true here. A broken wire reads as not pressed.
     // ENDSTOPPULLUPS is on in the Configurations example.
     gpio_set_mode(GPIOC, GPIO_MODE_INPUT, GPIO_CNF_INPUT_PULL_UPDOWN, GPIO0 | GPIO1 | GPIO2);
     GPIO_BSRR(GPIOC) = GPIO0 | GPIO1 | GPIO2;
@@ -117,4 +118,4 @@ void hal_motors(bool on)
     }
 }
 
-uint8_t hal_endstops(void) { return (uint8_t)(GPIO_IDR(GPIOC) & 7u); }
+uint8_t hal_endstops(void) { return (uint8_t)(~GPIO_IDR(GPIOC) & 7u); }

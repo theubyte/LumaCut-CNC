@@ -421,6 +421,7 @@ Voraussetzungen:
       **Eigene Firmware (Auftrag Besitzer 05.11.):** Zweig `eigene-firmware`, Vertrag `docs/FIRMWARE_EIGEN.md`, Code `firmware/lumacut/`, für den RET6 (Marlin lief als RC-Build). Nur am PC geprüft, nie auf Hardware. Inbetriebnahme mit dem Besitzer, Rückweg Marlin per SD und alter Pi-Stand.
       Parallel auf main: Weboberfläche, Pi-Betrieb, Panel 1.3 (siehe CHANGELOG). Achtung: `update.sh` holt `main` jede Nacht ~04:15. Dienstdatei ist gehärtet, Stop löst bei aktivem Strahl M112 aus.
       Unabhängiges Review: 12 Funde behoben (Commit 4566d10, 811 Host-Prüfungen, 432 Pi-Tests). Z ohne Referenz höchstens 25 mm (Besitzer). Abbilder `A:\mfw\lumacut-fw\`, Ablauf `docs/INBETRIEBNAHME_FIRMWARE.md`. **Wechsel nur mit dem Besitzer: `eigene-firmware` erst dann nach main.**
+      Panel 1.3 am echten Gerät bestätigt (Bild, Touch, Seite System, Update über den Pi). **Eigene Firmware 0.2.0 läuft auf dem RET6** (Besitzer per SD): USB meldet sich als `LumaCut CNC`, M115 und M119 antworten. Fehler am Gerät: Endschalter verkehrt herum (gedrückt = Low, Vertrag war falsch), TMC-Antworten sporadisch (SENDDELAY erst nach dem Einrichten), Startmeldung kam als Echo in den ersten Befehl, Pi suchte den alten Maple-Namen. Korrigiert in 0.2.1. Weiter nach `docs/INBETRIEBNAHME_FIRMWARE.md`.
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut

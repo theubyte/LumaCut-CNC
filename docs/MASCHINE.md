@@ -29,7 +29,7 @@ Motoren und Endschalter:
 | Y | YM | PB10 / PB2 / PB11 | Y-STOP PC1 |
 | Z | ZAM (oder ZBM, nur eine) | PB0 / PC5 / PB1 | Z-STOP PC2 = auch Werkstücktaster |
 
-Alle drei Endschalter sind Öffner (in der Firmware invertiert). X/Y-Motorrichtung gegenüber dem Mega-Zero-Beispiel umgedreht (am Gerät geprüft), Z unverändert. Schritte/mm: X 80, Y 80, Z 1018,59 (Schneckenlift, der Pi setzt den Wert bei jeder Verbindung).
+Alle drei Endschalter ziehen den Pin gedrückt auf Low, ungedrückt liest er High. X/Y-Motorrichtung gegenüber dem Mega-Zero-Beispiel umgedreht (am Gerät geprüft), Z unverändert. Schritte/mm: X 80, Y 80, Z 1018,59 (Schneckenlift, der Pi setzt den Wert bei jeder Verbindung).
 
 Hinweise zur Elektrik:
 - Die MOSFET-Ausgänge (FAN1, HE0, BED) schalten **Minus**. Die Laser-Masse an FAN1− ist keine feste Logikmasse; PA9 darf deshalb nicht direkt an den Laser-PWM-Eingang. Dafür gibt es einen galvanisch getrennten PWM-Treiber.

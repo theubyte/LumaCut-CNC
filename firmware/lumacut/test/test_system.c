@@ -395,5 +395,5 @@ void test_commands(void)
     // First contact reports why the board restarted.
     sim_reset();
     sim_run_ms(2);
-    CHECK(sim_out_has("echo:LumaCut reset=test"));
+    CHECK(!sim_out_has("echo:LumaCut reset")); // the Linux tty would echo it into the first command
 }
