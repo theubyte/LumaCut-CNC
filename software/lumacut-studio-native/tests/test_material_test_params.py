@@ -1,5 +1,5 @@
 """Material test with a chosen parameter per axis (LightBurn Material Test X / Y
-parameter, Interval Test): power, speed, line interval or passes."""
+parameter, Interval Test / Focus Test): power, speed, line interval, passes or focus."""
 
 import hashlib
 
@@ -39,7 +39,7 @@ def test_defaults_are_the_classic_power_by_speed_grid():
     assert (s.column_param, s.row_param) == ("power", "speed")
     assert s.column_values() == s.powers() and s.row_values() == s.speeds()
     assert s.cell_settings(1, 2) == {"power": s.powers()[2], "speed": s.speeds()[1],
-                                     "interval": 0.2, "passes": 1}
+                                     "interval": 0.2, "passes": 1, "focus": 0.0}
     assert s.label_width() == s.label_mm + 2
 
 
@@ -50,6 +50,8 @@ def test_param_values_for_every_parameter():
     assert s.param_values("passes", 3) == [1, 2, 4]          # 2.5 -> 2 (banker's), ints only
     assert all(isinstance(v, int) for v in s.param_values("passes", 6))
     assert s.param_values("interval", 1) == [0.05]
+    s2 = MaterialTestSpec(focus_min=-1.0, focus_max=1.0)
+    assert s2.param_values("focus", 5) == [-1.0, -0.5, 0.0, 0.5, 1.0]
     with pytest.raises(ValueError):
         s.param_values("frequency", 3)
 
@@ -58,13 +60,17 @@ def test_off_axis_parameters_take_their_fixed_value():
     s = MaterialTestSpec(column_param="interval", row_param="passes", power_min=35,
                          power_max=90, speed_min=1200, speed_max=3000, columns=3, rows=2,
                          line_interval_mm=0.1, interval_max=0.3, passes=1, passes_max=2)
-    assert s.cell_settings(0, 0) == {"power": 35, "speed": 1200, "interval": 0.1, "passes": 1}
-    assert s.cell_settings(1, 2) == {"power": 35, "speed": 1200, "interval": 0.3, "passes": 2}
+    assert s.cell_settings(0, 0) == {"power": 35, "speed": 1200, "interval": 0.1, "passes": 1,
+                                     "focus": 0.0}
+    assert s.cell_settings(1, 2) == {"power": 35, "speed": 1200, "interval": 0.3, "passes": 2,
+                                     "focus": 0.0}
 
 
 @pytest.mark.parametrize("kw, msg", [
     (dict(column_param="speed", row_param="speed"), "verschiedene"),
-    (dict(column_param="focus"), "Unbekannt"),
+    (dict(column_param="frequency"), "Unbekannt"),
+    (dict(column_param="focus", focus_min=-1, focus_max=-1), "verschieden"),
+    (dict(column_param="focus", focus_min=-4.0, focus_max=1.0), "Fokus-Versatz"),
     (dict(column_param="interval", line_interval_mm=0), "Füllen"),
     (dict(row_param="interval", interval_max=3.0), "Linienabstand"),
     (dict(row_param="passes", passes_max=31), "Durchgänge"),
@@ -253,7 +259,7 @@ def test_interval_on_layer_survives_save_and_load(tmp_path):
 
 
 def test_test_params_constant():
-    assert TEST_PARAMS == ("power", "speed", "interval", "passes")
+    assert TEST_PARAMS == ("power", "speed", "interval", "passes", "focus")
 
 
 # --- dialog -------------------------------------------------------------------------------
@@ -311,3 +317,98 @@ def test_job_tools_insert_interval_test_as_one_undo_step(qapp):
     assert len(ed.document.layers) == n0 and not ed.document.shapes
     ed.undo_stack.setClean()
     ed.deleteLater()
+
+
+# --- focus axis (LightBurn Focus Test) ----------------------------------------------------
+
+def test_focus_by_power_grid_sets_layer_z_offset(qapp):
+    spec = MaterialTestSpec(column_param="focus", row_param="power", columns=3, rows=2,
+                            focus_min=-1.0, focus_max=1.0, power_min=40, power_max=80,
+                            speed_min=2000, line_interval_mm=0.2, labels=False)
+    cells, _, _ = _cell_grid(spec)
+    assert [l.z_offset for l in cells] == [-1.0, 0.0, 1.0, -1.0, 0.0, 1.0]
+    assert [l.power for l in cells] == [40, 40, 40, 80, 80, 80]
+    assert {l.speed for l in cells} == {2000}
+    # Names stay parsable by the material library (power / speed only).
+    assert all(l.name.startswith("Test P") and " F" in l.name for l in cells)
+
+
+def test_focus_by_speed_grid_and_labels(qapp):
+    spec = MaterialTestSpec(column_param="speed", row_param="focus", columns=2, rows=3,
+                            speed_min=600, speed_max=1800, focus_min=-0.5, focus_max=0.5,
+                            line_interval_mm=0)
+    cells, layers, shapes = _cell_grid(spec)
+    assert [l.z_offset for l in cells] == [-0.5, -0.5, 0.0, 0.0, 0.5, 0.5]
+    assert [l.speed for l in cells] == [600, 1800, 600, 1800, 600, 1800]
+    assert {s.kind for s in shapes if s.layer_id in {l.id for l in cells}} == {"rect"}
+    assert spec.label_texts() == (["10", "30"], ["-0.5", "+0", "+0.5"])
+    label_id = layers[0].id
+    texts = [s.text for s in shapes if s.kind == "text" and s.layer_id == label_id]
+    assert texts == ["10", "30", "-0.5", "+0", "+0.5"]
+
+
+def test_focus_axis_gcode_emits_relative_z_per_cell(qapp):
+    doc = Document()
+    add_material_test(doc, MaterialTestSpec(
+        column_param="focus", row_param="power", columns=3, rows=1,
+        focus_min=-1.0, focus_max=1.0, power_min=50, labels=False, line_interval_mm=0))
+    g = document_to_gcode(doc)
+    pi_check(g)
+    # Three cells at -1 / 0 / +1 mm: only the non-zero offsets wrap.
+    # G0 Z-1.000 = apply of -1 and restore of +1; G0 Z1.000 = restore of -1 and apply of +1.
+    assert g.count("G0 Z-1.000 F600") == 2
+    assert g.count("G0 Z1.000 F600") == 2
+    assert "G0 Z0.000" not in g
+    assert g.count("G91") == 4  # apply -1, restore -1, apply +1, restore +1
+
+
+def test_default_grid_sha_unchanged_with_focus_fields(qapp):
+    doc = Document()
+    add_material_test(doc, MaterialTestSpec(labels=False))
+    assert hashlib.sha256(document_to_gcode(doc).encode()).hexdigest() == _OLD_SHA["default"]
+    cells = [l for l in doc.layers if l.name.startswith("Test P")]
+    assert all(l.z_offset == 0.0 for l in cells)
+
+
+def test_image_cells_with_focus_axis(qapp):
+    from lumacut_job.planner import optimized_document_gcode
+    doc = Document()
+    add_material_test(doc, MaterialTestSpec(
+        column_param="focus", row_param="speed", columns=3, rows=1,
+        focus_min=-0.6, focus_max=0.6, speed_min=2400, image_mode="floyd",
+        line_interval_mm=0.2, labels=False))
+    cells = [l for l in doc.layers if l.name.startswith("Test P")]
+    assert sorted(l.z_offset for l in cells) == [-0.6, 0.0, 0.6]
+    assert all(s.kind == "image" for s in doc.shapes)
+    g = optimized_document_gcode(doc)
+    pi_check(g)
+    assert "G0 Z-0.600 F600" in g and "G0 Z0.600 F600" in g
+
+
+def test_dialog_focus_option_and_range_visibility(qapp):
+    from PySide6.QtWidgets import QDialogButtonBox
+    from lumacut_job.qt_tools import MaterialTestDialog
+    dlg = MaterialTestDialog(None)
+    assert dlg.col_param.findData("focus") >= 0
+    assert dlg.row_param.findData("focus") >= 0
+    assert dlg.focus_min.isHidden() and dlg.focus_max.isHidden()
+    dlg.col_param.setCurrentIndex(dlg.col_param.findData("focus"))
+    assert not dlg.focus_min.isHidden() and not dlg.focus_max.isHidden()
+    assert dlg.focus_max.isEnabled()
+    assert dlg._rows["focus_min"].text() == "Fokus von"
+    # Equal from/to disables OK.
+    dlg.focus_min.setValue(0.5)
+    dlg.focus_max.setValue(0.5)
+    ok = dlg.bb.button(QDialogButtonBox.Ok)
+    assert not ok.isEnabled() and "verschieden" in dlg.hint.text()
+    dlg.focus_max.setValue(1.0)
+    assert ok.isEnabled()
+    out = dlg.spec()
+    assert (out.column_param, out.focus_min, out.focus_max) == ("focus", 0.5, 1.0)
+    # Round trip.
+    again = MaterialTestDialog(None, out)
+    assert again.spec().focus_min == 0.5 and again.spec().column_param == "focus"
+    assert not again.focus_min.isHidden()
+    dlg.deleteLater()
+    again.deleteLater()
+
