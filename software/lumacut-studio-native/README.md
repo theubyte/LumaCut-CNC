@@ -279,7 +279,7 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   `https://id.gs1.org/01/09501101530003/10/AB-12?17=261231` (genau ein Primärschlüssel – GTIN,
   SSCC, GLN … –, Schlüssel-Qualifier 22/10/21 im Pfad in Normreihenfolge, alle übrigen AIs als
   Abfrage, Sonderzeichen %-kodiert; eigene Domain wählbar) – oder eine fertige
-  Digital-Link-Adresse wird geprüft und unverändert kodiert. Das Handy öffnet die Produktseite,
+  Digital-Link-Adresse wird geprüft und unverändert kodiert. **Kurzname-Aliases** aus Digital Link URI Syntax 1.1 (`/gtin/`, `/sscc/`, `/gln/`, `/lot/`, `/ser/`, `?exp=` …) werden beim Einfügen immer akzeptiert (Groß-/Kleinschreibung egal); die Checkbox „Kurzname (/gtin/, /lot/, …)“ (Standard aus) schreibt die Aliase statt numerischer AIs (`…/gtin/…/lot/…?exp=…`). Ohne Häkchen bleiben die Adressen bitgleich zu älteren Dateien. Das Handy öffnet die Produktseite,
   Kassenscanner lesen die GTIN. Beide GS1-Arten nutzen gemischte Segmente (Ziffern numerisch,
   „%“/Großbuchstaben alphanumerisch, Rest Byte) und werden dadurch kleiner; „Beispiel“ setzt
   Musterdaten ein, die Zeile unter dem Inhalt zeigt die kodierten Daten. Code:
