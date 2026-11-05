@@ -16,11 +16,14 @@ keeps the ``Test P…% F…`` layer names so the material library still parses
 the cells.
 
 Image cells (LightBurn Interval Test "Dithered Image", photo-engraving test):
-with ``image_mode`` set, every cell is an image object holding a white-to-black
-grey ramp, engraved in that image mode (dithering, greyscale, halftone, ...)
-with the cell's power (at black), speed, line interval and passes in its image
-settings. The image raster path (``lumacut_job.images``) runs them before the
-vector layers, so the labels still run last. The cell layer keeps the same
+with ``image_mode`` set, every cell is an image object engraved in that image
+mode (dithering, greyscale, halftone, ...) with the cell's power (at black),
+speed, line interval and passes in its image settings. ``image_source`` chooses
+the shared test image for the whole grid: ``ramp`` (default white→black
+horizontal grey ramp, byte-identical to earlier rounds), ``wedge`` (discrete
+step wedge / Stufenkeil) or ``photo`` (user-supplied 8-bit grey PNG in
+``image_png``). The image raster path (``lumacut_job.images``) runs them before
+the vector layers, so the labels still run last. The cell layer keeps the same
 name and values, so the material library's "Preset aus Testzelle" works the
 same way. Default ``image_mode = ""`` = vector cells, output unchanged.
 """
@@ -45,8 +48,13 @@ TEST_PARAM_LABELS = {"power": "Leistung", "speed": "Geschwindigkeit",
 INTERVAL_TEST_RANGE = (0.05, 2.0)   # mm
 # Image modes offered for image test cells (sketch only draws edges, a ramp has none).
 TEST_IMAGE_MODES = tuple(m for m in IMAGE_MODES if m != "sketch")
-# Pixel size of the embedded grey ramp (white left -> black right).
+# Shared test-image sources for image cells (LightBurn Interval Test style).
+IMAGE_SOURCES = ("ramp", "wedge", "photo")
+IMAGE_SOURCE_LABELS = {"ramp": "Verlauf", "wedge": "Stufenkeil", "photo": "Eigenes Bild…"}
+# Pixel size of the embedded grey ramp / step wedge (white left -> black right).
 RAMP_PX = (256, 16)
+# Number of equal grey bands in a step wedge (white → black).
+WEDGE_STEPS = 16
 # Rough width of one label character relative to the label height.
 _LABEL_CHAR_W = 0.62
 
@@ -80,9 +88,12 @@ class MaterialTestSpec:
     focus_min: float = -1.0
     focus_max: float = 1.0
     # Image cells: "" = vector cells (hatch / outline); an image mode (TEST_IMAGE_MODES)
-    # = grey-ramp image cells engraved in that mode. image_min_power = power at white.
+    # = image cells engraved in that mode. image_min_power = power at white.
+    # image_source selects the shared PNG (ramp / wedge / photo); photo needs image_png.
     image_mode: str = ""
     image_min_power: float = 0.0
+    image_source: str = "ramp"
+    image_png: bytes | None = None
 
     def powers(self) -> list[float]:
         return _steps(self.power_min, self.power_max, self.columns)
@@ -176,6 +187,14 @@ class MaterialTestSpec:
                 raise ValueError("Bild-Testzellen brauchen einen Linienabstand")
             if not 0 <= self.image_min_power <= self.power_min:
                 raise ValueError("Min.-Leistung (Weiß) 0..kleinste Leistung")
+            src = self.image_source or "ramp"
+            if src not in IMAGE_SOURCES:
+                raise ValueError(f"Unbekannte Bildquelle: {src}")
+            if src == "photo":
+                if not self.image_png:
+                    raise ValueError("Eigenes Bild fehlt – bitte eine Bilddatei wählen")
+                if not self.image_png.startswith(b"\x89PNG"):
+                    raise ValueError("Eigenes Bild muss ein PNG sein")
         if not 2 <= self.cell_mm <= 60 or not 0 <= self.gap_mm <= 30:
             raise ValueError("Zellgröße 2..60 mm, Abstand 0..30 mm")
         if self.line_interval_mm and not 0.05 <= self.line_interval_mm <= 2:
@@ -217,9 +236,10 @@ def hatch_points(x: float, y: float, w: float, h: float, interval: float) -> lis
     return pts
 
 
-def ramp_png(width: int = RAMP_PX[0], height: int = RAMP_PX[1]) -> bytes:
-    """8-bit grey PNG of a horizontal ramp, white (left) to black (right)."""
-    row = bytes(255 - round(255 * x / (width - 1)) for x in range(width))
+def _grey_png(width: int, height: int, row: bytes) -> bytes:
+    """Encode one repeated grey row as an 8-bit greyscale PNG."""
+    if len(row) != width:
+        raise ValueError("Graustufenzeile passt nicht zur Breite")
     raw = b"".join(b"\x00" + row for _ in range(height))
 
     def chunk(tag: bytes, data: bytes) -> bytes:
@@ -231,13 +251,57 @@ def ramp_png(width: int = RAMP_PX[0], height: int = RAMP_PX[1]) -> bytes:
             + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
 
 
+def ramp_png(width: int = RAMP_PX[0], height: int = RAMP_PX[1]) -> bytes:
+    """8-bit grey PNG of a horizontal ramp, white (left) to black (right)."""
+    row = bytes(255 - round(255 * x / (width - 1)) for x in range(width))
+    return _grey_png(width, height, row)
+
+
+def wedge_png(width: int = RAMP_PX[0], height: int = RAMP_PX[1],
+              steps: int = WEDGE_STEPS) -> bytes:
+    """8-bit grey PNG of a horizontal step wedge (equal bands, white → black)."""
+    n = max(2, int(steps))
+    row = bytearray(width)
+    for x in range(width):
+        step = min(n - 1, x * n // width)
+        row[x] = 255 - round(255 * step / (n - 1))
+    return _grey_png(width, height, bytes(row))
+
+
+def png_size(png: bytes) -> tuple[int, int]:
+    """Width and height from a PNG IHDR chunk."""
+    if not png.startswith(b"\x89PNG") or len(png) < 24:
+        raise ValueError("Eigenes Bild muss ein PNG sein")
+    return struct.unpack(">II", png[16:24])
+
+
+def cell_image_png(spec: MaterialTestSpec) -> tuple[bytes, int, int]:
+    """Shared PNG + pixel size for every image cell of ``spec``."""
+    src = spec.image_source or "ramp"
+    if src == "wedge":
+        png = wedge_png()
+        return png, RAMP_PX[0], RAMP_PX[1]
+    if src == "photo":
+        if not spec.image_png:
+            raise ValueError("Eigenes Bild fehlt – bitte eine Bilddatei wählen")
+        png = spec.image_png
+        return png, *png_size(png)
+    png = ramp_png()
+    return png, RAMP_PX[0], RAMP_PX[1]
+
+
 def image_cell(spec: MaterialTestSpec, settings: dict, x: float, y: float,
-               layer_id: str, png: bytes | None = None) -> Shape:
-    """Grey-ramp image object for one cell with the cell's laser settings."""
+               layer_id: str, png: bytes | None = None,
+               px: tuple[int, int] | None = None) -> Shape:
+    """Test-image object for one cell with the cell's laser settings."""
     st = ImageSettings(mode=spec.image_mode, line_interval_mm=settings["interval"],
                        power=settings["power"], min_power=spec.image_min_power,
                        speed_mm_min=settings["speed"], passes=settings["passes"]).normalized()
-    img = RasterImage(png or ramp_png(), RAMP_PX[0], RAMP_PX[1], st)
+    if png is None or px is None:
+        png, w, h = cell_image_png(spec)
+    else:
+        w, h = px
+    img = RasterImage(png, w, h, st)
     return Shape("image", Geometry(x, y, spec.cell_mm, spec.cell_mm), layer_id, image=img)
 
 
@@ -256,7 +320,7 @@ def build_material_test(spec: MaterialTestSpec) -> tuple[list[Layer], list[Shape
     pitch = spec.cell_mm + spec.gap_mm
     interval_test = "interval" in (spec.column_param, spec.row_param)
     cell_layers: list[Layer] = []
-    png = ramp_png() if spec.image_mode else None
+    shared = cell_image_png(spec) if spec.image_mode else None
     for r in range(spec.rows):
         for c in range(spec.columns):
             st = spec.cell_settings(r, c)
@@ -272,7 +336,8 @@ def build_material_test(spec: MaterialTestSpec) -> tuple[list[Layer], list[Shape
             cell_layers.append(layer)
             x, y = ox + c * pitch, oy + r * pitch
             if spec.image_mode:
-                shapes.append(image_cell(spec, st, x, y, layer.id, png))
+                png, pw, ph = shared
+                shapes.append(image_cell(spec, st, x, y, layer.id, png, (pw, ph)))
             elif spec.line_interval_mm:
                 shapes.append(Shape.from_points(
                     "path", hatch_points(x, y, spec.cell_mm, spec.cell_mm, st["interval"]),
