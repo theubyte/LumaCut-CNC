@@ -10,6 +10,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -345,6 +347,47 @@ def status():
                   firmware_release=firmware_releases.offer(result.get("identity") or ""),
                   panel=panel.BRIDGE.info() if panel.BRIDGE else None)
     return jsonify(result)
+
+
+_STARTED_AT = time.monotonic()
+_software = {}
+
+
+def _software_version():
+    """Commit this service runs (read once: a pull only counts after a restart)."""
+    if not _software:
+        _software.update(commit=None, date=None)
+        try:
+            out = subprocess.run(["git", "log", "-1", "--format=%h %cI"], cwd=ROOT, text=True,
+                                 capture_output=True, timeout=5).stdout.split()
+            if len(out) == 2:
+                _software.update(commit=out[0], date=out[1])
+        except (OSError, subprocess.SubprocessError):
+            logging.debug("Softwarestand nicht lesbar", exc_info=True)
+    return _software
+
+
+def _cpu_temp():
+    try:
+        return round(int(Path("/sys/class/thermal/thermal_zone0/temp").read_text()) / 1000, 1)
+    except (OSError, ValueError):
+        return None
+
+
+@app.get("/api/system")
+def system_info():
+    """Read-only facts about the Pi itself for the system page; never touches the machine."""
+    try:
+        disk = shutil.disk_usage(DATA)
+        free, total = disk.free, disk.total
+    except OSError:
+        free = total = None
+    version = _software_version()
+    return jsonify(software_commit=version["commit"], software_date=version["date"],
+                   service_uptime_s=int(time.monotonic() - _STARTED_AT),
+                   disk_free_bytes=free, disk_total_bytes=total,
+                   jobs_bytes=sum(f.stat().st_size for f in JOBS.iterdir() if f.is_file()),
+                   cpu_temp_c=_cpu_temp())
 
 
 def local_owner():
