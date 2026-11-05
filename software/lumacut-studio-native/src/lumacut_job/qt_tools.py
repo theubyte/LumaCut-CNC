@@ -21,8 +21,8 @@ from lumacut_canvas.export import job_layers
 from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 
 from .estimate import estimate_gcode, frame_gcode
-from .material_test import (INTERVAL_TEST_RANGE, TEST_PARAM_LABELS, TEST_PARAMS,
-                            MaterialTestSpec, build_material_test)
+from .material_test import (INTERVAL_TEST_RANGE, TEST_IMAGE_MODES, TEST_PARAM_LABELS,
+                            TEST_PARAMS, MaterialTestSpec, build_material_test)
 from .planner import PlanReport, optimize_layers, optimized_document_gcode
 
 
@@ -36,6 +36,10 @@ def _spin(lo, hi, value, step=1.0, decimals=0, suffix=""):
     if suffix:
         w.setSuffix(suffix)
     return w
+
+
+# "Art" combo of the material test dialog: index -> cell kind.
+CELL_FILL, CELL_OUTLINE, CELL_IMAGE = 0, 1, 2
 
 
 class MaterialTestDialog(QDialog):
@@ -61,8 +65,17 @@ class MaterialTestDialog(QDialog):
         self.passes = _spin(1, 30, s.passes)
         self.passes_max = _spin(1, 30, s.passes_max)
         self.mode = QComboBox()
-        self.mode.addItems(["Füllen (Gravur)", "Kontur (Schnitt)"])
-        self.mode.setCurrentIndex(0 if s.line_interval_mm else 1)
+        self.mode.addItems(["Füllen (Gravur)", "Kontur (Schnitt)", "Bild (Graustufen-Verlauf)"])
+        self.mode.setCurrentIndex(CELL_IMAGE if s.image_mode
+                                  else CELL_FILL if s.line_interval_mm else CELL_OUTLINE)
+        # Image cells: image mode and power at white (LightBurn "Dithered Image" test).
+        from lumacut_import.qt import MODE_LABELS
+        self.image_mode = QComboBox()
+        for key in TEST_IMAGE_MODES:
+            self.image_mode.addItem(MODE_LABELS.get(key, key), key)
+        idx = self.image_mode.findData(s.image_mode or "floyd")
+        self.image_mode.setCurrentIndex(max(0, idx))
+        self.image_min = _spin(0, 100, s.image_min_power, suffix=" %")
         self.interval = _spin(*INTERVAL_TEST_RANGE, s.line_interval_mm or 0.2, 0.05, 2, " mm")
         self.interval_max = _spin(*INTERVAL_TEST_RANGE, s.interval_max, 0.05, 2, " mm")
         # Parameter per axis (LightBurn Material Test: X / Y parameter).
@@ -89,6 +102,8 @@ class MaterialTestDialog(QDialog):
                               ("passes", "Durchgänge", self.passes),
                               ("passes_max", "Durchgänge bis", self.passes_max),
                               ("mode", "Art", self.mode),
+                              ("image_mode", "Bildmodus", self.image_mode),
+                              ("image_min", "Min.-Leistung (Weiß)", self.image_min),
                               ("interval", "Linienabstand", self.interval),
                               ("interval_max", "Linienabstand bis", self.interval_max),
                               ("cell", "Zellgröße", self.cell), ("gap", "Abstand", self.gap),
@@ -103,6 +118,8 @@ class MaterialTestDialog(QDialog):
         f.addRow(self.bb)
         for combo in (self.col_param, self.row_param, self.mode):
             combo.currentIndexChanged.connect(self._update_fields)
+        for spin in (self.image_min, self.p_min):
+            spin.valueChanged.connect(self._update_fields)
         self._update_fields()
 
     def _axes(self) -> tuple[str, str]:
@@ -111,7 +128,12 @@ class MaterialTestDialog(QDialog):
     def _update_fields(self) -> None:
         """Range fields only for parameters on an axis; fixed value otherwise."""
         axes = self._axes()
-        engrave = self.mode.currentIndex() == 0
+        kind = self.mode.currentIndex()
+        engrave = kind in (CELL_FILL, CELL_IMAGE)
+        image = kind == CELL_IMAGE
+        for key, w in (("image_mode", self.image_mode), ("image_min", self.image_min)):
+            self._rows[key].setVisible(image)
+            w.setVisible(image)
         fields = {"power": ("p_min", "p_max", "Leistung", self.p_max),
                   "speed": ("s_min", "s_max", "Geschw.", self.s_max),
                   "passes": ("passes", "passes_max", "Durchgänge", self.passes_max),
@@ -129,7 +151,9 @@ class MaterialTestDialog(QDialog):
         if axes[0] == axes[1]:
             problem = "Spalten und Zeilen brauchen verschiedene Parameter."
         elif "interval" in axes and not engrave:
-            problem = "Linienabstand-Test nur mit „Füllen (Gravur)“."
+            problem = "Linienabstand-Test nur mit „Füllen (Gravur)“ oder „Bild“."
+        elif image and self.image_min.value() > self.p_min.value():
+            problem = "Min.-Leistung (Weiß) darf die kleinste Leistung nicht übersteigen."
         self.hint.setText(problem)
         self.hint.setVisible(bool(problem))
         self.bb.button(QDialogButtonBox.Ok).setEnabled(not problem)
@@ -140,10 +164,15 @@ class MaterialTestDialog(QDialog):
             speed_min=self.s_min.value(), speed_max=self.s_max.value(), rows=self.rows.value(),
             cell_mm=self.cell.value(), gap_mm=self.gap.value(), x=self.x.value(), y=self.y.value(),
             passes=self.passes.value(),
-            line_interval_mm=self.interval.value() if self.mode.currentIndex() == 0 else 0.0,
+            line_interval_mm=(0.0 if self.mode.currentIndex() == CELL_OUTLINE
+                              else self.interval.value()),
             labels=self.labels.isChecked(),
             column_param=self.col_param.currentData(), row_param=self.row_param.currentData(),
-            interval_max=self.interval_max.value(), passes_max=self.passes_max.value())
+            interval_max=self.interval_max.value(), passes_max=self.passes_max.value(),
+            image_mode=(self.image_mode.currentData()
+                        if self.mode.currentIndex() == CELL_IMAGE else ""),
+            image_min_power=(self.image_min.value()
+                             if self.mode.currentIndex() == CELL_IMAGE else 0.0))
 
 
 def insert_material_test(editor, spec: MaterialTestSpec) -> int:
