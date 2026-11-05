@@ -9,7 +9,9 @@ ask first), names compare without case.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -17,9 +19,12 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
+from .storage import read_json_object
+
 MAX_PROJECT_BYTES = 30 * 1024 * 1024
 MAX_PROJECTS = 200
 MAX_NAME = 80
+_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 class NotFoundError(KeyError):
@@ -40,11 +45,44 @@ class ProjectStore:
         self.dir = Path(folder)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
-        try:
-            data = json.loads((self.dir / "index.json").read_text("utf-8"))
-            self.index = [p for p in data.get("projects", []) if isinstance(p, dict) and (self.dir / self._file(p["id"])).is_file()]
-        except Exception:
-            self.index = []
+        self.index = self._load_index()
+
+    def _load_index(self) -> list[dict]:
+        """The list on disk; project files it misses (damaged index, power cut
+        between project and index) come back under their title, none is lost."""
+        data = read_json_object(self.dir / "index.json") or {}
+        stored = data.get("projects")
+        index = [p for p in (stored if isinstance(stored, list) else [])
+                 if isinstance(p, dict) and isinstance(p.get("id"), str) and isinstance(p.get("name"), str)
+                 and isinstance(p.get("updated_at"), str) and _ID.match(p["id"]) and (self.dir / self._file(p["id"])).is_file()]
+        known = {p["id"] for p in index}
+        names = {p["name"].casefold() for p in index}
+        found = 0
+        for path in sorted(self.dir.glob("*.json")):
+            if path.stem in known or not _ID.match(path.stem):
+                continue
+            try:
+                raw = path.read_bytes()
+                doc = json.loads(raw.decode("utf-8"))
+                if not isinstance(doc, dict):
+                    raise ValueError("kein Objekt")
+            except (OSError, ValueError) as exc:
+                logging.error("Projektdatei %s nicht lesbar: %s", path, exc)
+                continue
+            title = doc.get("title")
+            name = " ".join(title.split())[:MAX_NAME] if isinstance(title, str) and title.strip() else ""
+            if not name or name.casefold() in names:
+                name = ((name[:MAX_NAME - 9] + " ") if name else "Projekt ") + path.stem[:8]
+            names.add(name.casefold())
+            index.append({"id": path.stem, "name": name, "bytes": len(raw), "updated_by": "",
+                          "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(path.stat().st_mtime)),
+                          **_summary(doc)})
+            found += 1
+        if found:
+            logging.warning("Projektliste: %d Projekte aus ihren Dateien wiederhergestellt", found)
+            self.index = index
+            self._save_index()
+        return index
 
     @staticmethod
     def _file(project_id: str) -> str:
@@ -93,12 +131,15 @@ class ProjectStore:
             same = next((p for p in self.index if p["name"].casefold() == name.casefold()), None)
             if same is None and len(self.index) >= MAX_PROJECTS:
                 raise ValueError("Schon %d Projekte auf dem Pi – erst alte löschen" % MAX_PROJECTS)
-            meta = same or {"id": uuid.uuid4().hex}
+            # a copy: a failed write (disk full) leaves the list as it was
+            meta = dict(same) if same else {"id": uuid.uuid4().hex}
             meta.update(name=name, bytes=len(raw), updated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                         updated_by=(by or "")[:40], **_summary(doc))
             self._write(self._file(meta["id"]), raw)
             if same is None:
                 self.index.append(meta)
+            else:
+                self.index[self.index.index(same)] = meta
             self._save_index()
             return dict(meta, replaced=same is not None)
 

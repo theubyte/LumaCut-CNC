@@ -26,9 +26,10 @@ import json
 import logging
 import math
 import os
-import tempfile
 import threading
 from pathlib import Path
+
+from .storage import atomic_write
 
 FORMAT = "lumacut-camera-calibration/1"
 SCHEMA_VERSION = 1
@@ -277,35 +278,6 @@ class CalibrationStore:
                                       "beschreibbarer Ablageort (" + "; ".join(errors or [
                                           str(p) for p in self.paths]) + ")")
             return self._load_locked()
-
-
-def atomic_write(path: Path, text: str) -> None:
-    """Write ``text`` so that readers see either the old or the new file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".tmp", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(tmp, 0o644)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-    try:
-        dir_fd = os.open(str(path.parent), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(dir_fd)
-    except OSError:
-        pass
-    finally:
-        os.close(dir_fd)
 
 
 # -- HTTP API (registered in web.py) ----------------------------------------

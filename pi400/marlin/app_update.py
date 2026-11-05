@@ -22,6 +22,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from .storage import atomic_write
+
 LOG = logging.getLogger("lumacut.app_update")
 
 REPO = os.environ.get("LUMACUT_APP_REPO", "theubyte/LumaCut-CNC")
@@ -53,7 +55,7 @@ class AppUpdates:
             m = json.loads(self.meta_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
-        if not self.apk.is_file() or self.apk.stat().st_size != m.get("size"):
+        if not isinstance(m, dict) or not self.apk.is_file() or self.apk.stat().st_size != m.get("size"):
             return None
         return m
 
@@ -101,14 +103,10 @@ class AppUpdates:
         data = self._get(assets[APK_ASSET], timeout=300)
         if len(data) != size or hashlib.sha256(data).hexdigest() != digest:
             raise RuntimeError("Heruntergeladene APK stimmt nicht mit der Prüfsumme überein")
-        tmp = self.apk.with_suffix(".tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, self.apk)
+        atomic_write(self.apk, data)
         meta = {"version_code": code, "version_name": str(new.get("version_name") or code),
                 "sha256": digest, "size": size, "commit": new.get("commit")}
-        tmp = self.meta_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(meta), encoding="utf-8")
-        os.replace(tmp, self.meta_file)
+        atomic_write(self.meta_file, json.dumps(meta))
         LOG.info("Android app %s (%d) bereit", meta["version_name"], code)
 
     def run_forever(self, running, busy=lambda: False, interval: float = CHECK_INTERVAL_S):

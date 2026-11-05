@@ -29,8 +29,8 @@ offene Punkte), [MACHINE_API.md](../software/lumacut-studio-native/docs/MACHINE_
 | Datei-Uploads | `POST /api/upload`, `/api/firmware`: `multipart/form-data`, Feld `file`. |
 | JSON-Body | `PUT /api/camera/calibration`, `PUT /api/camera/settings`, Materialien (`application/json`). |
 | Antwortformat | JSON. Ausnahmen: `GET /` (HTML), `/api/jobs/<name>/content` (`text/plain`), `/api/camera/snapshot` (`image/jpeg`). |
-| Header jeder Antwort | `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`. |
-| Max. Anfragegröße | 32 MB (`MAX_CONTENT_LENGTH`). Größer → **413 als HTML** (siehe unten). |
+| Header jeder Antwort | `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`. |
+| Max. Anfragegröße | 32 MB (`MAX_CONTENT_LENGTH`). Größer → **413** (JSON). Über 1 MB muss danach noch 100 MB frei bleiben, sonst **507**. |
 | Zahlen | Dezimalpunkt (`12.5`), nicht Komma. `float("abc")` scheitert mit 400 und englischem Python-Text (`could not convert string to float: 'abc'`). |
 
 ### 1.1 Erfolg und Fehler
@@ -44,15 +44,18 @@ offene Punkte), [MACHINE_API.md](../software/lumacut-studio-native/docs/MACHINE_
 | Ausnahme auf dem Pi | HTTP | Typische Bedeutung |
 | --- | --- | --- |
 | `ValueError` (auch `FirmwareImageError`), `RuntimeError` (auch `MarlinCommandError`), `PermissionError` | **400** | Eingabe ungültig, Vorbedingung fehlt, Steuerung belegt, Marlin meldet Fehler |
-| `TimeoutError`, `ConnectionError` | **503** | SKR nicht per USB identifiziert, Marlin-Antwort überfällig, Kamera fehlt, E-Stop ohne USB |
-| alles andere (z. B. `serial.SerialException` bei `op=connect` ohne USB-Gerät) | **500** | `{"error": "Interner Fehler – Pi-Protokoll ansehen"}` |
-| eigene Codes | 403 / 409 / 413 / 415 | nur `PUT /api/camera/calibration` (Abschnitt 4.13) |
+| `TimeoutError`, `ConnectionError`, `serial.SerialException` | **503** | SKR nicht per USB identifiziert, USB-Gerät fehlt, Marlin-Antwort überfällig, Kamera fehlt, E-Stop ohne USB |
+| `OSError` „kein Platz mehr“ | **507** | Speicherkarte voll, nichts gespeichert; die alte Datei bleibt |
+| alles andere | **500** | `{"error": "Interner Fehler – Pi-Protokoll ansehen"}` |
+| eigene Codes | 409 / 415 | `PUT /api/camera/calibration` (Abschnitt 4.13) |
 
-- **Nicht-JSON-Fehler** (Werkzeug-Standardseiten, `text/html`): 404 für
-  unbekannte Pfade, 405 für falsche Methode (z. B. `GET /api/action`), 413
-  bei mehr als 32 MB. Ein Client darf deshalb nicht blind `response.json()`
-  aufrufen: erst Text lesen, dann JSON versuchen (siehe JS-Helfer in
-  Abschnitt 9.2; die alte `index.html` macht es ebenso).
+- **Fremde Webseite: 403** bei jedem POST/PUT/DELETE, dessen `Origin` nicht zum
+  `Host` passt (Abschnitt 7.2). **Speicher fast voll: 507** bei Anfragen über
+  1 MB, wenn danach weniger als 100 MB frei blieben.
+- Unter `/api/` sind auch 404 (unbekannter Pfad), 405 (falsche Methode) und 413
+  (über 32 MB) JSON. Nur außerhalb von `/api/` kommen Werkzeug-Seiten als
+  `text/html`. Ältere Pi-Stände senden auch dort HTML: ein Client liest erst den
+  Text und versucht dann JSON (JS-Helfer in Abschnitt 9.2).
 - Status 400 heißt „abgelehnt, nichts passiert“ **nur bei Vorbedingungen**.
   Scheitert eine bereits laufende Fahrt (z. B. Marlin `Error:` mitten in
   `op=home`), kommt ebenfalls 400, aber die Maschine kann sich schon bewegt
@@ -269,6 +272,7 @@ Felder aus `web.py` (`status()`):
 | `sync` | object | `{workspace, project, scan}`: Revisionen des Arbeitsstands auf dem Pi (Abschnitt 4.15). Ändert sich eine, holt jedes Gerät nur diesen Teil neu. |
 | `travel_z_mm` | number | Fahrhöhe über unbekanntem Gelände = Stärke des gewählten Materials + 20 mm, mindestens `z_clearance_mm`, höchstens 80. Alle Pi-Fahrten (moveto, Abtasten, Parken, nach dem Referenzieren, lange Leerfahrten im Auftrag) gehen mindestens so hoch. |
 | `home_needs_confirm` | bool | `true`: Marlin kennt Z nicht und der Pi hat keine gemerkte Höhe – `op=home` bzw. `op=autorun` brauchen `clear=1` (Bediener bestätigt, dass der Kopf frei über allem steht). |
+| `disk_free_mb` | number | freier Platz auf der Speicherkarte in MB (Datenordner des Pi) |
 | `camera` | object | `{device, available}`: Gerätepfad (`LUMACUT_CAMERA`, Standard `/dev/video0`) und ob er existiert (sagt nichts darüber, ob ffmpeg ein Bild bekommt) |
 
 `job.line` / `job.total`: `total` = Zahl der Auftragszeilen; `line` zählt
@@ -420,7 +424,7 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | | |
 | --- | --- |
 | Parameter | `service_password`: `new` (≥ 4 Zeichen), `old` (nötig, wenn schon gesetzt); `service_unlock`: `password` |
-| Wirkung | Passwort des Service-Menüs setzen bzw. prüfen. Gespeichert nur als PBKDF2-Hash (`service_password.json`). Falsches Passwort: 400 nach 1 s. Status: `service_password_set` |
+| Wirkung | Passwort des Service-Menüs setzen bzw. prüfen. Gespeichert nur als PBKDF2-Hash (`service_password.json`). Falsches Passwort: 400 nach 1 s; langsame Prüfungen laufen nacheinander, auch parallele Anfragen schaffen also höchstens etwa einen Versuch pro Sekunde. Ein richtiges Passwort merkt sich der Pi 60 s als HMAC mit einem zufälligen Schlüssel im Speicher (nie das Passwort), damit Regler und `op=service_laser_ping` nicht jedes Mal PBKDF2 rechnen. Beschädigte Datei: Menü bleibt gesperrt (400 „beschädigt“), `service_password_set` bleibt `true`; neu setzen erst nach Löschen der Datei auf dem Pi. Status: `service_password_set` |
 
 #### `op=service_supply`
 
@@ -834,7 +838,10 @@ Web-UI jede Gruppe für sich.
 #### `GET /api/backup`
 
 Liest nur. Antwort `application/json` als Download (`lumacut-sicherung-<Datum>.json`):
-`{created, machine_name, config, materials: {revision, materials}, workspace, camera_calibration}`.
+`{created, machine_name, config, materials: {revision, materials}, workspace, camera_calibration, bed_map, material_calibration}`.
+`camera_calibration` ist `null`, solange nur der Platzhalter aktiv ist. Nicht enthalten:
+Aufträge, Projekte, Scanbild und Service-Passwort. Zurückspielen:
+[PI_BETRIEB.md](PI_BETRIEB.md), Abschnitt „Sicherung und Wiederherstellung“.
 
 ### 4.10 `POST /api/commission`
 
@@ -1294,12 +1301,13 @@ Internet freigeben. Kein HTTPS.
   Anfragen mit Preflight (JSON, eigene Header) nicht senden. Für die
   Entwicklung einen Dev-Proxy verwenden (`/api` → `http://lumacut.local:8080`).
 - Native Clients (Studio, curl, Tablet-App) sind von CORS nicht betroffen.
-- **CSRF-Lücke**: „Einfache“ Formular-POSTs (`application/x-www-form-urlencoded`,
-  `multipart/form-data`) an `/api/action`, `/api/upload`, `/api/settings`,
-  `/api/commission`, `/api/firmware` werden **auch mit fremdem `Origin`
-  ausgeführt** (nachgeprüft mit dem Testclient). Eine beliebige Webseite im
-  Browser eines Nutzers im selben WLAN könnte also Aktionen auslösen. Nur
-  `PUT /api/camera/calibration` prüft `Origin`. Siehe Abschnitt 10.
+- **Fremde Webseiten (CSRF):** Jedes POST/PUT/DELETE mit `Origin` ungleich `Host`
+  bekommt **403** `Fremde Webseite darf die Maschine nicht bedienen` (auch
+  `Origin: null`). Einzige Ausnahme: `op=estop`, Anhalten geht immer. Ohne
+  `Origin` (Apps, Panel, curl) läuft alles wie bisher.
+- **Offen: DNS-Rebinding.** Eine fremde Domain, die auf die Pi-Adresse zeigt, hat
+  `Origin` gleich `Host` und fällt durch die Prüfung. Eine feste Liste erlaubter
+  Hostnamen würde Apps aussperren, die den Pi unter einem Router-Namen ansprechen.
 
 ---
 
@@ -1507,9 +1515,8 @@ lesen; zum Anhalten E-Stop.
 
 Für das Redesign relevant, Vorschläge in Klammern:
 
-1. **CSRF**: Formular-POSTs von fremden Webseiten werden ausgeführt
-   (Abschnitt 7.2). (Origin-Prüfung wie bei der Kalibrierung für alle POSTs:
-   `Origin` vorhanden und ≠ Host → 403. Native Clients senden kein `Origin`.)
+1. **CSRF**: erledigt, Origin-Prüfung für alle schreibenden Anfragen
+   (Abschnitt 7.2). DNS-Rebinding bleibt offen.
 2. **Kein Push**: nur Polling. (SSE `GET /api/events` mit Status-Diffs.)
 3. **Keine Kamera-Vorschau**: nur Einzelbild per ffmpeg (1–3 s). (MJPEG-Stream
    `multipart/x-mixed-replace` oder dauerhafter ffmpeg-Prozess.)
@@ -1525,11 +1532,9 @@ Für das Redesign relevant, Vorschläge in Klammern:
 8. **`job.line`** zählt gesendete, nicht ausgeführte Zeilen; kein
    Zeit-/Restzeitwert. (`started_at`, `elapsed_s`, Schätzung.)
 9. **Keine Version** im Status. (`api_version`, `server_commit`.)
-10. **Fehlerformat uneinheitlich**: 404/405/413 als HTML; `op=connect` ohne
-    USB-Gerät → 500 statt 503; nicht-numerische Felder → englischer
-    Python-Text; `geometry` mit englischen Fehlertexten und ohne
-    Endungsprüfung. (JSON-Handler für `HTTPException`; `SerialException` →
-    503.)
+10. **Fehlerformat**: 404/405/413 unter `/api/` und `op=connect` ohne USB-Gerät
+    (503) sind erledigt, `geometry` prüft die Endung. Offen: nicht-numerische
+    Felder liefern englischen Python-Text.
 11. **`/api/settings`** wartet blockierend auf die Maschinensperre und
     verlangt immer alle Felder. (`acquire(timeout=…)` + 409/503; Teil-Update.)
 12. **`activity`** zeigt Firmware-Update, LightBurn und Web-Fahrten als

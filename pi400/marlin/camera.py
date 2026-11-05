@@ -12,6 +12,7 @@ that through the Pi 400 hub, hence 15 fps).
 """
 from __future__ import annotations
 
+import math
 import re
 import subprocess
 import threading
@@ -39,7 +40,8 @@ def validate(data) -> dict:
         v = data.get(key)
         if v is None:
             continue
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or v != int(v) or not low <= v <= high:
+        if (isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                or v != int(v) or not low <= v <= high):
             raise ValueError("%s: ganze Zahl %d … %d oder null erwartet" % (key, low, high))
         out[key] = int(v)
     return out

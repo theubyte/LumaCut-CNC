@@ -57,6 +57,7 @@ if ! runuser -u lumacut -- env PYTHONPATH="$ROOT/pi400" \
 fi
 
 log "Starte Dienst ..."
+cp "$ROOT/pi400/marlin/$SERVICE" "/etc/systemd/system/$SERVICE" || true
 systemctl daemon-reload || true
 systemctl enable "$SERVICE" || true
 systemctl start "$SERVICE" || die "Service-Start fehlgeschlagen. Siehe journalctl -u $SERVICE"

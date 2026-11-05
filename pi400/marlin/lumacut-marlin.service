@@ -2,6 +2,8 @@
 Description=LumaCut CNC Pi 400: Marlin USB gateway, web UI and TCP 23
 After=network-online.target
 Wants=network-online.target
+# Never give up restarting: the machine has no other control.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -16,6 +18,8 @@ ExecStart=/usr/bin/python3 -m marlin.web
 Restart=always
 RestartSec=3
 TimeoutStopSec=15
+# Out of memory (large uploads, ffmpeg): the gateway that can switch the laser off dies last.
+OOMScoreAdjust=-500
 NoNewPrivileges=yes
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -24,6 +28,14 @@ ProtectSystem=strict
 ReadWritePaths=/var/lib/lumacut -/etc/lumacut
 ProtectHome=true
 PrivateTmp=true
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Deliberately not: PrivateDevices, ProtectClock, DevicePolicy (they close /dev:
+# SKR, panel and camera), ProtectKernelTunables (pyserial/GPIO read and use /sys).
 
 [Install]
 WantedBy=multi-user.target

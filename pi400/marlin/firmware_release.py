@@ -20,7 +20,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
 import threading
 import time
@@ -30,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .app_update import CHECK_INTERVAL_S, REPO
+from .storage import atomic_write
 
 LOG = logging.getLogger("lumacut.firmware_release")
 
@@ -88,9 +88,15 @@ class FirmwareReleases:
 
     def meta(self) -> dict | None:
         try:
-            return json.loads(self.meta_file.read_text(encoding="utf-8"))
+            m = json.loads(self.meta_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
+        if not isinstance(m, dict):
+            return None
+        boards = m.get("boards")
+        # polled with every status: a damaged file must not take /api/status down
+        m["boards"] = {k: v for k, v in boards.items() if isinstance(v, dict)} if isinstance(boards, dict) else {}
+        return m
 
     def image(self, board: str) -> bytes | None:
         """Stored image for ``board``, only if it still matches the release."""
@@ -166,16 +172,12 @@ class FirmwareReleases:
             info = validate(board, data)
             if info.get("build") != entry.get("build"):
                 raise RuntimeError("Firmware %s: Build-Stempel passt nicht zum Release" % board)
-            tmp = self.dir / (BOARDS[board] + ".tmp")
-            tmp.write_bytes(data)
-            os.replace(tmp, self.dir / BOARDS[board])
+            atomic_write(self.dir / BOARDS[board], data)
             boards[board] = {"build": entry["build"], "sha256": digest, "size": size}
         if not boards:
             raise RuntimeError("Firmware-Release enthält kein Board-Image")
         meta = {"number": number, "commit": new.get("commit"), "boards": boards}
-        tmp = self.meta_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(meta), encoding="utf-8")
-        os.replace(tmp, self.meta_file)
+        atomic_write(self.meta_file, json.dumps(meta))
         LOG.info("Firmware-Release %d bereit (%s)", number, ", ".join(sorted(boards)))
 
     def run_forever(self, running, busy=lambda: False, interval: float = CHECK_INTERVAL_S):

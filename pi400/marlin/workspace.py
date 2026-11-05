@@ -16,12 +16,15 @@ one status poll and fetch only what changed.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
+
+from .storage import read_json_object
 
 # The thickest material that fits under the head with 20 mm travel
 # clearance below the 80 mm Z limit (owner's decision 2026-10-27).
@@ -87,21 +90,25 @@ class WorkspaceStore:
         self.dir = Path(folder)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.lock = threading.Lock()
-        self.state = self._read_json("state.json", {"revision": 0, "material": None, "areas": [], "probe_points": [],
-                                                    "heights": None, "settings": {}})
+        defaults = {"revision": 0, "material": None, "areas": [], "probe_points": [], "heights": None, "settings": {}}
+        self.state = self._read_json("state.json", defaults)
+        for key in STATE_KEYS:
+            # A value the API would refuse must not reach the machine from the file either.
+            try:
+                _validate_state({key: self.state[key]})
+            except (ValueError, TypeError):
+                logging.error("Arbeitsstand: Feld %s beschädigt, Standardwert aktiv", key)
+                self.state[key] = defaults[key]
         self.project_meta = self._read_json("project.meta.json", {"revision": 0})
         self.scan_meta = self._read_json("scan.meta.json", {"revision": 0})
         # called with the new state after every write (the Pi takes the material thickness from it)
         self.on_change = None
 
     def _read_json(self, name, default):
-        try:
-            data = json.loads((self.dir / name).read_text("utf-8"))
-            if isinstance(data, dict):
-                return {**default, **data}
-        except Exception:
-            pass
-        return dict(default)
+        merged = {**default, **(read_json_object(self.dir / name) or {})}
+        if isinstance(merged["revision"], bool) or not isinstance(merged["revision"], int):
+            merged["revision"] = 0
+        return merged
 
     def _write(self, name, data: bytes):
         tmp = self.dir / (name + ".tmp")
@@ -118,7 +125,7 @@ class WorkspaceStore:
     def _stamp(meta, by):
         meta["revision"] = int(meta.get("revision", 0)) + 1
         meta["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        meta["updated_by"] = (by or "")[:40]
+        meta["updated_by"] = str(by or "")[:40]
 
     def revisions(self) -> dict:
         return {"workspace": self.state["revision"], "project": self.project_meta["revision"],
