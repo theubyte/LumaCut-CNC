@@ -183,7 +183,13 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   reicht hinein“, wenn nur das Gesamtrechteck die Ecke berührt) und die Statusleiste meldet es
   einmal – „Park-Ecke wieder frei.“, sobald es behoben ist. Die Live-Prüfung nutzt die
   Objektboxen (etwas vorsichtiger als der G-Code-Laser-an-Bereich beim Senden, z. B. bei Text
-  oder weißen Bildrändern). Code: `src/lumacut_job/park_zone.py`.
+  oder weißen Bildrändern). **Schnitt-Optionen** brennen außerhalb der Objektboxen:
+  Kerf-Versatz nach außen, An-/Abfahrten und der Scan-Versatz der Schraffur. Könnten sie das
+  Ergebnis ändern (Objektboxen frei, Boxen + größtmögliche Reichweite in der Ecke), plant
+  Studio den Auftrag genau wie beim Senden und prüft dessen Laser-an-Bereich – die Warnung
+  „An-/Abfahrt / Versatz reicht hinein!“ stimmt dann mit der Ablehnung beim Senden überein;
+  weit weg von der Ecke wird nicht geplant. Der Überlauf der Schraffur läuft mit Laser aus und
+  zählt (wie am Pi) nicht. Code: `src/lumacut_job/park_zone.py`.
 - **Rahmen:** „Rahmen“ (*Strg+Umschalt+F*, Rechteck) bzw. „Gummiband-Rahmen“
   (*Alt+Umschalt+F*, konvexe Hülle) oder der Knopf „Rahmen“ im Maschinen-Panel
   fahren den Umriss mit ausgeschaltetem Laser ab (`op=frame`). Der gesendete
@@ -256,9 +262,16 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   alphanumerische und Byte-Segmente aufgeteilt (dynamische Programmierung), aber nur, wenn das
   eine kleinere Version ergibt (z. B. „HTTPS://LUMACUT.EXAMPLE/P/4711“ M 3 → 2, Link mit langer
   Seriennummer M 4 → 3, 1000 Ziffern L 22 → 13) – sonst bleibt der Code Bit für Bit wie bisher
-  (ein Byte-Segment). Der Dialog nennt die Segmente. Text mit Umlauten u. Ä. bleibt ein
-  UTF-8-Byte-Segment. Gespeicherte Dateien öffnen unverändert (Module sind Polygone); erst
-  „Code bearbeiten“ kodiert neu und kann dabei eine kleinere Version wählen.
+  (ein Byte-Segment). Der Dialog nennt die Segmente. **Umlaute / Sonderzeichen:** mit
+  „UTF-8 kennzeichnen (ECI)“ (Standard für neue Codes) bekommt Text mit Nicht-ASCII-Zeichen
+  („Größe“, „25 °C“, „€“, Emoji …) die Zeichensatz-Kennung ECI 26 (UTF-8) – Handys und Scanner
+  müssen den Zeichensatz nicht raten, und Ziffernfolgen dürfen dann auch numerische Segmente
+  werden. Japanischer Text (Kana / Kanji, alles in Shift JIS) nutzt den Kanji-Modus (13 statt
+  24 Bit je Zeichen, z. B. 52 Kanji M 9 → 5). Reiner ASCII-Text ändert sich nicht; ältere Codes
+  ohne die Einstellung öffnen beim Bearbeiten mit ausgeschaltetem Häkchen und bleiben
+  bitgleich (ein UTF-8-Byte-Segment ohne Kennung, der Dialog weist darauf hin). Gespeicherte
+  Dateien öffnen unverändert (Module sind Polygone); erst „Code bearbeiten“ kodiert neu und kann
+  dabei eine kleinere Version wählen.
   **Art** „GS1 QR-Code“: GS1-Elementstring „(01)09501101530003(17)261231(10)AB-12“ (feste Längen,
   Ziffern und Prüfziffern geprüft) mit dem Modusindikator *FNC1 an erster Stelle*, Trenner
   automatisch – GS1-Scanner lesen GTIN, Charge, MHD (Kennung `]Q3`). **Art** „GS1 Digital Link“
