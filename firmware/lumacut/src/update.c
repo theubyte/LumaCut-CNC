@@ -54,7 +54,8 @@ static void fail(const char *text)
 
 void update_cancel(void)
 {
-    if (state == UP_IDLE) return;
+    // Verified and answered: the host closes the port now, that must not stop the copy.
+    if (state == UP_IDLE || state == UP_FLUSH) return;
     state = UP_IDLE;
     rx_set_raw(false);
 }

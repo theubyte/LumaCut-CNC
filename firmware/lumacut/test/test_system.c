@@ -77,6 +77,17 @@ void test_update(void)
     CHECK(sim.selfcopy_bytes == 5000);
     CHECK(memcmp(sim.stage, image, 5000) == 0);
 
+    // 05.11. on the board: the Pi closed the port right after ok DONE, the copy never ran.
+    sim_reset();
+    make_image(5000);
+    CHECK(send_image(5000, 0));
+    sim_run_ms(10);
+    CHECK(sim_out_has("ok DONE"));
+     = false;
+    sim_run_ms(300);
+    CHECK(sim.selfcopy_bytes == 5000);
+     = true;
+
     // Wrong CRC: refused, back to normal lines, nothing copied.
     sim_reset();
     make_image(5000);
