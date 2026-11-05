@@ -131,6 +131,12 @@ class ImageSettings:
     white_point: int = 255            # Tonwert: Grauwert, der Weiß wird (> Schwarzpunkt)
     # Gradationskurve: Stützpunkte ((ein, aus), ...) als Grauwerte, () = linear.
     curve: tuple = ()
+    # Scan-Winkel (LightBurn „Scan Angle“): Rasterzeilen unter diesem Winkel
+    # (Grad, gegen den Uhrzeigersinn wie auf dem Bildschirm; 0 = entlang X,
+    # 90 = entlang Y) und Winkel-Schritt je weiterem Durchgang (LightBurn
+    # „Angle Increment“). 0 / 0 = wie bisher (fehlt in alten Dateien).
+    scan_angle: float = 0.0
+    angle_increment: float = 0.0
 
     def normalized(self) -> "ImageSettings":
         interval = _clamp(float(self.line_interval_mm), 0.03, 2.0)
@@ -157,10 +163,15 @@ class ImageSettings:
             sharpen_radius=_clamp(float(self.sharpen_radius), 0.5, 10.0),
             black_point=(bp := int(_clamp(int(self.black_point), 0, 254))),
             white_point=int(_clamp(int(self.white_point), bp + 1, 255)),
-            curve=normalize_curve(self.curve))
+            curve=normalize_curve(self.curve),
+            scan_angle=_clamp(float(self.scan_angle), -90.0, 90.0),
+            angle_increment=_clamp(float(self.angle_increment), -90.0, 90.0))
 
     def to_dict(self) -> dict:
         d = asdict(self)
+        for key in ("scan_angle", "angle_increment"):
+            if not d.get(key):
+                d.pop(key, None)          # 0: alte Dateien bleiben gleich
         if d.get("curve"):
             d["curve"] = [list(p) for p in d["curve"]]
         else:

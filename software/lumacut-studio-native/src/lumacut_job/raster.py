@@ -21,7 +21,8 @@ into Pi-safe Marlin laser G-code:
   ``z_step_mm`` lowers the focus between slices (relative ``G91`` Z moves;
   the Pi enforces its Z floor).
 
-Scanlines run along X with optional bidirectional scanning, ``overscan_mm``
+Scanlines run along X (or, with :func:`scanlines_frame` and a
+:class:`ScanFrame`, along any scan angle) with optional bidirectional scanning, ``overscan_mm``
 lead-in/lead-out at ``S0`` and ``scan_offset_mm`` compensation for the
 reverse direction (LightBurn "Scanning Offset Adjustment"). Runs of equal
 power are merged into one ``G1`` to keep the serial stream small.
@@ -640,6 +641,115 @@ def scanlines(spower: np.ndarray, origin: tuple[float, float], s: RasterSettings
     return out
 
 
+@dataclass(frozen=True)
+class ScanFrame:
+    """Affine scan frame for angled image rasters (LightBurn "Scan Angle").
+
+    A point ``(a, b)`` of the frame (mm along the scan direction / along the
+    row direction) lies at machine mm ``(x0, y0) + a * (ux, uy) + b * (vx, vy)``.
+    The power map's column ``c`` / row ``r`` sit at ``a = c * px`` /
+    ``b = (r + 0.5) * px`` - like :func:`scanlines`, only the axes are turned.
+    """
+
+    x0: float
+    y0: float
+    ux: float
+    uy: float
+    vx: float
+    vy: float
+
+    def point(self, a: float, b: float) -> tuple[float, float]:
+        return (self.x0 + a * self.ux + b * self.vx, self.y0 + a * self.uy + b * self.vy)
+
+    def shifted(self, da: float) -> "ScanFrame":
+        """Same frame moved by ``da`` mm along the scan direction."""
+        return ScanFrame(self.x0 + da * self.ux, self.y0 + da * self.uy,
+                         self.ux, self.uy, self.vx, self.vy)
+
+
+def wrap_angle(deg: float) -> float:
+    """Angle in degrees folded into [-90, 90] (a line at 180° is the same line);
+    values already in the range stay unchanged."""
+    deg = float(deg)
+    if -90.0 <= deg <= 90.0:
+        return deg
+    return ((deg + 90.0) % 180.0) - 90.0
+
+
+def _clip_runs(runs: list, lo: float, hi: float) -> list:
+    """Clip ascending ``(start, end, power)`` runs (mm) to ``[lo, hi]``; the
+    result starts and ends with a burning run (or is empty)."""
+    out = []
+    for a, b, v in runs:
+        a, b = max(a, lo), min(b, hi)
+        if b - a > 1e-9:
+            out.append((a, b, v))
+    while out and not out[0][2]:
+        out.pop(0)
+    while out and not out[-1][2]:
+        out.pop()
+    return out
+
+
+def scanlines_frame(spower: np.ndarray, frame: ScanFrame, s: RasterSettings,
+                    speed: float | None = None, chords=None,
+                    bottom_up: bool = False) -> list[str]:
+    """Like :func:`scanlines`, but the rows run along ``frame`` (any angle).
+
+    ``chords`` (optional, one ``(lo, hi)`` in mm along the scan direction per
+    row): burning runs are clipped to it - the part of the row inside the
+    real image, so anti-aliased edge pixels never burn outside the object.
+    ``bottom_up``: rows in reverse order (sliced depth, odd slices).
+    Overscan and ``scan_offset_mm`` work along the scan direction exactly as in
+    :func:`scanlines` (the caller shifts the frame by half the offset).
+    """
+    f = f"{(speed or s.speed_mm_min):g}"
+    px = s.line_interval_mm
+    out: list[str] = []
+    forward = True
+    order = range(spower.shape[0] - 1, -1, -1) if bottom_up else range(spower.shape[0])
+
+    def at(a: float, b: float) -> str:
+        x, y = frame.point(a, b)
+        return _fmt(x, y)
+
+    for r in order:
+        row = spower[r]
+        nz = np.nonzero(row)[0]
+        if nz.size == 0:
+            continue
+        c0, c1 = int(nz[0]), int(nz[-1]) + 1
+        runs: list = []
+        start = c0
+        for c in range(c0 + 1, c1 + 1):
+            if c == c1 or row[c] != row[start]:
+                runs.append((start, c, int(row[start])))
+                start = c
+        runs = _dot_width(runs, s.dot_width_mm / px) if s.dot_width_mm > 0 else runs
+        runs = [(a * px, b * px, v) for a, b, v in runs]
+        if chords is not None:
+            lo, hi = chords[r]
+            runs = _clip_runs(runs, lo, hi)
+            if not runs:
+                continue
+        b_mm = (r + 0.5) * px
+        shift = 0.0 if forward else s.scan_offset_mm
+        if not forward:
+            runs = [(b, a, v) for a, b, v in reversed(runs)]
+        sign = 1 if forward else -1
+        first = runs[0][0] + shift
+        out.append(f"G0 {at(first - sign * s.overscan_mm, b_mm)}")
+        if s.overscan_mm:
+            out.append(f"G1 {at(first, b_mm)} F{f} S0")
+        for _a, b, v in runs:
+            out.append(f"G1 {at(b + shift, b_mm)} F{f} S{v}")
+        if s.overscan_mm:
+            out.append(f"G1 {at(runs[-1][1] + shift + sign * s.overscan_mm, b_mm)} F{f} S0")
+        if s.bidirectional:
+            forward = not forward
+    return out
+
+
 MIN_DOT_PX = 0.1   # a burning run never gets shorter than this (in pixels)
 
 
@@ -735,7 +845,8 @@ def depth_slices(height: np.ndarray, levels: int, negative: bool = False) -> lis
 
 def sliced_depth_gcode(height: np.ndarray, origin: tuple[float, float], width_mm: float,
                        height_mm: float, s: RasterSettings, levels: int = 8,
-                       z_step_mm: float = 0.0, inside: np.ndarray | None = None) -> str:
+                       z_step_mm: float = 0.0, inside: np.ndarray | None = None,
+                       frame: ScanFrame | None = None, chords=None) -> str:
     """Multi-pass depth engraving: one constant-power raster pass per slice.
 
     Deeper areas are engraved more often. With ``z_step_mm`` the focus is
@@ -745,6 +856,8 @@ def sliced_depth_gcode(height: np.ndarray, origin: tuple[float, float], width_mm
     (Marlin raster only along X); instead odd slices start bottom-up to
     spread heat. Image adjustments of ``s`` are applied to the height map
     (``inside`` as in :func:`power_map`, same shape as the resampled map).
+    ``frame`` / ``chords``: angled scan (:func:`scanlines_frame`, ``origin``
+    is then ignored); without them the output is unchanged.
     """
     s.validate()
     if not 0 <= z_step_mm <= 2:
@@ -763,7 +876,9 @@ def sliced_depth_gcode(height: np.ndarray, origin: tuple[float, float], width_mm
         if k and z_step_mm and any_work:
             out += ["G91", f"G0 Z{-z_step_mm:.3f} F600", "G90"]
         pm = np.where(mask, full, 0).astype(int)
-        if k % 2:
+        if frame is not None:
+            lines = scanlines_frame(pm, frame, s, chords=chords, bottom_up=bool(k % 2))
+        elif k % 2:
             # Engrave bottom-up: flip rows and mirror the origin.
             lines = scanlines(pm[::-1], origin, s)
             rows = pm.shape[0]
