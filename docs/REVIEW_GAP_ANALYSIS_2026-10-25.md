@@ -2549,3 +2549,136 @@ Still open:
   readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
   with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
   the canvas value labels, rebuilt exe).
+
+## 40. Status update 2026-11-05 (review round 33)
+
+Done this round (2D codes, live park-corner box; canvas editing, Machine / Scan Probe and
+Materials untouched):
+
+- Gaps picked from the §39 list: **plain-text QR codes with non-ASCII characters stay one byte
+  segment (no ECI / Kanji mode)** and **overscan / lead-ins are not part of the live park-corner
+  box**.
+- **QR ECI 26 (UTF-8) and Kanji mode** (`lumacut_job/qr.py`, ISO/IEC 18004 §7.4.2 / §7.4.6):
+  - `QrSpec.eci` (new codes from the dialog: on; missing in old documents → off): text with
+    non-ASCII characters gets an ECI header (mode `0111`, designator 26 = UTF-8) before the
+    segments, so scanners decode umlauts / symbols as UTF-8 instead of guessing (ISO 8859-1 or
+    Shift JIS). The mixed-segment optimiser (numeric / alphanumeric / byte) still runs behind
+    the header.
+  - Kanji mode (`1000`, 13 bits per character from Shift JIS, count bits 8 / 10 / 12) joins the
+    mixed-segment optimiser for Japanese text (kana / CJK ideographs present, every non-ASCII
+    character Shift-JIS encodable, no `\` / `~`): e.g. 52 kanji at level M need version 5
+    instead of 9. Non-Japanese text never uses Kanji mode (symbols like ° or × would be misread).
+  - `text_charset` / `content_info`: „Zeichensatz UTF-8 (ECI 26)“, „Kanji-Modus (Shift JIS)“
+    or, for old codes, „UTF-8 ohne Zeichensatz-Kennung (älterer Code) … „UTF-8 kennzeichnen“
+    einschalten“; the segment summary names Kanji segments.
+  - Dialog (`qr_qt.py`): checkbox „UTF-8 kennzeichnen (ECI) – Umlaute / Sonderzeichen sicher
+    lesbar“ (text mode only, on for new codes, saved in the code meta, undoable via the generated
+    object edit).
+- **Live park-corner box with cut options** (`lumacut_job/park_zone.py`):
+  - `cut_margin_mm(layer, table)`: upper bound for how far the powered path leaves the object
+    boxes – 2 × |kerf| (mitred corners), lead-in / lead-out length (√2 × for quarter-circle leads),
+    half the scan offset at the layer speed for hatch / cross-hatch; `margin_box` = object boxes
+    grown by it.
+  - `ParkZoneSync.job_box`: the object boxes stay the base; only if the bound can change the
+    verdict (boxes clear, grown boxes in the corner) the job is planned exactly like at send
+    (`planned_powered_box`: `job_layers` → `optimize_layers` → scan offset →
+    `layers_to_gcode` → `park_corner.powered_bounds`; „Nur Auswahl“ plans the selection
+    document; images keep their object box). Cached on the job layers like the fill preview, so
+    status ticks and unrelated edits do not plan again; far from the corner nothing is planned; a
+    planning error falls back to the object boxes (the send check decides).
+  - Warning „Achtung: An-/Abfahrt, Kerf- oder Scan-Versatz (Schnitt-Optionen der Ebene) des
+    Motivs … reicht in die Park-Ecke …“ and label „Anfahrt / Versatz reicht hinein!“; the
+    objects whose grown box reaches the zone are listed. Works for placed jobs („Aktuelle
+    Position“ / „Benutzer-Ursprung“) as well – the placed zone uses the same box.
+  - Correction of §39: fill overscan runs with the laser off (`G1 … S0`) and is not part of the
+    Pi's powered extent; it never caused a refusal and is (correctly) not counted live either.
+
+Tests:
+
+- `tests/test_qr_eci_kanji.py` (76): charset choice table, ISO Kanji examples (点 → 0xD9F,
+  茗 → 0x1AAA), ECI header bits, bit-exact matrices against segno (embedded references for
+  „Grüße“ / „東京タワー“ plus single-segment texts at L / M / Q / H), old codes bit-identical
+  without ECI, ASCII ignores ECI, mixed byte / numeric with umlauts, Kanji smaller than byte,
+  random Japanese segmentation bound, capacity limits (ä × 1470 / 1477 at 40-L, 東 × 1817 / 1818),
+  zxing-cpp decode with the `]Q2\000026` ECI designator (vs. `]Q1` for old codes), Kanji decode,
+  hatch-filled ECI code decode, spec default / meta round trip, content info lines, dialog
+  checkbox, rebuild of an old umlaut code unchanged.
+- `tests/test_park_zone_cut_options.py` (28): margin bound per option (overscan, tabs, overcut,
+  perforation = 0), scan offset only for line fills, the bound contains the planned extent
+  (rects, rotated rects, ellipses, holes), planned box = powered bounds of the sent G-code incl.
+  scan offset and overscan, plan cache, sweeps along the corner with lead-in, arc lead-in /
+  lead-out and kerf where the live verdict equals `check_job` on the planned G-code (incl. the
+  positions only the lead reaches in), warning text and „wieder frei“, no planning far away / for
+  layers without cut options / on status ticks, overscan never refused, scan offset sweep,
+  „Nur Auswahl“, placed jobs (anchors bl / center) over a grid of head positions, planning error
+  fallback.
+
+Full suite: 2052 passed, 3 skipped (before: 1948 passed, 3 skipped).
+
+Output change for old files: none – QR codes without `eci` in their meta rebuild bit-identically
+(the dialog only switches ECI on for new codes or when the box is ticked); the park-zone change is
+display / warning only (the send-time check is unchanged).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Image: no scan angle / angle increment per pass (Marlin raster runs along X only); the preview
+  shows one pixel per dot and does not model the material's real dot size / beam spread (needs
+  the material library – Materials); mode and adjustment presets (incl. the curve presets) are
+  not linked to the material library (Materials); no per-channel / colour curves (images are
+  grey only).
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  no Micro QR.
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (QR codes with umlauts (ECI 26) and Japanese Kanji text with phone
+  scanners (iOS / Android camera apps) and a handheld scanner, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera, plain-text QR codes with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417
+  readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
+  with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
+  the canvas value labels, rebuilt exe).
