@@ -1,0 +1,50 @@
+name: LumaCut Firmware
+
+# Own firmware for the SKR Mini MZ. Build and host tests only: the Pi looks for
+# marlin-* releases, and this workflow creates no release at all until the
+# firmware has been proven on the machine (docs/FIRMWARE_EIGEN.md).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'firmware/lumacut/**'
+      - '.github/workflows/lumacut-fw.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lumacut-fw-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: firmware/lumacut/requirements.txt
+      - name: Host tests
+        run: CC=gcc python firmware/lumacut/test/run_tests.py
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-6.2.0-ststm32-15.4.1-v1
+      - name: Install PlatformIO
+        run: pip install -r firmware/lumacut/requirements.txt
+      - name: Build and check image
+        run: python firmware/lumacut/scripts/build.py
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaCut-Firmware-${{ github.sha }}
+          path: |
+            firmware/lumacut/dist/firmware.bin
+            firmware/lumacut/dist/manifest.json
+          if-no-files-found: error
+          retention-days: 14

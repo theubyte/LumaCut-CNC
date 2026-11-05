@@ -78,7 +78,7 @@ Fehler: zuerst `Error:<text>`, dann `ok`. Die Warteschlange fasst mindestens 32 
 | `G92 [X][Y][Z]` | Position setzen, wartet auf Stillstand |
 | `G28 [X][Y][Z] [R0]` | Referenzfahrt der genannten Achsen (ohne Achse: alle, erst Z, dann X, Y). Zum Schalter, 5 mm zurück, langsam (1/4) wieder hin, Position 0. Danach steht der Kopf am Schalter. `Error:Homing failed` bei Wegüberschreitung. Antwortet erst nach dem Ende, sendet alle 1 s `echo:busy: processing` |
 | `G30` | Taster an der aktuellen XY: Z sinkt mit 216 mm/min bis zum Kontakt oder bis Z=-2, bleibt **am Kontakt stehen**. Antwort: `Bed X:<x> Y:<y> Z:<z>`, dann ok. Sonst `Error:Probing failed`, Kopf bleibt dort. Vorher Z-Schalter offen, sonst `Error:Probe already triggered` |
-| `M3 I` / `M5 I` | Inline-Modus an / aus. `M5 I`: Leistung 0, wartet nicht auf die Warteschlange |
+| `M3 I` / `M5 I` | Inline-Modus an / aus. `M5 I`: modale Leistung 0, wartet nicht auf die Warteschlange. Schon eingereihte Blöcke behalten ihre Leistung (Regel 4), damit das Ende eines Auftrags brennt; sofort dunkel machen `M410` und `M112` |
 | `M3 S<n>` | Dauerleistung n im Stillstand, wartet auf leere Warteschlange. n=0 ist aus |
 | `M5` | Laser aus (Dauerleistung und Inline-Leistung), Modus bleibt |
 | `M106 P0 S<n>` / `M107 P0` | Relais an (n>0) / aus. Sofort, außer die Warteschlange läuft: dann erst danach |
