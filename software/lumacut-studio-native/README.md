@@ -399,6 +399,28 @@ layer_pass_plan(layer)           # mit den eingestellten layer.passes (Override)
   wird. Jede Änderung ist ein Undo-Schritt (`SetLayerAttrsCommand`). „manuell“ wird aus
   `passes ≠ ceil(Tiefe/Tiefe je Durchgang)` erkannt (kein eigenes Override-Feld).
 
+### Materialtest: Parameter je Achse (Leistung, Tempo, Linienabstand, Durchgänge)
+
+*Auftrag › Materialtest…* legt ein Testraster an (`lumacut_job/material_test.py`, Tests:
+`tests/test_material_test.py`, `tests/test_material_test_params.py`). Wie LightBurns
+*Material Test* (X-/Y-Parameter) und *Interval Test* ist der Parameter je Achse wählbar:
+„Spalten-Parameter“ / „Zeilen-Parameter“ = Leistung, Geschwindigkeit, Linienabstand oder
+Durchgänge (Standard: Spalten Leistung, Zeilen Geschwindigkeit – das bisherige Raster,
+G-Code byte-gleich).
+
+- Parameter auf einer Achse laufen von „… von“ bis „… bis“; die übrigen gelten fest
+  (Feld ohne „von“, „bis“ gesperrt) – z. B. Linienabstand 0,05–0,25 mm × Leistung bei
+  fester Geschwindigkeit.
+- Linienabstand-Test nur mit „Füllen (Gravur)“; gleicher Parameter auf beiden Achsen oder
+  Linienabstand mit „Kontur“ sperren OK mit Hinweis.
+- Jede Zelle bleibt eine eigene Ebene `Test P<Leistung>% F<mm/min>` (von der
+  Materialbibliothek als Testzelle erkannt; Durchgänge stehen in der Ebene, der getestete
+  Linienabstand in `line_interval_mm` der Ebene – Füllung bleibt aus, die Zelle ist eine
+  Serpentine im Abstand der Zelle).
+- Beschriftung: Leistung %, Geschwindigkeit mm/s, Linienabstand mm, Durchgänge „3x“; breite
+  Zeilen-Beschriftungen verbreitern die Beschriftungsspalte (Arbeitsflächen-Prüfung inklusive).
+- Ein Undo-Schritt; Pi-sicherer G-Code wie jede andere Ebene.
+
 ### Füllung: Schraffur, Kreuzschraffur und Offset-Füllung je Ebene
 
 Im Ebenen-Panel unter **Füllung der Ebene**: *Füllmodus* (Keine / Schraffur /

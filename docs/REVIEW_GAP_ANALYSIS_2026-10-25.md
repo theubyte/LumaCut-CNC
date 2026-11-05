@@ -2803,3 +2803,126 @@ Still open:
   readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
   with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
   the canvas value labels, rebuilt exe).
+
+## 42. Status update 2026-11-05 (review round 35)
+
+Done this round (material test with a parameter per axis / interval test; canvas editing,
+Machine / Scan Probe and Materials untouched):
+
+- Gap picked from a sanity sweep, not on the §41 list: **Material test only varies power × speed**.
+  LightBurn's *Material Test* lets every axis pick its parameter (power, speed, interval, passes …)
+  and LightBurn ships a separate *Interval Test*; on a diode the line interval and the number of
+  passes are the settings that are calibrated most after power / speed (engrave darkness and cut
+  depth), and LumaCut had no way to test them in one grid. Chosen over the §41 candidates (pass
+  previews with an angle increment, oblique-row time estimate, in/min, Micro QR) because it is an
+  everyday calibration workflow; the oblique-row estimate turned out to be covered already – the
+  estimator plans every `G1` segment with acceleration and junction deviation, so collinear
+  oblique row segments keep their speed.
+- **Engine** (`lumacut_job/material_test.py`): `MaterialTestSpec.column_param` / `row_param`
+  (`TEST_PARAMS` = power, speed, interval, passes; default power × speed), `interval_max`,
+  `passes_max`; `param_values`, `cell_settings` (off-axis parameters take their fixed value:
+  `power_min`, `speed_min`, `line_interval_mm`, `passes`), `label_texts`, `label_width`.
+  Validation: different parameters per axis, interval test only for engrave cells, interval
+  0.05–2 mm, passes 1–30. Each cell stays one layer named `Test P<power>% F<mm/min>` so the
+  material library (`lumacut_materials.testgrid`) still recognises it; passes are on the layer,
+  the tested interval is recorded in the layer's `line_interval_mm` (fill stays off, the cell is a
+  serpentine at the cell's interval). Labels: power %, speed mm/s, interval mm, passes „3x“;
+  wide row labels widen the label column (included in the work-area check).
+- **Dialog** (`lumacut_job/qt_tools.py`): „Spalten-Parameter“ / „Zeilen-Parameter“, „Linienabstand
+  bis“ and „Durchgänge bis“; range fields („… von“ / „… bis“) only for parameters on an axis, the
+  others are one fixed field; the same parameter twice or an interval test with „Kontur“ disables
+  OK with a hint; the mode follows the given spec (outline spec → „Kontur“).
+
+Tests:
+
+- `tests/test_material_test_params.py` (31): defaults = classic grid, values for every parameter
+  (integer passes), fixed off-axis values, validation, interval × power / passes × speed /
+  swapped axes grids (layer values, hatch rows per interval), layer order and names recognised by
+  the material library incl. a preset with the layer's passes, labels and the wider label
+  column (no overlap, work-area check), **old output byte-identical** (SHA-256 of round-34 output
+  for the default engrave grid and a 3 × 4 outline grid with 2 passes; label boxes of the classic
+  grid unchanged), all axis combinations through the Pi guard (plain and optimised send) and the
+  estimate, burnt length scales with passes / interval, save / load, dialog round trip /
+  enabling / checks, insert as one undo step.
+
+Full suite: 2109 passed, 3 skipped (before: 2078 passed, 3 skipped).
+
+Output change for old files: none – documents are not affected at all; a material test grid
+with the default axes is byte-identical to round 34 (verified for several sizes, outline / engrave,
+passes and labels).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Material test: no focus / Z-offset axis (LightBurn *Focus Test*; LumaCut has no per-layer Z
+  offset, only `z_step`) and no image (raster) test cells; the material library's
+  „Preset aus Testzelle“ takes the line interval from its own planning, not from the cell layer's
+  tested `line_interval_mm` (Materials, `testgrid.py`); several cells of an interval test share
+  the same layer name (power / speed are equal) – the canvas labels tell them apart.
+- Image: the preview shows one pixel per dot and does not model the material's real dot size /
+  beam spread (needs the material library – Materials); mode and adjustment presets (incl. the
+  curve presets) are not linked to the material library (Materials); no per-channel / colour
+  curves (images are grey only). Scan angle: the dialog preview shows pass 1 only (with an angle
+  increment the later passes are not previewed); the time estimate plans oblique rows like X
+  rows (acceleration and junction deviation per `G1`, collinear row segments keep their speed –
+  checked this round), but with one XY acceleration, so Marlin's per-axis limits on diagonal
+  moves are not modelled (to be compared on the SKR); the park-corner
+  live box keeps using the object box (the powered extent of an angled image never leaves it).
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  no Micro QR.
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (material test grids interval × power and passes × speed on wood /
+  card incl. the labels, QR codes with umlauts (ECI 26) and Japanese Kanji text with phone
+  scanners (iOS / Android camera apps) and a handheld scanner, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, photos at scan angles 30° / 45° /
+  90° and with a 90° angle increment (cross raster) on wood against the X-only raster (line
+  quality of oblique `G1` rows at 3000–6000 mm/min on the SKR), photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera, plain-text QR codes with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417
+  readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
+  with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
+  the canvas value labels, rebuilt exe).
