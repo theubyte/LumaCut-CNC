@@ -248,13 +248,15 @@ static void freeze_one(void)
         b->nominal_rate = nominal;
         b->exit_rate = exit_rate;
         b->floor_rate = floor_rate;
-        b->accel_q = (uint32_t)(a * (4294967296.0f / (float)STEP_TICK_HZ));
+        float aq = a * (4294967296.0f / (float)STEP_TICK_HZ);
+        b->accel_q = aq < 4.0e9f ? (uint32_t)aq : 4000000000u;
         b->accel_until = (uint32_t)(up + 0.5f);
         uint32_t d = (uint32_t)(down + 0.5f);
         b->decel_after = d >= b->count ? 0u : b->count - d;
         if (b->decel_after < b->accel_until) b->decel_after = b->accel_until;
         float mean = 0.25f * (float)(entry + exit_rate) + 0.5f * (float)nominal;
-        b->duration_us = (uint32_t)(n / mean * 1e6f);
+        float us = n / mean * 1e6f;
+        b->duration_us = us < 4.0e9f ? (uint32_t)us : 4000000000u;
     }
     pin_sqr = exit_sqr;
     frozen_total_us += b->duration_us;

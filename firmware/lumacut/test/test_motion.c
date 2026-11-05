@@ -85,6 +85,15 @@ static void test_trapezoid(void)
     CHECK(sim.phys[0] == 16);
     CHECK_NEAR((double)(sim.now_ticks - t0) / STEP_TICK_HZ, 2.0, 0.2);
 
+    // Very slow and very long: no overflow in the planned duration.
+    sim_reset();
+    sim_cmd("G1 X100 F0.01");
+    sim_run_ms(2000);
+    CHECK(sg_running());
+    CHECK(sim.phys[0] < 5);
+    sim_send("M410\n");
+    sim_run_ms(2);
+
     // Diagonal: both axes step exactly, Bresenham shares them out evenly.
     sim_reset();
     sim_cmd("G1 X10 Y3.3 F3000");
