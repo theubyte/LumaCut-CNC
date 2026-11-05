@@ -23,6 +23,8 @@ typedef struct {
     int32_t trip[AXES];
     uint8_t force_open;   // bits forced triggered
     uint8_t spike_once;   // bits triggered for one sample only
+    uint8_t spike_mask;   // bits triggered for spike_samples samples in a row
+    uint32_t spike_samples;
 
     uint8_t pwm;
     uint32_t pwm_writes;

@@ -186,7 +186,12 @@ void sim_send(const char *text) { rx_feed((const uint8_t *)text, strlen(text)); 
 
 static void step_tick(void)
 {
-    uint8_t mask = sg_pre(hal_endstops() | sim.spike_once);
+    uint8_t noise = sim.spike_once;
+    if (sim.spike_samples) {
+        sim.spike_samples--;
+        noise |= sim.spike_mask;
+    }
+    uint8_t mask = sg_pre(hal_endstops() | noise);
     sim.spike_once = 0;
     uint8_t pwm_while_stepping = sim.pwm;
     for (int a = 0; a < AXES; a++) {

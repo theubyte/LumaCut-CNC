@@ -20,6 +20,9 @@ enum { AX_X = 0, AX_Y = 1, AX_Z = 2 };
 #define DRIVER_CHECK_MS 1000u // GSTAT.reset at most this often
 
 #define STEP_TICK_HZ 2000000u // TIM2 tick, see TIMERS.md
+// A switch counts as hit after 1 ms unbroken: two samples at 9 kHz were only 0.1 ms,
+// and motor noise on the wires stopped Z in mid air. 1 ms is 9 um of Z at full speed.
+#define ENDSTOP_STABLE_TICKS 2000u
 #define MAX_STEP_RATE 15000u  // steps/s per axis
 
 #define QUEUE_SLOTS 128       // planner ring; 127 usable, contract asks >= 32; must span

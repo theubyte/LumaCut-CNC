@@ -250,7 +250,7 @@ void test_endstops(void)
     CHECK(planner_used() == 0);
     CHECK(!laser_is_inline()); // a new job needs M3 I
     // Stopped within two samples of the contact.
-    CHECK(sim.phys[2] >= sim.trip[2] - 2 && sim.phys[2] <= sim.trip[2]);
+    CHECK(sim.phys[2] >= sim.trip[2] - 6 && sim.phys[2] <= sim.trip[2]); // 1 ms filter at 3667 steps/s
     // Lines received before the stop do not start moving again.
     int32_t x_at_stop = sim.phys[0];
     sim_run_ms(100);
@@ -311,6 +311,20 @@ void test_endstops(void)
     sim_send("G0 X0 F3000\n");
     sim_run_ms(200);
     sim.spike_once = 1;
+    CHECK(sim_run_until_idle(5000));
+    CHECK(!sim_out_has("endstops hit"));
+    CHECK(sim.phys[0] == 0);
+
+    // Motor noise lasting several samples but under 1 ms does not stop it either.
+    sim_reset();
+    sim_cmd("G0 X100 F9000");
+    CHECK(sim_run_until_idle(5000));
+    sim_out_clear();
+    sim_send("G0 X0 F9000
+");
+    sim_run_ms(200);
+    sim.spike_samples = 8; // 12000 steps/s: about 0.7 ms
+    sim.spike_mask = 1;
     CHECK(sim_run_until_idle(5000));
     CHECK(!sim_out_has("endstops hit"));
     CHECK(sim.phys[0] == 0);
@@ -397,7 +411,7 @@ void test_endstops(void)
     CHECK(sim_ok_count() == 1);
     CHECK(sim_out_has("Bed X:50.000 Y:60.000 Z:"));
     CHECK(!sim_out_has("Error"));
-    CHECK(sim.phys[2] >= sim.trip[2] - 2 && sim.phys[2] <= sim.trip[2]);
+    CHECK(sim.phys[2] >= sim.trip[2] - 6 && sim.phys[2] <= sim.trip[2]); // 1 ms filter at 3667 steps/s
     CHECK(sim.max_rate_seen <= 3700u); // 216 mm/min * 1018.59 steps/mm / 60
     sim_cmd("M114");
     CHECK(motion_homed(AX_Z));

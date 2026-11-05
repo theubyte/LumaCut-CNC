@@ -16,7 +16,7 @@ static uint32_t decel_from;
 static bool decel_started;
 static uint8_t next_mask;
 static bool first_step;
-static uint8_t prev_raw;
+static uint32_t low_ticks[AXES]; // how long each switch has read pressed, unbroken
 
 static volatile bool running;
 static uint8_t dir_neg;
@@ -64,8 +64,16 @@ uint8_t sg_pre(uint8_t endstops_raw)
 {
     if (tone_left) return tone_axes;
 
-    uint8_t stable = endstops_raw & prev_raw; // two samples in a row filter spikes
-    prev_raw = endstops_raw;
+    uint8_t stable = 0;
+    for (int a = 0; a < AXES; a++) {
+        if (!(endstops_raw & (1u << a))) {
+            low_ticks[a] = 0;
+        } else if (low_ticks[a] >= ENDSTOP_STABLE_TICKS) {
+            stable |= (uint8_t)(1u << a);
+        } else {
+            low_ticks[a] += last_interval;
+        }
+    }
     const block_t *b = cur;
     if (!b) return 0;
     uint8_t hit = stable & b->stop_mask;
@@ -217,7 +225,10 @@ void sg_kick(void)
     uint32_t cs = hal_cs_enter();
     if (!running && stop_reason == SG_STOP_NONE && planner_isr_next()) {
         running = true;
-        prev_raw = 0;
+        // A switch already pressed at the start stops the move before its first step.
+        uint8_t pressed = hal_endstops();
+        for (int a = 0; a < AXES; a++) low_ticks[a] = (pressed & (1u << a)) ? ENDSTOP_STABLE_TICKS : 0;
+        last_interval = 0;
         hal_step_start(20);
     }
     hal_cs_exit(cs);

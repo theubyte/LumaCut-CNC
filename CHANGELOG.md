@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-05
 
+- **Eigene Firmware 0.2.4, Endschalter-Filter:** Ein Schalter gilt erst nach 1 ms ohne Unterbrechung als ausgelöst, vorher genügten zwei Abtastungen (bei schneller Z-Fahrt 0,1 ms). Am Board löste Z mitten in der Luft aus.
 - **Eigene Firmware 0.2.3, Endschalter im Motor-Interrupt:** 0.2.1 und 0.2.2 werteten die Schalter nur in M119 richtig aus, im Interrupt falsch herum: Eine Fahrt zum Schalter stoppte sofort auf einem ungedrückten und lief durch einen gedrückten. Referenzfahrten mit diesen Ständen sind ungültig. Dazu robustere Treiber-Abfrage.
 - **X/Y-Richtung prüfen:** Neue Knöpfe unter Bewegen (`op=axis_test`): ±10 mm mit 5 mm/s, auch ohne Referenz, damit die Laufrichtung vor der ersten Referenzfahrt feststeht.
 - **Eigene Firmware für den SKR Mini MZ (`firmware/lumacut/`):** Ersetzt Marlin, ohne fremden Firmware-Code, für den RET6. PWM in Hardware auf PA9, Leistung nur während einer Fahrt, keine dauerhaften Einstellungen, Selbst-Update über USB. Der Pi ist darauf umgestellt, die Marlin-Umwege sind entfernt, ein Abbruch stoppt mit M410 sofort. 12 Review-Funde sind behoben. Nur am PC geprüft, noch nie auf Hardware. Ablauf: `docs/INBETRIEBNAHME_FIRMWARE.md`. Erster Start am Board gelungen, 0.2.1 korrigiert Endschalter-Logik, Treiber-Bus und Startmeldung.
