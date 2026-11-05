@@ -10,7 +10,7 @@
 #define RELAY_PIN (1u << 6)  // PC6, FAN1 terminal
 #define LIGHT_PIN (1u << 8)  // PC8, HE0, TIM8 CH3
 #define EXHAUST_PIN (1u << 9) // PC9, BED
-#define USB_PULLUP_PIN (1u << 13) // PC13, high = D+ pull-up off
+#define USB_PULLUP_PIN (1u << 14) // PA14, high = D+ pull-up off (Marlin 2.1.2.9 E3 V2 pins; PC13 is PS_ON)
 #define USB_DP_PIN (1u << 12) // PA12
 
 #define X_STEP (1u << 13) // PB

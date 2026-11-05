@@ -135,11 +135,11 @@ static void delay_cycles(uint32_t n)
 
 void board_usb_disconnect(void)
 {
-    // PC13 is the contract's USB_CONNECT pin; Marlin 2.1.2.9 HAL.cpp drives
-    // that kind of pin high to disconnect. PA12 low pulls D+ down directly, so
-    // the host sees the disconnect even if the pull-up sits on another pin.
-    GPIO_BSRR(GPIOC) = USB_PULLUP_PIN;
-    GPIO_CRH(GPIOC) = (GPIO_CRH(GPIOC) & ~(0xFu << 20)) | (NIBBLE_OUT_PP_2MHZ << 20);
+    // Marlin 2.1.2.9 HAL.cpp drives USB_CONNECT high to disconnect. PA14 is
+    // SWCLK until AFIO releases it in board_init. PA12 low also pulls D+ down
+    // directly, so the host sees the disconnect in any case.
+    GPIO_BSRR(GPIOA) = USB_PULLUP_PIN;
+    GPIO_CRH(GPIOA) = (GPIO_CRH(GPIOA) & ~(0xFu << 24)) | (NIBBLE_OUT_PP_2MHZ << 24);
     GPIO_BRR(GPIOA) = USB_DP_PIN;
     GPIO_CRH(GPIOA) = (GPIO_CRH(GPIOA) & ~(0xFu << 16)) | (NIBBLE_OUT_PP_2MHZ << 16);
 }
@@ -147,7 +147,7 @@ void board_usb_disconnect(void)
 void board_usb_release(void)
 {
     GPIO_CRH(GPIOA) = (GPIO_CRH(GPIOA) & ~(0xFu << 16)) | (NIBBLE_IN_FLOAT << 16);
-    GPIO_BRR(GPIOC) = USB_PULLUP_PIN;
+    GPIO_BRR(GPIOA) = USB_PULLUP_PIN;
 }
 
 void board_iwdg_start(void)
@@ -176,6 +176,8 @@ void board_init(void)
     RCC_APB1RSTR = RCC_APB1RSTR_TIM2RST | RCC_APB1RSTR_UART4RST | RCC_APB1RSTR_USBRST;
     RCC_APB1RSTR = 0;
     RCC_APB2ENR |= RCC_APB2ENR_AFIOEN;
+    // Release PA13/PA14 from SWD: PA14 switches the USB pull-up. Rescue is the SD card.
+    AFIO_MAPR = (AFIO_MAPR & ~(7u << 24)) | (4u << 24);
 
     scb_set_priority_grouping(SCB_AIRCR_PRIGROUP_GROUP16_NOSUB);
     systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);

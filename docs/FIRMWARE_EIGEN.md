@@ -33,7 +33,7 @@ Quelle der Belegung: BTT-Plan des Mini MZ V1.0 vom Besitzer und `docs/MASCHINE.m
 | Z STEP / DIR / EN | PB0 / PC5 / PB1 | |
 | Endschalter X / Y / Z | PC0 / PC1 / PC2 | Öffner: offen = ausgelöst. Z ist auch der Werkstücktaster |
 | TMC2209 UART | UART4 TX PC10 / RX PC11 | Eindraht-Bus, Adressen aus dem BTT-Schaltplan oder Marlin 2.1.2.9 prüfen und im Code nennen |
-| USB | PA11 / PA12, Pull-up PC13 | `USB_CONNECT_PIN PC13`, CDC |
+| USB | PA11 / PA12, Pull-up PA14 | PA14 High = getrennt, Low = verbunden (Marlin `pins_BTT_SKR_MINI_E3_V2_0.h`, gilt für den MZ). SWD ist dafür abgeschaltet, Rettung über die SD-Karte. PC13 ist PS_ON und bleibt frei |
 
 Richtungen gegenüber dem Motor: wie `firmware/marlin/build.py`: `INVERT_X_DIR false`, `INVERT_Y_DIR false`, `INVERT_Z_DIR true`.
 Marlins „Y_DIR“ und Pegel genau nachvollziehen, die Laufrichtung am Gerät muss gleich bleiben. Motorströme, Mikroschritte (16) und

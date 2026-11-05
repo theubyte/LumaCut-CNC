@@ -37,7 +37,7 @@ Kritische Abschnitte sperren nur wenige Befehle lang (Laserwert setzen, Stepper 
 2. Interrupts aus, NVIC und SysTick leer, Vektortabelle auf `0x08007000`, `.data` und `.bss`.
 3. Takt über HSI neu aufsetzen (der Bootloader kann schon auf der PLL laufen), TIM1, TIM8, TIM2, UART4, USB zurücksetzen.
 4. TIM1 und TIM8 starten mit Vergleich 0 (UG lädt die Schatten), MOE an. **Erst danach** werden PA9 und PC8 auf Timer-Ausgang umgestellt.
-5. EN der Treiber High, dann Ausgang. D+ für den Host abziehen (PC13 High und PA12 Low), Watchdog, Interrupts.
+5. EN der Treiber High, dann Ausgang. D+ für den Host abziehen (PA14 High und PA12 Low), Watchdog, Interrupts.
 
 ## Schritt-Timing (TMC2209)
 

@@ -1180,6 +1180,26 @@ class SupplyTestTests(unittest.TestCase):
         self.assertEqual(ctrl.serial.writes, [])
 
 
+class QuickStopTests(unittest.TestCase):
+    """A stopped job must not burn its queue: M410 first, written at once."""
+    def test_m410_goes_out_without_waiting_for_the_queue(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.laser_enabled = True
+        ctrl.last_xy_commanded = (10.0, 10.0)
+        ctrl.quick_stop(owner="job")
+        self.assertEqual(ParkLowTests().lines(ctrl), ["M410"])
+        self.assertFalse(ctrl.laser_enabled)
+        self.assertIsNone(ctrl.last_xy_commanded)
+        self.assertFalse(ctrl.inflight)
+
+    def test_refused_for_another_owner(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.owner = "lightburn"
+        with self.assertRaises(RuntimeError):
+            ctrl.quick_stop(owner="job")
+        self.assertEqual(ctrl.serial.writes, [])
+
+
 class ServiceLaserTests(unittest.TestCase):
     """Service menu slider: 0..100 %, no time limit, off when the page is gone."""
     def test_slider_sets_power_and_zero_switches_off(self):
@@ -1666,6 +1686,7 @@ m.safe_home = home
 m.probe_surface = probe
 m.park_safezone = lambda **k: calls.append("park")
 m.emergency_stop = lambda: calls.append("M112")
+m.quick_stop = lambda **k: calls.append("M410")
 m.probe_xy_offset_mm = (0.0, 0.0)
 m.position = [0.0, 0.0, 20.0]
 m.homed = False
@@ -1862,6 +1883,7 @@ m.state = "Idle"
 m.homing_verified = True
 sent = []
 m.command = lambda cmd, **k: sent.append((cmd, k.get("owner")))
+m.quick_stop = lambda **k: sent.append("M410")
 with web.app.test_client() as c:
     post = lambda **d: c.post("/api/action", data=dict(op="frame", **d))
     m.homed = False

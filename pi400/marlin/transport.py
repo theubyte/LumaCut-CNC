@@ -1988,6 +1988,30 @@ class MarlinTransport:
                 "recent": list(self.lines)[-25:]
             }
 
+    def quick_stop(self, owner: str = "job"):
+        """Beam and motion stop at once, the reference stays.
+
+        M5 I does not touch queued blocks (they would burn on), M410 clears
+        them on reception. Written directly: draining first would wait for
+        the queue. The ok of every line already sent still arrives.
+        """
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None:
+                raise ConnectionError("SKR USB nicht verbunden")
+            line = b"M410\n"
+            self.serial.write(line)
+            self.inflight.append(len(line))
+            self.service_power = 0
+            self.laser_enabled = False
+            self.guard.inline = False
+            self.last_xy_commanded = None
+            try:
+                self._drain_locked(30.0)
+            except MarlinCommandError as exc:
+                LOG.warning("Quick stop: %s", exc)
+
     def emergency_stop(self):
         # The firmware evaluates M112 on reception, also with a full queue.
         # A hardware E-Stop / power interlock remains essential.

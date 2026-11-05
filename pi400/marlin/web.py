@@ -1672,10 +1672,11 @@ def _stop_after_job_error():
 
     An M112 latches firmware and gateway until it is acknowledged and needs
     new homing; a rejected line or an operator abort does not need that.
-    M5 I switches the PWM off at once, the buffered segments then run unlit.
-    Escalates to M112 if the controlled stop itself fails.
+    M410 cuts beam and motion at once and clears the queue. Escalates to
+    M112 if the controlled stop itself fails.
     """
     try:
+        machine.quick_stop(owner="job")
         machine.command("M5 I", owner="job", timeout=60)
         if machine.homed:
             machine.park_safezone(owner="job")
@@ -2313,6 +2314,7 @@ def _frame_worker(commands):
         frame.update(state="aborted" if stop_job.is_set() else "error", error=str(exc))
         if not machine.emergency_latched:
             try:
+                machine.quick_stop(owner="frame")
                 machine.command("M5 I", owner="frame", timeout=60)
             except Exception:
                 logging.exception("Controlled frame stop failed; issuing M112")
