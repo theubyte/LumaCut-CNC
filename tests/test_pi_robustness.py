@@ -349,7 +349,7 @@ c = web.app.test_client()
 logging.basicConfig(level=logging.INFO)
 assert c.post("/api/action", data={"op": "gibtsnicht"}).status_code == 400
 """)
-        self.assertIn("abgelehnt: Unbekannte Marlin-Aktion", run.stderr)
+        self.assertIn("abgelehnt: Unbekannte Aktion", run.stderr)
         self.assertNotIn("Traceback", run.stderr)
 
     def test_backup_holds_the_real_calibration_and_can_be_restored(self):
