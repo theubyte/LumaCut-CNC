@@ -83,10 +83,10 @@ void test_update(void)
     CHECK(send_image(5000, 0));
     sim_run_ms(10);
     CHECK(sim_out_has("ok DONE"));
-     = false;
+    sim.link_ok = false;
     sim_run_ms(300);
     CHECK(sim.selfcopy_bytes == 5000);
-     = true;
+    sim.link_ok = true;
 
     // Wrong CRC: refused, back to normal lines, nothing copied.
     sim_reset();
