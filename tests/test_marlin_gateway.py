@@ -1180,6 +1180,24 @@ class SupplyTestTests(unittest.TestCase):
         self.assertEqual(ctrl.serial.writes, [])
 
 
+class MatcalToneCheckTests(unittest.TestCase):
+    """A measurement far off the target must never be saved as a material."""
+    def test_far_off_is_refused_and_near_passes(self):
+        self._run = None
+        script = r'''
+from marlin import web
+good = {"dunkel": {"tone": 0.8}, "mittel": {"tone": 0.6}, "hell": {"tone": 0.3}}
+web._matcal_check_tones(good)
+try:
+    web._matcal_check_tones(dict(good, hell={"tone": 0.0}))
+except RuntimeError as exc:
+    assert "nichts gespeichert" in str(exc) and "hell" in str(exc), exc
+else:
+    raise AssertionError("nicht abgelehnt")
+'''
+        GatewayFilesTests._run_web_script(self, script)
+
+
 class ParkOntoSwitchTests(unittest.TestCase):
     """05.11. on the board: every material test ended in a fault at Y0.038."""
     def test_switch_just_short_of_zero_is_no_fault(self):

@@ -1417,6 +1417,9 @@ def matcal_get():
     return jsonify(material_calibration=MATCAL["run"])
 
 
+MATCAL_TONE_MAX_OFF = 0.2
+
+
 def _camera_model():
     return matcal.CameraModel(CalibrationStore().load().get("android") or {})
 
@@ -1541,6 +1544,7 @@ def _matcal_worker(kind, origin, centre, head, cam, search, name, thickness):
         if kind == "engrave":
             _matcal_engrave(run, origin, head, cam, search, surface, focus_z)
             results = search.results
+            _matcal_check_tones(results)
             run["result"] = {k: {a: v[a] for a in ("power", "speed", "tone", "approximate")} for k, v in results.items()}
             run["saved"] = _matcal_save_engrave(name, thickness, results, matcal.tone_curve(search.fields))
         else:
@@ -1578,6 +1582,16 @@ def _matcal_worker(kind, origin, centre, head, cam, search, name, thickness):
         _exhaust_after_job()
 
 
+def _matcal_check_tones(results):
+    """05.11.: fields measured beside the burn saved 80 % as the light tone. Far off the
+    target is a failed measurement, not a value: nothing may reach the material list."""
+    targets = dict(matcal.TARGETS)
+    wrong = ["%s %.2f statt %.2f" % (k, v["tone"], targets[k]) for k, v in results.items()
+             if abs(v["tone"] - targets[k]) > MATCAL_TONE_MAX_OFF]
+    if wrong:
+        raise RuntimeError("Materialtest unbrauchbar, nichts gespeichert: " + ", ".join(wrong))
+
+
 def _matcal_engrave(run, origin, head, cam, search, surface, focus_z):
     before, z = _matcal_photo(cam, head)
     lum_before = cam.sampler(before, head, z, surface)
@@ -1594,8 +1608,8 @@ def _matcal_engrave(run, origin, head, cam, search, surface, focus_z):
         after, z = _matcal_photo(cam, head)
         lum_after = cam.sampler(after, head, z, surface)
         dx, dy, dark = matcal.locate(lum_before, lum_after, x, y, matcal.ENGRAVE_CELL_MM, guess, reach)
-        if dark < 8 and k > 0:
-            dx, dy = guess            # hardly any colour: keep the registration seen so far
+        if dark < 8:
+            dx, dy = guess            # hardly any colour, also on the first field: nothing to register on
         else:
             guess, reach = (dx, dy), 1.0
         measured = matcal.measure_field(lum_after, x + dx, y + dy)
