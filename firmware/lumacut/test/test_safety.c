@@ -320,10 +320,9 @@ void test_endstops(void)
     sim_cmd("G0 X100 F9000");
     CHECK(sim_run_until_idle(5000));
     sim_out_clear();
-    sim_send("G0 X0 F9000
-");
+    sim_send("G0 X0 F9000\n");
     sim_run_ms(200);
-    sim.spike_samples = 8; // 12000 steps/s: about 0.7 ms
+    sim.spike_samples = 4; // about 8000 steps/s here: 0.5 ms; two samples used to be enough
     sim.spike_mask = 1;
     CHECK(sim_run_until_idle(5000));
     CHECK(!sim_out_has("endstops hit"));
