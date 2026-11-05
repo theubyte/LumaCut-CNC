@@ -14,7 +14,8 @@ from dataclasses import replace
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-                               QFormLayout, QLabel, QMessageBox, QSpinBox, QToolBar)
+                               QFileDialog, QFormLayout, QHBoxLayout, QLabel, QMessageBox,
+                               QPushButton, QSpinBox, QToolBar, QWidget)
 
 from lumacut_canvas.commands import AddLayerCommand, AddShapesCommand
 from lumacut_canvas.export import job_layers
@@ -23,8 +24,9 @@ from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 from .estimate import estimate_gcode, frame_gcode
 from lumacut_canvas.model import Z_OFFSET_RANGE
 
-from .material_test import (INTERVAL_TEST_RANGE, TEST_IMAGE_MODES, TEST_PARAM_LABELS,
-                            TEST_PARAMS, MaterialTestSpec, build_material_test)
+from .material_test import (IMAGE_SOURCE_LABELS, IMAGE_SOURCES, INTERVAL_TEST_RANGE,
+                            TEST_IMAGE_MODES, TEST_PARAM_LABELS, TEST_PARAMS,
+                            MaterialTestSpec, build_material_test)
 from .planner import PlanReport, optimize_layers, optimized_document_gcode
 
 
@@ -78,6 +80,30 @@ class MaterialTestDialog(QDialog):
         idx = self.image_mode.findData(s.image_mode or "floyd")
         self.image_mode.setCurrentIndex(max(0, idx))
         self.image_min = _spin(0, 100, s.image_min_power, suffix=" %")
+        self.image_source = QComboBox()
+        for key in IMAGE_SOURCES:
+            self.image_source.addItem(IMAGE_SOURCE_LABELS[key], key)
+        src = s.image_source if s.image_source in IMAGE_SOURCES else "ramp"
+        if src == "photo" and not s.image_png:
+            src = "ramp"
+        self.image_source.setCurrentIndex(IMAGE_SOURCES.index(src))
+        self.image_source.setToolTip(
+            "Gemeinsames Testbild für alle Zellen: Verlauf (Weiß→Schwarz), "
+            "Stufenkeil (diskrete Graustufen) oder ein eigenes Foto.")
+        self._photo_png = s.image_png if src == "photo" else None
+        self._photo_path = ""
+        self.photo_row = QWidget()
+        photo_lay = QHBoxLayout(self.photo_row)
+        photo_lay.setContentsMargins(0, 0, 0, 0)
+        self.photo_label = QLabel("kein Bild")
+        self.photo_label.setToolTip("Optionales Foto für die Bild-Testzellen (wird als Graustufen eingebettet).")
+        self.photo_btn = QPushButton("Bild wählen…")
+        self.photo_btn.setToolTip("PNG, JPG oder BMP wählen – wird als 8-Bit-Graustufen in die Zellen gelegt.")
+        self.photo_btn.clicked.connect(self._pick_photo)
+        photo_lay.addWidget(self.photo_label, 1)
+        photo_lay.addWidget(self.photo_btn)
+        if self._photo_png:
+            self.photo_label.setText(f"eingebettet ({len(self._photo_png)} Bytes)")
         self.interval = _spin(*INTERVAL_TEST_RANGE, s.line_interval_mm or 0.2, 0.05, 2, " mm")
         self.interval_max = _spin(*INTERVAL_TEST_RANGE, s.interval_max, 0.05, 2, " mm")
         # Focus Test (LightBurn): relative Z offset; needs motorized Z.
@@ -112,6 +138,8 @@ class MaterialTestDialog(QDialog):
                               ("passes", "Durchgänge", self.passes),
                               ("passes_max", "Durchgänge bis", self.passes_max),
                               ("mode", "Art", self.mode),
+                              ("image_source", "Bildquelle", self.image_source),
+                              ("photo", "Eigenes Bild", self.photo_row),
                               ("image_mode", "Bildmodus", self.image_mode),
                               ("image_min", "Min.-Leistung (Weiß)", self.image_min),
                               ("interval", "Linienabstand", self.interval),
@@ -128,7 +156,7 @@ class MaterialTestDialog(QDialog):
         self.bb.accepted.connect(self.accept)
         self.bb.rejected.connect(self.reject)
         f.addRow(self.bb)
-        for combo in (self.col_param, self.row_param, self.mode):
+        for combo in (self.col_param, self.row_param, self.mode, self.image_source):
             combo.currentIndexChanged.connect(self._update_fields)
         for spin in (self.image_min, self.p_min, self.focus_min, self.focus_max):
             spin.valueChanged.connect(self._update_fields)
@@ -143,9 +171,13 @@ class MaterialTestDialog(QDialog):
         kind = self.mode.currentIndex()
         engrave = kind in (CELL_FILL, CELL_IMAGE)
         image = kind == CELL_IMAGE
-        for key, w in (("image_mode", self.image_mode), ("image_min", self.image_min)):
+        photo = image and self.image_source.currentData() == "photo"
+        for key, w in (("image_source", self.image_source),
+                       ("image_mode", self.image_mode), ("image_min", self.image_min)):
             self._rows[key].setVisible(image)
             w.setVisible(image)
+        self._rows["photo"].setVisible(photo)
+        self.photo_row.setVisible(photo)
         fields = {"power": ("p_min", "p_max", "Leistung", self.p_max),
                   "speed": ("s_min", "s_max", "Geschw.", self.s_max),
                   "passes": ("passes", "passes_max", "Durchgänge", self.passes_max),
@@ -172,6 +204,8 @@ class MaterialTestDialog(QDialog):
             problem = "Linienabstand-Test nur mit „Füllen (Gravur)“ oder „Bild“."
         elif image and self.image_min.value() > self.p_min.value():
             problem = "Min.-Leistung (Weiß) darf die kleinste Leistung nicht übersteigen."
+        elif photo and not self._photo_png:
+            problem = "Eigenes Bild fehlt – bitte eine Bilddatei wählen."
         elif "focus" in axes and self.focus_min.value() == self.focus_max.value():
             problem = "Fokus von und bis müssen verschieden sein."
         self.hint.setText(problem)
@@ -193,7 +227,48 @@ class MaterialTestDialog(QDialog):
             image_mode=(self.image_mode.currentData()
                         if self.mode.currentIndex() == CELL_IMAGE else ""),
             image_min_power=(self.image_min.value()
-                             if self.mode.currentIndex() == CELL_IMAGE else 0.0))
+                             if self.mode.currentIndex() == CELL_IMAGE else 0.0),
+            image_source=(self.image_source.currentData()
+                          if self.mode.currentIndex() == CELL_IMAGE else "ramp"),
+            image_png=(self._photo_png
+                       if (self.mode.currentIndex() == CELL_IMAGE
+                           and self.image_source.currentData() == "photo") else None))
+
+
+    def _pick_photo(self) -> None:
+        """Load a user photo as 8-bit grey PNG for the image cells."""
+        from lumacut_import.image import grayscale_png
+        from lumacut_import.placement import IMAGE_SUFFIXES
+        from PySide6.QtGui import QImageReader
+
+        filt = ("Bild (" + " ".join(f"*{s}" for s in IMAGE_SUFFIXES) + ")")
+        path, _ = QFileDialog.getOpenFileName(self, "Testbild wählen", "", filt)
+        if not path:
+            return
+        reader = QImageReader(path)
+        reader.setAutoTransform(True)
+        img = reader.read()
+        if img.isNull():
+            QMessageBox.warning(self, "Bild", f"Bild nicht lesbar: {reader.errorString()}")
+            return
+        # Cap long side so a photo test cell stays snappy (same order as the ramp).
+        from PySide6.QtCore import Qt
+        long_side = max(img.width(), img.height())
+        max_side = 512
+        if long_side > max_side:
+            img = img.scaled(img.width() * max_side // long_side,
+                             img.height() * max_side // long_side,
+                             Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        try:
+            png, _, _ = grayscale_png(img)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Bild", str(exc))
+            return
+        self._photo_png = png
+        self._photo_path = path
+        from pathlib import Path
+        self.photo_label.setText(Path(path).name)
+        self._update_fields()
 
 
 def insert_material_test(editor, spec: MaterialTestSpec) -> int:
