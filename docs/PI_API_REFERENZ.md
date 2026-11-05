@@ -451,6 +451,14 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | Wirkung | `M5 I`, `M400`, `M107 P0` (Laser-Relais aus), `M3 S255`, `G4`, `M5`. TTL-Pin (PA9 an EXP3) ~5 V zum Messen, Laser ohne Versorgung. ⚠ Hardware |
 | Erfolg | 200 `TTL-Pin 10 s auf S255 (Relais aus), wieder aus.` |
 
+#### `op=axis_test`
+
+| | |
+| --- | --- |
+| Parameter | `axis`: `X` oder `Y`; `distance`: genau `-10`, `-5`, `-1`, `1`, `5`, `10` (mm, Minus = zum Endschalter) |
+| Vorbedingungen | **frei**, **nicht** referenziert nötig (Richtungsprüfung vor der ersten Referenz); kein Notstopp; **Go des Besitzers** |
+| Wirkung | `M5 I`, `G92` auf Bereichsmitte, `G91`, `G0 ±d F300`, `M400`, `G90`, `M114`. Setzt `homed` zurück. ⚠ Hardware |
+
 #### `op=z_test`
 
 | | |

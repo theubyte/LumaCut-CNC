@@ -657,6 +657,15 @@ dialog h2{padding-right:92px}
       </div>
       <p class="help">Laser bleibt aus. Maschinen-mm wie auf der Arbeitsfläche.</p>
      </div></details>
+     <details class="more"><summary>X/Y-Richtung prüfen</summary><div class="stack">
+      <div class="cols3 keep">
+       <button class="btn" data-motion data-axistest="X:10" type="button">X +10 mm</button>
+       <button class="btn" data-motion data-axistest="X:-10" type="button">X −10 mm</button>
+       <button class="btn" data-motion data-axistest="Y:10" type="button">Y +10 mm</button>
+       <button class="btn" data-motion data-axistest="Y:-10" type="button">Y −10 mm</button>
+      </div>
+      <p class="help">Eine Achse mit 5 mm/s, auch ohne Referenz. Minus fährt zum Endschalter. Vorher Platz prüfen; danach ist die Maschine nicht referenziert.</p>
+     </div></details>
      <details class="more"><summary>Z-Richtung prüfen</summary><div class="stack">
       <div class="cols3 keep">
        <button class="btn" data-motion data-ztest="1" type="button">+1 mm</button>
@@ -2400,6 +2409,11 @@ $("serviceLaserOff").onclick=()=>{serviceNote("");serviceOff()};
 setInterval(()=>{if(servicePw&&serviceBeam&&!serviceLoop&&!serviceNoPing)api("/api/action",{method:"POST",body:param({op:"service_laser_ping",password:servicePw})}).catch(()=>{})},1500);
 // Tab zu: sofort aus, nicht erst nach den 5 s.
 addEventListener("pagehide",()=>{if(servicePw&&serviceBeam)navigator.sendBeacon?.("/api/action",param({op:"service_laser",password:servicePw,percent:"0"}))});
+for(const b of $$("[data-axistest]"))b.onclick=async ev=>{
+ const [axis,d]=b.dataset.axistest.split(":"),btn=ev.currentTarget;
+ if(!await askGo("Achsen-Test "+axis+" "+(Number(d)>0?"+":"")+d+" mm?","Nur "+axis+", langsam (5 mm/s). Vorher Platz prüfen. Danach ist die Maschine nicht referenziert.","Fahren"))return;
+ call("axis_test",{axis,distance:d},btn);
+};
 for(const b of $$("[data-ztest]"))b.onclick=async ev=>{
  const d=Number(b.dataset.ztest),btn=ev.currentTarget;
  if(!await askGo("Z-Test "+(d>0?"+":"")+d+" mm?","Nur Z, langsam (2 mm/s). Danach ist die Maschine nicht referenziert.","Fahren"))return;

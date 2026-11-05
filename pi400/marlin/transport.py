@@ -104,6 +104,8 @@ REFERENCE_LOST_ERRORS = ("Error:Planner underrun", "Error:Driver reset")
 # op=z_test: Z without homing to check the direction, slow (2 mm/s).
 Z_TEST_MAX_MM = 10.0
 Z_TEST_FEED_MM_MIN = 120
+AXIS_TEST_FEED_MM_MIN = 300
+AXIS_TEST_CENTER = {"X": 195, "Y": 185}
 # Z max feedrate (M203 Z). 9 mm/s from the belt drive; the worm lift reaches
 # ~30 (owner raises it in steps, config z_speed_mm_s), but the firmware caps
 # M203 Z at 9 (contract). Z travel moves ask for this speed, M203 caps them.
@@ -1184,6 +1186,37 @@ class MarlinTransport:
             result = self._exchange_locked("M114", timeout=6.0)
             self._exchange_locked("G92 Z0", timeout=wait)
             return result
+
+    def axis_test(self, axis: str, distance: float, owner: str = "web"):
+        """X or Y only, relative and slow, also without homing.
+
+        Direction and travel check before the first homing: a wrong direction
+        there runs the axis away from its switch into the far end. At most
+        Z_TEST_MAX_MM, laser off; the machine stays unhomed afterwards.
+        """
+        if axis not in AXIS_TEST_CENTER:
+            raise ValueError("Achsen-Test: nur X oder Y")
+        if not isinstance(distance, (int, float)) or not 0 < abs(distance) <= Z_TEST_MAX_MM:
+            raise ValueError("Achsen-Test: höchstens ±%g mm" % Z_TEST_MAX_MM)
+        wait = abs(distance) * 60.0 / AXIS_TEST_FEED_MM_MIN + 15
+        with self.lock:
+            if self.owner not in (None, owner):
+                raise RuntimeError("Steuerung belegt: " + self.owner)
+            if self.serial is None or not self.identity or self.emergency_latched:
+                raise ConnectionError("SKR USB nicht bereit oder Notstopp verriegelt")
+            self.homed = False
+            self.parked_low = False
+            self.last_xy_commanded = None
+            self._exchange_locked("M5 I", timeout=6.0)
+            # The firmware's limits still apply: the test runs in the middle of the range.
+            self._exchange_locked("G92 %s%g" % (axis, AXIS_TEST_CENTER[axis]), timeout=wait)
+            self._exchange_locked("G91", timeout=6.0)
+            try:
+                self._exchange_locked("G0 %s%+.3f F%d" % (axis, distance, AXIS_TEST_FEED_MM_MIN), timeout=wait)
+                self._exchange_locked("M400", timeout=wait)
+            finally:
+                self._exchange_locked("G90", timeout=6.0)
+            return self._exchange_locked("M114", timeout=6.0)
 
     def supply_test(self, seconds: float, owner: str = "web"):
         """Laser 24 V rail (relay on FAN0) on for a few seconds, beam off.

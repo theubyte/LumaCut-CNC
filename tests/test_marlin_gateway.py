@@ -1180,6 +1180,27 @@ class SupplyTestTests(unittest.TestCase):
         self.assertEqual(ctrl.serial.writes, [])
 
 
+class AxisTestTests(unittest.TestCase):
+    """op=axis_test: X/Y direction check before the first homing."""
+    def test_slow_relative_one_axis_and_stays_unhomed(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.axis_test("X", 10.0)
+        w = ParkLowTests().lines(ctrl)
+        self.assertEqual(w, ["M5 I", "G92 X195", "G91", "G0 X+10.000 F300", "M400", "G90", "M114"])
+        self.assertFalse(ctrl.homed)
+        self.assertIsNone(ctrl.last_xy_commanded)
+
+    def test_y_keeps_its_own_center_and_z_is_refused(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.axis_test("Y", -1.0)
+        self.assertIn("G92 Y185", ParkLowTests().lines(ctrl))
+        ctrl = ParkLowTests().machine()
+        for axis, distance in (("Z", 1.0), ("X", 10.5), ("X", 0), ("Y", -11)):
+            with self.assertRaises(ValueError):
+                ctrl.axis_test(axis, distance)
+        self.assertEqual(ctrl.serial.writes, [])
+
+
 class QuickStopTests(unittest.TestCase):
     """A stopped job must not burn its queue: M410 first, written at once."""
     def test_m410_goes_out_without_waiting_for_the_queue(self):

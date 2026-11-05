@@ -792,6 +792,17 @@ def action():
         reply = machine.z_test(distance, speed=speed)
         return jsonify(message="Z-Test %+g mm gefahren (%g mm/s). Maschine ist nicht referenziert."
                        % (distance, speed or 2), lines=reply)
+    if op == "axis_test":
+        # X/Y direction check before the first homing (transport.axis_test).
+        axis = request.form.get("axis", "").upper()
+        distance = float(request.form.get("distance", "0"))
+        if distance not in (-10.0, -5.0, -1.0, 1.0, 5.0, 10.0):
+            raise ValueError("Achsen-Test: Schrittweite ±1, ±5 oder ±10 mm")
+        local_owner()
+        _forget_current_placement()
+        reply = machine.axis_test(axis, distance)
+        return jsonify(message="Achsen-Test %s %+g mm gefahren (5 mm/s). Maschine ist nicht referenziert."
+                       % (axis, distance), lines=reply)
     if op == "supply_test":
         # Laser 24 V relay on for measuring, beam stays off (transport.supply_test).
         seconds = float(request.form.get("seconds", "15"))

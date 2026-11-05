@@ -215,7 +215,7 @@ class PanelLimitsTest(unittest.TestCase):
     """What the panel must never be able to do. Do not loosen this."""
 
     FORBIDDEN = ("service_laser", "service_supply", "service_password", "service_unlock", "supply_test",
-                 "ttl_test", "z_test", "motion_test", "motion_limits", "line_laser", "matcal", "bedmap",
+                 "ttl_test", "z_test", "axis_test", "motion_test", "motion_limits", "line_laser", "matcal", "bedmap",
                  "start", "frame", "moveto", "connect", "firmware_update_install", "panel_auto", "gcode")
 
     def test_allowed_actions_are_exactly_these(self):
