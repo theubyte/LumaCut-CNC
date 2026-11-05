@@ -4,6 +4,9 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-05
 
+- **SKR: Laser-PWM auf PA9 umgezogen (Wunsch des Besitzers):** Das Signal kommt jetzt von PA9 an EXP3 statt von PA1 am BL-Touch-Stecker. PA9 läuft auf Timer 1 mit 1 kHz, getrennt von Temperatur und Schrittmotoren. Anlass: Der Besitzer misst an PA1, dass ein Schuss von 5 s nur kurz angeht und wieder aus. Die Ursache ist noch nicht gefunden, der Pinwechsel grenzt sie ein. Das Interface V2 muss dafür am SKR umgesteckt werden. Etiketten sind noch nicht geändert.
+- **Laser-Treiber ZY62, Messbilder:** `hardware/laser-treiber-zy62/` zeigt, wo und wie am Treiber gemessen wird.
+
 - **Bedienpanel 1.2, erstes Flashen:** Am PC über COM4 geflasht. Version 1.1 startete in einer Schleife neu, weil `esp_lcd_new_panel_io_i2c` mit dem alten I2C-Treiber keine Busgeschwindigkeit in der Touch-Konfiguration erlaubt (ESP_ERR_INVALID_ARG). Jetzt `scl_speed_hz = 0`, das Panel startet und sendet hello und ping mit Version 1.2. `pi400/marlin/panel_fw/` enthält 1.2, damit der Pi nicht die defekte 1.1 aufspielt. Bild und Touch am Panel noch nicht bestätigt.
 
 ## 2026-11-04

@@ -324,9 +324,9 @@ def status():
                   coord_convention=placing.COORD_CONVENTION,
                   features=list(FEATURES),
                   busy=busy, stale_ms=stale_ms,
-                  expected_pwm="PA1 / M3 I / S0..255",
+                  expected_pwm="PA9 / M3 I / S0..255",
                   io={"laser_supply_switch":"FAN1 / PC6 (M106/M107, low-side)",
-                      "laser_pwm":"BL-Touch / PA1",
+                      "laser_pwm":"EXP3 / PA9",
                       "fan_cooldown":"180s via Pi: requires firmware FAN0 PC6; no crash-proof fan timer",
                       "exhaust":"BED PC9 M8",
                       "lights":"HE0 PC8 M355 (dimmbar), alte Firmware M7",
@@ -1675,7 +1675,7 @@ def _stop_after_job_error():
 
     An M112 latches the gateway until the service restarts and the SKR is
     power-cycled; a rejected line or an operator abort does not need that.
-    M5 waits for the already buffered segments, then switches PA1 off.
+    M5 waits for the already buffered segments, then switches the PWM off.
     Escalates to M112 if the controlled stop itself fails.
     """
     try:

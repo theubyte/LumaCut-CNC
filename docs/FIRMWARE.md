@@ -10,7 +10,7 @@ python firmware/marlin/build.py                   # Ergebnis: firmware/marlin/di
 `build.py` klont Marlin 2.1.2.9 und die passende Beispielkonfiguration „AnyCubic Mega Zero / BTT SKR Mini MZ V1.0“ und wendet alle LumaCut-Anpassungen per Skript an. Ändert sich die Upstream-Datei unerwartet, bricht das Skript ab. Jede Anpassung ist dort mit Begründung kommentiert. Die wichtigsten:
 
 - Name „LumaCut CNC Marlin“. Der Pi akzeptiert nur Firmware mit dieser Kennung.
-- Laser: `LASER_FEATURE`, PWM PA1, `CUTTER_POWER_UNIT PWM255`, Startleistung 0 %.
+- Laser: `LASER_FEATURE`, PWM PA9 (EXP3, 1 kHz), `CUTTER_POWER_UNIT PWM255`, Startleistung 0 %.
 - Fester Z-Taster am Z-MIN-Pin (`FIX_MOUNTED_PROBE`, `Z_SAFE_HOMING` an X0/Y0, Tasterversatz 0, Grenze für zu frühes Auslösen 16 mm).
 - `COOLANT_CONTROL` (M7/M8), `EMERGENCY_PARSER`, `ADVANCED_OK`.
 - `BINARY_FILE_TRANSFER` für Updates über den Pi.

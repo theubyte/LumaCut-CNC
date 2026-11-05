@@ -114,14 +114,14 @@ class FirmwareDirectionContractTests(unittest.TestCase):
         spec.loader.exec_module(module)
         pins=module.PIN_PATCH
         self.assertIn("#define SPINDLE_LASER_ENA_PIN PC7",pins)
-        self.assertIn("#define SPINDLE_LASER_PWM_PIN PA1",pins)
+        self.assertIn("#define SPINDLE_LASER_PWM_PIN PA9",pins)
         self.assertIn("#define FAN0_PIN PC6",pins)
         self.assertIn("#define FAN1_PIN -1",pins)
         self.assertNotIn("#define SPINDLE_LASER_ENA_PIN PC6",pins)
 
     def test_laser_pwm_timer_runs_free_at_1khz(self):
-        # PA1 is TIM2 CH2, TIM2 is the temperature timer (maple HAL): the
-        # ISR must not reset the counter, or the PWM follows the steppers.
+        # Fallback pin PA1 is TIM2 CH2, TIM2 is the temperature timer (maple HAL):
+        # the ISR must not reset the counter, or the PWM follows the steppers.
         import importlib.util, tempfile
         spec=importlib.util.spec_from_file_location(
             "lumacut_build",ROOT/"firmware"/"marlin"/"build.py")

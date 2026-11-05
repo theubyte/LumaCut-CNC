@@ -15,7 +15,7 @@ Ausgänge laut `firmware/marlin/build.py` (`PIN_PATCH`):
 
 | Funktion | Anschluss | STM32 | Befehl |
 |---|---|---|---|
-| Laser PWM | BL_Touch-Header (5-polig: GND, 5 V, **PA1**, GND, PC14; PA1 + GND daneben, über Optokoppler) – **nicht** PWR-DET (= PC12) und nicht die TFT-Leiste direkt darunter (PA2 = TX2) | PA1 | `M3 I`, `G1 … S0–255`, `M5 I` |
+| Laser PWM | EXP3 (obere Reihe laut BTT-Plan: GND, PB8, PA10, **PA9**, PB5; PA9 + GND über Optokoppler, seit 05.11., vorher BL_Touch-Header PA1) | PA9 | `M3 I`, `G1 … S0–255`, `M5 I` |
 | Laser-24-V-Versorgung + Lüfter | FAN1-Klemme | PC6 (Marlin FAN0) | `M106 P0 S255` / `M107 P0` (vom Pi gesteuert) |
 | Licht (24-V-LED-Streifen, dimmbar) | HE0 | PC8 | `M355 S1 P0–255` (Hardware-PWM TIM8 ~1,1 kHz), `M355 S0` aus; ältere Firmware: `M7`/`M9` |
 | Abluft | BED | PC9 | `M8` an, `M9` aus |
@@ -32,7 +32,7 @@ Motoren und Endschalter:
 Alle drei Endschalter sind Öffner (in der Firmware invertiert). X/Y-Motorrichtung gegenüber dem Mega-Zero-Beispiel umgedreht (am Gerät geprüft), Z unverändert. Schritte/mm: X 80, Y 80, Z 380.
 
 Hinweise zur Elektrik:
-- Die MOSFET-Ausgänge (FAN1, HE0, BED) schalten **Minus**. Die Laser-Masse an FAN1− ist keine feste Logikmasse; PA1 darf deshalb nicht direkt an den Laser-PWM-Eingang. Dafür gibt es einen galvanisch getrennten PWM-Treiber.
+- Die MOSFET-Ausgänge (FAN1, HE0, BED) schalten **Minus**. Die Laser-Masse an FAN1− ist keine feste Logikmasse; PA9 darf deshalb nicht direkt an den Laser-PWM-Eingang. Dafür gibt es einen galvanisch getrennten PWM-Treiber.
 - PC6 schaltet die Laserversorgung. Nach dem Einschalten wartet der Pi 800 ms, bevor `M3 I` kommt (sonst brennt die erste Linie schwach). Nach Jobende läuft die Versorgung 180 s nach (Kühlung), dann `M107 P0`. Dieser Nachlauf hängt am Pi, nicht an der Hardware.
 - Ein unabhängiger Not-Aus für Laserversorgung und Motoren bleibt Pflicht.
 

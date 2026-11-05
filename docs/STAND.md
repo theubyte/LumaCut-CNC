@@ -399,6 +399,18 @@ Voraussetzungen:
       flackert weiter. Bei S255 ist die PWM dauerhaft an, die Firmware scheidet damit aus. Verdacht:
       Kabel/Klemmen (Kabelkette) oder Netzteil; Laser und SKR hängen am selben 24-V-Netzteil
       (Typenschild offen). Nächster Schritt: Kabel durchpiepsen, Kopf von Hand verfahren.
+      **05.11. Messungen und Pinwechsel:** V2 ohne Laser, Signal vom Pi: D'R 50 % → 2,5 V, 100 % → 3,7 V
+      (Soll laut Bauplan ~4,7 V). Originalboard TTL ohne Last: 5 V (Besitzer; ob Ruhepegel oder Befehl, offen).
+      Nächster Schritt: TQ messen (4,9–5,3 V), dann 680 Ω parallel zu R1 (340 Ω); U1-Typ ablesen.
+      Treiber ZY62 (Laser aus, `hardware/laser-treiber-zy62/`): J3 = vom Adapter, J2 = Lüfter (Besitzer).
+      J3: A-B 1,28 kΩ, B-C 14,53 kΩ, A-C 64,7 kΩ, A-X 43,1 kΩ, sonst > 200 MΩ. Diodentest: T1 222, D6 648/916,
+      C5 218, C6 OL. Kein Kurzschluss auf dem Treiber; die 0,3 („00.3“) am Stecker sind ungeklärt (Einheit?
+      Kabel/Adapter?), Messung Kabel ohne/mit Treiber offen. Am Diodenstecker ohne Diode bei 20 %: ~1,2 V.
+      **Besitzer misst an PA1: Schuss 5 s geht nur kurz an und wieder aus.** Ursache offen (`fire_test` hält M3 S
+      über G4; `LASER_SAFETY_TIMEOUT_MS` ist nur Verdacht, keine abschaltende Stelle gefunden). Darum Laser-PWM auf
+      **PA9 (EXP3, TIM1 CH2, 1 kHz)**: SKR-Plan des Besitzers (Mini MZ V1.0), EXP3 obere Reihe GND, PB8, PA10, PA9, PB5.
+      Für dieses Board gilt der BTT-Plan, nicht Marlins E3-Pin-Datei (dort heißt der Stecker EXP1, andere Belegung).
+      Offen: Firmware per Knopf, Lage von PA9/GND am Stecker messen, V2 J3 umstecken, PA9 messen, Etiketten ändern.
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut

@@ -156,6 +156,7 @@ def patch_configuration(cfg: str, adv: str) -> tuple[str, str]:
     adv = uncomment(adv, "LASER_FEATURE")
     adv = replace_active(adv, "SPINDLE_LASER_ACTIVE_STATE", "HIGH")
     adv = replace_active(adv, "CUTTER_POWER_UNIT", "PWM255")
+    adv = replace_active(adv, "SPINDLE_LASER_FREQUENCY", "1000")
     # Make bare M3 fail-safe at zero rather than Marlin's stock 80% power.
     # The above keyword occurs in both spindle and laser branches. Replace
     # only the *laser* branch after checking a unique exact source token.
@@ -211,7 +212,7 @@ PIN_PATCH = """
 // LumaCut CNC laser 24V rail/fan on FAN1 connector, controlled by
 // FAN0 firmware output PC6 (M106 P0 S255/M107 P0).
 // PC6 is a switched low-side MOSFET, not a 24V source.
-// Laser power remains on during post-job cooldown, while PWM PA1 is
+// Laser power remains on during post-job cooldown, while PWM PA9 is
 // disabled by M5 I. PC7 (unused FAN2 pin) satisfies Marlin laser
 // enable; it MUST NOT be wired to a live laser power rail.
 // IMPORTANT: this is Pi-mediated cooldown, not hardware-backed.
@@ -228,7 +229,7 @@ PIN_PATCH = """
 #undef HEATER_BED_PIN
 #define HEATER_BED_PIN -1
 #define SPINDLE_LASER_ENA_PIN PC7
-#define SPINDLE_LASER_PWM_PIN PA1
+#define SPINDLE_LASER_PWM_PIN PA9
 #undef CASE_LIGHT_PIN
 #define CASE_LIGHT_PIN PC8
 #define COOLANT_FLOOD_PIN PC9
@@ -254,7 +255,9 @@ def patch_motor_tone(src: pathlib.Path) -> None:
 
 
 def patch_laser_pwm_timer(src: pathlib.Path) -> None:
-    """Laser PWM on PA1 shares TIM2 with the temperature ISR (maple HAL).
+    """TIM2 free-running: laser PWM ran on PA1 (TIM2 CH2) until 05.11., now PA9 on TIM1.
+
+    Kept so PA1 stays a working fallback for the laser PWM.
 
     Stock Marlin runs TIM2 at 72 kHz and the temperature ISR resets the
     counter every ~72 ticks, so S>=72 was already full power and the PWM
@@ -367,7 +370,7 @@ def main():
             "environment": PIO_ENV,
             "cpu": "STM32F103RC",
             "usb": "Marlin native USB CDC",
-            "laser": {"supply": "FAN1 PC6 / FAN0 M106-M107 (Pi 180s cooldown)", "enable": "PC7 unwired", "pwm": "PA1 (TIM2 CH2, ~1 kHz, hardware)",
+            "laser": {"supply": "FAN1 PC6 / FAN0 M106-M107 (Pi 180s cooldown)", "enable": "PC7 unwired", "pwm": "PA9 EXP3 (TIM1 CH2, 1 kHz, hardware)",
                       "mode": "M3 I", "s_max": 255},
             "accessories": {"lights": "M355 S<0|1> P<0-255> HE0 PC8 (PWM, dimmable)",
                             "exhaust": "M8 BED PC9"},
