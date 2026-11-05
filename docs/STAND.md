@@ -419,7 +419,8 @@ Voraussetzungen:
       das M114 alle 2 s (Monitor) schaltet laut Marlin-Quelltext nichts ab, im Stillstand mit festem Wert nachprüfen.
       Besitzer danach: Bei festem Wert und einem Tab geht der Laser weiter im Takt des Protokolls aus und an. Ursache offen. Am Laser liegen laut Besitzer jetzt 5 V an, R1 bleibt.
       **Eigene Firmware (Auftrag Besitzer 05.11.):** Zweig `eigene-firmware`, Vertrag `docs/FIRMWARE_EIGEN.md`, Code `firmware/lumacut/`, für den RET6 (Marlin lief als RC-Build). Nur am PC geprüft, nie auf Hardware. Inbetriebnahme mit dem Besitzer, Rückweg Marlin per SD und alter Pi-Stand.
-      Parallel auf main: Weboberfläche, Pi-Betrieb, Panel 1.3 (siehe CHANGELOG). Noch nicht auf den Pi gebracht: erst mit dem Besitzer, Dienstdatei ist gehärtet, Stop löst bei aktivem Strahl M112 aus.
+      Parallel auf main: Weboberfläche, Pi-Betrieb, Panel 1.3 (siehe CHANGELOG). Achtung: `update.sh` holt `main` jede Nacht ~04:15. Dienstdatei ist gehärtet, Stop löst bei aktivem Strahl M112 aus.
+      Unabhängiges Review: 12 Funde behoben (Commit 4566d10, 811 Host-Prüfungen, 432 Pi-Tests). Z ohne Referenz höchstens 25 mm (Besitzer). Abbilder `A:\mfw\lumacut-fw\`, Ablauf `docs/INBETRIEBNAHME_FIRMWARE.md`. **Wechsel nur mit dem Besitzer: `eigene-firmware` erst dann nach main.**
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
