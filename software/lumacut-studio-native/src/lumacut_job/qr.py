@@ -12,6 +12,11 @@ freigehalten (Position X/Y = linke obere Ecke inkl. Ruhezone), invertiert
 (für Materialien, die beim Lasern *hell* werden, z. B. eloxiertes Alu,
 Schiefer) wird sie zusammen mit den hellen Modulen graviert.
 
+Micro QR (``QrSpec.mode`` ``"micro"``): ISO/IEC 18004 Micro QR M1–M4
+(:mod:`lumacut_job.micro_qr`) – kleines Symbol für Bauteilkennzeichnung; Ruhezone
+Standard 2 Module; Fehlerkorrektur D (nur M1, Erkennung) / L / M / Q; kein ECI,
+kein Kanji. Siehe :mod:`lumacut_job.micro_qr`.
+
 GS1 (``QrSpec.mode``): ``"gs1"`` kodiert einen GS1-Elementstring „(01)…(10)…“ als
 GS1 QR-Code (Modusindikator „FNC1 an erster Stelle“, FNC1-Trenner als „%“ im
 alphanumerischen bzw. GS im Byte-Modus), ``"link"`` eine GS1-Digital-Link-Adresse
@@ -52,9 +57,10 @@ MIN_MODULE_MM = 0.8
 HARD_MIN_MODULE_MM = 0.2
 SIZE_RANGE = (5.0, 340.0)        # mm, Kantenlänge des Codes
 QUIET_RANGE = (0, 10)            # Module
-MODES = ("text", "gs1", "link")
+MODES = ("text", "gs1", "link", "micro")
 MODE_LABELS = {"text": "Text / Adresse", "gs1": "GS1 QR-Code (Elementstring)",
-               "link": "GS1 Digital Link (Web-Adresse)"}
+               "link": "GS1 Digital Link (Web-Adresse)",
+               "micro": "Micro QR (klein, M1–M4)"}
 
 # Format-Bits je Stufe (Tabelle 12 der Norm).
 _FORMAT_BITS = {"L": 1, "M": 0, "Q": 3, "H": 2}
@@ -773,15 +779,25 @@ class QrSpec:
     eci: bool = False
 
     def normalized(self) -> "QrSpec":
+        from . import micro_qr as mq
         ec = str(self.ec).upper()
         mode = str(self.mode or "text").lower()
+        if mode not in MODES:
+            mode = "text"
         domain = "".join(str(self.domain or "").split()) or gs1_link.DEFAULT_DOMAIN
-        return QrSpec(text=str(self.text or ""), ec=ec if ec in EC_LEVELS else "M",
-                      size_mm=float(_clamp(float(self.size_mm), *SIZE_RANGE)),
+        if mode == "micro":
+            if ec not in mq.EC_LEVELS:
+                ec = "L"
+            size_lo, size_hi = mq.SIZE_RANGE
+        else:
+            if ec not in EC_LEVELS:
+                ec = "M"
+            size_lo, size_hi = SIZE_RANGE
+        return QrSpec(text=str(self.text or ""), ec=ec,
+                      size_mm=float(_clamp(float(self.size_mm), size_lo, size_hi)),
                       quiet_zone=int(_clamp(int(self.quiet_zone), *QUIET_RANGE)),
                       invert=bool(self.invert), x=float(self.x), y=float(self.y),
-                      mode=mode if mode in MODES else "text", domain=domain,
-                      eci=bool(self.eci))
+                      mode=mode, domain=domain, eci=bool(self.eci) and mode == "text")
 
     def content(self) -> str:
         """Was ein Scanner liest: Text, GS1-Elementstring (normalisiert) oder Digital-Link-Adresse.
@@ -795,8 +811,12 @@ class QrSpec:
             return gs1_link.resolve(s.text, s.domain)[0]
         return s.text
 
-    def encode(self, mask: int | None = None) -> QrCode:
+    def encode(self, mask: int | None = None):
+        """Full QR (:class:`QrCode`) or Micro QR (:class:`micro_qr.MicroQrCode`)."""
         s = self.normalized()
+        if s.mode == "micro":
+            from . import micro_qr as mq
+            return mq.encode(s.text, s.ec, mask=mask)
         if s.mode == "gs1":
             return encode_gs1(s.text, s.ec, mask=mask)
         if s.mode == "link":
@@ -838,6 +858,9 @@ def qr_shapes(spec: QrSpec, layer_id: str, code: QrCode | None = None) -> list[S
     wenn der Code samt Ruhezone nicht auf die Arbeitsfläche passt.
     """
     s = spec.normalized()
+    if s.mode == "micro":
+        from . import micro_qr as mq
+        return mq.micro_qr_shapes(s, layer_id, code)
     code = code or s.encode()
     module = s.size_mm / code.size
     if module < HARD_MIN_MODULE_MM:
@@ -868,6 +891,13 @@ def content_info(spec: QrSpec) -> str:
     """Deutsche Zeile für den Dialog: was im GS1-Code steht; im Text-Modus der Zeichensatz bei
     Nicht-ASCII-Text und die gemischten Segmente, falls sie den Code verkleinern (sonst "")."""
     s = spec.normalized()
+    if s.mode == "micro":
+        from . import micro_qr as mq
+        mode = mq.choose_mode(s.text)
+        names = {"N": "numerisch", "A": "alphanumerisch", "B": "Byte (UTF-8)"}
+        return (f"Micro QR – kompakt für Bauteile / wenig Platz; Modus {names[mode]}"
+                + ("; kein ECI / Kanji (UTF-8-Bytes)" if mode == "B" and any(ord(c) >= 0x80 for c in s.text)
+                   else ""))
     if s.mode == "gs1":
         return "GS1-Daten: " + s.content()
     if s.mode == "link":
@@ -891,7 +921,10 @@ def content_info(spec: QrSpec) -> str:
     return segment_summary(segs) + " (kleinere Version als ein Byte-Segment)"
 
 
-def describe(code: QrCode, size_mm: float) -> str:
+def describe(code, size_mm: float) -> str:
+    from . import micro_qr as mq
+    if isinstance(code, mq.MicroQrCode):
+        return mq.describe(code, size_mm)
     module = size_mm / code.size
     return (f"Version {code.version} ({code.size}×{code.size} Module), Maske {code.mask}, "
             f"Modul {module:.2f} mm")
