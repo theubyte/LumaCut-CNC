@@ -35,12 +35,19 @@ typedef struct {
     // Rate trace of the fastest axis, per tick.
     bool trace_on;
     uint32_t trace_rate[200000];
-    uint8_t trace_pwm[200000];
+    uint8_t trace_pwm[200000];       // while this step goes out
+    uint8_t trace_pwm_after[200000]; // at the end of the same tick
     uint8_t trace_mask[200000];
     uint64_t trace_time[200000];
     size_t trace_n;
 
+    // Test hooks: bytes that "arrive" at a chosen moment inside the main loop.
+    const char *inject_after_pop;     // after a line was taken, before it runs
+    bool inject_armed;
+    const char *inject_at_link_check; // between reading the clock and comparing it
+
     bool tmc_dead;
+    uint32_t tmc_gstat_reads;
     bool tmc_spread[4];
     uint32_t tmc_reg[4][128];
     uint32_t tmc_ifcnt[4];
@@ -58,6 +65,8 @@ void sim_send(const char *text);       // bytes from the host, as the USB interr
 void sim_send_bytes(const uint8_t *data, size_t len);
 void sim_run_ms(uint32_t ms);          // advance virtual time, main loop every 100 us
 bool sim_run_until_idle(uint32_t max_ms);
+void sim_stall_ms(uint32_t ms);        // like sim_run_ms, but the main loop hangs
+void sim_step_one_pass(void);          // exactly one main-loop pass
 const char *sim_out(void);             // text the firmware wrote since the last clear
 void sim_out_clear(void);
 int sim_ok_count(void);

@@ -52,6 +52,8 @@ Pins PA1, PA8, PC7 bleiben unbenutzt (hochohmig). PA2/PA3 ebenfalls.
 
 Z darf nie über 80 mm: harte Grenze in der Firmware, nicht änderbar. Bewegungen außerhalb des Wegs: `Error:Out of bounds`, kein Fahren.
 
+Ohne Z-Referenz (nach Reset, `M999`, fehlgeschlagener `G28 Z`, geändertem `M92 Z`) ist die echte Höhe unbekannt: Z darf dann höchstens `Z_UNHOMED_LIFT_MM` (Vorgabe **25 mm**, `firmware/lumacut/src/config.h`, M115 meldet `Cap:Z_UNHOMED_LIFT:<mm>`) über die Stelle steigen, an der die Referenz verloren ging. `G92` verschiebt nur die Zahlen, das Budget bleibt an derselben Stelle. Der Rückzug von `G28` bei schon offenem Schalter zählt mit, ein klemmender Schalter endet also bei `Error:Homing failed`. Mit Z-Referenz gelten auch nach `G92` physisch -2..80 mm.
+
 ## Sicherheit (nicht verhandelbar)
 
 1. Nach Reset, Watchdog, HardFault, M112, Fehler: PWM aus (Pin Low), Relais aus, Licht/Abluft aus, Bewegung sofort stopp. Fault-Handler schalten selbst direkt am Register.
@@ -75,7 +77,7 @@ Fehler: zuerst `Error:<text>`, dann `ok`. Die Warteschlange fasst mindestens 32 
 | `G2`/`G3 [X][Y][I][J][F][S]` | Bogen, in der Firmware in Sehnen ≤ 0,1 mm Fehler zerlegt |
 | `G4 P<ms>` / `G4 S<s>` | Warten, reiht sich in die Warteschlange, Laser nach Regel 4/5 |
 | `G21`, `G90`, `G91` | mm, absolut, relativ. `G20` wird abgelehnt |
-| `G92 [X][Y][Z]` | Position setzen, wartet auf Stillstand |
+| `G92 [X][Y][Z]` | Position setzen, wartet auf Stillstand. Hebt keine Z-Grenze auf |
 | `G28 [X][Y][Z] [R0]` | Referenzfahrt der genannten Achsen (ohne Achse: alle, erst Z, dann X, Y). Zum Schalter, 5 mm zurück, langsam (1/4) wieder hin, Position 0. Danach steht der Kopf am Schalter. `Error:Homing failed` bei Wegüberschreitung. Antwortet erst nach dem Ende, sendet alle 1 s `echo:busy: processing` |
 | `G30` | Taster an der aktuellen XY: Z sinkt mit 216 mm/min bis zum Kontakt oder bis Z=-2, bleibt **am Kontakt stehen**. Antwort: `Bed X:<x> Y:<y> Z:<z>`, dann ok. Sonst `Error:Probing failed`, Kopf bleibt dort. Vorher Z-Schalter offen, sonst `Error:Probe already triggered` |
 | `M3 I` / `M5 I` | Inline-Modus an / aus. `M5 I`: modale Leistung 0, wartet nicht auf die Warteschlange. Schon eingereihte Blöcke behalten ihre Leistung (Regel 4), damit das Ende eines Auftrags brennt; sofort dunkel machen `M410` und `M112` |
@@ -85,10 +87,10 @@ Fehler: zuerst `Error:<text>`, dann `ok`. Die Warteschlange fasst mindestens 32 
 | `M8` / `M9` | Abluft an / aus |
 | `M355 S<0/1> P<0..255>` | Licht |
 | `M17`, `M84` | Motorstrom an / aus, wartet auf Stillstand |
-| `M92 [X][Y][Z]` | Schritte/mm zur Laufzeit |
+| `M92 [X][Y][Z]` | Schritte/mm zur Laufzeit, 1..5000, sonst `Error:Invalid value`. Ein geänderter Wert macht die Achse unreferenziert, derselbe Wert nicht |
 | `M201 [X][Y][Z]`, `M203 [X][Y][Z]`, `M204 [P][T]` | Beschleunigung und Vorschub, nur im RAM. M203 Z wird auf 9 begrenzt |
 | `M114` | `X:<x> Y:<y> Z:<z> Count X:<n> Y:<n> Z:<n>`: geplante Endposition. Darf PWM und Schritte in keiner Weise stören |
-| `M115` | `FIRMWARE_NAME:LumaCut CNC <version> (<__DATE__> <__TIME__>) MACHINE_TYPE:LumaCut CNC` und `Cap:Z_PROBE:1`, `Cap:SELF_UPDATE:1` |
+| `M115` | `FIRMWARE_NAME:LumaCut CNC <version> (<__DATE__> <__TIME__>) MACHINE_TYPE:LumaCut CNC` und `Cap:Z_PROBE:1`, `Cap:SELF_UPDATE:1`, `Cap:Z_UNHOMED_LIFT:<mm>` |
 | `M119` | `Reporting endstop status`, dann `x_min: open`/`TRIGGERED`, gleich für y und z |
 | `M122` | TMC-Register (Strom, Mikroschritte, Fehler) je Achse als Text, Diagnose |
 | `M300 S<Hz> P<ms> [X][Y]` | Motorton ohne Fahrt wie `firmware/marlin/motor_tone.cpp` (neu geschrieben). Nur im Stillstand mit Laser aus. S0 = Pause, höchstens 2 s |
@@ -104,11 +106,13 @@ Nicht mehr nötig und entfallen: M21, M28, M30, M105, M120, M402, M503, M851, M7
 
 Lookahead-Planer mit Trapezprofilen und Kurvengeschwindigkeit (Junction Deviation 0,05 mm), Bresenham im Schritt-Interrupt mit Hardware-Timer, unterbrechungsfrei für TIM1. Bis 15 kHz Schritte je Achse. Lange Rasterzeilen mit kurzen Segmenten dürfen nicht stocken: Die Warteschlange läuft leer, wenn der Pi nicht schnell genug liefert; dann bremst der Planer normal. Rundungsfehler dürfen sich nicht aufsummieren: Zielposition in ganzen Schritten führen.
 
+Der Planer hält 50 ms fertig geplante Blöcke vor. Endet trotzdem ein Block mit Geschwindigkeit, ohne dass der nächste fertig ist (Hauptschleife blockiert): harter Halt, Laser aus, Warteschlange leer, alle Achsen unreferenziert, `Error:Planner underrun`. Vor einer Fahrt aus dem Stillstand prüft die Firmware höchstens einmal je Sekunde `GSTAT.reset` der Treiber. War einer stromlos: Treiber neu einstellen, alle Achsen unreferenziert, `Error:Driver reset`, die Fahrt entfällt. Der Pi behandelt beide Fehler als Referenzverlust.
+
 Keine Eingabeformung im ersten Stand (war bei Marlin aus).
 
 ## Selbst-Update
 
-`M997 U<bytes> C<crc32>` antwortet `ok READY <chunk>`. Dann kommen `<chunk>` Bytes roh, je Block `ok <offset>`. Der Empfang landet im oberen Flash ab `0x08040000`; nach Abschluss CRC prüfen, Kennung `LumaCut CNC` im Abbild prüfen, Antwort `ok DONE`, dann USB trennen, Routine aus dem RAM kopiert nach `0x08007000`, Reset. Größe höchstens 196 KB, Flash-Größe im Register `0x1FFFF7E0` prüfen. Bei Stromausfall im Kopieren bleibt die SD-Rettung (`firmware.bin` auf die Karte, BTT-Bootloader). Der Bootloader wird nie angefasst. Nur im Stillstand, Laser aus, Relais aus.
+`M997 U<bytes> C<crc32>` antwortet `ok READY <chunk>`. Dann kommen `<chunk>` Bytes roh, je Block `ok <offset>`. Der Empfang landet im oberen Flash ab `0x08040000`; nach Abschluss CRC prüfen, Kennung `LumaCut CNC` im Abbild prüfen, Antwort `ok DONE`, dann USB trennen, Routine aus dem RAM kopiert nach `0x08007000`, Reset. Größe höchstens 196 KB, Flash-Größe im Register `0x1FFFF7E0` prüfen. Bei Stromausfall im Kopieren bleibt die SD-Rettung (`firmware.bin` auf die Karte, BTT-Bootloader). Der Bootloader wird nie angefasst. Nur im Stillstand, Laser aus, Relais aus. Im Rohmodus des Empfangs werden M112 und M410 nicht erkannt: Die Bytes sind Teil des Abbilds, die CRC verwirft es. Nach 10 s ohne Daten geht die Firmware in den Zeilenbetrieb zurück.
 
 Erste Installation: `firmware.bin` per SD-Karte (mit dem Besitzer vor Ort). Rückweg: Marlin-Release `marlin-62` ebenfalls per SD.
 

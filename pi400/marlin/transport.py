@@ -99,6 +99,8 @@ _XY_MOTION = re.compile(r"^G0?[0123](?:\s|$)")
 # 01.11.): worm 1:10, pinion 10 teeth module 1 on a printed rack = 3.1416 mm
 # per motor turn, 16 microsteps. Sent on every connect: the Pi owns the value.
 Z_STEPS_PER_MM = 1018.59
+# Firmware errors after which the position in the firmware is no longer true.
+REFERENCE_LOST_ERRORS = ("Error:Planner underrun", "Error:Driver reset")
 # op=z_test: Z without homing to check the direction, slow (2 mm/s).
 Z_TEST_MAX_MM = 10.0
 Z_TEST_FEED_MM_MIN = 120
@@ -319,6 +321,14 @@ class MarlinTransport:
         self.identity = ""
         self.cap_z_probe = None
         self.cap_self_update = False
+        # Lift the firmware allows without a Z reference (Cap:Z_UNHOMED_LIFT), and
+        # what this Pi has used of it since the reference was lost.
+        self.z_unhomed_lift = None
+        self.blind_lift_used = 0.0
+        # ok lines of M410 written ahead of the command lock. Every ok is the same
+        # text, so whichever comes first is taken for the M410, the counts stay right.
+        self._stray_oks = 0
+        self._stray_lock = threading.Lock()
         self.firmware = {"state": "idle", "progress": 0, "message": ""}
         self.homed = False
         self.z_homed = False
@@ -403,6 +413,9 @@ class MarlinTransport:
                 pass
         self.serial = None
         self.inflight.clear()
+        with self._stray_lock:
+            self._stray_oks = 0
+        self.blind_lift_used = 0.0
         self.service_power = 0
         self.state = "Disconnected"
         self.homed = False
@@ -424,7 +437,33 @@ class MarlinTransport:
         if message:
             self.fault = message[:200]
 
-    def _read_line_locked(self, deadline):
+    def _note_firmware_line(self, line: str):
+        """State the firmware changed by itself, whoever happens to read the line."""
+        if line.startswith("echo:Laser off"):
+            self.service_power = 0
+        elif line.startswith(REFERENCE_LOST_ERRORS):
+            self.homed = False
+            self.z_homed = False
+            self.surface_z = None
+            self.last_xy_commanded = None
+            self.laser_enabled = False
+            self.guard.inline = False
+            self.reference_lost = "Firmware meldet: " + line[6:]
+
+    def _take_stray_ok(self, line: str) -> bool:
+        if not line.lower().startswith("ok"):
+            return False
+        with self._stray_lock:
+            if self._stray_oks <= 0:
+                return False
+            self._stray_oks -= 1
+            return True
+
+    def _read_line_locked(self, deadline, until_no_stray=False):
+        """Next line from the firmware, without the ok lines owed to an early M410.
+
+        until_no_stray: return "" as soon as the last of those has come.
+        """
         while time.monotonic() < deadline:
             raw = self.serial.readline()
             if not raw:
@@ -440,6 +479,11 @@ class MarlinTransport:
                         self.last_known_z = self.position[2]
                 if "FIRMWARE_NAME:" in line:
                     self.identity = line
+                self._note_firmware_line(line)
+                if self._take_stray_ok(line):
+                    if until_no_stray and not self._stray_oks:
+                        return ""
+                    continue
                 return line
         raise TimeoutError("Keine Bestätigung der Firmware vor Fristablauf")
 
@@ -452,6 +496,10 @@ class MarlinTransport:
         """
         hit = ENDSTOP_HIT.search(line)
         fault = is_marlin_error(line)
+        if hit and not fault and (self.inflight or self.laser_enabled):
+            # The hit also threw away every line the firmware had received: with
+            # lines under way or the laser armed this cannot be a harmless parking.
+            fault = True
         if hit and not fault and self.last_xy_commanded is not None:
             target = dict(zip("XY", self.last_xy_commanded))
             fault = any(target[axis] > AT_SWITCH_MM
@@ -570,6 +618,8 @@ class MarlinTransport:
             self.cap_z_probe = "Cap:Z_PROBE:1" in caps if any(
                 c.startswith("Cap:Z_PROBE:") for c in caps) else None
             self.cap_self_update = "Cap:SELF_UPDATE:1" in caps
+            lift_caps = [c.split(":")[2] for c in caps if c.startswith("Cap:Z_UNHOMED_LIFT:")]
+            self.z_unhomed_lift = float(lift_caps[0]) if lift_caps else None
             if quit_emergency:
                 self._exchange_locked("M999", timeout=6.0)
             try:
@@ -1059,7 +1109,13 @@ class MarlinTransport:
         if self.last_known_z is not None:
             last = self.last_known_z
             lift = min(max(self.travel_z - last, MIN_BLIND_LIFT_MM), Z_MAX_MM - last)
-            return ["G91", f"G0 Z{lift:.2f} F{self.z_feed}", "G90"] if lift > 0.05 else []
+            if self.z_unhomed_lift is not None:
+                # The firmware refuses more than its budget without a Z reference.
+                lift = min(lift, self.z_unhomed_lift - self.blind_lift_used)
+            if lift <= 0.05:
+                return []
+            self.blind_lift_used += lift
+            return ["G91", f"G0 Z{lift:.2f} F{self.z_feed}", "G90"]
         if operator_clear:
             return []
         raise RuntimeError("Kopfhöhe unbekannt: Steht der Kopf frei über allem auf dem Bett? "
@@ -1118,6 +1174,8 @@ class MarlinTransport:
                 if speed and speed > self.z_speed_mm_s:
                     self._exchange_locked("M203 Z%g" % speed, timeout=6.0)
                 self._exchange_locked("G0 Z%+.3f F%d" % (distance, feed), timeout=wait)
+                if not known:
+                    self.blind_lift_used += distance
                 self._exchange_locked("M400", timeout=wait)
             finally:
                 self._exchange_locked("G90", timeout=6.0)
@@ -1295,9 +1353,19 @@ class MarlinTransport:
                     if cmd == "G28 Z" and should_stop is not None and should_stop():
                         self.last_xy_commanded = (0.0, 0.0)
                         raise Aborted()
-                    result = self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35)
+                    try:
+                        result = self._exchange_locked(cmd, timeout=150 if "G28" in cmd else 35)
+                    except MarlinCommandError as exc:
+                        # Budget used up (earlier lifts this Pi cannot know of, after a
+                        # service restart): the head has already risen, homing may go on.
+                        if cmd not in lift or "Out of bounds" not in str(exc):
+                            raise
+                        self.fault = ""
+                        LOG.warning("Blinder Hub abgelehnt: %s", exc)
+                        continue
                     if cmd == "G28 Z":
                         self.z_homed = True
+                        self.blind_lift_used = 0.0
                         # G28 Z is a BED / MACHINE origin, NEVER workpiece Z.
                         self.surface_z = None
                 self.homed = True
@@ -1993,17 +2061,27 @@ class MarlinTransport:
         """Beam and motion stop at once, the reference stays.
 
         M5 I does not touch queued blocks (they would burn on), M410 clears
-        them on reception. Written directly: draining first would wait for
-        the queue. The ok of every line already sent still arrives.
+        them on reception. Written ahead of the command lock like M112: a
+        running M400 or G28 holds the lock until it ends, and its answer comes
+        early because of this very M410. Its own ok is counted and taken out
+        of the stream, so nobody reads it as the answer to something else.
         """
-        with self.lock:
-            if self.owner not in (None, owner):
-                raise RuntimeError("Steuerung belegt: " + self.owner)
+        if self.owner not in (None, owner):
+            raise RuntimeError("Steuerung belegt: " + self.owner)
+        serial_port = self.serial
+        if serial_port is None:
+            raise ConnectionError("SKR USB nicht verbunden")
+        self._write_m410(serial_port)
+        self.service_power = 0
+        contended = not self.lock.acquire(blocking=False)
+        if contended:
+            self.lock.acquire()
+        try:
             if self.serial is None:
-                raise ConnectionError("SKR USB nicht verbunden")
-            line = b"M410\n"
-            self.serial.write(line)
-            self.inflight.append(len(line))
+                return
+            if contended:
+                # Whoever held the lock may have streamed on after our first M410.
+                self._write_m410(self.serial)
             self.service_power = 0
             self.laser_enabled = False
             self.guard.inline = False
@@ -2012,6 +2090,26 @@ class MarlinTransport:
                 self._drain_locked(30.0)
             except MarlinCommandError as exc:
                 LOG.warning("Quick stop: %s", exc)
+            self._absorb_stray_oks(time.monotonic() + 5.0)
+        finally:
+            self.lock.release()
+
+    def _write_m410(self, serial_port):
+        with self._stray_lock:
+            self._stray_oks += 1
+        serial_port.write(b"M410\n")
+
+    def _absorb_stray_oks(self, deadline):
+        try:
+            while self._stray_oks:
+                line = self._read_line_locked(deadline, until_no_stray=True)
+                if line and self._is_fault_locked(line):
+                    self.serial_errors += 1
+                    self.fault = _fault_text(line)
+        except TimeoutError:
+            LOG.warning("Quick stop: Bestätigung von M410 fehlt")
+            with self._stray_lock:
+                self._stray_oks = 0
 
     def emergency_stop(self):
         # The firmware evaluates M112 on reception, also with a full queue.

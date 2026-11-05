@@ -48,6 +48,9 @@ seek_status_t homing_poll(void)
         axis = ORDER[order_i++];
         motion_set_unhomed((uint8_t)(1u << axis));
         if (triggered(axis)) {
+            // Already on the switch, or it is stuck open: repeating G28 must not
+            // creep upward past the lift budget.
+            if (axis == AX_Z && !motion_z_lift_allowed(HOME_BACKOFF_MM)) return SEEK_FAILED;
             state = H_BACKOFF;
             return queue_or_fail(HOME_BACKOFF_MM, FEED_MM_S[axis], false);
         }

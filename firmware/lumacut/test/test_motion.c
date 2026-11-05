@@ -233,10 +233,13 @@ static void test_limits(void)
     CHECK(!sim.motors); // rule 8: refused moves do not energise anything
 
     // Within travel it moves to the very edge, but Z never above 80.
+    sim_reset();
+    sim_home_all_at_zero();
+    int32_t home[AXES] = {sim.phys[0], sim.phys[1], sim.phys[2]};
     sim_cmd("G0 X390 Y370 Z80 F60000");
     CHECK(sim_out_has("ok P"));
     CHECK(sim_run_until_idle(30000));
-    CHECK(sim.phys[0] == 31200 && sim.phys[1] == 29600 && sim.phys[2] == 81487);
+    CHECK(sim.phys[0] - home[0] == 31200 && sim.phys[1] - home[1] == 29600 && sim.phys[2] - home[2] == 81487);
 
     sim_cmd("G91");
     sim_cmd("G0 Z0.001");
@@ -264,7 +267,7 @@ static void test_limits(void)
     sim_reset();
     sim_cmd("M203 Z100");
     CHECK(motion_limits()->max_feed[AX_Z] == 9.0f);
-    sim_cmd("G0 Z30 F60000");
+    sim_cmd("G0 Z20 F60000");
     CHECK(sim_run_until_idle(20000));
     CHECK(sim.max_rate_seen <= (uint32_t)(9.0 * 1018.59) + 2u);
 
@@ -297,7 +300,7 @@ static void test_queue_sizes(void)
 {
     sim_reset();
     sim_cmd("M114");
-    CHECK(sim_out_has("ok P63 B16"));
+    CHECK(sim_out_has("ok P127 B16"));
 
     // The contract: at least 32 blocks and 16 lines of 96 characters.
     sim_out_clear();
@@ -317,7 +320,7 @@ static void test_queue_sizes(void)
     sim_reset();
     sim_out_clear();
     int acked = 0, sent = 0;
-    while (sent < 200) {
+    while (sent < 400) {
         char line[40];
         snprintf(line, sizeof line, "G1 X%d F600\n", (sent % 2) ? 300 : 0);
         sim_send(line);

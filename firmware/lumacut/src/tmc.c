@@ -13,6 +13,7 @@ enum {
     REG_GCONF = 0x00,
     REG_GSTAT = 0x01,
     REG_IFCNT = 0x02,
+    REG_NODECONF = 0x03,
     REG_IHOLD_IRUN = 0x10,
     REG_TPOWERDOWN = 0x11,
     REG_CHOPCONF = 0x6C,
@@ -46,6 +47,10 @@ enum {
 #define PWM_FREQ 1u
 #define PWM_REG 8u
 #define PWM_LIM 12u
+// Three drivers share the bus. SENDDELAY 0/1 (8 bit times) is not for multi-node
+// use; 2 means 3*8 bit times (TMC2209 datasheet, NODECONF; Klipper uses 2 as well).
+#define SENDDELAY 2u
+#define WRITES_IN_SETUP 7u
 
 uint8_t tmc_crc8(const uint8_t *data, size_t len)
 {
@@ -144,6 +149,7 @@ bool tmc_configure_all(uint8_t *failed_axis)
         if (!reg_read(a, REG_IFCNT, &before)) return false;
         // Stealth on all axes: STEALTHCHOP_XY and STEALTHCHOP_Z in the same
         // example, HYBRID_THRESHOLD off.
+        reg_write(a, REG_NODECONF, SENDDELAY << 8);
         reg_write(a, REG_GCONF, tmc_gconf(false));
         reg_write(a, REG_CHOPCONF, tmc_chopconf());
         reg_write(a, REG_IHOLD_IRUN, tmc_ihold_irun());
@@ -151,10 +157,21 @@ bool tmc_configure_all(uint8_t *failed_axis)
         reg_write(a, REG_PWMCONF, tmc_pwmconf());
         reg_write(a, REG_GSTAT, 0x7u);
         if (!reg_read(a, REG_IFCNT, &after)) return false;
-        if (((after - before) & 0xFFu) != 6u) return false;
+        if (((after - before) & 0xFFu) != WRITES_IN_SETUP) return false;
         if (!reg_read(a, REG_CHOPCONF, &chop) || chop != tmc_chopconf()) return false;
     }
     return true;
+}
+
+tmc_health_t tmc_check_reset(uint8_t *axis)
+{
+    for (uint8_t a = 0; a < AXES; a++) {
+        uint32_t gstat;
+        *axis = a;
+        if (!reg_read(a, REG_GSTAT, &gstat)) return TMC_NO_ANSWER;
+        if (gstat & 1u) return TMC_WAS_RESET;
+    }
+    return TMC_OK;
 }
 
 void tmc_spreadcycle(uint8_t axes, bool on)

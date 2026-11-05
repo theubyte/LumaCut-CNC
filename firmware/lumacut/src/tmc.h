@@ -18,5 +18,8 @@ uint32_t tmc_pwmconf(void);
 // Writes the whole setup to all axes and reads it back. On failure returns
 // false and names the first axis that did not answer correctly.
 bool tmc_configure_all(uint8_t *failed_axis);
+// GSTAT.reset: the driver lost power and runs on default settings.
+typedef enum { TMC_OK, TMC_NO_ANSWER, TMC_WAS_RESET } tmc_health_t;
+tmc_health_t tmc_check_reset(uint8_t *axis);
 void tmc_spreadcycle(uint8_t axes, bool on);
 void tmc_report(void); // M122

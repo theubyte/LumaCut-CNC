@@ -2,10 +2,12 @@
 #include "hal.h"
 #include "stepgen.h"
 #include "tmc.h"
+#include <math.h>
 
 static limits_t lim;
 static int32_t pos_fix[AXES];
 static int32_t z_offset_fix; // physical Z = logical Z + this, changed by G92 Z
+static int32_t z_base_fix;   // logical Z where the reference was lost (lift budget)
 static uint8_t homed;
 static bool motors_on;
 
@@ -34,6 +36,7 @@ void motion_init(void)
     lim = defaults;
     for (int a = 0; a < AXES; a++) pos_fix[a] = 0;
     z_offset_fix = 0;
+    z_base_fix = 0;
     homed = 0;
     motors_on = false;
     hal_motors(false);
@@ -42,18 +45,32 @@ void motion_init(void)
 limits_t *motion_limits(void) { return &lim; }
 int32_t motion_pos(int axis) { return pos_fix[axis]; }
 
+// May Z go up to this logical value? Referenced: the physical limit. Otherwise
+// the height is unknown and only the lift budget counts, whatever G92 says.
+static bool z_lift_ok(int32_t target)
+{
+    if (homed & (1u << AX_Z)) return target + z_offset_fix <= MM_FIX(Z_HARD_MAX_MM);
+    return target - z_base_fix <= MM_FIX(Z_UNHOMED_LIFT_MM);
+}
+
 bool motion_in_bounds(const int32_t target[AXES])
 {
     for (int a = 0; a < AXES; a++) {
         if (target[a] == pos_fix[a]) continue;
         if (target[a] < MIN_FIX[a] || target[a] > MAX_FIX[a]) return false;
     }
-    // After G92 Z the logical value is shifted; the physical limit still holds.
-    if ((homed & (1u << AX_Z)) && target[AX_Z] != pos_fix[AX_Z] &&
-        target[AX_Z] + z_offset_fix > MM_FIX(Z_HARD_MAX_MM)) {
+    if (target[AX_Z] > pos_fix[AX_Z] && !z_lift_ok(target[AX_Z])) return false;
+    // Referenced, G92 only shifts the logical value: the rail stays where it is.
+    if (target[AX_Z] < pos_fix[AX_Z] && (homed & (1u << AX_Z)) &&
+        target[AX_Z] + z_offset_fix < MIN_FIX[AX_Z]) {
         return false;
     }
     return true;
+}
+
+bool motion_z_lift_allowed(float delta_mm)
+{
+    return z_lift_ok(pos_fix[AX_Z] + round_to_i32((double)delta_mm * FIX_PER_MM));
 }
 
 move_result_t motion_move(const int32_t target[AXES], float speed, float accel, uint8_t power)
@@ -101,7 +118,10 @@ static void apply_position(int axis, int32_t fix)
 bool motion_set_position(int axis, int32_t fix)
 {
     if (fix < MIN_FIX[axis] || fix > MAX_FIX[axis]) return false;
-    if (axis == AX_Z) z_offset_fix += pos_fix[AX_Z] - fix;
+    if (axis == AX_Z) {
+        z_offset_fix += pos_fix[AX_Z] - fix;
+        z_base_fix += fix - pos_fix[AX_Z]; // the motor did not move: same spot
+    }
     apply_position(axis, fix);
     return true;
 }
@@ -115,12 +135,20 @@ void motion_zero_axis(int axis)
 
 void motion_set_steps_mm(int axis, float steps_mm)
 {
+    // The Pi repeats its value on every connect; that must not cost the reference.
+    if (fabsf(steps_mm - lim.steps_mm[axis]) < 0.0005f) return;
+    motion_set_unhomed((uint8_t)(1u << axis));
     lim.steps_mm[axis] = steps_mm;
     apply_position(axis, pos_fix[axis]);
 }
 
 bool motion_homed(int axis) { return (homed >> axis) & 1u; }
-void motion_set_unhomed(uint8_t axes) { homed &= (uint8_t)~axes; }
+void motion_set_unhomed(uint8_t axes)
+{
+    // Only when the reference really goes: repeated failures must not grow the budget.
+    if ((axes & homed) & (1u << AX_Z)) z_base_fix = pos_fix[AX_Z];
+    homed &= (uint8_t)~axes;
+}
 
 bool motion_idle(void) { return planner_empty() && !sg_running(); }
 

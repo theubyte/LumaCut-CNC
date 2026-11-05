@@ -12,14 +12,21 @@ enum { AX_X = 0, AX_Y = 1, AX_Z = 2 };
 
 #define Z_HARD_MAX_MM 80     // head leaves the Z rail above this; not changeable
 #define Z_HARD_MAX_FEED 9.0f // mm/s, M203 Z cannot exceed it
+// Without a Z reference the real height is unknown: Z may rise at most this far
+// above where it stood when the reference was lost. Owner's value, only here.
+#define Z_UNHOMED_LIFT_MM 25
+#define STEPS_MM_MIN 1      // M92 plausibility
+#define STEPS_MM_MAX 5000
+#define DRIVER_CHECK_MS 1000u // GSTAT.reset at most this often
 
 #define STEP_TICK_HZ 2000000u // TIM2 tick, see TIMERS.md
 #define MAX_STEP_RATE 15000u  // steps/s per axis
 
-#define QUEUE_SLOTS 64        // planner ring; 63 usable, contract asks >= 32
+#define QUEUE_SLOTS 128       // planner ring; 127 usable, contract asks >= 32; must span
+                              // the braking distance plus the frozen PLAN_HORIZON_US
 #define PLAN_GATE_BLOCKS 8    // start stepping once this many blocks wait...
 #define PLAN_GATE_MS 30u      // ...or the oldest waited this long
-#define PLAN_HORIZON_US 15000u // freeze blocks this far ahead of the stepper
+#define PLAN_HORIZON_US 50000u // freeze blocks this far ahead of the stepper
 
 #define JUNCTION_DEV_MM 0.05f
 #define ARC_TOLERANCE_MM 0.02f // stricter than the contract's 0.1 mm
@@ -30,6 +37,7 @@ enum { AX_X = 0, AX_Y = 1, AX_Z = 2 };
 #define PROBE_MIN_Z_FIX MM_FIX(-2)
 
 #define USB_SILENCE_MS 5000u // rule 6
+#define ARC_CHECK_SLICE 16u  // chords checked per main-loop pass
 #define BUSY_PERIOD_MS 1000u
 #define TONE_MAX_MS 2000u
 #define TONE_MIN_HZ 40u

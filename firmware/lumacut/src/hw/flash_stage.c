@@ -22,6 +22,9 @@ static void flash_open(void)
 
 static bool flash_wait_ok(void)
 {
+    // BSY rises one wait state after the write: the first read can still say idle.
+    (void)FLASH_SR;
+    (void)FLASH_SR;
     while (FLASH_SR & FLASH_SR_BSY) {
     }
     return !(FLASH_SR & (FLASH_SR_PGERR | FLASH_SR_WRPRTERR));

@@ -10,7 +10,8 @@ typedef enum {
     SG_STOP_NONE = 0,
     SG_STOP_ENDSTOP, // rule 7: a switch in the driving direction opened
     SG_STOP_SEEK,    // homing or probing block reached its switch
-    SG_STOP_ABORT    // M112 or M410
+    SG_STOP_ABORT,   // M112 or M410
+    SG_STOP_UNDERRUN // block planned to run on, but the next one was not ready
 } sg_stop_t;
 
 void sg_init(void);

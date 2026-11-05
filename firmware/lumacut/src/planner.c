@@ -258,8 +258,10 @@ static void freeze_one(void)
         float us = n / mean * 1e6f;
         b->duration_us = us < 4.0e9f ? (uint32_t)us : 4000000000u;
     }
+    b->exit_moving = exit_sqr > 0.0f;
     pin_sqr = exit_sqr;
     frozen_total_us += b->duration_us;
+    __asm__ volatile("" : : : "memory"); // block complete before it is published
     frozen = after; // publishes the block to the step interrupt
 }
 

@@ -5,12 +5,19 @@ static volatile bool inline_mode;
 static volatile bool gate; // closed by laser_kill until the next M3
 static volatile uint8_t modal_s;
 static volatile uint8_t cont_power;
+static volatile uint8_t output;
+
+static void set_output(uint8_t s)
+{
+    output = s;
+    hal_laser_pwm(s);
+}
 
 static void end_continuous(void)
 {
     if (cont_power) {
         cont_power = 0;
-        hal_laser_pwm(0);
+        set_output(0);
     }
 }
 
@@ -20,12 +27,13 @@ void laser_init(void)
     gate = false;
     modal_s = 0;
     cont_power = 0;
-    hal_laser_pwm(0);
+    set_output(0);
 }
 
 void laser_m3_inline(void)
 {
     end_continuous();
+    modal_s = 0; // no power left over from before; S comes with the job
     gate = true;
     inline_mode = true;
 }
@@ -52,7 +60,7 @@ void laser_m3_continuous(uint8_t s)
     inline_mode = false;
     gate = s > 0;
     cont_power = s;
-    hal_laser_pwm(s);
+    set_output(s);
     hal_cs_exit(cs);
 }
 
@@ -66,16 +74,24 @@ uint8_t laser_block_power(bool rapid)
 
 void laser_motion_queued(void) { end_continuous(); }
 
-void laser_first_step(uint8_t power) { hal_laser_pwm(gate ? power : 0); }
+// Going down must not wait for the first step: from standstill that is 7 ms
+// away, with the beam on a standing head. Going up waits for that step.
+void laser_block_load(uint8_t power)
+{
+    uint8_t p = gate ? power : 0;
+    if (p < output) set_output(p);
+}
+
+void laser_first_step(uint8_t power) { set_output(gate ? power : 0); }
 
 void laser_dwell(void)
 {
-    if (!cont_power) hal_laser_pwm(0);
+    if (!cont_power) set_output(0);
 }
 
 void laser_block_gap(void)
 {
-    if (!cont_power) hal_laser_pwm(0);
+    if (!cont_power) set_output(0);
 }
 
 void laser_kill(void)
@@ -84,7 +100,7 @@ void laser_kill(void)
     inline_mode = false;
     modal_s = 0;
     cont_power = 0;
-    hal_laser_pwm(0);
+    set_output(0);
 }
 
 bool laser_is_inline(void) { return inline_mode; }

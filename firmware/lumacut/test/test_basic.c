@@ -113,6 +113,7 @@ void test_tmc(void)
     CHECK(tmc_configure_all(&axis));
     CHECK(sim.tmc_reg[0][0x6C] == chop && sim.tmc_reg[2][0x6C] == chop && sim.tmc_reg[1][0x6C] == chop);
     CHECK(sim.tmc_reg[3][0x6C] == 0); // address 3 belongs to no axis here
+    CHECK(sim.tmc_reg[0][0x03] == 0x200u);
 
     sim.tmc_dead = true;
     CHECK(!tmc_configure_all(&axis) && axis == 0);

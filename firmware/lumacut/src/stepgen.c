@@ -130,10 +130,17 @@ static void update_rate(const block_t *b)
     if (rate < b->floor_rate) rate = b->floor_rate;
 }
 
-static uint32_t load_next(void)
+static uint32_t load_next(bool must_continue)
 {
     const block_t *b = planner_isr_next();
     if (!b) {
+        if (must_continue) {
+            // Stopping dead or restarting without a ramp would lose steps
+            // silently: end it loudly instead.
+            laser_kill();
+            halt(SG_STOP_UNDERRUN, 0);
+            return 0;
+        }
         laser_block_gap();
         if (planner_isr_waiting()) return STARVE_TICKS;
         running = false;
@@ -147,6 +154,7 @@ static uint32_t load_next(void)
         ev_left = 0;
         return b->dwell_ticks ? b->dwell_ticks : 1u;
     }
+    laser_block_load(b->power);
     if (dir_neg != b->neg_mask) dir_dirty = true;
     dir_neg = b->neg_mask;
     ev_done = 0;
@@ -174,19 +182,20 @@ uint32_t sg_post(void)
         return tone_half;
     }
     const block_t *b = cur;
-    if (!b) return load_next();
+    if (!b) return load_next(false);
     if (b->flags & B_DWELL) {
         cur = 0;
         planner_isr_release();
-        return load_next();
+        return load_next(false);
     }
     ev_done++;
     ev_left = b->count - ev_done;
     if (ev_done >= b->count) {
+        bool must_continue = b->exit_moving;
         cur = 0;
         next_mask = 0;
         planner_isr_release();
-        return load_next();
+        return load_next(must_continue);
     }
     update_rate(b);
     next_mask = bresenham(b);

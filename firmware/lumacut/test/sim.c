@@ -23,7 +23,16 @@ void t_print_near(double a, double b) { printf("     got %.6f, want %.6f\n", a, 
 
 // --- hal.h ------------------------------------------------------------------
 
-uint32_t hal_ms(void) { return (uint32_t)(sim.now_ticks / (STEP_TICK_HZ / 1000u)); }
+uint32_t hal_ms(void)
+{
+    if (sim.inject_armed && sim.inject_after_pop) {
+        const char *text = sim.inject_after_pop;
+        sim.inject_after_pop = 0;
+        sim.inject_armed = false;
+        sim_send(text);
+    }
+    return (uint32_t)(sim.now_ticks / (STEP_TICK_HZ / 1000u));
+}
 const char *hal_reset_cause(void) { return "test"; }
 uint32_t hal_cs_enter(void) { return 0; }
 void hal_cs_exit(uint32_t state) { (void)state; }
@@ -83,8 +92,18 @@ void hal_usb_write(const char *data, size_t len)
 }
 
 bool hal_usb_tx_idle(void) { return true; }
-bool hal_usb_link_ok(void) { return sim.link_ok; }
-void hal_usb_rx_resume(void) {}
+bool hal_usb_link_ok(void)
+{
+    if (sim.inject_at_link_check) {
+        const char *text = sim.inject_at_link_check;
+        sim.inject_at_link_check = 0;
+        sim.now_ticks += STEP_TICK_HZ / 1000u;
+        sim_send(text);
+    }
+    return sim.link_ok;
+}
+
+void hal_usb_rx_resume(void) { sim.inject_armed = sim.inject_after_pop != 0; }
 
 // Fake TMC bus: frames arrive through hal_tmc_send, replies wait for hal_tmc_recv.
 static uint8_t tmc_reply[8];
@@ -98,11 +117,14 @@ void hal_tmc_send(const uint8_t *data, size_t len)
     if (addr > 3) return;
     if (len == 8 && tmc_crc8(data, 7) == data[7] && (data[2] & 0x80u)) {
         uint8_t reg = data[2] & 0x7Fu;
-        sim.tmc_reg[addr][reg] = ((uint32_t)data[3] << 24) | ((uint32_t)data[4] << 16) |
-                                 ((uint32_t)data[5] << 8) | data[6];
+        uint32_t v = ((uint32_t)data[3] << 24) | ((uint32_t)data[4] << 16) |
+                     ((uint32_t)data[5] << 8) | data[6];
+        if (reg == 0x01) sim.tmc_reg[addr][reg] &= ~v; // GSTAT: write 1 to clear
+        else sim.tmc_reg[addr][reg] = v;
         sim.tmc_ifcnt[addr]++;
     } else if (len == 4 && tmc_crc8(data, 3) == data[3]) {
         uint8_t reg = data[2];
+        if (reg == 0x01) sim.tmc_gstat_reads++;
         uint32_t v = reg == 0x02 ? sim.tmc_ifcnt[addr] : sim.tmc_reg[addr][reg & 0x7Fu];
         tmc_reply[0] = 0x05;
         tmc_reply[1] = 0xFF;
@@ -164,6 +186,7 @@ static void step_tick(void)
 {
     uint8_t mask = sg_pre(hal_endstops() | sim.spike_once);
     sim.spike_once = 0;
+    uint8_t pwm_while_stepping = sim.pwm;
     for (int a = 0; a < AXES; a++) {
         if (mask & (1u << a)) {
             sim.phys[a] += (sim.sim_dir & (1u << a)) ? -1 : 1;
@@ -183,7 +206,8 @@ static void step_tick(void)
         if (mask && rate > sim.max_rate_seen) sim.max_rate_seen = rate;
         if (sim.trace_on && sim.trace_n < 200000 && mask) {
             sim.trace_rate[sim.trace_n] = rate;
-            sim.trace_pwm[sim.trace_n] = sim.pwm;
+            sim.trace_pwm[sim.trace_n] = pwm_while_stepping;
+            sim.trace_pwm_after[sim.trace_n] = sim.pwm;
             sim.trace_mask[sim.trace_n] = mask;
             sim.trace_time[sim.trace_n] = sim.now_ticks;
             sim.trace_n++;
@@ -209,6 +233,19 @@ void sim_run_ms(uint32_t ms)
         while (sim.timer_armed && sim.next_tick <= sim.now_ticks) step_tick();
     }
 }
+
+void sim_stall_ms(uint32_t ms)
+{
+    uint64_t end = sim.now_ticks + (uint64_t)ms * (STEP_TICK_HZ / 1000u);
+    while (sim.now_ticks < end) {
+        uint64_t t = end;
+        if (sim.timer_armed && sim.next_tick < t) t = sim.next_tick;
+        sim.now_ticks = t;
+        while (sim.timer_armed && sim.next_tick <= sim.now_ticks) step_tick();
+    }
+}
+
+void sim_step_one_pass(void) { cmd_poll(); }
 
 bool sim_run_until_idle(uint32_t max_ms)
 {

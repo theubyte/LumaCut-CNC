@@ -433,11 +433,11 @@ void test_estop(void)
     CHECK(sim.relay && sim.exhaust && sim.light == 100);
     sim_cmd("M3 I");
     sim_out_clear();
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 160; i++) {
         char line[32];
         strcpy(line, i % 2 ? "G1 X300 F600 S200\n" : "G1 X1 F600 S200\n");
         sim_send(line);
-        sim_run_ms(i < 79 ? 1 : 0);
+        sim_run_ms(i < 139 ? 1 : 0);
     }
     sim_run_ms(100);
     CHECK(planner_free() == 0);
@@ -536,7 +536,7 @@ void test_estop(void)
     CHECK(motion_homed(AX_X));
     CHECK(planner_position(AX_X) == x - home_x);
     sim_cmd("M114");
-    CHECK(sim_out_has("ok P63 B16"));
+    CHECK(sim_out_has("ok P127 B16"));
     // Afterwards it works again.
     sim_cmd("G0 X0 F3000");
     CHECK(!sim_out_has("Error"));

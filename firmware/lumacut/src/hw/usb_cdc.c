@@ -6,6 +6,7 @@
 #include "../rxlines.h"
 #include "board.h"
 #include <libopencm3/cm3/nvic.h>
+#include <libopencm3/stm32/st_usbfs.h>
 #include <libopencm3/usb/cdc.h>
 #include <libopencm3/usb/usbd.h>
 #include <string.h>
@@ -223,6 +224,7 @@ static void on_set_config(usbd_device *d, uint16_t value)
     tx_in_flight = false;
     tx_needs_zlp = false;
     rx_nak = false;
+    usbd_ep_nak_set(d, EP_OUT, 0); // a bus reset does not clear the driver's forced NAK
     configured = true;
 }
 
@@ -246,7 +248,8 @@ static void on_resume(void) { suspended = false; }
 void usb_lp_can_rx0_isr(void)
 {
     usbd_poll(dev);
-    if (rx_nak && rx_can_take_packet()) {
+    // A packet that just came in must be read first, VALID would let the next overwrite it.
+    if (rx_nak && rx_can_take_packet() && !(*USB_EP_REG(EP_OUT) & USB_EP_RX_CTR)) {
         rx_nak = false;
         usbd_ep_nak_set(dev, EP_OUT, 0);
     }

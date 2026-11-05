@@ -13,9 +13,13 @@
 #include <libopencm3/stm32/iwdg.h>
 
 #define COPY_ATTEMPTS 3
+#define VECTOR_HALVES 4u // first 8 bytes
 
 __attribute__((always_inline)) static inline void wait_flash(void)
 {
+    // BSY rises one wait state after the write: the first read can still say idle.
+    (void)FLASH_SR;
+    (void)FLASH_SR;
     while (FLASH_SR & FLASH_SR_BSY) IWDG_KR = IWDG_KR_RESET;
 }
 
@@ -40,7 +44,13 @@ static void ram_copy(const volatile uint16_t *src, volatile uint16_t *dst, uint3
         }
         FLASH_SR = FLASH_SR_EOP | FLASH_SR_PGERR | FLASH_SR_WRPRTERR;
         FLASH_CR = FLASH_CR_PG;
-        for (uint32_t i = 0; i < halves; i++) {
+        // SP and reset vector last: a power cut before this leaves them erased,
+        // so the bootloader does not start half an image.
+        for (uint32_t i = VECTOR_HALVES; i < halves; i++) {
+            dst[i] = src[i];
+            wait_flash();
+        }
+        for (uint32_t i = 0; i < VECTOR_HALVES; i++) {
             dst[i] = src[i];
             wait_flash();
         }

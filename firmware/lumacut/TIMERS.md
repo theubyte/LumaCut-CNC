@@ -50,4 +50,6 @@ Datenblatt: STEP high und DIR-Vorlauf je mindestens 20 ns; Vertrag: je 100 ns.
 ## Warten, Grenzen
 
 - Intervalle über 60000 Ticks (30 ms) laufen in Stücken, so gehen auch sehr langsame Vorschübe und `G4`.
-- Reißt der Vorrat an fertig geplanten Blöcken ab (Hauptschleife zu spät), wartet der Interrupt in 100-µs-Schritten mit Laser 0. Das ist ein Ruckler, kein Fehler, und bei den eingeplanten 15 ms Vorlauf nur bei blockierter Hauptschleife denkbar.
+- Der Planer hält 50 ms fertig geplante Blöcke vor (`PLAN_HORIZON_US`). Längste Sperren der Hauptschleife: M122 rund 13 ms (aus 12 Lesezugriffen gerechnet, nicht gemessen), USB-Stau einmal 20 ms, Bogen-Prüfung in Scheiben von 16 Sehnen.
+- Endet ein Block im Stand (Ausgang 0) und der nächste ist noch nicht fertig, wartet der Interrupt in 100-µs-Schritten mit Laser 0. Das ist normal.
+- Endet ein Block mit Geschwindigkeit und der nächste ist nicht fertig (Hauptschleife über 50 ms blockiert): harter Halt, Laser aus, Warteschlange leer, alle Achsen unreferenziert, `Error:Planner underrun`. Weiterfahren ohne Rampe würde still Schritte verlieren.

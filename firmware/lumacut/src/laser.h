@@ -17,6 +17,7 @@ uint8_t laser_block_power(bool rapid);
 void laser_motion_queued(void); // rule 5: a move ends continuous power
 
 // Step interrupt.
+void laser_block_load(uint8_t power);
 void laser_first_step(uint8_t power);
 void laser_dwell(void);
 void laser_block_gap(void); // no block running

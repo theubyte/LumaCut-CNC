@@ -43,7 +43,8 @@ static void __attribute__((used, noreturn)) board_start(void)
 
 void __attribute__((naked)) reset_handler(void)
 {
-    __asm__("ldr r0, =_stack_top\n"
+    __asm__("cpsid i\n"
+            "ldr r0, =_stack_top\n"
             "msr msp, r0\n"
             "b board_start\n"
             ".ltorg\n");
@@ -106,6 +107,8 @@ static void read_reset_cause(void)
 // already run on the PLL, so this goes through HSI first.
 static void clock_setup(void)
 {
+    // USBPRE must not change while the USB clock runs; the bootloader may have left it on.
+    RCC_APB1ENR &= ~RCC_APB1ENR_USBEN;
     RCC_CR |= RCC_CR_HSION;
     while (!(RCC_CR & RCC_CR_HSIRDY)) {
     }
@@ -153,13 +156,15 @@ void board_usb_release(void)
 void board_iwdg_start(void)
 {
     // LSI 40 kHz / 64 = 625 Hz, reload 1250: about 2 s (LSI varies 30..60 kHz).
+    // START first: it turns the LSI on, and without LSI the update flags in SR
+    // never clear. Until the new values land the reset defaults give about 400 ms.
+    IWDG_KR = IWDG_KR_START;
     IWDG_KR = IWDG_KR_UNLOCK;
     IWDG_PR = 4;
     IWDG_RLR = 1250;
     while (IWDG_SR) {
     }
     IWDG_KR = IWDG_KR_RESET;
-    IWDG_KR = IWDG_KR_START;
 }
 
 void board_iwdg_feed(void) { IWDG_KR = IWDG_KR_RESET; }

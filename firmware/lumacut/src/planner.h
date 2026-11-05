@@ -25,6 +25,7 @@ typedef struct {
     uint8_t stop_mask; // axes whose switch stops this block (rule 7)
     uint8_t power;     // laser S for this block
     uint8_t flags;
+    bool exit_moving; // planned to run straight into the next block
     // Planner part.
     float mm, rate_per_mm, accel;
     float nominal_sqr, max_entry_sqr, back_sqr, entry_sqr;

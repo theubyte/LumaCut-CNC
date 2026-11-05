@@ -15,6 +15,9 @@
 
 typedef enum { DONE, AGAIN } step_t;
 
+#define STR_(x) #x
+#define STR(x) STR_(x)
+
 // Set in interrupts, handled in the main loop.
 static volatile bool latched;         // M112 until M999
 static volatile uint8_t rt_m112_acks; // ok lines still owed
@@ -30,6 +33,8 @@ static uint32_t cur_phase; // per-command progress
 static uint32_t wait_since, busy_at;
 
 static arc_t arc;
+static uint32_t arc_checked; // chords passed the travel check
+static uint32_t driver_check_at;
 static uint32_t tone_end_ms;
 static bool tone_was_on;
 static uint8_t tone_axes;
@@ -57,6 +62,7 @@ void cmd_init(void)
     light_level = 153; // CASE_LIGHT_DEFAULT_BRIGHTNESS in firmware/marlin/build.py
     light_on = false;
     link_was_ok = false;
+    driver_check_at = 0;
     boot_reported = false;
     sg_init();
     motion_init();
@@ -121,9 +127,41 @@ static bool wait_stillstand(void)
     return false;
 }
 
+// Interrupts off and nothing stopped the machine since this command began. An
+// output command must not undo an M112 or M410 that landed after its checks.
+static bool output_section_begin(uint32_t *cs)
+{
+    *cs = hal_cs_enter();
+    if (!latched && cur_gen == abort_gen) return true;
+    hal_cs_exit(*cs);
+    return false;
+}
+
+// 24 V gone and back: the driver forgot microsteps and current, the position is void.
+static bool drivers_still_configured(void)
+{
+    uint32_t now = hal_ms();
+    if (!motors_are_on() || !motion_idle() || (int32_t)(now - driver_check_at) < 0) return true;
+    driver_check_at = now + DRIVER_CHECK_MS;
+    uint8_t axis;
+    tmc_health_t health = tmc_check_reset(&axis);
+    if (health == TMC_OK) return true;
+    motors_off();
+    motion_set_unhomed(7);
+    if (health == TMC_WAS_RESET && motors_ensure(&axis)) {
+        reply_error("Driver reset");
+        return false;
+    }
+    char text[] = "Driver not responding: X";
+    text[sizeof text - 2] = (char)('X' + axis);
+    reply_error(text);
+    return false;
+}
+
 static bool ensure_motors(void)
 {
     uint8_t axis;
+    if (!drivers_still_configured()) return false;
     if (motors_ensure(&axis)) return true;
     char text[] = "Driver not responding: X";
     text[sizeof text - 2] = (char)('X' + axis);
@@ -209,6 +247,8 @@ static step_t g_line(bool rapid)
     return finish_ok();
 }
 
+#define ARC_CHECKING 0xFFFFFFFFu
+
 static step_t g_arc(bool clockwise)
 {
     if (cur_phase == 0) {
@@ -228,11 +268,17 @@ static step_t g_arc(bool clockwise)
                       (int32_t)j, clockwise)) {
             return finish_error("Arc invalid");
         }
-        for (uint32_t k = 1; k <= arc.segments; k++) {
+        arc_checked = 0;
+        cur_phase = ARC_CHECKING;
+    }
+    if (cur_phase == ARC_CHECKING) {
+        // In slices: a big arc has hundreds of chords, the stepper needs its blocks.
+        for (uint32_t n = 0; n < ARC_CHECK_SLICE && arc_checked < arc.segments; n++) {
             int32_t p[AXES] = {0, 0, motion_pos(AX_Z)};
-            arc_point(&arc, k, &p[AX_X], &p[AX_Y]);
+            arc_point(&arc, ++arc_checked, &p[AX_X], &p[AX_Y]);
             if (!motion_in_bounds(p)) return finish_error("Out of bounds");
         }
+        if (arc_checked < arc.segments) return AGAIN;
         if (!ensure_motors()) return DONE;
         apply_motion_words(false);
         laser_motion_queued();
@@ -244,6 +290,7 @@ static step_t g_arc(bool clockwise)
         arc_point(&arc, cur_phase, &p[AX_X], &p[AX_Y]);
         (void)motion_move(p, feed_g1, accel_print, laser_block_power(false));
         cur_phase++;
+        planner_poll(hal_ms());
     }
     return finish_ok();
 }
@@ -333,16 +380,22 @@ static step_t m_laser_on(void)
     if (gc_has(&cur, 'I')) {
         if (!check_power_word()) return finish_error("S out of range");
         if (!hal_usb_link_ok()) return finish_error("No USB host");
+        uint32_t cs;
+        if (!output_section_begin(&cs)) return AGAIN;
         laser_m3_inline();
         if (gc_num(&cur, 'S')) laser_set_modal((uint8_t)gc_int(&cur, 'S'));
+        hal_cs_exit(cs);
         return finish_ok();
     }
     if (!check_power_word()) return finish_error("S out of range");
     if (!wait_stillstand()) return AGAIN;
     uint8_t s = gc_num(&cur, 'S') ? (uint8_t)gc_int(&cur, 'S') : 0;
     if (s && !hal_usb_link_ok()) return finish_error("No USB host");
+    uint32_t cs;
+    if (!output_section_begin(&cs)) return AGAIN;
     laser_m3_continuous(s);
     continuous_since = hal_ms();
+    hal_cs_exit(cs);
     return finish_ok();
 }
 
@@ -354,8 +407,21 @@ static step_t m_relay(bool on)
     }
     if (!wait_stillstand()) return AGAIN;
     if (on && gc_num(&cur, 'S')) on = gc_fix(&cur, 'S') > 0;
+    uint32_t cs;
+    if (!output_section_begin(&cs)) return AGAIN;
     relay_on = on;
     hal_relay(on);
+    hal_cs_exit(cs);
+    return finish_ok();
+}
+
+static step_t m_exhaust(bool on)
+{
+    uint32_t cs;
+    if (!output_section_begin(&cs)) return AGAIN;
+    exhaust_on = on;
+    hal_exhaust(on);
+    hal_cs_exit(cs);
     return finish_ok();
 }
 
@@ -366,8 +432,11 @@ static step_t m_light(void)
         if (p < 0 || p > 255) return finish_error("P out of range");
         light_level = (uint8_t)p;
     }
+    uint32_t cs;
+    if (!output_section_begin(&cs)) return AGAIN;
     if (gc_num(&cur, 'S')) light_on = gc_fix(&cur, 'S') != 0;
     hal_light(light_on ? light_level : 0);
+    hal_cs_exit(cs);
     return finish_ok();
 }
 
@@ -392,8 +461,12 @@ static step_t m_steps_per_mm(void)
     static const char LETTER[AXES] = {'X', 'Y', 'Z'};
     if (!wait_stillstand()) return AGAIN;
     for (int a = 0; a < AXES; a++) {
-        if (gc_has(&cur, LETTER[a]) && (!gc_num(&cur, LETTER[a]) || gc_fix(&cur, LETTER[a]) <= 0))
+        if (!gc_has(&cur, LETTER[a])) continue;
+        int64_t v = gc_fix(&cur, LETTER[a]);
+        if (!gc_num(&cur, LETTER[a]) || v < STEPS_MM_MIN * (int64_t)GC_UNIT ||
+            v > STEPS_MM_MAX * (int64_t)GC_UNIT) {
             return finish_error("Invalid value");
+        }
     }
     for (int a = 0; a < AXES; a++) {
         if (gc_num(&cur, LETTER[a])) motion_set_steps_mm(a, fix_to_float(gc_fix(&cur, LETTER[a])));
@@ -433,7 +506,7 @@ static step_t m_position(void)
 static step_t m_identify(void)
 {
     out_str("FIRMWARE_NAME:" LUMACUT_ID " " LUMACUT_VERSION " (" __DATE__ " " __TIME__
-            ") MACHINE_TYPE:" LUMACUT_ID "\nCap:Z_PROBE:1\nCap:SELF_UPDATE:1\n");
+            ") MACHINE_TYPE:" LUMACUT_ID "\nCap:Z_PROBE:1\nCap:SELF_UPDATE:1\nCap:Z_UNHOMED_LIFT:" STR(Z_UNHOMED_LIFT_MM) "\n");
     return finish_ok();
 }
 
@@ -549,14 +622,8 @@ static step_t dispatch(void)
             if (gc_has(&cur, 'I')) laser_m5_inline();
             else laser_m5();
             return finish_ok();
-        case 8:
-            exhaust_on = true;
-            hal_exhaust(true);
-            return finish_ok();
-        case 9:
-            exhaust_on = false;
-            hal_exhaust(false);
-            return finish_ok();
+        case 8: return m_exhaust(true);
+        case 9: return m_exhaust(false);
         case 17: {
             if (!wait_stillstand()) return AGAIN;
             if (!ensure_motors()) return DONE;
@@ -665,6 +732,11 @@ static void handle_stops(void)
         rx_mark_discard();
         abort_gen = abort_gen + 1;
     }
+    if (reason == SG_STOP_UNDERRUN) {
+        out_str("Error:Planner underrun\n");
+        rx_mark_discard();
+        abort_gen = abort_gen + 1;
+    }
     if (reason == SG_STOP_SEEK) homing_note_switch_hit();
     if (reason != SG_STOP_NONE || rt_flush) {
         uint32_t cs = hal_cs_enter();
@@ -672,6 +744,7 @@ static void handle_stops(void)
         hal_cs_exit(cs);
         motion_resync();
         sg_stop_clear();
+        if (reason == SG_STOP_UNDERRUN) motion_set_unhomed(7); // steps were lost
     }
     while (rt_m112_acks) {
         cmd_reply_ok();
@@ -718,8 +791,9 @@ static void check_link(uint32_t now)
         out_str(hal_reset_cause());
         out_nl();
     }
-    if (laser_continuous() && now - rx_last_line_ms() > USB_SILENCE_MS &&
-        now - continuous_since > USB_SILENCE_MS) {
+    // Signed: a line can arrive after `now` was read, then the difference is -1.
+    if (laser_continuous() && (int32_t)(now - rx_last_line_ms()) > (int32_t)USB_SILENCE_MS &&
+        (int32_t)(now - continuous_since) > (int32_t)USB_SILENCE_MS) {
         laser_kill(); // rule 6
         out_str("echo:Laser off: USB silent\n");
     }

@@ -12,6 +12,7 @@ limits_t *motion_limits(void);
 
 int32_t motion_pos(int axis); // planned position, 1e-5 mm
 bool motion_in_bounds(const int32_t target[AXES]);
+bool motion_z_lift_allowed(float delta_mm); // for moves that skip the travel check
 
 // Straight move to a target in 1e-5 mm. Checks bounds, queues the block.
 move_result_t motion_move(const int32_t target[AXES], float speed, float accel, uint8_t power);

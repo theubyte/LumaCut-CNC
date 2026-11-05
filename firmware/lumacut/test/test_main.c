@@ -11,6 +11,7 @@ void test_endstops(void);
 void test_estop(void);
 void test_update(void);
 void test_commands(void);
+void test_review(void);
 
 int main(void)
 {
@@ -21,7 +22,7 @@ int main(void)
         {"parser", test_parser},     {"crc", test_crc},         {"tmc", test_tmc},
         {"planner", test_planner},   {"arc", test_arc},         {"laser", test_laser},
         {"endstops", test_endstops}, {"estop", test_estop},     {"update", test_update},
-        {"commands", test_commands},
+        {"commands", test_commands}, {"review", test_review},
     };
     for (size_t i = 0; i < sizeof groups / sizeof groups[0]; i++) {
         int before_c = t_checks, before_f = t_failed;
