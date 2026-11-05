@@ -64,11 +64,16 @@ Hook liefert zu einer Ebenen-Änderung abgeleitete Attribute, die
    **Testzelle als Preset…**): Material/Dicke/Operation/Laser aus dem Dialog,
    Leistung/Geschwindigkeit/Durchgänge/Z aus der Zelle, Zeilenabstand und
    Hinweise aus der Bibliothek. Ist keine Testzelle aktiv, fragt der Dialog
-   nach der Zelle.
+   nach der Zelle. War der **Zeilenabstand** eine Raster-Achse, gilt der
+   Abstand der Zelle (auf den Pi-Bereich 0,01–5 mm begrenzt, nicht beim
+   Schneiden); Durchgänge werden auf 1–30 begrenzt. Getestete Achsen stehen
+   im Namen (z. B. „Test P40% F900 A0.15mm 3×“). Reine Leistung/Geschwindigkeit-
+   Raster verhalten sich wie bisher.
 3. Das Preset (`source: "test"`) erscheint unter „Gespeichert“ und im
    Preset-Menü des Ebenen-Panels.
 
-API: `lumacut_materials.testgrid.preset_from_test_cell(db, layer, material_id, op, thickness)`.
+API: `lumacut_materials.testgrid.preset_from_test_cell(db, layer, material_id, op, thickness, cells=find_test_cells(doc))`;
+`tested_axes(cells)` liefert die variierenden Zusatz-Achsen.
 
 ## Kerf, Haltestege, Anfahrt
 

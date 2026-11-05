@@ -436,7 +436,8 @@ class MaterialLibraryDialog(QDialog):
         try:
             p = preset_from_test_cell(self.db, layer, self.material.currentData(), op,
                                       self._thickness(), self.laser.currentData(),
-                                      depth_mm=self.relief_depth.value() if op == "relief" else None)
+                                      depth_mm=self.relief_depth.value() if op == "relief" else None,
+                                      cells=find_test_cells(self.editor.document))
         except (MaterialError, ValueError) as exc:
             QMessageBox.warning(self, "Materialtest", str(exc))
             return None

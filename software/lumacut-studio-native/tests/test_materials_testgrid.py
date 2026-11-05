@@ -124,3 +124,71 @@ def test_main_window_menu_and_design_material_field(qapp, tmp_path):
     assert not win.canvas.document.layer(lid).material_ref
     win.canvas.undo_stack.setClean()
     win.close()
+
+
+# --- Achsen-Parameter (Linienabstand, Durchgänge) ----------------------------------------
+
+def _axis_grid(**kw):
+    doc = Document()
+    add_material_test(doc, MaterialTestSpec(**kw))
+    return find_test_cells(doc)
+
+
+def test_power_speed_grid_keeps_planned_interval(db):
+    cells = _axis_grid(columns=2, rows=2, line_interval_mm=0.2)
+    from lumacut_materials.testgrid import tested_axes
+    assert tested_axes(cells) == set()
+    old = preset_from_test_cell(db, cells[0], "slate", "engrave_surface")
+    new = preset_from_test_cell(db, cells[0], "slate", "engrave_surface", cells=cells)
+    assert new.to_dict() == old.to_dict()
+
+
+def test_interval_axis_takes_cell_interval(db):
+    cells = _axis_grid(column_param="interval", row_param="power", columns=3, rows=2,
+                       line_interval_mm=0.1, interval_max=0.3)
+    cell = max(cells, key=lambda c: c.line_interval_mm)
+    p = preset_from_test_cell(db, cell, "slate", "engrave_surface", cells=cells)
+    assert p.line_interval_mm == pytest.approx(cell.line_interval_mm) == pytest.approx(0.3)
+    assert "A0.3mm" in p.name
+    # Schneiden kennt keinen Zeilenabstand
+    c = preset_from_test_cell(db, cell, "basswood_plywood", "cut", 3.0, cells=cells)
+    assert c.line_interval_mm is None
+
+
+def test_passes_axis_takes_cell_passes(db):
+    cells = _axis_grid(column_param="passes", row_param="power", columns=3, rows=2,
+                       passes_max=3, line_interval_mm=0)
+    cell = [c for c in cells if c.passes == 3][0]
+    p = preset_from_test_cell(db, cell, "basswood_plywood", "cut", 3.0, cells=cells)
+    assert p.passes == 3 and p.depth_per_pass_mm == pytest.approx(1.0) and "3×" in p.name
+
+
+def test_tested_values_fit_pi_limits(db):
+    from lumacut_materials.remote import preset_to_material
+    cells = _axis_grid(column_param="interval", row_param="power", columns=2, rows=1,
+                       line_interval_mm=0.1, interval_max=0.2)
+    cell = cells[0]
+    cell.line_interval_mm, cell.passes = 12.0, 99  # von Hand verstellt
+    p = preset_from_test_cell(db, cell, "slate", "engrave_surface", cells=cells)
+    assert p.line_interval_mm == 5.0 and p.passes == 30
+    m = preset_to_material(p.to_dict())
+    assert m["interval_mm"] == 5.0 and m["passes"] == 30
+    # ohne Zeilenabstand bleibt das Feld weg (Pi setzt 0,1)
+    q = preset_from_test_cell(db, cells[1], "basswood_plywood", "cut", 3.0, cells=cells)
+    assert "interval_mm" not in preset_to_material(q.to_dict())
+
+
+def test_dialog_saves_interval_cell(editor, tmp_path, db):
+    from lumacut_materials.dialog import MaterialLibraryDialog
+    from lumacut_materials.presets import PresetStore
+    doc = editor.document
+    add_material_test(doc, MaterialTestSpec(column_param="interval", row_param="passes", columns=2,
+                                            rows=2, line_interval_mm=0.1, interval_max=0.2,
+                                            passes_max=2))
+    best = find_test_cells(doc)[-1]
+    dlg = MaterialLibraryDialog(editor, store=PresetStore(tmp_path / "p.json"), db=db)
+    dlg.select("slate", None, "engrave_surface")
+    p = dlg.save_test_cell(name="Schiefer getestet", layer=best)
+    assert p is not None
+    assert p.line_interval_mm == pytest.approx(best.line_interval_mm) and p.passes == best.passes
+    dlg.close()
