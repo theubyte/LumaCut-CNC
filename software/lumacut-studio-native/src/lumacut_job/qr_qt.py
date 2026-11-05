@@ -10,6 +10,10 @@ Umrisse gelasert und der Code wäre nicht lesbar.
 „Art“: Text / Adresse, GS1 QR-Code (Elementstring „(01)…(10)…“, FNC1-Modus) oder
 GS1 Digital Link (Elementstring + Domain → Web-Adresse, oder eine fertige
 Digital-Link-Adresse, die geprüft wird).
+
+„UTF-8 kennzeichnen (ECI)“ (nur Text, Standard für neue Codes): Umlaute und Sonderzeichen
+bekommen die Zeichensatz-Kennung ECI 26, japanischer Text den Kanji-Modus. Ältere Codes ohne
+die Einstellung öffnen ausgeschaltet und bleiben beim Bearbeiten bitgleich.
 """
 
 from __future__ import annotations
@@ -52,7 +56,7 @@ class QrDialog(QDialog):
     def __init__(self, parent=None, spec: qr.QrSpec | None = None, active_layer=None):
         super().__init__(parent)
         self.setWindowTitle("QR-Code einfügen")
-        s = (spec or qr.QrSpec()).normalized()
+        s = (spec or qr.QrSpec(eci=True)).normalized()
         form = QFormLayout(self)
         self.mode = QComboBox()
         for key in qr.MODES:
@@ -87,6 +91,12 @@ class QrDialog(QDialog):
         self.quiet.setValue(s.quiet_zone)
         self.quiet.setToolTip("Heller Rand um den Code (Norm: 4 Module); wird freigehalten, "
                               "invertiert mitgraviert")
+        self.eci = QCheckBox("UTF-8 kennzeichnen (ECI) – Umlaute / Sonderzeichen sicher lesbar")
+        self.eci.setChecked(s.eci)
+        self.eci.setToolTip("Text mit Umlauten, „°“, „€“ … bekommt die Zeichensatz-Kennung "
+                            "ECI 26 (UTF-8), damit Handys und Scanner ihn nicht raten müssen; "
+                            "japanischer Text nutzt den kompakten Kanji-Modus. Reiner ASCII-Text "
+                            "ändert sich nicht. Aus: wie ältere Codes (ohne Kennung)")
         self.invert = QCheckBox("Invertiert (helle Module lasern – für Material, das hell wird)")
         self.invert.setChecked(s.invert)
         fills = layer_fills(active_layer)
@@ -109,6 +119,7 @@ class QrDialog(QDialog):
         self.content.setWordWrap(True)
         self.content.setTextInteractionFlags(Qt.TextSelectableByMouse)
         form.addRow("", self.content)
+        form.addRow("", self.eci)
         form.addRow("Fehlerkorrektur", self.ec)
         form.addRow("Größe", self.size_mm)
         form.addRow("Ruhezone", self.quiet)
@@ -126,6 +137,7 @@ class QrDialog(QDialog):
         self.text.textChanged.connect(self._update)
         self.mode.currentIndexChanged.connect(self._mode_changed)
         self.domain.textChanged.connect(self._update)
+        self.eci.toggled.connect(self._update)
         self.ec.currentIndexChanged.connect(self._update)
         self.size_mm.valueChanged.connect(self._update)
         self.quiet.valueChanged.connect(self._update)
@@ -136,7 +148,7 @@ class QrDialog(QDialog):
         return qr.QrSpec(text=self.text.text(), ec=self.ec.currentData(),
                          size_mm=self.size_mm.value(), quiet_zone=self.quiet.value(),
                          invert=self.invert.isChecked(), mode=self.mode.currentData(),
-                         domain=self.domain.text()).normalized()
+                         domain=self.domain.text(), eci=self.eci.isChecked()).normalized()
 
     def _mode_changed(self) -> None:
         mode = self.mode.currentData()
@@ -147,6 +159,7 @@ class QrDialog(QDialog):
         if self.domain_label is not None:
             self.domain_label.setVisible(link)
         self.content.setVisible(mode != "text")
+        self.eci.setVisible(mode == "text")
         self._update()
 
     def _insert_example(self) -> None:

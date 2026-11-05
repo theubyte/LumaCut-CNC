@@ -23,8 +23,15 @@ Text-Modus (:func:`encode_text`, ``QrSpec.encode``): ebenfalls gemischte Segment
 Byte), aber nur, wenn das eine *kleinere Version* ergibt als ein einziges
 Byte-Segment – sonst bleibt die Matrix bitgleich zum bisherigen Byte-Segment
 (:func:`encode`), damit bestehende Codes beim Bearbeiten nicht ohne Gewinn
-anders aussehen. Text mit Nicht-ASCII-Zeichen bleibt ein Byte-Segment (UTF-8 ohne
-ECI; Scanner erraten den Zeichensatz je Segment, geteilte Segmente wären unsicher).
+anders aussehen.
+
+Nicht-ASCII-Text (Umlaute, „°“, „€“, Emoji …): mit ``QrSpec.eci`` (Standard für neue Codes)
+steht vor den Daten die Zeichensatz-Kennung ECI 26 (UTF-8, ISO/IEC 18004 7.4.2), so dass
+Handys und Scanner den Text nicht raten müssen; dann sind auch gemischte Segmente sicher.
+Japanischer Text (Kana/Kanji, alle Nicht-ASCII-Zeichen in Shift JIS) nutzt stattdessen den
+Kanji-Modus (13 Bit je Zeichen statt 24 Bit UTF-8, ohne ECI – den Kanji-Modus lesen Scanner
+immer als Shift JIS). Ohne ``eci`` (ältere Dokumente) bleibt Nicht-ASCII-Text wie bisher ein
+Byte-Segment ohne Kennung (bitgleich).
 """
 
 from __future__ import annotations
@@ -416,10 +423,53 @@ def encode(text: str, ec: str = "M", min_version: int = MIN_VERSION, mask: int |
 # --- Gemischte Segmente (numerisch / alphanumerisch / Byte), GS1 ----------------------
 ALNUM_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:"
 _ALNUM = {c: i for i, c in enumerate(ALNUM_CHARS)}
-_MODE_IND = {"N": 0b0001, "A": 0b0010, "B": 0b0100}
-_COUNT_BITS = {"N": (10, 12, 14), "A": (9, 11, 13), "B": (8, 16, 16)}
+_MODE_IND = {"N": 0b0001, "A": 0b0010, "B": 0b0100, "K": 0b1000}
+_COUNT_BITS = {"N": (10, 12, 14), "A": (9, 11, 13), "B": (8, 16, 16), "K": (8, 10, 12)}
 FNC1_FIRST = 0b0101
 GS = 0x1D
+ECI_MODE = 0b0111
+ECI_UTF8 = 26                  # ECI-Kennung UTF-8 (AIM ECI-Register)
+# Kanji-Zeichen als Eingabe-Element: KANJI_BASE + 13-Bit-Wert (über Byte 0–255 und gs1.FNC1).
+KANJI_BASE = 0x10000
+
+
+def kanji_value(ch: str) -> int | None:
+    """13-Bit-Wert eines Zeichens im QR-Kanji-Modus (Shift JIS 0x8140–0x9FFC, 0xE040–0xEBBF)."""
+    try:
+        b = ch.encode("shift_jis")
+    except (UnicodeEncodeError, LookupError):
+        return None
+    if len(b) != 2:
+        return None
+    code = (b[0] << 8) | b[1]
+    if 0x8140 <= code <= 0x9FFC:
+        code -= 0x8140
+    elif 0xE040 <= code <= 0xEBBF:
+        code -= 0xC140
+    else:
+        return None
+    return (code >> 8) * 0xC0 + (code & 0xFF)
+
+
+def _is_japanese(ch: str) -> bool:
+    o = ord(ch)
+    return (0x3040 <= o <= 0x30FF or 0x3400 <= o <= 0x4DBF or 0x4E00 <= o <= 0x9FFF
+            or 0xF900 <= o <= 0xFAFF)
+
+
+def eci_bits(designator: int) -> list[int]:
+    """ECI-Kopf (Modus 0111 + Kennung, 1–3 Bytes je nach Größe)."""
+    bits: list[int] = []
+    _put(bits, ECI_MODE, 4)
+    if designator < 0x80:
+        _put(bits, designator, 8)
+    elif designator < 0x4000:
+        _put(bits, 0b10 << 14 | designator, 16)
+    elif designator < 1000000:
+        _put(bits, 0b110 << 21 | designator, 24)
+    else:
+        raise ValueError("ECI-Kennung zu groß")
+    return bits
 
 
 def _version_class(ver: int) -> int:
@@ -432,6 +482,10 @@ def _units(item: int, mode: str, gs1_mode: bool):
     GS1: FNC1 ist im alphanumerischen Modus „%“, ein echtes „%“ wird „%%“; im Byte-Modus ist
     FNC1 das Steuerzeichen GS (0x1D).
     """
+    if item >= KANJI_BASE:
+        return (item - KANJI_BASE,) if mode == "K" else None
+    if mode == "K":
+        return None
     if item == gs1.FNC1:
         return ("%",) if mode == "A" else ((GS,) if mode == "B" else None)
     if mode == "B":
@@ -447,15 +501,16 @@ def _units(item: int, mode: str, gs1_mode: bool):
 def segments(items: list[int], ver: int, gs1_mode: bool = False) -> list[tuple[str, list]]:
     """Kürzeste Segmentfolge [(Modus, Zeichen)] für die Versionsklasse von ``ver``.
 
-    Dynamische Programmierung über die drei Modi mit Kosten in 1/6 Bit (numerisch 10/3,
-    alphanumerisch 11/2, Byte 8 Bit je Zeichen, Kopf 4 + Zählerbits je Segment) – wie der
-    Segment-Optimierer der Referenz-Implementierung von Project Nayuki.
+    Dynamische Programmierung über die Modi mit Kosten in 1/6 Bit (numerisch 10/3,
+    alphanumerisch 11/2, Byte 8, Kanji 13 Bit je Zeichen, Kopf 4 + Zählerbits je Segment) – wie
+    der Segment-Optimierer der Referenz-Implementierung von Project Nayuki. Den Kanji-Modus gibt
+    es nur für Elemente ab ``KANJI_BASE`` (die nur dort darstellbar sind).
     """
     if not items:
         return []
     cls = _version_class(ver)
-    modes = ("N", "A", "B")
-    unit_cost = {"N": 20, "A": 33, "B": 48}
+    modes = ("N", "A", "B", "K") if any(it >= KANJI_BASE for it in items) else ("N", "A", "B")
+    unit_cost = {"N": 20, "A": 33, "B": 48, "K": 78}
     head = {m: (4 + _COUNT_BITS[m][cls]) * 6 for m in modes}
     inf = float("inf")
     cost = {m: inf for m in modes}
@@ -495,9 +550,10 @@ def segments(items: list[int], ver: int, gs1_mode: bool = False) -> list[tuple[s
     return out
 
 
-def segment_bits(segs: list[tuple[str, list]], ver: int, fnc1_first: bool = False) -> list[int]:
+def segment_bits(segs: list[tuple[str, list]], ver: int, fnc1_first: bool = False,
+                 eci: int | None = None) -> list[int]:
     cls = _version_class(ver)
-    bits: list[int] = []
+    bits: list[int] = eci_bits(eci) if eci is not None else []
     if fnc1_first:
         _put(bits, FNC1_FIRST, 4)
     for mode, chars in segs:
@@ -515,6 +571,9 @@ def segment_bits(segs: list[tuple[str, list]], ver: int, fnc1_first: bool = Fals
                 _put(bits, _ALNUM[chars[i]] * 45 + _ALNUM[chars[i + 1]], 11)
             if n % 2:
                 _put(bits, _ALNUM[chars[-1]], 6)
+        elif mode == "K":
+            for v in chars:
+                _put(bits, v, 13)
         else:
             for b in chars:
                 _put(bits, b, 8)
@@ -522,8 +581,10 @@ def segment_bits(segs: list[tuple[str, list]], ver: int, fnc1_first: bool = Fals
 
 
 def mixed_bits(items: list[int], ec: str = "M", fnc1_first: bool = False,
-               min_version: int = MIN_VERSION) -> tuple[int, list[int]]:
-    """Kleinste Version und Datenbits mit optimalen Segmenten (ohne Terminator/Auffüllen)."""
+               min_version: int = MIN_VERSION, eci: int | None = None) -> tuple[int, list[int]]:
+    """Kleinste Version und Datenbits mit optimalen Segmenten (ohne Terminator/Auffüllen).
+
+    ``eci``: Zeichensatz-Kennung (z. B. :data:`ECI_UTF8`) vor den Segmenten."""
     ec = _check_level(ec)
     items = list(items)
     if not items:
@@ -533,7 +594,7 @@ def mixed_bits(items: list[int], ec: str = "M", fnc1_first: bool = False,
     best_bits = None
     for v in range(max(MIN_VERSION, int(min_version)), MAX_VERSION + 1):
         try:
-            bits = segment_bits(segments(items, v, fnc1_first), v, fnc1_first)
+            bits = segment_bits(segments(items, v, fnc1_first), v, fnc1_first, eci)
         except ValueError:
             continue
         best_bits = bits if best_bits is None or len(bits) < len(best_bits) else best_bits
@@ -552,18 +613,57 @@ def encode_items(items: list[int], ec: str = "M", fnc1_first: bool = False,
     return _bits_to_code(ver, ec, bits, mask)
 
 
-def text_segments(text: str, ec: str = "M", min_version: int = MIN_VERSION) -> list[tuple[str, list]]:
-    """Segmente, die :func:`encode_text` für ``text`` verwendet ([("B", Bytes)] = ein Byte-Segment)."""
+TEXT_CHARSETS = ("ascii", "bytes", "eci", "kanji")
+
+
+def text_charset(text: str, eci: bool = False) -> str:
+    """Wie :func:`encode_text` ``text`` kodiert.
+
+    ``"ascii"`` (nur ASCII: numerisch / alphanumerisch / Byte wie bisher), ``"bytes"``
+    (Nicht-ASCII ohne ``eci``: ein Byte-Segment UTF-8 ohne Kennung, bisheriges Verhalten),
+    ``"kanji"`` (japanischer Text, alle Nicht-ASCII-Zeichen im Kanji-Modus darstellbar, kein „\\“
+    oder „~“, die in Shift JIS anders aussehen) oder ``"eci"`` (ECI 26 UTF-8 + Segmente).
+    """
+    text = text or ""
+    if all(ord(c) < 0x80 for c in text):
+        return "ascii"
+    if not eci:
+        return "bytes"
+    if (any(_is_japanese(c) for c in text) and "\\" not in text and "~" not in text
+            and all(ord(c) < 0x80 or kanji_value(c) is not None for c in text)):
+        return "kanji"
+    return "eci"
+
+
+def text_items(text: str, charset: str) -> list[int]:
+    """Eingabe-Elemente für :func:`segments`: UTF-8-Bytes bzw. im Kanji-Modus Kanji-Elemente."""
+    if charset == "kanji":
+        return [ord(c) if ord(c) < 0x80 else KANJI_BASE + kanji_value(c) for c in text]
+    return list((text or "").encode("utf-8"))
+
+
+def text_segments(text: str, ec: str = "M", min_version: int = MIN_VERSION,
+                  eci: bool = False) -> list[tuple[str, list]]:
+    """Segmente, die :func:`encode_text` für ``text`` verwendet ([("B", Bytes)] = ein Byte-Segment).
+
+    Mit ``eci`` und Nicht-ASCII-Text steht davor noch die ECI-Kennung (siehe :func:`text_charset`).
+    """
     ec = _check_level(ec)
     data = (text or "").encode("utf-8")
     if not data:
         raise ValueError("Kein Text für den QR-Code")
+    charset = text_charset(text, eci)
+    if charset in ("eci", "kanji"):
+        items = text_items(text, charset)
+        ver, _bits = mixed_bits(items, ec, False, min_version,
+                                ECI_UTF8 if charset == "eci" else None)
+        return segments(items, ver)
     byte_ver = None
     try:
         byte_ver = choose_version(len(data), ec, min_version)
     except ValueError:
         pass
-    if max(data) >= 0x80:          # Nicht-ASCII: ein Byte-Segment (Zeichensatz-Erkennung)
+    if charset == "bytes":         # Nicht-ASCII ohne ECI: ein Byte-Segment (Zeichensatz-Erkennung)
         if byte_ver is None:
             choose_version(len(data), ec, min_version)   # deutsche Fehlermeldung
         return [("B", list(data))]
@@ -579,13 +679,22 @@ def text_segments(text: str, ec: str = "M", min_version: int = MIN_VERSION) -> l
 
 
 def encode_text(text: str, ec: str = "M", min_version: int = MIN_VERSION,
-                mask: int | None = None) -> QrCode:
+                mask: int | None = None, eci: bool = False) -> QrCode:
     """Text als QR-Code mit gemischten Segmenten, wenn das eine kleinere Version ergibt.
 
-    Sonst (und bei Nicht-ASCII-Text) identisch mit :func:`encode` (ein Byte-Segment), so
-    dass bestehende Codes bitgleich bleiben, solange sie nicht kleiner werden können.
+    Sonst (und bei Nicht-ASCII-Text ohne ``eci``) identisch mit :func:`encode` (ein
+    Byte-Segment), so dass bestehende Codes bitgleich bleiben, solange sie nicht kleiner werden
+    können. Mit ``eci`` bekommt Nicht-ASCII-Text die Kennung ECI 26 (UTF-8) bzw. bei
+    japanischem Text den Kanji-Modus (:func:`text_charset`).
     """
     ec = _check_level(ec)
+    charset = text_charset(text, eci)
+    if charset in ("eci", "kanji"):
+        if not text:
+            raise ValueError("Kein Text für den QR-Code")
+        ver, bits = mixed_bits(text_items(text, charset), ec, False, min_version,
+                               ECI_UTF8 if charset == "eci" else None)
+        return _bits_to_code(ver, ec, bits, mask)
     segs = text_segments(text, ec, min_version)
     if len(segs) == 1 and segs[0][0] == "B":
         return encode(text, ec, min_version, mask)
@@ -596,7 +705,7 @@ def encode_text(text: str, ec: str = "M", min_version: int = MIN_VERSION,
 
 def segment_summary(segs: list[tuple[str, list]]) -> str:
     """Kurzbeschreibung für den Dialog, z. B. „Segmente: Byte 8, numerisch 12“."""
-    names = {"N": "numerisch", "A": "alphanumerisch", "B": "Byte"}
+    names = {"N": "numerisch", "A": "alphanumerisch", "B": "Byte", "K": "Kanji"}
     return "Segmente: " + ", ".join(f"{names[m]} {len(c)}" for m, c in segs)
 
 
@@ -659,6 +768,9 @@ class QrSpec:
     y: float = 0.0
     mode: str = "text"      # "text", "gs1" (GS1 QR-Code) oder "link" (GS1 Digital Link)
     domain: str = gs1_link.DEFAULT_DOMAIN   # nur "link" mit Elementstring
+    # Nur "text": Nicht-ASCII mit ECI 26 (UTF-8) bzw. Kanji-Modus. Fehlt in älteren
+    # Dokumenten → False (bitgleich wie bisher); neue Codes aus dem Dialog: True.
+    eci: bool = False
 
     def normalized(self) -> "QrSpec":
         ec = str(self.ec).upper()
@@ -668,7 +780,8 @@ class QrSpec:
                       size_mm=float(_clamp(float(self.size_mm), *SIZE_RANGE)),
                       quiet_zone=int(_clamp(int(self.quiet_zone), *QUIET_RANGE)),
                       invert=bool(self.invert), x=float(self.x), y=float(self.y),
-                      mode=mode if mode in MODES else "text", domain=domain)
+                      mode=mode if mode in MODES else "text", domain=domain,
+                      eci=bool(self.eci))
 
     def content(self) -> str:
         """Was ein Scanner liest: Text, GS1-Elementstring (normalisiert) oder Digital-Link-Adresse.
@@ -688,7 +801,7 @@ class QrSpec:
             return encode_gs1(s.text, s.ec, mask=mask)
         if s.mode == "link":
             return encode_link(s.text, s.ec, s.domain, mask=mask)
-        return encode_text(s.text, s.ec, mask=mask)
+        return encode_text(s.text, s.ec, mask=mask, eci=s.eci)
 
     def total_mm(self, code: QrCode) -> float:
         s = self.normalized()
@@ -752,8 +865,8 @@ def qr_shapes(spec: QrSpec, layer_id: str, code: QrCode | None = None) -> list[S
 
 
 def content_info(spec: QrSpec) -> str:
-    """Deutsche Zeile für den Dialog: was im GS1-Code steht; im Text-Modus die gemischten
-    Segmente, falls sie den Code verkleinern (sonst "")."""
+    """Deutsche Zeile für den Dialog: was im GS1-Code steht; im Text-Modus der Zeichensatz bei
+    Nicht-ASCII-Text und die gemischten Segmente, falls sie den Code verkleinern (sonst "")."""
     s = spec.normalized()
     if s.mode == "gs1":
         return "GS1-Daten: " + s.content()
@@ -761,9 +874,18 @@ def content_info(spec: QrSpec) -> str:
         uri, link = gs1_link.resolve(s.text, s.domain)
         return f"Adresse: {uri} ({gs1_link.describe(link)})"
     try:
-        segs = text_segments(s.text, s.ec)
+        segs = text_segments(s.text, s.ec, eci=s.eci)
     except ValueError:
         return ""
+    charset = text_charset(s.text, s.eci)
+    if charset == "eci":
+        return "Zeichensatz UTF-8 (ECI 26) – Umlaute / Sonderzeichen werden sicher erkannt; " + \
+            segment_summary(segs)
+    if charset == "kanji":
+        return "Kanji-Modus (Shift JIS) – japanischer Text kompakt; " + segment_summary(segs)
+    if charset == "bytes":
+        return ("UTF-8 ohne Zeichensatz-Kennung (älterer Code) – manche Scanner zeigen Umlaute "
+                "falsch; „UTF-8 kennzeichnen“ einschalten")
     if len(segs) == 1 and segs[0][0] == "B":
         return ""
     return segment_summary(segs) + " (kleinere Version als ein Byte-Segment)"
