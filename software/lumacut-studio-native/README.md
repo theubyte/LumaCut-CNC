@@ -149,7 +149,9 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     Berührung ignoriert (keine doppelte Ausführung); Touchpad-Gesten bleiben beim System.
 - **Ebenen:** Farbe, Name, sichtbar, gesperrt, Reihenfolge; je Ebene
   Leistung (1–100 %), Geschwindigkeit (1–6000 mm/min) und Durchgänge (1–30),
-  optional Material/Dicke/Tiefe je Durchgang (siehe „Material-Grundlage“).
+  optional `z_step` (Fokus-Absenkung je Durchgang) und `z_offset` (relativer
+  Fokus-Versatz der ganzen Ebene, negativ = näher am Material; Materialtest-
+  Fokusachse), optional Material/Dicke/Tiefe je Durchgang (siehe „Material-Grundlage“).
   Die **Geschwindigkeits-Einheit** (Auswahl neben dem Feld: *mm/min* oder *mm/s*, wie
   LightBurn) gilt für Ebenen-Liste, Ebenen-Feld, Bild-Einstellungen, Materialtest und
   Scan-Versatz zugleich und wird als App-Einstellung gemerkt; intern und in Datei/G-Code
@@ -408,26 +410,35 @@ layer_pass_plan(layer)           # mit den eingestellten layer.passes (Override)
   wird. Jede Änderung ist ein Undo-Schritt (`SetLayerAttrsCommand`). „manuell“ wird aus
   `passes ≠ ceil(Tiefe/Tiefe je Durchgang)` erkannt (kein eigenes Override-Feld).
 
-### Materialtest: Parameter je Achse (Leistung, Tempo, Linienabstand, Durchgänge)
+### Materialtest: Parameter je Achse (Leistung, Tempo, Linienabstand, Durchgänge, Fokus)
 
 *Auftrag › Materialtest…* legt ein Testraster an (`lumacut_job/material_test.py`, Tests:
-`tests/test_material_test.py`, `tests/test_material_test_params.py`). Wie LightBurns
-*Material Test* (X-/Y-Parameter) und *Interval Test* ist der Parameter je Achse wählbar:
-„Spalten-Parameter“ / „Zeilen-Parameter“ = Leistung, Geschwindigkeit, Linienabstand oder
-Durchgänge (Standard: Spalten Leistung, Zeilen Geschwindigkeit – das bisherige Raster,
-G-Code byte-gleich).
+`tests/test_material_test.py`, `tests/test_material_test_params.py`,
+`tests/test_layer_z_offset.py`). Wie LightBurns *Material Test* (X-/Y-Parameter),
+*Interval Test* und *Focus Test* ist der Parameter je Achse wählbar:
+„Spalten-Parameter“ / „Zeilen-Parameter“ = Leistung, Geschwindigkeit, Linienabstand,
+Durchgänge oder Fokus-Versatz (Standard: Spalten Leistung, Zeilen Geschwindigkeit – das
+bisherige Raster, G-Code byte-gleich).
 
 - Parameter auf einer Achse laufen von „… von“ bis „… bis“; die übrigen gelten fest
   (Feld ohne „von“, „bis“ gesperrt) – z. B. Linienabstand 0,05–0,25 mm × Leistung bei
   fester Geschwindigkeit.
-- Linienabstand-Test nur mit „Füllen (Gravur)“; gleicher Parameter auf beiden Achsen oder
-  Linienabstand mit „Kontur“ sperren OK mit Hinweis.
+- Linienabstand-Test nur mit „Füllen (Gravur)“ oder „Bild“; gleicher Parameter auf beiden
+  Achsen oder Linienabstand mit „Kontur“ sperren OK mit Hinweis.
+- **Fokus-Versatz** (LightBurn *Focus Test*): relativ zum Fokus beim Start des Auftrags
+  in mm (Standard −1…+1, Bereich ±`MAX_FOCUS_DROP_MM`); negativ = näher am Material
+  (Kopf senken). Setzt `Layer.z_offset` der Zelle; der G-Code senkt/hebt relativ
+  (`G91`/`G0 Z…`/`G90`) zu Beginn der Ebene und stellt nach der Ebene (nach einer
+  etwaigen `z_step`-Rückfahrt) wieder her – braucht motorisierte Z (LumaCut hat sie).
+  Mit Füllen, Kontur und Bild-Zellen; `Fokus von`/`bis` erscheinen nur, wenn Fokus auf
+  einer Achse liegt.
 - Jede Zelle bleibt eine eigene Ebene `Test P<Leistung>% F<mm/min>` (von der
   Materialbibliothek als Testzelle erkannt; Durchgänge stehen in der Ebene, der getestete
   Linienabstand in `line_interval_mm` der Ebene – Füllung bleibt aus, die Zelle ist eine
-  Serpentine im Abstand der Zelle).
-- Beschriftung: Leistung %, Geschwindigkeit mm/s, Linienabstand mm, Durchgänge „3x“; breite
-  Zeilen-Beschriftungen verbreitern die Beschriftungsspalte (Arbeitsflächen-Prüfung inklusive).
+  Serpentine im Abstand der Zelle; der Fokus-Versatz steht in `z_offset`, nicht im Namen).
+- Beschriftung: Leistung %, Geschwindigkeit mm/s, Linienabstand mm, Durchgänge „3x“,
+  Fokus mit Vorzeichen („−1“, „+0.5“); breite Zeilen-Beschriftungen verbreitern die
+  Beschriftungsspalte (Arbeitsflächen-Prüfung inklusive).
 - Ein Undo-Schritt; Pi-sicherer G-Code wie jede andere Ebene.
 - **Bild-Testzellen** (wie LightBurns *Interval Test* „Dithered Image“, für Fotogravur):
   „Art“ = „Bild (Graustufen-Verlauf)“ legt in jede Zelle einen Graustufen-Verlauf
