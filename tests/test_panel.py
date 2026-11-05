@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import threading
 import unittest
@@ -14,6 +15,8 @@ class FakeApi:
         self.calls = []
         self.status = status or {"connected": True, "origin": {"placement": None}}
         self.answer = (200, {"message": "ok"})
+        self.workspace = {"revision": 7, "material": {"name": "MDF", "thickness_mm": 3.0}}
+        self.put_answer = (200, {"revision": 8})
 
     def json(self, method, path, form=None, timeout=15):
         self.calls.append((method, path, dict(form or {})))
@@ -23,7 +26,18 @@ class FakeApi:
             return 200, {"files": [{"name": "a.gcode", "bytes": 2048, "modified": 1}]}
         if path.endswith("/geometry"):
             return 200, {"bounds": {"xmin": 40, "ymin": 50, "xmax": 120, "ymax": 90}}
+        if path == "/api/materials":
+            return 200, {"revision": 1, "materials": [
+                {"name": "MDF", "thickness_mm": 3.0, "process": "Schneiden", "builtin": True},
+                {"name": "Leder", "thickness_mm": 2.0, "process": "Gravieren", "builtin": False},
+                {"name": "Leder", "thickness_mm": 2.0, "process": "Schneiden", "builtin": True}]}
+        if path == "/api/workspace":
+            return 200, self.workspace
         return self.answer
+
+    def send_json(self, method, path, body, timeout=15):
+        self.calls.append((method, path, dict(body)))
+        return self.put_answer
 
     def call(self, method, path, form=None, timeout=15):
         self.calls.append((method, path, dict(form or {})))
@@ -47,6 +61,15 @@ def bridge(api=None):
     b = panel.PanelBridge(api or FakeApi())
     b.port = FakePort()
     return b
+
+
+def wait_for_kind(b, kind):
+    for _ in range(200):
+        found = [m for m in b.port.messages() if m["t"] == kind]
+        if found:
+            return found[-1]
+        threading.Event().wait(0.01)
+    raise AssertionError("no %s message from the bridge" % kind)
 
 
 def wait_for_answer(b, count=1):
@@ -119,7 +142,45 @@ class PanelActionTest(unittest.TestCase):
     def test_job_list_is_sent(self):
         b = bridge()
         b.handle_line(b'{"t":"jobs"}')
-        self.assertEqual(b.port.messages()[-1], {"t": "jobs", "files": [{"name": "a.gcode", "kb": 2}]})
+        self.assertEqual(wait_for_kind(b, "jobs"), {"t": "jobs", "files": [{"name": "a.gcode", "kb": 2}]})
+
+    def test_a_job_name_the_panel_cannot_hold_is_left_out(self):
+        api = FakeApi()
+        real = api.json
+        api.json = lambda m, p, f=None, timeout=15: ((200, {"files": [
+            {"name": "x" * 96 + ".gcode", "bytes": 1}, {"name": "ü" * 40 + ".gcode", "bytes": 1}]})
+            if p == "/api/jobs" else real(m, p, f, timeout))
+        b = bridge(api)
+        b.send_jobs()
+        self.assertEqual([f["name"] for f in b.port.messages()[-1]["files"]], ["ü" * 40 + ".gcode"])
+
+    def test_long_lists_still_fit_into_one_line(self):
+        items = [{"name": "ä" * 90, "kb": 1} for _ in range(60)]
+        msg = panel.fit_line("files", items, {"t": "jobs"})
+        self.assertLessEqual(len(json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode()), panel.LINE_LIMIT)
+        self.assertGreater(len(msg["files"]), 10)
+
+    def test_a_query_does_not_block_the_line(self):
+        api = FakeApi()
+        release = threading.Event()
+        real = api.json
+        api.json = lambda m, p, f=None, timeout=15: (release.wait(5), real(m, p, f, timeout))[1]
+        b = bridge(api)
+        b.handle_line(b'{"t":"jobs"}')       # waits for the slow Pi in the background
+        api.json = real
+        b.handle_line(b'{"t":"act","id":9,"op":"estop"}')
+        wait_for_answer(b)
+        self.assertIn(("POST", "/api/action", {"op": "estop"}), api.calls)
+        release.set()
+
+    def test_a_failing_pi_does_not_end_the_session(self):
+        api = FakeApi()
+        def down(*args, **kwargs):
+            raise OSError("connection refused")
+        api.json = down
+        b = bridge(api)
+        b.answer_query("jobs")               # no exception out of it
+        self.assertEqual(b.port.out, b"")
 
     def test_noise_on_the_line_is_ignored(self):
         b = bridge()
@@ -138,6 +199,245 @@ class PanelActionTest(unittest.TestCase):
         b = bridge()
         b.send({"t": "img", "w": 2, "h": 1, "len": 3}, b"\xff\xd8\x00")
         self.assertTrue(b.port.out.endswith(b'"len":3}\n\xff\xd8\x00'))
+
+
+class PanelLimitsTest(unittest.TestCase):
+    """What the panel must never be able to do. Do not loosen this."""
+
+    FORBIDDEN = ("service_laser", "service_supply", "service_password", "service_unlock", "supply_test",
+                 "ttl_test", "z_test", "motion_test", "motion_limits", "line_laser", "matcal", "bedmap",
+                 "start", "frame", "moveto", "connect", "firmware_update_install", "panel_auto", "gcode")
+
+    def test_allowed_actions_are_exactly_these(self):
+        self.assertEqual(panel.ACTIONS, {
+            "estop": (), "estop_reset": (), "abort": (), "home": ("clear",), "jog": ("axis", "distance"),
+            "probe": (), "park": (), "light": ("on", "brightness"), "exhaust": ("on",),
+            "queue_pause": (), "queue_run": (), "autorun": ("name", "clear"), "frame_job": ("name",),
+            "material": ("name", "thickness"), "screen_off": ("minutes",), "panel_update": ()})
+
+    def test_service_menu_and_raw_gcode_are_refused_without_calling_the_pi(self):
+        for op in self.FORBIDDEN:
+            b = bridge()
+            b.handle_line(json.dumps({"t": "act", "id": 1, "op": op, "gcode": "M3 S255", "power": "100"}).encode())
+            self.assertEqual(b.api.calls, [], op)
+            self.assertFalse(b.port.messages()[-1]["ok"], op)
+
+    def test_no_allowed_action_carries_gcode_or_laser_power(self):
+        for op, fields in panel.ACTIONS.items():
+            for field in ("gcode", "power", "percent", "S"):
+                self.assertNotIn(field, fields, op)
+
+    def test_panel_sources_only_use_allowed_actions_and_known_queries(self):
+        src = (Path(panel.__file__).resolve().parents[2] / "firmware" / "panel" / "src")
+        text = (src / "ui.c").read_text(encoding="utf-8")
+        ops = set(re.findall(r'link_act\("(\w+)"', text)) | set(re.findall(r'act_(?:simple|toggle), "(\w+)"', text))
+        self.assertTrue({"estop", "autorun", "light"} <= ops)
+        self.assertEqual(ops - set(panel.ACTIONS), set())
+        for op, rest in re.findall(r'link_act\("(\w+)", ([^;]*?)NULL\)', text):
+            keys = re.findall(r'"(\w+)", (?:"[^"]*"|\w+(?:\[\w+\])?), ', rest + " ")
+            self.assertLessEqual(set(keys), set(panel.ACTIONS[op]), op)
+        queries = set(re.findall(r'link_request\("(\w+)"\)', text))
+        self.assertEqual(queries, set(panel.PanelBridge.QUERIES))
+        for name in ("service_", "\"gcode\"", "M3 "):
+            self.assertNotIn(name, text)
+
+    def test_every_drive_and_laser_action_of_the_panel_goes_through_the_go(self):
+        text = (Path(panel.__file__).resolve().parents[2] / "firmware" / "panel" / "src" / "ui.c").read_text(encoding="utf-8")
+        for op, action in (("home", "do_home"), ("park", "do_park"), ("probe", "do_probe"),
+                           ("frame_job", "do_frame"), ("autorun", "do_start"), ("queue_run", "do_resume")):
+            self.assertRegex(text, r'ask_go\([^;]*%s\)' % action, op)
+            found = re.search(r'static void %s\(void\)(?: \{ (.*?) \}\n|\n\{\n(.*?)\n\}\n)' % action, text, re.S)
+            body = found.group(1) or found.group(2)
+            self.assertIn('link_act("%s"' % op, body)
+            # nowhere else in the file: no way around the question
+            self.assertFalse('link_act("%s"' % op in text.replace(body, ""), op)
+        self.assertIn("Hände raus · Deckel zu · Schutzbrille auf", text)
+
+
+class PanelMaterialTest(unittest.TestCase):
+    def act(self, b, **fields):
+        b.handle_line(json.dumps({"t": "act", "id": 1, "op": "material", **fields}).encode())
+        wait_for_answer(b)
+        return b.port.messages()[-1]
+
+    def test_list_has_one_line_per_material_and_thickness(self):
+        b = bridge()
+        b.handle_line(b'{"t":"mats"}')
+        items = wait_for_kind(b, "mats")["items"]
+        self.assertEqual(items, [{"name": "Leder", "mm": 2.0, "proc": "Gravieren, Schneiden", "start": False},
+                                 {"name": "MDF", "mm": 3.0, "proc": "Schneiden", "start": True}])
+
+    def test_choice_goes_to_the_shared_work_state_with_its_revision(self):
+        b = bridge()
+        res = self.act(b, name="MDF", thickness="3")
+        self.assertTrue(res["ok"], res)
+        self.assertIn(("PUT", "/api/workspace", {"material": {"name": "MDF", "thickness_mm": 3.0},
+                                                 "base_revision": 7, "updated_by": "panel"}), b.api.calls)
+
+    def test_only_materials_of_the_list(self):
+        for fields in ({"name": "Holz", "thickness": "3"}, {"name": "MDF", "thickness": "59"},
+                       {"name": "MDF", "thickness": "dick"}):
+            b = bridge()
+            self.assertFalse(self.act(b, **fields)["ok"], fields)
+            self.assertFalse([c for c in b.api.calls if c[0] == "PUT"])
+
+    def test_not_while_the_machine_works(self):
+        for status in ({"activity": "job", "job": {"state": "running"}},
+                       {"activity": "idle", "job": {"state": "idle"}, "queue": {"state": "running"}},
+                       {"activity": "idle", "job": {"state": "idle"}, "laser_armed": True}):
+            b = bridge(FakeApi(status))
+            self.assertFalse(self.act(b, name="MDF", thickness="3")["ok"], status)
+            self.assertFalse([c for c in b.api.calls if c[0] == "PUT"])
+
+    def test_another_device_changed_it_meanwhile(self):
+        api = FakeApi()
+        api.put_answer = (409, {"error": "x", "revision": 9})
+        res = self.act(bridge(api), name="MDF", thickness="3")
+        self.assertFalse(res["ok"])
+        self.assertIn("nochmal", res["msg"])
+
+    def test_status_carries_the_chosen_material_and_reads_it_only_on_change(self):
+        b = bridge()
+        s = {"sync": {"workspace": 7}}
+        self.assertEqual(b.panel_fields(s)["mat"], "MDF")
+        self.assertEqual(b.panel_fields(s)["mat_mm"], 3.0)
+        self.assertEqual(len([c for c in b.api.calls if c[1] == "/api/workspace"]), 1)
+        b.api.workspace = {"revision": 8, "material": None}
+        self.assertEqual(b.panel_fields({"sync": {"workspace": 8}})["mat"], "")
+
+    def test_status_survives_a_failing_workspace(self):
+        b = bridge()
+        def down(*args, **kwargs):
+            raise OSError("down")
+        b.api.json = down
+        self.assertEqual(b.panel_fields({"sync": {"workspace": 1}})["mat"], "")
+
+
+class PanelPrefsTest(unittest.TestCase):
+    def test_screen_off_is_kept_on_the_pi(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "panel.json"
+            b = panel.PanelBridge(FakeApi(), prefs_path=path)
+            b.port = FakePort()
+            self.assertEqual(b.prefs["screen_off"], panel.SCREEN_OFF_DEFAULT)
+            b.handle_line(b'{"t":"act","id":1,"op":"screen_off","minutes":"5"}')
+            wait_for_answer(b)
+            self.assertTrue(b.port.messages()[-1]["ok"])
+            self.assertEqual(panel.PanelBridge(FakeApi(), prefs_path=path).prefs["screen_off"], 5)
+            self.assertEqual(b.panel_fields({})["soff"], 5)
+
+    def test_other_values_are_refused(self):
+        b = bridge()
+        for minutes in ("7", "-1", "bald", ""):
+            ok, _ = b.set_screen_off(minutes)
+            self.assertFalse(ok, minutes)
+        self.assertEqual(b.prefs["screen_off"], panel.SCREEN_OFF_DEFAULT)
+
+    def test_broken_file_gives_the_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "panel.json"
+            for text in ("kaputt", "[1]", '{"screen_off": 999}'):
+                path.write_text(text)
+                self.assertEqual(panel.load_prefs(path)["screen_off"], panel.SCREEN_OFF_DEFAULT)
+
+    def test_light_level_goes_to_the_pi(self):
+        b = bridge()
+        b.handle_line(b'{"t":"act","id":1,"op":"light","on":"1","brightness":"60","effects":"0"}')
+        wait_for_answer(b)
+        self.assertIn(("POST", "/api/action", {"op": "light", "on": "1", "brightness": "60"}), b.api.calls)
+
+
+class PanelEventsTest(unittest.TestCase):
+    IDLE = {"connected": True, "activity": "idle", "job": {"state": "idle"}}
+
+    def texts(self, log):
+        return [(e["level"], e["text"]) for e in log.items]
+
+    def test_a_job_from_start_to_end(self):
+        log = panel.EventLog()
+        log.observe(self.IDLE, "10:00")
+        self.assertEqual(log.seq, 0)
+        run = {"connected": True, "activity": "job", "laser_armed": True, "job": {"state": "homing", "file": "a.gcode"}}
+        log.observe(run, "10:01")
+        log.observe({**run, "job": {"state": "running", "file": "a.gcode"}}, "10:02")   # no second entry
+        log.observe({**self.IDLE, "job": {"state": "complete", "file": "a.gcode"}}, "10:30")
+        self.assertEqual(self.texts(log), [("ok", "Fertig: a.gcode"), ("info", "Gestartet: a.gcode")])
+        self.assertEqual(log.items[0]["time"], "10:30")
+        self.assertEqual(log.problem, 0)
+
+    def test_problems_are_counted_for_the_dot_on_the_panel(self):
+        log = panel.EventLog()
+        log.observe(self.IDLE, "10:00")
+        log.observe({**self.IDLE, "job": {"state": "error", "file": "a.gcode", "error": "Kein Material"}}, "10:01")
+        self.assertEqual(self.texts(log), [("err", "a.gcode: Kein Material")])
+        self.assertEqual(log.problem, log.seq)
+
+    def test_emergency_stop_connection_and_reference(self):
+        log = panel.EventLog()
+        log.observe(self.IDLE, "10:00")
+        log.observe({**self.IDLE, "emergency_latched": True, "fault": "M112"}, "10:01")
+        log.observe(self.IDLE, "10:02")
+        log.observe({**self.IDLE, "connected": False}, "10:03")
+        log.observe({**self.IDLE, "reference": {"lost": "Schalter offen"}}, "10:04")
+        got = self.texts(log)
+        self.assertIn(("err", "Notstopp aktiv: M112"), got)
+        self.assertIn(("ok", "Notstopp quittiert"), got)
+        self.assertIn(("err", "Steuerung getrennt (USB prüfen)"), got)
+        self.assertIn(("info", "Steuerung verbunden"), got)
+        self.assertIn(("warn", "Referenz verloren: Schalter offen"), got)
+
+    def test_laser_armed_without_a_job_is_an_error(self):
+        log = panel.EventLog()
+        log.observe(self.IDLE, "10:00")
+        log.observe({**self.IDLE, "laser_armed": True}, "10:01")
+        log.observe({**self.IDLE, "laser_armed": True}, "10:02")
+        self.assertEqual(self.texts(log), [("err", "Laser scharf ohne Auftrag")])
+
+    def test_the_list_is_short_and_refused_actions_land_in_it(self):
+        log = panel.EventLog(size=3)
+        for i in range(5):
+            log.add("info", "x%d" % i, "10:00")
+        self.assertEqual([e["text"] for e in log.items], ["x4", "x3", "x2"])
+        api = FakeApi()
+        api.answer = (400, {"error": "Marlin muss zuerst referenziert werden"})
+        b = bridge(api)
+        b.handle_line(b'{"t":"act","id":1,"op":"park"}')
+        wait_for_answer(b)
+        for _ in range(100):
+            if b.events.items:
+                break
+            threading.Event().wait(0.01)
+        self.assertEqual(b.events.items[0]["text"], "Marlin muss zuerst referenziert werden")
+        b.handle_line(b'{"t":"events"}')
+        self.assertEqual(wait_for_kind(b, "events")["items"][0]["level"], "warn")
+
+
+class PanelSystemTest(unittest.TestCase):
+    def test_system_page(self):
+        api = FakeApi({"connected": True, "serial_errors": 2,
+                       "firmware_release": {"running_build": "b1", "release_build": "b2", "update_available": True}})
+        b = bridge(api)
+        b.firmware = lambda: {"version": "9.9"}
+        b.path = "/dev/ttyACM0"
+        b.version = "1.3"
+        b.handle_line(b'{"t":"sys"}')
+        msg = wait_for_kind(b, "sys")
+        self.assertEqual((msg["skr"], msg["skr_new"], msg["serial_err"], msg["panel_new"]), ("b1", "b2", 2, "9.9"))
+        self.assertTrue(msg["skr_conn"])
+
+    def test_wlan_helpers_cope_with_a_pi_without_wlan(self):
+        def missing(*args, **kwargs):
+            raise FileNotFoundError("iwgetid")
+        self.assertEqual(panel.wifi_name(run=missing), "")
+        self.assertEqual(panel.software_version(run=missing), "")
+        self.assertIsNone(panel.wifi_signal(Path("/gibt/es/nicht")))
+
+    def test_signal_from_proc(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "wireless"
+            path.write_text("Inter-| sta-|   Quality\n face | status | link level noise\n"
+                            " wlan0: 0000   49.  -61.  -256        0      0      0      0      0        0\n")
+            self.assertEqual(panel.wifi_signal(path), 70)
 
 
 class CompactStatusTest(unittest.TestCase):
@@ -159,6 +459,12 @@ class CompactStatusTest(unittest.TestCase):
         self.assertTrue(msg["armed"])
         self.assertEqual(msg["job"]["file"], "a.gcode")
         self.assertEqual(msg["time"], "14:33")
+
+    def test_light_frame_power_and_waiting_queue(self):
+        msg = panel.compact({"light_brightness": 60, "light_dimmable": True, "config": {"frame_power_pct": 0.5},
+                             "queue": {"state": "paused", "items": [{"state": "done"}, {"state": "queued"}]}},
+                            1.0, "", {}, None)
+        self.assertEqual((msg["bright"], msg["dim"], msg["fpow"], msg["qn"]), (60, True, 0.5, 1))
 
     def test_idle_has_no_times(self):
         msg = panel.compact({"job": {"state": "complete"}}, 5.0, "10:00", {}, None)

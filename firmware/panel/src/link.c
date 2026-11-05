@@ -1,9 +1,10 @@
 // Link to the Pi: JSON lines over the ESP32-S3's own USB (USB-Serial/JTAG).
-// Pi -> panel: {"t":"st"|"res"|"jobs"} lines, and {"t":"img","len":n} followed by n bytes JPEG.
+// Pi -> panel: {"t":"st"|"res"|"jobs"|"mats"|"events"|"sys"} lines, and {"t":"img","len":n} followed by n bytes JPEG.
 
 #include "link.h"
 
 #include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "cJSON.h"
@@ -20,7 +21,7 @@
 
 static const char *TAG = "link";
 
-#define LINK_LINE_MAX    4096
+#define LINK_LINE_MAX    8192    // panel.LINE_LIMIT stays below this
 #define IMG_MAX     (512 * 1024)
 #define CAM_W       640
 #define CAM_H       480
@@ -69,9 +70,11 @@ int link_act(const char *op, ...)
     return id;
 }
 
-void link_request_jobs(void)
+void link_request(const char *kind)
 {
-    send_text("{\"t\":\"jobs\"}");
+    char text[32];
+    snprintf(text, sizeof(text), "{\"t\":\"%s\"}", kind);
+    send_text(text);
 }
 
 static void show_image(int len)
@@ -112,6 +115,12 @@ static void handle_line(char *line)
             ui_on_result(msg);
         } else if (!strcmp(t, "jobs")) {
             ui_on_jobs(msg);
+        } else if (!strcmp(t, "mats")) {
+            ui_on_materials(msg);
+        } else if (!strcmp(t, "events")) {
+            ui_on_events(msg);
+        } else if (!strcmp(t, "sys")) {
+            ui_on_system(msg);
         }
         lvgl_port_unlock();
     }

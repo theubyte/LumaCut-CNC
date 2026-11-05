@@ -10,4 +10,5 @@ $PY -m ziglang cc -O1 -w -o out/sim.exe -DLV_CONF_SKIP -DLV_LVGL_H_INCLUDE_SIMPL
   -Iinclude -I../src -I$LV -I$LV/src -I$CJ \
   sim_main.c ../src/fonts/*.c $CJ/cJSON.c $(find $LV/src -name '*.c')
 out/sim.exe
+rm -f out/*.png
 $PY topng.py out

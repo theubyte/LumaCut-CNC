@@ -21,17 +21,42 @@ Dienst `lumacut-marlin` mit.
 
 | Bildschirm | Inhalt | Aktionen (Pi-`op`) |
 | --- | --- | --- |
-| Status | Fortschrittsring, Restzeit, Datei, Laufzeit/Zeile, Position, Laserleistung und Vorschub (aus der Auftragsdatei), Laser/24 V/Abluft/Referenz | – |
-| Bewegen | Kreuz X/Y (wie von vorne gesehen: X+ links, Y+ nach vorne), Z, Schrittweite 0,1/1/10 mm | `jog`, `home` (Mitte), `park`, `probe` („Fokus tasten“) |
+| Status | Fortschrittsring, Restzeit, Datei, Laufzeit/Zeile, wartende Aufträge, Position, Laserleistung und Vorschub (aus der Auftragsdatei), Laser/24 V/Abluft/Referenz | – |
+| Bewegen | Kreuz X/Y (wie von vorne gesehen: X+ links, Y+ nach vorne), Z, Schrittweite 0,1/1/10 mm, Hinweis, warum gesperrt | `jog`, `home` (Mitte), `park`, `probe` („Fokus tasten“) |
 | Kamera | Livebild der Kopfkamera (640 × 480, ca. ein Bild je 1–2 s) | `frame_job` (Rahmen), Zoom, `light`, `exhaust` |
-| Auftrag | Aufträge auf dem Pi, Auswahl | `frame_job`, **Laser starten** = `autorun` nach Freigabe-Popup |
+| Auftrag | Aufträge auf dem Pi, Auswahl, Material (eigene Liste) | `material`, `frame_job`, **Laser starten** = `autorun` |
+| System → Licht & Abluft | Licht an/aus und 10–100 %, Abluft, Bildschirm-Aus-Zeit | `light` (`on`, `brightness`), `exhaust`, `screen_off` |
+| System → Ereignisse | Die letzten 30: Start, Ende, Fehler, Notstopp, Verbindung, Referenz verloren, abgelehnte Aktionen. Roter Punkt am Menü = neue Warnung | – |
+| System → Info | Adresse, WLAN, Name, Versionen, Verbindung, Update-Hinweise | `panel_update` |
 | immer rechts | **STOPP** (sofort, ohne Rückfrage), Pause/Weiter (nur Warteschlange), Abbruch | `estop`, `queue_pause`, `queue_run`, `abort` |
 
-- **Laser starten:** Popup „Laser freigeben?“ mit Datei und dem Hinweis
-  „Hände raus · Deckel zu · Schutzbrille auf“; erst „Freigeben“ sendet `autorun`.
+- **Go vor jedem Fahr- oder Laserauftrag:** Referenzfahrt, Parken, Fokus tasten,
+  Rahmen, Laser starten und „Weiter“ (Warteschlange) fragen im Popup mit „Hände
+  raus · Deckel zu · Schutzbrille auf“; erst die Bestätigung sendet die Aktion.
+  Einzelne Jog-Schritte fragen nicht: der Bediener steht an der Taste, je Schritt
+  höchstens 10 mm, der nächste erst nach der Antwort des Pi. Wird die Maschine
+  belegt oder geht die Verbindung weg, verschwindet ein offenes Go von selbst.
+- **Laser starten** zeigt Datei und Material und geht erst mit gewähltem Material.
   Ist die Kopfhöhe unbekannt, steht das im Popup, die Freigabe bestätigt dann
-  auch `clear=1`.
-- **Referenzfahrt** ohne bekannte Kopfhöhe fragt „Kopf ist frei?“ (`clear=1`).
+  auch `clear=1`; `clear` gilt nur, wenn die Frage das wirklich gesagt hat.
+- **Material:** dieselbe Wahl wie in Web und App (`PUT /api/workspace`), nur
+  Einträge aus `/api/materials`, nur im Leerlauf (prüft `panel.py`). Die Stärke
+  setzt die Fahrhöhe; Leistung und Tempo stehen im Auftrag. Reine Startwerte sind
+  in der Liste als „Startwert, erst testen“ markiert.
+- **Rahmen:** Ist `frame_power_pct` auf dem Pi gesetzt, sagt das Popup, dass der
+  Laser dabei glimmt.
+- **Bildschirm aus** (Nie, 2, 5, 15, 30 min, Standard 15; gespeichert auf dem Pi
+  in `panel.json`): Solange die Maschine arbeitet, belegt ist, der Laser scharf
+  ist oder keine Verbindung besteht, bleibt er an, und ein Auftrag von einem
+  anderen Gerät weckt ihn. STOPP liegt damit nie hinter einem Weck-Tipper. Die
+  Berührung, die ihn weckt, löst sonst nichts aus. Dunkel holt das Panel auch
+  kein Kamerabild.
+- Das Panel kann **nicht:** Service-Menü (`service_*`), Laser-Regler, roher
+  G-Code. `panel.ACTIONS` lässt nur die Aktionen dieser Tabelle durch;
+  `tests/test_panel.py` hält die Liste und den Quellcode dagegen fest.
+- **Hardware:** Die Hintergrundbeleuchtung hängt am Schaltausgang EXIO2 (nur an/aus,
+  `board.c`), `board.c` kennt auch keinen Summer. Darum gibt es weder Helligkeit
+  noch Ton in den Einstellungen.
 - **Notstopp aktiv:** roter Hinweis mit „Notstopp quittieren“ (`estop_reset`).
 - **Keine Verbindung:** Hinweis; STOPP bleibt bedienbar. Das Software-STOPP
   ersetzt den echten Not-Aus nicht.
@@ -41,10 +66,17 @@ Dienst `lumacut-marlin` mit.
 ## Protokoll (USB, JSON-Zeilen)
 
 Siehe Kopf von `pi400/marlin/panel.py`. Kurz: Panel → Pi `hello`, `ping`
-(jede Sekunde, `cam` 1 = Kamerabildschirm offen), `jobs`, `act`; Pi → Panel
-`st` (Status alle 0,5–1 s), `res` (Antwort mit deutschem Text vom Pi), `jobs`,
-`img` (Kopfzeile + JPEG-Bytes). Der Pi lässt nur die Aktionen in
-`panel.ACTIONS` und deren Felder durch.
+(jede Sekunde, `cam` 1 = Kamerabildschirm offen), Abfragen `jobs`, `mats`,
+`events`, `sys`, und `act`; Pi → Panel `st` (Status alle 0,5–1 s), `res` (Antwort
+mit deutschem Text vom Pi), `jobs`, `mats`, `events`, `sys`, `img` (Kopfzeile +
+JPEG-Bytes). Der Pi lässt nur die Aktionen in `panel.ACTIONS` und deren Felder
+durch. Eine Zeile hat höchstens 8000 Bytes (`panel.LINE_LIMIT`); Listen werden
+dafür gekürzt, Auftragsnamen über 95 Bytes nicht angezeigt.
+
+Adresse, WLAN und Pi-Stand liest die Brücke auf dem Pi selbst (Socket,
+`iwgetid`, `/proc/net/wireless`, `git log`), weil die API dafür keine Felder hat;
+fehlt etwas, zeigt das Panel „–“. Ereignisse leitet sie aus `/api/status` ab und
+hält sie im Speicher: Ein Neustart des Dienstes leert die Liste.
 
 ## Bauen und Flashen
 
@@ -67,13 +99,16 @@ Schlägt es fehl, startet das Panel evtl. nicht mehr: dann über den Knopf erneu
 oder am PC über „UART“ flashen.
 
 Schriften: `tools/gen_fonts.sh` (Inter 4.0, JetBrains Mono 2.304, FontAwesome 5
-aus LVGL; lv_font_conv 1.5.2). Umlaute und „ “ – − sind enthalten.
+aus LVGL; lv_font_conv 1.5.2), `--icons` nur für die Symbole. Umlaute und „ “ – −
+sind enthalten.
 
 ## Vorschau am PC
 
 `sim/build.sh` baut LVGL und `src/ui.c` für Windows/Linux (Compiler: `pip install
 ziglang`) und schreibt die Bildschirme mit Beispieldaten nach `sim/out/*.png`.
-So lässt sich die Oberfläche ohne Panel prüfen.
+So lässt sich die Oberfläche ohne Panel prüfen. Das Programm geht auch die Regeln
+für Bildschirm-Aus und das Zurücknehmen eines Go durch und schreibt das Ergebnis
+auf die Konsole. Ein Stand der Bilder liegt in `preview/`.
 
 ## Stand
 
