@@ -7,9 +7,11 @@ Kreuzschraffur) graviert. Füllt die aktive Ebene nicht, schlägt der Dialog
 eine eigene Ebene „QR-Code“ mit Schraffur 0,1 mm vor – sonst würden nur die
 Umrisse gelasert und der Code wäre nicht lesbar.
 
-„Art“: Text / Adresse, GS1 QR-Code (Elementstring „(01)…(10)…“, FNC1-Modus) oder
+„Art“: Text / Adresse, GS1 QR-Code (Elementstring „(01)…(10)…“, FNC1-Modus),
 GS1 Digital Link (Elementstring + Domain → Web-Adresse, oder eine fertige
-Digital-Link-Adresse, die geprüft wird).
+Digital-Link-Adresse, die geprüft wird) oder **Micro QR** (ISO/IEC 18004 M1–M4 –
+kleines Symbol für Bauteilkennzeichnung / wenig Platz; Ruhezone Standard 2 Module;
+kein ECI / Kanji).
 
 „UTF-8 kennzeichnen (ECI)“ (nur Text, Standard für neue Codes): Umlaute und Sonderzeichen
 bekommen die Zeichensatz-Kennung ECI 26, japanischer Text den Kanji-Modus. Ältere Codes ohne
@@ -37,13 +39,18 @@ FILL_LAYER_NAME = "QR-Code"
 
 PLACEHOLDERS = {"text": "Text oder Adresse, z. B. https://example.com",
                 "gs1": "(AI)Wert, z. B. " + qr.gs1.EXAMPLE,
-                "link": "(01)GTIN… oder https://id.gs1.org/01/…"}
+                "link": "(01)GTIN… oder https://id.gs1.org/01/…",
+                "micro": "Kurzer Text, z. B. Seriennummer oder Lot"}
 TOOLTIPS = {"text": "Beliebiger Text (UTF-8, Umlaute erlaubt), Web-Adresse, WLAN-Daten …",
             "gs1": "GS1-Elementstring: Datenbezeichner in Klammern, feste Längen und Prüfziffern "
                    "werden geprüft; Trenner (FNC1) setzt der Code selbst",
             "link": "Elementstring mit genau einem Primärschlüssel (z. B. (01) GTIN) – daraus wird "
-                    "die Adresse gebaut – oder eine fertige Digital-Link-Adresse"}
-EXAMPLES = {"text": "https://example.com", "gs1": qr.gs1.EXAMPLE, "link": gs1_link.EXAMPLE}
+                    "die Adresse gebaut – oder eine fertige Digital-Link-Adresse",
+            "micro": "Micro QR (M1–M4): sehr kleines Symbol für Bauteilkennzeichnung und "
+                     "beengte Flächen; numerisch / alphanumerisch / Byte (UTF-8); kein ECI, "
+                     "kein Kanji – für längere Texte normalen QR-Code wählen"}
+EXAMPLES = {"text": "https://example.com", "gs1": qr.gs1.EXAMPLE, "link": gs1_link.EXAMPLE,
+            "micro": "SN-042"}
 
 
 def layer_fills(layer) -> bool:
@@ -64,7 +71,8 @@ class QrDialog(QDialog):
         self.mode.setCurrentIndex(qr.MODES.index(s.mode))
         self.mode.setToolTip("GS1 QR-Code: Produktdaten (GTIN, Charge, MHD …) für GS1-Scanner. "
                              "GS1 Digital Link: dieselben Daten als Web-Adresse – Handy öffnet "
-                             "die Produktseite, Kassenscanner lesen die GTIN")
+                             "die Produktseite, Kassenscanner lesen die GTIN. "
+                             "Micro QR: kleines Symbol (11–17 Module) für Bauteile / wenig Platz")
         self.text = QLineEdit(s.text)
         self.domain = QLineEdit(s.domain)
         self.domain.setPlaceholderText(gs1_link.DEFAULT_DOMAIN)
@@ -73,14 +81,15 @@ class QrDialog(QDialog):
         self.example = QPushButton("Beispiel")
         self.example.setToolTip("Beispieldaten für die gewählte Art einsetzen")
         self.example.clicked.connect(self._insert_example)
+        from . import micro_qr as mq
         self.ec = QComboBox()
-        for key in qr.EC_LEVELS:
-            self.ec.addItem(qr.EC_LABELS[key], key)
-        self.ec.setCurrentIndex(qr.EC_LEVELS.index(s.ec))
+        # Levels filled in _mode_changed (Micro vs full QR); seed current value here.
+        self._pending_ec = s.ec
         self.ec.setToolTip("Fehlerkorrektur: höher = robuster gegen Kratzer/Brandspuren, "
-                           "aber mehr und kleinere Module")
+                           "aber mehr und kleinere Module"
+                           + ("; Micro QR: D nur M1, L/M bis M4, Q nur M4" if True else ""))
         self.size_mm = QDoubleSpinBox()
-        self.size_mm.setRange(*qr.SIZE_RANGE)
+        self.size_mm.setRange(*(mq.SIZE_RANGE if s.mode == "micro" else qr.SIZE_RANGE))
         self.size_mm.setDecimals(1)
         self.size_mm.setSuffix(" mm")
         self.size_mm.setValue(s.size_mm)
@@ -89,8 +98,8 @@ class QrDialog(QDialog):
         self.quiet.setRange(*qr.QUIET_RANGE)
         self.quiet.setSuffix(" Module")
         self.quiet.setValue(s.quiet_zone)
-        self.quiet.setToolTip("Heller Rand um den Code (Norm: 4 Module); wird freigehalten, "
-                              "invertiert mitgraviert")
+        self.quiet.setToolTip("Heller Rand um den Code (Norm: 4 Module, Micro QR: 2); "
+                              "wird freigehalten, invertiert mitgraviert")
         self.eci = QCheckBox("UTF-8 kennzeichnen (ECI) – Umlaute / Sonderzeichen sicher lesbar")
         self.eci.setChecked(s.eci)
         self.eci.setToolTip("Text mit Umlauten, „°“, „€“ … bekommt die Zeichensatz-Kennung "
@@ -151,15 +160,45 @@ class QrDialog(QDialog):
                          domain=self.domain.text(), eci=self.eci.isChecked()).normalized()
 
     def _mode_changed(self) -> None:
+        from . import micro_qr as mq
         mode = self.mode.currentData()
         self.text.setPlaceholderText(PLACEHOLDERS[mode])
         self.text.setToolTip(TOOLTIPS[mode])
         link = mode == "link"
+        micro = mode == "micro"
         self.domain.setVisible(link)
         if self.domain_label is not None:
             self.domain_label.setVisible(link)
         self.content.setVisible(mode != "text")
         self.eci.setVisible(mode == "text")
+        # Size / quiet defaults & EC levels for Micro vs full QR
+        prev_ec = getattr(self, "_pending_ec", None) or self.ec.currentData()
+        self._pending_ec = None
+        self.ec.blockSignals(True)
+        self.ec.clear()
+        if micro:
+            for key in mq.EC_LEVELS:
+                self.ec.addItem(mq.EC_LABELS[key], key)
+            self.size_mm.setRange(*mq.SIZE_RANGE)
+            # Only nudge quiet/size when the user *switches* into Micro, not on first open
+            switching = getattr(self, "_mode_ready", False)
+            if switching and self.quiet.value() == 4:
+                self.quiet.setValue(mq.DEFAULT_QUIET)
+            if switching and self.size_mm.value() > 80:
+                self.size_mm.setValue(15.0)
+        else:
+            for key in qr.EC_LEVELS:
+                self.ec.addItem(qr.EC_LABELS[key], key)
+            self.size_mm.setRange(*qr.SIZE_RANGE)
+            switching = getattr(self, "_mode_ready", False)
+            if switching and self.quiet.value() == mq.DEFAULT_QUIET:
+                self.quiet.setValue(4)
+        idx = self.ec.findData(prev_ec)
+        if idx < 0:
+            idx = self.ec.findData("L" if micro else "M")
+        self.ec.setCurrentIndex(max(0, idx))
+        self.ec.blockSignals(False)
+        self._mode_ready = True
         self._update()
 
     def _insert_example(self) -> None:
@@ -170,7 +209,11 @@ class QrDialog(QDialog):
         return self.fill.isChecked()
 
     def _update(self) -> None:
+        from . import micro_qr as mq
         s = self.spec()
+        fill_name = mq.FILL_LAYER_NAME if s.mode == "micro" else FILL_LAYER_NAME
+        self.fill.setText(f"Neue Ebene „{fill_name}“ mit Füllung "
+                          f"(Schraffur {FILL_INTERVAL_MM:.1f} mm) anlegen")
         try:
             info = qr.content_info(s)
             self.content.setText(info)
@@ -183,11 +226,13 @@ class QrDialog(QDialog):
             return
         module = s.size_mm / code.size
         text = qr.describe(code, s.size_mm)
-        ok = module >= qr.HARD_MIN_MODULE_MM
+        hard = qr.HARD_MIN_MODULE_MM
+        soft = qr.MIN_MODULE_MM
+        ok = module >= hard
         if not ok:
-            text += f" – zu klein (mindestens {qr.HARD_MIN_MODULE_MM:.1f} mm)"
-        elif module < qr.MIN_MODULE_MM:
-            text += f" – unter {qr.MIN_MODULE_MM:.1f} mm evtl. schlecht lesbar"
+            text += f" – zu klein (mindestens {hard:.1f} mm)"
+        elif module < soft:
+            text += f" – unter {soft:.1f} mm evtl. schlecht lesbar"
         total = s.total_mm(code)
         if total > min(WORK_WIDTH_MM, WORK_HEIGHT_MM):
             text += f" – mit Ruhezone {total:.0f} mm, größer als die Arbeitsfläche"
@@ -223,8 +268,11 @@ def insert_qr(editor, spec: qr.QrSpec, fill_layer: bool = False,
     s = centered(s, center, code)
     active = doc.active_layer or (doc.layers[0] if doc.layers else None)
     layer = None
+    from . import micro_qr as mq
+    layer_name = mq.FILL_LAYER_NAME if s.mode == "micro" else FILL_LAYER_NAME
+    label = "Micro-QR-Code" if s.mode == "micro" else "QR-Code"
     if fill_layer:
-        layer = Layer(FILL_LAYER_NAME, color=doc.next_layer_color(),
+        layer = Layer(layer_name, color=doc.next_layer_color(),
                       power=active.power if active else 50.0,
                       speed=active.speed if active else 1500.0,
                       fill_mode="hatch", line_interval_mm=FILL_INTERVAL_MM, hatch_outline=True)
@@ -237,11 +285,11 @@ def insert_qr(editor, spec: qr.QrSpec, fill_layer: bool = False,
         layer_id = active.id
     shapes = tag(qr.qr_shapes(s, layer_id, code), s)
     stack = editor.undo_stack
-    stack.beginMacro("QR-Code einfügen")
+    stack.beginMacro(f"{label} einfügen")
     try:
         if layer is not None:
             stack.push(AddLayerCommand(doc, layer, 0))
-        stack.push(AddShapesCommand(doc, shapes, "QR-Code"))
+        stack.push(AddShapesCommand(doc, shapes, label))
     finally:
         stack.endMacro()
     ids = [sh.id for sh in shapes]
