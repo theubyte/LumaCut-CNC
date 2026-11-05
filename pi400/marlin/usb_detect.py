@@ -2,7 +2,7 @@
 
 The ttyACM number can change after a reset or firmware update.
 Never guess and persist a /dev/ttyACM* path without first confirming that
-the device replies to native M115 and identifies itself as LumaCut Marlin.
+the device replies to M115 and identifies itself as LumaCut CNC.
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def locate_verified_marlin(configured: str, device_root: Path = Path("/dev"),
         device = factory(path)
         try:
             device.ensure_ready()  # Native M115 and LumaCut identity required.
-            print(f"Marlin LumaCut SKR erkannt: {path}", file=sys.stderr)
+            print(f"LumaCut SKR erkannt: {path}", file=sys.stderr)
             return path
         except Exception as exc:
             print(f"USB-Kandidat {path}: {exc}", file=sys.stderr)
@@ -53,9 +53,9 @@ def locate_verified_marlin(configured: str, device_root: Path = Path("/dev"),
             with device.lock:
                 device._close_locked()
     raise RuntimeError(
-        "Ein serielles USB-Geraet ist sichtbar, aber keine LumaCut-Marlin-"
+        "Ein serielles USB-Geraet ist sichtbar, aber keine LumaCut-CNC-"
         "Firmware wurde anhand von M115 bestaetigt. Falsche Firmware? "
-        "LumaCut-Marlin-Firmware einmalig per SD-Karte flashen.")
+        "LumaCut-Firmware einmalig per SD-Karte flashen.")
 
 
 def main():
@@ -66,7 +66,7 @@ def main():
         found = locate_verified_marlin(args.configured_port)
         print(found)  # stdout ONLY selected verified device path
     except Exception as exc:
-        print("LumaCut Marlin USB: " + str(exc), file=sys.stderr)
+        print("LumaCut USB: " + str(exc), file=sys.stderr)
         return 2
     return 0
 

@@ -1,7 +1,7 @@
-"""Headless Raspberry Pi 400 control server for native Marlin on SKR Mini MZ.
+"""Headless Raspberry Pi 400 control server for the LumaCut firmware on SKR Mini MZ.
 
 Web UI and HTTP API on port 8080 for LumaCut Studio and browsers.
-TCP 23 remains for LightBurn (Marlin device) until Studio replaces it.
+TCP 23 remains for LightBurn (device type Marlin) until Studio replaces it.
 """
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def _fixed_head_surface():
 
 
 # SKR at LUMACUT_SKR; without it the original Atomstack board (Grbl, CH340)
-# through the Marlin bridge (grbl_bridge.py, emergency use since 31.10.2026).
+# through the bridge (grbl_bridge.py, emergency use since 31.10.2026).
 service_auth = ServiceAuth(DATA / "service_password.json")
 machine = MarlinTransport(USB, serial_factory=lambda port, baud, timeout=0.1: open_controller(
     port, baud, timeout, surface_hint=_fixed_head_surface))
@@ -114,10 +114,9 @@ MACHINE_NAME_MAX = 40
 # recalibrated for head v6 (STAND.md §9).
 PROBE_GRID_MIN = 30.0
 EXHAUST_AFTER_RANGE = (0, 900)
-# op=report: Marlin queries that only read (transport.READ_ONLY without M400).
-REPORTS = {"M105": "Temperaturen", "M114": "Position", "M115": "Firmware",
-           "M119": "Endschalter", "M122": "Schrittmotortreiber",
-           "M503": "Firmware-Einstellungen"}
+# op=report: firmware queries that only read (transport.READ_ONLY without M400).
+REPORTS = {"M114": "Position", "M115": "Firmware",
+           "M119": "Endschalter", "M122": "Schrittmotortreiber"}
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
 JOBS.mkdir(parents=True, exist_ok=True)
@@ -127,7 +126,7 @@ if CONFIG.is_file():
         if isinstance(saved, dict):
             config.update({k: saved[k] for k in config if k in saved})
     except Exception:
-        logging.exception("Marlin config corrupt, using safe disabled default")
+        logging.exception("Config corrupt, using safe disabled default")
 # An older config.json may still say 90 mm: never above the rail limit.
 config["travels"]["z"] = min(float(config["travels"].get("z", Z_MAX_MM)), Z_MAX_MM)
 machine.homing_verified = bool(config["validated"])
@@ -216,7 +215,7 @@ def handle_error(exc):
         return jsonify(error=str(exc), revision=exc.revision), 409
     if isinstance(exc, NotFoundError):
         return jsonify(error="Material nicht gefunden"), 404
-    logging.exception("Marlin Control server request failed: %s", exc)
+    logging.exception("Control server request failed: %s", exc)
     if isinstance(exc, (ValueError, RuntimeError, PermissionError)):
         return jsonify(error=str(exc)), 400
     if isinstance(exc, (TimeoutError, ConnectionError)):
@@ -303,7 +302,7 @@ def _status_config():
 @app.get("/api/status")
 def status():
     result, busy, stale_ms = machine_snapshot()
-    # This is an estimate, not a measured surface map. Marlin Z=0
+    # This is an estimate, not a measured surface map. Machine Z=0
     # represents the endstop trigger, not necessarily the laser tip.
     tip_gap = None
     if result["homed"] and result["position"] is not None:
@@ -319,7 +318,7 @@ def status():
                             "job" if (job["state"] in ("homing", "probing", "running") or
                                       job_queue["state"] in QUEUE_ACTIVE)
                             else "idle"),
-                  firmware="marlin",
+                  firmware="marlin",  # API name of this gateway: the Android app's discovery asks for it
                   service_password_set=service_auth.is_set(),
                   coord_convention=placing.COORD_CONVENTION,
                   features=list(FEATURES),
@@ -329,7 +328,7 @@ def status():
                       "laser_pwm":"EXP3 / PA9",
                       "fan_cooldown":"180s via Pi: requires firmware FAN0 PC6; no crash-proof fan timer",
                       "exhaust":"BED PC9 M8",
-                      "lights":"HE0 PC8 M355 (dimmbar), alte Firmware M7",
+                      "lights":"HE0 PC8 M355 (dimmbar)",
                       "aux":"FAN2 PC7 unused"},
                   config=_status_config(),
                   sync=WORKSPACE.revisions(),
@@ -356,7 +355,7 @@ def local_owner():
                 "Steuerung belegt durch " + machine.owner +
                 " – LightBurn zuerst trennen")
         if machine.serial is None or not machine.identity:
-            raise ConnectionError("Marlin SKR noch nicht per USB identifiziert")
+            raise ConnectionError("SKR noch nicht per USB identifiziert")
         if machine.state not in ("Idle",):
             raise RuntimeError("SKR beschäftigt: " + machine.state)
 
@@ -560,9 +559,9 @@ def _start_skr_flash(image):
     local_owner()
     if job_lock.locked():
         raise RuntimeError("Während eines Auftrags wird nicht geflasht")
-    if not machine.cap_binary_transfer:
-        raise RuntimeError("Aktuelle SKR-Firmware kann keine Dateien empfangen: "
-                           "einmalig per SD-Karte eine Firmware mit Pi-Update flashen")
+    if not machine.cap_self_update:
+        raise RuntimeError("Aktuelle SKR-Firmware kann sich nicht selbst aktualisieren: "
+                           "einmalig per SD-Karte die LumaCut-Firmware flashen")
     threading.Thread(target=_flash_worker, args=(image,), daemon=True,
                      name="skr-firmware-update").start()
     return jsonify(message="Firmware-Update gestartet (%d KB, Build %s). SKR startet gleich neu."
@@ -616,12 +615,12 @@ def action():
     if op == "estop":
         stop_job.set()
         machine.emergency_stop()
-        return jsonify(message="Marlin M112 ausgelöst – physischen Not-Aus prüfen")
+        return jsonify(message="M112 ausgelöst – physischen Not-Aus prüfen")
     if op == "estop_reset":
         return jsonify(message=machine.clear_emergency())
     if op == "connect":
         machine.ensure_ready()
-        return jsonify(message="Marlin M115 + LumaCut-Kennung bestätigt")
+        return jsonify(message="M115 + LumaCut-Kennung bestätigt")
     if op == "home":
         _forget_current_placement()
         # clear=1: the operator confirmed the head stands clear (only asked when Z is unknown)
@@ -632,7 +631,7 @@ def action():
         reply = manual(cmd, timeout=12)
         return jsonify(message="\n".join(reply))
     if op == "report":
-        # Read-only Marlin queries for the diagnosis page, nothing else.
+        # Read-only firmware queries for the diagnosis page, nothing else.
         cmd = request.form.get("cmd", "").strip().upper()
         if cmd not in REPORTS:
             raise ValueError("Nur Abfragen: " + ", ".join(REPORTS))
@@ -640,7 +639,7 @@ def action():
         return jsonify(message="%s (%s) gelesen" % (REPORTS[cmd], cmd), cmd=cmd, lines=reply)
     if op == "jog":
         if not machine.homed:
-            raise RuntimeError("Marlin muss zuerst referenziert werden")
+            raise RuntimeError("Maschine muss zuerst referenziert werden")
         axis = request.form.get("axis","").upper()
         distance = float(request.form.get("distance","0"))
         if axis not in ("X","Y","Z") or distance not in (
@@ -656,7 +655,7 @@ def action():
                 axis, distance, 360 if axis=="Z" else 1800), owner="web", timeout=30)
             machine.command("M400", owner="web", timeout=45)
         finally:
-            # Also when the guard refuses the move: Marlin must not stay
+            # Also when the guard refuses the move: the firmware must not stay
             # relative (01.11.: the next absolute G0 drove into the X end).
             machine.command("G90", owner="web")
         machine.command("M114", owner="web")
@@ -740,8 +739,6 @@ def action():
         image = firmware_releases.image(info["board"])
         if image is None:
             raise RuntimeError("Firmware-Datei auf dem Pi fehlt – erneut prüfen")
-        if info["board"] == "anet":
-            return _start_anet_flash(image.decode("ascii"))
         return _start_skr_flash(image)
     if op == "panel_update":
         # Bedienpanel: flash the firmware that came with the last deploy now
@@ -788,10 +785,7 @@ def action():
             if target:
                 manual("M8")
             else:
-                lights = machine.lights
                 manual("M9")
-                if lights and not machine.lights:
-                    machine.set_light(True, owner="web")   # old firmware: M9 also hit PC8
         return jsonify(message="Abluft" + (" EIN" if target else " AUS"))
     if op == "probe":
         # Web counterpart of LightBurn G30: measure the workpiece below the
@@ -897,7 +891,7 @@ def action():
             raise RuntimeError("Kein laufender Auftrag")
         stop_job.set()
         return jsonify(message="Abbruch angefordert: Laser aus, danach Parkposition")
-    raise ValueError("Unbekannte Marlin-Aktion: " + op)
+    raise ValueError("Unbekannte Aktion: " + op)
 
 
 def _origin_status():
@@ -1627,7 +1621,7 @@ def upload():
     temporary.write_text(text, encoding="utf-8")
     temporary.replace(JOBS / basename)
     _forget_placement(lambda p: p["file"] == basename)
-    return jsonify(message="Marlin-Auftrag geprüft und gespeichert: " + basename)
+    return jsonify(message="Auftrag geprüft und gespeichert: " + basename)
 
 
 # Workflow commands a LightBurn export may contain. The job worker runs them
@@ -1676,9 +1670,9 @@ def _powered_bounds(text):
 def _stop_after_job_error():
     """Laser off and park without M112 when the USB link still works.
 
-    An M112 latches the gateway until the service restarts and the SKR is
-    power-cycled; a rejected line or an operator abort does not need that.
-    M5 waits for the already buffered segments, then switches the PWM off.
+    An M112 latches firmware and gateway until it is acknowledged and needs
+    new homing; a rejected line or an operator abort does not need that.
+    M5 I switches the PWM off at once, the buffered segments then run unlit.
     Escalates to M112 if the controlled stop itself fails.
     """
     try:
@@ -1969,10 +1963,7 @@ def _exhaust_after_job():
             if machine.owner is not None:
                 return
         try:
-            lights = machine.lights
             machine.command("M9", owner="web", timeout=10)
-            if lights and not machine.lights:
-                machine.set_light(True, owner="web")   # old firmware: M9 also hit PC8
         except Exception:
             logging.exception("Exhaust run-on: switching off failed")
     threading.Thread(target=off, daemon=True, name="exhaust-run-on").start()
@@ -2313,7 +2304,7 @@ def _frame_worker(commands):
             machine.command(command, owner="frame", timeout=150)
             if _FRAME_MOVE.match(command):
                 # Wait for each edge, so an abort stops at the next corner
-                # instead of after Marlin has drained the whole outline.
+                # instead of after the firmware has run the whole outline.
                 machine.command("M400", owner="frame", timeout=600)
             frame["line"] = i
         machine.command("M5 I", owner="frame", timeout=30)
@@ -2407,14 +2398,14 @@ def monitor_loop():
             try:
                 machine.ensure_ready()
             except Exception as exc:
-                logging.debug("Marlin USB unavailable: %s", exc)
+                logging.debug("SKR USB unavailable: %s", exc)
         elif machine.serial is not None and machine.identity:
             try:
                 machine.command("M114", owner="monitor", use_guard=False, timeout=5)
                 if job["state"] not in ("homing", "probing", "running") and frame["state"] != "running":
                     machine.check_reference()
             except Exception:
-                logging.warning("Marlin heartbeat failed", exc_info=True)
+                logging.warning("SKR heartbeat failed", exc_info=True)
 
 
 def main():

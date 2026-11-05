@@ -1,8 +1,8 @@
-"""Buffer-aware job streaming (#18) against a simulated Marlin.
+"""Buffer-aware job streaming (#18) against a simulated firmware.
 
-The simulation models the SKR's real limits: a 256-byte serial RX buffer
-and BUFSIZE 8 command slots. Marlin answers "ok" when a line moves from
-the RX buffer into a command slot; the planner frees one slot per tick.
+The simulation models the contract's limits (docs/FIRMWARE_EIGEN.md): at least
+16 lines of 96 characters on the receive side. It answers "ok" when a line
+moves from the RX buffer into a command slot; the planner frees one slot per tick.
 An overflowing RX buffer or an ok without a sent line fails the test.
 No motor or laser is involved.
 """
@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pi400"))
 from marlin import transport
 from marlin.transport import MarlinCommandError, MarlinTransport, normalize
 
-RX_BUFFER = 256
-BUFSIZE = 8
+RX_BUFFER = 16 * 96
+BUFSIZE = 16
 
 
 class SimMarlin:
@@ -49,8 +49,7 @@ class SimMarlin:
             self.received.append(text)
             self.slots.append(text)
             if text in self.errors:
-                self.out.append("echo:Unknown command: \"%s\"" % text)
-                self.out.append("Error:simulated reject")
+                self.out.append("Error:Unknown command: %s" % text)
             if text == "M114":
                 self.out.append("X:50.00 Y:50.00 Z:10.00 E:0.00 Count X:0 Y:0 Z:0")
             self.out.append("ok P%d B%d" % (16, BUFSIZE - len(self.slots))
@@ -96,7 +95,7 @@ class Probe(SimMarlin):
 def ready_bridge(serial):
     bridge = MarlinTransport("/dev/null")
     bridge.serial = serial
-    bridge.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+    bridge.identity = "FIRMWARE_NAME:LumaCut CNC 0.1 MACHINE_TYPE:LumaCut CNC"
     bridge.homing_verified = True
     bridge.homed = True
     bridge.surface_z = 3.0
@@ -195,7 +194,7 @@ class StreamingTests(unittest.TestCase):
                 self.assertEqual(sim.received[-1], "M5 I")
                 self.assertEqual(len(bridge.inflight), 0)
 
-    def test_first_cut_after_rapid_needs_power_when_streamed(self):
+    def test_power_is_modal_across_a_rapid_when_streamed(self):
         ref = [None]
         sim = Probe(ref)
         bridge = ready_bridge(sim)
@@ -203,8 +202,9 @@ class StreamingTests(unittest.TestCase):
         bridge.command("M3 I", owner="job")
         bridge.stream_command("G1 X60 S20", owner="job")
         bridge.stream_command("G0 X70 Y60", owner="job")
-        with self.assertRaisesRegex(ValueError, "nach G0"):
-            bridge.stream_command("G1 X80", owner="job")
+        bridge.stream_command("G1 X80", owner="job")
+        bridge.drain(owner="job")
+        self.assertEqual(sim.received[-1], "G1 X80")
 
     def test_marlin_error_stops_sending_and_raises(self):
         lines = raster(rows=4)
@@ -302,10 +302,10 @@ class StreamingTests(unittest.TestCase):
 
     def test_window_setting_is_clamped(self):
         self.assertEqual(transport._stream_window_setting("1"), 1)
-        self.assertEqual(transport._stream_window_setting("99"), 8)
-        self.assertEqual(transport._stream_window_setting("abc"), 4)
-        self.assertEqual(transport._stream_window_setting(None), 4)
-        self.assertEqual(transport.STREAM_MAX_LINES, 4)
+        self.assertEqual(transport._stream_window_setting("99"), 16)
+        self.assertEqual(transport._stream_window_setting("abc"), 8)
+        self.assertEqual(transport._stream_window_setting(None), 8)
+        self.assertEqual(transport.STREAM_MAX_LINES, 8)
 
     def test_emergency_latch_blocks_further_streaming(self):
         ref = [None]

@@ -32,7 +32,7 @@ def fake_command(cmd, owner=None, timeout=20, use_guard=True):
 
 if scenario != "offline":
     m.serial = FakeSerial()
-    m.identity = "FIRMWARE_NAME:Marlin 2.1.2.4 LumaCut-SKR-MiniMZ (LUMACUT_KEY v3) MACHINE_TYPE:LumaCut CNC"
+    m.identity = "FIRMWARE_NAME:LumaCut CNC 0.1 (Nov  5 2026 12:00:00) MACHINE_TYPE:LumaCut CNC"
     m.state = "Idle"; m.homed = True; m.z_homed = True
     m.position = [142.5, 118.25, 20.0]
     m.surface_z = 3.0

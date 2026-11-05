@@ -1,11 +1,12 @@
-"""Native Marlin USB transport and exclusive LightBurn/TCP gateway.
+"""USB transport to the LumaCut firmware and exclusive LightBurn/TCP gateway.
 
-No GRBL identity spoofing, no '?'/$-commands, no blind line flooding.
-One acknowledged Marlin G-code command is in flight at a time, except for
-plain job moves sent with stream_command(): there a small, ok-counted
-window (STREAM_MAX_LINES / STREAM_MAX_BYTES, below Marlin's BUFSIZE 8 and
-256-byte RX buffer) keeps the planner fed. Every streamed line passes the
-same MarlinLaserGuard and XY/Z guards first.
+The firmware's G-code subset and its answers are the contract in
+docs/FIRMWARE_EIGEN.md. No '?'/$-commands, no blind line flooding.
+One acknowledged command is in flight at a time, except for plain job moves
+sent with stream_command(): there a small, ok-counted window
+(STREAM_MAX_LINES / STREAM_MAX_BYTES, half of the firmware's receive side)
+keeps the planner fed. Every streamed line passes the same MarlinLaserGuard
+and XY/Z guards first.
 Live cutting requires validated homing, PWM isolation and hard interlock.
 """
 from __future__ import annotations
@@ -40,33 +41,37 @@ MELODIES = {
 POSITION_RE = re.compile(
     r"(?:^|\s)X:([-+]?\d+(?:\.\d+)?)\s+Y:([-+]?\d+(?:\.\d+)?)\s+Z:([-+]?\d+(?:\.\d+)?)")
 PROBE_RESULT_RE = re.compile(
-    r"\bBed\s+X:\s*[-+]?\d+(?:\.\d+)?\s+Y:\s*[-+]?\d+(?:\.\d+)?\s+Z:\s*([-+]?\d+(?:\.\d+)?)",
-    re.IGNORECASE)
+    r"\bBed X:[-+]?\d+(?:\.\d+)? Y:[-+]?\d+(?:\.\d+)? Z:([-+]?\d+(?:\.\d+)?)")
 WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 COMMENT = re.compile(r"\([^()]*\)")
-READ_ONLY = frozenset({"M105", "M114", "M115", "M119", "M122", "M503", "M400"})
-ERROR_PREFIXES = ("Error:", "echo:Error:", "Resend:", "rs ")
-# Anet firmware: endstops always on (Z guard, 01.11.). Marlin stops Z when
-# the switch closes outside homing/probing and reports "echo:endstops hit:
-# Z:..". The Pi treats that like a Marlin error (job aborts, laser off).
-# X/Y hits only happen at the X0/Y0 switches when parking: not an error.
+READ_ONLY = frozenset({"M114", "M115", "M119", "M122", "M400"})
+# LightBurn and its exports send these; the firmware rejects them and they
+# change nothing here (one coordinate frame, no M7 output, M30 is no job end).
+FILTERED = frozenset({"M30", "G54", "M7", "G17", "G40"})
+# Every endstop stops all axes, switches the laser off and empties the queue
+# (contract, Sicherheit 7), then reports "endstops hit: X:.. Y:.. Z:..".
+# A Z hit always aborts. A X/Y hit is expected only on the way to that axis's
+# zero (parking at the switches), see MarlinTransport._is_fault_locked.
 Z_ENDSTOP_HIT = re.compile(r"endstops hit:.*[ :]Z:", re.IGNORECASE)
+ENDSTOP_HIT = re.compile(r"endstops hit:(.*)", re.IGNORECASE)
+ENDSTOP_AXIS = re.compile(r"(?:^|[ :])([XYZ]):")
+AT_SWITCH_MM = 0.5     # a target this close to zero runs onto the switch
 
 
 def is_marlin_error(line: str) -> bool:
-    return line.startswith(ERROR_PREFIXES) or Z_ENDSTOP_HIT.search(line) is not None
-# Streaming window (#18). Marlin BUFSIZE 8 / RX_BUFFER_SIZE 256 on the SKR:
-# stay at half of both so a slow ok can never overflow the serial buffer.
+    return line.startswith("Error:") or Z_ENDSTOP_HIT.search(line) is not None
+# Streaming window (#18). The firmware's receive side holds at least 16 lines
+# of 96 characters: stay at half of both so a slow ok can never overflow it.
 # LUMACUT_STREAM_WINDOW=1 restores strict one-line-at-a-time sending.
 def _stream_window_setting(raw) -> int:
     try:
-        return max(1, min(8, int(raw)))
+        return max(1, min(16, int(raw)))
     except (TypeError, ValueError):
-        return 4
+        return 8
 
 
-STREAM_MAX_LINES = _stream_window_setting(os.environ.get("LUMACUT_STREAM_WINDOW", "4"))
-STREAM_MAX_BYTES = 200
+STREAM_MAX_LINES = _stream_window_setting(os.environ.get("LUMACUT_STREAM_WINDOW", "8"))
+STREAM_MAX_BYTES = 768
 STREAMABLE = re.compile(r"^G0?[01]\s")
 # X/Y travel until web.py sets the Pi's configured one (config "travels";
 # measured with head v6 on 31.10.2026: 370 x 360, set via /api/settings).
@@ -75,16 +80,15 @@ TRAVEL_XY_MM = (390.0, 370.0)
 # towards +Y from the beam (build_kopf_v6.py), plus 10 mm. Burning is
 # forbidden only inside this rectangle; everything else is work area.
 PARK_CORNER_MM = (78.0, 35.0)
-# Marlin refuses G30 ("Z Probe Past Bounds") when the head is within
-# PROBING_MARGIN (10 mm in the BTT example config) of the bed edges, on both
-# sides (the high side is travel - 10). The laser is off while probing, so
-# the head may enter the park corner.
+# The Pi probes only with the head this far from the bed edges, on both sides
+# (the high side is travel - 10). The laser is off while probing, so the head
+# may enter the park corner.
 PROBE_HEAD_MIN = (10.0, 10.0)
 # Fast multi-point probing: low hop between the points of one area.
 PROBE_HOP_MM = 3.0
 # Highest switch-tip Z above the homed bed: above 80 mm the head runs out
-# of the Z linear rail. Firmware Z_MAX_POS is the same; the Pi checks it too
-# because a SKR with older firmware still allows 90 mm.
+# of the Z linear rail. The firmware's hard limit is the same; the Pi checks
+# it as well, before anything is sent.
 Z_MAX_MM = 80.0
 # Parked and after homing the head waits this low over the bed in the park
 # corner (owner 31.10.): with the motors unpowered (emergency stop, board
@@ -93,15 +97,14 @@ PARK_Z_MM = 1.0
 _XY_MOTION = re.compile(r"^G0?[0123](?:\s|$)")
 # Z steps/mm of the worm lift (head v6 retrofit /mfw/zmount/v7/nachruest,
 # 01.11.): worm 1:10, pinion 10 teeth module 1 on a printed rack = 3.1416 mm
-# per motor turn, 16 microsteps. Sent on every connect like M203 Z9: the
-# old belt value (80) would move Z only 1/12.7 of the commanded distance.
+# per motor turn, 16 microsteps. Sent on every connect: the Pi owns the value.
 Z_STEPS_PER_MM = 1018.59
 # op=z_test: Z without homing to check the direction, slow (2 mm/s).
 Z_TEST_MAX_MM = 10.0
 Z_TEST_FEED_MM_MIN = 120
 # Z max feedrate (M203 Z). 9 mm/s from the belt drive; the worm lift reaches
-# ~30 (owner raises it in steps, config z_speed_mm_s). Z travel moves ask
-# for this speed, Marlin caps them at M203.
+# ~30 (owner raises it in steps, config z_speed_mm_s), but the firmware caps
+# M203 Z at 9 (contract). Z travel moves ask for this speed, M203 caps them.
 Z_SPEED_DEFAULT = 9.0
 Z_SPEED_MAX = 30.0
 SUPPLY_TEST_MAX_S = 30.0  # op=supply_test: laser rail on for measuring, beam off
@@ -121,11 +124,15 @@ MIN_BLIND_LIFT_MM = 5.0
 def _fault_text(line: str) -> str:
     if Z_ENDSTOP_HIT.search(line):
         return "Z-Taster während der Fahrt ausgelöst, Z gestoppt: " + line[:120]
-    return "Marlin: " + line[:150]
+    hit = ENDSTOP_HIT.search(line)
+    if hit:
+        return ("Endschalter %s während der Fahrt ausgelöst, alle Achsen gestoppt: "
+                % "/".join(ENDSTOP_AXIS.findall(hit.group(1)))) + line[:120]
+    return "Firmware: " + line[:150]
 
 
 class MarlinCommandError(RuntimeError):
-    """Marlin rejected a command but the serial protocol was re-synchronized."""
+    """The firmware rejected a command but the serial protocol is in sync."""
 
     responses: list = []
 
@@ -155,8 +162,8 @@ def normalize(line: str) -> str:
     return line.split(";", 1)[0].strip().upper()
 
 
-# X/Y acceleration (mm/s²) and top speed (mm/s) of the firmware build
-# (DEFAULT_MAX_ACCELERATION / DEFAULT_MAX_FEEDRATE in firmware/marlin/build.py).
+# X/Y acceleration (mm/s²) and top speed (mm/s), defaults of the firmware
+# (docs/FIRMWARE_EIGEN.md, Maschine).
 FIRMWARE_MOTION = (500.0, 150.0)
 # Hard caps for runtime limits and the motion test (belt-driven diode gantry).
 MOTION_ACCEL_RANGE = (100.0, 20000.0)
@@ -218,36 +225,36 @@ def motion_commands(accel: float, speed: float, z_speed: float = Z_SPEED_DEFAULT
 
 
 class MarlinLaserGuard:
-    """Conservatively permit only real Marlin 2.1 laser inline operation."""
+    """Conservatively permit only the firmware's laser inline operation."""
 
     def __init__(self):
         self.inline = False
-        self.last_rapid = False
 
     def check(self, command: str, homing_verified: bool):
         cmd = normalize(command)
         if not cmd:
             return ""
         if not cmd.isascii() or len(cmd) > 96:
-            raise ValueError("G-Code überschreitet Marlin-Limit von 96 Zeichen")
+            raise ValueError("G-Code überschreitet das Firmware-Limit von 96 Zeichen")
         if cmd == "G20":
             raise ValueError("Z-Sicherheitsgrenze benötigt Millimeter, G20 gesperrt")
         if cmd.startswith(("$", "?", "!", "~")):
-            raise ValueError("GRBL-Befehl am Marlin-Controller nicht zulässig")
-        # Allow only known laser motion, harmless queries and lighting/exhaust.
-        # Other Marlin commands can switch heater MOSFETs, disable software
-        # limits or remap machine coordinates, so they are never forwarded.
-        if cmd in READ_ONLY or cmd in ("M7", "M8", "M9", "M5", "M5 I",
+            raise ValueError("GRBL-Befehl am LumaCut-Controller nicht zulässig")
+        if cmd in FILTERED:
+            return ""
+        # Allow only known laser motion, harmless queries and exhaust. Other
+        # commands can change the machine's limits, steps or outputs, so they
+        # are never forwarded from a job file or LightBurn.
+        if cmd in READ_ONLY or cmd in ("M8", "M9", "M5", "M5 I",
                                          "G90", "G91", "G20", "G21"):
             if cmd.startswith("M5"):
                 self.inline = False
-                self.last_rapid = False
             return cmd
-        # Marlin treats the I selector as a *bare flag* (M3 I, M5 I).
+        # The I selector is a *bare flag* (M3 I, M5 I).
         # Recognize that spelling without turning it into a GRBL parameter.
         parsed = re.sub(r"(?<![A-Z])I(?=\s|$)", "I1", cmd)
         if cmd.startswith("G28"):
-            # Marlin G28 takes bare axis flags such as "G28 Z" / "G28 X Y".
+            # G28 takes bare axis flags such as "G28 Z" / "G28 X Y".
             parsed = re.sub(r"\b([XYZ])\b", r"\g<1>1", parsed)
         words = WORD.findall(parsed)
         if not words or WORD.sub("", parsed).strip():
@@ -256,55 +263,47 @@ class MarlinLaserGuard:
                     if letter in ("G", "M") and float(value).is_integer()]
         allowed_families = {"G0", "G1", "G2", "G3", "G4", "G28",
                             "G90", "G91", "G20", "G21", "M3", "M5",
-                            "M7", "M8", "M9", "M105", "M112", "M114",
-                            "M115", "M119", "M400", "M410", "M503"}
+                            "M8", "M9", "M112", "M114",
+                            "M115", "M119", "M400", "M410"}
         if any(f not in allowed_families for f in families):
-            raise ValueError("Marlin-G-Code nicht freigegeben")
+            raise ValueError("G-Code nicht freigegeben")
         if len(families) > 1:
             raise ValueError("Pro Zeile nur ein G/M-Befehl erlaubt")
-        if any(l not in "GMXYZIJRFSP" for l, _ in words):
+        if any(l not in "GMXYZIJFSP" for l, _ in words):
             raise ValueError("Unbekannter G-Code-Parameter")
         if any(m in families for m in ("M112", "M410")):
             # Emergency commands are not legal job-file instructions.
             # The dedicated emergency endpoint writes M112 immediately.
             raise ValueError("Notstopp ausschließlich über separaten M112-Kanal")
         if "M4" in families:
-            raise ValueError("Marlin M4 I nutzt Vorschub statt S-Leistung: M3 I erforderlich")
+            raise ValueError("M4 gibt es nicht: M3 I erforderlich")
         if "M3" in families:
             # A single bare I flag is required, never M3 S which can fire
             # the laser immediately while stationary.
             if cmd != "M3 I":
-                raise ValueError("Nur Marlin M3 I ohne S/O ist freigegeben")
+                raise ValueError("Nur M3 I ohne S/O ist freigegeben")
             self.inline = True
-            self.last_rapid = False
             return cmd
         if "M5" in families:
             if any(l == "I" for l, _ in words):
                 self.inline = False
-            self.last_rapid = False
             return cmd
         if "G28" in families:
-            # Native Marlin G28 may move XY before Z retracting. The Pi
-            # intercepts all G28 and executes a safe, staged home sequence.
+            # A bare G28 homes in the firmware's own order. The Pi intercepts
+            # all G28 and executes a safe, staged home sequence.
             raise ValueError("G28 nur über Pi-Zuerst-Z-Referenzfahrt erlaubt")
         if any(m in families for m in ("G0", "G1", "G2", "G3")):
             if not homing_verified:
                 raise ValueError("Fahrbewegung erst nach bestätigter Mechanik-Konfiguration freigeben")
-            is_rapid = "G0" in families
-            if is_rapid:
-                if any(l == "S" and float(v) > 0 for l, v in words):
-                    raise ValueError("G0 darf keine Laserleistung S>0 enthalten")
-                self.last_rapid = True
-            # A powered cut after a G0 requires a new S, per Marlin firmware.
+            if "G0" in families and any(l == "S" and float(v) > 0 for l, v in words):
+                raise ValueError("G0 darf keine Laserleistung S>0 enthalten")
+            # S is modal in the firmware: a G1 without S keeps the last power.
             if any(m in families for m in ("G1", "G2", "G3")):
                 power = [float(v) for l, v in words if l == "S"]
                 if power and not self.inline and max(power) > 0:
                     raise ValueError("Laserleistung ohne vorheriges M3 I verweigert")
                 if any(not 0 <= x <= 255 for x in power):
-                    raise ValueError("Marlin S-Wert außerhalb 0..255")
-                if self.last_rapid and self.inline and not power:
-                    raise ValueError("Erste Bearbeitungsfahrt nach G0 benötigt S-Leistung")
-                self.last_rapid = False
+                    raise ValueError("S-Wert außerhalb 0..255")
         return cmd
 
 
@@ -319,10 +318,8 @@ class MarlinTransport:
         self.state = "Disconnected"
         self.identity = ""
         self.cap_z_probe = None
-        self.cap_binary_transfer = False
+        self.cap_self_update = False
         self.firmware = {"state": "idle", "progress": 0, "message": ""}
-        # LightBurn assumes S is modal; Marlin resets inline power on G0.
-        self.last_cut_s = None
         self.homed = False
         self.z_homed = False
         self.homing_verified = False
@@ -335,7 +332,7 @@ class MarlinTransport:
         self.material_mm = None
         # Last Z the head is known to be at (machine Z, also commanded job Z),
         # kept by the web layer in a file: it decides how far to lift before
-        # homing when Marlin lost its position (emergency stop, reset).
+        # homing when the firmware lost its position (emergency stop, reset).
         self.last_known_z = None
         self.position = None
         self.fault = ""
@@ -372,15 +369,13 @@ class MarlinTransport:
         self.last_xy_commanded = None
         self.homing_chime_enabled = True
         self.job_chime_enabled = True
-        # None = not tried yet; False after "Unknown command" (old firmware).
-        self.motor_tones_supported: bool | None = None
         self.absolute_mode = True
         self.focused_this_job = False
         self.fan_off_at = None
         self.lights = False
         self.light_pct = 60            # operator brightness 1..100 %
         self.light_effects = True
-        # None = not tried; True = M355 dimming; False = old firmware (M7/M9).
+        # None = not switched yet since connecting; True = M355 answered.
         self.light_pwm: bool | None = None
         self.exhaust = False
         self.client = None
@@ -424,8 +419,7 @@ class MarlinTransport:
         self.guard = MarlinLaserGuard()
         self.identity = ""
         self.cap_z_probe = None
-        self.cap_binary_transfer = False
-        self.motor_tones_supported = None   # new firmware may have been flashed
+        self.cap_self_update = False
         if message:
             self.fault = message[:200]
 
@@ -443,23 +437,40 @@ class MarlinTransport:
                     self.position = [float(p.group(i)) for i in (1, 2, 3)]
                     if self.z_homed:
                         self.last_known_z = self.position[2]
-                if "FIRMWARE_NAME:Marlin" in line:
+                if "FIRMWARE_NAME:" in line:
                     self.identity = line
                 return line
-        raise TimeoutError("Keine Marlin-Bestätigung vor Fristablauf")
+        raise TimeoutError("Keine Bestätigung der Firmware vor Fristablauf")
+
+    def _is_fault_locked(self, line: str) -> bool:
+        """Firmware error, or an endstop hit that was not on the way to zero.
+
+        A hit emptied the firmware's queue and stopped all axes, so the Pi's
+        record of the commanded XY is void afterwards. Parking runs onto the
+        X0/Y0 switches: there a hit may come just before zero and is no fault.
+        """
+        hit = ENDSTOP_HIT.search(line)
+        fault = is_marlin_error(line)
+        if hit and not fault and self.last_xy_commanded is not None:
+            target = dict(zip("XY", self.last_xy_commanded))
+            fault = any(target[axis] > AT_SWITCH_MM
+                        for axis in ENDSTOP_AXIS.findall(hit.group(1)) if axis in target)
+        if hit and fault:
+            self.last_xy_commanded = None
+        return fault
 
     def _await_stream_ack_locked(self, timeout: float):
         """Read until one streamed line is acknowledged.
 
-        Marlin answers strictly in order, one ok per received line
-        (ADVANCED_OK "ok N.. P.. B.." counts the same). An error line
+        The firmware answers strictly in order, one "ok P.. B.." per received
+        line. An error line
         belongs to one of the lines in flight and is followed by its ok;
         it is remembered and raised once the window is drained.
         """
         deadline = time.monotonic() + timeout
         while True:
             line = self._read_line_locked(deadline)
-            if is_marlin_error(line):
+            if self._is_fault_locked(line):
                 self.serial_errors += 1
                 self.fault = _fault_text(line)
                 if not self.stream_error:
@@ -471,7 +482,7 @@ class MarlinTransport:
                 return
 
     def _drain_locked(self, timeout: float = 150.0):
-        """Wait for every streamed line; raise a remembered Marlin error."""
+        """Wait for every streamed line; raise a remembered firmware error."""
         while self.inflight:
             self._await_stream_ack_locked(timeout)
         if self.stream_error:
@@ -497,10 +508,10 @@ class MarlinTransport:
             line = self._read_line_locked(deadline)
             responses.append(line)
             lower = line.lower()
-            if is_marlin_error(line):
+            if self._is_fault_locked(line):
                 self.serial_errors += 1
                 self.fault = _fault_text(line)
-                # A Marlin error is usually followed by a normal "ok".
+                # An error is followed by a normal "ok".
                 # Consume that trailing ACK before the next command;
                 # otherwise M114/G30 will read a stale ACK as its own.
                 ack_deadline = min(deadline, time.monotonic() + 4.0)
@@ -510,9 +521,6 @@ class MarlinTransport:
                         responses.append(trailing)
                         if trailing.lower().startswith("ok"):
                             self.state = "Idle"
-                            # Keep the report lines Marlin printed between
-                            # the error and its ACK (G30 reports the stop
-                            # position there) for callers that can use them.
                             error = MarlinCommandError(self.fault)
                             error.responses = responses
                             raise error
@@ -528,69 +536,55 @@ class MarlinTransport:
     def ensure_ready(self, owner=None):
         with self.lock:
             if self.emergency_latched:
-                raise RuntimeError("M112-Notstopp verriegelt – SKR zurücksetzen, dann Notstopp quittieren")
+                raise RuntimeError("M112-Notstopp verriegelt – erst Notstopp quittieren")
             if self.serial is not None and self.identity:
                 return
             if self.owner not in (None, owner):
                 raise RuntimeError("SKR noch nicht bereit, während Client verbunden ist")
-            self._close_locked()
+            self._connect_locked()
+
+    def _connect_locked(self, quit_emergency: bool = False):
+        """Open the port, prove the firmware by M115, set the Pi's runtime values.
+
+        The firmware keeps nothing across a reset: speeds, steps and limits
+        are sent on every connection (the Pi is the central store).
+        ``quit_emergency`` sends M999; otherwise a firmware that is still
+        latched (Pi service restarted after an M112) latches the Pi too.
+        """
+        self._close_locked()
+        try:
+            self.serial = self._open()
+            # The Grbl bridge buffers by itself and asks for a deeper window
+            # (short arc segments would starve Grbl's planner otherwise).
+            self.stream_window = getattr(self.serial, "stream_window", STREAM_MAX_LINES)
+            self.stream_bytes = getattr(self.serial, "stream_bytes", STREAM_MAX_BYTES)
+            # STM32 USB may reset at open. Allow boot banner to settle.
+            time.sleep(1.0)
+            self.serial.reset_input_buffer()
+            reply = self._exchange_locked("M115", timeout=8.0)
+            if ("FIRMWARE_NAME:LumaCut CNC" not in self.identity
+                    or "MACHINE_TYPE:LumaCut CNC" not in self.identity):
+                raise RuntimeError("Fremde oder alte Firmware: LumaCut-CNC-Kennung im M115 fehlt")
+            caps = [line.strip() for line in reply]
+            self.cap_z_probe = "Cap:Z_PROBE:1" in caps if any(
+                c.startswith("Cap:Z_PROBE:") for c in caps) else None
+            self.cap_self_update = "Cap:SELF_UPDATE:1" in caps
+            if quit_emergency:
+                self._exchange_locked("M999", timeout=6.0)
             try:
-                self.serial = self._open()
-                # The Grbl bridge buffers by itself and asks for a deeper window
-                # (short arc segments would starve Grbl's planner otherwise).
-                self.stream_window = getattr(self.serial, "stream_window", STREAM_MAX_LINES)
-                self.stream_bytes = getattr(self.serial, "stream_bytes", STREAM_MAX_BYTES)
-                # STM32 USB may reset at open. Allow boot banner to settle.
-                time.sleep(1.0)
-                # Ignore unsolicited 'start'/welcome, then ask native M115.
-                self.serial.reset_input_buffer()
-                reply = self._exchange_locked("M115", timeout=8.0)
-                if not any("FIRMWARE_NAME:Marlin" in x for x in reply):
-                    raise RuntimeError("SKR meldet kein echtes Marlin M115")
-                if "LumaCut CNC" not in self.identity:
-                    raise RuntimeError("Fremde/alte Marlin-Firmware: LumaCut CNC Kennung fehlt")
-                caps = [line.strip() for line in reply
-                        if line.strip().startswith("Cap:Z_PROBE:")]
-                # A firmware compiled without HAS_BED_PROBE cannot perform
-                # real G30 probing, even when M119 recognizes Z_MIN.
-                self.cap_z_probe = (caps[-1] == "Cap:Z_PROBE:1") if caps else None
-                # Needed for firmware updates over USB (M28 B1 + M997).
-                self.cap_binary_transfer = "Cap:BINARY_FILE_TRANSFER:1" in (
-                    line.strip() for line in reply)
                 self._exchange_locked("M5 I", timeout=6.0)
-                # The installed EEPROM from earlier firmware reported
-                # M203 Z6. Marlin limits homing and probing feedrate by that
-                # runtime cap, even if the new firmware requests 7.2 mm/s.
-                # User requested 1.8x Z speed. Set 9 mm/s on every SKR USB
-                # reconnect; do not write permanent EEPROM without an
-                # explicit flash/configuration workflow.
-                self._exchange_locked("M203 Z%g" % self.z_speed_mm_s, timeout=6.0)
-                self._exchange_locked("M92 Z%g" % Z_STEPS_PER_MM, timeout=6.0)
-                # Z guard (Anet and SKR): ENDSTOPS_ALWAYS_ON_DEFAULT only takes effect
-                # on an EEPROM reset; a valid EEPROM loads without it and the
-                # switch stayed unchecked (tested 01.11.). M120 switches the
-                # endstops on for every move until the next board reset.
-                self._exchange_locked("M120", timeout=6.0)
-                # The same stale EEPROM may still hold the Mega Zero example
-                # probe offset { -40, -10, 2 }. Marlin then shifts every G30
-                # by X+40/Y+10, adds 2 mm to the result and lowers the
-                # "triggered early" limit by 2 mm. The Pi applies the real
-                # X/Y switch offset itself, so the firmware offset must be 0.
-                try:
-                    self._exchange_locked("M851 X0 Y0 Z0", timeout=6.0)
-                except MarlinCommandError:
-                    LOG.warning("M851 X/Y not accepted, resetting Z offset only")
-                    self._exchange_locked("M851 Z0", timeout=6.0)
-                # Measured X/Y acceleration and speed (never written to EEPROM).
-                self._apply_motion_locked()
-                # Motors keep holding when idle (Marlin's default lets them go
-                # after 120 s): the head cannot be pushed by hand unnoticed.
-                self._exchange_locked("M84 S0", timeout=6.0)
-                self.state = "Idle"
-                self.fault = ""
-            except Exception as exc:
-                self._close_locked(str(exc))
+            except MarlinCommandError as exc:
+                if "emergency stop" in str(exc).lower():
+                    self.emergency_latched = True
                 raise
+            self._exchange_locked("M92 Z%g" % Z_STEPS_PER_MM, timeout=6.0)
+            # X/Y acceleration and speed from the calibration, Z speed.
+            self._apply_motion_locked()
+            self.state = "Idle"
+            self.fault = ""
+        except Exception as exc:
+            self._close_locked(str(exc))
+            raise
 
     def set_workpiece_surface(self, contact_confirmed: bool, owner: str = "web"):
         """Declare measured Z position at physical switch contact.
@@ -622,7 +616,7 @@ class MarlinTransport:
         if self.surface_z is None:
             raise ValueError("Z-Fahrten nur mit vermessener Werkstückoberfläche erlaubt")
         if self.absolute_mode:
-            # The target is known without asking Marlin. Draining the
+            # The target is known without asking the firmware. Draining the
             # planner here would stop the head on every focus-compensated
             # segment (a Z word on each 2 mm piece) and burn dots.
             target = coords["Z"]
@@ -652,10 +646,10 @@ class MarlinTransport:
         G0 with laser safely extinguished is permitted in home bands.
 
         The start point is the Pi's own record of the last commanded XY,
-        not an M400/M114 query: M400 drains Marlin's planner, so querying
+        not an M400/M114 query: M400 waits for an empty queue, so querying
         before every segment stopped the head at each vector node and burnt
-        dots/uneven lines into the material. Every XY move reaches Marlin
-        through this gateway, so the commanded record is exact.
+        dots/uneven lines into the material. Every XY move reaches the
+        firmware through this gateway, so the commanded record is exact.
         """
         if not re.match(r"^G0?[123](?:\s|$)", cmd) or not self.laser_enabled:
             return
@@ -685,7 +679,7 @@ class MarlinTransport:
                 f"Start X{px:.2f} Y{py:.2f}, Ziel X{tx:.2f} Y{ty:.2f}")
 
     def _unpark_before_locked(self, cmd: str):
-        """Every path to Marlin passes here: the head sitting low in the park
+        """Every path to the firmware passes here: the head sitting low in the park
         corner rises to the travel height before any X/Y move, so it never
         drags over the bed. Any Z move ends the parked state."""
         if not self.parked_low or not _XY_MOTION.match(cmd):
@@ -745,24 +739,27 @@ class MarlinTransport:
         self.focused_this_job = True
 
     def command(self, cmd: str, owner: str = "web",
-                timeout: float = 20.0, use_guard=True):
+                timeout: float = 20.0, use_guard=True, after_queue=False):
+        """One acknowledged command. ``after_queue``: an M5 from a job or from
+        LightBurn waits for the moves before it (the firmware's M5 acts at
+        once, the rest of the queue would run unlit)."""
         with self.lock:
             normalized, passthrough = self._prepare_locked(cmd, owner, use_guard)
             if not normalized:
                 return []
             if passthrough:
                 return self._exchange_locked(normalized, timeout)
-            return self._send_locked(normalized, timeout)
+            return self._send_locked(normalized, timeout, after_queue=after_queue)
 
     def stream_command(self, cmd: str, owner: str = "job", timeout: float = 150.0):
         """Send a job line, keeping plain moves in a small ok-counted window.
 
         Same normalization and guards as command(). Only absolute G0/G1
-        lines whose guards need no extra Marlin exchange (known start XY,
-        focus done, no relative mode) are streamed; everything else first
-        drains the window and then runs exactly like command(). A Marlin
-        error on any streamed line stops further sending and raises after
-        the window is drained.
+        lines whose guards need no extra exchange (known start XY, focus
+        done, no relative mode) are streamed; everything else first drains
+        the window and then runs exactly like command(). A firmware error on
+        any streamed line stops further sending and raises after the window
+        is drained. An M5 in the job waits for the moves before it.
         """
         with self.lock:
             normalized, passthrough = self._prepare_locked(cmd, owner, True)
@@ -771,11 +768,11 @@ class MarlinTransport:
             if passthrough:
                 return self._exchange_locked(normalized, timeout)
             if not self._streamable_locked(normalized):
-                return self._send_locked(normalized, timeout)
+                return self._send_locked(normalized, timeout, after_queue=True)
             return self._send_locked(normalized, timeout, stream=True)
 
     def drain(self, owner: str = "job", timeout: float = 150.0):
-        """Wait until every streamed line is acknowledged by Marlin."""
+        """Wait until every streamed line is acknowledged by the firmware."""
         with self.lock:
             if self.serial is None:
                 self.inflight.clear()
@@ -828,10 +825,11 @@ class MarlinTransport:
         if self.owner not in (None, owner):
             raise RuntimeError("Steuerung belegt: " + self.owner)
         if self.serial is None or not self.identity:
-            raise ConnectionError("Marlin USB nicht bereit")
+            raise ConnectionError("SKR USB nicht bereit")
         if self.emergency_latched:
             raise RuntimeError("M112-Notstopp aktiv; keine weiteren Bewegungen")
-        normalized = normalize(cmd)
+        # G01 and M05 are the same commands; the firmware's table has G1 and M5.
+        normalized = re.sub(r"^([GM])0+(?=\d)", r"\1", normalize(cmd))
         # A bare G0/G1 from LightBurn changes only the modal motion
         # type; there is no destination and thus no motion to authorize.
         # In particular this must not erase a confirmed homing state.
@@ -849,27 +847,22 @@ class MarlinTransport:
                 and any(k == "S" for k, _ in WORD.findall(normalized))):
             normalized = re.sub(r"^G0?1", "G0", normalized)
             normalized = re.sub(r"\s*S\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)", "", normalized)
-        # LightBurn often emits G0 X... Y... without an F word.
-        # Marlin's modal feedrate might still be the slow Z feedrate;
+        # LightBurn often emits G0 X... Y... without an F word. The modal G0
+        # feed might still be the slow Z feed of the Pi's last lift;
         # give XY-only rapids their own travel speed every time.
         if (re.match(r"^G0?0(?:\s|$)", normalized)
                 and re.search(r"\b[XY]\s*[-+]?\d", normalized)
                 and not re.search(r"\bZ\s*[-+]?\d", normalized)
                 and not re.search(r"\bF\s*[-+]?\d", normalized)):
             normalized += " F9000"
-        # LightBurn treats S as modal, Marlin does not: after G0 the
-        # inline power is 0, so a following G1 without S cuts at 0 and
-        # the guard rejected it (which latched M112 mid-job). Re-send
-        # the last cut power, exactly what LightBurn intended.
-        if (owner == "lightburn" and self.laser_enabled and self.guard.last_rapid
-                and self.last_cut_s is not None
-                and re.match(r"^G0?[123](?:\s|$)", normalized)
-                and not any(k == "S" for k, _ in WORD.findall(normalized))):
-            normalized += f" S{self.last_cut_s:g}"
         if use_guard:
             normalized = self.guard.check(normalized, self.homing_verified)
         if not normalized:
             return "", True
+        # G0 has no S in the firmware's table and always runs at power 0. The
+        # guard has refused S>0 already; an S0 must not end up as modal power.
+        if re.match(r"^G0(?:\s|$)", normalized):
+            normalized = re.sub(r"\s*S\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)", "", normalized)
         if normalized.startswith(("G0 ", "G1 ")) and "Z" in normalized and self.surface_z is None:
             raise RuntimeError("Keine Werkstückhöhe bekannt; keine Z-Fahrt über LightBurn freigeben")
         # The frame's glimmer (web.py, at most 1 %) needs no focus height.
@@ -880,7 +873,8 @@ class MarlinTransport:
             raise RuntimeError("Maschine nicht referenziert: in LightBurn zuerst Home (G28) ausfuehren; danach G30 fuer Werkstueckfokus")
         return normalized, False
 
-    def _send_locked(self, normalized: str, timeout: float, stream: bool = False):
+    def _send_locked(self, normalized: str, timeout: float, stream: bool = False,
+                     after_queue: bool = False):
         """Guards needing the machine state, the exchange and bookkeeping."""
         try:
             self._z_move_guard_locked(normalized)
@@ -902,18 +896,16 @@ class MarlinTransport:
                 any(k == "S" and float(v) > 0 for k,v in WORD.findall(normalized)) and
                 self.laser_enabled and not self.focused_this_job):
                 self._focus_before_cut_locked()
+            if after_queue and normalized.startswith("M5"):
+                self._exchange_locked("M400", timeout=max(timeout, 150.0))
             if stream:
                 reply = self._stream_write_locked(normalized, timeout)
             else:
                 reply = self._exchange_locked(normalized, timeout)
-            # Remember the workpiece target sent by LightBurn even if
-            # asynchronous Marlin M114 reports arrive out of order.
-            # Relative moves are tracked too: the cut guard uses this
+            # Remember the target sent. Relative moves are tracked too: the cut guard uses this
             # record as the start point of the next segment.
             if re.match(r"^G0?[0123](?:\s|$)", normalized):
                 coords = {k: float(v) for k, v in WORD.findall(normalized)}
-                if "S" in coords and not normalized.startswith(("G0 ", "G00 ")):
-                    self.last_cut_s = coords["S"]
                 if "X" in coords or "Y" in coords:
                     if self.absolute_mode and "X" in coords and "Y" in coords:
                         self.last_xy_commanded = (coords["X"], coords["Y"])
@@ -930,14 +922,10 @@ class MarlinTransport:
                 self.laser_enabled = False
                 if self.fan_power:
                     self.fan_off_at = time.monotonic() + self.fan_cooldown_s
-            if normalized == "M7":
-                self.lights = True
             if normalized == "M8":
                 self.exhaust = True
             if normalized == "M9":
                 self.exhaust = False
-                if self.light_pwm is not True:
-                    self.lights = False    # old firmware: M9 also switched PC8 off
             return reply
         except (ValueError, MarlinCommandError) as exc:
             # Rejected G-code is not the same as a disconnected USB cable.
@@ -969,31 +957,19 @@ class MarlinTransport:
             return True
 
     def _play_stepper_chime_locked(self, event: str) -> bool:
-        """Melody on the X/Y stepper coils, the head does not move.
+        """Melody on the X/Y stepper coils with M300, the head does not move.
 
-        Uses the LumaCut firmware M300 (firmware/marlin/motor_tone.cpp): each
-        tone alternates one microstep forward and back in SpreadCycle, so the
-        motors sing loudly with zero net travel; Marlin refuses it while the
-        laser is on. Coordinates and homing stay valid. Older firmware
-        without it answers "Unknown command" and the melodies switch off
-        quietly until the next connection.
+        Each tone alternates one microstep forward and back, so the motors
+        sing with zero net travel; coordinates and homing stay valid. The
+        firmware refuses it while the laser is on or an axis moves: then the
+        melody just stays silent.
         """
         notes = MELODIES.get(event)
-        if (notes is None or self.serial is None or self.laser_enabled
-                or self.motor_tones_supported is False):
+        if notes is None or self.serial is None or self.laser_enabled:
             return False
         try:
             for hz, ms in notes:
-                replies = self._exchange_locked(f"M300 S{hz} P{ms}",
-                                                timeout=ms / 1000.0 + 10)
-                text = " ".join(replies).lower()
-                if "unknown command" in text:
-                    self.motor_tones_supported = False
-                    LOG.info("Firmware without motor tones (M300); melodies off")
-                    return False
-                if "refused" in text:
-                    return False
-            self.motor_tones_supported = True
+                self._exchange_locked(f"M300 S{hz} P{ms}", timeout=ms / 1000.0 + 10)
             return True
         except Exception as exc:
             LOG.warning("Motor melody '%s' unavailable: %s", event, exc)
@@ -1011,23 +987,11 @@ class MarlinTransport:
 
     # ---------- dimmable light (PC8) ----------
 
-    def _light_raw_locked(self, pct: float) -> bool:
-        """Sets PC8 to ``pct``; False when the firmware cannot dim (old M7/M9)."""
-        if self.light_pwm is not False:
-            replies = self._exchange_locked(
-                "M355 S%d P%d" % (1 if pct > 0 else 0, round(max(0.0, min(100.0, pct)) * 2.55)), timeout=8)
-            if "unknown command" not in " ".join(replies).lower():
-                self.light_pwm = True
-                return True
-            self.light_pwm = False
-            LOG.info("Firmware without dimmable light (M355); using M7/M9")
-        if pct > 0:
-            self._exchange_locked("M7", timeout=8)
-        else:
-            self._exchange_locked("M9", timeout=8)
-            if self.exhaust:
-                self._exchange_locked("M8", timeout=8)
-        return False
+    def _light_raw_locked(self, pct: float):
+        """Sets PC8 to ``pct``."""
+        self._exchange_locked(
+            "M355 S%d P%d" % (1 if pct > 0 else 0, round(max(0.0, min(100.0, pct)) * 2.55)), timeout=8)
+        self.light_pwm = True
 
     def _apply_light_locked(self):
         self._light_raw_locked(self.light_pct if self.lights else 0)
@@ -1050,14 +1014,12 @@ class MarlinTransport:
     def _light_effect_locked(self, event: str) -> bool:
         """Plays LIGHT_EFFECTS[event], then restores the operator's light."""
         steps = LIGHT_EFFECTS.get(event)
-        if (steps is None or not self.light_effects or self.serial is None
-                or self.light_pwm is False or self.emergency_latched):
+        if steps is None or not self.light_effects or self.serial is None or self.emergency_latched:
             return False
         before = self.state
         try:
             for pct, ms in steps:
-                if not self._light_raw_locked(pct):
-                    return False           # old firmware: no effects
+                self._light_raw_locked(pct)
                 time.sleep(ms / 1000.0)
             self._apply_light_locked()
             return True
@@ -1125,7 +1087,10 @@ class MarlinTransport:
         For checking the Z direction after a drive change: homing itself
         runs Z into the switch and would drive the wrong way at full force.
         At most Z_TEST_MAX_MM, laser off, X/Y untouched; the machine stays
-        unhomed afterwards (Marlin's Z is no longer the real height).
+        unhomed afterwards (the firmware's Z is no longer the real height).
+        Unhomed the firmware's Z says nothing, but its travel limits still
+        apply: G92 puts the test in the middle of the range and Z0 afterwards,
+        so the later blind lift before homing stays inside it too.
         """
         if not isinstance(distance, (int, float)) or not 0 < abs(distance) <= Z_TEST_MAX_MM:
             raise ValueError("Z-Test: höchstens ±%g mm" % Z_TEST_MAX_MM)
@@ -1138,12 +1103,15 @@ class MarlinTransport:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity or self.emergency_latched:
-                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+                raise ConnectionError("SKR USB nicht bereit oder Notstopp verriegelt")
+            known = self.z_homed
             self.homed = False
             self.z_homed = False
             self.surface_z = None
             self.parked_low = False
             self._exchange_locked("M5 I", timeout=6.0)
+            if not known:
+                self._exchange_locked("G92 Z%g" % (Z_MAX_MM / 2), timeout=wait)
             self._exchange_locked("G91", timeout=6.0)
             try:
                 if speed and speed > self.z_speed_mm_s:
@@ -1154,7 +1122,9 @@ class MarlinTransport:
                 self._exchange_locked("G90", timeout=6.0)
                 if speed and speed > self.z_speed_mm_s:
                     self._exchange_locked("M203 Z%g" % self.z_speed_mm_s, timeout=6.0)
-            return self._exchange_locked("M114", timeout=6.0)
+            result = self._exchange_locked("M114", timeout=6.0)
+            self._exchange_locked("G92 Z0", timeout=wait)
+            return result
 
     def supply_test(self, seconds: float, owner: str = "web"):
         """Laser 24 V rail (relay on FAN0) on for a few seconds, beam off.
@@ -1170,7 +1140,7 @@ class MarlinTransport:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity or self.emergency_latched:
-                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+                raise ConnectionError("SKR USB nicht bereit oder Notstopp verriegelt")
             self._exchange_locked("M5 I", timeout=6.0)
             self._exchange_locked("M400", timeout=15)
             self._exchange_locked("M106 P0 S255", timeout=8)
@@ -1195,7 +1165,7 @@ class MarlinTransport:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity or self.emergency_latched:
-                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+                raise ConnectionError("SKR USB nicht bereit oder Notstopp verriegelt")
             self._exchange_locked("M5 I", timeout=6.0)
             self._exchange_locked("M400", timeout=15)
             if on:
@@ -1220,7 +1190,7 @@ class MarlinTransport:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity or self.emergency_latched:
-                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+                raise ConnectionError("SKR USB nicht bereit oder Notstopp verriegelt")
             self.service_ping = time.monotonic()
             if power == self.service_power:
                 return power
@@ -1252,9 +1222,10 @@ class MarlinTransport:
     def ttl_test(self, seconds: float, owner: str = "web"):
         """Laser PWM pin at full duty with the laser rail OFF (owner 01.11.).
 
-        For measuring the TTL pin (ISP SCK, PB7; MISO until 01.11.) with a meter: the relay is
-        switched off first and stays off, so the module has no supply. With
-        S255 the pin reads ~5 V DC; 0 V means pin, firmware or wiring fault.
+        For measuring the TTL pin (PA9) with a meter: the relay is switched
+        off first and stays off, so the module has no supply. 0 V at S255 means
+        pin, firmware or wiring fault. M114 every second: the firmware ends a
+        stationary beam after 5 s without a command (Sicherheit 6).
         """
         if not isinstance(seconds, (int, float)) or not 1 <= seconds <= TTL_TEST_MAX_S:
             raise ValueError("TTL-Test: 1..%g s" % TTL_TEST_MAX_S)
@@ -1262,7 +1233,7 @@ class MarlinTransport:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity or self.emergency_latched:
-                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+                raise ConnectionError("SKR USB nicht bereit oder Notstopp verriegelt")
             self._exchange_locked("M5 I", timeout=6.0)
             self._exchange_locked("M400", timeout=15)
             self._exchange_locked("M107 P0", timeout=8)
@@ -1270,8 +1241,10 @@ class MarlinTransport:
             self.fan_off_at = None
             try:
                 self._exchange_locked("M3 S255", timeout=6.0)
-                self._exchange_locked("G4 P%d" % int(seconds * 1000),
-                                      timeout=seconds + 10)
+                end = time.monotonic() + seconds
+                while time.monotonic() < end:
+                    time.sleep(min(1.0, max(0.0, end - time.monotonic())))
+                    self._exchange_locked("M114", timeout=6.0)
             finally:
                 self._exchange_locked("M5", timeout=6.0)
 
@@ -1292,7 +1265,7 @@ class MarlinTransport:
             if not self.homing_verified:
                 raise PermissionError("Mechanik/Z-Endschalter nicht verifiziert")
             if self.serial is None or not self.identity or self.emergency_latched:
-                raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
+                raise ConnectionError("SKR USB nicht bereit oder Notstopp verriegelt")
             clearance = self.clearance_mm if clearance_mm is None else clearance_mm
             if probe_contact_confirmed:
                 raise ValueError("G28 referenziert ausschließlich den Maschinenboden; Werkstückkontakt separat mit G30")
@@ -1306,8 +1279,7 @@ class MarlinTransport:
             self.last_probe_laser_xy = None
             self.last_xy_commanded = None
             self.focused_this_job = False
-            # Up to the travel height before X/Y cross the bed; G28 R0: Marlin
-            # itself does not lift again (its blind 16 mm could hit the rail top).
+            # Up to the travel height before X/Y cross the bed.
             lift = self._lift_before_home_locked(operator_clear)
             final = min(Z_MAX_MM, max(clearance, self.travel_z))
             if self.park_z_mm:
@@ -1552,7 +1524,7 @@ class MarlinTransport:
             return result
 
     def probe_workpiece(self, owner: str = "lightburn"):
-        """Intercept LightBurn G30; use native Marlin probe, preserve bed Z0."""
+        """Intercept LightBurn G30; probe with the firmware's G30, preserve bed Z0."""
         with self.lock:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
@@ -1577,23 +1549,12 @@ class MarlinTransport:
                 raise RuntimeError("Ausgangsposition für G30 unbekannt")
             self._absolute_locked()
             laser_x, laser_y, z = self.position
-            # Some queued M114 reports are stale (for example X0/Y0 from
-            # homing arrives after LightBurn has moved to X120/Y120).
-            # Wait for a *verified* position matching the last commanded XY.
             if self.last_xy_commanded is not None:
                 tx, ty = self.last_xy_commanded
                 if abs(laser_x - tx) > 0.15 or abs(laser_y - ty) > 0.15:
-                    for _ in range(5):
-                        self._exchange_locked("M400", timeout=20)
-                        self._exchange_locked("M114", timeout=8)
-                        if self.position is not None:
-                            laser_x, laser_y, z = self.position
-                        if abs(laser_x - tx) <= 0.15 and abs(laser_y - ty) <= 0.15:
-                            break
-                    else:
-                        raise RuntimeError(
-                            f"G30 Positionsabgleich fehlgeschlagen: erwartet X{tx:.2f} "
-                            f"Y{ty:.2f}, Marlin meldet X{laser_x:.2f} Y{laser_y:.2f}")
+                    raise RuntimeError(
+                        f"G30 Positionsabgleich fehlgeschlagen: erwartet X{tx:.2f} "
+                        f"Y{ty:.2f}, Firmware meldet X{laser_x:.2f} Y{laser_y:.2f}")
             # After M2 parks at X0/Y0, a repeated G30 should use the
             # previously successful measurement location, not the park.
             # Reuse only when the requested position is inside keep-out.
@@ -1619,29 +1580,7 @@ class MarlinTransport:
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=60)
             self._exchange_locked("M400", timeout=60)
             self.last_xy_commanded = (x, y)
-            start_z = max(z, self.travel_z)
-            note = ""
-            try:
-                replies = self._exchange_locked("G30", timeout=120)
-                contact = None
-                for line in replies:
-                    # Only the dedicated G30 result line is a measurement.
-                    # The "X: Y: Z:" report that follows it is the position
-                    # AFTER Marlin's post-probe raise, never the contact.
-                    match = PROBE_RESULT_RE.search(line)
-                    if match:
-                        contact = float(match.group(1))
-            except MarlinCommandError as exc:
-                if "probing failed" not in str(exc).lower():
-                    raise
-                replies = list(exc.responses)
-                contact = self._early_trigger_contact_locked(start_z)
-                note = ("echo:LumaCut G30: Marlin meldete 'Probing Failed' "
-                        "(Kontakt oberhalb Firmware-Grenze Z_CLEARANCE_MULTI_PROBE), "
-                        f"Taster bestaetigt geschaltet bei Z{contact:.3f}")
-                LOG.warning(note)
-            if contact is None or not -BED_BELOW_Z0_MM <= contact <= Z_MAX_MM:
-                raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
+            contact, replies = self._probe_here_locked()
             self.surface_z = contact
             self.last_probe_laser_xy = (laser_x, laser_y)
             lift = min(Z_MAX_MM, max(self.travel_z, contact + self.probe_clearance_mm))
@@ -1653,50 +1592,11 @@ class MarlinTransport:
             self.last_xy_commanded = (laser_x, laser_y)
             self.focused_this_job = False
             self.fault = ""
-            head = [f"echo:LumaCut workpiece Z:{contact:.3f}"] + ([note] if note else [])
-            # Never forward Marlin's own Error line: LightBurn would abort
-            # the job although the contact is measured and valid.
-            return head + [line for line in replies
-                           if not line.startswith(("Error:", "echo:Error:"))]
-
-    def _early_trigger_contact_locked(self, start_z: float) -> float:
-        """Evaluate a G30 that Marlin rejected as 'Probing Failed'.
-
-        Marlin 2.1.2.9 (single probing, Probe::run_z_probe) reports failure
-        in two different situations:
-          * no trigger: the head reached Z_PROBE_LOW_POINT (-2 mm), switch open
-          * triggered early: contact above -offset.z + Z_CLEARANCE_MULTI_PROBE
-            (5 mm in the stock example config, 16 mm in the LumaCut build).
-        In the second case Marlin has stopped the stepper at the trigger and
-        set current_position from the stepper counts; nothing raises the head
-        afterwards (fixed probe, no stow move). M114 therefore reports the
-        exact contact height and M119 still reads the pressed switch.
-        Accept only that physically confirmed case.
-        """
-        self._exchange_locked("M400", timeout=20)
-        self.position = None
-        self._exchange_locked("M114", timeout=8)
-        if self.position is None:
-            raise RuntimeError("G30 fehlgeschlagen und Kontakthöhe nicht lesbar (M114)")
-        stop_z = self.position[2]
-        endstops = self._exchange_locked("M119", timeout=8)
-        pressed = any(re.match(r"^\s*z_(?:min|probe)\s*:\s*TRIGGERED", line, re.IGNORECASE)
-                      for line in endstops)
-        if not pressed:
-            raise RuntimeError(
-                f"G30 ohne Tasterkontakt bis Z{stop_z:.2f}: kein Material unter dem "
-                "Taster oder X/Y-Tasterversatz falsch")
-        if stop_z >= start_z - 0.3:
-            raise RuntimeError(
-                f"Z-Taster war schon beim G30-Start (Z{start_z:.2f}) gedrückt: "
-                "Taster klemmt/Verdrahtung prüfen, Material zu hoch für Z-Rückzug")
-        if stop_z < -BED_BELOW_Z0_MM:
-            raise RuntimeError(f"G30-Kontakt Z{stop_z:.2f} unter Maschinenboden: Z-Referenz prüfen")
-        return stop_z
+            return [f"echo:LumaCut workpiece Z:{contact:.3f}"] + replies
 
     def _absolute_locked(self):
         """G90 before absolute moves. A relative jog that failed after its
-        G91 left Marlin relative: G30's "G0 X212 Y167" then drove from
+        G91 left the firmware relative: G30's "G0 X212 Y167" then drove from
         X185/Y180 into the X end (01.11.)."""
         if not self.absolute_mode:
             self._exchange_locked("G90", timeout=8)
@@ -1713,27 +1613,30 @@ class MarlinTransport:
         dx, dy = self.probe_xy_offset_mm
         return self._probe_head_ok(x - dx, y - dy)
 
-    def _probe_here_locked(self, start_z: float) -> float:
-        """G30 E0 at the current head XY: contact Z, the switch stays deployed.
-
-        A plain G30 stows the fixed probe afterwards, so the next G30 deploys
-        it again and Marlin first raises to Z_CLEARANCE_BETWEEN_PROBES (16 mm)
-        before it descends. E0 skips the stow; probe_surface() stows once
-        with M402 at the end. One measurement per point (no MULTIPLE_PROBING).
-        """
-        contact = None
+    def _probe_here_locked(self):
+        """G30 at the current head XY: (contact Z, reply lines), the head stays
+        at the contact. M400 first: the lift before it must have left the
+        switch, or the firmware answers "Probe already triggered"."""
+        self._exchange_locked("M400", timeout=60)
         try:
-            for line in self._exchange_locked("G30 E0", timeout=120):
-                match = PROBE_RESULT_RE.search(line)
-                if match:
-                    contact = float(match.group(1))
+            replies = self._exchange_locked("G30", timeout=120)
         except MarlinCommandError as exc:
-            if "probing failed" not in str(exc).lower():
-                raise
-            contact = self._early_trigger_contact_locked(start_z)
+            text = str(exc).lower()
+            if "already triggered" in text:
+                raise RuntimeError("Z-Taster war schon beim G30-Start gedrückt: Taster klemmt/"
+                                   "Verdrahtung prüfen, Material zu hoch für Z-Rückzug") from exc
+            if "probing failed" in text:
+                raise RuntimeError("G30 ohne Tasterkontakt: kein Material unter dem Taster "
+                                   "oder X/Y-Tasterversatz falsch") from exc
+            raise
+        contact = None
+        for line in replies:
+            match = PROBE_RESULT_RE.search(line)
+            if match:
+                contact = float(match.group(1))
         if contact is None or not -BED_BELOW_Z0_MM <= contact <= Z_MAX_MM:
-            raise RuntimeError("Marlin G30 meldet keinen gültigen Z-Tastkontakt")
-        return contact
+            raise RuntimeError("G30 meldet keinen gültigen Z-Tastkontakt")
+        return contact, replies
 
     def probe_surface(self, groups, owner: str = "job", progress=None,
                       should_stop=None, hop_mm: float = PROBE_HOP_MM, skip_missing: bool = False):
@@ -1745,7 +1648,7 @@ class MarlinTransport:
         height there). The lowest point is probed once more at the end, so
         the measured surface (and with it the Z floor surface + 2 mm) is the
         lowest one: every focus height of the job is then allowed. Laser stays
-        off; the switch is stowed (M402) and Z raised whatever happens.
+        off. A failed point leaves the head there; the caller parks.
         ``skip_missing`` (bed map): a point where the switch finds nothing
         before the firmware's lowest probe Z is left None instead of
         stopping; every other probe error still stops.
@@ -1789,7 +1692,7 @@ class MarlinTransport:
 
             def contact_at(x, y):
                 try:
-                    return self._probe_here_locked(z)
+                    return self._probe_here_locked()[0]
                 except (MarlinCommandError, RuntimeError, ValueError) as exc:
                     raise ProbeFailed(x, y, exc) from exc
 
@@ -1805,117 +1708,103 @@ class MarlinTransport:
                 self._exchange_locked(f"G0 X{hx:.3f} Y{hy:.3f} F9000", timeout=60)
                 self.last_xy_commanded = (hx, hy)
 
-            try:
-                self._exchange_locked("M5 I", timeout=8)
-                self._exchange_locked("M400", timeout=20)
-                self._exchange_locked("M114", timeout=8)
-                if self.position is None:
-                    raise RuntimeError("Ausgangsposition für das Abtasten unbekannt")
-                if not self.absolute_mode:
-                    self._exchange_locked("G90", timeout=8)
-                    self.absolute_mode = True
-                z = self.position[2]
-                tallest = None
-                for gi, group in enumerate(groups):
-                    highest = None
-                    for pi, (x, y) in enumerate(group):
-                        check_stop()
-                        if highest is not None:
-                            lift(highest + hop_mm)
-                        else:   # new area: height unknown, travel high
-                            lift(self.travel_z if tallest is None
-                                 else max(self.travel_z, tallest + hop_mm))
-                        go(x, y)
-                        try:
-                            contact = contact_at(x, y)
-                        except ProbeFailed as exc:
-                            if not skip_missing or "ohne Tasterkontakt" not in str(exc.cause):
-                                raise
-                            LOG.warning("Probe point skipped: %s", exc)
-                            self._exchange_locked("M114", timeout=8)
-                            z = self.position[2] if self.position is not None else -BED_BELOW_Z0_MM
-                            lift(self.travel_z if highest is None else highest + hop_mm)
-                            step_done()
-                            continue
-                        values[gi][pi] = contact
-                        highest = contact if highest is None else max(highest, contact)
-                        tallest = highest if tallest is None else max(tallest, highest)
-                        z = contact
+            self._exchange_locked("M5 I", timeout=8)
+            self._exchange_locked("M400", timeout=20)
+            self._exchange_locked("M114", timeout=8)
+            if self.position is None:
+                raise RuntimeError("Ausgangsposition für das Abtasten unbekannt")
+            if not self.absolute_mode:
+                self._exchange_locked("G90", timeout=8)
+                self.absolute_mode = True
+            z = self.position[2]
+            tallest = None
+            for gi, group in enumerate(groups):
+                highest = None
+                for pi, (x, y) in enumerate(group):
+                    check_stop()
+                    if highest is not None:
                         lift(highest + hop_mm)
-                        step_done()
-                check_stop()
-                found = [(g, p) for g in range(len(groups)) for p in range(len(groups[g]))
-                         if values[g][p] is not None]
-                if not found:
-                    raise RuntimeError("Der Taster hat an keinem Punkt eine Fläche gefunden")
-                gi, pi = min(found, key=lambda gp: values[gp[0]][gp[1]])
-                if gi != len(groups) - 1:
-                    lift(max(self.travel_z, tallest + hop_mm))
-                x, y = groups[gi][pi]
-                go(x, y)
-                low = values[gi][pi] + hop_mm
-                if z > low + 0.001:
-                    self._exchange_locked(f"G0 Z{low:.3f} F{self.z_feed}", timeout=45)
-                    z = low
-                contact = contact_at(x, y)
-                values[gi][pi] = contact
-                z = contact
-                step_done()
-                self._stow_probe_locked()
-                lift(max(self.travel_z, tallest + self.probe_clearance_mm))
-                self._exchange_locked("M400", timeout=45)
-                self._exchange_locked("M114", timeout=8)
-                self.surface_z = min(v for g in values for v in g if v is not None)
-                self.last_probe_laser_xy = (x, y)
-                self.focused_this_job = False
-                self.fault = ""
-                return values
-            except Exception:
-                if self.serial is not None:
+                    else:   # new area: height unknown, travel high
+                        lift(self.travel_z if tallest is None
+                             else max(self.travel_z, tallest + hop_mm))
+                    go(x, y)
                     try:
-                        self._stow_probe_locked()
-                    except Exception:
-                        LOG.warning("M402 after failed probing not confirmed", exc_info=True)
-                raise
-
-    def _stow_probe_locked(self):
-        """M402: stow the switch after G30 E0 (no Z move on a fixed probe)."""
-        try:
-            self._exchange_locked("M402", timeout=20)
-        except MarlinCommandError:
-            LOG.warning("M402 rejected by firmware")
+                        contact = contact_at(x, y)
+                    except ProbeFailed as exc:
+                        if not skip_missing or "ohne Tasterkontakt" not in str(exc.cause):
+                            raise
+                        LOG.warning("Probe point skipped: %s", exc)
+                        self._exchange_locked("M114", timeout=8)
+                        z = self.position[2] if self.position is not None else -BED_BELOW_Z0_MM
+                        lift(self.travel_z if highest is None else highest + hop_mm)
+                        step_done()
+                        continue
+                    values[gi][pi] = contact
+                    highest = contact if highest is None else max(highest, contact)
+                    tallest = highest if tallest is None else max(tallest, highest)
+                    z = contact
+                    lift(highest + hop_mm)
+                    step_done()
+            check_stop()
+            found = [(g, p) for g in range(len(groups)) for p in range(len(groups[g]))
+                     if values[g][p] is not None]
+            if not found:
+                raise RuntimeError("Der Taster hat an keinem Punkt eine Fläche gefunden")
+            gi, pi = min(found, key=lambda gp: values[gp[0]][gp[1]])
+            if gi != len(groups) - 1:
+                lift(max(self.travel_z, tallest + hop_mm))
+            x, y = groups[gi][pi]
+            go(x, y)
+            low = values[gi][pi] + hop_mm
+            if z > low + 0.001:
+                self._exchange_locked(f"G0 Z{low:.3f} F{self.z_feed}", timeout=45)
+                z = low
+            contact = contact_at(x, y)
+            values[gi][pi] = contact
+            z = contact
+            step_done()
+            lift(max(self.travel_z, tallest + self.probe_clearance_mm))
+            self._exchange_locked("M400", timeout=45)
+            self._exchange_locked("M114", timeout=8)
+            self.surface_z = min(v for g in values for v in g if v is not None)
+            self.last_probe_laser_xy = (x, y)
+            self.focused_this_job = False
+            self.fault = ""
+            return values
 
     def clear_emergency(self):
-        """Release the M112 latch once the SKR has demonstrably restarted.
+        """Release the M112 latch with M999, on a fresh connection.
 
-        After M112 Marlin sits in kill() and answers nothing. A fresh M115
-        reply with LumaCut identity therefore proves a reset/power cycle:
-        the board is unhomed with laser PWM and the PC6 rail off.
+        The firmware answers M115 and M999 while latched. Afterwards the
+        board is unhomed with laser PWM and the PC6 rail off; also after a
+        reset or power cycle, where M999 changes nothing.
         """
         with self.lock:
             if not self.emergency_latched:
                 return "Kein Notstopp aktiv"
             if self.owner is not None:
                 raise RuntimeError("Steuerung belegt: " + self.owner)
-            self._close_locked()
             self.emergency_latched = False
             try:
-                self.ensure_ready()
+                self._connect_locked(quit_emergency=True)
             except Exception as exc:
                 self.emergency_latched = True
-                raise RuntimeError("SKR antwortet noch nicht: Reset-Taste am SKR drücken "
+                raise RuntimeError("SKR antwortet nicht: USB prüfen, Reset-Taste am SKR drücken "
                                    "oder 24 V und USB kurz trennen (" + str(exc)[:80] + ")")
             self.fault = ""
-            return "Notstopp quittiert: SKR neu gestartet, bitte neu referenzieren"
+            return "Notstopp quittiert, bitte neu referenzieren"
 
-    def flash_firmware(self, image: bytes, settle_timeout: float = 120.0,
-                       boot_wait: float = 8.0, poll: float = 3.0):
-        """Write firmware.bin to the SKR SD over USB, reboot it, verify M115.
+    def flash_firmware(self, image: bytes, settle_timeout: float = 60.0,
+                       boot_wait: float = 3.0, poll: float = 2.0):
+        """Self-update (M997, firmware_flash.py), then verify the build by M115.
 
-        Runs for minutes: call from a worker thread. Ownership 'firmware'
+        The firmware keeps the running image until the whole new one arrived
+        with a good checksum. Any failure before "ok DONE" therefore leaves it
+        untouched; the port is closed and the heartbeat connects again. Runs
+        for up to a minute: call from a worker thread. Ownership 'firmware'
         keeps LightBurn, jobs and the heartbeat away for the whole update.
         """
-        from .firmware_flash import BinaryUploader, TARGET_NAME, validate_image
+        from .firmware_flash import SelfUpdateUploader, validate_image
         info = validate_image(image)
         expected = info["build"]
         with self.lock:
@@ -1923,14 +1812,14 @@ class MarlinTransport:
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity or self.emergency_latched:
                 raise RuntimeError("SKR nicht bereit oder Notstopp aktiv")
-            if not self.cap_binary_transfer:
+            if not self.cap_self_update:
                 raise RuntimeError(
-                    "Aktuelle SKR-Firmware kann keine Dateien empfangen "
-                    "(Cap:BINARY_FILE_TRANSFER:0): einmalig per SD-Karte flashen")
+                    "Aktuelle SKR-Firmware kann sich nicht selbst aktualisieren "
+                    "(Cap:SELF_UPDATE fehlt): einmalig per SD-Karte flashen")
             self.owner = "firmware"
             previous = self.identity
             self.firmware = {"state": "uploading", "progress": 0,
-                             "message": "Laser aus, SD-Karte prüfen"}
+                             "message": "Laser, Relais, Licht und Abluft aus"}
         try:
             with self.lock:
                 self._exchange_locked("M5 I", timeout=8)
@@ -1938,38 +1827,35 @@ class MarlinTransport:
                 # PC6 switches the laser module's 24 V rail: off before reset.
                 self._exchange_locked("M107 P0", timeout=8)
                 self._exchange_locked("M9", timeout=8)
+                self._exchange_locked("M355 S0", timeout=8)
                 self.laser_enabled = False
                 self.fan_power = False
                 self.lights = self.exhaust = False
-                media = self._exchange_locked("M21", timeout=15)
-                if not any("SD card ok" in line for line in media):
-                    raise RuntimeError("Keine SD-Karte im SKR erkannt (M21): "
-                                       "microSD (FAT32) dauerhaft im SKR stecken lassen")
-                try:
-                    self._exchange_locked("M30 " + TARGET_NAME, timeout=15)
-                except MarlinCommandError:
-                    pass  # no previous firmware.bin on the card
                 self.state = "Busy"
                 self.serial.reset_input_buffer()
                 port = self.serial
             # Outside the lock so /api/status stays responsive; the
             # 'firmware' owner already keeps every other sender out.
-            uploader = BinaryUploader(port, log=self.lines.append)
+            uploader = SelfUpdateUploader(port, log=self.lines.append)
 
             def progress(done, total):
                 self.firmware.update(progress=round(100 * done / total),
                                      message=f"Übertrage {done // 1024} / {total // 1024} KB")
-            uploader.upload(TARGET_NAME, image, progress)
+            try:
+                uploader.upload(image, progress)
+            except Exception as exc:
+                with self.lock:
+                    self._close_locked("Firmware-Update abgebrochen, laufende Firmware bleibt: "
+                                       + str(exc)[:120])
+                raise RuntimeError("Firmware-Update abgebrochen, laufende Firmware bleibt: "
+                                   + str(exc)[:150]) from exc
             with self.lock:
                 self.firmware.update(state="rebooting", progress=100,
-                                     message="SKR startet neu, Bootloader flasht")
-                # M997 reboots immediately: no 'ok' will follow.
-                self.serial.write(b"M997\n")
-                self.serial.flush()
-                time.sleep(0.5)
+                                     message="SKR kopiert die neue Firmware und startet neu")
+                # After "ok DONE" the firmware drops USB by itself.
                 self._close_locked("Firmware-Update: SKR startet neu")
             deadline = time.monotonic() + settle_timeout
-            time.sleep(boot_wait)  # bootloader flashes ~145 KB, USB is gone meanwhile
+            time.sleep(boot_wait)
             last_error = ""
             while time.monotonic() < deadline:
                 try:
@@ -1979,15 +1865,15 @@ class MarlinTransport:
                     last_error = str(exc)
                     time.sleep(poll)
             else:
-                raise RuntimeError("SKR nach dem Flashen nicht wieder erreichbar: " + last_error[:120])
+                raise RuntimeError("SKR nach dem Update nicht wieder erreichbar, Rettung per SD-Karte: "
+                                   + last_error[:120])
             with self.lock:
                 running = self.identity
             if expected and f"({expected})" not in running:
                 raise RuntimeError(
-                    f"SKR läuft nicht mit dem neuen Build ({expected}); "
-                    "Bootloader hat die Datei nicht übernommen. Meldung: " + running[:120])
+                    f"SKR läuft nicht mit dem neuen Build ({expected}). Meldung: " + running[:120])
             if not expected and running == previous:
-                raise RuntimeError("SKR meldet unveränderte Firmware nach dem Flashen")
+                raise RuntimeError("SKR meldet unveränderte Firmware nach dem Update")
             self.firmware = {"state": "done", "progress": 100,
                              "message": "Neue Firmware aktiv: " + (expected or running[:60])}
             return self.firmware["message"]
@@ -2000,14 +1886,14 @@ class MarlinTransport:
                 if self.owner == "firmware":
                     self.owner = None
 
-    def flash_avr(self, hex_text: str, port: str | None = None, opener=None,
-                  settle_timeout: float = 60.0, poll: float = 3.0):
-        """Flash LumaCut Marlin onto the Anet board (ATmega1284P) over USB.
+    def flash_avr(self, hex_text: str, port: str | None = None, opener=None):
+        """Flash a firmware.hex onto the Anet board (ATmega1284P) over USB.
 
         avr_flash.py talks to the board's boot loader directly (STK500, the
-        CH340's DTR resets the chip), so this also works when the board
-        still runs a foreign firmware the gateway refuses. Runs ~20 s: call
-        from a worker thread. Owner 'firmware' keeps everyone else away.
+        CH340's DTR resets the chip) and reads every page back. Runs ~20 s:
+        call from a worker thread. Owner 'firmware' keeps everyone else away.
+        The Anet build is Marlin and this gateway only drives the firmware of
+        docs/FIRMWARE_EIGEN.md, so there is no reconnect and no M115 check.
         """
         from .avr_flash import BOOT_BAUD, flash as avr_flash, validate_hex
         from .grbl_bridge import grbl_ports
@@ -2050,25 +1936,8 @@ class MarlinTransport:
                     ser.close()
                 except Exception:
                     pass
-            self.firmware.update(state="rebooting", progress=100,
-                                 message="Geschrieben und geprüft, Marlin startet")
-            deadline = time.monotonic() + settle_timeout
-            last_error = ""
-            while time.monotonic() < deadline:
-                time.sleep(poll)
-                try:
-                    self.ensure_ready(owner="firmware")
-                    break
-                except Exception as exc:
-                    last_error = str(exc)
-            else:
-                raise RuntimeError("Anet nach dem Flashen nicht erreichbar: " + last_error[:120])
-            with self.lock:
-                running = self.identity
-            if expected and f"({expected})" not in running:
-                raise RuntimeError(f"Anet meldet nicht den neuen Build ({expected}): " + running[:120])
             self.firmware = {"state": "done", "progress": 100,
-                             "message": "Neue Firmware aktiv: " + (expected or running[:60])}
+                             "message": "Anet-Firmware geschrieben und geprüft: " + (expected or "ohne Build-Stempel")}
             return self.firmware["message"]
         except Exception as exc:
             self.firmware = {"state": "error", "progress": self.firmware.get("progress", 0),
@@ -2086,7 +1955,7 @@ class MarlinTransport:
                 "state": self.state, "owner": self.owner or "Frei",
                 "identity": self.identity, "homed": self.homed,
                 "z_homed": self.z_homed, "z_probe_supported": self.cap_z_probe, "emergency_latched": self.emergency_latched,
-                "firmware_upload_supported": self.cap_binary_transfer,
+                "firmware_upload_supported": self.cap_self_update,
                 # CH340 board for an Anet firmware.hex (flash_avr), None = none
                 "firmware_avr_port": _ch340_port(),
                 "firmware_update": dict(self.firmware),
@@ -2120,11 +1989,10 @@ class MarlinTransport:
             }
 
     def emergency_stop(self):
-        # Emergency parser can accept M112 during long G-code commands.
+        # The firmware evaluates M112 on reception, also with a full queue.
         # A hardware E-Stop / power interlock remains essential.
         # Do not acquire the long-running command lock: a streaming G28
-        # or G1 may be awaiting 'ok'. Marlin's EMERGENCY_PARSER accepts M112
-        # on the input stream while a move is underway.
+        # or G1 may be awaiting 'ok'.
         self.service_power = 0
         serial_port = self.serial
         if serial_port is None:
@@ -2135,7 +2003,7 @@ class MarlinTransport:
         if serial_port is not None:
             try:
                 serial_port.write(b"M112\n")
-                self.fault = "M112 ausgelöst: SKR stromlos schalten und prüfen"
+                self.fault = "M112 ausgelöst: Notstopp quittieren, dann neu referenzieren"
                 self.emergency_latched = True
                 self.homed = False
                 self.z_homed = False
@@ -2161,7 +2029,7 @@ class MarlinTransport:
         fragment = bytearray()
         try:
             # Line-by-line ACK backpressure. Never send blind batches to a
-            # microcontroller with a finite Marlin RX/command queue.
+            # microcontroller with a finite receive and command queue.
             while True:
                 try:
                     payload = client.recv(4096)
@@ -2182,17 +2050,16 @@ class MarlinTransport:
                                 client.sendall(b"Error:LumaCut M112 emergency stop sent; reset required\r\n")
                                 return
                             if normalized == "G00 G17 G40 G21":
-                                # LightBurn's Marlin-flavor initialization:
+                                # LightBurn's initialization line:
                                 # G00 is a modal rapid with no destination;
                                 # G17 and G40 don't change our XY laser
-                                # trajectory. Send real G21 to Marlin and
-                                # return its genuine ACK.
+                                # trajectory. Send real G21 and return its
+                                # genuine ACK.
                                 lines = self.command("G21", owner="lightburn", timeout=15)
-                            elif normalized == "G54":
-                                # This controller uses the default frame only.
-                                # Synchronize against Marlin (actual ACK),
-                                # without pretending to support G55+ offsets.
-                                lines = self.command("M400", owner="lightburn", timeout=15)
+                            elif normalized in FILTERED:
+                                # LightBurn waits for an answer, the firmware
+                                # never sees these (FILTERED).
+                                lines = ["ok"]
                             elif normalized == "M2":
                                 lines = self.park_safezone(owner="lightburn")
                             elif normalized == "G30":
@@ -2202,7 +2069,8 @@ class MarlinTransport:
                                     raise ValueError("G28 nur ohne Achsen über Pi erlaubt")
                                 lines = self.safe_home(owner="lightburn")
                             else:
-                                lines = self.command(cmd, owner="lightburn", timeout=150.0)
+                                lines = self.command(cmd, owner="lightburn", timeout=150.0,
+                                                     after_queue=True)
                             for line in lines:
                                 client.sendall((line + "\r\n").encode("ascii", "replace"))
                         except (ValueError, RuntimeError) as exc:
@@ -2224,9 +2092,9 @@ class MarlinTransport:
                         client.sendall(b"Error:LumaCut invalid/oversize G-code\r\n")
                         return
         except (OSError, ConnectionError, TimeoutError):
-            LOG.warning("LightBurn Marlin connection lost", exc_info=True)
+            LOG.warning("LightBurn connection lost", exc_info=True)
         finally:
-            # Marlin may still be in continuous inline laser mode if a Wi-Fi
+            # The firmware may still be in inline laser mode if a Wi-Fi
             # client disappears mid-job. Fail closed instead of leaving it
             # armed until the firmware timeout. Hardware cutoff still needed.
             if self.laser_enabled and not self.emergency_latched:

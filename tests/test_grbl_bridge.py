@@ -92,7 +92,8 @@ class GrblBridgeTest(unittest.TestCase):
     def test_identity_passes_the_gateway_check(self):
         _, bridge = self.make()
         reply = self.ask(bridge, "M115")
-        self.assertIn("FIRMWARE_NAME:Marlin", reply[0])
+        self.assertIn("FIRMWARE_NAME:LumaCut CNC", reply[0])
+        self.assertIn("MACHINE_TYPE:LumaCut CNC", reply[0])
         self.assertIn("LumaCut CNC", reply[0])
         self.assertIn("Cap:Z_PROBE:1", reply)
 
@@ -123,8 +124,8 @@ class GrblBridgeTest(unittest.TestCase):
         self.ask(bridge, "G0 Z20 F600")
         self.assertFalse(any("Z" in w for w in grbl.written if w.startswith("G")))
         self.assertIn("Z:20.00", self.ask(bridge, "M114")[0])
-        probe = self.ask(bridge, "G30 E0")
-        self.assertTrue(any(line.startswith("Bed X:") and "Z: 2.70" in line for line in probe))
+        probe = self.ask(bridge, "G30")
+        self.assertTrue(any(line.startswith("Bed X:") and "Z:2.70" in line for line in probe))
 
     def test_refuses_grbl_without_laser_mode(self):
         grbl = FakeGrbl(0)

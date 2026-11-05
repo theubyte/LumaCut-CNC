@@ -2,27 +2,35 @@
 import hashlib
 import io
 import json
+import struct
 import tempfile
 import unittest
 from pathlib import Path
 
 from pi400.marlin.firmware_release import FirmwareReleases, board_of, running_build
-from tests.test_avr_flash import lumacut_image, to_hex
 
-ANET_ID = ("FIRMWARE_NAME:Marlin 2.1.2.9 (Oct 30 2026 10:00:00) SOURCE_CODE_URL:github.com/MarlinFirmware/Marlin "
-           "PROTOCOL_VERSION:1.0 MACHINE_TYPE:LumaCut CNC Marlin Anet EXTRUDER_COUNT:0")
-HEX = to_hex(lumacut_image()).encode()          # build stamp "Oct 31 2026 16:54:31"
+SKR_ID = "FIRMWARE_NAME:LumaCut CNC 0.1 (Oct 30 2026 10:00:00) MACHINE_TYPE:LumaCut CNC"
+MARLIN_ID = ("FIRMWARE_NAME:Marlin 2.1.2.9 (Oct 30 2026 10:00:00) SOURCE_CODE_URL:github.com/MarlinFirmware/Marlin "
+             "PROTOCOL_VERSION:1.0 MACHINE_TYPE:LumaCut CNC Marlin EXTRUDER_COUNT:0")
+BUILD = "Oct 31 2026 16:54:31"
+IMAGE = (struct.pack("<II", 0x20010000, 0x08007000 + 0x1235)
+         + b"FIRMWARE_NAME:LumaCut CNC 0.1 (" + BUILD.encode() + b") MACHINE_TYPE:LumaCut CNC\x00"
+         + b"Cap:SELF_UPDATE:1\x00").ljust(32 * 1024, b"\xff")
+MARLIN_IMAGE = (struct.pack("<II", 0x2000C000, 0x08007000 + 0x1235)
+                + b"FIRMWARE_NAME:Marlin Oct 31 2026 16:54:31 MACHINE_TYPE:LumaCut CNC Marlin\x00"
+                + b"Switching to Binary Protocol\x00").ljust(128 * 1024, b"\xff")
+ASSET = "LumaCut-Firmware-SKR.bin"
 
 
-def fake_github(number, hex_data=HEX, build="Oct 31 2026 16:54:31", digest=None, extra_releases=()):
-    meta = {"number": number, "commit": "abc", "boards": {"anet": {
-        "asset": "LumaCut-Marlin-Anet.hex", "build": build, "size": len(hex_data),
-        "sha256": digest or hashlib.sha256(hex_data).hexdigest()}}}
-    releases = list(extra_releases) + [{"tag_name": "marlin-%d" % number, "assets": [
-        {"name": "LumaCut-Marlin.json", "browser_download_url": "https://dl/json"},
-        {"name": "LumaCut-Marlin-Anet.hex", "browser_download_url": "https://dl/hex"}]}]
+def fake_github(number, image=IMAGE, build=BUILD, digest=None, extra_releases=()):
+    meta = {"number": number, "commit": "abc", "boards": {"skr": {
+        "asset": ASSET, "build": build, "size": len(image),
+        "sha256": digest or hashlib.sha256(image).hexdigest()}}}
+    releases = list(extra_releases) + [{"tag_name": "lumacut-fw-%d" % number, "assets": [
+        {"name": "LumaCut-Firmware.json", "browser_download_url": "https://dl/json"},
+        {"name": ASSET, "browser_download_url": "https://dl/bin"}]}]
     urls = {"https://api.github.com/repos/o/r/releases?per_page=30": json.dumps(releases).encode(),
-            "https://dl/json": json.dumps(meta).encode(), "https://dl/hex": hex_data}
+            "https://dl/json": json.dumps(meta).encode(), "https://dl/bin": image}
     calls = []
 
     def opener(url, timeout):
@@ -33,11 +41,13 @@ def fake_github(number, hex_data=HEX, build="Oct 31 2026 16:54:31", digest=None,
 
 class FirmwareReleaseTests(unittest.TestCase):
     def test_identity_parsing(self):
-        self.assertEqual(board_of(ANET_ID), "anet")
-        self.assertEqual(running_build(ANET_ID), "Oct 30 2026 10:00:00")
-        self.assertEqual(board_of("FIRMWARE_NAME:Marlin 2.1.2.9 (Oct  1 2026 08:00:00) "
-                                  "MACHINE_TYPE:LumaCut CNC Marlin EXTRUDER_COUNT:0"), "skr")
-        # The Grbl bridge and foreign firmwares are never offered an image.
+        self.assertEqual(board_of(SKR_ID), "skr")
+        self.assertEqual(running_build(SKR_ID), "Oct 30 2026 10:00:00")
+        self.assertEqual(running_build("FIRMWARE_NAME:LumaCut CNC 0.1 (Oct  1 2026 08:00:00) "
+                                       "MACHINE_TYPE:LumaCut CNC"), "Oct  1 2026 08:00:00")
+        # Marlin builds, the Grbl bridge and foreign firmwares are never offered an image.
+        self.assertIsNone(board_of(MARLIN_ID))
+        self.assertIsNone(board_of(MARLIN_ID.replace("CNC Marlin", "CNC Marlin Anet")))
         self.assertIsNone(board_of("MACHINE_TYPE:LumaCut CNC Atomstack-Grbl EXTRUDER_COUNT:0"))
         self.assertIsNone(board_of("FIRMWARE_NAME:Marlin 2.0.9.7 MACHINE_TYPE:Anet A8 plus"))
 
@@ -47,56 +57,91 @@ class FirmwareReleaseTests(unittest.TestCase):
             android = {"tag_name": "android-1.0.60", "assets": []}
             opener, calls = fake_github(7, extra_releases=[android])
             fw = FirmwareReleases(Path(tmp), repo="o/r", opener=opener)
-            self.assertFalse(fw.offer(ANET_ID)["update_available"])
+            self.assertFalse(fw.offer(SKR_ID)["update_available"])
             fw.check()
-            offer = fw.offer(ANET_ID)
+            offer = fw.offer(SKR_ID)
             self.assertIsNone(offer["error"])
             self.assertTrue(offer["update_available"])
             self.assertEqual((offer["board"], offer["number"], offer["release_build"]),
-                             ("anet", 7, "Oct 31 2026 16:54:31"))
-            self.assertEqual(fw.image("anet"), HEX)
+                             ("skr", 7, BUILD))
+            self.assertEqual(fw.image("skr"), IMAGE)
             # Same release again: no second image download.
             calls.clear()
             fw.check()
-            self.assertNotIn("https://dl/hex", calls)
+            self.assertNotIn("https://dl/bin", calls)
 
     def test_same_or_older_build_on_the_board_is_not_offered(self):
         with tempfile.TemporaryDirectory() as tmp:
             fw = FirmwareReleases(Path(tmp), repo="o/r", opener=fake_github(7)[0])
             fw.check()
-            same = ANET_ID.replace("Oct 30 2026 10:00:00", "Oct 31 2026 16:54:31")
-            newer = ANET_ID.replace("Oct 30 2026 10:00:00", "Nov  2 2026 09:00:00")
+            same = SKR_ID.replace("Oct 30 2026 10:00:00", BUILD)
+            newer = SKR_ID.replace("Oct 30 2026 10:00:00", "Nov  2 2026 09:00:00")
             self.assertFalse(fw.offer(same)["update_available"])
             self.assertFalse(fw.offer(newer)["update_available"])
-            skr = ANET_ID.replace("Marlin Anet", "Marlin")
-            self.assertFalse(fw.offer(skr)["update_available"])     # no SKR image in it
+            # The running Marlin gets nothing: this path goes over SD once.
+            self.assertFalse(fw.offer(MARLIN_ID)["update_available"])
+
+    def test_old_marlin_releases_are_not_taken(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            marlin = {"tag_name": "marlin-62", "assets": [
+                {"name": "LumaCut-Marlin.json", "browser_download_url": "https://dl/old"}]}
+            opener = lambda url, timeout: io.BytesIO(json.dumps([marlin]).encode())
+            fw = FirmwareReleases(Path(tmp), repo="o/r", opener=opener)
+            fw.check()
+            self.assertIn("noch keine Firmware", fw.offer(SKR_ID)["error"])
+            self.assertFalse(fw.offer(SKR_ID)["update_available"])
+            # Newest first in the list, ours further down: ours is the one.
+            fw._open = fake_github(3, extra_releases=[marlin])[0]
+            fw.check()
+            self.assertEqual(fw.offer(SKR_ID)["number"], 3)
+
+    def test_marlin_release_still_on_disk_is_never_offered(self):
+        # A Pi that ran Marlin holds its release.json and skr.bin (numbers up to 62).
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "firmware"
+            base.mkdir()
+            (base / "skr.bin").write_bytes(MARLIN_IMAGE)
+            (base / "release.json").write_text(json.dumps({
+                "number": 62, "commit": "old", "boards": {"skr": {
+                    "build": "Dec 31 2026 16:54:31", "size": len(MARLIN_IMAGE),
+                    "sha256": hashlib.sha256(MARLIN_IMAGE).hexdigest()}}}), encoding="utf-8")
+            opener, calls = fake_github(1)
+            fw = FirmwareReleases(Path(tmp), repo="o/r", opener=opener)
+            self.assertIsNone(fw.meta())
+            self.assertFalse(fw.offer(SKR_ID)["update_available"])
+            self.assertIsNone(fw.image("skr"))
+            # A release with a lower number than the old Marlin ones still counts.
+            fw.check()
+            self.assertEqual(fw.offer(SKR_ID)["number"], 1)
+            self.assertEqual(fw.image("skr"), IMAGE)
 
     def test_bad_checksum_or_stamp_keeps_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             fw = FirmwareReleases(Path(tmp), repo="o/r", opener=fake_github(7, digest="0" * 64)[0])
             fw.check()
-            self.assertIn("Prüfsumme", fw.offer(ANET_ID)["error"])
-            self.assertFalse(fw.offer(ANET_ID)["update_available"])
+            self.assertIn("Prüfsumme", fw.offer(SKR_ID)["error"])
+            self.assertFalse(fw.offer(SKR_ID)["update_available"])
             fw._open = fake_github(8, build="Nov  1 2026 00:00:00")[0]
             fw.check()
-            self.assertIn("Build-Stempel", fw.offer(ANET_ID)["error"])
+            self.assertIn("Build-Stempel", fw.offer(SKR_ID)["error"])
             self.assertIsNone(fw.meta())
 
-    def test_foreign_image_is_refused(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            foreign = to_hex(lumacut_image().replace(b"LumaCut CNC Marlin Anet", b"Some Other Firmware!!!!")).encode()
-            fw = FirmwareReleases(Path(tmp), repo="o/r", opener=fake_github(7, hex_data=foreign)[0])
-            fw.check()
-            self.assertIsNotNone(fw.offer(ANET_ID)["error"])
-            self.assertFalse(fw.offer(ANET_ID)["update_available"])
+    def test_foreign_or_marlin_image_is_refused(self):
+        foreign = IMAGE.replace(b"LumaCut CNC", b"Other Stuff")
+        for image in (foreign, MARLIN_IMAGE):
+            with self.subTest(image=image[8:30]), tempfile.TemporaryDirectory() as tmp:
+                fw = FirmwareReleases(Path(tmp), repo="o/r", opener=fake_github(7, image=image)[0])
+                fw.check()
+                self.assertIsNotNone(fw.offer(SKR_ID)["error"])
+                self.assertFalse(fw.offer(SKR_ID)["update_available"])
 
     def test_tampered_file_on_disk_is_not_flashed(self):
         with tempfile.TemporaryDirectory() as tmp:
             fw = FirmwareReleases(Path(tmp), repo="o/r", opener=fake_github(7)[0])
             fw.check()
-            path = Path(tmp) / "firmware" / "anet.hex"
-            path.write_bytes(HEX[:-3] + b"00\n")
-            self.assertIsNone(fw.image("anet"))
+            path = Path(tmp) / "firmware" / "skr.bin"
+            path.write_bytes(IMAGE[:-3] + b"000")
+            self.assertIsNone(fw.image("skr"))
 
 
 if __name__ == "__main__":

@@ -493,7 +493,7 @@ dialog.danger h2{color:var(--bad)}
   <span id="jobDetails"></span>
  </div>
  <div class="banner estop-latched" id="estopBanner">
-  <span>Notstopp aktiv – SKR am Reset-Taster zurücksetzen, dann quittieren und neu referenzieren.</span>
+  <span>Notstopp aktiv – Ursache prüfen, dann quittieren und neu referenzieren.</span>
   <button class="btn sm" id="estopReset" type="button">Notstopp quittieren</button>
  </div>
  <div class="banner update" id="fwBanner" role="status"><span id="fwBannerText">Firmware-Update verfügbar</span><button class="btn sm primary" id="fwBannerInstall" type="button">Jetzt flashen</button></div>
@@ -871,7 +871,7 @@ dialog.danger h2{color:var(--bad)}
      <label class="field">Beschleunigung X/Y<span class="unit" data-unit="mm/s²"><input id="motionAccel" type="number" min="100" step="50" inputmode="decimal" placeholder="Firmware"></span></label>
      <label class="field">Höchsttempo X/Y<span class="unit" data-unit="mm/s"><input id="motionSpeed" type="number" min="10" step="5" inputmode="decimal" placeholder="Firmware"></span></label>
     </div>
-    <p class="help">Werte aus der Bewegungs-Kalibrierung der App. Höher = schneller, aber mehr Nachschwingen an Ecken. Wird sofort an Marlin gesendet (M201/M203) und beim Start wieder gesetzt.</p>
+    <p class="help">Werte aus der Bewegungs-Kalibrierung der App. Höher = schneller, aber mehr Nachschwingen an Ecken. Wird sofort an die Firmware gesendet (M201/M203) und beim Start wieder gesetzt.</p>
     <div class="row"><button type="submit" class="btn primary" id="motionSave"><svg class="i"><use href="#i-check"/></svg>Übernehmen</button><button type="button" class="btn ghost" id="motionReset">Firmware-Werte</button></div>
    </form>
   </section>
@@ -936,7 +936,7 @@ dialog.danger h2{color:var(--bad)}
 
 <!-- ===================================================== System -->
 <section class="page" data-page="system" aria-labelledby="hSys">
- <div class="pagehead"><div><h1 id="hSys">System</h1><p>Verbindung, Marlin-Abfragen, Protokoll, Firmware, App und Sicherung.</p></div>
+ <div class="pagehead"><div><h1 id="hSys">System</h1><p>Verbindung, Firmware-Abfragen, Protokoll, Firmware, App und Sicherung.</p></div>
   <a class="btn" id="backupBtn" href="/api/backup" download><svg class="i"><use href="#i-download"/></svg>Sicherung herunterladen</a></div>
  <div class="grid-system">
   <div>
@@ -953,17 +953,15 @@ dialog.danger h2{color:var(--bad)}
     <p class="small faint" id="board" style="margin-top:12px">Firmware noch nicht identifiziert</p>
    </section>
    <section class="card">
-    <div class="card-head"><h2><svg class="i"><use href="#i-cmd"/></svg>Marlin-Abfragen</h2><span class="small faint">nur lesen</span></div>
+    <div class="card-head"><h2><svg class="i"><use href="#i-cmd"/></svg>Firmware-Abfragen</h2><span class="small faint">nur lesen</span></div>
     <div class="row" id="reports">
      <button class="btn sm" data-report="M114" type="button">Position M114</button>
      <button class="btn sm" data-report="M119" type="button">Endschalter M119</button>
      <button class="btn sm" data-report="M115" type="button">Firmware M115</button>
      <button class="btn sm" data-report="M122" type="button">Treiber M122</button>
-     <button class="btn sm" data-report="M503" type="button">Einstellungen M503</button>
-     <button class="btn sm" data-report="M105" type="button">Temperatur M105</button>
      <button class="btn sm ghost" data-action="connect" type="button">Verbindung prüfen</button>
     </div>
-    <pre class="console" id="reportOut" style="margin-top:12px">Eine Abfrage antippen – die Antwort von Marlin erscheint hier.</pre>
+    <pre class="console" id="reportOut" style="margin-top:12px">Eine Abfrage antippen – die Antwort der Firmware erscheint hier.</pre>
    </section>
    <section class="card" id="servicePanel">
     <div class="card-head"><h2><svg class="i"><use href="#i-beam"/></svg>Service: Laser</h2><span class="tag warn" id="serviceTag">gesperrt</span></div>
@@ -995,7 +993,7 @@ dialog.danger h2{color:var(--bad)}
     </div>
    </section>
    <section class="card">
-    <div class="card-head"><h2><svg class="i"><use href="#i-pulse"/></svg>Marlin-Ereignisprotokoll</h2>
+    <div class="card-head"><h2><svg class="i"><use href="#i-pulse"/></svg>Firmware-Ereignisprotokoll</h2>
      <span class="row" style="gap:6px"><label class="check small" style="min-height:0"><input type="checkbox" id="logPause"> Anhalten</label>
       <button class="btn ghost sm icon" id="copyLog" type="button" title="Kopieren" aria-label="Protokoll kopieren"><svg class="i"><use href="#i-copy"/></svg></button>
       <button class="btn ghost sm" id="clearLog" type="button">Leeren</button></span></div>
@@ -1051,7 +1049,7 @@ dialog.danger h2{color:var(--bad)}
     <div class="card-head"><h2><svg class="i"><use href="#i-link"/></svg>LightBurn</h2></div>
     <dl class="kv"><dt>Gerätetyp</dt><dd>Marlin · Network/TCP</dd><dt>Adresse</dt><dd class="mono" id="hostname">—</dd><dt>Port</dt><dd class="mono">23</dd></dl>
     <details class="more" style="margin-top:12px"><summary>Einrichtung und Regeln</summary><div class="stack small">
-     <p>Marlin-Modus mit <code>M3 I</code>, S-Werte <code>0–255</code>. Nach Leerfahrten braucht die erste G1-Bearbeitung wieder einen S-Wert. <code>M4 I</code> nicht benutzen. Kein GRBL: <code>$$</code>, <code>$H</code>, <code>?</code> gehen nicht.</p>
+     <p>In LightBurn als Marlin einrichten, mit <code>M3 I</code>, S-Werte <code>0–255</code>. <code>M4 I</code> nicht benutzen. Kein GRBL: <code>$$</code>, <code>$H</code>, <code>?</code> gehen nicht.</p>
      <p>Zuerst <code>G28</code> referenzieren, <code>G30</code> nur über dem Werkstück. „Job-Ende“ auf <code>M2</code>: Laser aus, Z hoch, X0/Y0 parken. <code>M5 I</code> bleibt das normale Laser-Aus.</p>
      <p>Die Park-Ecke oben rechts (Kopf v6 + 1 cm, X0–78 / Y0–35) bleibt frei; überall sonst wird gelasert (Arbeitsfläche 370 × 360 mm). LightBurn und diese Oberfläche teilen sich den Controller, führen aber nie gleichzeitig Befehle aus.</p>
     </div></details>
@@ -1250,7 +1248,7 @@ function refreshUI(s){
  $("estopBanner").classList.toggle("show",Boolean(s.emergency_latched));
  $("estopReset").disabled=!s.emergency_latched;
  $("state").textContent=s.state||"Offline";
- $("board").textContent=s.identity||"Keine gültige LumaCut-Marlin-Kennung vom SKR";
+ $("board").textContent=s.identity||"Keine gültige LumaCut-Kennung vom SKR";
  // Position
  const pos=Array.isArray(s.position)&&s.position.length>=3?s.position:null;
  $("position").classList.toggle("unknown",!pos||!s.homed);
@@ -1298,7 +1296,7 @@ function refreshUI(s){
  // Firmware
  const fw=s.firmware_update||{};
  $("firmwareStatus").textContent=fw.state&&fw.state!=="idle"?fw.state+" · "+(fw.message||""):
-  (s.firmware_upload_supported?"Bereit: Update über den Pi möglich":s.firmware_avr_port?"Anet-Board an "+s.firmware_avr_port+": firmware.hex über den Pi flashen":"Aktuelle Firmware kann keine Dateien empfangen – einmalig per SD-Karte flashen");
+  (s.firmware_upload_supported?"Bereit: Update über den Pi möglich":s.firmware_avr_port?"Anet-Board an "+s.firmware_avr_port+": firmware.hex über den Pi flashen":"Aktuelle Firmware kann sich nicht selbst aktualisieren – einmalig per SD-Karte flashen");
  $("firmwareProgress").style.width=(fw.progress||0)+"%";
  renderFwRelease(s);
  renderPanel(s);
@@ -1424,7 +1422,7 @@ $("deviceSettings").onsubmit=ev=>{ev.preventDefault();saveSettings("deviceSettin
 $("exhaustSettings").onsubmit=ev=>{ev.preventDefault();saveSettings("exhaustSettings",{exhaust_auto:$("setExhaustAuto").checked?"1":"0",exhaust_after_s:$("setExhaustAfter").value||"0"},ev.submitter)};
 $("lineSettings").onsubmit=ev=>{ev.preventDefault();saveSettings("lineSettings",{line_laser_gpio:$("setLineGpio").value},ev.submitter)};
 $("motionSettings").onsubmit=async ev=>{ev.preventDefault();if(await call("motion_limits",{accel:$("motionAccel").value,speed:$("motionSpeed").value},$("motionSave")))dirty.delete("motionSettings")};
-$("motionReset").onclick=async ev=>{if(await ask("Firmware-Werte verwenden?","Beschleunigung und Tempo kommen dann wieder aus der Marlin-Firmware.","Zurücksetzen")){$("motionAccel").value="";$("motionSpeed").value="";if(await call("motion_limits",{accel:"",speed:""},ev.currentTarget))dirty.delete("motionSettings")}};
+$("motionReset").onclick=async ev=>{if(await ask("Firmware-Werte verwenden?","Beschleunigung und Tempo kommen dann wieder aus der Firmware.","Zurücksetzen")){$("motionAccel").value="";$("motionSpeed").value="";if(await call("motion_limits",{accel:"",speed:""},ev.currentTarget))dirty.delete("motionSettings")}};
 $("originX").oninput=$("originY").oninput=()=>dirty.add("originForm");
 $("originSet").onclick=async ev=>{if(await call("origin_set",{x:$("originX").value,y:$("originY").value},ev.currentTarget))dirty.delete("originForm")};
 $("originHead").onclick=async ev=>{if(await call("origin_set",{},ev.currentTarget))dirty.delete("originForm")};
@@ -1505,7 +1503,7 @@ function renderPhase(s){
 
 /* ================= G-Code lesen (Vorschau, Statistik, Abgleich) ================= */
 function analyseGcode(text){
- // Wie Marlin: G0 setzt die Leistung auf 0, G1 nutzt S oder das letzte S seit G0; M5 = aus.
+ // Wie die Firmware: G0 brennt nie, S gilt weiter, auch über G0 hinweg; M5 = aus.
  let x=0,y=0,abs=true,S=0,F=null,mode=0,cut=0,cutLen=0,travelLen=0,time=0,lines=0;
  const sv=new Map(),fv=new Map(),seg=[],trav=[];
  let bx0=Infinity,by0=Infinity,bx1=-Infinity,by1=-Infinity;
@@ -1520,7 +1518,7 @@ function analyseGcode(text){
   if("F" in w)F=w.F;
   if(!/^G0?[0-3](?!\d)/.test(line)&&!("X" in w||"Y" in w))continue;
   const nx="X" in w?(abs?w.X:x+w.X):x,ny="Y" in w?(abs?w.Y:y+w.Y):y;
-  if(mode===0)S=0;else if("S" in w)S=w.S;
+  if(mode===1&&"S" in w)S=w.S;
   const len=Math.hypot(nx-x,ny-y);
   if(len>0){
    if(mode===1&&S>0){
@@ -2310,7 +2308,7 @@ $("firmwareForm").onsubmit=async ev=>{
 };
 // Not-Aus: wird nie deaktiviert und ist in der Kopfzeile immer erreichbar.
 async function estop(){
- if(await ask("NOT-AUS auslösen?","Marlin-Notstopp M112: Laser und Motoren stoppen sofort. Danach das SKR am Reset-Taster zurücksetzen, quittieren und neu referenzieren. Ersetzt keinen physischen Not-Aus.","Jetzt stoppen",true))
+ if(await ask("NOT-AUS auslösen?","Notstopp M112: Laser und Motoren stoppen sofort. Danach quittieren und neu referenzieren. Ersetzt keinen physischen Not-Aus.","Jetzt stoppen",true))
   call("estop");
 }
 $("stop").onclick=estop;
@@ -2318,7 +2316,7 @@ $("stop").onclick=estop;
 /* ================= Licht ================= */
 let lightDragging=false,lightTimer=null;
 function renderLight(s){
- const dim=s.light_dimmable;   // true / false (alte Firmware) / null (noch nicht geprüft)
+ const dim=s.light_dimmable;   // true / null (noch nicht geprüft)
  const free=apiOk&&ownerFree(s)&&!s.busy,range=$("lightRange"),fx=$("lightFx");
  $("lightCtl").hidden=dim===false;$("lightNote").hidden=dim!==false;
  if(!lightDragging&&s.light_brightness!=null&&document.activeElement!==range)range.value=Math.round(s.light_brightness);

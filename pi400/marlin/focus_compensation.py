@@ -127,8 +127,7 @@ def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
     relative = False
     offset = 0.0
     feed = None         # modal feed of the job
-    out_feed = None     # feed Marlin has right now (G0 lines change it)
-    last_s = None       # power of the last cut, Marlin forgets it on G0
+    out_feed = None     # feed the last output line left in force
 
     def surface_z(px, py, length):
         surface, inside = maps.surface(px, py)
@@ -187,8 +186,6 @@ def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
             continue
         nx, ny = values.get("X", x), values.get("Y", y)
         s_word = (" S%g" % values["S"]) if "S" in values else ""
-        if g == 1 and "S" in values:
-            last_s = values["S"]
         if "F" in values:
             feed = values["F"]
         if g == 0:
@@ -199,8 +196,7 @@ def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
                 rep.travel_lifts += 1
             if z is not None and target > z + Z_RESOLUTION_MM:
                 z_only(target)                  # up first
-            out.append("G0 X%s Y%s%s%s" % (_f(nx), _f(ny), s_word,
-                                           (" F%g" % values["F"]) if "F" in values else ""))
+            out.append("G0 X%s Y%s%s" % (_f(nx), _f(ny), (" F%g" % values["F"]) if "F" in values else ""))
             out_feed = None
             if z is None or abs(target - z) > Z_RESOLUTION_MM:
                 z_only(target)                  # down at the target
@@ -208,11 +204,8 @@ def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
             start = surface_z(x, y, 0.0)
             if z is None or abs(start - z) > LOWER_BEFORE_CUT_MM:
                 # Never travel a large Z distance while burning (first cut
-                # without a rapid, a big per-pass drop): settle Z first. The
-                # rapid resets Marlin's inline power, so the cut needs its S.
+                # without a rapid, a big per-pass drop): settle Z first.
                 z_only(start)
-                if not s_word and last_s is not None:
-                    s_word = " S%g" % last_s
             length = math.hypot(nx - x, ny - y)
             pieces = max(1, math.ceil(length / max_segment_mm))
             for k in range(1, pieces + 1):

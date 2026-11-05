@@ -1,35 +1,33 @@
-"""SKR firmware update over USB, without removing the SD card.
+"""SKR firmware update over USB: the firmware's self-update (M997).
 
-Marlin 2.1 BINARY_FILE_TRANSFER ('M28 B1') writes firmware.bin to the SKR's
-onboard SD card. M997 then reboots the STM32F1 (HAL: hal.reboot()) and the
-BTT bootloader flashes the file, exactly like a manually inserted card.
+docs/FIRMWARE_EIGEN.md, Selbst-Update::
 
-Packet format implemented from Marlin/src/feature/binary_stream.h (2.1.2.9):
-  header  AD B5 | sync u8 | meta u8 (protocol<<4 | type) | size u16 | csum u16
-  payload size bytes (only when size > 0)
-  footer  csum u16 over header bytes 2..7 and payload (only when size > 0)
-All integers little endian, checksums Fletcher-16 (mod 255).
-Marlin answers 'ok<sync>' per accepted packet, 'rs<sync>' for a resend,
-'ss<sync>,<max payload>,<version>' for SYNC and 'fe<sync>' on fatal errors.
+    Pi:  M997 U<bytes> C<crc32>     SKR: ok READY <chunk>
+    Pi:  <chunk> raw bytes          SKR: ok <offset>      (repeated)
+                                    SKR: ok DONE          (image checked)
+
+The firmware stores the image in upper flash and copies it to 0x08007000 only
+after the checksum and the identification were good. Everything before
+"ok DONE" leaves the running firmware untouched. The BTT bootloader is never
+touched; the SD card stays the way back.
 """
 from __future__ import annotations
 
 import re
 import struct
 import time
+import zlib
 
-HEADER_TOKEN = 0xB5AD
-PROTOCOL_CONTROL, PROTOCOL_FILE = 0, 1
-CONTROL_SYNC, CONTROL_CLOSE = 1, 2
-FILE_QUERY, FILE_OPEN, FILE_CLOSE, FILE_WRITE, FILE_ABORT = 0, 1, 2, 3, 4
-
-# SKR Mini MZ: 256 KB flash, BTT bootloader occupies the first 28 KB and
-# starts the application at 0x08007000.
+# SKR Mini MZ with STM32F103RET6: 512 KB flash, 64 KB RAM. The BTT bootloader
+# occupies the first 28 KB and starts the application at 0x08007000. The
+# firmware takes at most 196 KB (contract), the upper flash holds the download.
 APP_BASE = 0x08007000
-FLASH_END = 0x08040000
-MAX_IMAGE = FLASH_END - APP_BASE
-SRAM_BASE, SRAM_END = 0x20000000, 0x2000C000
-TARGET_NAME = "firmware.bin"
+MAX_IMAGE = 196 * 1024
+MIN_IMAGE = 4 * 1024
+FLASH_END = APP_BASE + MAX_IMAGE
+SRAM_BASE, SRAM_END = 0x20000000, 0x20010000
+IDENTITY = b"LumaCut CNC"
+SELF_UPDATE = b"Cap:SELF_UPDATE:1"
 
 
 class FirmwareImageError(ValueError):
@@ -37,31 +35,14 @@ class FirmwareImageError(ValueError):
 
 
 class TransferError(RuntimeError):
-    """The binary transfer to the SKR SD card failed."""
-
-
-def fletcher16(data: bytes, cs: int = 0) -> int:
-    for value in data:
-        low = ((cs & 0xFF) + value) % 255
-        cs = ((((cs >> 8) + low) % 255) << 8) | low
-    return cs
-
-
-def build_packet(sync: int, protocol: int, ptype: int, payload: bytes = b"") -> bytes:
-    head = struct.pack("<BBH", sync & 0xFF, (protocol << 4) | ptype, len(payload))
-    header_cs = fletcher16(head)
-    head += struct.pack("<H", header_cs)
-    packet = struct.pack("<H", HEADER_TOKEN) + head
-    if payload:
-        packet += payload + struct.pack("<H", fletcher16(payload, fletcher16(head)))
-    return packet
+    """The transfer to the SKR failed; its running firmware is untouched."""
 
 
 def build_stamp(image: bytes):
     """Return 'Mon DD YYYY HH:MM:SS' compiled into the image, if present.
 
-    Marlin's M115 prints the same __DATE__/__TIME__ in parentheses, which
-    lets the Pi prove that the SKR really runs the uploaded build.
+    M115 prints the same __DATE__/__TIME__ in parentheses, which lets the Pi
+    prove that the SKR really runs the uploaded build.
     """
     date = re.search(rb"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d{4}", image)
     clock = re.search(rb"(?<![\d:])\d\d:\d\d:\d\d(?![\d:])", image)
@@ -72,106 +53,73 @@ def build_stamp(image: bytes):
 
 def validate_image(image: bytes) -> dict:
     """Refuse anything that would not boot, or that cannot be updated again."""
-    if not 32 * 1024 <= len(image) <= MAX_IMAGE:
+    if not MIN_IMAGE <= len(image) <= MAX_IMAGE:
         raise FirmwareImageError(
-            f"Dateigröße {len(image)} Byte unplausibel (erlaubt 32 KB bis {MAX_IMAGE // 1024} KB)")
+            f"Dateigröße {len(image)} Byte unplausibel (erlaubt {MIN_IMAGE // 1024} KB bis {MAX_IMAGE // 1024} KB)")
     stack, reset = struct.unpack_from("<II", image, 0)
     if not (SRAM_BASE < stack <= SRAM_END and APP_BASE <= (reset & ~1) < FLASH_END):
         raise FirmwareImageError(
             "Keine SKR-Mini-MZ-Firmware für den BTT-Bootloader (Startadresse 0x08007000)")
-    if b"LumaCut CNC" not in image:
+    if IDENTITY not in image:
         raise FirmwareImageError("LumaCut-Kennung fehlt: fremde Firmware wird nicht geflasht")
-    if b"Switching to Binary Protocol" not in image:
-        # Without BINARY_FILE_TRANSFER the next update would need the SD card again.
+    if SELF_UPDATE not in image:
+        # Also refuses every LumaCut Marlin build. Without M997 the next update needs the SD card.
         raise FirmwareImageError(
-            "Firmware ohne BINARY_FILE_TRANSFER: danach wäre kein Update über den Pi mehr möglich")
+            "Firmware ohne Selbst-Update (Cap:SELF_UPDATE:1): Marlin-Abbild oder danach "
+            "kein Update über den Pi mehr möglich")
     return {"bytes": len(image), "build": build_stamp(image)}
 
 
-class BinaryUploader:
-    """Marlin binary file transfer over an already open pyserial port."""
+def update_command(image: bytes) -> str:
+    """M997 line for ``image``: size and CRC-32 (zlib/IEEE 802.3), both decimal."""
+    return "M997 U%d C%d" % (len(image), zlib.crc32(image) & 0xFFFFFFFF)
 
-    def __init__(self, serial, log=None, packet_timeout: float = 3.0):
+
+class SelfUpdateUploader:
+    """Device dialogue of M997 over an already open, idle pyserial port."""
+
+    def __init__(self, serial, log=None, block_timeout: float = 10.0, done_timeout: float = 30.0):
         self.serial = serial
         self.log = log or (lambda line: None)
-        self.packet_timeout = packet_timeout
-        self.sync = 0
-        self.max_payload = 0
+        self.block_timeout = block_timeout
+        self.done_timeout = done_timeout
 
-    def _line(self, deadline: float) -> str:
+    def _answer(self, pattern: str, timeout: float) -> re.Match:
+        """Next line matching ``pattern``; an Error: line ends the transfer."""
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             raw = self.serial.readline()
-            if raw:
-                line = raw.decode("utf-8", errors="replace").strip()
-                if line:
-                    self.log(line)
-                    return line
-        raise TransferError("SKR antwortet nicht während der Firmware-Übertragung")
+            line = raw.decode("utf-8", errors="replace").strip() if raw else ""
+            if not line:
+                continue
+            self.log(line)
+            if line.startswith("Error:"):
+                raise TransferError("SKR lehnt das Update ab: " + line[:120])
+            match = re.match(pattern, line)
+            if match:
+                return match
+        raise TransferError("SKR antwortet nicht während des Firmware-Updates")
 
-    def _expect(self, predicate, timeout: float) -> str:
-        deadline = time.monotonic() + timeout
-        while True:
-            line = self._line(deadline)
-            if line.startswith("fe"):
-                raise TransferError("Marlin meldet fatalen Übertragungsfehler: " + line)
-            if predicate(line):
-                return line
-
-    def _send(self, protocol: int, ptype: int, payload: bytes = b"", retries: int = 5):
-        for _ in range(retries):
-            self.serial.write(build_packet(self.sync, protocol, ptype, payload))
-            deadline = time.monotonic() + self.packet_timeout
-            while True:
-                try:
-                    line = self._line(deadline)
-                except TransferError:
-                    break  # timeout: resend the same packet
-                if line.startswith("fe"):
-                    raise TransferError("Marlin meldet fatalen Übertragungsfehler: " + line)
-                if line == f"ok{self.sync}":
-                    self.sync = (self.sync + 1) & 0xFF
-                    return
-                if line.startswith("rs"):
-                    break
-        raise TransferError(f"Paket {self.sync} nach {retries} Versuchen nicht bestätigt")
-
-    def _pft(self, timeout: float = 10.0) -> str:
-        return self._expect(lambda line: line.startswith(("PFT:", "PTF:")), timeout)
-
-    def upload(self, filename: str, data: bytes, progress=None):
-        self.serial.write(b"M28 B1\n")
-        self._expect(lambda line: line.lower().startswith("ok"), 5.0)
-        # Short pause so Marlin's queue switches the port into binary mode.
-        time.sleep(0.1)
-        self.serial.write(build_packet(0, PROTOCOL_CONTROL, CONTROL_SYNC))
-        reply = self._expect(lambda line: re.match(r"^ss\d+,\d+,", line) is not None, 5.0)
-        sync, size = re.match(r"^ss(\d+),(\d+),", reply).groups()
-        self.sync, self.max_payload = int(sync), int(size)
-        if self.max_payload < 16:
-            raise TransferError("Marlin meldet unbrauchbare Paketgröße " + size)
-        try:
-            # payload: dummy flag, compression flag, NUL-terminated 8.3 name
-            self._send(PROTOCOL_FILE, FILE_OPEN, b"\x00\x00" + filename.encode("ascii") + b"\x00")
-            if self._pft() != "PFT:success":
-                raise TransferError("SD-Datei konnte nicht geöffnet werden (SD-Karte im SKR?)")
-            sent = 0
-            while sent < len(data):
-                chunk = data[sent:sent + self.max_payload]
-                self._send(PROTOCOL_FILE, FILE_WRITE, chunk)
-                sent += len(chunk)
-                if progress:
-                    progress(sent, len(data))
-            self._send(PROTOCOL_FILE, FILE_CLOSE)
-            if self._pft() != "PFT:success":
-                raise TransferError("SD-Datei konnte nicht geschlossen werden")
-        except Exception:
-            try:
-                self._send(PROTOCOL_FILE, FILE_ABORT, retries=1)
-            except Exception:
-                pass
-            raise
-        finally:
-            try:
-                self._send(PROTOCOL_CONTROL, CONTROL_CLOSE, retries=2)
-            except Exception:
-                pass
+    def upload(self, image: bytes, progress=None):
+        self.serial.write((update_command(image) + "\n").encode("ascii"))
+        chunk = int(self._answer(r"^ok READY (\d+)$", self.block_timeout).group(1))
+        if not 16 <= chunk <= 64 * 1024:
+            raise TransferError("SKR meldet unbrauchbare Blockgröße %d" % chunk)
+        sent = 0
+        done = False
+        while sent < len(image):
+            block = image[sent:sent + chunk]
+            self.serial.write(block)
+            sent += len(block)
+            answer = self._answer(r"^ok (\d+|DONE)$", self.block_timeout).group(1)
+            if answer == "DONE":
+                if sent != len(image):
+                    raise TransferError("SKR meldet DONE bei Byte %d von %d" % (sent, len(image)))
+                done = True
+            elif int(answer) != sent:
+                raise TransferError("SKR bestätigt Byte %s statt %d" % (answer, sent))
+            if progress:
+                progress(sent, len(image))
+        if not done:
+            # checksum and identification of the stored image
+            self._answer(r"^ok DONE$", self.done_timeout)

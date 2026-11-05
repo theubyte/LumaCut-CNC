@@ -128,21 +128,17 @@ class FlashTest(unittest.TestCase):
 
 
 class TransportFlashTest(unittest.TestCase):
-    def test_flash_avr_reconnects_and_checks_the_build(self):
+    def test_flash_avr_writes_verifies_and_does_not_connect(self):
+        # The Anet build is Marlin: the gateway no longer drives it.
         from pi400.marlin.transport import MarlinTransport
         boot = FakeBootloader()
         m = MarlinTransport("/dev/null")
         connects = []
-
-        def ensure_ready(owner=None):
-            connects.append(owner)
-            m.identity = "FIRMWARE_NAME:Marlin 2.1.2.9 (Oct 31 2026 16:54:31) MACHINE_TYPE:LumaCut CNC Marlin Anet"
-            m.serial = object()
-        m.ensure_ready = ensure_ready
+        m.ensure_ready = lambda owner=None: connects.append(owner)
         message = m.flash_avr(to_hex(lumacut_image()), port="/dev/ttyUSB0",
-                              opener=lambda port, baud: boot, poll=0.01)
+                              opener=lambda port, baud: boot)
         self.assertIn("Oct 31 2026 16:54:31", message)
-        self.assertEqual(connects, ["firmware"])
+        self.assertEqual(connects, [])
         self.assertTrue(boot.closed)
         self.assertIsNone(m.owner)
         self.assertEqual(m.firmware["state"], "done")

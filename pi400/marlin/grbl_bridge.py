@@ -46,14 +46,14 @@ SETTING = re.compile(r"^\$(\d+)=([-+]?\d+(?:\.\d+)?)")
 # [OPT:VZ,15,128] (15 planner blocks, 128 bytes); 127 usable.
 RX_BUFFER = 127
 MARLIN_S_MAX = 255.0
-IDENTITY = ("FIRMWARE_NAME:Marlin 2.1.2.9 (LumaCut Grbl-Bridge) "
+IDENTITY = ("FIRMWARE_NAME:LumaCut CNC Grbl-Bridge "
             "SOURCE_CODE_URL:github.com/theubyte/LumaCut-CNC PROTOCOL_VERSION:1.0 "
             "MACHINE_TYPE:LumaCut CNC Atomstack-Grbl EXTRUDER_COUNT:0")
 # Marlin commands that only tune the SKR (speed caps, steps, probe offset,
 # idle hold, lights, tones, fan): nothing to do on the Atomstack board.
 NO_OP = ("M92", "M201", "M203", "M204", "M205", "M84", "M18", "M17", "M851",
          "M355", "M300", "M106", "M107", "M42", "M401", "M402", "M500", "M501",
-         "M117", "M118", "M150", "M593", "M7", "G17", "G40", "G54", "M2", "M30")
+         "M117", "M118", "M150", "M593", "M7", "G17", "G40", "G54", "M2", "M30", "M999", "G92")
 
 
 def grbl_ports() -> list[str]:
@@ -669,7 +669,7 @@ class GrblMarlinBridge:
         if family == "M115":
             self.out.put(IDENTITY)
             self.out.put("Cap:Z_PROBE:1")
-            self.out.put("Cap:BINARY_FILE_TRANSFER:0")
+            self.out.put("Cap:SELF_UPDATE:0")
             self.out.put("ok")
         elif family in ("G0", "G1", "G2", "G3"):
             grbl = self._motion(cmd, words)
@@ -708,7 +708,7 @@ class GrblMarlinBridge:
             except Exception:
                 LOG.exception("surface hint failed")
             self.z = 0.0 if hint is None else float(hint)
-            self.out.put("Bed X: %.2f Y: %.2f Z: %.2f" % (x, y, self.z))
+            self.out.put("Bed X:%.2f Y:%.2f Z:%.2f" % (x, y, self.z))
             self.out.put("X:%.2f Y:%.2f Z:%.2f E:0.00 Count X:0 Y:0 Z:0" % (x, y, self.z))
             self.out.put("ok")
         elif family == "M400":

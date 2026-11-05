@@ -1,17 +1,18 @@
 """Firmware updates from GitHub, flashed by the Pi on the owner's button press.
 
-The firmware CI (.github/workflows/marlin.yml) publishes every build on main
-as a GitHub release ``marlin-<run>`` (never marked "latest": that one is the
-Android app) with ``LumaCut-Marlin.json`` and one image per board::
+A release of the own firmware (docs/FIRMWARE_EIGEN.md) is a GitHub release
+``lumacut-fw-<run>`` (never marked "latest": that one is the Android app) with
+``LumaCut-Firmware.json`` and the image::
 
     {"number": 12, "commit": "...",
-     "boards": {"skr":  {"asset": "LumaCut-Marlin-SKR.bin",  "build": "Oct 31 2026 16:54:31",
-                         "sha256": "...", "size": 123},
-                "anet": {"asset": "LumaCut-Marlin-Anet.hex", ...}}}
+     "boards": {"skr":  {"asset": "LumaCut-Firmware-SKR.bin",  "build": "Oct 31 2026 16:54:31",
+                         "sha256": "...", "size": 123}}}
+
+Old ``marlin-<run>`` releases and a Marlin release.json still on the Pi's disk
+are ignored, and validate_image() refuses a Marlin image anyway.
 
 The Pi fetches the newest one (at start, every few hours, on request), checks
-size, SHA-256 and the image itself (validate_image / validate_hex) and keeps
-one image per board on disk. ``offer()`` compares the build stamp with the
+size, SHA-256 and the image itself (validate_image) and keeps the image on disk. ``offer()`` compares the build stamp with the
 one the connected board reports in M115; flashing stays a button press in the
 web UI (owner present). Never touches the machine: network and disk only.
 """
@@ -33,15 +34,15 @@ from .app_update import CHECK_INTERVAL_S, REPO
 
 LOG = logging.getLogger("lumacut.firmware_release")
 
-META_ASSET = "LumaCut-Marlin.json"
-TAG_PREFIX = "marlin-"
+META_ASSET = "LumaCut-Firmware.json"
+TAG_PREFIX = "lumacut-fw-"
 MAX_IMAGE_BYTES = 2 * 1024 * 1024
-BOARDS = {"skr": "skr.bin", "anet": "anet.hex"}
-BOARD_NAMES = {"skr": "SKR Mini MZ", "anet": "Anet V1.7"}
-# M115 MACHINE_TYPE of our own builds; the Grbl bridge ("Atomstack-Grbl")
-# and foreign firmwares never get an offer.
-MACHINE_TYPES = {"LumaCut CNC Marlin": "skr", "LumaCut CNC Marlin Anet": "anet"}
-_MACHINE_RE = re.compile(r"MACHINE_TYPE:(LumaCut CNC Marlin(?: Anet)?)(?=\s|$)")
+BOARDS = {"skr": "skr.bin"}
+BOARD_NAMES = {"skr": "SKR Mini MZ"}
+# M115 MACHINE_TYPE of our own build; Marlin builds ("LumaCut CNC Marlin"), the
+# Grbl bridge ("LumaCut CNC Atomstack-Grbl") and foreign firmwares get no offer.
+MACHINE_TYPES = {"LumaCut CNC": "skr"}
+_MACHINE_RE = re.compile(r"MACHINE_TYPE:(LumaCut CNC)(?=\s*$)")
 _BUILD_RE = re.compile(r"\(((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d{4} \d\d:\d\d:\d\d)\)")
 
 
@@ -64,9 +65,6 @@ def _when(build: str | None) -> datetime | None:
 
 def validate(board: str, data: bytes) -> dict:
     """The same checks as a manual upload; raises FirmwareImageError."""
-    if board == "anet":
-        from .avr_flash import validate_hex
-        return validate_hex(data.decode("ascii", errors="replace"))
     from .firmware_flash import validate_image
     return validate_image(data)
 
@@ -88,9 +86,11 @@ class FirmwareReleases:
 
     def meta(self) -> dict | None:
         try:
-            return json.loads(self.meta_file.read_text(encoding="utf-8"))
+            meta = json.loads(self.meta_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
+        # A release.json from the Marlin releases has no tag: not ours any more.
+        return meta if str(meta.get("tag", "")).startswith(TAG_PREFIX) else None
 
     def image(self, board: str) -> bytes | None:
         """Stored image for ``board``, only if it still matches the release."""
@@ -172,7 +172,7 @@ class FirmwareReleases:
             boards[board] = {"build": entry["build"], "sha256": digest, "size": size}
         if not boards:
             raise RuntimeError("Firmware-Release enthält kein Board-Image")
-        meta = {"number": number, "commit": new.get("commit"), "boards": boards}
+        meta = {"tag": release["tag_name"], "number": number, "commit": new.get("commit"), "boards": boards}
         tmp = self.meta_file.with_suffix(".tmp")
         tmp.write_text(json.dumps(meta), encoding="utf-8")
         os.replace(tmp, self.meta_file)

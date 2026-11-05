@@ -183,17 +183,22 @@ class CompensationTests(unittest.TestCase):
         feeds = [float(l.split("F")[1]) for l in out if l.startswith("G1") and " F" in l]
         self.assertLess(max(feeds), 6000)      # 3 mm Z on 2 mm XY: Z limits the speed
 
-    def test_large_z_jump_before_cut_happens_laser_off_with_power_kept(self):
+    def test_large_z_jump_before_cut_happens_laser_off_with_modal_power(self):
         out, _ = compensate(["G0 X50 Y50", "G1 X52 Y50 F600 S120", "G91", "G0 Z-2", "G90",
                              "G1 X54 Y50"], flat(3.0), 7.0, 1.5, start_z=20.0)
         i = out.index("G0 Z6.500 F600")
-        self.assertEqual(out[i + 1], "G1 X54.000 Y50.000 S120 F600")
+        # S is modal in the firmware, also across the G0.
+        self.assertEqual(out[i + 1], "G1 X54.000 Y50.000 F600")
 
 
 SIM = r"""
 import re
 from marlin import web
 from marlin.transport import MarlinTransport
+
+CONTRACT = {"G0", "G1", "G2", "G3", "G4", "G21", "G90", "G91", "G92", "G28", "G30", "M3", "M5", "M106", "M107",
+            "M8", "M9", "M355", "M17", "M84", "M92", "M201", "M203", "M204", "M114", "M115", "M119", "M122",
+            "M300", "M400", "M410", "M112", "M999", "M997"}
 
 class MarlinSim:
     def __init__(self, surface):
@@ -213,8 +218,10 @@ class MarlinSim:
             self.hook(cmd)
         words = dict((k, float(v)) for k, v in re.findall(r"([XYZ])([-+]?[0-9.]+)", cmd))
         reply = []
-        if cmd == "M115":
-            reply += ["FIRMWARE_NAME:Marlin 2.1.2.9 MACHINE_TYPE:LumaCut CNC Marlin", "Cap:Z_PROBE:1"]
+        if cmd.split()[0] not in CONTRACT or cmd == "G30 E0" or cmd.startswith("M84 "):
+            reply += ["Error:Unknown command: " + cmd]
+        elif cmd == "M115":
+            reply += ["FIRMWARE_NAME:LumaCut CNC 0.1 (Nov  5 2026 12:00:00) MACHINE_TYPE:LumaCut CNC", "Cap:Z_PROBE:1"]
         elif cmd.startswith("G28 X Y"):
             self.pos[0] = self.pos[1] = 0.0
         elif cmd == "G28 Z":
@@ -227,16 +234,16 @@ class MarlinSim:
                     self.pos[i] = words[axis] if self.absolute else self.pos[i] + words[axis]
         elif cmd == "M114":
             reply.append(self.report())
-        elif cmd.startswith("G30") and self.no_contact:
+        elif cmd == "G30" and self.no_contact:
             self.pos[2] = -2.0 if self.pos[2] > 1 else self.pos[2]
-            reply += ["Error:Probing Failed"]
+            reply += ["Error:Probing failed"]
         elif cmd == "M119":
             reply += ["Reporting endstop status", "z_min: open"]
-        elif cmd.startswith("G30"):
+        elif cmd == "G30":
             contact = self.surface(self.pos[0] + OFFSET[0], self.pos[1] + OFFSET[1])
             assert contact < self.pos[2] - 0.5, ("switch would already touch", self.pos, contact)
             self.pos[2] = contact
-            reply += ["Bed X: %.3f Y: %.3f Z: %.3f" % tuple(self.pos), self.report()]
+            reply += ["Bed X:%.3f Y:%.3f Z:%.3f" % tuple(self.pos)]
         self.out += [r + "\n" for r in reply] + ["ok\n"]
         return len(raw)
     def readline(self):
@@ -310,17 +317,17 @@ assert seen[0]["state"] == "homing" and seen[1]["state"] == "probing", seen[:2]
 assert seen[1]["probe"]["done"] == 0 and [x["probe"]["done"] for x in seen[2:]] == list(
     range(1, seen[1]["probe"]["total"] + 1)), seen
 w = sim.writes
-probes = w.count("G30 E0")
+probes = w.count("G30")
 assert s["probe"]["done"] == s["probe"]["total"] == probes, (s["probe"], probes)
 # Area 2 (X318..382) lies partly where the head cannot go (X > 380 - 23 = 357):
 # those points are filled from their neighbours, the reachable ones are probed.
-heads = [c for i, c in enumerate(w) if c.startswith("G0 X") and "G30 E0" in w[i + 1:i + 3]]
+heads = [c for i, c in enumerate(w) if c.startswith("G0 X") and "G30" in w[i + 1:i + 4]]
 assert len(heads) == probes, heads
 xs = [float(re.search(r"X([-+0-9.]+)", h).group(1)) for h in heads]
 assert max(xs) <= 380.0 and min(xs) >= 30.0, heads
 assert any(x - 23.0 > 300 for x in xs), "right area probed too"
 # Between areas the head travels at the clearance, inside an area only hops.
-i0, i1 = w.index("G30 E0"), w.index("M402")
+i0, i1 = w.index("G30"), len(w) - 1 - w[::-1].index("G30")
 hop_z = [float(c.split("Z")[1].split()[0]) for c in w[i0:i1] if c.startswith("G0 Z")]
 assert 20.0 in hop_z and sorted(set(hop_z)) == [6.0, 9.0, 20.0], hop_z
 # The lowest point was probed last: the Z floor is the thin part.
@@ -358,7 +365,7 @@ m.owner = "job"
 web._job_worker("eigen.gcode", auto["commands"], auto)
 assert web.job["state"] == "complete", web.job
 w = sim.writes
-assert "G30 E0" in w and m.surface_z == 3.0
+assert "G30" in w and m.surface_z == 3.0
 cuts = [c for c in w if c.startswith("G1 X")]
 assert cuts == ["G1 X120 Y100 Z9.100 F1500 S80"], cuts
 assert "G0 Z8.500 F600" not in w, "no single-surface focus over the job's own Z"
@@ -387,7 +394,7 @@ assert len(sim.writes) == before, sim.writes[before:]
 assert web.job["state"] == "idle"
 """)
 
-    def test_abort_while_probing_stows_switch_and_parks(self):
+    def test_abort_while_probing_parks(self):
         self._run(r"""
 OFFSET = (10.0, 5.0)
 sim, m = connect(lambda x, y: 3.0)
@@ -396,11 +403,11 @@ lines = ["M3 I", "G0 X100 Y100", "G1 X300 Y100 F1500 S80", "G1 X300 Y300 S80", "
 auto = web.auto_plan(lines)
 count = {"n": 0}
 real = m._probe_here_locked
-def probe_then_abort(start_z):
+def probe_then_abort():
     count["n"] += 1
     if count["n"] == 2:
         web.stop_job.set()
-    return real(start_z)
+    return real()
 m._probe_here_locked = probe_then_abort
 web.job_lock.acquire()
 web.stop_job.clear()
@@ -408,11 +415,12 @@ m.owner = "job"
 web._job_worker("a.gcode", auto["commands"], auto)
 assert web.job["state"] == "aborted", web.job
 w = sim.writes
-assert w.count("G30 E0") == 2 and "M402" in w and "M3 I" not in w, w
-assert w.index("M402") < w.index("G0 X0.000 Y0.000 F9000")
+assert w.count("G30") == 2 and "M3 I" not in w, w
+last_probe = len(w) - 1 - w[::-1].index("G30")
+assert last_probe < w.index("G0 X0.000 Y0.000 F9000")
 assert m.surface_z is None and "M112" not in w
 assert web.job["error"] == "Abgebrochen" and web.job["phase"] is None, web.job
-assert "M5 I" in w[w.index("M402"):], "laser off after the abort"
+assert "M5 I" in w[last_probe:], "laser off after the abort"
 """)
 
     def test_abort_during_homing_stops_in_park_corner_without_m112(self):
@@ -430,7 +438,7 @@ m.owner = "job"
 web._job_worker("a.gcode", auto["commands"], auto)
 w = sim.writes
 assert web.job["state"] == "aborted" and web.job["error"] == "Abgebrochen", web.job
-assert "G28 Z" not in w and "G30 E0" not in w and "M3 I" not in w, w
+assert "G28 Z" not in w and "G30" not in w and "M3 I" not in w, w
 assert w[-1] == "M5 I" and "M112" not in w, w
 assert sim.pos[:2] == [0.0, 0.0] and not m.homed and m.serial is not None
 """)
@@ -473,8 +481,8 @@ assert web.job["state"] == "error", web.job
 err = web.job["error"]
 assert err.startswith("Der Taster hat bei X") and "kein Material gefunden" in err, err
 assert err.endswith("dann neu starten.") and err.count(".") == 1, err
-assert "M402" in w and "M3 I" not in w and "M112" not in w, w
-assert "G0 X0.000 Y0.000 F9000" in w[w.index("M402"):], "parked after the error"
+assert "G30" in w and "M3 I" not in w and "M112" not in w, w
+assert "G0 X0.000 Y0.000 F9000" in w[w.index("G30"):], "parked after the error"
 """)
 
     def test_taller_object_than_the_material_stops_before_lasering(self):
@@ -586,13 +594,14 @@ q = c.get("/api/status").get_json()["queue"]
 assert q["state"] == "complete" and [i["state"] for i in q["items"]] == ["done", "done"], q
 w = sim.writes
 assert w.count("G28 X Y R0") == 1, "homing only once, when needed"
-assert w.count("M402") == 2, "every item probed"
+first_cut = w.index("M3 I")
+assert "G30" in w[:first_cut] and "G30" in w[first_cut:], "every item probed"
 for name in ("A.gcode", "B.gcode"):
     seq = [s for f, s in states if f == name]
     seen = [s for i, s in enumerate(seq) if i == 0 or s != seq[i - 1]]
     assert seen[-2:] == ["probing", "running"] and "complete" not in seen[:-1], (name, seen)
 # Two passes with a 0.5 mm focus drop: compensated, no G91 sent.
-assert "G91" not in w[w.index("M402"):], "relative drop became a Z offset"
+assert "G91" not in w[w.index("G30"):], "relative drop became a Z offset"
 assert "G0 Z8.500 F600" in w and "G0 Z8.000 F600" in w, [c for c in w if c.startswith("G0 Z")]
 assert "M112" not in w
 """)

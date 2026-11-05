@@ -88,7 +88,7 @@ import threading, time
 from marlin import web
 m = web.machine
 m.serial = object()
-m.identity = "FIRMWARE_NAME:Marlin MACHINE_TYPE:LumaCut CNC"
+m.identity = "FIRMWARE_NAME:LumaCut CNC 0.1 MACHINE_TYPE:LumaCut CNC"
 m.state = "Idle"
 m.homing_verified = True
 m.homed = True

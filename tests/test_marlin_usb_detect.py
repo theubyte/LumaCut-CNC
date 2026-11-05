@@ -50,7 +50,7 @@ class USBDetectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             dev = Path(root)
             (dev / "ttyUSB0").touch()
-            with self.assertRaisesRegex(RuntimeError, "keine LumaCut-Marlin"):
+            with self.assertRaisesRegex(RuntimeError, "keine LumaCut-CNC"):
                 locate_verified_marlin("/dev/serial/by-id/missing",
                                        device_root=dev, factory=FakeTransport)
 

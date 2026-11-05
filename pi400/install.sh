@@ -58,7 +58,7 @@ if DETECTED=$(runuser -u lumacut -- env PYTHONPATH="$TARGET/pi400" \
   printf 'LUMACUT_SKR=%s\n' "${BY_ID:-$DETECTED}" > "$PORT_ENV"
   echo "SKR erkannt: ${BY_ID:-$DETECTED}"
 else
-  echo "WARNUNG: SKR nicht als LumaCut-Marlin erkannt. Dienst startet trotzdem und versucht es weiter." >&2
+  echo "WARNUNG: SKR nicht als LumaCut CNC erkannt. Dienst startet trotzdem und versucht es weiter." >&2
 fi
 
 # Remove the former grblHAL service if an old installation left it behind.

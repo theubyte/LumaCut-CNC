@@ -1,6 +1,43 @@
-# SKR-Firmware (Marlin 2.1.2.9)
+# SKR-Firmware
 
-## Bauen
+Auf dem SKR Mini MZ soll die eigene Firmware laufen: Vertrag und Hardware in [FIRMWARE_EIGEN.md](FIRMWARE_EIGEN.md),
+Quellen in `firmware/lumacut/`. Der Pi im Zweig `eigene-firmware` spricht nur noch diesen Vertrag und lehnt Marlin ab
+(M115 braucht `FIRMWARE_NAME:LumaCut CNC` und `MACHINE_TYPE:LumaCut CNC`). Marlin 2.1.2.9 bleibt als Rückweg per SD-Karte,
+ist dann aber nur mit dem Pi-Stand davor betreibbar.
+
+## Flashen über den Pi (Standard)
+
+Web-UI → Karte „SKR-Firmware“ → `.bin` wählen → „Flashen“. Voraussetzung: Die laufende Firmware meldet `Cap:SELF_UPDATE:1`. Der Pi:
+1. prüft die Datei: Größe 4 KB bis 196 KB, STM32-Vektortabelle für den BTT-Bootloader (Start 0x08007000), Kennung `LumaCut CNC`, `Cap:SELF_UPDATE:1` enthalten. Marlin-Abbilder fallen damit durch;
+2. schaltet Laser, die 24-V-Laserversorgung, Licht und Abluft aus und wartet auf Stillstand;
+3. sendet `M997 U<Bytes> C<CRC-32>` (CRC-32 wie zlib, beide Zahlen dezimal) und auf `ok READY <chunk>` Blöcke dieser Größe, je Block `ok <offset>` mit der Zahl der bisher empfangenen Bytes;
+4. wartet auf `ok DONE`, schließt USB und wartet, bis die neue Firmware antwortet;
+5. vergleicht den Build-Stempel der Datei mit `M115`. Nur bei Übereinstimmung meldet er „Neue Firmware aktiv“.
+
+Fehler vor `ok DONE` (Ablehnung, falscher Offset, Stille, Prüfsumme): Die laufende Firmware bleibt, der Pi schließt den Port und verbindet neu. Danach immer neu referenzieren. LightBurn muss getrennt sein.
+
+Per Kommandozeile auf dem Pi: `curl -F file=@firmware.bin http://127.0.0.1:8080/api/firmware`.
+
+Releases für den Pi heißen `lumacut-fw-<Nr.>` mit `LumaCut-Firmware.json`; `marlin-<Nr.>` wird ignoriert ([PI_API_REFERENZ.md](PI_API_REFERENZ.md) §4.16).
+
+## Flashen per SD-Karte (Erstinstallation, Rettung)
+
+`firmware.bin` ins Hauptverzeichnis der FAT32-Karte, Karte ins SKR, 24 V **und** USB kurz trennen, einschalten. Nach dem Flashen heißt die Datei `FIRMWARE.CUR`. Der Bootloader (erste 28 KB) wird nie überschrieben, dieser Weg funktioniert also immer. So kommt die eigene Firmware das erste Mal auf das Board; Rückweg ist das Marlin-Release `marlin-62` auf demselben Weg.
+
+## Was der Pi trotz Vertrag dazugibt
+
+| Verhalten der Firmware (Vertrag) | Folge | Lösung auf dem Pi |
+|---|---|---|
+| `M5 I` wirkt sofort und wartet nicht auf die Warteschlange | Der Rest eines Auftrags liefe unbeleuchtet (`M5 I` am Dateiende der App) | Aus Auftrag und LightBurn geht `M400` voraus. Abbruch, Tippen und Service bleiben sofort |
+| Ein Endschalter stoppt alle Achsen und leert die Warteschlange | Der Auftrag liefe an falscher Stelle weiter | Z-Treffer und X/Y-Treffer abseits von Null brechen ab. Nur auf dem Weg nach X0/Y0 (Parken) ist ein Treffer normal |
+| `G0` kennt kein `S` | Ein `S0` könnte als modale Leistung gelten | Der Pi streicht `S` aus `G0`, `S>0` lehnt der Wächter ab |
+| `G30` prüft den Taster vor dem Start | Nach einem Hub wäre er noch gedrückt, solange die Fahrt läuft | `M400` vor jedem `G30` |
+| Dauerleistung endet nach 5 s ohne Befehl | TTL-Test würde abbrechen | Der Test sendet jede Sekunde `M114`; sonst läuft der Herzschlag alle 2 s |
+| Wegprüfung auch ohne Referenz | `op=z_test` nach unten wäre abgelehnt | `G92 Z40` vor dem Test, `G92 Z0` danach |
+| `M2`, `M30`, `G54`, `M7`, `G17`, `G40` gibt es nicht | LightBurn sendet sie | Der Pi filtert sie (`M2` parkt) |
+| `M112` verriegelt bis `M999` | Nach Neustart des Pi-Dienstes noch verriegelt | Beim Verbinden erkennt der Pi das und verriegelt selbst, `op=estop_reset` sendet `M999` |
+
+## Marlin bauen (Rückweg)
 
 ```bash
 pip install -r firmware/marlin/requirements.txt   # PlatformIO 6.2.0
@@ -9,7 +46,7 @@ python firmware/marlin/build.py                   # Ergebnis: firmware/marlin/di
 
 `build.py` klont Marlin 2.1.2.9 und die passende Beispielkonfiguration „AnyCubic Mega Zero / BTT SKR Mini MZ V1.0“ und wendet alle LumaCut-Anpassungen per Skript an. Ändert sich die Upstream-Datei unerwartet, bricht das Skript ab. Jede Anpassung ist dort mit Begründung kommentiert. Die wichtigsten:
 
-- Name „LumaCut CNC Marlin“. Der Pi akzeptiert nur Firmware mit dieser Kennung.
+- Name „LumaCut CNC Marlin“. Nur der Pi-Stand vor dem Zweig `eigene-firmware` akzeptiert diese Kennung.
 - Laser: `LASER_FEATURE`, PWM PA9 (EXP3, 1 kHz), `CUTTER_POWER_UNIT PWM255`, Startleistung 0 %.
 - Fester Z-Taster am Z-MIN-Pin (`FIX_MOUNTED_PROBE`, `Z_SAFE_HOMING` an X0/Y0, Tasterversatz 0, Grenze für zu frühes Auslösen 16 mm).
 - `COOLANT_CONTROL` (M7/M8), `EMERGENCY_PARSER`, `ADVANCED_OK`.
@@ -21,33 +58,3 @@ Auf GitHub baut `.github/workflows/marlin.yml` die Firmware bei jeder Änderung 
 
 Unter Windows mit langem Benutzerpfad scheitert der Marlin-Clone an der Pfadlänge. Abhilfe: kurze Ordner (`--cache-dir`, `--output`, `TMP`) und `git -c core.longpaths=true` (siehe [ENTWICKLUNG.md](ENTWICKLUNG.md)).
 
-## Flashen über den Pi (Standard)
-
-Voraussetzung: Im SKR steckt **dauerhaft** eine FAT32-microSD, und die laufende Firmware hat bereits `BINARY_FILE_TRANSFER`. Das ist seit dem Build vom 25.10.2026 22:57 der Fall.
-
-Web-UI → Karte „SKR-Firmware“ → `.bin` wählen → „Flashen“. Der Pi:
-1. prüft die Datei: Größe, STM32-Vektortabelle für den BTT-Bootloader (Start 0x08007000), LumaCut-Kennung, Upload-Funktion enthalten;
-2. schaltet Laser, die 24-V-Laserversorgung, Licht und Abluft aus und prüft die SD-Karte (`M21`);
-3. schreibt `firmware.bin` per Marlin-Binärprotokoll (`M28 B1`) auf die Karte und startet neu (`M997`);
-4. wartet, bis der Bootloader geflasht hat und USB wieder da ist;
-5. vergleicht den Build-Zeitstempel der Datei mit `M115`. Nur bei Übereinstimmung meldet er „Neue Firmware aktiv“.
-
-Dauer etwa 12 s (am 25.10.2026 am echten SKR gemessen). Danach neu referenzieren. LightBurn muss getrennt sein.
-
-Per Kommandozeile auf dem Pi: `curl -F file=@firmware.bin http://127.0.0.1:8080/api/firmware`.
-
-## Flashen per SD-Karte (Erstinstallation, Rettung)
-
-`firmware.bin` ins Hauptverzeichnis der FAT32-Karte, Karte ins SKR, 24 V **und** USB kurz trennen, einschalten. Nach dem Flashen heißt die Datei `FIRMWARE.CUR`. Der Bootloader (erste 28 KB) wird nie überschrieben, dieser Weg funktioniert also immer.
-
-## Marlin-Besonderheiten, die der Pi ausgleicht
-
-| Verhalten von Marlin 2.1.2.9 | Folge | Lösung auf dem Pi |
-|---|---|---|
-| G30 meldet „Probing Failed“, wenn der Kontakt über `Z_CLEARANCE_MULTI_PROBE` liegt (Probe::run_z_probe). Der Kopf bleibt aber exakt am Kontakt stehen. | Gültige Messung wird als Fehler gemeldet | M114-Höhe übernehmen, wenn M119 `z_min: TRIGGERED` zeigt und der Kopf unter der Starthöhe steht |
-| Nach G30 folgt eine Positionsmeldung **nach** dem Hochfahren | Falsche Oberfläche, wenn man irgendein `Z:` liest | Nur die Zeile `Bed X: … Y: … Z: …` zählt |
-| M3/M5 laufen mit `planner.synchronize()` | Stillstand an jedem Pfad, Brennpunkte | Studio sendet ein `M3 I` pro Auftrag |
-| `M400` leert den Planer | Stillstand an jedem Segment | Safezone-Prüfung mit den vom Pi selbst gesendeten Koordinaten statt M400/M114 |
-| `G0` setzt die Inline-Leistung auf 0 | `G1` ohne S nach einer Leerfahrt lasert nicht | Studio schreibt S in jedes G1. Für LightBurn ergänzt der Pi den letzten S-Wert |
-| EEPROM behält Werte älterer Firmware | z. B. Z auf 6 mm/s begrenzt, falscher Tasterversatz | Bei jeder Verbindung `M203 Z9`, `M851 X0 Y0 Z0` |
-| Nach `M112` hängt Marlin in `kill()` und antwortet nicht | Kein Weiterarbeiten | Erst nach Reset des SKR mit „Notstopp quittieren“ freigeben |

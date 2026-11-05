@@ -94,7 +94,7 @@ assert summary["lowest"] < -1.3 and summary["highest"] > -0.8, summary
 assert m.surface_z is None                     # the bed is no workpiece
 # Hops between bed points stay well above the bed (forgotten clamps).
 w = sim.writes
-i0, i1 = w.index("G30 E0"), w.index("M402")
+i0, i1 = w.index("G30"), len(w) - 1 - w[::-1].index("G30")
 hops = [float(x.split("Z")[1].split()[0]) for x in w[i0:i1] if x.startswith("G0 Z")]
 assert min(hops) >= 8.5, hops
 full = c.get("/api/bedmap").get_json()["bed_map"]

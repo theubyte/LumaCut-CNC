@@ -43,8 +43,8 @@ offene Punkte), [MACHINE_API.md](../software/lumacut-studio-native/docs/MACHINE_
 
 | Ausnahme auf dem Pi | HTTP | Typische Bedeutung |
 | --- | --- | --- |
-| `ValueError` (auch `FirmwareImageError`), `RuntimeError` (auch `MarlinCommandError`), `PermissionError` | **400** | Eingabe ungültig, Vorbedingung fehlt, Steuerung belegt, Marlin meldet Fehler |
-| `TimeoutError`, `ConnectionError` | **503** | SKR nicht per USB identifiziert, Marlin-Antwort überfällig, Kamera fehlt, E-Stop ohne USB |
+| `ValueError` (auch `FirmwareImageError`), `RuntimeError` (auch `MarlinCommandError`), `PermissionError` | **400** | Eingabe ungültig, Vorbedingung fehlt, Steuerung belegt, Firmware meldet Fehler |
+| `TimeoutError`, `ConnectionError` | **503** | SKR nicht per USB identifiziert, Firmware-Antwort überfällig, Kamera fehlt, E-Stop ohne USB |
 | alles andere (z. B. `serial.SerialException` bei `op=connect` ohne USB-Gerät) | **500** | `{"error": "Interner Fehler – Pi-Protokoll ansehen"}` |
 | eigene Codes | 403 / 409 / 413 / 415 | nur `PUT /api/camera/calibration` (Abschnitt 4.13) |
 
@@ -54,7 +54,7 @@ offene Punkte), [MACHINE_API.md](../software/lumacut-studio-native/docs/MACHINE_
   aufrufen: erst Text lesen, dann JSON versuchen (siehe JS-Helfer in
   Abschnitt 9.2; die alte `index.html` macht es ebenso).
 - Status 400 heißt „abgelehnt, nichts passiert“ **nur bei Vorbedingungen**.
-  Scheitert eine bereits laufende Fahrt (z. B. Marlin `Error:` mitten in
+  Scheitert eine bereits laufende Fahrt (z. B. Firmware-`Error:` mitten in
   `op=home`), kommt ebenfalls 400, aber die Maschine kann sich schon bewegt
   haben. Danach immer `/api/status` neu lesen.
 
@@ -67,13 +67,13 @@ und Fehlertexte:
 | --- | --- |
 | `owner == "frame"` | 400 `Rahmenfahrt läuft – abwarten oder abbrechen` |
 | `owner` gesetzt (`web`, `job`, `lightburn`, `firmware`, `monitor`, `shutdown`) | 400 `Steuerung belegt durch <owner> – LightBurn zuerst trennen` (der Text nennt LightBurn auch bei `job`/`firmware`) |
-| kein USB / keine LumaCut-Kennung | 503 `Marlin SKR noch nicht per USB identifiziert` |
+| kein USB / keine LumaCut-Kennung | 503 `SKR noch nicht per USB identifiziert` |
 | `state != "Idle"` (z. B. `Busy`) | 400 `SKR beschäftigt: Busy` |
 
 `local_owner()` prüft den **E-Stop-Riegel nicht** selbst. Das erledigt der
-nächste Marlin-Befehl: `RuntimeError` `M112-Notstopp aktiv; keine weiteren
+nächste Befehl an die Firmware: `RuntimeError` `M112-Notstopp aktiv; keine weiteren
 Bewegungen` bzw. bei Fahrroutinen `SKR nicht bereit / Notstopp aktiv` oder
-`Marlin USB nicht bereit oder Notstopp verriegelt` (503). `op=frame` prüft den
+`SKR USB nicht bereit oder Notstopp verriegelt` (503). `op=frame` prüft den
 Riegel ausdrücklich.
 
 Kurzzeichen in den Tabellen unten:
@@ -166,7 +166,7 @@ Alle `op`-Werte von `POST /api/action`:
 | Aufträge | `start`, `autorun`, `abort`, `frame` |
 | Warteschlange | `queue_add`, `queue_run`, `queue_pause`, `queue_skip`, `queue_remove`, `queue_clear` |
 
-Unbekanntes oder fehlendes `op` → 400 `Unbekannte Marlin-Aktion: <op>`.
+Unbekanntes oder fehlendes `op` → 400 `Unbekannte Aktion: <op>`.
 
 ---
 
@@ -194,7 +194,7 @@ Rahmenkante (M400) halten die Sperre für die ganze Fahrt.
 - Die Felder aus `web.py` (`job`, `frame`, `queue`, `activity`, `origin`,
   `config`, `camera`, …) sind immer aktuell, auch bei `busy: true`.
 - `position` ist während einer Fahrt die **letzte von M114 gemeldete**
-  Position, nicht die Live-Position (Marlin meldet erst nach der Fahrt).
+  Position, nicht die Live-Position (die Firmware meldet die geplante Endposition).
   ⚠ Hardware
 
 ### 3.2 Felder
@@ -211,7 +211,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `z_homed` | bool | Z referenziert |
 | `z_probe_supported` | bool \| null | Firmware meldet `Cap:Z_PROBE` (null = noch unbekannt) |
 | `emergency_latched` | bool | M112-Riegel aktiv: alles außer `estop`/`estop_reset` wird abgelehnt |
-| `firmware_upload_supported` | bool | Firmware meldet `Cap:BINARY_FILE_TRANSFER:1` (Voraussetzung für `/api/firmware` mit `.bin`) |
+| `firmware_upload_supported` | bool | Firmware meldet `Cap:SELF_UPDATE:1` (Voraussetzung für `/api/firmware` mit `.bin`) |
 | `firmware_avr_port` | string/null | CH340-Port (Anet-Board oder Atomstack) für `/api/firmware` mit `firmware.hex`; `null` = kein CH340 |
 | `firmware_release` | object | Firmware-Update von GitHub (§4.16): `number`, `commit`, `board` (`skr`/`anet`/null), `board_name`, `running_build` (aus M115), `release_build`, `update_available`, `checked_at`, `error` |
 | `panel` | object\|null | Bedienpanel am USB (§4.16, `panel.py`): `connected`, `port`, `version` (meldet das Panel), `available` (Firmware in `panel_fw/` auf dem Pi), `update_available`, `auto`, `esptool`, `state` (`idle`/`flashing`/`done`/`error`), `message`, `target`; null ohne Panel-Brücke |
@@ -222,7 +222,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `fault` | string | letzter Fehler (z. B. nach E-Stop), `""` wenn keiner |
 | `lights` | bool | Licht (LED-Streifen an PC8) an |
 | `light_brightness` | number | eingestellte Helligkeit 1..100 % (gilt, wenn `lights` an) |
-| `light_dimmable` | bool \| null | `true` = Firmware dimmt (`M355`), `false` = alte Firmware (nur `M7`/`M9`), `null` = noch nicht geprüft |
+| `light_dimmable` | bool \| null | `true` = `M355` beantwortet, `null` = seit dem Verbinden noch nicht geschaltet |
 | `light_effects` | bool | Lichteffekte bei Referenzieren, Auftragsstart, Auftragsende, Fehler |
 | `exhaust` | bool | Abluft (M8) an |
 | `laser_armed` | bool | Laser per `M3 I` scharf; außerhalb eines Auftrags immer `false` |
@@ -241,7 +241,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `cooldown_remaining_s` | int \| null | Nachlauf der Laserkühlung in s |
 | `serial_errors` | int | Zähler serieller Fehler |
 | `command_count` | int | Zähler gesendeter Befehle |
-| `stream_window` | int | Streaming-Fenster 1..8 (`LUMACUT_STREAM_WINDOW`, Standard 4) |
+| `stream_window` | int | Streaming-Fenster 1..16 (`LUMACUT_STREAM_WINDOW`, Standard 8) |
 | `streamed_count` | int | Zähler gestreamter Auftragszeilen |
 | `lightburn_clients` | int | Zähler bisheriger LightBurn-Verbindungen (kein „gerade verbunden“; dafür `owner == "lightburn"`) |
 | `recent` | string[] | letzte 25 Zeilen des seriellen Protokolls |
@@ -268,12 +268,12 @@ Felder aus `web.py` (`status()`):
 | `line_laser` | object | `{gpio, on}`: roter Mess-Linienlaser am Kopf (3D-Höhe), geschaltet über einen Pi-GPIO (BCM); `gpio` `null` = nicht eingebaut |
 | `sync` | object | `{workspace, project, scan}`: Revisionen des Arbeitsstands auf dem Pi (Abschnitt 4.15). Ändert sich eine, holt jedes Gerät nur diesen Teil neu. |
 | `travel_z_mm` | number | Fahrhöhe über unbekanntem Gelände = Stärke des gewählten Materials + 20 mm, mindestens `z_clearance_mm`, höchstens 80. Alle Pi-Fahrten (moveto, Abtasten, Parken, nach dem Referenzieren, lange Leerfahrten im Auftrag) gehen mindestens so hoch. |
-| `home_needs_confirm` | bool | `true`: Marlin kennt Z nicht und der Pi hat keine gemerkte Höhe – `op=home` bzw. `op=autorun` brauchen `clear=1` (Bediener bestätigt, dass der Kopf frei über allem steht). |
+| `home_needs_confirm` | bool | `true`: die Firmware kennt Z nicht und der Pi hat keine gemerkte Höhe – `op=home` bzw. `op=autorun` brauchen `clear=1` (Bediener bestätigt, dass der Kopf frei über allem steht). |
 | `camera` | object | `{device, available}`: Gerätepfad (`LUMACUT_CAMERA`, Standard `/dev/video0`) und ob er existiert (sagt nichts darüber, ob ffmpeg ein Bild bekommt) |
 
 `job.line` / `job.total`: `total` = Zahl der Auftragszeilen; `line` zählt
-Zeilen, die **an Marlin übergeben** wurden. Durch das Streaming-Fenster
-(`stream_window`) und den Marlin-Planerpuffer läuft `line` der tatsächlichen
+Zeilen, die **an die Firmware übergeben** wurden. Durch das Streaming-Fenster
+(`stream_window`) und die Warteschlange der Firmware läuft `line` der tatsächlichen
 Bewegung voraus. Für eine Fortschrittsanzeige reicht das; für „jetzt fertig“
 gilt nur `job.state == "complete"`. ⚠ Hardware
 
@@ -325,8 +325,8 @@ ergänzen lassen.
 | --- | --- |
 | Parameter | keine |
 | Vorbedingungen | **keine**: nimmt weder `local_owner()` noch die Maschinensperre; wirkt auch bei Besitzer `job`, `frame`, `lightburn`, `firmware` |
-| Wirkung | setzt `stop_job` (Auftrag/Rahmen/Warteschlange brechen ab), schreibt `M112` direkt auf USB (Marlin EMERGENCY_PARSER), setzt `emergency_latched`, `homed`/`z_homed`/`laser_armed` = false, `fault` |
-| Erfolg | 200 `{"message": "Marlin M112 ausgelöst – physischen Not-Aus prüfen"}` |
+| Wirkung | setzt `stop_job` (Auftrag/Rahmen/Warteschlange brechen ab), schreibt `M112` direkt auf USB (die Firmware wertet es beim Empfang aus), setzt `emergency_latched`, `homed`/`z_homed`/`laser_armed` = false, `fault` |
+| Erfolg | 200 `{"message": "M112 ausgelöst – physischen Not-Aus prüfen"}` |
 | Fehler | 503 `Software-Notstopp NICHT übertragen: USB getrennt, physischen Not-Aus benutzen` (**Riegel wird trotzdem gesetzt**); 503/500 `Software-Notstopp fehlgeschlagen: …` bei Schreibfehler |
 | Danach | SKR hängt in `kill()`; erst SKR-Reset (Taste oder 24 V/USB trennen), dann `op=estop_reset`, dann neu referenzieren. ⚠ Hardware |
 
@@ -338,10 +338,10 @@ wiederholen (Abschnitt 9.2).
 | | |
 | --- | --- |
 | Parameter | keine |
-| Vorbedingungen | Besitzer frei (`Steuerung belegt: <owner>`); SKR muss neu gestartet sein |
-| Wirkung | schließt USB, versucht Neuverbindung (M115 + Kennung); bei Erfolg Riegel und `fault` gelöscht |
-| Erfolg | 200 `Notstopp quittiert: SKR neu gestartet, bitte neu referenzieren`, oder `Kein Notstopp aktiv` wenn kein Riegel |
-| Fehler | 400 `SKR antwortet noch nicht: Reset-Taste am SKR drücken oder 24 V und USB kurz trennen (…)` – Riegel bleibt |
+| Vorbedingungen | Besitzer frei (`Steuerung belegt: <owner>`) |
+| Wirkung | schließt USB, verbindet neu (M115 + Kennung), sendet `M999`; bei Erfolg Riegel und `fault` gelöscht. Die Firmware antwortet auch verriegelt auf M115, ein Reset ist nicht nötig. Danach nicht referenziert |
+| Erfolg | 200 `Notstopp quittiert, bitte neu referenzieren`, oder `Kein Notstopp aktiv` wenn kein Riegel |
+| Fehler | 400 `SKR antwortet nicht: USB prüfen, Reset-Taste am SKR drücken oder 24 V und USB kurz trennen (…)` – Riegel bleibt |
 | Dauer | einige Sekunden (Port öffnen, M115) |
 
 ### 4.3 `POST /api/action` – Verbindung und Abfragen
@@ -351,10 +351,10 @@ wiederholen (Abschnitt 9.2).
 | | |
 | --- | --- |
 | Parameter | keine |
-| Vorbedingungen | kein Riegel, kein Client verbunden (sonst 400 `M112-Notstopp verriegelt – SKR zurücksetzen, dann Notstopp quittieren` bzw. `SKR noch nicht bereit, während Client verbunden ist`) |
+| Vorbedingungen | kein Riegel, kein Client verbunden (sonst 400 `M112-Notstopp verriegelt – erst Notstopp quittieren` bzw. `SKR noch nicht bereit, während Client verbunden ist`) |
 | Wirkung | öffnet USB (falls zu), prüft M115 + LumaCut-Kennung. Der Heartbeat versucht das ohnehin alle 8 s. |
-| Erfolg | 200 `Marlin M115 + LumaCut-Kennung bestätigt` |
-| Fehler | 400 `SKR meldet kein echtes Marlin M115`, `Fremde/alte Marlin-Firmware: LumaCut CNC Kennung fehlt`; 503 bei Timeout; **500** `Interner Fehler – Pi-Protokoll ansehen`, wenn das USB-Gerät fehlt (`SerialException` wird nicht abgebildet) |
+| Erfolg | 200 `M115 + LumaCut-Kennung bestätigt` |
+| Fehler | 400 `Fremde oder alte Firmware: LumaCut-CNC-Kennung im M115 fehlt` (auch jedes Marlin-Abbild), Fehlermeldung `Emergency stop`, wenn die Firmware noch verriegelt ist (dann setzt auch der Pi den Riegel); 503 bei Timeout; **500** `Interner Fehler – Pi-Protokoll ansehen`, wenn das USB-Gerät fehlt (`SerialException` wird nicht abgebildet) |
 
 #### `op=info` / `op=position` / `op=endstops`
 
@@ -363,18 +363,18 @@ wiederholen (Abschnitt 9.2).
 | Parameter | keine |
 | Vorbedingungen | **frei** |
 | Wirkung | sendet `M115` / `M114` / `M119` (Timeout 12 s) |
-| Erfolg | 200 `{"message": "<Marlin-Antwortzeilen, mit \n getrennt>"}` |
-| Fehler | Abschnitt 1.2; 503 `Keine Marlin-Bestätigung vor Fristablauf` |
+| Erfolg | 200 `{"message": "<Antwortzeilen, mit \n getrennt>"}` |
+| Fehler | Abschnitt 1.2; 503 `Keine Bestätigung der Firmware vor Fristablauf` |
 
 #### `op=report`
 
 | | |
 | --- | --- |
-| Parameter | `cmd`: genau eine der Abfragen `M105`, `M114`, `M115`, `M119`, `M122`, `M503` (nur lesen, ohne Parameter; `M122` = TMC-Treiberstatus, braucht 24 V) |
+| Parameter | `cmd`: genau eine der Abfragen `M114`, `M115`, `M119`, `M122` (nur lesen, ohne Parameter; `M122` = TMC-Treiberstatus, braucht 24 V) |
 | Vorbedingungen | **frei** |
 | Wirkung | sendet die Abfrage (Timeout 15 s); Diagnose-Seite der Web-UI |
-| Erfolg | 200 `{message, cmd, lines: [<Marlin-Antwortzeilen>]}` |
-| Fehler | 400 `Nur Abfragen: M105, M114, M115, M119, M122, M503`; Abschnitt 1.2 |
+| Erfolg | 200 `{message, cmd, lines: [<Antwortzeilen>]}` |
+| Fehler | 400 `Nur Abfragen: M114, M115, M119, M122`; Abschnitt 1.2 |
 
 ### 4.4 `POST /api/action` – Bewegung
 
@@ -387,9 +387,9 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | --- | --- |
 | Parameter | `clear=1` optional: Bediener bestätigt, dass der Kopf frei steht (nur nötig bei `home_needs_confirm`) |
 | Vorbedingungen | **frei**, **freigegeben** (sonst 400 `Mechanik/Z-Endschalter nicht verifiziert`), kein Riegel |
-| Wirkung | atomare sichere Referenzfahrt (dieselbe wie LightBurn-G28): erst auf die Fahrhöhe (`travel_z_mm`; bei unbekanntem Z relativ um Fahrhöhe − gemerkte letzte Höhe, mindestens 5 mm, nie über Z80; ohne gemerkte Höhe 400 `Kopfhöhe unbekannt: … bestätigen`, außer `clear=1`), dann `G28 X Y R0` in die leere 30-mm-Zone (Marlin hebt nicht noch einmal blind an), dann Z auf Maschinenboden Z=0 und in der Ecke auf die Fahrhöhe. Verwirft eine Platzierung mit `origin=current`. Die letzte bekannte Z-Höhe hält der Pi in `/var/lib/lumacut/marlin/last_z.json`. |
+| Wirkung | atomare sichere Referenzfahrt (dieselbe wie LightBurn-G28): erst auf die Fahrhöhe (`travel_z_mm`; bei unbekanntem Z relativ um Fahrhöhe − gemerkte letzte Höhe, mindestens 5 mm, nie über Z80; ohne gemerkte Höhe 400 `Kopfhöhe unbekannt: … bestätigen`, außer `clear=1`), dann `G28 X Y R0` in die leere 30-mm-Zone, dann Z auf Maschinenboden Z=0 und in der Ecke auf die Fahrhöhe. Verwirft eine Platzierung mit `origin=current`. Die letzte bekannte Z-Höhe hält der Pi in `/var/lib/lumacut/marlin/last_z.json`. |
 | Erfolg | 200 `X/Y zuerst, danach Maschinenboden Z=0 und Z-Rückzug: referenziert.` |
-| Fehler | Abschnitt 1.2; Marlin-Fehler 400; 503 bei Timeout (Teilschritte bis 150 s) |
+| Fehler | Abschnitt 1.2; Firmware-Fehler 400; 503 bei Timeout (Teilschritte bis 150 s) |
 | Hinweis | Die 30-mm-Bänder an X0 und Y0 müssen frei von Material sein. ⚠ Hardware |
 
 #### `op=jog`
@@ -401,8 +401,8 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 
 | | |
 | --- | --- |
-| Vorbedingungen | **referenziert** (zuerst geprüft: 400 `Marlin muss zuerst referenziert werden`), dann **frei**, Fahrt nur mit **Freigabe** (Wächter) |
-| Wirkung | `M5 I`, `G91`, `G0 <Achse><±d> F1800` (Z: F360), `M400`, `G90`, `M114`. Verwirft Platzierung `current`. Prüft **keine** Arbeitsraumgrenzen selbst; Marlin-Softendstops begrenzen. ⚠ Hardware |
+| Vorbedingungen | **referenziert** (zuerst geprüft: 400 `Maschine muss zuerst referenziert werden`), dann **frei**, Fahrt nur mit **Freigabe** (Wächter) |
+| Wirkung | `M5 I`, `G91`, `G0 <Achse><±d> F1800` (Z: F360), `M400`, `G90`, `M114`. Verwirft Platzierung `current`. Prüft **keine** Arbeitsraumgrenzen selbst; die Firmware lehnt mit `Error:Out of bounds` ab. ⚠ Hardware |
 | Erfolg | 200 `Bewegung ausgeführt: X 1.0` |
 | Fehler | 400 `Ungültige Achse oder Schrittweite` |
 
@@ -533,7 +533,7 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | --- | --- |
 | Vorbedingungen | **frei**, **referenziert** (`Vor dem Abtasten referenzieren`), Freigabe, Firmware mit `Cap:Z_PROBE` (sonst 400 `SKR meldet Cap:Z_PROBE:0 …`), Tasterversatz gesetzt (`X/Y-Tasterversatz muss zuerst kalibriert sein`), Laser aus |
 | Wirkung | optional `G0 X Y` (Timeout 60 s), dann G30-Abtastung unter der aktuellen Laser-XY (mit Tasterversatz). Setzt `workpiece_surface_z`; Maschinen-Z0 bleibt unverändert. |
-| Erfolg | 200 `{"message": "Werkstückoberfläche Z=… mm, Fokus Z=… mm[, … mm über dem Bett]", "above_bed_mm": number \| null, "detail": "<bis 6 Marlin-Zeilen>"}`; die Dicke über dem Bett nur mit Bettkarte |
+| Erfolg | 200 `{"message": "Werkstückoberfläche Z=… mm, Fokus Z=… mm[, … mm über dem Bett]", "above_bed_mm": number \| null, "detail": "<bis 6 Antwortzeilen>"}`; die Dicke über dem Bett nur mit Bettkarte |
 | Fehler | 400 `Abtastpunkt außerhalb X30..390 / Y30..370`, `G30 ohne Tasterkontakt bis Z…: kein Material unter dem Taster …`, `Z-Taster war schon beim G30-Start … gedrückt …`, `G30-Kontakt Z… unter Maschinenboden …` (erst unter −3 mm: das leere Bett liegt 0,7–1,2 mm unter Z0) ⚠ Hardware |
 
 #### `op=bedmap`
@@ -584,7 +584,7 @@ Keine Parameter, **frei**. Löscht die gespeicherte Bettkarte. 200 `{"message": 
 
 #### `op=light`
 
-Dimmbarer 24-V-LED-Streifen an PC8 (Firmware: Marlin-Gehäuselicht `M355 S<0|1> P<0-255>`,
+Dimmbarer 24-V-LED-Streifen an PC8 (Firmware: `M355 S<0|1> P<0-255>`,
 Hardware-PWM ~1,1 kHz).
 
 | Parameter | Typ | Erlaubt |
@@ -596,7 +596,7 @@ Hardware-PWM ~1,1 kHz).
 | | |
 | --- | --- |
 | Vorbedingungen | **frei** (also nicht während Auftrag/Rahmen/LightBurn), SKR verbunden |
-| Wirkung | `M355 S1 P<brightness·2,55>` bzw. `M355 S0`. Alte Firmware ohne `M355` („Unknown command“): `M7` an, `M9` aus (danach `M8`, falls Abluft an war); `light_dimmable` wird dann `false`. |
+| Wirkung | `M355 S1 P<brightness·2,55>` bzw. `M355 S0`. |
 | Erfolg | 200 `{"message": "Licht EIN · 60 %", "lights": true, "brightness": 60, "dimmable": true}` |
 | Fehler | 400 `Helligkeit 1..100 %` |
 | Lichteffekte | Der Pi spielt sie selbst (nicht abschaltbar pro Ereignis, nur gesamt über `effects`): Referenzieren = 2× aufblitzen, Auftragsstart = hochdimmen, Auftragsende = 3× „atmen“, Auftragsfehler = 3× schnell blinken (nicht bei Abbruch durch den Bediener). Danach gilt wieder `lights`/`light_brightness`. Nur mit Dimm-Firmware. |
@@ -699,13 +699,13 @@ Abschnitt 4): Auftrag in Maschinenkoordinaten **ohne Z** hochladen, dann
 | | |
 | --- | --- |
 | Vorbedingungen | wie `start`, aber **nicht referenziert nötig**; Tasterversatz gesetzt (`X/Y-Tasterversatz zuerst unter Fokus & Taster eintragen`); `clear=1` wie bei `op=home`, wenn `home_needs_confirm`. Nach dem Abtasten muss die Oberfläche zur Materialstärke passen (± `thickness_tolerance_mm`), sonst bricht der Auftrag vor dem Lasern ab (`Gemessen … mm, Material „…“ hat … mm – …`). Leerfahrten über 20 mm im Auftrag gehen erst auf die Fahrhöhe. |
-| Planung (vor jeder Bewegung) | `G28`/`G30`/`M2` aus der Datei entfallen. Motivbereiche = Laserwege (G1 mit S>0) in 5-mm-Zellen, Teile mit < 10 mm Abstand bilden einen Bereich, Bereich = Umriss + 2 mm (max. 12 Bereiche, sonst einer). Raster je Bereich 1×1 bis 4×4 (ca. ein Punkt je 90 mm, 5 mm vom Rand), höchstens 36 Punkte je Auftrag. Erreichbar ist ein Punkt, wenn der Kopf (Punkt − Tasterversatz) in X10..380 / Y10..360 liegt (Marlin `PROBING_MARGIN` 10 mm; der Laser ist aus, der Kopf darf dafür in die Safezone). Ein Punkt im Randstreifen, den der Taster nie erreicht (er sitzt neben dem Laser), wird am **nächsten erreichbaren Ort höchstens 40 mm daneben** abgetastet; dessen Höhe gilt für den Punkt (`HeightGrid.probe_at`). So lassen sich Motive bis an den Rand des Arbeitsbereichs lasern. Was auch so nicht erreichbar ist, wird aus Nachbarn ergänzt; ein ganz unerreichbarer Bereich bekommt die höchste gemessene Oberfläche. Höhenkorrektur einmal gegen eine ebene Testfläche, damit Bögen/relative X/Y sofort abgelehnt werden. |
-| Ablauf | 1. `homing` nur wenn `homed` false ist (nach Verbinden, Reset, Not-Aus). 2. `probing`: je Punkt `G0 X Y` und `G30 E0` (eine Messung, Taster bleibt ausgefahren, kein 16-mm-Anheben durch Marlin), dazwischen nur Hub auf höchste Oberfläche des Bereichs + 3 mm; zwischen Bereichen Z-Rückzug. Der **tiefste Punkt wird zuletzt nochmal** angetastet, `workpiece_surface_z` = tiefster Kontakt, dann `M402` (Taster verstauen) und Z-Rückzug. 3. Höhenkorrektur auf dem Pi (`focus_compensation.py`): Z = Oberfläche + `focus_gap_mm` − `z_switch_tip_offset_mm`, nie unter Oberfläche + 2 mm, Laserlinien in ≤ 2-mm-Stücke, Leerfahrten erst hoch, am Ziel runter, `G91`/`G0 Z-…`/`G90` als Versatz, Vorschub sinkt, wenn Z (9 mm/s) nicht folgt. Ein Auftrag mit **eigenem absolutem Z** wird nur abgetastet, nicht nochmal korrigiert. 4. `running`: Startmelodie, lasern, parken, Melodie. |
+| Planung (vor jeder Bewegung) | `G28`/`G30`/`M2` aus der Datei entfallen. Motivbereiche = Laserwege (G1 mit S>0) in 5-mm-Zellen, Teile mit < 10 mm Abstand bilden einen Bereich, Bereich = Umriss + 2 mm (max. 12 Bereiche, sonst einer). Raster je Bereich 1×1 bis 4×4 (ca. ein Punkt je 90 mm, 5 mm vom Rand), höchstens 36 Punkte je Auftrag. Erreichbar ist ein Punkt, wenn der Kopf (Punkt − Tasterversatz) in X10..380 / Y10..360 liegt (Randabstand des Pi; der Laser ist aus, der Kopf darf dafür in die Safezone). Ein Punkt im Randstreifen, den der Taster nie erreicht (er sitzt neben dem Laser), wird am **nächsten erreichbaren Ort höchstens 40 mm daneben** abgetastet; dessen Höhe gilt für den Punkt (`HeightGrid.probe_at`). So lassen sich Motive bis an den Rand des Arbeitsbereichs lasern. Was auch so nicht erreichbar ist, wird aus Nachbarn ergänzt; ein ganz unerreichbarer Bereich bekommt die höchste gemessene Oberfläche. Höhenkorrektur einmal gegen eine ebene Testfläche, damit Bögen/relative X/Y sofort abgelehnt werden. |
+| Ablauf | 1. `homing` nur wenn `homed` false ist (nach Verbinden, Reset, Not-Aus). 2. `probing`: je Punkt `G0 X Y`, `M400` und `G30` (eine Messung, der Kopf bleibt am Kontakt), dazwischen nur Hub auf höchste Oberfläche des Bereichs + 3 mm; zwischen Bereichen Z-Rückzug. Der **tiefste Punkt wird zuletzt nochmal** angetastet, `workpiece_surface_z` = tiefster Kontakt, dann Z-Rückzug. 3. Höhenkorrektur auf dem Pi (`focus_compensation.py`): Z = Oberfläche + `focus_gap_mm` − `z_switch_tip_offset_mm`, nie unter Oberfläche + 2 mm, Laserlinien in ≤ 2-mm-Stücke, Leerfahrten erst hoch, am Ziel runter, `G91`/`G0 Z-…`/`G90` als Versatz, Vorschub sinkt, wenn Z (9 mm/s) nicht folgt. Ein Auftrag mit **eigenem absolutem Z** wird nur abgetastet, nicht nochmal korrigiert. 4. `running`: Startmelodie, lasern, parken, Melodie. |
 | Status | `job.state`: `homing` → `probing` → `running` → `complete`; `job.probe` = `{done, total}` (total = Punkte + 1 Nachmessung) |
 | Erfolg | 200 `Automatischer Ablauf gestartet: [Referenzieren → ]Abtasten (N Punkte) → Höhenkorrektur → <name> → Parken` (bzw. `eigenes Z des Auftrags`) |
 | Fehler (Start) | 400 `Auftrag ohne Laserbahnen: nichts abzutasten`, `Kein Abtastpunkt erreichbar: …`, `Zeile N: Bögen (G2/G3) – in der App als Linien ausgeben`, `Zeile N: relative X/Y-Fahrten (G91) …`, `Fokushöhe läge näher als 2 mm …`, `Fokus-Absenkung führt unter Oberfläche + 2 mm` |
 | Relatives Z | `G91`/`G0 Z-…`/`G90` (Fokus-Absenkung je Durchgang) wird nur hier und in der Warteschlange (Auftrag ohne eigenes Z) als Versatz auf die Kartenhöhe gerechnet, höchstens bis Oberfläche + 2 mm. Bei `op=start` und bei Aufträgen mit eigenem Z gehen die Zeilen unverändert an Marlin. |
-| Abbruch / Not-Aus | `op=abort` wirkt in jeder Phase: `homing` nach der X/Y-Referenzfahrt (Kopf steht dann in der Parkecke X0/Y0, Z unverändert, Maschine nicht referenziert), `probing` vor jedem Punkt (Taster wird mit `M402` verstaut), `focusing` alle 500 Zeilen, `running` vor jeder Zeile, `finishing`/`parking` nach dem Parken. Danach `M5 I` und Parken ohne M112, `job.state = aborted`, `job.error = Abgebrochen`. Zwischen allen Phasen ist der Laser aus (`M5 I`). `op=estop` (M112) wirkt sofort. ⚠ Hardware |
+| Abbruch / Not-Aus | `op=abort` wirkt in jeder Phase: `homing` nach der X/Y-Referenzfahrt (Kopf steht dann in der Parkecke X0/Y0, Z unverändert, Maschine nicht referenziert), `probing` vor jedem Punkt, `focusing` alle 500 Zeilen, `running` vor jeder Zeile, `finishing`/`parking` nach dem Parken. Danach `M5 I` und Parken ohne M112, `job.state = aborted`, `job.error = Abgebrochen`. Zwischen allen Phasen ist der Laser aus (`M5 I`). `op=estop` (M112) wirkt sofort. ⚠ Hardware |
 | Fehler (Lauf) | `job.state = error`, `job.error` ein Satz mit nächstem Schritt, z. B. `Der Taster hat bei X… Y… kein Material gefunden – Material unter das Motiv legen oder den Tasterversatz prüfen, dann neu starten.`, `Der Taster war bei X… Y… schon gedrückt – Taster und Kabel prüfen, dann neu starten.`, `Abtasten bei X… Y… fehlgeschlagen (…) – Taster prüfen, dann neu starten.`, `Verbindung zur Steuerung unterbrochen (…) – USB-Kabel prüfen, dann neu starten.`; danach Laser aus und Parken (ohne M112). ⚠ Hardware |
 
 #### `op=abort`
@@ -855,12 +855,12 @@ deutlich sagen und `enable=1` nur nach bewusster Bestätigung senden.
 | | |
 | --- | --- |
 | Anfrage | multipart, Feld `file` = `firmware.bin` |
-| Prüfung des Abbilds | 32 KB .. 228 KB (`0x08040000 − 0x08007000`), gültiger Vektor für BTT-Bootloader (Start 0x08007000), enthält `LumaCut CNC` und `Switching to Binary Protocol` |
-| Vorbedingungen | **frei**, kein Auftrag (`Während eines Auftrags wird nicht geflasht`), aktuelle Firmware `firmware_upload_supported` (sonst 400 `Aktuelle SKR-Firmware kann keine Dateien empfangen: einmalig per SD-Karte eine Firmware mit Pi-Update flashen`) |
-| Wirkung | asynchron (Thread), Besitzer `firmware`: Laser/24-V-Schiene/Zubehör aus, SD-Karte prüfen, Upload, `M997`, Neustart, Warten bis M115 den neuen Build meldet (bis 120 s). Fortschritt **nur** über `/api/status` → `firmware_update`. Danach nicht referenziert. ⚠ Hardware |
+| Prüfung des Abbilds | 4 KB .. 196 KB, gültiger Vektor für BTT-Bootloader (Start 0x08007000), enthält `LumaCut CNC` und `Cap:SELF_UPDATE:1` (damit fällt jedes Marlin-Abbild durch) |
+| Vorbedingungen | **frei**, kein Auftrag (`Während eines Auftrags wird nicht geflasht`), aktuelle Firmware `firmware_upload_supported` (sonst 400 `Aktuelle SKR-Firmware kann sich nicht selbst aktualisieren: einmalig per SD-Karte die LumaCut-Firmware flashen`) |
+| Wirkung | asynchron (Thread), Besitzer `firmware`: Laser/24-V-Schiene/Licht/Abluft aus, `M997 U<Bytes> C<CRC-32 dezimal>`, Blöcke senden (`docs/FIRMWARE_EIGEN.md`), nach `ok DONE` Warten, bis M115 den neuen Build meldet (bis 60 s). Jeder Fehler vor `ok DONE` lässt die laufende Firmware unberührt. Fortschritt **nur** über `/api/status` → `firmware_update`. Danach nicht referenziert. ⚠ Hardware |
 | Erfolg | 200 `Firmware-Update gestartet (N KB, Build …). SKR startet gleich neu.` |
-| Fehler (sofort) | 400 `firmware.bin auswählen`, `Dateigröße … unplausibel …`, `Keine SKR-Mini-MZ-Firmware für den BTT-Bootloader …`, `LumaCut-Kennung fehlt: fremde Firmware wird nicht geflasht`, `Firmware ohne BINARY_FILE_TRANSFER: …` |
-| Fehler (Lauf) | `firmware_update.state = "error"`, `message` z. B. `Keine SD-Karte im SKR erkannt (M21): …`, `SKR nach dem Flashen nicht wieder erreichbar: …` |
+| Fehler (sofort) | 400 `firmware.bin auswählen`, `Dateigröße … unplausibel …`, `Keine SKR-Mini-MZ-Firmware für den BTT-Bootloader …`, `LumaCut-Kennung fehlt: fremde Firmware wird nicht geflasht`, `Firmware ohne Selbst-Update (Cap:SELF_UPDATE:1): …` |
+| Fehler (Lauf) | `firmware_update.state = "error"`, `message` z. B. `Firmware-Update abgebrochen, laufende Firmware bleibt: …`, `SKR nach dem Update nicht wieder erreichbar, Rettung per SD-Karte: …`, `SKR läuft nicht mit dem neuen Build (…)` |
 
 **`firmware.hex` (Anet-Board, ATmega1284P):** Dateiname endet auf `.hex` →
 `avr_flash.py` statt SD-Weg. Prüfung: Intel-HEX mit Prüfsummen, AVR-Sprungtabelle,
@@ -870,8 +870,8 @@ Maschine nicht beschäftigt – **kein** verbundener Controller nötig (der erst
 ersetzt eine fremde Firmware). Wirkung: Besitzer `firmware`, Laser/FAN/Abluft aus
 falls verbunden, Port schließen, DTR-Reset in den Bootloader (STK500 v1, 115200),
 Signatur `1E 97 05` prüfen (sonst nichts geschrieben), Seiten schreiben, alles
-zurücklesen und vergleichen, Marlin starten, neu verbinden, Build-Datum in M115
-prüfen. Fortschritt über `firmware_update`. Erfolg 200 `Anet-Firmware wird geflasht
+zurücklesen und vergleichen. Kein Neuverbinden: das Abbild ist Marlin, und das Gateway
+betreibt nur die Firmware aus `docs/FIRMWARE_EIGEN.md` (M115 wird abgelehnt). Fortschritt über `firmware_update`. Erfolg 200 `Anet-Firmware wird geflasht
 (N KB, Build …). Board startet gleich neu.` Fehler im Lauf z. B. `Kein Bootloader am
 Port (Sync fehlgeschlagen)`, `Falscher Chip: Signatur …`, `Prüfen nach dem Schreiben
 fehlgeschlagen bei Byte …`. ⚠ Hardware
@@ -886,7 +886,7 @@ fehlgeschlagen bei Byte …`. ⚠ Hardware
 | Vorbedingungen | **freigegeben** (`Mechanik noch nicht freigegeben`); keine Besitzer-Prüfung (Upload während eines Auftrags möglich) |
 | Prüfung | jede Zeile durch den G-Code-Wächter (`G-Code Zeile N: …`), nicht leer (`G-Code ist leer`), Laserbahnen in X30..390 / Y30..370 (`Motiv X… liegt außerhalb … (30-mm-Safezone)`) |
 | Wirkung | atomar speichern (`<name>.partial` → `<name>`), **überschreibt** gleichnamige Datei, verwirft deren Platzierung. Ein eingereihter Auftrag mit gleichem Namen scheitert danach am SHA-Vergleich. |
-| Erfolg | 200 `Marlin-Auftrag geprüft und gespeichert: <name>` |
+| Erfolg | 200 `Auftrag geprüft und gespeichert: <name>` |
 | Fehler | 400 `G-Code-Datei auswählen`, `Nur .gcode, .gc oder .nc Dateien`; Nicht-UTF-8 → 400 Python-Text; >32 MB → **413 HTML** |
 
 #### `GET /api/jobs`
@@ -1085,14 +1085,16 @@ sofort und lädt eine neuere APK.
 
 ### 4.16 Firmware-Updates von GitHub
 
-Die Firmware-CI (`.github/workflows/marlin.yml`) veröffentlicht jeden Build auf `main` als
-Release `marlin-<Nr.>` (nie „latest“, das bleibt die App) mit `LumaCut-Marlin.json`,
-`LumaCut-Marlin-SKR.bin` und `LumaCut-Marlin-Anet.hex`. Der Pi (`firmware_release.py`) holt das
-neueste beim Start, alle 6 Stunden (nicht während eines Auftrags) und auf `op=firmware_update_check`,
-prüft Größe, SHA-256, das Image selbst (wie beim Hochladen) und den Build-Stempel und behält je Board
-ein Image. `update_available` in `firmware_release` ist wahr, wenn das verbundene LumaCut-Board
-(M115 `MACHINE_TYPE`) einen älteren Build meldet. Die Grbl-Brücke und fremde Firmware bekommen
-kein Angebot. Geflasht wird nur per Knopf (`op=firmware_update_install`).
+Ein Firmware-Release ist ein GitHub-Release `lumacut-fw-<Nr.>` (nie „latest“, das bleibt die App)
+mit `LumaCut-Firmware.json` (`{"number", "commit", "boards": {"skr": {"asset", "build", "sha256", "size"}}}`)
+und dem Abbild. Der Pi (`firmware_release.py`) holt das neueste beim Start, alle 6 Stunden (nicht
+während eines Auftrags) und auf `op=firmware_update_check`, prüft Größe, SHA-256, das Image selbst
+(wie beim Hochladen) und den Build-Stempel und behält es. Alte `marlin-<Nr.>`-Releases und eine auf
+dem Pi liegende Marlin-`release.json` zählen nicht. `update_available` in `firmware_release` ist
+wahr, wenn das verbundene Board (M115 `MACHINE_TYPE:LumaCut CNC`) einen älteren Build meldet.
+Die Grbl-Brücke, Marlin und fremde Firmware bekommen kein Angebot. Geflasht wird nur per Knopf
+(`op=firmware_update_install`). Solange die Firmware nicht auf der Maschine geprüft ist, gibt es
+kein solches Release (`docs/FIRMWARE_EIGEN.md`).
 
 #### `op=firmware_update_check`
 
@@ -1100,18 +1102,18 @@ Keine Parameter, **keine** Vorbedingung (nur Netzwerk).
 
 | | |
 | --- | --- |
-| Erfolg | 200 `{"message": "Firmware-Update für Anet V1.7 bereit (Build …)" \| "Firmware ist aktuell" \| "Kein LumaCut-Board verbunden", …Felder wie `firmware_release`}` |
+| Erfolg | 200 `{"message": "Firmware-Update für SKR Mini MZ bereit (Build …)" \| "Firmware ist aktuell" \| "Kein LumaCut-Board verbunden", …Felder wie `firmware_release`}` |
 | Fehler | 503 `{"error": "Firmware-Update: <Grund>", …}`; ein schon geladenes Image bleibt |
 
 #### `op=firmware_update_install`
 
 Keine Parameter. Flasht das gespeicherte Image auf das verbundene Board, mit denselben Prüfungen wie
-`POST /api/firmware` (§4.11): Steuerung frei, kein Auftrag; SKR braucht Binary-Transfer. Die
+`POST /api/firmware` (§4.11): Steuerung frei, kein Auftrag; die Firmware braucht `Cap:SELF_UPDATE:1`. Die
 SHA-256 wird vor dem Flashen erneut geprüft. Fortschritt in `firmware_update`.
 
 | | |
 | --- | --- |
-| Erfolg | 200 `{"message": "Anet-Firmware wird geflasht …"}` bzw. SKR-Meldung |
+| Erfolg | 200 `{"message": "Firmware-Update gestartet …"}` |
 | Fehler | 409/400 `{"error": "Kein Firmware-Update für das verbundene Board"}`, „Firmware-Datei auf dem Pi fehlt“, Belegt-/Auftragsfehler wie §4.11 |
 
 #### Bedienpanel-Update (`op=panel_update`, `op=panel_auto`)
@@ -1311,7 +1313,7 @@ Felder/Antworten (Commit = erster Commit auf main mit der Funktion):
 | Funktion | Erkennbar an | seit |
 | --- | --- | --- |
 | Firmware-Update über den Pi | `firmware_update` in `/api/status` | 62f47a1 |
-| `op=park`, `/api/jobs/<name>/content` | `op=park` nicht 400 `Unbekannte Marlin-Aktion: park` | 5d3b0ea |
+| `op=park`, `/api/jobs/<name>/content` | `op=park` nicht 400 `Unbekannte Aktion: park` | 5d3b0ea |
 | `op=moveto`, Kamera-Snapshot | `camera` in `/api/status` | 2c61b8a |
 | Kamera-Kalibrierung | `GET /api/camera/calibration` nicht 404 | 95ace5e |
 | Rahmenfahrt | `frame` und `activity` in `/api/status` | 65a22b4 |
@@ -1540,7 +1542,7 @@ Für das Redesign relevant, Vorschläge in Klammern:
 15. **`lightburn_clients`** ist ein Zähler, kein „verbunden“-Flag.
 16. **Rahmen**: Der Pi erzeugt keinen Rahmen aus einem gespeicherten Auftrag;
     die UI muss G-Code bauen. (`op=frame name=… mode=box` serverseitig.)
-17. **Jog** prüft keine Arbeitsraumgrenzen selbst (nur Marlin-Softendstops).
+17. **Jog** prüft keine Arbeitsraumgrenzen selbst (nur die Wegprüfung der Firmware).
     ⚠ Hardware
 18. **Status direkt nach Dienststart** kann bei belegter Sperre ohne
     Transportfelder kommen (`stale_ms: null`).
