@@ -895,7 +895,9 @@ class PanelBridge:
 
 def run_esptool(command: list[str]) -> tuple[bool, str]:
     try:
-        env = dict(os.environ, PYTHONPATH=os.pathsep.join(filter(None, [str(PYLIB), os.environ.get("PYTHONPATH")])))
+        # ProtectHome: esptool looks for its config in $HOME and dies on the permission error.
+        env = dict(os.environ, HOME=str(PYLIB.parent),
+                   PYTHONPATH=os.pathsep.join(filter(None, [str(PYLIB), os.environ.get("PYTHONPATH")])))
         done = subprocess.run(command, capture_output=True, text=True, timeout=FLASH_TIMEOUT_S, env=env)
     except subprocess.TimeoutExpired:
         return False, "esptool hängt (Zeitüberschreitung)"
