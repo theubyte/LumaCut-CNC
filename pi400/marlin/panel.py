@@ -7,12 +7,19 @@ release and G-code guard stay on the Pi. The panel only shows and asks.
 It is connected to the native USB-C socket of the ESP32-S3 (Espressif
 USB-Serial/JTAG, vendor 303a) and talks in JSON lines:
 
-panel -> Pi   {"t": "hello", "v": ver}  {"t": "ping", "cam": 0|1, "v": ver}  {"t": "jobs"}
+panel -> Pi   {"t": "hello", "v": ver}  {"t": "ping", "cam": 0|1, "v": ver}
+              {"t": "jobs"}  {"t": "mats"}  {"t": "events"}  {"t": "sys"}
               {"t": "act", "id": n, "op": ..., <fields>}
 Pi -> panel   {"t": "st", ...}            compact status, every 0.5..1 s
               {"t": "res", "id": n, "ok": bool, "msg": str}
               {"t": "jobs", "files": [{"name", "kb"}]}
+              {"t": "mats", "items": [{"name", "mm", "proc", "start"}]}
+              {"t": "events", "items": [{"time", "level", "text"}]}, newest first
+              {"t": "sys", ...}           network, versions, update state
               {"t": "img", "w": w, "h": h, "len": n} + n bytes JPEG
+
+Never here, on purpose: the service menu (service_*), raw G-code and anything
+else that is not in ACTIONS. tests/test_panel.py pins that list.
 
 The panel's serial port is never the SKR: Marlin is found by its own path,
 and grbl_bridge.open_controller() skips Espressif devices.
@@ -27,6 +34,7 @@ off in the web UI; a failed version is not retried by itself.
 from __future__ import annotations
 
 import bisect
+import collections
 import glob
 import hashlib
 import importlib.util
@@ -34,6 +42,7 @@ import json
 import logging
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -48,6 +57,10 @@ ESPRESSIF_VID = "303a"
 CAMERA_SIZE = (640, 480)
 CONTENT_LIMIT = 8 * 1024 * 1024    # larger jobs show no laser power/feed
 PING_TIMEOUT_S = 5.0
+LINE_LIMIT = 8000                  # the panel drops longer JSON lines (LINK_LINE_MAX in link.c)
+NAME_LIMIT = 95                    # bytes of a job name the panel can keep and send back
+SCREEN_OFF_CHOICES = (0, 2, 5, 15, 30)   # minutes, 0 = never (the panel has the same buttons)
+SCREEN_OFF_DEFAULT = 15
 
 # What the panel may ask for, and which form fields pass through.
 ACTIONS = {
@@ -58,18 +71,22 @@ ACTIONS = {
     "jog": ("axis", "distance"),
     "probe": (),
     "park": (),
-    "light": ("on",),
+    "light": ("on", "brightness"),
     "exhaust": ("on",),
     "queue_pause": (),
     "queue_run": (),
     "autorun": ("name", "clear"),
     "frame_job": ("name",),
+    "material": ("name", "thickness"),   # handled here: only an entry of /api/materials, only when idle
+    "screen_off": ("minutes",),          # handled here: the panel's own setting, kept on the Pi
+    "panel_update": (),                  # the Pi checks that the machine is idle
 }
 FIRMWARE_DIR = Path(__file__).resolve().parent / "panel_fw"
 FLASH_TIMEOUT_S = 240
 # The service sees no home directory (ProtectHome): esptool lives in the data folder,
 # pip3 install --target /var/lib/lumacut/pylib esptool. Only the esptool process gets it.
 PYLIB = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "pylib"
+PREFS_FILE = Path(os.environ.get("LUMACUT_DATA", "/var/lib/lumacut")) / "panel.json"
 SLOW = {"home": 200, "probe": 120, "park": 90, "estop_reset": 30, "jog": 60}
 
 _S = re.compile(r"\bS\s*([-+]?\d*\.?\d+)", re.I)
@@ -191,6 +208,160 @@ class JobTrace:
 ACTIVE = ("homing", "probing", "running")
 
 
+class EventLog:
+    """What happened lately, for the panel's event list: taken from the status changes.
+
+    Lives on the Pi, so it survives a restart of the panel. The Pi has no event
+    API; this only remembers what /api/status showed.
+    """
+
+    def __init__(self, size: int = 30):
+        self.items: collections.deque = collections.deque(maxlen=size)
+        self.seq = 0                  # number of the newest event
+        self.problem = 0              # number of the newest warning or error
+        self.last: dict | None = None
+
+    def add(self, level: str, text: str, clock: str) -> None:
+        self.seq += 1
+        if level in ("warn", "err"):
+            self.problem = self.seq
+        self.items.appendleft({"time": clock, "level": level, "text": text[:140]})
+
+    def observe(self, s: dict, clock: str) -> None:
+        job = s.get("job") or {}
+        now = {
+            "conn": bool(s.get("connected")),
+            "latched": bool(s.get("emergency_latched")),
+            "fault": s.get("fault") or "",
+            "state": job.get("state") or "idle",
+            "file": job.get("file") or "",
+            "error": job.get("error") or "",
+            "frame": (s.get("frame") or {}).get("state") or "idle",
+            "frame_error": (s.get("frame") or {}).get("error") or "",
+            "queue": (s.get("queue") or {}).get("state") or "idle",
+            "lost": (s.get("reference") or {}).get("lost") or "",
+            "stray": bool(s.get("laser_armed")) and (s.get("activity") or "idle") == "idle",
+        }
+        old, self.last = self.last, now
+        if old is None:               # first look after a start: only what still needs attention
+            if now["latched"]:
+                self.add("err", "Notstopp aktiv: %s" % (now["fault"] or "quittieren"), clock)
+            if now["stray"]:
+                self.add("err", "Laser scharf ohne Auftrag", clock)
+            return
+        if old["conn"] != now["conn"]:
+            self.add("info" if now["conn"] else "err",
+                     "Steuerung verbunden" if now["conn"] else "Steuerung getrennt (USB prüfen)", clock)
+        if now["latched"] and not old["latched"]:
+            self.add("err", "Notstopp aktiv: %s" % (now["fault"] or "quittieren"), clock)
+        elif old["latched"] and not now["latched"]:
+            self.add("ok", "Notstopp quittiert", clock)
+        elif now["fault"] and now["fault"] != old["fault"]:
+            self.add("warn", now["fault"], clock)
+        if now["stray"] and not old["stray"]:
+            self.add("err", "Laser scharf ohne Auftrag", clock)
+        if now["lost"] and now["lost"] != old["lost"]:
+            self.add("warn", "Referenz verloren: %s" % now["lost"], clock)
+        if now["state"] != old["state"]:
+            name = now["file"] or "Auftrag"
+            if now["state"] in ACTIVE and old["state"] not in ACTIVE:
+                self.add("info", "Gestartet: %s" % name, clock)
+            elif now["state"] == "complete":
+                self.add("ok", "Fertig: %s" % name, clock)
+            elif now["state"] == "aborted":
+                self.add("warn", "Abgebrochen: %s" % name, clock)
+            elif now["state"] == "error":
+                self.add("err", "%s: %s" % (name, now["error"] or "Fehler"), clock)
+        if now["frame"] == "error" and old["frame"] != "error":
+            self.add("err", "Rahmenfahrt: %s" % (now["frame_error"] or "Fehler"), clock)
+        if now["queue"] == "stopped" and old["queue"] != "stopped":
+            self.add("warn", "Warteschlange angehalten", clock)
+
+
+def fit_line(key: str, items: list, base: dict) -> dict:
+    """base + items, as many as fit into one line the panel accepts."""
+    msg = dict(base)
+    for count in range(len(items), -1, -1):
+        msg[key] = items[:count]
+        if len(json.dumps(msg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= LINE_LIMIT:
+            break
+    return msg
+
+
+def material_choices(materials: list) -> list[dict]:
+    """One line per material and thickness (that is what the Pi keeps as the chosen material)."""
+    found: dict = {}
+    for m in materials:
+        try:
+            name, mm = m["name"], round(float(m["thickness_mm"]), 3)
+        except (KeyError, TypeError, ValueError):
+            continue
+        entry = found.setdefault((name, mm), {"name": name, "mm": mm, "proc": [], "start": True})
+        if m.get("process") and m["process"] not in entry["proc"]:
+            entry["proc"].append(m["process"])
+        entry["start"] = entry["start"] and bool(m.get("builtin"))   # only starting values, not measured
+    return [{**e, "proc": ", ".join(e["proc"])} for _, e in sorted(found.items())][:40]
+
+
+def load_prefs(path: Path | None) -> dict:
+    prefs = {"screen_off": SCREEN_OFF_DEFAULT}
+    if path is not None:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8")).get("screen_off")
+            if value in SCREEN_OFF_CHOICES:
+                prefs["screen_off"] = value
+        except (OSError, ValueError, AttributeError):
+            pass
+    return prefs
+
+
+def save_prefs(path: Path | None, prefs: dict) -> None:
+    if path is None:
+        return
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(prefs), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def local_address() -> str:
+    """The address others reach this Pi at; the socket sends nothing."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))
+            return probe.getsockname()[0]
+    except OSError:
+        return ""
+
+
+def wifi_name(run=subprocess.run) -> str:
+    try:
+        done = run(["iwgetid", "-r"], capture_output=True, text=True, timeout=2)
+        return done.stdout.strip() if done.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def wifi_signal(path: Path = Path("/proc/net/wireless")) -> int | None:
+    """Link quality in percent (the driver counts to 70), None without WLAN."""
+    try:
+        for line in path.read_text().splitlines():
+            if ":" in line:
+                return min(100, round(float(line.split(":", 1)[1].split()[1].rstrip(".")) * 100 / 70))
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def software_version(run=subprocess.run) -> str:
+    """Commit and date of the Pi's checkout: the API has no version field."""
+    try:
+        done = run(["git", "-C", str(Path(__file__).resolve().parents[2]), "log", "-1", "--format=%h %cs"],
+                   capture_output=True, text=True, timeout=3)
+        return done.stdout.strip() if done.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def compact(s: dict, now: float, clock: str, track: dict, trace: JobTrace | None) -> dict:
     """The panel's view of /api/status (small: it travels every second).
 
@@ -214,6 +385,7 @@ def compact(s: dict, now: float, clock: str, track: dict, trace: JobTrace | None
     probe = job.get("probe")
     origin = s.get("origin") or {}
     placed = (origin.get("placement") or {}).get("file")
+    queue = s.get("queue") or {}
     return {
         "t": "st",
         "time": clock,
@@ -226,6 +398,9 @@ def compact(s: dict, now: float, clock: str, track: dict, trace: JobTrace | None
         "supply": bool(s.get("laser_cooling_fan_on")),
         "exhaust": bool(s.get("exhaust")),
         "lights": bool(s.get("lights")),
+        "bright": s.get("light_brightness"),
+        "dim": s.get("light_dimmable"),
+        "fpow": config.get("frame_power_pct") or 0,
         "pos": s.get("position"),
         "act": s.get("activity") or "idle",
         "clear": bool(s.get("home_needs_confirm")),
@@ -241,7 +416,8 @@ def compact(s: dict, now: float, clock: str, track: dict, trace: JobTrace | None
             "error": job.get("error") or "",
             "probe": [probe.get("done", 0), probe.get("total", 0)] if isinstance(probe, dict) else None,
         },
-        "queue": (s.get("queue") or {}).get("state") or "idle",
+        "queue": queue.get("state") or "idle",
+        "qn": sum(1 for item in queue.get("items") or [] if item.get("state") == "queued"),
         "frame": (s.get("frame") or {}).get("state") or "idle",
         "elapsed": elapsed,
         "remain": remain,
@@ -254,6 +430,7 @@ class Api:
     """The Pi's own HTTP API on 127.0.0.1."""
 
     def __init__(self, port: int):
+        self.port = port
         self.base = "http://127.0.0.1:%d" % port
 
     def call(self, method: str, path: str, form: dict | None = None, timeout: float = 15):
@@ -265,18 +442,32 @@ class Api:
         except urllib.error.HTTPError as err:
             return err.code, err.read(), err.headers.get("Content-Type", "")
 
+    @staticmethod
+    def _decode(status: int, body: bytes):
+        try:
+            return status, json.loads(body.decode("utf-8"))
+        except ValueError:
+            return status, {"error": "Pi antwortet mit HTTP %d" % status}
+
     def json(self, method: str, path: str, form: dict | None = None, timeout: float = 15):
         status, body, _ = self.call(method, path, form, timeout)
+        return self._decode(status, body)
+
+    def send_json(self, method: str, path: str, body: dict, timeout: float = 15):
+        """For the API parts that take a JSON body (/api/workspace)."""
+        req = urllib.request.Request(self.base + path, data=json.dumps(body).encode("utf-8"), method=method,
+                                     headers={"Content-Type": "application/json"})
         try:
-            data = json.loads(body.decode("utf-8"))
-        except ValueError:
-            data = {"error": "Pi antwortet mit HTTP %d" % status}
-        return status, data
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return self._decode(resp.status, resp.read())
+        except urllib.error.HTTPError as err:
+            return self._decode(err.code, err.read())
 
 
 class PanelBridge:
     def __init__(self, api, serial_factory=None, finder=find_panel, clock=time.time,
-                 firmware=bundled_firmware, auto=lambda: True, flasher=None, has_esptool=esptool_installed):
+                 firmware=bundled_firmware, auto=lambda: True, flasher=None, has_esptool=esptool_installed,
+                 prefs_path: Path | None = None):
         self.api = api
         self.serial_factory = serial_factory
         self.finder = finder
@@ -302,6 +493,13 @@ class PanelBridge:
         self.update = {"state": "idle", "message": "", "target": None}
         self.connected_at = 0.0
         self.failed = None                    # version that failed: no automatic retry
+        # shown on the panel
+        self.events = EventLog()
+        self.prefs_path = prefs_path
+        self.prefs = load_prefs(prefs_path)
+        self.workspace_revision = None        # the material is read again when this changes
+        self.material = None
+        self.pi_version = None                # a deploy restarts the service: read once
 
     # ---------- sending ----------
     def send(self, msg: dict, payload: bytes = b"") -> None:
@@ -326,29 +524,65 @@ class PanelBridge:
                 self.camera_wanted = self.last_ping
             elif kind == "ping":
                 self.camera_wanted = 0.0
-        elif kind == "jobs":
-            self.send_jobs()
+        elif kind in self.QUERIES:
+            # in the background: a slow answer must never hold up a STOPP on the same line
+            threading.Thread(target=self.answer_query, args=(kind,), daemon=True).start()
         elif kind == "act":
             self.start_action(msg)
 
+    QUERIES = {"jobs": "send_jobs", "mats": "send_materials", "events": "send_events", "sys": "send_system"}
+
+    def answer_query(self, kind: str) -> None:
+        try:
+            getattr(self, self.QUERIES[kind])()
+        except Exception as exc:              # Pi still starting, or the panel is gone
+            LOG.debug("panel query %s: %s", kind, exc)
+
     def send_jobs(self) -> None:
         status, data = self.api.json("GET", "/api/jobs")
+        # a longer name would arrive cut off at the panel and not name the file any more
         files = [{"name": f.get("name", ""), "kb": round((f.get("bytes") or 0) / 1024)}
-                 for f in data.get("files", [])] if status == 200 else []
-        self.send({"t": "jobs", "files": files[:60]})
+                 for f in data.get("files", [])
+                 if len(f.get("name", "").encode("utf-8")) <= NAME_LIMIT] if status == 200 else []
+        self.send(fit_line("files", files[:60], {"t": "jobs"}))
+
+    def send_materials(self) -> None:
+        status, data = self.api.json("GET", "/api/materials")
+        items = material_choices(data.get("materials", [])) if status == 200 else []
+        self.send(fit_line("items", items, {"t": "mats"}))
+
+    def send_events(self) -> None:
+        self.send(fit_line("items", list(self.events.items), {"t": "events"}))
+
+    def send_system(self) -> None:
+        status, s = self.api.json("GET", "/api/status", timeout=5)
+        s = s if status == 200 else {}
+        address = local_address()
+        info = self.info()
+        firmware = s.get("firmware_release") or {}
+        if self.pi_version is None:
+            self.pi_version = software_version()
+        self.send({"t": "sys", "ip": address, "host": socket.gethostname(),
+                   "http": "http://%s:%s" % (address, getattr(self.api, "port", 8080)) if address else "",
+                   "wifi": wifi_name(), "signal": wifi_signal(), "pi": self.pi_version,
+                   "panel_new": info["available"] if info["update_available"] else "",
+                   "panel_state": info["state"], "panel_msg": info["message"], "auto": info["auto"],
+                   "skr": firmware.get("running_build") or "", "skr_conn": bool(s.get("connected")),
+                   "skr_new": (firmware.get("release_build") or "") if firmware.get("update_available") else "",
+                   "serial_err": s.get("serial_errors") or 0})
 
     def start_action(self, msg: dict) -> None:
         op = msg.get("op")
         ident = msg.get("id", 0)
         if op not in ACTIONS:
-            self.send({"t": "res", "id": ident, "ok": False, "msg": "Aktion am Panel nicht erlaubt: %s" % op})
+            self.send({"t": "res", "id": ident, "op": op, "ok": False, "msg": "Aktion am Panel nicht erlaubt: %s" % op})
             return
         if op in ("estop", "abort"):
             # never queued behind a running action
             threading.Thread(target=self.run_action, args=(msg, False), daemon=True).start()
             return
         if not self.busy.acquire(blocking=False):
-            self.send({"t": "res", "id": ident, "ok": False, "msg": "Vorherige Aktion läuft noch"})
+            self.send({"t": "res", "id": ident, "op": op, "ok": False, "msg": "Vorherige Aktion läuft noch"})
             return
         threading.Thread(target=self.run_action, args=(msg, True), daemon=True).start()
 
@@ -362,6 +596,9 @@ class PanelBridge:
         finally:
             if release:
                 self.busy.release()
+        if not ok:
+            self.events.add("warn", text or "Aktion abgelehnt: %s" % op,
+                            time.strftime("%H:%M", time.localtime(self.clock())))
         try:
             self.send({"t": "res", "id": ident, "op": op, "ok": ok, "msg": text})
         except Exception:
@@ -370,6 +607,10 @@ class PanelBridge:
     def action(self, op: str, form: dict) -> tuple[bool, str]:
         if op == "frame_job":
             return self.frame_job(form.get("name", ""))
+        if op == "material":
+            return self.choose_material(form.get("name", ""), form.get("thickness", ""))
+        if op == "screen_off":
+            return self.set_screen_off(form.get("minutes", ""))
         if op == "autorun":
             status, s = self.api.json("GET", "/api/status")
             placed = ((s.get("origin") or {}).get("placement") or {}).get("file")
@@ -390,6 +631,63 @@ class PanelBridge:
             form.update(placement="1", name=name)
         status, data = self.api.json("POST", "/api/action", form)
         return status == 200, data.get("message") or data.get("error") or ""
+
+    def choose_material(self, name: str, thickness: str) -> tuple[bool, str]:
+        """The material of all devices, like the web UI; its thickness sets the travel height."""
+        status, s = self.api.json("GET", "/api/status", timeout=5)
+        reason = self.update_blocked(s) if status == 200 else "Pi-Status nicht lesbar"
+        if reason:
+            return False, "%s: Material jetzt nicht änderbar" % reason
+        try:
+            mm = round(float(thickness), 3)
+        except ValueError:
+            return False, "Materialstärke unlesbar"
+        status, data = self.api.json("GET", "/api/materials")
+        if status != 200 or not any(e["name"] == name and e["mm"] == mm
+                                    for e in material_choices(data.get("materials", []))):
+            return False, "Material steht nicht in der Liste"
+        status, state = self.api.json("GET", "/api/workspace")
+        if status != 200:
+            return False, state.get("error") or "Arbeitsstand nicht lesbar"
+        status, answer = self.api.send_json("PUT", "/api/workspace", {
+            "material": {"name": name, "thickness_mm": mm},
+            "base_revision": state.get("revision"), "updated_by": "panel"})
+        self.workspace_revision = None
+        if status == 409:
+            return False, "Ein anderes Gerät hat das Material gerade geändert – bitte nochmal wählen"
+        if status != 200:
+            return False, answer.get("error") or "Material nicht gespeichert"
+        return True, "Material: %s %g mm – gilt auf allen Geräten" % (name, mm)
+
+    def set_screen_off(self, minutes: str) -> tuple[bool, str]:
+        try:
+            value = int(minutes)
+        except ValueError:
+            value = -1
+        if value not in SCREEN_OFF_CHOICES:
+            return False, "Zeit für den Bildschirm nicht erlaubt"
+        self.prefs["screen_off"] = value
+        try:
+            save_prefs(self.prefs_path, self.prefs)
+        except OSError as exc:
+            LOG.warning("panel prefs: %s", exc)
+            return False, "Nicht gespeichert: gilt nur bis zum nächsten Neustart des Pi"
+        return True, "Bildschirm bleibt an" if value == 0 else "Bildschirm aus nach %d min" % value
+
+    def panel_fields(self, s: dict) -> dict:
+        """What compact() cannot take from /api/status alone."""
+        revision = (s.get("sync") or {}).get("workspace")
+        if revision is None or revision != self.workspace_revision:
+            try:
+                status, state = self.api.json("GET", "/api/workspace", timeout=3)
+                if status == 200:
+                    self.material = state.get("material")
+                    self.workspace_revision = revision
+            except Exception as exc:          # the status must reach the panel anyway
+                LOG.debug("panel workspace: %s", exc)
+        material = self.material or {}
+        return {"mat": material.get("name") or "", "mat_mm": material.get("thickness_mm"),
+                "ev": self.events.seq, "evp": self.events.problem, "soff": self.prefs["screen_off"]}
 
     # ---------- firmware update ----------
     def info(self) -> dict:
@@ -500,8 +798,10 @@ class PanelBridge:
                 status, s = self.api.json("GET", "/api/status", timeout=3)
                 if status == 200:
                     self.update_trace(s)
-                    msg = compact(s, time.monotonic(), time.strftime("%H:%M", time.localtime(self.clock())),
-                                  self.track, self.trace)
+                    clock = time.strftime("%H:%M", time.localtime(self.clock()))
+                    self.events.observe(s, clock)
+                    msg = compact(s, time.monotonic(), clock, self.track, self.trace)
+                    msg.update(self.panel_fields(s))
                     self.send(msg)
                     pause = 0.5 if msg["act"] != "idle" else 1.0
                     self.auto_update(s)
@@ -610,6 +910,6 @@ BRIDGE: PanelBridge | None = None
 def start(http_port: int, auto=lambda: True) -> PanelBridge:
     """Run the bridge in the background of the Pi service (marlin.web)."""
     global BRIDGE
-    BRIDGE = PanelBridge(Api(http_port), auto=auto, flasher=run_esptool)
+    BRIDGE = PanelBridge(Api(http_port), auto=auto, flasher=run_esptool, prefs_path=PREFS_FILE)
     threading.Thread(target=BRIDGE.serve_forever, daemon=True, name="panel-bridge").start()
     return BRIDGE
