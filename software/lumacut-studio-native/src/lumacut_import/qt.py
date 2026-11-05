@@ -149,6 +149,17 @@ class ImageSettingsDialog(QDialog):
         self.threshold.setRange(0, 255)
         self.threshold.setValue(st.threshold)
         self.overscan = self._dspin(0, 20, st.overscan_mm, 1, 0.5, " mm")
+        # Scan-Winkel (LightBurn „Scan Angle“ / „Angle Increment“).
+        self.scan_angle = self._dspin(-90, 90, st.scan_angle, 1, 15, " °")
+        self.scan_angle.setObjectName("image_scan_angle")
+        self.scan_angle.setToolTip("Rasterzeilen unter diesem Winkel lasern (gegen den "
+                                   "Uhrzeigersinn; 0 = entlang X, 90 = entlang Y). Z. B. "
+                                   "entlang der Holzmaserung oder schräg gegen Streifen.")
+        self.angle_increment = self._dspin(-90, 90, st.angle_increment, 1, 15, " °")
+        self.angle_increment.setObjectName("image_angle_increment")
+        self.angle_increment.setToolTip("Jeder weitere Durchgang wird um diesen Winkel weiter "
+                                        "gedreht gelasert (z. B. 90° = Kreuzraster); "
+                                        "nur bei mehreren Durchgängen")
         self.bidirectional = QCheckBox("Bidirektional (hin und zurück lasern)")
         self.bidirectional.setChecked(st.bidirectional)
         self.negative = QCheckBox("Negativ (Helles lasern)")
@@ -245,6 +256,8 @@ class ImageSettingsDialog(QDialog):
         form.addRow("Durchgänge", self.passes)
         form.addRow("Schwellwert", self.threshold)
         form.addRow("Overscan", self.overscan)
+        form.addRow("Scan-Winkel", self.scan_angle)
+        form.addRow("Winkel-Schritt je Durchgang", self.angle_increment)
         form.addRow("", self.bidirectional)
         form.addRow("", self.negative)
         form.addRow("Tiefenstufen (3D)", self.levels)
@@ -308,6 +321,8 @@ class ImageSettingsDialog(QDialog):
         self.cpi.valueChanged.connect(self._update)
         self.dot_width.valueChanged.connect(self._update)
         self.sharpen.valueChanged.connect(self._update)
+        self.passes.valueChanged.connect(self._update)
+        self.scan_angle.valueChanged.connect(self._update)
         for w in (self.power, self.min_power, self.threshold, self.angle, self.levels,
                   self.brightness, self.contrast, self.gamma, self.sharpen_radius,
                   self.black_point, self.white_point):
@@ -338,6 +353,7 @@ class ImageSettingsDialog(QDialog):
         self.angle.setEnabled(mode == "halftone")
         self.dot_width.setMaximum(self.interval.value())
         self.sharpen_radius.setEnabled(self.sharpen.value() > 0)
+        self.angle_increment.setEnabled(self.passes.value() > 1)
         dpi = 25.4 / self.interval.value()
         src_dpi = self._px / self._width_mm * 25.4 if self._width_mm > 0 else 0
         self.dpi_label.setText(f"= {dpi:.0f} DPI (Bild: {src_dpi:.0f} DPI)")
@@ -395,12 +411,17 @@ class ImageSettingsDialog(QDialog):
         rot = self._shape.geom.rot if self._shape is not None else 0.0
         if rot:
             text += f", gedreht um {rot:g}°"
+        if st.scan_angle:
+            text += f", Scan-Winkel {st.scan_angle:g}°"
+        if st.angle_increment and st.passes > 1:
+            text += " (Vorschau: 1. Durchgang)"
         self.preview_label.setText(text)
 
     def _render_cached(self, st: ImageSettings):
         """Bildobjekt wie im Auftrag rendern (Cache je Linienabstand / Negativ)."""
         from .image_preview import render_for_preview
-        key = (st.line_interval_mm, st.negative)
+        from lumacut_job.images import pass_angles
+        key = (st.line_interval_mm, st.negative, pass_angles(st)[0])
         if key != self._render_key:
             self._rendered = render_for_preview(self._shape, st)
             self._render_key = key
@@ -414,7 +435,7 @@ class ImageSettingsDialog(QDialog):
         from .image_preview import histograms, histograms_rendered
         st = st or self.settings()
         try:
-            if self._shape is not None and self._shape.geom.rot:
+            if self._shape is not None and (self._shape.geom.rot or st.scan_angle):
                 gray, inside = self._render_cached(st)
                 h = histograms_rendered(gray, inside, st)
             else:
@@ -506,7 +527,9 @@ class ImageSettingsDialog(QDialog):
             sharpen_radius=self.sharpen_radius.value(),
             black_point=self.black_point.value(),
             white_point=self.white_point.value(),
-            curve=self.curve.curve()).normalized()
+            curve=self.curve.curve(),
+            scan_angle=self.scan_angle.value(),
+            angle_increment=self.angle_increment.value()).normalized()
 
 
 class ImportTools(QObject):

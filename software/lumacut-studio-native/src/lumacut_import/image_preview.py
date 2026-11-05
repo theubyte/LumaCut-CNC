@@ -10,6 +10,8 @@ so bleibt die echte Punktstruktur sichtbar statt einer verkleinerten.
 :func:`preview_shape` (Dialog mit Bildobjekt) rendert das Bild wie der Auftrag
 samt Drehung und Glättung und rechnet im Maschinen-Nullpunkt oben rechts
 gespiegelt (Fehlerverteilung, Halbtonwinkel) – Vorschau = Pixel des Auftrags;
+mit Scan-Winkel im gedrehten Raster des ersten Durchgangs, für die Anzeige
+zurückgedreht (:func:`rotate_pixels`);
 :func:`preview_array` (nur Bilddaten) ignoriert die Drehung.
 :func:`histograms` / :func:`auto_points_for`: Histogramm vor/nach der
 Bildanpassung und Schwarz-/Weißpunkt für „Auto-Tonwert“ (:func:`auto_levels_for`
@@ -116,9 +118,15 @@ def render_for_preview(shape, settings: ImageSettings):
 
     ``inside`` (nur bei gedrehten Bildern) markiert die Pixel im Bild;
     ohne Bildanpassung / Skizze nutzt der Auftrag die Maske nicht."""
-    from lumacut_job.images import render_gray, render_inside
+    from lumacut_job.images import (pass_angles, render_gray, render_gray_frame,
+                                    render_inside, render_inside_frame, scan_geometry)
     tmp = _job_shape(shape, settings)
     interval = tmp.image.settings.line_interval_mm
+    angle = pass_angles(tmp.image.settings)[0]
+    if angle:
+        # Scan-Winkel: im gedrehten Raster wie der Auftrag (erster Durchgang).
+        geo = scan_geometry(tmp, angle, interval)
+        return render_gray_frame(tmp, geo), render_inside_frame(tmp, geo)
     gray, _ = render_gray(tmp, interval)
     inside = render_inside(tmp, interval)
     if inside is not None and inside.shape != gray.shape:
@@ -135,12 +143,26 @@ def preview_shape(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_
     Ecken der Hüllbox außerhalb des gedrehten Bildes bleiben weiß.
     ``rendered``: bereits gerechnetes ``(gray, inside)`` (Cache des Dialogs)."""
     from lumacut_canvas.workarea import IMAGE_FLIP_X
+    from lumacut_job.images import pass_angles
+    from lumacut_job.raster import wrap_angle
     st = settings.normalized()
     gray, inside = rendered if rendered is not None else render_for_preview(shape, st)
     s = preview_settings(st)
+    mask = inside
     if not (st.mode == "sketch" or s.adjusted()):
         inside = None
     from dataclasses import replace
+    angle = pass_angles(st)[0]
+    if angle:
+        # Gerechnet im gedrehten Raster (Halbton wie im Auftrag), angezeigt
+        # zurückgedreht – so liegt das Bild wie auf dem Canvas.
+        st = replace(st, halftone_angle=wrap_angle(st.halftone_angle + angle))
+        pv = preview_pixels(gray, st, max_pixels, inside)
+        if not pv.cropped and mask is not None and mask.shape == pv.pixels.shape and mask.any():
+            # Anteil bezogen auf das Bild, nicht auf das größere gedrehte Raster.
+            pv.burn_share = min(1.0, pv.burn_share * mask.size / int(mask.sum()))
+        pv.pixels = rotate_pixels(pv.pixels, angle)
+        return pv
     if IMAGE_FLIP_X:
         gray = np.ascontiguousarray(gray[:, ::-1])
         if inside is not None:
@@ -150,6 +172,36 @@ def preview_shape(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_
     if IMAGE_FLIP_X:
         pv.pixels = np.ascontiguousarray(pv.pixels[:, ::-1])
     return pv
+
+
+def rotate_pixels(pixels: np.ndarray, angle: float) -> np.ndarray:
+    """Vorschaupixel des gedrehten Rasters (Zeilen unter ``angle`` Grad) zurück
+    in Canvas-Lage drehen (gegen den Uhrzeigersinn um ``angle``, ohne
+    Glättung – die Punkte bleiben scharf); Ränder weiß."""
+    import math
+
+    from PySide6.QtGui import QImage, QPainter, QTransform
+
+    h, w = pixels.shape
+    t = math.radians(angle)
+    c, sn = abs(math.cos(t)), abs(math.sin(t))
+    ow = max(1, int(math.ceil(w * c + h * sn - 1e-6)))
+    oh = max(1, int(math.ceil(w * sn + h * c - 1e-6)))
+    src = to_qimage(pixels)
+    out = QImage(ow, oh, QImage.Format_Grayscale8)
+    out.fill(255)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.SmoothPixmapTransform, False)
+    tr = QTransform()
+    tr.translate(ow / 2, oh / 2)
+    tr.rotate(-angle)           # Qt dreht im Uhrzeigersinn (Y nach unten)
+    tr.translate(-w / 2, -h / 2)
+    p.setTransform(tr)
+    p.drawImage(0, 0, src)
+    p.end()
+    stride = out.bytesPerLine()
+    arr = np.frombuffer(out.constBits(), dtype=np.uint8, count=stride * oh)
+    return arr.reshape(oh, stride)[:, :ow].copy()
 
 
 # ----------------------------------------------------------- Histogramm
