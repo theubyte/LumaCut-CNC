@@ -2682,3 +2682,124 @@ Still open:
   readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
   with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
   the canvas value labels, rebuilt exe).
+
+## 41. Status update 2026-11-05 (review round 34)
+
+Done this round (image scan angle; canvas editing, Machine / Scan Probe and Materials
+untouched):
+
+- Gap picked from the §40 list: **Image: no scan angle / angle increment per pass (Marlin raster
+  runs along X only)** (LightBurn *Scan Angle* / *Angle Increment*).
+- **Model** (`lumacut_canvas/model.py`): `ImageSettings.scan_angle` and `angle_increment`
+  (degrees, −90…90, counter-clockwise on the canvas; 0 = rows along X, 90 = along Y); saved only
+  when ≠ 0, so old files stay byte-identical.
+- **Engine** (`lumacut_job/raster.py`): `ScanFrame` (row origin + row / column axes in machine
+  mm), `wrap_angle`, `scanlines_frame` – the same run building, dot width correction,
+  bidirectional order, overscan and scan offset as `scanlines`, but every row is written as
+  oblique `G1 X… Y… S…` along the frame (vector-style moves, the Pi guard already accepts them);
+  burning runs are clipped to the row's chord through the (rotated) image so anti-aliased edge
+  pixels never burn outside the object. `sliced_depth_gcode` takes an optional frame / chords
+  (3D depth at an angle, odd slices bottom-up as before).
+- **Job** (`lumacut_job/images.py`): `ScanGeometry` / `scan_geometry` render the image (incl. the
+  object's own rotation) in a grid rotated by the scan angle at the line interval
+  (`render_gray_frame`, `render_inside_frame`); `angled_settings` clamps overscan and scan offset
+  to the work area along the row (shortest room from the image corners) and turns the halftone
+  angle by the scan angle so the screen stays at the set angle on the workpiece. With an angle
+  increment pass k uses `wrap(scan_angle + k × increment)`; each distinct angle is rasterised
+  once and every pass gets `; PASS k OF n` / `; SCAN ANGLE a` comments. All angles 0 → the
+  untouched old path.
+- **Preview** (`lumacut_import/image_preview.py`): the dialog preview computes pass 1 in the
+  rotated grid like the job and rotates it back to the canvas orientation (`rotate_pixels`, no
+  smoothing); the burnt share refers to the image, not the larger rotated grid.
+- **Dialog** (`lumacut_import/qt.py`): „Scan-Winkel“ and „Winkel-Schritt je Durchgang“ (only
+  enabled with more than one pass), preview label „Scan-Winkel …°“, render cache keyed by the
+  angle; stored with undo via the existing image-settings command.
+
+Tests:
+
+- `tests/test_image_scan_angle.py` (26): settings defaults / normalising / round trip / old files,
+  `wrap_angle` and per-pass angles, run clipping and frame maths, **old output byte-identical** for
+  Floyd, halftone, rotated grayscale with scan offset and 2 passes, 3D depth and rotated sketch
+  near the work-area edge (SHA-256 of round-33 output), burns inside the dark half and along the
+  scan direction for 30° / −45° / 60° / 90° on plain and rotated objects (coverage = area / line
+  interval within 8 %), 90° = vertical rows, bidirectional vs. unidirectional, overscan along the
+  row, overscan / scan offset clamped at the work-area edge (all moves inside the machine limits),
+  scan offset shifts every row by half the offset against its travel direction, 0° / 90° / 0°
+  passes with the angle increment (identical bodies for equal angles, one pass → unchanged),
+  3D depth at 45°, halftone angle compensation, preview orientation and burn share, dialog round
+  trip / enabling / label, edit with undo and save / load, full document G-code through the Pi
+  guard and the time estimate.
+
+Full suite: 2078 passed, 3 skipped (before: 2052 passed, 3 skipped).
+
+Output change for old files: none – documents without `scan_angle` / `angle_increment` take the
+unchanged X raster path (verified byte-identical against round 33 for several modes, rotation,
+scan offset, passes and edge clamping).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Image: the preview shows one pixel per dot and does not model the material's real dot size /
+  beam spread (needs the material library – Materials); mode and adjustment presets (incl. the
+  curve presets) are not linked to the material library (Materials); no per-channel / colour
+  curves (images are grey only). Scan angle: the dialog preview shows pass 1 only (with an angle
+  increment the later passes are not previewed); oblique rows are short `G1` segments without
+  acceleration-aware speed (the time estimate counts them like vector moves); the park-corner
+  live box keeps using the object box (the powered extent of an angled image never leaves it).
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression) and no short-name aliases (`/gtin/`); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  no Micro QR.
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (QR codes with umlauts (ECI 26) and Japanese Kanji text with phone
+  scanners (iOS / Android camera apps) and a handheld scanner, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, photos at scan angles 30° / 45° /
+  90° and with a 90° angle increment (cross raster) on wood against the X-only raster (line
+  quality of oblique `G1` rows at 3000–6000 mm/min on the SKR), photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera, plain-text QR codes with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / barcode / Data Matrix / Aztec / PDF417
+  readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417 codes
+  with a real scanner, park-corner refusal, variable text / CSV merge over several sends incl.
+  the canvas value labels, rebuilt exe).

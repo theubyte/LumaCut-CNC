@@ -732,7 +732,17 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   bei gedrehten Bildern zählt das Histogramm nur das gedrehte Bild (ohne die Ecken). Für Fotos auf dem Diodenlaser sind Jarvis oder Stucki meist die beste Wahl. Die
   Punktbreitenkorrektur (LightBurn „Dot Width Correction“) kürzt jede gelaserte Strecke um den
   eingestellten Wert (je Ende die Hälfte), damit der Strahl Punkte nicht verbreitert – Startwert
-  etwa die halbe Strahlbreite, höchstens der Linienabstand; 0 = aus. Bilder werden im
+  etwa die halbe Strahlbreite, höchstens der Linienabstand; 0 = aus. **Scan-Winkel** (wie
+  LightBurn „Scan Angle“, −90…90°, gegen den Uhrzeigersinn; 0 = Zeilen entlang X, 90 = entlang Y)
+  lasert die Rasterzeilen schräg – z. B. entlang der Holzmaserung oder gegen sichtbare Streifen:
+  das Bild wird in einem um den Winkel gedrehten Raster im Linienabstand gerechnet und jede Zeile
+  als schräge `G1`-Strecke (X und Y zugleich) ausgegeben, auf das Bild gekürzt; Overscan,
+  Scan-Versatz und Bidirektional laufen entlang der Zeile (am Rand der Arbeitsfläche gekürzt), der
+  Halbtonwinkel bleibt auf dem Werkstück wie eingestellt, 3D-Tiefe geht ebenso. **Winkel-Schritt je
+  Durchgang** (LightBurn „Angle Increment“, nur bei mehreren Durchgängen) dreht jeden weiteren
+  Durchgang um den Schritt weiter (z. B. 90° = Kreuzraster für gleichmäßigere Flächen). Die
+  Live-Vorschau zeigt den ersten Durchgang im gedrehten Raster, in Canvas-Lage zurückgedreht.
+  Winkel 0 = bisherige Ausgabe (ältere Dateien unverändert). Bilder werden im
   Auftrag vor den Vektor-Ebenen graviert.
 - **Bild nachzeichnen** (*Datei › Bild nachzeichnen…*, *Alt+T*, wie LightBurn „Trace Image“):
   wandelt das ausgewählte Bild in Vektorkonturen. Schwellwert (dunkler = Kontur; Startwert aus den
