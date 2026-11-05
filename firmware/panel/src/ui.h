@@ -10,5 +10,8 @@ void ui_init(void);
 void ui_on_status(const cJSON *st);                               // {"t":"st",...}
 void ui_on_result(const cJSON *res);                              // {"t":"res",...}
 void ui_on_jobs(const cJSON *jobs);                               // {"t":"jobs",...}
+void ui_on_materials(const cJSON *mats);                          // {"t":"mats",...}
+void ui_on_events(const cJSON *events);                           // {"t":"events",...}
+void ui_on_system(const cJSON *sys);                              // {"t":"sys",...}
 void ui_on_image(const uint16_t *rgb565, int w, int h);           // decoded camera frame
 bool ui_camera_wanted(void);                                      // camera screen open

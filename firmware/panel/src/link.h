@@ -4,4 +4,5 @@
 void link_start(void);
 // {"t":"act","id":n,"op":op,<key>:<value>...}; key/value strings, NULL-terminated. Returns n.
 int link_act(const char *op, ...);
-void link_request_jobs(void);
+// {"t":kind}: "jobs", "mats", "events" or "sys"; the answer arrives at ui_on_*.
+void link_request(const char *kind);

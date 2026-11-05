@@ -6,10 +6,15 @@ TCP 23 remains for LightBurn (device type Marlin) until Studio replaces it.
 from __future__ import annotations
 
 import dataclasses
+import errno
 import json
 import logging
+import math
 import os
 import re
+import signal
+import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -34,6 +39,7 @@ from .line_laser import LineLaser
 from .app_update import AppUpdates
 from .firmware_release import FirmwareReleases
 from .service_auth import ServiceAuth
+from .storage import RESERVE_BYTES, atomic_write, free_bytes, quarantine, read_json_object, remove_stale_temp
 from .grbl_bridge import merge_power_steps, merge_short_moves, open_controller
 
 ROOT = Path(__file__).resolve().parent
@@ -106,6 +112,8 @@ config = {
     "park_z_mm": 1.0,
     # Z max feedrate (M203 Z), raised in steps for the worm lift (01.11.).
     "z_speed_mm_s": 9.0,
+    # Bedienpanel: flash its firmware by itself when the machine is idle (op=panel_auto).
+    "panel_auto_update": True,
 }
 FRAME_POWER_MAX = 1.0
 FRAME_POWER_MIN_FEED = 1200.0
@@ -120,13 +128,42 @@ REPORTS = {"M114": "Position", "M115": "Firmware",
 CONFIG = DATA / "config.json"
 DATA.mkdir(parents=True, exist_ok=True)
 JOBS.mkdir(parents=True, exist_ok=True)
-if CONFIG.is_file():
-    try:
-        saved = json.loads(CONFIG.read_text("utf-8"))
-        if isinstance(saved, dict):
-            config.update({k: saved[k] for k in config if k in saved})
-    except Exception:
-        logging.exception("Config corrupt, using safe disabled default")
+
+
+def _is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def valid_setting(key, value):
+    """Type check for a value from a file: a damaged config.json must not stop the service."""
+    default = config[key]
+    if key == "camera":
+        try:
+            head_camera.validate(value)
+            return True
+        except ValueError:
+            return False
+    if isinstance(default, bool):
+        return isinstance(value, bool)
+    if isinstance(default, (int, float)):
+        return _is_number(value)
+    if isinstance(default, str):
+        return isinstance(value, str)
+    if isinstance(default, dict):
+        return (isinstance(value, dict) and all(v is None or _is_number(v) for v in value.values())
+                and all(v is None or _is_number(value.get(k)) for k, v in default.items()))
+    if key == "user_origin":
+        return value is None or (isinstance(value, list) and len(value) == 2 and all(map(_is_number, value)))
+    return value is None or _is_number(value)
+
+
+# Damaged or missing: mechanics stay locked (validated False), a copy is kept as .corrupt.
+for _key, _value in (read_json_object(CONFIG) or {}).items():
+    if _key in config:
+        if valid_setting(_key, _value):
+            config[_key] = _value
+        else:
+            logging.error("config.json: Wert für %s ungültig, Standardwert aktiv", _key)
 # An older config.json may still say 90 mm: never above the rail limit.
 config["travels"]["z"] = min(float(config["travels"].get("z", Z_MAX_MM)), Z_MAX_MM)
 machine.homing_verified = bool(config["validated"])
@@ -193,33 +230,72 @@ running = False
 job_placement = None
 
 
+_persist_lock = threading.Lock()
+
+
 def persist():
-    temporary = CONFIG.with_suffix(".tmp")
-    temporary.write_text(json.dumps(config, indent=2), encoding="utf-8")
-    os.replace(temporary, CONFIG)
+    with _persist_lock:
+        atomic_write(CONFIG, json.dumps(config, indent=2))
 
 
 @app.after_request
 def headers(response):
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"     # no foreign page around the controls
     return response
+
+
+#: Larger requests must leave RESERVE_BYTES free (storage.py).
+LARGE_REQUEST_BYTES = 1024 * 1024
+
+
+@app.before_request
+def guard_request():
+    """The API has no login: only the LAN protects it. So a web page from
+    elsewhere, open in a browser in this LAN, must not be able to send anything
+    to the machine (a plain form POST needs no CORS permission). Browsers name
+    the page in Origin; the apps and the panel send none. M112 always passes."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    origin = request.headers.get("Origin")
+    if (origin and origin.split("://", 1)[-1].rstrip("/").lower() != request.host.lower()
+            and not (request.path == "/api/action" and request.form.get("op") == "estop")):
+        logging.warning("Fremde Webseite abgewiesen: %s -> %s %s", origin[:80], request.method, request.path)
+        return jsonify(error="Fremde Webseite darf die Maschine nicht bedienen"), 403
+    length = request.content_length or 0
+    if length > LARGE_REQUEST_BYTES and free_bytes(DATA) < length + RESERVE_BYTES:
+        return jsonify(error="Speicherkarte des Pi fast voll – erst Aufträge oder Projekte löschen"), 507
+    return None
 
 
 @app.errorhandler(Exception)
 def handle_error(exc):
     from werkzeug.exceptions import HTTPException
     if isinstance(exc, HTTPException):
-        return exc
+        if not request.path.startswith("/api/"):
+            return exc
+        text = {404: "Unbekannte API-Adresse", 405: "Methode hier nicht erlaubt",
+                413: "Anfrage größer als %d MB" % (app.config["MAX_CONTENT_LENGTH"] // (1024 * 1024))}
+        return jsonify(error=text.get(exc.code, exc.description)), exc.code
     if isinstance(exc, ConflictError):
         return jsonify(error=str(exc), revision=exc.revision), 409
     if isinstance(exc, NotFoundError):
         return jsonify(error="Material nicht gefunden"), 404
-    logging.exception("Control server request failed: %s", exc)
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        logging.error("Speicherkarte voll: %s %s", request.method, request.path)
+        return jsonify(error="Speicherkarte des Pi voll – nichts gespeichert. Erst Aufträge oder Projekte löschen"), 507
+    # A refusal with a clear message is normal operation: one line, no stack
+    # trace (a client retrying would flood the journal). Bugs keep their trace.
+    if (isinstance(exc, (ValueError, RuntimeError, PermissionError, TimeoutError, ConnectionError))
+            or type(exc).__name__ == "SerialException"):
+        logging.warning("%s %s abgelehnt: %s", request.method, request.path, exc)
+    else:
+        logging.exception("Control server request failed: %s", exc)
     if isinstance(exc, (ValueError, RuntimeError, PermissionError)):
         return jsonify(error=str(exc)), 400
-    if isinstance(exc, (TimeoutError, ConnectionError)):
-        return jsonify(error=str(exc)), 503
+    if isinstance(exc, (TimeoutError, ConnectionError)) or type(exc).__name__ == "SerialException":
+        return jsonify(error=str(exc)), 503       # USB device gone or not there
     return jsonify(error="Interner Fehler – Pi-Protokoll ansehen"), 500
 
 
@@ -341,9 +417,51 @@ def status():
                   origin=_origin_status(),
                   queue=_queue_status(),
                   camera={"device": CAMERA, "available": os.path.exists(CAMERA)},
+                  disk_free_mb=free_bytes(DATA) // (1024 * 1024),
                   firmware_release=firmware_releases.offer(result.get("identity") or ""),
                   panel=panel.BRIDGE.info() if panel.BRIDGE else None)
     return jsonify(result)
+
+
+_STARTED_AT = time.monotonic()
+_software = {}
+
+
+def _software_version():
+    """Commit this service runs (read once: a pull only counts after a restart)."""
+    if not _software:
+        _software.update(commit=None, date=None)
+        try:
+            out = subprocess.run(["git", "log", "-1", "--format=%h %cI"], cwd=ROOT, text=True,
+                                 capture_output=True, timeout=5).stdout.split()
+            if len(out) == 2:
+                _software.update(commit=out[0], date=out[1])
+        except (OSError, subprocess.SubprocessError):
+            logging.debug("Softwarestand nicht lesbar", exc_info=True)
+    return _software
+
+
+def _cpu_temp():
+    try:
+        return round(int(Path("/sys/class/thermal/thermal_zone0/temp").read_text()) / 1000, 1)
+    except (OSError, ValueError):
+        return None
+
+
+@app.get("/api/system")
+def system_info():
+    """Read-only facts about the Pi itself for the system page; never touches the machine."""
+    try:
+        disk = shutil.disk_usage(DATA)
+        free, total = disk.free, disk.total
+    except OSError:
+        free = total = None
+    version = _software_version()
+    return jsonify(software_commit=version["commit"], software_date=version["date"],
+                   service_uptime_s=int(time.monotonic() - _STARTED_AT),
+                   disk_free_bytes=free, disk_total_bytes=total,
+                   jobs_bytes=sum(f.stat().st_size for f in JOBS.iterdir() if f.is_file()),
+                   cpu_temp_c=_cpu_temp())
 
 
 def local_owner():
@@ -482,14 +600,12 @@ def settings():
 @app.get("/api/backup")
 def backup():
     """Every setting the Pi keeps, as one JSON file to download (reads only)."""
-    calibration = DATA.parent / "camera_calibration.json"
-    try:
-        camera_cal = json.loads(calibration.read_text("utf-8")) if calibration.is_file() else None
-    except Exception:
-        camera_cal = None
+    # From the store: it lies in /etc/lumacut, only the fallback is next to the data.
+    camera_cal = CalibrationStore().load()
     body = {"created": time.strftime("%Y-%m-%dT%H:%M:%S"), "machine_name": config["machine_name"],
             "config": config, "materials": MATERIALS.list(), "workspace": WORKSPACE.get_state(),
-            "camera_calibration": camera_cal}
+            "camera_calibration": None if camera_cal["placeholder"] else camera_cal,
+            "bed_map": None if BED is None else BED.as_dict(), "material_calibration": MATCAL["run"]}
     stamp = time.strftime("%Y-%m-%d")
     return (json.dumps(body, indent=2, ensure_ascii=False), 200,
             {"Content-Type": "application/json; charset=utf-8",
@@ -1250,19 +1366,24 @@ MATCAL_TITLES = {"engrave": "Materialtest Gravur", "cut": "Materialtest Schnitt"
 
 
 def _load_matcal():
-    try:
-        return json.loads(MATCAL_FILE.read_text("utf-8"))
-    except (OSError, ValueError):
+    run = read_json_object(MATCAL_FILE)
+    if run is not None and not valid_matcal(run):
+        quarantine(MATCAL_FILE)     # /api/status reads these fields with every poll
         return None
+    return run
+
+
+def valid_matcal(run):
+    steps = run.get("fields") if run.get("kind") == "engrave" else run.get("passes")
+    return (run.get("kind") in MATCAL_TITLES and isinstance(run.get("material"), str)
+            and isinstance(run.get("state"), str) and isinstance(steps or [], list))
 
 
 MATCAL = {"run": _load_matcal()}
 
 
 def _save_matcal():
-    tmp = MATCAL_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(MATCAL["run"], ensure_ascii=False, indent=1), "utf-8")
-    os.replace(tmp, MATCAL_FILE)
+    atomic_write(MATCAL_FILE, json.dumps(MATCAL["run"], ensure_ascii=False, indent=1))
 
 
 def _matcal_summary():
@@ -1590,18 +1711,16 @@ def job_delete(filename):
 @app.get("/api/jobs/<path:filename>/geometry")
 def job_geometry(filename):
     """Preview actual powered toolpath envelope before an automatic probe."""
-    if filename != Path(filename).name:
-        raise ValueError("Unzulässiger Dateiname")
-    path = JOBS / filename
-    if not path.is_file():
-        raise ValueError("Auftrag nicht gefunden")
-    bounds = analyze_job(path.read_text(encoding="utf-8"))
+    bounds = analyze_job(_job_path(filename).read_text(encoding="utf-8"))
     return jsonify(bounds={"xmin": bounds.xmin, "ymin": bounds.ymin,
                            "xmax": bounds.xmax, "ymax": bounds.ymax},
                    segments=bounds.segments,
                    center=bounds.center,
                    probe_candidates=bounds.probe_grid(),
                    warning="Rasterpunkte sind Kandidaten: Materialabdeckung noch nicht vermessen.")
+
+JOB_NAME_MAX_BYTES = 200   # the file system takes 255, with room for the temporary name
+
 
 @app.post("/api/upload")
 def upload():
@@ -1612,14 +1731,14 @@ def upload():
     if (basename != incoming.filename or
             Path(basename).suffix.lower() not in (".gcode", ".gc", ".nc")):
         raise ValueError("Nur .gcode, .gc oder .nc Dateien")
+    if len(basename.encode("utf-8")) > JOB_NAME_MAX_BYTES:
+        raise ValueError("Dateiname länger als %d Zeichen" % JOB_NAME_MAX_BYTES)
     raw = incoming.read()
     if len(raw) > 32*1024*1024:
         raise ValueError("Auftrag über 32 MB")
     text = raw.decode("utf-8")
     preflight(text)
-    temporary = JOBS / (basename + ".partial")
-    temporary.write_text(text, encoding="utf-8")
-    temporary.replace(JOBS / basename)
+    atomic_write(JOBS / basename, raw)
     _forget_placement(lambda p: p["file"] == basename)
     return jsonify(message="Auftrag geprüft und gespeichert: " + basename)
 
@@ -2371,9 +2490,7 @@ def _remember_z(state={"z": None}):
     if z is None or (state["z"] is not None and abs(z - state["z"]) < 0.2):
         return
     try:
-        tmp = LAST_Z.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"z": round(z, 3), "at": int(time.time())}), encoding="utf-8")
-        os.replace(tmp, LAST_Z)
+        atomic_write(LAST_Z, json.dumps({"z": round(z, 3), "at": int(time.time())}))
         state["z"] = z
     except OSError:
         logging.warning("Letzte Z-Höhe nicht gespeichert", exc_info=True)
@@ -2410,56 +2527,111 @@ def monitor_loop():
                 logging.warning("SKR heartbeat failed", exc_info=True)
 
 
+SUPERVISE_RESTART_S = 10.0
+#: How long the stop waits for machine.lock; held longer = a move is running.
+SHUTDOWN_LOCK_WAIT_S = 3.0
+
+
+def _supervised(target, *args):
+    """Thread body: a background loop that dies by an unexpected error comes
+    back. The heartbeat also carries the USB reconnect and the service beam
+    watchdog; without it the service would look healthy and do neither."""
+    while True:
+        try:
+            return target(*args)
+        except Exception:
+            logging.exception("Hintergrunddienst %s abgestürzt, neuer Versuch in %g s",
+                              getattr(target, "__name__", target), SUPERVISE_RESTART_S)
+        time.sleep(SUPERVISE_RESTART_S)
+        if not running:
+            return None
+
+
+class _QuietPolling(logging.Filter):
+    """Successful polls stay out of the journal: web UI and panel alone write
+    about 140,000 lines a day, which pushes the real messages out and wears the
+    SD card. Errors and everything that changes something are still logged."""
+    _POLL = re.compile(r"GET /api/(?:status|jobs|camera/snapshot|workspace)\b")
+    _FAILED = re.compile(r"\" [45]\d\d ")
+
+    def filter(self, record):
+        text = record.getMessage()
+        return not self._POLL.search(text) or bool(self._FAILED.search(text))
+
+
+def _stop_on_sigterm():
+    """systemd stops the service with SIGTERM. Python's default ends the process
+    on the spot, so the laser-off in _shutdown_machine would never run."""
+    def handler(_signum, _frame):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        raise KeyboardInterrupt            # ends app.run() in the main thread
+    signal.signal(signal.SIGTERM, handler)
+
+
 def main():
     global running
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("werkzeug").addFilter(_QuietPolling())
+    for folder in (DATA, JOBS, DATA.parent):
+        remove_stale_temp(folder)
     running=True
-    threading.Thread(target=monitor_loop, daemon=True,
-                     name="marlin-usb-heartbeat").start()
-    threading.Thread(target=app_updates.run_forever,
-                     args=(lambda: running, lambda: job["state"] in ("homing", "probing", "running")),
-                     daemon=True, name="android-app-updates").start()
-    threading.Thread(target=firmware_releases.run_forever,
-                     args=(lambda: running, lambda: job["state"] in ("homing", "probing", "running")),
-                     daemon=True, name="firmware-updates").start()
+    _stop_on_sigterm()
+    job_active = lambda: job["state"] in ("homing", "probing", "running")
+    for name, target, args in (
+            ("marlin-usb-heartbeat", monitor_loop, ()),
+            ("android-app-updates", app_updates.run_forever, (lambda: running, job_active)),
+            ("firmware-updates", firmware_releases.run_forever, (lambda: running, job_active)),
+            ("marlin-lightburn-server", serve_tcp, (machine, "0.0.0.0", TCP, lambda: running))):
+        threading.Thread(target=_supervised, args=(target, *args), daemon=True, name=name).start()
     # Bedienpanel (ESP32 touch display) on USB: one more API client, see panel.py.
-    panel.start(HTTP, auto=lambda: config.get("panel_auto_update", True))
-    threading.Thread(target=serve_tcp,
-                     args=(machine,"0.0.0.0",TCP,lambda: running),
-                     daemon=True, name="marlin-lightburn-server").start()
+    try:
+        panel.start(HTTP, auto=lambda: config.get("panel_auto_update", True))
+    except Exception:
+        logging.exception("Panel-Brücke nicht gestartet, der Dienst läuft ohne Panel")
     try:
         app.run(host="0.0.0.0", port=HTTP, threaded=True, use_reloader=False)
     finally:
         running=False
-        # Normal service maintenance must not leave the SKR hard-killed.
-        # Still hard-stop any live LightBurn/job ownership or armed cutter.
-        # With idle, verified USB, explicitly send cutter-off and wait for
-        # completion; if that fails, escalate to the emergency parser.
-        with machine.lock:
-            unsafe = (machine.owner is not None or
-                      machine.laser_enabled or
-                      machine.state == "Busy")
-            idle_connected = (machine.serial is not None and
-                              bool(machine.identity) and
-                              not machine.emergency_latched)
-        if unsafe:
+        _shutdown_machine()
+
+
+def _shutdown_machine():
+    # Normal service maintenance must not leave the SKR hard-killed.
+    # Still hard-stop any live LightBurn/job ownership or armed cutter.
+    # With idle, verified USB, explicitly send cutter-off and wait for
+    # completion; if that fails, escalate to the emergency parser.
+    # Lock held by a running move: no waiting, systemd would kill us before M112.
+    locked = machine.lock.acquire(timeout=SHUTDOWN_LOCK_WAIT_S)
+    try:
+        unsafe = (not locked or
+                  machine.owner is not None or
+                  machine.laser_enabled or
+                  bool(machine.service_power) or
+                  machine.state == "Busy")
+        idle_connected = (machine.serial is not None and
+                          bool(machine.identity) and
+                          not machine.emergency_latched)
+    finally:
+        if locked:
+            machine.lock.release()
+    if unsafe:
+        try:
+            machine.emergency_stop()
+        except Exception:
+            logging.exception("Could not issue emergency stop on exit")
+    elif idle_connected:
+        try:
+            machine.command("M5 I", owner="shutdown", timeout=5)
+            machine.command("M400", owner="shutdown", timeout=5)
+        except Exception:
+            logging.exception("Cutter-off handshake failed; issuing M112")
             try:
                 machine.emergency_stop()
             except Exception:
-                logging.exception("Could not issue emergency stop on exit")
-        elif idle_connected:
-            try:
-                machine.command("M5 I", owner="shutdown", timeout=5)
-                machine.command("M400", owner="shutdown", timeout=5)
-            except Exception:
-                logging.exception("Cutter-off handshake failed; issuing M112")
-                try:
-                    machine.emergency_stop()
-                except Exception:
-                    logging.exception("Emergency stop failed")
-        # No USB means there is no safe software stop to send.
-        # Physical laser power interlocks remain necessary.
+                logging.exception("Emergency stop failed")
+    # No USB means there is no safe software stop to send.
+    # Physical laser power interlocks remain necessary.
 
 
 if __name__=="__main__":

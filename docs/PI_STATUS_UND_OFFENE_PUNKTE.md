@@ -375,7 +375,9 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
    `tests/test_marlin_gateway.py` prüft „Keine Anmeldung erforderlich“).
    Jeder im WLAN kann die Maschine bedienen. Schutz ist nur das WLAN;
    Port 8080 nicht ins Internet freigeben. Eine Schlüsselprüfung würde die
-   Web-UI aussperren und braucht eine eigene Entscheidung.
+   Web-UI aussperren und braucht eine eigene Entscheidung. Fremde Webseiten
+   im Browser sperrt seit 05.11. die Origin-Prüfung aus; DNS-Rebinding bleibt
+   offen ([PI_API_REFERENZ.md](PI_API_REFERENZ.md) §7.2).
 2. **Status-Verzögerung: gelöst** durch den Snapshot (`busy`/`stale_ms`).
    Das gilt erst ab dem aktualisierten Pi, siehe Abschnitt 2.
 3. **Kein Rahmen- und kein Park-Knopf in der Pi-Web-UI.** `index.html`
@@ -411,16 +413,12 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
    - `/api/settings` nimmt `machine.lock` und wartet daher hinter einer
      laufenden Fahrt. Die Antwort kommt erst danach; das ist harmlos, aber
      langsam.
-   - `/api/jobs/<name>/geometry` prüft den Namen, aber nicht die Endung
-     (anders als `content`/`delete`). Das ist unkritisch, weil nur
-     `JOBS/` lesbar ist.
+   - [x] `/api/jobs/<name>/geometry` prüft jetzt auch die Endung (05.11.).
    - Der Lüfternachlauf hängt am Pi-Prozess. Stürzt der Dienst ab, entfällt
      der Nachlauf (steht so in `/api/status` → `io.fan_cooldown`).
    - Im Snapshot ist `position` die letzte M114-Antwort. Während einer
      langen Kante bewegt sie sich nicht.
-   - `install.sh` installiert `ffmpeg` nicht, obwohl
-     `/api/camera/snapshot` es braucht. Das fällt in den Bereich Kamera;
-     dort entscheiden.
+   - [x] `install.sh` installiert `ffmpeg` und `v4l-utils` (05.11.).
    - Abbrechen wirkt bei Rahmen an der **nächsten Ecke**, nicht mitten in
      der Kante. Sofort stoppt nur NOT-AUS.
 8. **Z-Obergrenze 80 mm (Commit `f163c3f`): an der Maschine noch zu tun.**
@@ -467,3 +465,23 @@ curl -s http://127.0.0.1:8080/api/status | python3 -m json.tool | grep -E '"(fra
          Messung bestätigen; die Feldsuche gleicht Abweichungen bis 1,5 mm aus.
    - [ ] Mittlere Töne auf Holz bleiben fleckig: Fokus +2 mm als Option der
          Suche prüfen.
+12. **Betriebsprüfung (2026-11-05), nur mit Fake-SKR und Testdateien, nicht am Pi.**
+   - [x] Dienst-Stopp: SIGTERM führt jetzt wirklich zu `M5 I` bzw. `M112`; vorher
+         endete der Prozess sofort und ließ diesen Teil aus.
+   - [x] Abgestürzte Hintergrund-Threads kommen wieder.
+   - [x] Alle Dateien atomar; beschädigte Dateien stoppen weder Dienst noch Status.
+   - [x] Sicherung enthält die echte Kamera-Kalibrierung und die Bettkarte, dazu
+         `marlin.restore_backup`.
+   - [x] `panel_auto_update` übersteht einen Neustart.
+   - [x] Fremde Webseiten: 403. Volle Karte: 507. Fehler unter `/api/` als JSON.
+   - [x] Service-Passwort: kurzzeitige Prüfung im Speicher, parallele Fehlversuche
+         warten aufeinander.
+   - [x] Journal ohne erfolgreiche Abfragen; Dienstdatei gehärtet, `update.sh`
+         übernimmt sie.
+   - [ ] Am Pi nachprüfen: gehärtete Dienstdatei startet (SKR, Kamera, Panel,
+         `pinctrl`), `systemctl restart` sendet `M5 I`, Zeit für eine PBKDF2-Prüfung.
+   - [ ] Linienlaser: die Dienstdatei hat keine Gruppe `gpio`; `pinctrl` als
+         `lumacut` am Pi prüfen, sobald der Laser angebaut ist.
+   - [ ] `transport.py`: `_close_locked` setzt `service_power` nicht zurück. Nach
+         USB-Verlust mit Service-Strahl meldet `/api/status` weiter den alten Wert,
+         und der Wächter schreibt alle 2 s einen Stacktrace, bis das SKR wieder da ist.

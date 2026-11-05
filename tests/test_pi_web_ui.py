@@ -3,7 +3,11 @@
 Nullpunkt-Konvention: X0/Y0 oben rechts an den Endschaltern, +X fährt nach links,
 +Y nach unten zur Tür. API-Werte bleiben rohe Maschinen-mm.
 """
+import os
 import re
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 HTML = (Path(__file__).resolve().parents[1] / "pi400" / "marlin" / "index.html").read_text(encoding="utf-8")
@@ -106,3 +110,77 @@ def test_android_app_tab():
         assert 'id="%s"' % el in HTML
     assert 'api("/api/app/android")' in HTML and 'op:"app_update_check"' in HTML
     assert 'href="/api/app/android.apk"' in HTML
+
+
+def _section(start, end):
+    return HTML[HTML.index(start):HTML.index(end)]
+
+
+def test_every_motion_and_laser_start_asks_go():
+    assert 'const GO_LINE="Hände raus, Deckel zu, Brille – starten?"' in HTML
+    go = _section("async function goFor(op)", 'for(const b of $$("[data-action]"))')
+    for op in ("home", "probe", "park", "autorun", "start", "queue_run"):
+        assert 'case "%s":return askGo(' % op in go
+    action = _section('for(const b of $$("[data-action]"))', '$("gotoRun").onclick')
+    assert action.index("await goFor(op)") < action.index("call(op,extra,b)")
+    frame = _section('$("frameJob").onclick', "/* ================= Materialdatenbank")
+    assert frame.index("await askGo(") < frame.index('call("frame"')
+    menu = _section("function bedMenu(ev)", 'document.addEventListener("pointerdown"')
+    assert menu.count("await askGo(") == 2
+    goto = _section('$("gotoRun").onclick', '$("lineLaserBtn").onclick')
+    assert goto.count("await askGo(") == 2 and goto.count('call("moveto"') == 2
+    assert 'if(!await askGo("Z-Test' in HTML
+
+
+def test_estop_reachable_inside_dialogs():
+    # Modale Dialoge sperren die Kopfzeile: jeder trägt einen eigenen NOT-AUS.
+    block = _section('for(const d of $$("dialog")){', "/* ================= API")
+    assert "estop()" in block and '"NOT-AUS"' in block
+
+
+def test_service_ping_and_off_button_stay_safe():
+    ping = next(l for l in HTML.splitlines() if "service_laser_ping" in l and "setInterval" in l)
+    assert "percent" not in ping, "Der Ping darf nie eine Leistung senden"
+    assert not re.search(r'\$\("serviceLaserOff"\)\.disabled', HTML)
+    lock = _section("function lockAll()", "// Immer nur eine Statusabfrage")
+    assert "#serviceLaserOff" not in lock and "#stop" not in lock
+    # Solange der Strahl aus ist, sendet das Ziehen nichts: erst die Abfrage beim Loslassen.
+    assert "if(serviceBeam)serviceLaserSend(v)" in HTML
+    change = _section('$("serviceLaser").onchange', '$("serviceLaserOff").onclick')
+    assert change.index("await ask(") < change.index("serviceLaserSend(")
+    assert "Hände raus, Deckel zu, Brille" in change
+
+
+def test_marlin_only_in_comments():
+    # Marlin wird ersetzt: als Name nur noch im Kommentar, M-Codes nur in der Diagnose.
+    body = re.sub(r"<!--.*?-->", "", HTML, flags=re.S)
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+    body = "\n".join(l.split("// ")[0] for l in body.splitlines())
+    assert "Marlin" not in body and "MARLIN" not in body
+
+
+def test_pin_info_shows_pa9_at_exp3():
+    assert 'id="servicePin">PA9 an EXP3<' in HTML
+
+
+def test_system_info_endpoint_reads_only():
+    source = """
+from marlin import web
+sent = []
+web.machine.command = lambda *a, **k: sent.append(a)
+with web.app.test_client() as client:
+    r = client.get("/api/system")
+assert r.status_code == 200, r.data
+data = r.get_json()
+for key in ("software_commit", "software_date", "service_uptime_s", "disk_free_bytes",
+            "disk_total_bytes", "jobs_bytes", "cpu_temp_c"):
+    assert key in data, key
+assert data["jobs_bytes"] == 0 and data["disk_free_bytes"] > 0
+assert not sent, "Die Abfrage darf die Maschine nicht ansprechen"
+"""
+    root = Path(__file__).resolve().parents[1]
+    with tempfile.TemporaryDirectory() as tmp:
+        env = dict(os.environ, LUMACUT_DATA=tmp, PYTHONPATH=str(root / "pi400"))
+        result = subprocess.run([sys.executable, "-c", source], env=env, cwd=root,
+                                text=True, capture_output=True, timeout=60)
+    assert result.returncode == 0, result.stderr

@@ -14,13 +14,13 @@ from __future__ import annotations
 import calendar
 import json
 import logging
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import heightmap
 from .heightmap import Box, HeightGrid
+from .storage import atomic_write
 
 FILENAME = "bed_map.json"
 FORMAT = "lumacut-bed-map/1"
@@ -111,11 +111,7 @@ def load(path: Path):
 
 
 def save(path: Path, bed: BedMap):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".partial")
-    tmp.write_text(json.dumps(bed.as_dict(), indent=1), "utf-8")
-    os.replace(tmp, path)
+    atomic_write(path, json.dumps(bed.as_dict(), indent=1))
 
 
 def delete(path: Path):

@@ -67,6 +67,36 @@ Bis LumaCut Studio alles kann, funktioniert LightBurn weiter:
 - `G28` löst die Pi-Referenzfahrt aus, `G30` das Abtasten, `M2` das Parken mit Melodie.
 - LightBurn behandelt S als dauerhaft gültig, Marlin setzt die Leistung nach jedem `G0` auf 0. Fehlt der S-Wert im ersten `G1` nach einer Leerfahrt, setzt der Pi den letzten Wert ein.
 
+## Sicherung und Wiederherstellung
+
+- **Einstellungen:** „Sicherung herunterladen“ in der Web-UI (`GET /api/backup`). Die Datei enthält Einstellungen, Materialien, Arbeitsstand, Kamera-Kalibrierung, Bettkarte und das letzte Materialtest-Ergebnis. Aufträge, Projekte, Scanbild und das Service-Passwort sind nicht dabei.
+- **Zurückspielen** (neue SD-Karte, beschädigte Daten), bei gestopptem Dienst:
+  ```bash
+  sudo systemctl stop lumacut-marlin.service
+  sudo -u lumacut env $(sudo cat /etc/lumacut/lumacut.env | xargs) PYTHONPATH=/opt/lumacut/pi400 \
+    python3 -m marlin.restore_backup lumacut-sicherung-DATUM.json
+  sudo systemctl start lumacut-marlin.service
+  ```
+  Jeder Wert läuft durch dieselben Prüfungen wie im Betrieb. Die **Mechanik-Freigabe wird nicht übernommen**: danach neu bestätigen (`/api/commission`). Läuft der Dienst noch, bricht das Werkzeug ab.
+- **Alles auf einmal** (mit Aufträgen und Projekten, enthält den Passwort-Hash):
+  ```bash
+  sudo tar czf lumacut-daten.tgz -C / var/lib/lumacut etc/lumacut
+  ```
+
+## Stromausfall, volle Karte, beschädigte Dateien
+
+- Der Pi schreibt jede Datei atomar: nach einem Stromausfall liegt die alte oder die neue Fassung da, nie eine halbe. Reste temporärer Dateien löscht der nächste Dienststart.
+- Ist eine Datei trotzdem unlesbar, startet der Dienst mit sicheren Standardwerten und hebt sie als `<name>.corrupt` auf. Bei `config.json` bleibt die Mechanik damit gesperrt. Einzelne ungültige Werte fallen auf den Standard zurück, der Rest bleibt, Meldung im Journal.
+- Die Projektliste baut sich aus den Projektdateien neu auf, kein Projekt geht verloren.
+- `service_password.json` beschädigt: Das Service-Menü bleibt gesperrt, die Datei ist nicht einfach „kein Passwort“. Zum Neusetzen auf dem Pi löschen: `sudo rm /var/lib/lumacut/marlin/service_password.json`.
+- Speicher: `/api/status` → `disk_free_mb`. Anfragen über 1 MB lehnt der Pi mit 507 ab, wenn danach weniger als 100 MB frei blieben; Einstellungen lassen sich dann weiter speichern. Alte Aufträge löscht der Pi nicht selbst.
+
+## Dienst stoppen und neu starten
+
+- `systemctl stop`/`restart` schickt SIGTERM. Der Dienst beendet sich geordnet: In Ruhe sendet er `M5 I` und `M400`. **Besitzer aktiv (Auftrag, LightBurn), Laser scharf, Service-Strahl an oder eine laufende Fahrt:** `M112`, danach muss das SKR zurückgesetzt werden. Deshalb bleibt es dabei: nie während eines Auftrags neu starten.
+- Stirbt ein Hintergrunddienst (USB-Überwachung, TCP 23, Update-Prüfung) an einem unerwarteten Fehler, startet er nach 10 s von selbst neu. Im Journal: „Hintergrunddienst … abgestürzt“.
+- `update.sh` übernimmt eine geänderte Dienstdatei selbst und lässt ein Update aus, solange der Service-Strahl an ist oder eine Fahrt läuft (`busy`).
+
 ## HTTP-API (für Studio und Tablet)
 
 Kurzübersicht. Vollständige Referenz mit Parametern, Fehlern, Sperren, Statusschema und Beispielen: [PI_API_REFERENZ.md](PI_API_REFERENZ.md).
@@ -94,7 +124,10 @@ Stand des Dienstes, Update für Rahmen/Parken und offene Punkte: [PI_STATUS_UND_
 sudo journalctl -u lumacut-marlin.service -n 80 --no-pager    # Dienst
 journalctl -k --since "-1h" | grep -i usb                     # USB-Abbrüche des SKR
 sudo bash /opt/lumacut/pi400/update.sh diagnose               # Updater-Sicht
+journalctl --disk-usage                                       # Platz des Journals
 ```
+
+Das Journal enthält erfolgreiche Abfragen von `/api/status`, `/api/jobs`, `/api/workspace` und Kamerabildern nicht mehr. Abgelehnte Aktionen stehen als eine Zeile `… abgelehnt: <Grund>` darin, nur echte Programmfehler mit Stacktrace.
 
 - „Steuerung belegt durch lightburn“: LightBurn trennen.
 - „M112-Notstopp verriegelt“: SKR zurücksetzen, dann „Notstopp quittieren“.

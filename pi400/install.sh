@@ -13,7 +13,8 @@ PORT_ENV=/etc/lumacut/lumacut-marlin-port.env
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y python3 python3-flask python3-serial git curl avahi-daemon ca-certificates
+# ffmpeg, v4l-utils: head camera (camera.py)
+apt-get install -y python3 python3-flask python3-serial git curl avahi-daemon ca-certificates ffmpeg v4l-utils
 
 id lumacut >/dev/null 2>&1 || useradd --system --home /var/lib/lumacut \
   --shell /usr/sbin/nologin --user-group lumacut

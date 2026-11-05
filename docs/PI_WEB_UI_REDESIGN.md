@@ -21,16 +21,19 @@ Seit dem 28.10.2026 pflegt Claude die Oberfläche (vorher Grok).
   #jobStrip                   Fortschritt, Restzeit, Phasen (#phaseSteps), Abbrechen
   #estopBanner, #staleBanner
 <main id="app">
-  section.page[data-page=steuerung]     Arbeitsfläche (SVG #bed), Position, Joggen, Licht & Abluft
+  section.page[data-page=steuerung]     Arbeitsfläche (SVG #bed), Position, Joggen, Zu Position fahren,
+                                        Z-Richtung prüfen, Licht & Abluft
   section.page[data-page=auftraege]     Hochladen (Ziehen & Ablegen), Liste mit Vorschaubildern,
                                         Statistik, Material (für alle Geräte), Platzierung, Start, Warteschlange
   section.page[data-page=material]      Materialtabelle: suchen, filtern, bearbeiten, kopieren,
-                                        löschen, „Verwenden“, Export/Import als JSON
+                                        löschen, „Verwenden“, Export/Import als JSON,
+                                        Material automatisch kalibrieren (Handy: Zeilen als Karten)
   section.page[data-page=kamera]        Bild/Live, Fadenkreuz, Vollbild, Bildeinstellungen,
-                                        Scan der Arbeitsfläche, Kalibrier-Übersicht
-  section.page[data-page=einstellungen] Fokus & Taster, Gerät, Bewegung, Abluft, Ursprung,
+                                        Scan der Arbeitsfläche (auch löschen), Kalibrier-Übersicht
+  section.page[data-page=einstellungen] Fokus & Taster, Bettkarte, Gerät, Bewegung, Abluft, Ursprung,
                                         Linienlaser, Maschinenfreigabe, Diese Oberfläche
-  section.page[data-page=system]        Zustand, Marlin-Abfragen (op=report), Protokoll,
+  section.page[data-page=system]        Zustand mit Pi-Infos (/api/system) und Anschlüssen, Abfragen
+                                        (op=report), Service: Laser, Protokoll,
                                         SKR-Firmware, Android-App, LightBurn, Sicherung
 <dialog>                      #askDlg (Rückfragen), #matDialog, #palette (Strg+K), #keysDlg (?)
 ```
@@ -74,12 +77,24 @@ Details: [`PI_API_REFERENZ.md`](PI_API_REFERENZ.md).
 in `#bedFlip` (`translate(W,0) scale(-1,1)`, keine Texte darin), Jog-Kreuz-Reihenfolge und
 Pfeiltasten-Zuordnung, Material-API, `"/api/settings"`, `id="zOffset"`, `id="saveZSettings"`,
 `estimated_tip_gap_mm`, `const raw=await r.text();`, „Keine Anmeldung erforderlich“,
-„MARLIN CONTROL OS“, `M3 I`, `M112`, `M114`, `M115`, `M119`.
+„MARLIN CONTROL OS“ (nur noch im Kopfkommentar), `M3 I`, `M112`, `M114`, `M115`, `M119`.
+Der Name Marlin steht sonst nur in Kommentaren (Firmware wird ersetzt); M-Codes nur in Abfragen und
+der LightBurn-Einrichtung. Der Gerätetyp bei LightBurn kommt aus `status.firmware`.
 
 ## 6. Sicherheitslogik (nicht aufweichen)
 
+- **Go-Abfrage** („Hände raus, Deckel zu, Brille – starten?“, `askGo`/`goFor`) vor jedem Fahr- und
+  Laserauftrag: Referenz, Abtasten, Parken, Auftrag, Ohne Abtasten, Warteschlange, Rahmen, Hierhin
+  fahren/abtasten (Arbeitsfläche), Zu Position fahren, Z-Test, Bettkarte, Materialtest, Service-Strahl.
+  Bei diesen Dialogen steht der Fokus auf „Abbrechen“. Ausnahme bewusst: einzelne Jog-Schritte
+  (±0,1/1/10 mm, jeder Schritt ein eigener Druck).
 - `#stop` (M112) ist **nie** `disabled`, auch nicht bei API-Fehler; vor dem Auslösen fragt ein
-  Dialog nach.
+  Dialog nach. Weil modale Dialoge die Kopfzeile sperren, trägt jeder Dialog einen eigenen NOT-AUS.
+- **Service-Regler:** Solange der Strahl aus ist, sendet Ziehen nichts; erst die Abfrage beim Loslassen
+  schaltet ein. Meldet der Pi den Strahl aus, zählt er für die Seite sofort als aus (auch mitten im
+  Ziehen), und es erscheint eine Meldung. Der Ping (`service_laser_ping`) trägt nie eine Leistung.
+  Seitenwechsel, Sperren und Tab schließen schalten aus; die 5-s-Abschaltung des Pi bleibt. „Laser AUS“
+  wird nie gesperrt. Ein Strahl steht als „LASER n %“ in der Kopfzeile, auf jeder Breite.
 - `motionFree(s)` = API erreichbar ∧ Steuerung frei ∧ ¬`busy` ∧ `activity==="idle"` ∧ ¬`emergency_latched`.
   Alle `[data-motion]`-Knöpfe sind gesperrt, wenn nicht frei, ohne `config.validated`, oder
   (bei `data-needs-home`/`start`) wenn nicht referenziert. Dasselbe gilt im Menü der Arbeitsfläche.
@@ -101,6 +116,9 @@ Ohne Maschine (Mock-Server setzt den Maschinenzustand künstlich – **nie auf d
 ```bash
 LUMACUT_DATA=$(mktemp -d) PYTHONPATH=pi400 python tests/ui_mock_server.py idle 8099
 ```
+
+Touch und Maus am Service-Regler prüft man mit echten Gesten (Playwright: Maus, CDP
+`Input.dispatchTouchEvent`), einschließlich abgebrochener Geste (`touchCancel`).
 
 Szenarien: `idle`, `running` (hält `machine.lock` → Veraltet-Banner), `autorun` (Phasen), `oldpi`,
 `offline`. Dann `http://127.0.0.1:8099/` in Desktop-, Tablet- und Handygröße öffnen.

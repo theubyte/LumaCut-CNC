@@ -403,6 +403,7 @@ class MarlinTransport:
                 pass
         self.serial = None
         self.inflight.clear()
+        self.service_power = 0
         self.state = "Disconnected"
         self.homed = False
         self.parked_low = False

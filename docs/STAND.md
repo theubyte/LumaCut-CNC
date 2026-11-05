@@ -417,6 +417,9 @@ Voraussetzungen:
       Besitzer sah 17:13–17:16 den Laser im Takt des Protokolls wechseln. Pi-Log: Leistung sprang von einer IP zwischen 23 % und dem Reglerwert
       (mein Fehler: Seite wiederholte den Wert, vermutlich zwei Tabs). Behoben mit `op=service_laser_ping`. Offen: ob das Flackern damit weg ist;
       das M114 alle 2 s (Monitor) schaltet laut Marlin-Quelltext nichts ab, im Stillstand mit festem Wert nachprüfen.
+      Besitzer danach: Bei festem Wert und einem Tab geht der Laser weiter im Takt des Protokolls aus und an. Ursache offen. Am Laser liegen laut Besitzer jetzt 5 V an, R1 bleibt.
+      **Eigene Firmware (Auftrag Besitzer 05.11.):** Zweig `eigene-firmware`, Vertrag `docs/FIRMWARE_EIGEN.md`, Code `firmware/lumacut/`, für den RET6 (Marlin lief als RC-Build). Nur am PC geprüft, nie auf Hardware. Inbetriebnahme mit dem Besitzer, Rückweg Marlin per SD und alter Pi-Stand.
+      Parallel auf main: Weboberfläche, Pi-Betrieb, Panel 1.3 (siehe CHANGELOG). Noch nicht auf den Pi gebracht: erst mit dem Besitzer, Dienstdatei ist gehärtet, Stop löst bei aktivem Strahl M112 aus.
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut

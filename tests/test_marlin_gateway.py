@@ -1255,6 +1255,14 @@ class ServiceLaserTests(unittest.TestCase):
         self.assertEqual(ctrl.service_power, 0)
         self.assertTrue(ctrl.fan_power)
 
+    def test_usb_loss_clears_the_slider(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.service_laser(50)
+        with ctrl.lock:
+            ctrl._close_locked("USB weg")
+        self.assertEqual(ctrl.service_power, 0)
+        self.assertFalse(ctrl.service_laser_watchdog())
+
     def test_emergency_stop_clears_the_slider(self):
         ctrl = ParkLowTests().machine()
         ctrl.service_laser(50)

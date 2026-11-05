@@ -80,15 +80,26 @@ except (ValueError,TypeError,KeyError):
     sys.exit(1)
 owner=s.get("owner")
 state=s.get("state")
-print("Maschinenstatus:",state,"| Besitzer:",owner,
-      "| USB:",s.get("connected"),"| SKR bereit:",s.get("ready"))
+print("Maschinenstatus:",state,"| Besitzer:",owner,"| USB:",s.get("connected"))
 if owner!="Frei" or state not in ("Idle","Disconnected","Unknown","Alarm"):
     print("UPDATE GESPERRT: LightBurn/Job belegt die Maschine oder Bewegung aktiv.",
           file=sys.stderr)
     sys.exit(2)
+# Service beam: owner stays free, but stopping the service ends the page's control.
+if s.get("service_laser_percent") or s.get("busy"):
+    print("UPDATE GESPERRT: Service-Laser an oder Fahrt läuft.", file=sys.stderr)
+    sys.exit(2)
 PY
 }
 git_lumacut(){ runuser -u lumacut -- git -C "$ROOT" "$@"; }
+# Otherwise a changed unit file would only ever reach the Pi with a new installation.
+install_unit(){
+  local unit="$ROOT/pi400/marlin/$SERVICE"
+  cmp -s "$unit" "/etc/systemd/system/$SERVICE" && return 0
+  log "Systemd-Einheit geändert, wird übernommen."
+  cp "$unit" "/etc/systemd/system/$SERVICE"
+  systemctl daemon-reload
+}
 
 log "Installierter Commit: $(git_lumacut rev-parse --short HEAD)"
 log "Pi-Service: $(systemctl is-active "$SERVICE" || true)"
@@ -153,6 +164,7 @@ if ! runuser -u lumacut -- env PYTHONPATH="$ROOT/pi400" \
   git_lumacut reset --hard "$ORIGINAL_REV"
   die "Importprüfung fehlgeschlagen (MarlinTransport/web.py)."
 fi
+install_unit
 systemctl start "$SERVICE"
 # Real health-check: 'systemctl active' may appear briefly between crashes.
 if ! response=$(status_json) || ! systemctl is-active --quiet "$SERVICE"; then
@@ -160,6 +172,7 @@ if ! response=$(status_json) || ! systemctl is-active --quiet "$SERVICE"; then
   show_api_diagnostics
   systemctl stop "$SERVICE" || true
   git_lumacut reset --hard "$ORIGINAL_REV"
+  install_unit || true
   systemctl start "$SERVICE" || true
   die "Service startet nicht dauerhaft oder HTTP-API ist nicht erreichbar."
 fi
