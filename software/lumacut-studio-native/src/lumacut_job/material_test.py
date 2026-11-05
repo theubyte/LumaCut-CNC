@@ -10,14 +10,26 @@ setting in LumaCut), so the existing G-code path, layer panel and preview work
 unchanged. Cells are either outlines or filled with a serpentine hatch at the
 cell's line interval (engrave test). Optional labels go on a separate
 low-power layer.
+
+Image cells (LightBurn Interval Test "Dithered Image", photo-engraving test):
+with ``image_mode`` set, every cell is an image object holding a white-to-black
+grey ramp, engraved in that image mode (dithering, greyscale, halftone, ...)
+with the cell's power (at black), speed, line interval and passes in its image
+settings. The image raster path (``lumacut_job.images``) runs them before the
+vector layers, so the labels still run last. The cell layer keeps the same
+name and values, so the material library's "Preset aus Testzelle" works the
+same way. Default ``image_mode = ""`` = vector cells, output unchanged.
 """
 
 from __future__ import annotations
 
+import struct
+import zlib
 from dataclasses import dataclass
 
-from lumacut_canvas.model import (LAYER_COLORS, PASSES_RANGE, POWER_RANGE, SPEED_RANGE,
-                                  Document, Geometry, Layer, Shape)
+from lumacut_canvas.model import (IMAGE_MODES, LAYER_COLORS, PASSES_RANGE, POWER_RANGE,
+                                  SPEED_RANGE, Document, Geometry, ImageSettings, Layer,
+                                  RasterImage, Shape)
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
 
@@ -26,6 +38,10 @@ TEST_PARAMS = ("power", "speed", "interval", "passes")
 TEST_PARAM_LABELS = {"power": "Leistung", "speed": "Geschwindigkeit",
                      "interval": "Linienabstand", "passes": "Durchgänge"}
 INTERVAL_TEST_RANGE = (0.05, 2.0)   # mm
+# Image modes offered for image test cells (sketch only draws edges, a ramp has none).
+TEST_IMAGE_MODES = tuple(m for m in IMAGE_MODES if m != "sketch")
+# Pixel size of the embedded grey ramp (white left -> black right).
+RAMP_PX = (256, 16)
 # Rough width of one label character relative to the label height.
 _LABEL_CHAR_W = 0.62
 
@@ -53,6 +69,10 @@ class MaterialTestSpec:
     row_param: str = "speed"
     interval_max: float = 0.5      # mm, only used when "interval" is on an axis
     passes_max: int = 5            # only used when "passes" is on an axis
+    # Image cells: "" = vector cells (hatch / outline); an image mode (TEST_IMAGE_MODES)
+    # = grey-ramp image cells engraved in that mode. image_min_power = power at white.
+    image_mode: str = ""
+    image_min_power: float = 0.0
 
     def powers(self) -> list[float]:
         return _steps(self.power_min, self.power_max, self.columns)
@@ -130,6 +150,13 @@ class MaterialTestSpec:
                 raise ValueError("Geschwindigkeit außerhalb 1..6000 mm/min")
         if not PASSES_RANGE[0] <= self.passes <= PASSES_RANGE[1]:
             raise ValueError("Durchgänge außerhalb 1..30")
+        if self.image_mode:
+            if self.image_mode not in TEST_IMAGE_MODES:
+                raise ValueError(f"Unbekannter Bildmodus: {self.image_mode}")
+            if not self.line_interval_mm:
+                raise ValueError("Bild-Testzellen brauchen einen Linienabstand")
+            if not 0 <= self.image_min_power <= self.power_min:
+                raise ValueError("Min.-Leistung (Weiß) 0..kleinste Leistung")
         if not 2 <= self.cell_mm <= 60 or not 0 <= self.gap_mm <= 30:
             raise ValueError("Zellgröße 2..60 mm, Abstand 0..30 mm")
         if self.line_interval_mm and not 0.05 <= self.line_interval_mm <= 2:
@@ -169,6 +196,30 @@ def hatch_points(x: float, y: float, w: float, h: float, interval: float) -> lis
     return pts
 
 
+def ramp_png(width: int = RAMP_PX[0], height: int = RAMP_PX[1]) -> bytes:
+    """8-bit grey PNG of a horizontal ramp, white (left) to black (right)."""
+    row = bytes(255 - round(255 * x / (width - 1)) for x in range(width))
+    raw = b"".join(b"\x00" + row for _ in range(height))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+def image_cell(spec: MaterialTestSpec, settings: dict, x: float, y: float,
+               layer_id: str, png: bytes | None = None) -> Shape:
+    """Grey-ramp image object for one cell with the cell's laser settings."""
+    st = ImageSettings(mode=spec.image_mode, line_interval_mm=settings["interval"],
+                       power=settings["power"], min_power=spec.image_min_power,
+                       speed_mm_min=settings["speed"], passes=settings["passes"]).normalized()
+    img = RasterImage(png or ramp_png(), RAMP_PX[0], RAMP_PX[1], st)
+    return Shape("image", Geometry(x, y, spec.cell_mm, spec.cell_mm), layer_id, image=img)
+
+
 def build_material_test(spec: MaterialTestSpec) -> tuple[list[Layer], list[Shape]]:
     """Layers and shapes for the grid (not yet added to a document).
 
@@ -184,6 +235,7 @@ def build_material_test(spec: MaterialTestSpec) -> tuple[list[Layer], list[Shape
     pitch = spec.cell_mm + spec.gap_mm
     interval_test = "interval" in (spec.column_param, spec.row_param)
     cell_layers: list[Layer] = []
+    png = ramp_png() if spec.image_mode else None
     for r in range(spec.rows):
         for c in range(spec.columns):
             st = spec.cell_settings(r, c)
@@ -197,7 +249,9 @@ def build_material_test(spec: MaterialTestSpec) -> tuple[list[Layer], list[Shape
                 layer.line_interval_mm = st["interval"]
             cell_layers.append(layer)
             x, y = ox + c * pitch, oy + r * pitch
-            if spec.line_interval_mm:
+            if spec.image_mode:
+                shapes.append(image_cell(spec, st, x, y, layer.id, png))
+            elif spec.line_interval_mm:
                 shapes.append(Shape.from_points(
                     "path", hatch_points(x, y, spec.cell_mm, spec.cell_mm, st["interval"]),
                     layer.id))
