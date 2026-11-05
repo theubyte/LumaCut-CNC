@@ -298,28 +298,28 @@ Hardware-Anbindung (`src/scanprobe/adapters.py`, Qt-frei):
 
 ### Fokuskorrektur beim Export (Höhenmesh)
 
-Checkbox **„Fokuskorrektur anwenden (Höhenmesh)"** im Scan-Panel (Standard: aus).
-Ohne Höhenmesh (nach „Auto-Probe" oder „Höhenmesh laden …") ist sie deaktiviert und ein
-Hinweis wird angezeigt. Ist sie aus, bleiben **„An Pi senden"** und der normale Export
-**unverändert**.
-
-Ist sie an, wird der normale Marlin-G-Code des Canvas (`document_to_gcode`) per
-`scanprobe.focus_export.compensate_for_export` → `apply_focus_compensation` umgerechnet:
+Liegt ein Höhenmesh vor, korrigiert Studio **jeden** gesendeten oder exportierten Auftrag
+automatisch (`ScanPanel.prepare_job_gcode` → `compensate_for_export` →
+`apply_focus_compensation`). Den Haken „Fokuskorrektur anwenden“ gibt es nicht mehr;
+ohne Mesh bleibt der G-Code unverändert. Für Tests: verstecktes Attribut
+`skip_focus_correction`.
 
 * **„An Pi senden"** (`main.py`, `_send_canvas_job`) schickt den korrigierten G-Code.
-* **„G-Code exportieren …"** im Scan-Panel speichert ihn als Datei (mit Korrektur, wenn angehakt,
-  sonst unverändert) – aus derselben Auftragsquelle wie „An Pi senden" (`window().job_tools.job_gcode()`:
-  Schnittplaner, **„Nur Auswahl"** und Planer-Hinweise wie weggelassene Anfahrten; ohne JobTools
-  `lumacut_job.planner.optimized_document_gcode`). Datei und gesendeter Auftrag sind also identisch,
-  auch bei „Nur Auswahl" (ohne Auswahl bricht der Export mit Meldung ab). Eine eigene Quelle lässt
-  sich über `ScanPanel.job_gcode_source` setzen.
+* **„G-Code exportieren …"** im Scan-Panel speichert ihn als Datei – aus derselben
+  Auftragsquelle wie „An Pi senden" (`window().job_tools.job_gcode()`: Schnittplaner,
+  **„Nur Auswahl"** und Planer-Hinweise; ohne JobTools
+  `lumacut_job.planner.optimized_document_gcode`). Datei und gesendeter Auftrag sind
+  identisch; ohne Auswahl bricht der Export mit Meldung ab. Eigene Quelle:
+  `ScanPanel.job_gcode_source`.
 * Z je Segment = Oberfläche (bilinear aus dem Mesh) + 5,5 mm (Fokus 7,0 − Tasterumschaltung 1,5);
   lange Linien werden in ≤ 2 mm-Stücke geteilt. Die erste Brennbewegung bekommt ein explizites Z.
-* **Fokus-Absenkung je Durchgang** (`z_step` der Ebene, auch Schichten-Relief aus
-  `lumacut_materials`): die relativen Blöcke `G91` / `G0 Z-… F600` / `G90` werden nicht
-  ausgegeben, sondern als Versatz auf das Mesh-Z gerechnet (Durchgang 2 = Mesh-Z − z_step usw.,
-  nach der Ebene wieder Fokushöhe). Der Versatz darf nie unter Oberfläche + 2 mm führen
-  (bei Fokus 5,5 mm also max. 3,5 mm; das Canvas begrenzt ohnehin auf 3 mm) – sonst Fehler.
+* **Relativer Fokus-Versatz** (`z_step` je Durchgang und `z_offset` der Ebene, auch
+  Schichten-Relief aus `lumacut_materials`): die relativen Blöcke
+  `G91` / `G0 Z±… F600` / `G90` werden nicht ausgegeben, sondern auf das Mesh-Z
+  aufgerechnet (negativ = näher am Material, positiv = höher; Durchgang 2 =
+  Mesh-Z + z_offset − z_step usw., nach der Ebene wieder Fokushöhe). Absenkung
+  und Anhebung dürfen ± max. 3,5 mm nicht überschreiten (bei Fokus 5,5 mm /
+  Oberfläche + 2 mm; das Canvas begrenzt ohnehin auf ±3 mm) – sonst Fehler.
 * Leistung (S) und Vorschub (F) je Ebene, Reihenfolge aus dem Schnittplaner, Materialtest-Raster
   und Schraffuren bleiben unverändert; nur Z kommt hinzu, Linien werden geteilt.
 
@@ -328,27 +328,28 @@ Prüfungen (deutsche Meldungen; **Fehler** blockieren, **Warnungen** müssen bes
 | Fall | Verhalten |
 |---|---|
 | G2/G3-Bögen im G-Code | Fehler – Bögen vorher in Liniensegmente auflösen (Canvas-Export erzeugt nur Linien). |
-| Absolute Z-Wörter oder Z zusammen mit X/Y im G-Code | Fehler – entfernen oder ohne Korrektur exportieren. (Relative Fokus-Absenkung je Durchgang ist erlaubt, s. o.) |
-| Fokus-Absenkung würde unter Oberfläche + 2 mm führen | Fehler. |
+| Absolute Z-Wörter oder Z zusammen mit X/Y im G-Code | Fehler – entfernen oder ohne Korrektur exportieren. (Relativer Fokus-Versatz `z_step`/`z_offset` ist erlaubt, s. o.) |
+| Fokus-Absenkung würde unter Oberfläche + 2 mm führen bzw. Anhebung über max. Versatz | Fehler. |
 | Kein Höhenmesh / keine Brennstrecke im Mesh | Fehler. |
 | Teile des Jobs außerhalb der geprobten Bereiche | Warnung mit Länge in mm und Beispielpunkt. **Fallback:** dort gilt die *höchste gemessene Oberfläche* (Fokus eher zu hoch, nie zu tief / keine Kollision). |
 | Bild-Fingerabdruck passt nicht zum aktuellen Scan (Material bewegt) | Fehler – neu proben. |
 | Kein aktueller Scan / Mesh ohne Fingerabdruck | Warnung (Lage nicht prüfbar). |
 | Mesh älter als 8 h oder ohne Zeitstempel | Warnung. |
-| Ziel-Z unter Pi-Oberfläche + 2 mm (z. B. mehrere Werkstücke unterschiedlicher Höhe, G30 auf dem höheren) | Fehler – der Pi würde den Auftrag mitten im Lauf abbrechen. G30 auf dem niedrigsten Werkstück oder Fokus-Absenkung verringern. |
+| Ziel-Z unter Pi-Oberfläche + 2 mm (z. B. mehrere Werkstücke unterschiedlicher Höhe, G30 auf dem höheren) | Fehler – der Pi würde den Auftrag mitten im Lauf abbrechen. G30 auf dem niedrigsten Werkstück oder Fokus-Versatz verringern. |
 
 Grenzen:
 
 * Nur G-Code in mm mit absoluten X/Y (G21/G90); keine Bögen, keine absoluten Z-Werte. Erlaubt ist
-  nur die relative Fokus-Absenkung je Durchgang.
-* Der Relief-Export im Material-Dialog (`lumacut_materials`) sendet/speichert selbst und nutzt die
-  Checkbox (noch) nicht. Die Kernfunktion kann Relief-G-Code korrigieren (getestet); die
-  UI-Anbindung dort steht aus. Der optionale Tiefen-Hook (`gcode.pass_hook`) ist in Studio aus;
-  Hook-Zeilen mit eigenem Z würden abgelehnt.
+  der relative Fokus-Versatz aus `z_step` und `z_offset`.
+* Der Relief-Export im Material-Dialog (`lumacut_materials`) sendet/speichert selbst und
+  umgeht `prepare_job_gcode` – Fokuskorrektur dort nur, wenn der Aufrufer sie anstößt.
+  Die Kernfunktion kann Relief-G-Code korrigieren (getestet). Der optionale Tiefen-Hook
+  (`gcode.pass_hook`) ist in Studio aus; Hook-Zeilen mit eigenem Z würden abgelehnt.
 * Der Pi fokussiert vor der ersten Brennbewegung auf *seine* gemessene Oberfläche und prüft Z
   nur gegen diese eine Oberfläche (≥ Oberfläche + 2 mm).
-  Mehrere Werkstücke: Z wird je Punkt aus dem passenden Mesh gerechnet (inkl. `z_step` und 3D-Tiefe,
-  getestet in `test_focus_multi_region.py`); Studio blockiert, wenn das niedrigste Ziel-Z unter
+  Mehrere Werkstücke: Z wird je Punkt aus dem passenden Mesh gerechnet (inkl. `z_step`,
+  `z_offset` und 3D-Tiefe, getestet in `test_focus_multi_region.py` /
+  `test_focus_export.py`); Studio blockiert, wenn das niedrigste Ziel-Z unter
   dieser Pi-Sperre läge.
 * Der Pi hängt an jede Bewegung mit Z ein `M400`/`M114` an. Bei der Korrektur hat fast jedes
   Segment Z → der Planer läuft leer, der Laser **stockt** (Punkte/Brandflecken an Segmentgrenzen
