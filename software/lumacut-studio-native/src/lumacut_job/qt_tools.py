@@ -14,14 +14,15 @@ from dataclasses import replace
 from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-                               QFormLayout, QMessageBox, QSpinBox, QToolBar)
+                               QFormLayout, QLabel, QMessageBox, QSpinBox, QToolBar)
 
 from lumacut_canvas.commands import AddLayerCommand, AddShapesCommand
 from lumacut_canvas.export import job_layers
 from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 
 from .estimate import estimate_gcode, frame_gcode
-from .material_test import MaterialTestSpec, build_material_test
+from .material_test import (INTERVAL_TEST_RANGE, TEST_PARAM_LABELS, TEST_PARAMS,
+                            MaterialTestSpec, build_material_test)
 from .planner import PlanReport, optimize_layers, optimized_document_gcode
 
 
@@ -58,23 +59,80 @@ class MaterialTestDialog(QDialog):
         self.x = _spin(0, 360, s.x, 5, 1, " mm")
         self.y = _spin(0, 340, s.y, 5, 1, " mm")
         self.passes = _spin(1, 30, s.passes)
+        self.passes_max = _spin(1, 30, s.passes_max)
         self.mode = QComboBox()
         self.mode.addItems(["Füllen (Gravur)", "Kontur (Schnitt)"])
-        self.interval = _spin(0.05, 2.0, s.line_interval_mm or 0.2, 0.05, 2, " mm")
-        self.labels = QCheckBox("Beschriftung (Leistung % / Geschw. mm/s)")
+        self.mode.setCurrentIndex(0 if s.line_interval_mm else 1)
+        self.interval = _spin(*INTERVAL_TEST_RANGE, s.line_interval_mm or 0.2, 0.05, 2, " mm")
+        self.interval_max = _spin(*INTERVAL_TEST_RANGE, s.interval_max, 0.05, 2, " mm")
+        # Parameter per axis (LightBurn Material Test: X / Y parameter).
+        self.col_param = QComboBox()
+        self.row_param = QComboBox()
+        for combo, value in ((self.col_param, s.column_param), (self.row_param, s.row_param)):
+            for key in TEST_PARAMS:
+                combo.addItem(TEST_PARAM_LABELS[key], key)
+            combo.setCurrentIndex(TEST_PARAMS.index(value) if value in TEST_PARAMS else 0)
+        self.labels = QCheckBox("Beschriftung (Leistung % / Geschw. mm/s / Abstand mm / Durchgänge)")
         self.labels.setChecked(s.labels)
-        for label, w in (("Leistung von", self.p_min), ("Leistung bis", self.p_max),
-                         ("Spalten (Leistung)", self.cols), ("Geschw. von", self.s_min),
-                         ("Geschw. bis", self.s_max), ("Geschw.-Einheit", self.speed_unit),
-                         ("Zeilen (Geschw.)", self.rows),
-                         ("Zellgröße", self.cell), ("Abstand", self.gap), ("Position X", self.x),
-                         ("Position Y", self.y), ("Durchgänge", self.passes), ("Art", self.mode),
-                         ("Linienabstand", self.interval), ("", self.labels)):
-            f.addRow(label, w)
-        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.accepted.connect(self.accept)
-        bb.rejected.connect(self.reject)
-        f.addRow(bb)
+        self.hint = QLabel()
+        self.hint.setWordWrap(True)
+        self._rows: dict = {}
+        for key, label, w in (("cparam", "Spalten-Parameter", self.col_param),
+                              ("cols", "Spalten", self.cols),
+                              ("rparam", "Zeilen-Parameter", self.row_param),
+                              ("rows", "Zeilen", self.rows),
+                              ("p_min", "Leistung von", self.p_min),
+                              ("p_max", "Leistung bis", self.p_max),
+                              ("s_min", "Geschw. von", self.s_min),
+                              ("s_max", "Geschw. bis", self.s_max),
+                              ("unit", "Geschw.-Einheit", self.speed_unit),
+                              ("passes", "Durchgänge", self.passes),
+                              ("passes_max", "Durchgänge bis", self.passes_max),
+                              ("mode", "Art", self.mode),
+                              ("interval", "Linienabstand", self.interval),
+                              ("interval_max", "Linienabstand bis", self.interval_max),
+                              ("cell", "Zellgröße", self.cell), ("gap", "Abstand", self.gap),
+                              ("x", "Position X", self.x), ("y", "Position Y", self.y),
+                              ("labels", "", self.labels), ("hint", "", self.hint)):
+            lab = QLabel(label)
+            self._rows[key] = lab
+            f.addRow(lab, w)
+        self.bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.bb.accepted.connect(self.accept)
+        self.bb.rejected.connect(self.reject)
+        f.addRow(self.bb)
+        for combo in (self.col_param, self.row_param, self.mode):
+            combo.currentIndexChanged.connect(self._update_fields)
+        self._update_fields()
+
+    def _axes(self) -> tuple[str, str]:
+        return self.col_param.currentData(), self.row_param.currentData()
+
+    def _update_fields(self) -> None:
+        """Range fields only for parameters on an axis; fixed value otherwise."""
+        axes = self._axes()
+        engrave = self.mode.currentIndex() == 0
+        fields = {"power": ("p_min", "p_max", "Leistung", self.p_max),
+                  "speed": ("s_min", "s_max", "Geschw.", self.s_max),
+                  "passes": ("passes", "passes_max", "Durchgänge", self.passes_max),
+                  "interval": ("interval", "interval_max", "Linienabstand", self.interval_max)}
+        for param, (lo, hi, name, hi_w) in fields.items():
+            varied = param in axes
+            self._rows[lo].setText(f"{name} von" if varied else name)
+            hi_w.setEnabled(varied)
+            self._rows[hi].setEnabled(varied)
+        self.interval.setEnabled(engrave)
+        self._rows["interval"].setEnabled(engrave)
+        self._rows["cols"].setText(f"Spalten ({TEST_PARAM_LABELS[axes[0]]})")
+        self._rows["rows"].setText(f"Zeilen ({TEST_PARAM_LABELS[axes[1]]})")
+        problem = ""
+        if axes[0] == axes[1]:
+            problem = "Spalten und Zeilen brauchen verschiedene Parameter."
+        elif "interval" in axes and not engrave:
+            problem = "Linienabstand-Test nur mit „Füllen (Gravur)“."
+        self.hint.setText(problem)
+        self.hint.setVisible(bool(problem))
+        self.bb.button(QDialogButtonBox.Ok).setEnabled(not problem)
 
     def spec(self) -> MaterialTestSpec:
         return MaterialTestSpec(
@@ -83,7 +141,9 @@ class MaterialTestDialog(QDialog):
             cell_mm=self.cell.value(), gap_mm=self.gap.value(), x=self.x.value(), y=self.y.value(),
             passes=self.passes.value(),
             line_interval_mm=self.interval.value() if self.mode.currentIndex() == 0 else 0.0,
-            labels=self.labels.isChecked())
+            labels=self.labels.isChecked(),
+            column_param=self.col_param.currentData(), row_param=self.row_param.currentData(),
+            interval_max=self.interval_max.value(), passes_max=self.passes_max.value())
 
 
 def insert_material_test(editor, spec: MaterialTestSpec) -> int:
