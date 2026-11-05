@@ -132,7 +132,7 @@ def test_height_difference_vs_pi_guard():
     assert not bad.ok and bad.gcode is None
     msg = " ".join(bad.errors)
     assert "Pi-Sperre Z8.00" in msg and "4.00 mm unter der Pi-Oberfläche" in msg
-    assert "Fokus-Absenkung bis 1.00 mm" in msg and "niedrigsten Werkstück" in msg
+    assert "relativer Fokus-Versatz bis 1.00 mm" in msg and "niedrigsten Werkstück" in msg
     ok = compensate_for_export(src, maps, pi_surface_z=2.0)        # G30 auf dem tieferen Teil
     assert ok.ok, ok.errors
     # kleiner Höhenunterschied: auch G30 auf dem höheren Teil reicht

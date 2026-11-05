@@ -11,10 +11,12 @@ absoluten G-Code mit Z je Segment:
 * Z-Achse max. 9 mm/s: wird die Steigung zu groß, sinkt der Vorschub für
   dieses Stück (gemeldet in ``CompensationReport.feed_limited``).
 * Z-Untergrenze: nie unter Oberfläche + ``min_clearance_mm`` (2 mm).
-* Fokus-Absenkung je Durchgang (``z_step``): reine relative Z-Fahrten
-  (``G91`` / ``G0 Z-0.5`` / ``G90``) werden nicht ausgegeben, sondern als
-  Versatz auf das Mesh-Z aufgerechnet (Z = Fokus-Z + Versatz). Der Versatz darf
-  das Z nicht unter Oberfläche + ``min_clearance_mm`` bringen.
+* Relativer Fokus-Versatz (``z_step`` je Durchgang und ``z_offset`` der Ebene):
+  reine relative Z-Fahrten (``G91`` / ``G0 Z±…`` / ``G90``) werden nicht
+  ausgegeben, sondern als Versatz auf das Mesh-Z aufgerechnet
+  (Z = Fokus-Z + Versatz). Negativ = näher am Material, positiv = höher.
+  Absenkung darf Z nicht unter Oberfläche + ``min_clearance_mm`` bringen;
+  Anhebung ist bis zur gleichen Grenze (``max_drop``) erlaubt.
 * Bögen (G2/G3) und absolute bzw. mit X/Y kombinierte Z-Wörter im Eingang
   werden abgelehnt.
 
@@ -68,7 +70,8 @@ class CompensationReport:
     z_max: float = -math.inf
     outside_points: int = 0
     feed_limited: int = 0
-    focus_offset_min: float = 0.0      # tiefste Fokus-Absenkung (z_step), ≤ 0
+    focus_offset_min: float = 0.0      # tiefster relativer Fokus-Versatz (z_step/z_offset), ≤ 0
+    focus_offset_max: float = 0.0      # höchster relativer Fokus-Versatz (positives z_offset), ≥ 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -148,14 +151,16 @@ def apply_focus_compensation(gcode: str, maps: HeightMapSet,
         has_xy = "X" in vals or "Y" in vals
         if "Z" in vals and is_relative_z_only(words, absolute):
             offset += vals["Z"] * scale
-            if offset > 1e-6:
-                raise ValueError(f"Zeile {number}: Fokus-Versatz über Fokushöhe ({offset:+.2f} mm)")
+            if offset > max_drop + 1e-6:
+                raise ValueError(f"Zeile {number}: relativer Fokus-Versatz {offset:+.2f} mm zu groß "
+                                 f"(max. +{max_drop:.2f} mm)")
             if -offset > max_drop + 1e-6:
                 raise ValueError(f"Zeile {number}: Fokus-Absenkung {-offset:.2f} mm würde unter "
                                  f"Oberfläche + {settings.min_clearance_mm:g} mm führen "
                                  f"(max. {max_drop:.2f} mm)")
             offset = round(offset, 6)
             rep.focus_offset_min = min(rep.focus_offset_min, offset)
+            rep.focus_offset_max = max(rep.focus_offset_max, offset)
             continue  # Z kommt beim nächsten Segment aus Mesh + Versatz
         if "Z" in vals:
             raise ValueError(f"Zeile {number}: Z im Eingang – der Fokus kommt aus dem Höhenmesh")

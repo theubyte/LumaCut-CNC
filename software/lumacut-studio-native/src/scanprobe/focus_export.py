@@ -9,9 +9,10 @@ geht; das Ergebnis trennt **Fehler** (Export gesperrt) von **Warnungen**
 Fehler
   * G2/G3-Bögen im Eingang (der Canvas-Export erzeugt nur Linien; Bögen kämen
     nur aus fremdem G-Code) und absolute Z-Wörter – beides lässt sich nicht
-    mit der Mesh-Korrektur kombinieren. Die relative „Fokus-Absenkung je
-    Durchgang" (``z_step``, ``G91``/``G0 Z-…``/``G90``) wird dagegen
-    unterstützt: sie wird auf das Mesh-Z aufgerechnet.
+    mit der Mesh-Korrektur kombinieren. Relative Fokus-Versätze
+    (``z_step`` je Durchgang und ``z_offset`` der Ebene,
+    ``G91``/``G0 Z±…``/``G90``) werden dagegen unterstützt: sie werden auf
+    das Mesh-Z aufgerechnet.
   * Material laut Fingerabdruck seit dem Proben verschoben/verändert
     (Vergleich mit dem aktuellen Scan).
   * Keine brennende Strecke liegt in einem Höhenmesh.
@@ -70,10 +71,14 @@ class FocusExport:
         if not self.ok:
             return "Fokuskorrektur nicht möglich:\n• " + "\n• ".join(self.errors)
         r = self.report
+        offset_note = ""
+        if r.focus_offset_min < -1e-6 and r.focus_offset_max <= 1e-6:
+            offset_note = f", Fokus-Absenkung je Durchgang bis {-r.focus_offset_min:.2f} mm"
+        elif r.focus_offset_max > 1e-6 or r.focus_offset_min < -1e-6:
+            offset_note = (f", relativer Fokus-Versatz {r.focus_offset_min:.2f} … "
+                           f"{r.focus_offset_max:.2f} mm")
         text = (f"Fokuskorrektur angewendet: Z {r.z_min:.2f} … {r.z_max:.2f} mm, "
-                f"{r.segments_added} Zusatzsegmente"
-                + (f", Fokus-Absenkung je Durchgang bis {-r.focus_offset_min:.2f} mm"
-                   if r.focus_offset_min < 0 else "") + ".")
+                f"{r.segments_added} Zusatzsegmente" + offset_note + ".")
         if self.warnings:
             text += "\n\nBitte prüfen:\n• " + "\n• ".join(self.warnings)
         return text
@@ -83,7 +88,7 @@ class FocusExport:
 def precheck_gcode(gcode: str) -> list[str]:
     """Fehler, die eine Kompensation ausschließen (Bögen, absolute Z-Wörter).
 
-    Relative reine Z-Fahrten (Fokus-Absenkung je Durchgang) sind erlaubt.
+    Relative reine Z-Fahrten (z_step je Durchgang und z_offset der Ebene) sind erlaubt.
     """
     errors: list[str] = []
     arcs = z_lines = 0
@@ -109,8 +114,9 @@ def precheck_gcode(gcode: str) -> list[str]:
                       "tut das automatisch; betroffen ist nur fremder G-Code).")
     if z_lines:
         errors.append(f"{z_lines} Zeile(n) mit absoluter Z-Angabe (erstmals Zeile {first_z}). Mit "
-                      "Fokuskorrektur kommt Z aus dem Höhenmesh (plus ggf. „Fokus-Absenkung je "
-                      "Durchgang“) – absolute Z-Fahrten entfernen oder ohne Korrektur exportieren.")
+                      "Fokuskorrektur kommt Z aus dem Höhenmesh (plus ggf. relativem Fokus-Versatz "
+                      "aus z_step/z_offset) – absolute Z-Fahrten entfernen oder ohne Korrektur "
+                      "exportieren.")
     return errors
 
 
@@ -266,8 +272,8 @@ def compensate_for_export(gcode: str, maps: Optional[HeightMapSet], *,
                 why.append(f"niedrigster geprobter Bereich Z{low:.2f} liegt "
                            f"{pi_surface_z - low:.2f} mm unter der Pi-Oberfläche")
             if report.focus_offset_min < 0:
-                why.append(f"Fokus-Absenkung bis {-report.focus_offset_min:.2f} mm (Tiefe je "
-                           "Durchgang/3D-Stufen)")
+                why.append(f"relativer Fokus-Versatz bis {-report.focus_offset_min:.2f} mm "
+                           "(z_offset/z_step bzw. 3D-Stufen)")
             res.errors.append(
                 f"Tiefste Fokushöhe Z{report.z_min:.2f} liegt unter der Pi-Sperre Z{limit:.2f} "
                 f"(zuletzt am Pi gemessene Oberfläche {pi_surface_z:.2f} + {s.min_clearance_mm:g} mm)"

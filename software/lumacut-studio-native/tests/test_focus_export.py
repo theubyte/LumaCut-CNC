@@ -103,6 +103,55 @@ def test_focus_step_down_is_added_to_mesh_z():
     assert zs(out2.split("; LAYER Gravur")[1])[0] == pytest.approx(3 + FOCUS, abs=0.01)
 
 
+def test_layer_z_offset_is_added_to_mesh_z():
+    """Layer.z_offset (relativer Fokus-Versatz der Ebene) wird wie z_step aufs Mesh-Z gelegt."""
+    flat = fake_maps(z_fn=lambda x, y: 3.0)
+    src = layers_to_gcode([JobLayer("l1", "Tief", 80, 600, 1, [[(110, 110), (150, 110)]],
+                                   z_offset_mm=-1.0)])
+    assert "G0 Z-1.000 F600" in src and precheck_gcode(src) == []
+    res = compensate_for_export(src, flat)
+    assert res.ok, res.errors
+    assert "G91" not in res.gcode
+    assert zs(res.gcode)[0] == pytest.approx(3 + FOCUS - 1.0, abs=0.01)
+    assert res.report.focus_offset_min == pytest.approx(-1.0)
+    assert res.report.focus_offset_max == pytest.approx(0.0)
+
+
+def test_positive_layer_z_offset_raises_focus():
+    """Positives z_offset hebt den Fokus über Mesh-Z (sicher, kein Kollisionsrisiko)."""
+    flat = fake_maps(z_fn=lambda x, y: 3.0)
+    src = layers_to_gcode([JobLayer("l1", "Hoch", 80, 600, 1, [[(110, 110), (150, 110)]],
+                                   z_offset_mm=0.5)])
+    res = compensate_for_export(src, flat)
+    assert res.ok, res.errors
+    assert zs(res.gcode)[0] == pytest.approx(3 + FOCUS + 0.5, abs=0.01)
+    assert res.report.focus_offset_max == pytest.approx(0.5)
+    assert res.report.focus_offset_min == pytest.approx(0.0)
+    assert "relativer Fokus-Versatz" in res.summary()
+
+
+def test_z_offset_combined_with_z_step():
+    flat = fake_maps(z_fn=lambda x, y: 3.0)
+    src = layers_to_gcode([JobLayer("l1", "Tief", 80, 600, 3, [[(110, 110), (150, 110)]],
+                                   z_step_mm=0.5, z_offset_mm=-0.8)])
+    res = compensate_for_export(src, flat)
+    assert res.ok, res.errors
+    passes = res.gcode.split("; PASS ")[1:]
+    first_z = [zs(p)[0] if zs(p) else None for p in passes]
+    # Offset −0,8 dauerhaft; z_step zusätzlich je Durchgang
+    assert first_z == pytest.approx(
+        [3 + FOCUS - 0.8, 3 + FOCUS - 0.8 - 0.5, 3 + FOCUS - 0.8 - 1.0], abs=0.01)
+    assert res.report.focus_offset_min == pytest.approx(-1.8)
+
+
+def test_positive_z_offset_above_max_drop_rejected():
+    # max_drop bei Standard-Settings: 7 − 1,5 − 2 = 3,5 mm
+    src = "G21\nG90\nG91\nG0 Z4.000 F600\nG90\nG1 X110 Y110 F600\nG1 X150 Y110 S100\n"
+    res = compensate_for_export(src, fake_maps(), settings=FocusSettings())
+    assert not res.ok
+    assert any("zu groß" in e for e in res.errors)
+
+
 def test_focus_step_down_never_below_clearance():
     src = layers_to_gcode([JobLayer("l1", "Tief", 80, 600, 4, [[(110, 110), (150, 110)]], z_step_mm=1.0)])
     res = compensate_for_export(src, fake_maps(), settings=FocusSettings(min_clearance_mm=4.0))
