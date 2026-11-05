@@ -11,6 +11,13 @@ attribute). Values are percent-encoded where the GS1 character set contains URI 
 non-numeric query parameters such as ``linkType`` are kept out of the element list) and checks
 the values with the rules of :mod:`lumacut_job.gs1` (fixed lengths, digits, check digits).
 
+Path segments and selected query keys may use the numeric Application Identifier or the legacy
+convenience alphas from Digital Link URI Syntax 1.1 (``gtin``, ``sscc``, ``gln``, ``lot``,
+``ser``, ``exp``, …). Those alphas were removed in Syntax 1.3.0 but remain useful for interop
+with older scanners and docs; :func:`parse` always accepts them (case-insensitive), while
+:func:`build` emits numeric AIs by default and alphabetic aliases only when
+``short_names=True``.
+
 Pure Python, no Qt. Errors are German ``ValueError`` messages for the dialog.
 """
 
@@ -49,6 +56,24 @@ KEY_LABELS = {"01": "GTIN", "8006": "ITIP", "8013": "GMN", "8010": "CPID", "414"
               "415": "GLN Rechnungssteller", "417": "Party-GLN", "00": "SSCC", "253": "GDTI",
               "255": "GCN", "401": "GINC", "402": "GSIN", "8003": "GRAI", "8004": "GIAI",
               "8017": "GSRN Anbieter", "8018": "GSRN Empfänger"}
+
+# Convenience alphas (Digital Link URI Syntax 1.1) → numeric AI. Keys keep the 1.1 spelling
+# (camelCase where the table used it); lookup is case-insensitive via ``_SHORT_LOOKUP``.
+SHORT_NAMES: dict[str, str] = {
+    # Primary keys
+    "gtin": "01", "itip": "8006", "gmn": "8013", "cpid": "8010",
+    "gln": "414", "payTo": "415", "party": "417",
+    "gsrnp": "8017", "gsrn": "8018", "gcn": "255", "sscc": "00",
+    "gdti": "253", "ginc": "401", "gsin": "402", "grai": "8003", "giai": "8004",
+    # Key qualifiers
+    "cpv": "22", "lot": "10", "ser": "21", "cpsn": "8011",
+    "glnx": "254", "refno": "8020", "srin": "8019",
+    # Selected data attributes (query string)
+    "exp": "17", "expdt": "7003",
+}
+_SHORT_LOOKUP: dict[str, str] = {name.lower(): ai for name, ai in SHORT_NAMES.items()}
+AI_SHORT_NAMES: dict[str, str] = {ai: name for name, ai in SHORT_NAMES.items()}
+
 # RFC 3986 unreserved characters stay literal in path and query values.
 _SAFE = "-._~"
 _DOMAIN = re.compile(r"^https?://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$")
@@ -71,6 +96,31 @@ class Link:
 
 def _qualifier_slots(key: str) -> list[tuple[str, ...]]:
     return [q if isinstance(q, tuple) else (q,) for q in PRIMARY_KEYS[key]]
+
+
+def short_name(ai: str) -> str | None:
+    """Canonical convenience alpha for ``ai``, or ``None`` if none is defined."""
+    return AI_SHORT_NAMES.get(str(ai or ""))
+
+
+def resolve_key(seg: str) -> str:
+    """Map a path/query key (numeric AI or convenience alpha) to a numeric AI.
+
+    Unknown tokens are returned unchanged so callers can raise a precise error.
+    Alias lookup is case-insensitive; numeric AIs pass through as-is.
+    """
+    s = str(seg or "")
+    if s.isascii() and s.isdigit() and 2 <= len(s) <= 4:
+        return s
+    return _SHORT_LOOKUP.get(s.lower(), s)
+
+
+def _path_key(ai: str, use_short: bool) -> str:
+    if use_short:
+        name = AI_SHORT_NAMES.get(ai)
+        if name is not None:
+            return name
+    return ai
 
 
 def normalize_domain(domain: str) -> str:
@@ -121,13 +171,21 @@ def _split(elements: list[gs1.Element]):
     return key, quals, attrs
 
 
-def build(text: str, domain: str = DEFAULT_DOMAIN) -> str:
-    """GS1 Digital Link URI for the element string ``text``; ``ValueError`` (German)."""
+def build(text: str, domain: str = DEFAULT_DOMAIN, short_names: bool = False) -> str:
+    """GS1 Digital Link URI for the element string ``text``; ``ValueError`` (German).
+
+    With ``short_names=False`` (default) path and query keys stay numeric so existing G-code
+    digests and tests remain byte-identical. With ``short_names=True`` known AIs are emitted as
+    convenience alphas (``/gtin/…/lot/…?exp=…``).
+    """
     elements = gs1.parse(text)
     key, quals, attrs = _split(elements)
     d = normalize_domain(domain)
-    path = "".join(f"/{e.ai}/{quote(e.data, safe=_SAFE)}" for e in [key] + quals)
-    query = "&".join(f"{e.ai}={quote(e.data, safe=_SAFE)}" for e in attrs)
+    path = "".join(
+        f"/{_path_key(e.ai, short_names)}/{quote(e.data, safe=_SAFE)}"
+        for e in [key] + quals)
+    query = "&".join(
+        f"{_path_key(e.ai, short_names)}={quote(e.data, safe=_SAFE)}" for e in attrs)
     uri = d + path + ("?" + query if query else "")
     if len(uri) > MAX_URI:
         raise ValueError(f"Adresse zu lang ({len(uri)} Zeichen)")
@@ -157,14 +215,19 @@ def parse(uri: str) -> Link:
         segs = segs[:-1]
     start = None
     for i, seg in enumerate(segs):
-        if seg in PRIMARY_KEYS and (len(segs) - i) % 2 == 0:
+        ai = resolve_key(seg)
+        if ai in PRIMARY_KEYS and (len(segs) - i) % 2 == 0:
             start = i
             break
     if start is None:
-        raise ValueError("Kein GS1-Primärschlüssel im Pfad gefunden, z. B. …/01/09501101530003")
+        raise ValueError("Kein GS1-Primärschlüssel im Pfad gefunden, z. B. …/01/09501101530003 "
+                         "oder …/gtin/09501101530003")
     domain = normalize_domain(scheme + "://" + "/".join([host] + segs[:start]))
-    pairs = [(segs[i], unquote(segs[i + 1])) for i in range(start, len(segs), 2)]
+    pairs = [(resolve_key(segs[i]), unquote(segs[i + 1])) for i in range(start, len(segs), 2)]
     key_ai = pairs[0][0]
+    if key_ai not in PRIMARY_KEYS:
+        raise ValueError(f"Kein GS1-Primärschlüssel im Pfad gefunden, z. B. …/01/09501101530003 "
+                         "oder …/gtin/09501101530003")
     slots = _qualifier_slots(key_ai)
     pos = 0
     for ai, _ in pairs[1:]:
@@ -178,10 +241,11 @@ def parse(uri: str) -> Link:
     extra: list[tuple[str, str]] = []
     for part in filter(None, query.split("&")):
         name, _, value = part.partition("=")
-        if name.isascii() and name.isdigit() and 2 <= len(name) <= 4:
-            if name in PRIMARY_KEYS:
-                raise ValueError(f"Primärschlüssel ({name}) gehört in den Pfad, nicht in die Abfrage")
-            attrs.append((name, unquote(value)))
+        ai = resolve_key(name)
+        if ai.isascii() and ai.isdigit() and 2 <= len(ai) <= 4:
+            if ai in PRIMARY_KEYS:
+                raise ValueError(f"Primärschlüssel ({ai}) gehört in den Pfad, nicht in die Abfrage")
+            attrs.append((ai, unquote(value)))
         else:
             extra.append((name, value))
     text = "".join(f"({ai}){val}" for ai, val in pairs + attrs)
@@ -190,11 +254,12 @@ def parse(uri: str) -> Link:
     return Link(domain, tuple(elements), tuple(extra))
 
 
-def resolve(text: str, domain: str = DEFAULT_DOMAIN) -> tuple[str, Link]:
+def resolve(text: str, domain: str = DEFAULT_DOMAIN,
+            short_names: bool = False) -> tuple[str, Link]:
     """Content of a Digital Link QR code: (URI, parsed link).
 
-    ``text`` is either an element string (built with ``domain``) or a complete Digital Link URI
-    (encoded as typed, after validation).
+    ``text`` is either an element string (built with ``domain`` / ``short_names``) or a complete
+    Digital Link URI (encoded as typed, after validation — aliases accepted).
     """
     t = str(text or "").strip()
     if not t:
@@ -202,7 +267,7 @@ def resolve(text: str, domain: str = DEFAULT_DOMAIN) -> tuple[str, Link]:
                          "Digital-Link-Adresse")
     if looks_like_uri(t):
         return t, parse(t)
-    uri = build(t, domain)
+    uri = build(t, domain, short_names=short_names)
     return uri, parse(uri)
 
 
@@ -214,5 +279,6 @@ def describe(link: Link) -> str:
     return ", ".join(parts)
 
 
-__all__ = ["DEFAULT_DOMAIN", "EXAMPLE", "KEY_LABELS", "Link", "PRIMARY_KEYS", "build", "describe",
-           "looks_like_uri", "normalize_domain", "parse", "resolve"]
+__all__ = ["AI_SHORT_NAMES", "DEFAULT_DOMAIN", "EXAMPLE", "KEY_LABELS", "Link", "PRIMARY_KEYS",
+           "SHORT_NAMES", "build", "describe", "looks_like_uri", "normalize_domain", "parse",
+           "resolve", "resolve_key", "short_name"]

@@ -9,9 +9,10 @@ Umrisse gelasert und der Code wäre nicht lesbar.
 
 „Art“: Text / Adresse, GS1 QR-Code (Elementstring „(01)…(10)…“, FNC1-Modus),
 GS1 Digital Link (Elementstring + Domain → Web-Adresse, oder eine fertige
-Digital-Link-Adresse, die geprüft wird) oder **Micro QR** (ISO/IEC 18004 M1–M4 –
-kleines Symbol für Bauteilkennzeichnung / wenig Platz; Ruhezone Standard 2 Module;
-kein ECI / Kanji).
+Digital-Link-Adresse, die geprüft wird; Kurzname-Aliases ``/gtin/``, ``/lot/`` …
+werden beim Einfügen akzeptiert, Ausgabe optional per Checkbox) oder **Micro QR**
+(ISO/IEC 18004 M1–M4 – kleines Symbol für Bauteilkennzeichnung / wenig Platz;
+Ruhezone Standard 2 Module; kein ECI / Kanji).
 
 „UTF-8 kennzeichnen (ECI)“ (nur Text, Standard für neue Codes): Umlaute und Sonderzeichen
 bekommen die Zeichensatz-Kennung ECI 26, japanischer Text den Kanji-Modus. Ältere Codes ohne
@@ -39,13 +40,14 @@ FILL_LAYER_NAME = "QR-Code"
 
 PLACEHOLDERS = {"text": "Text oder Adresse, z. B. https://example.com",
                 "gs1": "(AI)Wert, z. B. " + qr.gs1.EXAMPLE,
-                "link": "(01)GTIN… oder https://id.gs1.org/01/…",
+                "link": "(01)GTIN… oder https://id.gs1.org/gtin/…",
                 "micro": "Kurzer Text, z. B. Seriennummer oder Lot"}
 TOOLTIPS = {"text": "Beliebiger Text (UTF-8, Umlaute erlaubt), Web-Adresse, WLAN-Daten …",
             "gs1": "GS1-Elementstring: Datenbezeichner in Klammern, feste Längen und Prüfziffern "
                    "werden geprüft; Trenner (FNC1) setzt der Code selbst",
             "link": "Elementstring mit genau einem Primärschlüssel (z. B. (01) GTIN) – daraus wird "
-                    "die Adresse gebaut – oder eine fertige Digital-Link-Adresse",
+                    "die Adresse gebaut – oder eine fertige Digital-Link-Adresse "
+                    "(auch mit Kurznamen /gtin/, /lot/, /ser/, ?exp= …)",
             "micro": "Micro QR (M1–M4): sehr kleines Symbol für Bauteilkennzeichnung und "
                      "beengte Flächen; numerisch / alphanumerisch / Byte (UTF-8); kein ECI, "
                      "kein Kanji – für längere Texte normalen QR-Code wählen"}
@@ -78,6 +80,13 @@ class QrDialog(QDialog):
         self.domain.setPlaceholderText(gs1_link.DEFAULT_DOMAIN)
         self.domain.setToolTip("Eigene Domain (Resolver) für die Digital-Link-Adresse, z. B. "
                                "https://marke.example – Standard: " + gs1_link.DEFAULT_DOMAIN)
+        self.short_names = QCheckBox("Kurzname (/gtin/, /lot/, …) statt numerischer AI")
+        self.short_names.setChecked(s.short_names)
+        self.short_names.setToolTip(
+            "Ein: Adresse mit Convenience-Alphas aus GS1 Digital Link 1.1 "
+            "(…/gtin/…/lot/…?exp=…). Aus (Standard): numerische AIs (…/01/…/10/…?17=…) – "
+            "bitgleich zu älteren Dateien. Eingefügte Adressen mit Kurznamen werden "
+            "immer akzeptiert.")
         self.example = QPushButton("Beispiel")
         self.example.setToolTip("Beispieldaten für die gewählte Art einsetzen")
         self.example.clicked.connect(self._insert_example)
@@ -124,6 +133,7 @@ class QrDialog(QDialog):
         form.addRow("Inhalt", row)
         form.addRow("Domain", self.domain)
         self.domain_label = form.labelForField(self.domain)
+        form.addRow("", self.short_names)
         self.content = QLabel()
         self.content.setWordWrap(True)
         self.content.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -146,6 +156,7 @@ class QrDialog(QDialog):
         self.text.textChanged.connect(self._update)
         self.mode.currentIndexChanged.connect(self._mode_changed)
         self.domain.textChanged.connect(self._update)
+        self.short_names.toggled.connect(self._update)
         self.eci.toggled.connect(self._update)
         self.ec.currentIndexChanged.connect(self._update)
         self.size_mm.valueChanged.connect(self._update)
@@ -157,7 +168,8 @@ class QrDialog(QDialog):
         return qr.QrSpec(text=self.text.text(), ec=self.ec.currentData(),
                          size_mm=self.size_mm.value(), quiet_zone=self.quiet.value(),
                          invert=self.invert.isChecked(), mode=self.mode.currentData(),
-                         domain=self.domain.text(), eci=self.eci.isChecked()).normalized()
+                         domain=self.domain.text(), eci=self.eci.isChecked(),
+                         short_names=self.short_names.isChecked()).normalized()
 
     def _mode_changed(self) -> None:
         from . import micro_qr as mq
@@ -169,6 +181,7 @@ class QrDialog(QDialog):
         self.domain.setVisible(link)
         if self.domain_label is not None:
             self.domain_label.setVisible(link)
+        self.short_names.setVisible(link)
         self.content.setVisible(mode != "text")
         self.eci.setVisible(mode == "text")
         # Size / quiet defaults & EC levels for Micro vs full QR

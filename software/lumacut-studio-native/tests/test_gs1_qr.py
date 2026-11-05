@@ -183,6 +183,62 @@ def test_resolve_uses_uri_verbatim_or_builds():
         gs1_link.resolve("   ")
 
 
+def test_short_name_aliases_build_parse_and_round_trip():
+    """Convenience alphas (GS1 DL 1.1): parse always, build via short_names=True."""
+    els = f"(01){GTIN}(10)AB-12(17)261231"
+    numeric = gs1_link.build(els)
+    assert numeric == f"https://id.gs1.org/01/{GTIN}/10/AB-12?17=261231"
+    alias = gs1_link.build(els, short_names=True)
+    assert alias == f"https://id.gs1.org/gtin/{GTIN}/lot/AB-12?exp=261231"
+    # default build stays numeric (byte-identical to older digests)
+    assert gs1_link.build(els, short_names=False) == numeric
+    # alias → elements → numeric is stable
+    link = gs1_link.parse(alias)
+    assert [(e.ai, e.data) for e in link.elements] == [
+        ("01", GTIN), ("10", "AB-12"), ("17", "261231")]
+    assert gs1_link.build(link.element_string()) == numeric
+    assert gs1_link.build(link.element_string(), short_names=True) == alias
+    # SSCC / GLN
+    assert gs1_link.build("(00)106141411234567897", short_names=True) ==         "https://id.gs1.org/sscc/106141411234567897"
+    assert gs1_link.parse("https://id.gs1.org/sscc/106141411234567897").key.ai == "00"
+    gln = gs1_link.build("(414)9520123456788(254)A1", short_names=True)
+    assert gln == "https://id.gs1.org/gln/9520123456788/glnx/A1"
+    assert [(e.ai, e.data) for e in gs1_link.parse(gln).elements] == [
+        ("414", "9520123456788"), ("254", "A1")]
+    # mixed query attrs + non-AI extras; percent-encoding still works
+    mixed = (f"https://marke.example/p/GTIN/{GTIN}/LOT/X%2F1/"
+             f"?exp=270101&3103=000189&linkType=gs1:pip#frag")
+    link = gs1_link.parse(mixed)
+    assert link.domain == "https://marke.example/p"
+    assert [(e.ai, e.data) for e in link.elements] == [
+        ("01", GTIN), ("10", "X/1"), ("17", "270101"), ("3103", "000189")]
+    assert link.extra == (("linkType", "gs1:pip"),)
+    # case folding on aliases
+    folded = gs1_link.parse(f"HTTPS://ID.GS1.ORG/Gtin/{GTIN}/Ser/SN1?EXP=261231")
+    assert [(e.ai, e.data) for e in folded.elements] == [
+        ("01", GTIN), ("21", "SN1"), ("17", "261231")]
+    # camelCase payTo / party
+    assert gs1_link.resolve_key("PAYTO") == "415"
+    assert gs1_link.short_name("415") == "payTo"
+    assert gs1_link.short_name("3103") is None
+    # invalid / unknown alias → no primary key; exp in path still rejected
+    with pytest.raises(ValueError, match="Primärschlüssel"):
+        gs1_link.parse(f"https://example.com/foo/{GTIN}")
+    with pytest.raises(ValueError, match="nicht erlaubt"):
+        gs1_link.parse(f"https://example.com/gtin/{GTIN}/exp/261231")
+    # resolve: typed alias URI kept verbatim; element string respects flag
+    typed = f"https://brand.example/gtin/{GTIN}/lot/L1"
+    uri, link = gs1_link.resolve(typed)
+    assert uri == typed and link.key.ai == "01"
+    assert gs1_link.resolve(f"(01){GTIN}(10)L1", short_names=True)[0] ==         f"https://id.gs1.org/gtin/{GTIN}/lot/L1"
+    # QrSpec / encode_link honour the flag; numeric default unchanged
+    short = QrSpec(els, mode="link", short_names=True)
+    assert short.content() == alias
+    assert _decode(short.encode())[2] == alias
+    assert QrSpec(els, mode="link").content() == numeric
+    assert not QrSpec("x", mode="gs1", short_names=True).normalized().short_names
+
+
 # --- QR segments / GS1 QR -------------------------------------------------------------------
 def test_segments_pick_numeric_alnum_and_byte():
     items = list(b"https://id.gs1.org/01/09501101530003")
@@ -305,8 +361,9 @@ def test_dialog_modes_domain_example_and_errors(qapp):
     from lumacut_job.qr_qt import EXAMPLES, QrDialog
     dlg = QrDialog()
     assert dlg.mode.currentData() == "text" and dlg.domain.isHidden() and dlg.content.isHidden()
+    assert dlg.short_names.isHidden()
     dlg.mode.setCurrentIndex(qr.MODES.index("gs1"))
-    assert dlg.domain.isHidden() and not dlg.content.isHidden()
+    assert dlg.domain.isHidden() and dlg.short_names.isHidden() and not dlg.content.isHidden()
     assert "(AI)" in dlg.text.placeholderText()
     dlg.example.click()
     assert dlg.text.text() == EXAMPLES["gs1"] and dlg.ok_button.isEnabled()
@@ -315,18 +372,32 @@ def test_dialog_modes_domain_example_and_errors(qapp):
     assert not dlg.ok_button.isEnabled() and "richtig wäre 3" in dlg.info.text()
     assert dlg.content.text() == ""
     dlg.mode.setCurrentIndex(qr.MODES.index("link"))
-    assert not dlg.domain.isHidden()
+    assert not dlg.domain.isHidden() and not dlg.short_names.isHidden()
+    assert not dlg.short_names.isChecked()
     dlg.example.click()
     assert dlg.ok_button.isEnabled() and "https://id.gs1.org/01/" in dlg.content.text()
     dlg.domain.setText("marke.example")
     assert "https://marke.example/01/" in dlg.content.text()
+    dlg.short_names.setChecked(True)
+    assert f"https://marke.example/gtin/" in dlg.content.text()
     s = dlg.spec()
-    assert (s.mode, s.domain, s.text) == ("link", "marke.example", EXAMPLES["link"])
+    assert (s.mode, s.domain, s.text, s.short_names) == (
+        "link", "marke.example", EXAMPLES["link"], True)
     dlg.domain.setText("ftp://x")
     assert not dlg.ok_button.isEnabled() and "Domain" in dlg.info.text()
-    edit = QrDialog(spec=QrSpec(f"(01){GTIN}", mode="link", domain="brand.example"))
+    # pasted alias URI accepted regardless of checkbox
+    dlg.domain.setText("id.gs1.org")
+    dlg.short_names.setChecked(False)
+    dlg.text.setText(f"https://id.gs1.org/gtin/{GTIN}/lot/AB")
+    assert dlg.ok_button.isEnabled() and f"/gtin/{GTIN}/lot/AB" in dlg.content.text()
+    edit = QrDialog(spec=QrSpec(f"(01){GTIN}", mode="link", domain="brand.example",
+                                short_names=True))
     assert edit.mode.currentData() == "link" and edit.domain.text() == "brand.example"
+    assert edit.short_names.isChecked() and not edit.short_names.isHidden()
     assert not edit.domain.isHidden() and edit.ok_button.isEnabled()
+    # short-names checkbox hidden outside link mode
+    dlg.mode.setCurrentIndex(qr.MODES.index("text"))
+    assert dlg.short_names.isHidden() and dlg.domain.isHidden()
 
 
 @pytest.fixture

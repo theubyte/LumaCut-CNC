@@ -727,9 +727,10 @@ def encode_gs1(text: str, ec: str = "M", min_version: int = MIN_VERSION,
 
 
 def encode_link(text: str, ec: str = "M", domain: str = gs1_link.DEFAULT_DOMAIN,
-                min_version: int = MIN_VERSION, mask: int | None = None) -> QrCode:
+                min_version: int = MIN_VERSION, mask: int | None = None,
+                short_names: bool = False) -> QrCode:
     """GS1-Digital-Link-QR-Code; ``text`` = Elementstring oder fertige Digital-Link-Adresse."""
-    uri, _ = gs1_link.resolve(text, domain)
+    uri, _ = gs1_link.resolve(text, domain, short_names=short_names)
     return encode_items(list(uri.encode("utf-8")), ec, False, min_version, mask)
 
 
@@ -777,6 +778,9 @@ class QrSpec:
     # Nur "text": Nicht-ASCII mit ECI 26 (UTF-8) bzw. Kanji-Modus. Fehlt in älteren
     # Dokumenten → False (bitgleich wie bisher); neue Codes aus dem Dialog: True.
     eci: bool = False
+    # Nur "link": Convenience-Alphas (/gtin/, /lot/, …) statt numerischer AIs ausgeben.
+    # Fehlt in älteren Dokumenten → False (bitgleiche numerische URIs).
+    short_names: bool = False
 
     def normalized(self) -> "QrSpec":
         from . import micro_qr as mq
@@ -785,6 +789,7 @@ class QrSpec:
         if mode not in MODES:
             mode = "text"
         domain = "".join(str(self.domain or "").split()) or gs1_link.DEFAULT_DOMAIN
+        short = bool(self.short_names) if mode == "link" else False
         if mode == "micro":
             if ec not in mq.EC_LEVELS:
                 ec = "L"
@@ -797,7 +802,8 @@ class QrSpec:
                       size_mm=float(_clamp(float(self.size_mm), size_lo, size_hi)),
                       quiet_zone=int(_clamp(int(self.quiet_zone), *QUIET_RANGE)),
                       invert=bool(self.invert), x=float(self.x), y=float(self.y),
-                      mode=mode, domain=domain, eci=bool(self.eci) and mode == "text")
+                      mode=mode, domain=domain, eci=bool(self.eci) and mode == "text",
+                      short_names=short)
 
     def content(self) -> str:
         """Was ein Scanner liest: Text, GS1-Elementstring (normalisiert) oder Digital-Link-Adresse.
@@ -808,7 +814,7 @@ class QrSpec:
         if s.mode == "gs1":
             return gs1.hri(gs1.parse(s.text))
         if s.mode == "link":
-            return gs1_link.resolve(s.text, s.domain)[0]
+            return gs1_link.resolve(s.text, s.domain, short_names=s.short_names)[0]
         return s.text
 
     def encode(self, mask: int | None = None):
@@ -820,7 +826,8 @@ class QrSpec:
         if s.mode == "gs1":
             return encode_gs1(s.text, s.ec, mask=mask)
         if s.mode == "link":
-            return encode_link(s.text, s.ec, s.domain, mask=mask)
+            return encode_link(s.text, s.ec, s.domain, mask=mask,
+                               short_names=s.short_names)
         return encode_text(s.text, s.ec, mask=mask, eci=s.eci)
 
     def total_mm(self, code: QrCode) -> float:
@@ -901,7 +908,7 @@ def content_info(spec: QrSpec) -> str:
     if s.mode == "gs1":
         return "GS1-Daten: " + s.content()
     if s.mode == "link":
-        uri, link = gs1_link.resolve(s.text, s.domain)
+        uri, link = gs1_link.resolve(s.text, s.domain, short_names=s.short_names)
         return f"Adresse: {uri} ({gs1_link.describe(link)})"
     try:
         segs = text_segments(s.text, s.ec, eci=s.eci)
