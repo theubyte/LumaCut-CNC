@@ -1,5 +1,6 @@
 """Material test with image cells (LightBurn Interval Test "Dithered Image"):
-every cell is a white-to-black grey ramp engraved in the chosen image mode with
+every cell is a shared test image (ramp / step wedge / user photo) engraved in the
+chosen image mode with
 the cell's power / speed / line interval / passes."""
 
 import hashlib
@@ -12,8 +13,9 @@ from lumacut_canvas.document_io import load_document, save_document
 from lumacut_canvas.gcode import document_to_gcode
 from lumacut_canvas.model import IMAGE_MODES, Document
 from lumacut_job.estimate import estimate_gcode
-from lumacut_job.material_test import (RAMP_PX, TEST_IMAGE_MODES, MaterialTestSpec,
-                                       add_material_test, build_material_test, ramp_png)
+from lumacut_job.material_test import (RAMP_PX, TEST_IMAGE_MODES, WEDGE_STEPS,
+                                       MaterialTestSpec, add_material_test, build_material_test,
+                                       cell_image_png, ramp_png, wedge_png)
 from lumacut_job.planner import optimized_document_gcode
 from lumacut_materials import testgrid
 
@@ -47,8 +49,60 @@ def test_ramp_png_is_a_white_to_black_grey_png(qapp):
 def test_default_spec_has_vector_cells():
     s = MaterialTestSpec()
     assert s.image_mode == "" and s.image_min_power == 0.0
+    assert s.image_source == "ramp" and s.image_png is None
     _, shapes = build_material_test(MaterialTestSpec(labels=False))
     assert not _image_cells(shapes)
+
+
+def test_wedge_png_has_equal_monotonic_bands(qapp):
+    from lumacut_import.image_preview import gray_from_png
+    png = wedge_png()
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    gray = gray_from_png(png)
+    assert gray.shape == (RAMP_PX[1], RAMP_PX[0])
+    row = gray[0]
+    assert row[0] == 255 and row[-1] == 0
+    assert np.all(gray == row)
+    # Exactly WEDGE_STEPS distinct levels, left → right non-increasing.
+    levels = [int(v) for v in sorted(set(row.tolist()), reverse=True)]
+    assert len(levels) == WEDGE_STEPS
+    assert levels[0] == 255 and levels[-1] == 0
+    assert np.all(np.diff(row.astype(int)) <= 0)
+    # Band widths are equal (floor division).
+    band = RAMP_PX[0] // WEDGE_STEPS
+    for i in range(WEDGE_STEPS):
+        assert len(set(row[i * band:(i + 1) * band].tolist())) == 1
+    assert wedge_png() == png
+
+
+def test_image_cells_share_wedge_or_photo_png():
+    wedge_spec = MaterialTestSpec(image_mode="floyd", image_source="wedge", columns=2, rows=1,
+                                  labels=False)
+    _, shapes = build_material_test(wedge_spec)
+    cells = _image_cells(shapes)
+    assert len(cells) == 2
+    assert cells[0].image.png == cells[1].image.png == wedge_png()
+    assert (cells[0].image.px_width, cells[0].image.px_height) == RAMP_PX
+
+    photo = ramp_png(64, 8)  # any grey PNG works as the embedded photo
+    photo_spec = MaterialTestSpec(image_mode="grayscale", image_source="photo", image_png=photo,
+                                  columns=2, rows=1, labels=False)
+    _, shapes = build_material_test(photo_spec)
+    cells = _image_cells(shapes)
+    assert len(cells) == 2
+    assert cells[0].image.png == cells[1].image.png == photo
+    assert (cells[0].image.px_width, cells[0].image.px_height) == (64, 8)
+
+
+def test_ramp_source_stays_byte_identical_to_legacy_default():
+    # image_source="ramp" (default) must keep the shared PNG identical to ramp_png().
+    legacy = MaterialTestSpec(image_mode="floyd", columns=2, rows=1, labels=False)
+    explicit = MaterialTestSpec(image_mode="floyd", image_source="ramp", columns=2, rows=1,
+                                labels=False)
+    assert cell_image_png(legacy) == cell_image_png(explicit) == (ramp_png(), *RAMP_PX)
+    _, a = build_material_test(legacy)
+    _, b = build_material_test(explicit)
+    assert [s.image.png for s in _image_cells(a)] == [s.image.png for s in _image_cells(b)]
 
 
 def test_image_cells_carry_the_cell_settings():
@@ -97,6 +151,9 @@ def test_interval_and_passes_axes_go_into_the_image_settings():
     (dict(image_mode="nope"), "Bildmodus"),
     (dict(image_mode="floyd", line_interval_mm=0), "Linienabstand"),
     (dict(image_mode="floyd", power_min=10, image_min_power=20), "Min.-Leistung"),
+    (dict(image_mode="floyd", image_source="nope"), "Bildquelle"),
+    (dict(image_mode="floyd", image_source="photo"), "Eigenes Bild fehlt"),
+    (dict(image_mode="floyd", image_source="photo", image_png=b"not-a-png"), "PNG"),
 ])
 def test_validation_of_image_cells(kw, msg):
     with pytest.raises(ValueError, match=msg):
@@ -177,23 +234,50 @@ def test_image_grid_survives_save_and_load(qapp, tmp_path):
 
 # --- dialog -------------------------------------------------------------------------------
 
+def test_photo_grid_is_pi_safe(qapp):
+    photo = ramp_png(32, 8)
+    spec = MaterialTestSpec(image_mode="floyd", image_source="photo", image_png=photo,
+                            columns=2, rows=1, labels=False, line_interval_mm=0.25)
+    doc, g = _gcode(spec)
+    pi_check(g)
+    assert g.count("; IMAGE ") == 2
+    assert estimate_gcode(g).total_time_s > 0
+
+
 def test_dialog_image_cells_round_trip_and_fields(qapp):
     from PySide6.QtWidgets import QDialogButtonBox
     from lumacut_job.qt_tools import CELL_FILL, CELL_IMAGE, CELL_OUTLINE, MaterialTestDialog
     dlg = MaterialTestDialog(None)
     assert dlg.mode.currentIndex() == CELL_FILL
     assert dlg.image_mode.isHidden() and dlg._rows["image_min"].isHidden()
+    assert dlg.image_source.isHidden() and dlg.photo_row.isHidden()
     dlg.mode.setCurrentIndex(CELL_IMAGE)
     assert not dlg.image_mode.isHidden() and not dlg.image_min.isHidden()
+    assert not dlg.image_source.isHidden() and dlg.photo_row.isHidden()
     assert dlg.interval.isEnabled()
     assert dlg.image_mode.currentData() == "floyd"
+    assert dlg.image_source.currentData() == "ramp"
     assert dlg.image_mode.findData("sketch") == -1
     dlg.image_mode.setCurrentIndex(dlg.image_mode.findData("grayscale"))
     dlg.image_min.setValue(5)
     out = dlg.spec()
-    assert (out.image_mode, out.image_min_power, out.line_interval_mm) == ("grayscale", 5, 0.2)
+    assert (out.image_mode, out.image_min_power, out.line_interval_mm,
+            out.image_source, out.image_png) == ("grayscale", 5, 0.2, "ramp", None)
+    # Step wedge round-trip.
+    dlg.image_source.setCurrentIndex(dlg.image_source.findData("wedge"))
+    assert dlg.photo_row.isHidden()
+    assert dlg.spec().image_source == "wedge" and dlg.spec().image_png is None
+    # Photo without file disables OK.
+    dlg.image_source.setCurrentIndex(dlg.image_source.findData("photo"))
+    assert not dlg.photo_row.isHidden()
     ok = dlg.bb.button(QDialogButtonBox.Ok)
+    assert not ok.isEnabled() and "Eigenes Bild fehlt" in dlg.hint.text()
+    dlg._photo_png = ramp_png(16, 4)
+    dlg._update_fields()
     assert ok.isEnabled()
+    photo_out = dlg.spec()
+    assert photo_out.image_source == "photo" and photo_out.image_png == dlg._photo_png
+    dlg.image_source.setCurrentIndex(dlg.image_source.findData("ramp"))
     dlg.image_min.setValue(dlg.p_min.value() + 1)
     assert not ok.isEnabled() and "Min.-Leistung" in dlg.hint.text()
     dlg.image_min.setValue(0)
@@ -205,15 +289,27 @@ def test_dialog_image_cells_round_trip_and_fields(qapp):
     dlg.col_param.setCurrentIndex(dlg.col_param.findData("power"))
     dlg.mode.setCurrentIndex(CELL_OUTLINE)
     assert dlg.spec().image_mode == "" and dlg.spec().line_interval_mm == 0
-    assert dlg.image_mode.isHidden()
+    assert dlg.spec().image_source == "ramp" and dlg.spec().image_png is None
+    assert dlg.image_mode.isHidden() and dlg.image_source.isHidden()
     dlg.mode.setCurrentIndex(CELL_FILL)
     assert dlg.spec().image_mode == "" and dlg.spec().image_min_power == 0
     # A spec with image cells opens in image mode.
     again = MaterialTestDialog(None, MaterialTestSpec(image_mode="halftone", image_min_power=3))
     assert again.mode.currentIndex() == CELL_IMAGE
     assert again.spec() == MaterialTestSpec(image_mode="halftone", image_min_power=3)
+    wedge_dlg = MaterialTestDialog(
+        None, MaterialTestSpec(image_mode="floyd", image_source="wedge"))
+    assert wedge_dlg.image_source.currentData() == "wedge"
+    assert wedge_dlg.spec().image_source == "wedge"
+    photo = ramp_png(16, 4)
+    photo_dlg = MaterialTestDialog(
+        None, MaterialTestSpec(image_mode="floyd", image_source="photo", image_png=photo))
+    assert photo_dlg.image_source.currentData() == "photo"
+    assert photo_dlg.spec().image_png == photo
     dlg.deleteLater()
     again.deleteLater()
+    wedge_dlg.deleteLater()
+    photo_dlg.deleteLater()
 
 
 def test_job_tools_insert_image_grid_as_one_undo_step(qapp):
