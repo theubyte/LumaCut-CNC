@@ -34,6 +34,11 @@ PASSES_RANGE = (1, 30)
 # auf Oberfläche + 5,5 mm und sperrt Z unter Oberfläche + 2 mm.
 Z_STEP_RANGE = (0.0, 2.0)
 MAX_FOCUS_DROP_MM = 3.0
+# Relative focus offset of a whole layer (mm). Applied once at layer start and
+# restored after the layer. Negative = closer to the material (same sign as the
+# relative Z moves of z_step). |offset| and the peak drop with z_step stay
+# within MAX_FOCUS_DROP_MM.
+Z_OFFSET_RANGE = (-MAX_FOCUS_DROP_MM, MAX_FOCUS_DROP_MM)
 # Material-Felder der Ebene (material.py); nur gespeichert, wenn gesetzt.
 MATERIAL_LAYER_FIELDS = ("material", "thickness_mm", "target_depth_mm", "depth_per_pass_mm")
 # Schnitt-Optionen der Ebene (lumacut_job.cutpath): Kerf-Versatz, Haltestege
@@ -242,6 +247,7 @@ class Layer:
     locked: bool = False
     id: str = field(default_factory=new_id)
     z_step: float = 0.0             # mm Fokus-Absenkung je Durchgang (0 = aus)
+    z_offset: float = 0.0           # mm relativer Fokus-Versatz der ganzen Ebene (0 = aus)
     # Material-Grundlage (siehe material.py); alle optional, 0/"" = aus.
     material: str = ""              # Materialname (frei, z. B. aus BUILTIN_MATERIALS)
     thickness_mm: float = 0.0       # Materialdicke
@@ -278,6 +284,7 @@ class Layer:
             speed=_clamp(float(self.speed), *SPEED_RANGE),
             passes=int(_clamp(int(self.passes), *PASSES_RANGE)),
             z_step=round(_clamp(float(self.z_step), *Z_STEP_RANGE), 3),
+            z_offset=round(_clamp(float(self.z_offset), *Z_OFFSET_RANGE), 3),
             material=str(self.material or "").strip()[:80],
             thickness_mm=round(_clamp(float(self.thickness_mm), *THICKNESS_RANGE), 3),
             target_depth_mm=round(_clamp(float(self.target_depth_mm), *THICKNESS_RANGE), 3),
@@ -308,15 +315,18 @@ class Layer:
         )
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "name": self.name, "color": self.color,
-                "power": self.power, "speed": self.speed, "passes": self.passes,
-                "visible": self.visible, "locked": self.locked, "z_step": self.z_step,
-                **{k: getattr(self, k) for k in MATERIAL_LAYER_FIELDS + LINK_LAYER_FIELDS
-                   if getattr(self, k)},
-                **{k: getattr(self, k) for k, v in CUT_LAYER_DEFAULTS.items()
-                   if getattr(self, k) != v},
-                **{k: getattr(self, k) for k, v in FILL_LAYER_DEFAULTS.items()
-                   if getattr(self, k) != v}}
+        d = {"id": self.id, "name": self.name, "color": self.color,
+             "power": self.power, "speed": self.speed, "passes": self.passes,
+             "visible": self.visible, "locked": self.locked, "z_step": self.z_step,
+             **{k: getattr(self, k) for k in MATERIAL_LAYER_FIELDS + LINK_LAYER_FIELDS
+                if getattr(self, k)},
+             **{k: getattr(self, k) for k, v in CUT_LAYER_DEFAULTS.items()
+                if getattr(self, k) != v},
+             **{k: getattr(self, k) for k, v in FILL_LAYER_DEFAULTS.items()
+                if getattr(self, k) != v}}
+        if self.z_offset:
+            d["z_offset"] = self.z_offset
+        return d
 
     @staticmethod
     def from_dict(d: dict) -> "Layer":
@@ -326,6 +336,7 @@ class Layer:
             power=float(d.get("power", 50.0)), speed=float(d.get("speed", 1500.0)),
             passes=int(d.get("passes", 1)), visible=bool(d.get("visible", True)),
             locked=bool(d.get("locked", False)), z_step=float(d.get("z_step", 0.0)),
+            z_offset=float(d.get("z_offset", 0.0)),
             material=str(d.get("material", "")),
             thickness_mm=float(d.get("thickness_mm", 0.0)),
             target_depth_mm=float(d.get("target_depth_mm", 0.0)),
@@ -777,8 +788,8 @@ class Document:
                 raise AttributeError(k)
             setattr(layer, k, v)
         normalized = layer.normalized()
-        for k in ("power", "speed", "passes", "z_step") + MATERIAL_LAYER_FIELDS + CUT_LAYER_FIELDS \
-                + FILL_LAYER_FIELDS + LINK_LAYER_FIELDS:
+        for k in ("power", "speed", "passes", "z_step", "z_offset") + MATERIAL_LAYER_FIELDS \
+                + CUT_LAYER_FIELDS + FILL_LAYER_FIELDS + LINK_LAYER_FIELDS:
             setattr(layer, k, getattr(normalized, k))
         self.changed()
 

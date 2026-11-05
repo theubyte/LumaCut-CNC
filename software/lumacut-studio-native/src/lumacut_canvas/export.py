@@ -30,6 +30,7 @@ class JobLayer:
     passes: int
     polylines: list[list[tuple[float, float]]]  # Maschinen-mm
     z_step_mm: float = 0.0  # Fokus-Absenkung je Durchgang
+    z_offset_mm: float = 0.0  # relativer Fokus-Versatz der ganzen Ebene (negativ = näher)
     # Tiefe je Durchgang aus der Material-Planung (material.layer_pass_plan),
     # leer ohne Planung. Nur für den optionalen G-Code-Hook (gcode.pass_hook).
     pass_depths_mm: tuple[float, ...] = ()
@@ -158,7 +159,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
             plan = layer_pass_plan(layer)
             result.append(JobLayer(layer.id, layer.name, layer.power, layer.speed,
                                    layer.passes, polys, layer.z_step,
-                                   plan.pass_depths if plan else (),
+                                   z_offset_mm=float(getattr(layer, "z_offset", 0.0) or 0.0),
+                                   pass_depths_mm=plan.pass_depths if plan else (),
                                    **{k: getattr(layer, k) for k in CUT_LAYER_FIELDS}, fills=fills,
                                    fill_fixed_order=layer.fill_mode == "offset",
                                    fill_free_corner=layer.fill_mode in LINE_FILL_MODES,

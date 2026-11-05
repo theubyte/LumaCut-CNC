@@ -423,14 +423,25 @@ def image_job(shape: Shape, layer_name: str = "", scan_offsets=None) -> ImageJob
 
 
 def document_image_jobs(doc: Document, scan_offsets=None) -> list[ImageJob]:
-    """Bilder sichtbarer Ebenen, unterste Ebene zuerst (wie job_layers)."""
+    """Bilder sichtbarer Ebenen, unterste Ebene zuerst (wie job_layers).
+
+    ``Layer.z_offset`` wraps each image of that layer in the same relative
+    ``G91``/``G0 Z``/``G90`` pair that vector layers use (negativ = näher am
+    Material), so a material-test focus axis also moves image cells.
+    """
     jobs: list[ImageJob] = []
     for layer in reversed(doc.layers):
         if not layer.visible:
             continue
+        z = float(getattr(layer, "z_offset", 0.0) or 0.0)
+        wrap = (["G91", f"G0 Z{z:.3f} F600", "G90"],
+                ["G91", f"G0 Z{-z:.3f} F600", "G90"]) if abs(z) > 1e-9 else None
         for s in doc.shapes_in_layer(layer.id):
             if s.kind == "image" and s.image is not None:
-                jobs.append(image_job(s, layer.name, scan_offsets))
+                job = image_job(s, layer.name, scan_offsets)
+                if wrap is not None:
+                    job.lines = wrap[0] + job.lines + wrap[1]
+                jobs.append(job)
     return jobs
 
 
