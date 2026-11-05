@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:,">
 <title>LumaCut</title>
 <!--
   LumaCut · MARLIN CONTROL OS – Weboberfläche des Raspberry Pi 400.
@@ -91,7 +92,8 @@ svg.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-widt
 .top{position:sticky;top:0;z-index:25;background:color-mix(in srgb,var(--bg) 86%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
  border-bottom:1px solid var(--line)}
 .topbar{display:flex;align-items:center;gap:12px;min-height:56px;padding:6px 16px}
-.machine{display:flex;align-items:center;gap:10px;min-width:0}
+.machine{display:flex;align-items:center;gap:10px;min-width:0;flex:0 1 auto}
+.machine .pill{flex:none}
 .machine strong{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
 .pill{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border-radius:999px;background:var(--surface);
  border:1px solid var(--line);font-size:13px;font-weight:650;white-space:nowrap}
@@ -101,8 +103,9 @@ svg.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-widt
 .pill.info::before{background:var(--info)}
 .pill.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--line))}
 .pill.hot{background:var(--bad);color:#fff;border-color:var(--bad)}.pill.hot::before{background:#fff}
-.chips{display:flex;gap:6px;flex-wrap:nowrap;overflow:hidden}
+.chips{display:flex;gap:6px;flex-wrap:nowrap;flex:none}
 .chips .pill{height:28px;font-size:12px;padding:0 10px;font-weight:600;color:var(--muted)}
+.chips .pill.hot{color:#fff;font-weight:800}
 .dro-mini{font:600 13px var(--mono);color:var(--muted);white-space:nowrap;display:flex;gap:12px}
 .dro-mini b{color:var(--text);font-weight:650}
 .estop{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 18px;border-radius:12px;border:0;cursor:pointer;
@@ -119,8 +122,9 @@ svg.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-widt
 .bar.frame span{background:var(--info)}.bar.error span{background:var(--bad)}.bar.done span{background:var(--ok)}
 .percent{font:700 15px var(--mono);min-width:52px;text-align:right}
 #jobDetails{grid-column:1/-1;font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#jobDetails.wrap{white-space:normal;overflow-wrap:anywhere}
 .phases{grid-column:1/-1;display:flex;gap:6px;list-style:none;margin:0;padding:0;flex-wrap:wrap}
-.phases li{flex:1 1 0;min-width:80px;text-align:center;font:650 12px var(--sans);padding:5px 8px;border-radius:999px;background:var(--surface2);color:var(--faint);border:1px solid var(--line)}
+.phases li{flex:1 1 auto;white-space:nowrap;text-align:center;font:650 12px var(--sans);padding:5px 8px;border-radius:999px;background:var(--surface2);color:var(--faint);border:1px solid var(--line)}
 .phases li.done{color:var(--accent);background:var(--accent-soft);border-color:transparent}
 .phases li.current{color:var(--accent-ink);background:var(--accent);border-color:var(--accent)}
 .phases.is-error li.current{background:var(--bad);border-color:var(--bad);color:#fff}
@@ -179,12 +183,14 @@ button,input,select,textarea{font:inherit;color:inherit}
 .btn.pending::after{content:"";position:absolute;inset:0;margin:auto;width:18px;height:18px;border-radius:50%;border:2px solid var(--muted);border-top-color:transparent;animation:spin .8s linear infinite}
 .btn.primary.pending::after{border-color:var(--accent-ink);border-top-color:transparent}
 @keyframes spin{to{transform:rotate(360deg)}}
-input[type=text],input[type=number],input[type=search],input:not([type]),select,textarea{width:100%;min-height:var(--touch);background:var(--surface2);border:1px solid var(--line);
+input[type=text],input[type=number],input[type=search],input[type=password],input:not([type]),select,textarea{width:100%;min-height:var(--touch);background:var(--surface2);border:1px solid var(--line);
  border-radius:var(--r-sm);padding:9px 12px;color:var(--text);transition:border-color .12s,background .12s}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);background:var(--surface)}
 input[type=number]{font-family:var(--mono)}
 select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
  background-position:calc(100% - 18px) 52%,calc(100% - 13px) 52%;background-size:5px 5px;background-repeat:no-repeat;padding-right:34px}
+input[type=file]{min-width:0;max-width:100%;font-size:13px}
+input[type=file]::file-selector-button{font:inherit;font-weight:650;min-height:38px;padding:0 14px;margin-right:10px;border-radius:10px;border:1px solid var(--line2);background:var(--surface);color:var(--text);cursor:pointer}
 input[type=range]{width:100%;accent-color:var(--accent);min-height:30px}
 input[type=checkbox]{width:20px;height:20px;accent-color:var(--accent);flex:none;margin:0}
 label.field{display:grid;gap:6px;font-size:12.5px;font-weight:600;color:var(--muted)}
@@ -202,7 +208,7 @@ label.field .unit::after{content:attr(data-unit);position:absolute;right:12px;to
 .switch input:disabled{opacity:.45;cursor:not-allowed}
 /* Segment */
 .seg{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);background:var(--surface2);border:1px solid var(--line);border-radius:var(--r-sm);padding:3px;gap:3px}
-.seg button{border:0;background:transparent;border-radius:9px;min-height:36px;font-weight:650;color:var(--muted);cursor:pointer;padding:4px 8px;line-height:1.15;overflow-wrap:anywhere}
+.seg button{border:0;background:transparent;border-radius:9px;min-height:36px;font-weight:650;color:var(--muted);cursor:pointer;padding:4px 6px;line-height:1.15;overflow-wrap:break-word;min-width:0}
 .seg button[aria-pressed=true]{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(20,24,40,.12)}
 :root[data-theme=dark] .seg button[aria-pressed=true]{background:var(--surface3)}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]) .seg button[aria-pressed=true]{background:var(--surface3)}}
@@ -249,7 +255,9 @@ details.more>div{padding:0 14px 14px}
 .layerbtn[aria-pressed=true]{background:var(--accent-soft);color:var(--text);border-color:transparent}
 .layerbtn[aria-pressed=false] i{opacity:.35}
 #bedCursor{font:600 12.5px var(--mono);color:var(--muted);min-width:150px;text-align:right}
-.bedwrap{position:relative;background:var(--canvas);touch-action:none}
+/* Ungezoomt scrollt ein Wisch über das Bett die Seite (Handy); gezoomt verschiebt er die Ansicht. */
+.bedwrap{position:relative;background:var(--canvas);touch-action:pan-y}
+.bedwrap.zoomed{touch-action:none}
 #bed{display:block;width:100%;height:auto;max-height:calc(100vh - 210px);min-height:280px;cursor:crosshair;user-select:none}
 #bed.panning{cursor:grabbing}
 .bedzoom{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:6px}
@@ -290,6 +298,7 @@ details.more>div{padding:0 14px 14px}
 .drop{display:grid;place-items:center;gap:6px;text-align:center;border:2px dashed var(--line2);border-radius:var(--r);padding:18px;cursor:pointer;color:var(--muted);transition:border-color .15s,background .15s}
 .drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--text)}
 .drop svg.i{width:26px;height:26px;color:var(--accent)}
+.drop.pending{opacity:.55;pointer-events:none}
 #jobsPanel{position:sticky;top:76px}
 .joblist{list-style:none;margin:0;padding:0;display:grid;gap:8px;max-height:calc(100vh - 330px);overflow:auto;padding-right:2px}
 .jobitem{display:grid;grid-template-columns:76px minmax(0,1fr);gap:12px;align-items:center;padding:8px;border-radius:14px;border:1px solid var(--line);background:var(--surface);cursor:pointer;transition:border-color .12s,background .12s}
@@ -344,6 +353,8 @@ table.mat td.acts{text-align:right;white-space:nowrap}
 .ctl .head{display:flex;justify-content:space-between;align-items:center;font-size:13px;font-weight:650}
 .ctl .head span{font:600 12.5px var(--mono);color:var(--muted)}
 #scanImg{width:100%;border-radius:var(--r-sm);background:var(--canvas);display:block}
+/* Service-Regler: eine wackelnde Fingerbewegung darf das Ziehen nicht abbrechen */
+#serviceLaser{min-height:44px;touch-action:none}
 
 /* ================= Dialoge, Meldungen, Palette ================= */
 dialog{border:1px solid var(--line);border-radius:22px;background:var(--surface);color:var(--text);padding:22px;box-shadow:var(--shadow-lg);max-width:min(560px,calc(100vw - 24px));width:100%}
@@ -352,6 +363,10 @@ dialog h2{font-size:19px;margin-bottom:6px}
 dialog .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;flex-wrap:wrap}
 dialog form{display:grid;gap:12px}
 dialog.danger h2{color:var(--bad)}
+dialog h2{padding-right:92px}
+.dlg-stop{position:absolute;top:16px;right:16px}
+#keysDlg .dlg-stop,#palette .dlg-stop{display:none}
+#keysDlg h2{padding-right:0}
 #toasts{position:fixed;right:16px;bottom:16px;z-index:80;display:flex;flex-direction:column;gap:8px;align-items:flex-end;max-width:min(520px,calc(100vw - 32px))}
 .toast{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;background:var(--text);color:var(--bg);box-shadow:var(--shadow-lg);font-size:13.5px;
  white-space:pre-wrap;word-break:break-word;cursor:pointer;animation:toastin .2s ease;max-height:45vh;overflow:auto}
@@ -371,7 +386,7 @@ dialog.danger h2{color:var(--bad)}
 /* ================= Responsiv ================= */
 @media (max-width:1280px){
  .grid-control{grid-template-columns:minmax(0,1fr) 360px}
- .chips{display:none}
+ .chips .pill:not(.hot){display:none}
 }
 @media (max-width:1060px){
  .grid-control,.grid-camera,.grid-system,.grid-jobs{grid-template-columns:minmax(0,1fr)}
@@ -386,18 +401,47 @@ dialog.danger h2{color:var(--bad)}
  .nav{width:auto;flex:1;padding:6px 0;font-size:10.5px}
  main{padding:14px 12px 96px}
  .topbar{padding:6px 12px;gap:8px}
- .machine strong{max-width:14ch}
- .jobstrip{grid-template-columns:1fr auto auto;padding:8px 12px}
+ .machine strong{max-width:14ch;min-width:0;flex:0 1 auto}
+ .jobstrip{grid-template-columns:minmax(0,1fr) auto auto;gap:8px 12px;padding:8px 12px}
+ .jobstrip .label{grid-row:1;grid-column:1}.jobstrip .percent{grid-row:1;grid-column:2}.jobstrip>.row{grid-row:1;grid-column:3}
  .jobstrip .bar{grid-column:1/-1;grid-row:2}
+ #jobEta{grid-column:1/-1}#jobEta:empty{display:none}
  #toasts{bottom:84px}
  .pagehead h1{font-size:21px}
 }
 @media (max-width:520px){
  .cols2,.cols3{grid-template-columns:minmax(0,1fr)}
  .cols3.keep{grid-template-columns:repeat(3,minmax(0,1fr))}
- .estop{padding:0 12px}.estop .txt{display:none}
+ .cols2.keep{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .estop{padding:0 12px}
+ .card{padding:14px}
+ .card-head{flex-wrap:wrap}.card-head.nowrap{flex-wrap:nowrap}
+ .seg button{font-size:13px}
+ .machine strong{font-size:14px}
+ .queue li{grid-template-columns:auto minmax(0,1fr)}
+ .queue li .file{white-space:normal;overflow-wrap:anywhere}
+ .queue .act{grid-column:1/-1;justify-content:flex-end}
+ .queue .act:empty{display:none}
+ .phases{gap:4px}.phases li{padding:4px 6px;font-size:11px}
+ .top.laser-hot .machine strong{display:none}
  .dro .axis b{font-size:19px}
  .acc{grid-template-columns:1fr}
+}
+@media (max-width:359px){.estop .txt{display:none}}
+/* Materialtabelle auf dem Handy: jede Zeile eine kleine Karte statt Querscrollen */
+@media (max-width:640px){
+ table.mat{min-width:0;display:block}table.mat thead{display:none}table.mat tbody{display:block}
+ table.mat tbody tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;padding:12px;border-bottom:1px solid var(--line)}
+ table.mat tbody tr:last-child{border-bottom:0}
+ table.mat tr.current{background:var(--accent-soft)}
+ table.mat td,table.mat tr.current td,table.mat tbody tr:hover td{padding:0;border:0;background:none;text-align:left;white-space:normal}
+ table.mat td.num{text-align:left}
+ table.mat td[data-l]::before{content:attr(data-l);display:block;font:700 10.5px var(--sans);letter-spacing:.4px;text-transform:uppercase;color:var(--faint);margin-bottom:1px}
+ table.mat td.m-name,table.mat td.m-note,table.mat td.acts{grid-column:1/-1}
+ table.mat td.m-proc{grid-column:span 2}
+ table.mat td.m-note:empty{display:none}
+ table.mat td.acts{text-align:right}
+ table.mat td[colspan]{grid-column:1/-1}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -479,7 +523,7 @@ dialog.danger h2{color:var(--bad)}
   </div>
   <div class="grow"></div>
   <div class="dro-mini" id="droMini" title="Kopfposition (Maschinen-mm)"><span>X <b id="miniX">—</b></span><span>Y <b id="miniY">—</b></span><span>Z <b id="miniZ">—</b></span></div>
-  <button class="estop" id="stop" type="button" title="Software-Notstopp M112 (ersetzt keinen physischen Not-Aus) · Taste Esc zweimal"><svg class="i"><use href="#i-stop"/></svg><span class="txt">NOT-AUS</span></button>
+  <button class="estop" id="stop" type="button" aria-label="NOT-AUS" title="Software-Notstopp (ersetzt keinen physischen Not-Aus) · Taste Esc zweimal"><svg class="i"><use href="#i-stop"/></svg><span class="txt">NOT-AUS</span></button>
  </div>
  <div class="jobstrip" id="jobStrip" hidden aria-label="Auftragsfortschritt">
   <div class="label"><small id="activityLabel">Auftrag</small><strong id="jobStatus">Kein Auftrag</strong></div>
@@ -585,7 +629,7 @@ dialog.danger h2{color:var(--bad)}
     <input type="hidden" id="step" value="1">
     <div class="cols3 keep">
      <button class="btn primary" data-action="home" data-motion type="button" title="X/Y zuerst, dann Z"><svg class="i"><use href="#i-home"/></svg>Referenz</button>
-     <button class="btn" data-action="probe" data-motion data-needs-home type="button" title="Werkstück unter dem Kopf abtasten (G30)"><svg class="i"><use href="#i-probe"/></svg>Abtasten</button>
+     <button class="btn" data-action="probe" data-motion data-needs-home type="button" title="Werkstück unter dem Kopf abtasten"><svg class="i"><use href="#i-probe"/></svg>Abtasten</button>
      <button class="btn" data-action="park" data-motion data-needs-home type="button" title="Laser aus, Z hoch, X0/Y0 oben rechts"><svg class="i"><use href="#i-park"/></svg>Parken</button>
     </div>
     <div class="jogwrap">
@@ -601,10 +645,26 @@ dialog.danger h2{color:var(--bad)}
      </div>
     </div>
     <p class="help" id="jogHint" style="margin-top:10px">Joggen erst nach dem Referenzieren.</p>
-    <div class="cols3 keep" style="margin-top:8px">
-     <button class="btn" data-ztest="1" type="button" title="Nur Z, 2 mm/s, auch ohne Referenz – zum Prüfen der Richtung">Z-Test +1 hoch</button>
-     <button class="btn" data-ztest="10" type="button" title="Nur Z, 2 mm/s, auch ohne Referenz">Z-Test +10 hoch</button>
-     <button class="btn" data-ztest="-1" type="button" title="Nur Z, 2 mm/s, auch ohne Referenz">Z-Test −1 runter</button>
+    <div class="stack" style="margin-top:12px;gap:8px">
+     <details class="more"><summary>Zu einer Position fahren</summary><div class="stack">
+      <div class="cols2 keep">
+       <label class="field">X<span class="unit" data-unit="mm"><input id="gotoX" type="number" min="0" step="0.1" inputmode="decimal"></span></label>
+       <label class="field">Y<span class="unit" data-unit="mm"><input id="gotoY" type="number" min="0" step="0.1" inputmode="decimal"></span></label>
+      </div>
+      <div class="row">
+       <button class="btn primary" id="gotoRun" type="button" data-motion data-needs-home><svg class="i"><use href="#i-move"/></svg>Fahren</button>
+       <button class="btn" id="gotoOrigin" type="button" data-motion data-needs-home><svg class="i"><use href="#i-target"/></svg>Zum Ursprung</button>
+      </div>
+      <p class="help">Laser bleibt aus. Maschinen-mm wie auf der Arbeitsfläche.</p>
+     </div></details>
+     <details class="more"><summary>Z-Richtung prüfen</summary><div class="stack">
+      <div class="cols3 keep">
+       <button class="btn" data-motion data-ztest="1" type="button">+1 mm</button>
+       <button class="btn" data-motion data-ztest="10" type="button">+10 mm</button>
+       <button class="btn" data-motion data-ztest="-1" type="button">−1 mm</button>
+      </div>
+      <p class="help">Nur Z mit 2 mm/s (+ = hoch), auch ohne Referenz. Für die Prüfung nach einem Antriebswechsel; danach ist die Maschine nicht referenziert.</p>
+     </div></details>
     </div>
    </section>
 
@@ -634,7 +694,7 @@ dialog.danger h2{color:var(--bad)}
    <form id="uploadForm">
     <label class="drop" id="dropZone">
      <svg class="i"><use href="#i-upload"/></svg>
-     <b>G-Code hierher ziehen</b><span class="small">oder antippen zum Auswählen · .gcode .gc .nc</span>
+     <b>G-Code hierher ziehen</b><span class="small" id="dropHint">oder antippen zum Auswählen · .gcode .gc .nc</span>
      <input type="file" accept=".gcode,.gc,.nc" id="file" multiple hidden>
     </label>
    </form>
@@ -647,7 +707,7 @@ dialog.danger h2{color:var(--bad)}
 
   <div>
    <section class="card" aria-labelledby="hJobDetail">
-    <div class="card-head">
+    <div class="card-head nowrap">
      <h2 id="hJobDetail" style="min-width:0"><svg class="i"><use href="#i-jobs"/></svg><span id="jobTitle" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Kein Auftrag ausgewählt</span></h2>
      <span class="row" style="gap:6px">
       <a class="btn ghost sm icon" id="jobDownload" title="G-Code herunterladen" aria-label="G-Code herunterladen" hidden><svg class="i"><use href="#i-download"/></svg></a>
@@ -709,6 +769,7 @@ dialog.danger h2{color:var(--bad)}
       <div class="grow stack" style="gap:8px"><p class="small" id="placeText">Dieser Punkt des Motivs kommt an die gewählte Stelle.</p>
        <button class="btn sm" id="placePreview" type="button" data-motion data-needs-home><svg class="i"><use href="#i-target"/></svg>Platzierung prüfen</button></div>
      </div>
+     <div class="note warn" id="startWhy" hidden><svg class="i"><use href="#i-alert"/></svg><span></span></div>
      <button class="btn primary lg block" data-action="autorun" data-motion type="button"><svg class="i"><use href="#i-play"/></svg>Auftrag starten</button>
      <p class="help">Macht alles selbst: referenziert bei Bedarf, tastet das Material unter dem Motiv ab, der Fokus folgt der Oberfläche, dann lasern und parken.</p>
      <div class="cols3">
@@ -749,10 +810,24 @@ dialog.danger h2{color:var(--bad)}
    </div>
   </div>
   <div class="tablewrap"><table class="mat" aria-label="Materialien">
-   <thead><tr><th>Material</th><th style="text-align:right">Stärke</th><th>Bearbeitung</th><th style="text-align:right">Leistung</th><th style="text-align:right">Tempo</th><th style="text-align:right">Durchg.</th><th>Hinweis</th><th></th></tr></thead>
+   <thead><tr><th>Material</th><th style="text-align:right">Stärke</th><th>Bearbeitung</th><th style="text-align:right">Leistung</th><th style="text-align:right">Tempo (mm/min)</th><th style="text-align:right">Durchg.</th><th>Hinweis</th><th></th></tr></thead>
    <tbody id="matTable"><tr><td colspan="8" class="faint">Lädt …</td></tr></tbody>
   </table></div>
   <p class="help" id="matCount" style="margin-top:10px"></p>
+ </section>
+ <section class="card" id="matcalPanel" hidden>
+  <div class="card-head"><h2><svg class="i"><use href="#i-beam"/></svg>Material automatisch kalibrieren</h2><span class="tag" id="matcalTag">bereit</span></div>
+  <div class="stack">
+   <p class="help"><b>Gravur:</b> ein 5-mm-Feld lasern, fotografieren, Ton, Streifen und Rauchrand messen, nächste Leistung rechnen – bis Dunkel, Mittel und Hell gefunden sind (meist 6–10 Felder). <b>Schnitt:</b> je Tempo ein Durchgang nach dem anderen, bis die Kamera das Loch offen sieht; gespeichert wird die Einstellung mit der wenigsten Energie (sauberste Rückseite). Der Testbereich beginnt am Laserpunkt (Gravur 51 × 21 mm, Schnitt 44 × 8 mm Richtung +X/+Y). Ergebnisse werden als Materialien gespeichert.</p>
+   <div class="cols2">
+    <label class="field">Material<input id="matcalName" type="text" maxlength="60" placeholder="z. B. Sperrholz"></label>
+    <label class="field">Stärke<span class="unit" data-unit="mm"><input id="matcalThickness" type="number" min="0.1" max="50" step="0.1" value="4" inputmode="decimal"></span></label>
+   </div>
+   <label class="check small"><input type="checkbox" id="matcalRaised"> Platte liegt hochgelegt auf Abstandhaltern (nötig zum Schneiden)</label>
+   <div class="row"><button type="button" class="btn primary" id="matcalEngrave" data-motion data-needs-home><svg class="i"><use href="#i-beam"/></svg>Gravur kalibrieren</button><button type="button" class="btn" id="matcalCut" data-motion data-needs-home><svg class="i"><use href="#i-beam"/></svg>Schnitt kalibrieren</button></div>
+   <p class="small faint" id="matcalInfo">Noch kein Materialtest</p>
+   <ul class="small" id="matcalResult"></ul>
+  </div>
  </section>
 </section>
 
@@ -775,7 +850,7 @@ dialog.danger h2{color:var(--bad)}
      <select id="camEvery" aria-label="Live-Intervall" style="width:auto;min-height:34px"><option value="1000">1 s</option><option value="2000" selected>2 s</option><option value="5000">5 s</option></select></div>
    </section>
    <section class="card">
-    <div class="card-head"><h2><svg class="i"><use href="#i-scan"/></svg>Scan der Arbeitsfläche</h2><span class="tag" id="scanRev">—</span></div>
+    <div class="card-head"><h2><svg class="i"><use href="#i-scan"/></svg>Scan der Arbeitsfläche</h2><span class="row" style="gap:6px"><span class="tag" id="scanRev">—</span><button class="btn ghost sm icon" id="scanDelete" type="button" title="Scan löschen" aria-label="Scan löschen" hidden><svg class="i"><use href="#i-trash"/></svg></button></span></div>
     <img id="scanImg" alt="Scan der Arbeitsfläche aus der App" hidden>
     <p class="help" id="scanNote">Den Scan macht die Android-App („Arbeitsplatz scannen“). Er erscheint auch als Hintergrund der Arbeitsfläche unter Steuerung.</p>
    </section>
@@ -840,21 +915,6 @@ dialog.danger h2{color:var(--bad)}
    </div>
   </section>
 
-  <section class="card" id="matcalPanel" hidden>
-   <div class="card-head"><h2><svg class="i"><use href="#i-beam"/></svg>Material automatisch kalibrieren</h2><span class="tag" id="matcalTag">bereit</span></div>
-   <div class="stack">
-    <p class="help"><b>Gravur:</b> ein 5-mm-Feld lasern, fotografieren, Ton, Streifen und Rauchrand messen, nächste Leistung rechnen – bis Dunkel, Mittel und Hell gefunden sind (meist 6–10 Felder). <b>Schnitt:</b> je Tempo ein Durchgang nach dem anderen, bis die Kamera das Loch offen sieht; gespeichert wird die Einstellung mit der wenigsten Energie (sauberste Rückseite). Der Testbereich beginnt am Laserpunkt (Gravur 51 × 21 mm, Schnitt 44 × 8 mm Richtung +X/+Y). Ergebnisse werden als Materialien gespeichert.</p>
-    <div class="cols2">
-     <label class="field">Material<input id="matcalName" type="text" maxlength="60" placeholder="z. B. Sperrholz"></label>
-     <label class="field">Stärke<span class="unit" data-unit="mm"><input id="matcalThickness" type="number" min="0.1" max="50" step="0.1" value="4" inputmode="decimal"></span></label>
-    </div>
-    <label class="check small"><input type="checkbox" id="matcalRaised"> Platte liegt hochgelegt auf Abstandhaltern (nötig zum Schneiden)</label>
-    <div class="row"><button type="button" class="btn primary" id="matcalEngrave" data-motion data-needs-home><svg class="i"><use href="#i-beam"/></svg>Gravur kalibrieren</button><button type="button" class="btn" id="matcalCut" data-motion data-needs-home><svg class="i"><use href="#i-beam"/></svg>Schnitt kalibrieren</button></div>
-    <p class="small faint" id="matcalInfo">Noch kein Materialtest</p>
-    <ul class="small" id="matcalResult"></ul>
-   </div>
-  </section>
-
   <section class="card">
    <div class="card-head"><h2><svg class="i"><use href="#i-chip"/></svg>Gerät</h2></div>
    <form id="deviceSettings" class="stack" data-settings>
@@ -871,7 +931,7 @@ dialog.danger h2{color:var(--bad)}
      <label class="field">Beschleunigung X/Y<span class="unit" data-unit="mm/s²"><input id="motionAccel" type="number" min="100" step="50" inputmode="decimal" placeholder="Firmware"></span></label>
      <label class="field">Höchsttempo X/Y<span class="unit" data-unit="mm/s"><input id="motionSpeed" type="number" min="10" step="5" inputmode="decimal" placeholder="Firmware"></span></label>
     </div>
-    <p class="help">Werte aus der Bewegungs-Kalibrierung der App. Höher = schneller, aber mehr Nachschwingen an Ecken. Wird sofort an Marlin gesendet (M201/M203) und beim Start wieder gesetzt.</p>
+    <p class="help">Werte aus der Bewegungs-Kalibrierung der App. Höher = schneller, aber mehr Nachschwingen an Ecken. Gilt sofort und wird beim Start wieder gesetzt.</p>
     <div class="row"><button type="submit" class="btn primary" id="motionSave"><svg class="i"><use href="#i-check"/></svg>Übernehmen</button><button type="button" class="btn ghost" id="motionReset">Firmware-Werte</button></div>
    </form>
   </section>
@@ -892,8 +952,8 @@ dialog.danger h2{color:var(--bad)}
    <div class="stack">
     <p class="small muted">Fester Bezugspunkt für Aufträge („Am Ursprung“ unter Aufträge). Auch per Antippen der Arbeitsfläche setzbar.</p>
     <div class="cols2">
-     <label class="field">X<span class="unit" data-unit="mm"><input id="originX" type="number" min="30" max="390" step="0.1" inputmode="decimal"></span></label>
-     <label class="field">Y<span class="unit" data-unit="mm"><input id="originY" type="number" min="30" max="370" step="0.1" inputmode="decimal"></span></label>
+     <label class="field">X<span class="unit" data-unit="mm"><input id="originX" type="number" step="0.1" inputmode="decimal"></span></label>
+     <label class="field">Y<span class="unit" data-unit="mm"><input id="originY" type="number" step="0.1" inputmode="decimal"></span></label>
     </div>
     <div class="row">
      <button class="btn primary" id="originSet" type="button" data-motion data-needs-home>Setzen</button>
@@ -936,7 +996,7 @@ dialog.danger h2{color:var(--bad)}
 
 <!-- ===================================================== System -->
 <section class="page" data-page="system" aria-labelledby="hSys">
- <div class="pagehead"><div><h1 id="hSys">System</h1><p>Verbindung, Marlin-Abfragen, Protokoll, Firmware, App und Sicherung.</p></div>
+ <div class="pagehead"><div><h1 id="hSys">System</h1><p>Verbindung, Abfragen, Protokoll, Firmware, App und Sicherung.</p></div>
   <a class="btn" id="backupBtn" href="/api/backup" download><svg class="i"><use href="#i-download"/></svg>Sicherung herunterladen</a></div>
  <div class="grid-system">
   <div>
@@ -951,9 +1011,16 @@ dialog.danger h2{color:var(--bad)}
      <div class="metric"><small>Abtastung Z</small><strong id="surfaceZ">—</strong></div>
     </div>
     <p class="small faint" id="board" style="margin-top:12px">Firmware noch nicht identifiziert</p>
+    <div class="metrics" id="piInfo" style="margin-top:12px" hidden>
+     <div class="metric"><small>Pi-Software</small><strong id="piVersion" style="font-size:14px">—</strong><em id="piVersionDate"></em></div>
+     <div class="metric"><small>Speicher frei</small><strong id="piDisk" style="font-size:14px">—</strong><em id="piJobs"></em></div>
+     <div class="metric"><small>Pi-Temperatur</small><strong id="piTemp" style="font-size:14px">—</strong></div>
+     <div class="metric"><small>Dienst läuft seit</small><strong id="piUptime" style="font-size:14px">—</strong></div>
+    </div>
+    <details class="more" style="margin-top:12px"><summary>Anschlüsse am Board</summary><div><dl class="kv" id="ioList"></dl></div></details>
    </section>
    <section class="card">
-    <div class="card-head"><h2><svg class="i"><use href="#i-cmd"/></svg>Marlin-Abfragen</h2><span class="small faint">nur lesen</span></div>
+    <div class="card-head"><h2><svg class="i"><use href="#i-cmd"/></svg>Abfragen ans Board</h2><span class="small faint">nur lesen</span></div>
     <div class="row" id="reports">
      <button class="btn sm" data-report="M114" type="button">Position M114</button>
      <button class="btn sm" data-report="M119" type="button">Endschalter M119</button>
@@ -963,7 +1030,7 @@ dialog.danger h2{color:var(--bad)}
      <button class="btn sm" data-report="M105" type="button">Temperatur M105</button>
      <button class="btn sm ghost" data-action="connect" type="button">Verbindung prüfen</button>
     </div>
-    <pre class="console" id="reportOut" style="margin-top:12px">Eine Abfrage antippen – die Antwort von Marlin erscheint hier.</pre>
+    <pre class="console" id="reportOut" style="margin-top:12px">Eine Abfrage antippen – die Antwort des Boards erscheint hier.</pre>
    </section>
    <section class="card" id="servicePanel">
     <div class="card-head"><h2><svg class="i"><use href="#i-beam"/></svg>Service: Laser</h2><span class="tag warn" id="serviceTag">gesperrt</span></div>
@@ -982,20 +1049,23 @@ dialog.danger h2{color:var(--bad)}
     </form>
     <div id="serviceControls" class="stack" style="margin-top:12px" hidden>
      <div class="row">
-      <span class="grow">Laserversorgung 24 V: <b id="serviceSupplyState">—</b></span>
+      <span class="grow">Laserversorgung 24&nbsp;V <span class="tag" id="serviceSupplyState">—</span></span>
       <button class="btn" id="serviceSupplyOn" type="button">24 V AN</button>
       <button class="btn" id="serviceSupplyOff" type="button">24 V AUS</button>
      </div>
-     <label class="field">Laserleistung: <b id="serviceLaserPct">0 %</b><input type="range" id="serviceLaser" min="0" max="100" step="1" value="0" aria-label="Laserleistung in Prozent"></label>
+     <div class="note warn" id="serviceBlocked" hidden><svg class="i"><use href="#i-alert"/></svg><span></span></div>
+     <div class="note bad" id="serviceOffNote" role="alert" hidden><svg class="i"><use href="#i-alert"/></svg><span></span></div>
+     <label class="field"><span>Laserleistung: <b id="serviceLaserPct">0 %</b></span><input type="range" id="serviceLaser" min="0" max="100" step="1" value="0" aria-label="Laserleistung in Prozent"></label>
+     <button class="btn solid-danger lg block" id="serviceLaserOff" type="button">Laser AUS</button>
      <div class="row">
-      <button class="btn solid-danger" id="serviceLaserOff" type="button">Laser AUS</button>
+      <span class="small muted grow">Lasersignal: <b id="servicePin">PA9 an EXP3</b></span>
       <button class="btn ghost" id="serviceLock" type="button">Sperren</button>
      </div>
-     <p class="help">Keine Zeitbegrenzung: Der Strahl bleibt an, bis du ihn ausschaltest. Er geht auch aus, wenn du 24 V schaltest oder diese Seite schließt, wegklickst oder die Verbindung verlierst. Ohne 24 V kommt nur das Signal, kein Strahl. Nur auf getestetem Material.</p>
+     <p class="help">Keine Zeitbegrenzung: Der Strahl bleibt an, bis du ihn ausschaltest. Er geht auch aus, wenn du 24 V schaltest, die Seite wechselst oder schließt oder die Verbindung verlierst. Ohne 24 V kommt nur das Signal, kein Strahl. Nur auf getestetem Material.</p>
     </div>
    </section>
    <section class="card">
-    <div class="card-head"><h2><svg class="i"><use href="#i-pulse"/></svg>Marlin-Ereignisprotokoll</h2>
+    <div class="card-head"><h2><svg class="i"><use href="#i-pulse"/></svg>Ereignisprotokoll</h2>
      <span class="row" style="gap:6px"><label class="check small" style="min-height:0"><input type="checkbox" id="logPause"> Anhalten</label>
       <button class="btn ghost sm icon" id="copyLog" type="button" title="Kopieren" aria-label="Protokoll kopieren"><svg class="i"><use href="#i-copy"/></svg></button>
       <button class="btn ghost sm" id="clearLog" type="button">Leeren</button></span></div>
@@ -1049,17 +1119,17 @@ dialog.danger h2{color:var(--bad)}
    </section>
    <section class="card" id="lightburnPanel">
     <div class="card-head"><h2><svg class="i"><use href="#i-link"/></svg>LightBurn</h2></div>
-    <dl class="kv"><dt>Gerätetyp</dt><dd>Marlin · Network/TCP</dd><dt>Adresse</dt><dd class="mono" id="hostname">—</dd><dt>Port</dt><dd class="mono">23</dd></dl>
+    <dl class="kv"><dt>Gerätetyp</dt><dd id="lbType">Network/TCP</dd><dt>Adresse</dt><dd class="mono" id="hostname">—</dd><dt>Port</dt><dd class="mono">23</dd></dl>
     <details class="more" style="margin-top:12px"><summary>Einrichtung und Regeln</summary><div class="stack small">
-     <p>Marlin-Modus mit <code>M3 I</code>, S-Werte <code>0–255</code>. Nach Leerfahrten braucht die erste G1-Bearbeitung wieder einen S-Wert. <code>M4 I</code> nicht benutzen. Kein GRBL: <code>$$</code>, <code>$H</code>, <code>?</code> gehen nicht.</p>
+     <p>Laser-Modus mit <code>M3 I</code>, S-Werte <code>0–255</code>. Nach Leerfahrten braucht die erste G1-Bearbeitung wieder einen S-Wert. <code>M4 I</code> nicht benutzen. Kein GRBL: <code>$$</code>, <code>$H</code>, <code>?</code> gehen nicht.</p>
      <p>Zuerst <code>G28</code> referenzieren, <code>G30</code> nur über dem Werkstück. „Job-Ende“ auf <code>M2</code>: Laser aus, Z hoch, X0/Y0 parken. <code>M5 I</code> bleibt das normale Laser-Aus.</p>
-     <p>Die Park-Ecke oben rechts (Kopf v6 + 1 cm, X0–78 / Y0–35) bleibt frei; überall sonst wird gelasert (Arbeitsfläche 370 × 360 mm). LightBurn und diese Oberfläche teilen sich den Controller, führen aber nie gleichzeitig Befehle aus.</p>
+     <p>Die Park-Ecke oben rechts bleibt frei, überall sonst wird gelasert (Maße unter Steuerung). LightBurn und diese Oberfläche teilen sich den Controller, führen aber nie gleichzeitig Befehle aus.</p>
     </div></details>
    </section>
    <section class="card">
     <div class="card-head"><h2><svg class="i"><use href="#i-shield"/></svg>Zugriff</h2></div>
     <p class="small muted">Keine Anmeldung erforderlich: Die Steuerung ist für Geräte in deinem WLAN direkt erreichbar. WLAN-Zugang schützen und Port 8080 nicht im Router ins Internet freigeben.</p>
-    <p class="small faint" style="margin-top:10px">LumaCut · MARLIN CONTROL OS · Raspberry Pi 400 · SKR Mini MZ</p>
+    <p class="small faint" style="margin-top:10px">LumaCut · Raspberry Pi 400 · SKR Mini MZ</p>
    </section>
   </div>
  </div>
@@ -1130,26 +1200,46 @@ function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className
 
 /* ================= Meldungen & Rückfragen ================= */
 function show(msg,error=false){
+ // Dieselbe Meldung nicht stapeln: die neue ersetzt die alte.
+ for(const old of $("toasts").children)if(old.textContent===String(msg))old.remove();
  const t=el("div","toast "+(error?"error":"ok"));
  t.innerHTML=icon(error?"alert":"check");t.append(el("span",null,String(msg)));
  t.title="Antippen zum Schließen";t.onclick=()=>t.remove();
  const box=$("toasts");box.append(t);
  while(box.children.length>4)box.firstChild.remove();
  if(!error)setTimeout(()=>t.remove(),6000);
+ return t;
 }
+let estopAsking=false;
 function ask(title,text,ok="OK",danger=false){
  const d=$("askDlg");$("askTitle").textContent=title;$("askText").textContent=text||"";
  $("askYes").textContent=ok;$("askYes").className="btn "+(danger?"solid-danger":"primary");
  d.classList.toggle("danger",danger);d.returnValue="";
- return new Promise(res=>{d.onclose=()=>res(d.returnValue==="yes");d.showModal();$("askYes").focus()});
+ d.querySelector(".dlg-stop").hidden=estopAsking;
+ // Gefährliches nie mit einer verirrten Eingabetaste bestätigen; nur beim NOT-AUS steht der Fokus auf „Ja“.
+ return new Promise(res=>{d.onclose=()=>res(d.returnValue==="yes");d.showModal();(danger&&!estopAsking?$("askNo"):$("askYes")).focus()});
+}
+/* Go-Abfrage vor jedem Fahr- und Laserauftrag (docs/STAND.md §4). Nichts startet ohne diesen Klick. */
+const GO_LINE="Hände raus, Deckel zu, Brille – starten?";
+function askGo(title,what,ok="Starten"){return ask(title,what+"\n\n"+GO_LINE,ok,true)}
+// Modale Dialoge sperren den Rest der Seite: darum in jedem Dialog ein eigener NOT-AUS.
+for(const d of $$("dialog")){
+ const b=el("button","btn solid-danger sm dlg-stop","NOT-AUS");b.type="button";
+ b.onclick=()=>{d.addEventListener("close",()=>estop(),{once:true});d.close()};
+ d.append(b);
 }
 
 /* ================= API ================= */
-async function api(endpoint,{body=null,method="GET",json=null}={}){
+async function api(endpoint,{body=null,method="GET",json=null,timeout=0}={}){
  const opts={method,cache:"no-store",headers:{}};
+ const abort=timeout?new AbortController():null,timer=abort?setTimeout(()=>abort.abort(),timeout):0;
+ if(abort)opts.signal=abort.signal;
  if(json!==null){opts.body=JSON.stringify(json);opts.headers["Content-Type"]="application/json"}
  else if(body){opts.body=body;if(body instanceof URLSearchParams)opts.headers["Content-Type"]="application/x-www-form-urlencoded"}
- const r=await fetch(endpoint,opts);
+ let r;
+ try{r=await fetch(endpoint,opts)}
+ catch{const err=Error("Pi antwortet nicht");err.offline=true;throw err}
+ finally{clearTimeout(timer)}
  // Eine Antwort darf nur einmal gelesen werden: einmal als Text lesen, dann
  // selbst als JSON auswerten (auch Fehlertexte, die kein JSON sind).
  const raw=await r.text();
@@ -1174,6 +1264,11 @@ async function call(op,fields={},button=null,quiet=false){
   return res;
  }catch(e){show(e.message,true);refresh();return null}
 }
+function press(sel){
+ const b=typeof sel==="string"?document.querySelector(sel):sel;if(!b)return;
+ if(b.disabled){show("Gerade nicht möglich: "+(snapshot?motionWhy(snapshot)||(!snapshot.homed?"erst referenzieren":"Voraussetzung fehlt"):"kein Status"),true);return}
+ b.click();
+}
 function has(feature){return Array.isArray(snapshot?.features)&&snapshot.features.includes(feature)}
 
 /* ================= Navigation ================= */
@@ -1193,6 +1288,8 @@ function route(){
  if(p==="material")renderMatTable();
  if(p==="auftraege")drawPreview();
  if(p!=="kamera")camLiveStop();
+ if(p==="system")loadPiInfo();
+ if(p!=="system"&&servicePw&&serviceBeam)serviceOff();   // der Regler ist dann nicht mehr zu sehen
  return p;
 }
 function page(){return store.get("lumacut.page","steuerung")}
@@ -1220,8 +1317,20 @@ function motionFree(s){
  // ohne Notstopp und mit frischem Status.
  return apiOk&&ownerFree(s)&&!s.busy&&(s.activity||"idle")==="idle"&&!s.emergency_latched;
 }
+const OWNER_LABEL={job:"Auftrag",frame:"Rahmenfahrt",web:"diese Oberfläche",lightburn:"LightBurn",shutdown:"Abschaltung"};
+function motionWhy(s){
+ // Warum Fahrknöpfe gerade gesperrt sind ("" = nichts spricht dagegen).
+ if(!apiOk)return "Pi nicht erreichbar";
+ if(s.emergency_latched)return "Notstopp aktiv – erst quittieren";
+ if(!s.connected)return "Steuerboard nicht verbunden";
+ if(!s.config?.validated)return "Maschinenfreigabe fehlt (Einstellungen)";
+ if((s.owner||"Frei")!=="Frei")return "Steuerung belegt: "+(OWNER_LABEL[s.owner]||s.owner);
+ if((s.activity||"idle")!=="idle")return "Auftrag läuft";
+ if(s.busy||s.state!=="Idle")return "Maschine beschäftigt";
+ return "";
+}
 function pill(id,cls){const e=$(id);e.classList.remove("ok","bad","warn","info","hot");if(cls)e.classList.add(cls)}
-let lastJobState=null,jobStartAt=null,rate=null,dismissedJob="";
+let lastJobState=null,jobStartAt=null,rate=null,dismissedJob="",faultToast=null;
 function refreshUI(s){
  snapshot=s;
  const valid=Boolean(s.config?.validated);
@@ -1240,17 +1349,20 @@ function refreshUI(s){
  else if(!s.connected){txt="SKR getrennt";cls="bad"}
  else if(busyJob){txt=JOB_LABEL[jobState]||"Auftrag";cls="info"}
  else if(s.activity==="framing"){txt="Rahmenfahrt";cls="info"}
- else if((s.owner||"Frei")!=="Frei"){txt="Belegt: "+s.owner;cls="warn"}
+ else if((s.owner||"Frei")!=="Frei"){txt="Belegt: "+(OWNER_LABEL[s.owner]||s.owner);cls="warn"}
  else if(!valid){txt="Gesperrt";cls="warn"}
- else{txt=s.homed?"Bereit":"Bereit · nicht referenziert";cls=s.homed?"ok":"warn"}
+ else{txt=s.homed?"Bereit":"Nicht referenziert";cls=s.homed?"ok":"warn"}
  $("connectState").textContent=txt;pill("connectPill",cls);
  $("homed").textContent=s.homed?"Referenziert":"Nicht referenziert";pill("chipHomed",s.homed?"ok":"warn");
- $("laserState").textContent=s.laser_armed?"LASER AKTIV":"Laser aus";pill("chipLaser",s.laser_armed?"hot":"ok");
- $("owner").textContent=(s.owner||"Frei")==="Frei"?"Steuerung frei":"Steuerung: "+s.owner;pill("chipOwner",(s.owner||"Frei")==="Frei"?"ok":"info");
+ const beam=Number(s.service_laser_percent)||0;
+ $("laserState").textContent=beam?"LASER "+beam+" %":s.laser_armed?"LASER AKTIV":"Laser aus";pill("chipLaser",beam||s.laser_armed?"hot":"ok");
+ $("statusPanel").classList.toggle("laser-hot",Boolean(beam||s.laser_armed));
+ $("owner").textContent=(s.owner||"Frei")==="Frei"?"Steuerung frei":"Steuerung: "+(OWNER_LABEL[s.owner]||s.owner);pill("chipOwner",(s.owner||"Frei")==="Frei"?"ok":"info");
  $("estopBanner").classList.toggle("show",Boolean(s.emergency_latched));
  $("estopReset").disabled=!s.emergency_latched;
  $("state").textContent=s.state||"Offline";
- $("board").textContent=s.identity||"Keine gültige LumaCut-Marlin-Kennung vom SKR";
+ $("board").textContent=s.identity||"Keine gültige LumaCut-Kennung vom Board";
+ renderIo(s);
  // Position
  const pos=Array.isArray(s.position)&&s.position.length>=3?s.position:null;
  $("position").classList.toggle("unknown",!pos||!s.homed);
@@ -1280,9 +1392,9 @@ function refreshUI(s){
   b.disabled=!free||!valid||((b.dataset.action==="start"||"needsHome" in b.dataset)&&!s.homed);
  for(const b of $$("[data-axis]"))b.disabled=jogInFlight||!free||!valid||!s.homed;
  $("jogHint").textContent=!valid?"Gesperrt: Maschinenfreigabe fehlt (Einstellungen).":
+  !free?"Gesperrt: "+(motionWhy(s)||"Maschine beschäftigt")+".":
   !s.homed?"Joggen erst nach dem Referenzieren.":
-  !free?"Gesperrt: Steuerung belegt ("+(s.owner||"—")+", "+(s.activity||s.state)+").":
-  "Bereit · jeder Schritt fährt genau "+$("step").value.replace(".",",")+" mm"+(prefs.keys?" · Pfeiltasten aktiv":"");
+  "Bereit · jeder Schritt fährt genau "+$("step").value.replace(".",",")+" mm"+(prefs.keys&&matchMedia("(hover:hover)").matches?" · Pfeiltasten aktiv":"");
  for(const b of $$("[data-accessory]")){
   const on=Boolean(s[b.dataset.accessory==="light"?"lights":"exhaust"]);
   b.classList.toggle("on",on);b.querySelector(".state").textContent=on?"EIN":"AUS";
@@ -1294,7 +1406,7 @@ function refreshUI(s){
  // Kamera
  $("cameraState").textContent=s.camera?.available?"Kamera "+(s.camera.device||"")+" erkannt":"Keine Kamera am Pi";
  $("cameraState").className="tag "+(s.camera?.available?"ok":"warn");
- $("cameraShot").disabled=!s.camera?.available;$("camLive").disabled=!s.camera?.available;
+ $("cameraShot").disabled=!s.camera?.available;$("camLive").disabled=!s.camera?.available;if($("camTest"))$("camTest").disabled=!s.camera?.available;
  // Firmware
  const fw=s.firmware_update||{};
  $("firmwareStatus").textContent=fw.state&&fw.state!=="idle"?fw.state+" · "+(fw.message||""):
@@ -1308,10 +1420,17 @@ function refreshUI(s){
  renderPhase(s);
  const q=s.queue||{items:[],state:"idle"};
  renderQueue(q);
+ const queued=(q.items||[]).filter(i=>i.state==="queued").length,qr=document.querySelector('[data-action="queue_run"]');
+ if(!queued)qr.disabled=true;
+ const qrLabel=q.state==="paused"?"Fortsetzen":"Starten";if(qr.dataset.label!==qrLabel){qr.dataset.label=qrLabel;qr.innerHTML=icon("play")+qrLabel}
  $("queuePause").disabled=q.state!=="running";
  $("queueClear").disabled=!(q.items||[]).some(i=>i.state!=="running");
  $("queueAdd").disabled=!selectedJob()||(q.items||[]).length>=(q.max||50);
  $("deleteJob").disabled=!selectedJob();
+ // Warum der Start gesperrt ist (ein grauer Knopf allein sagt nichts)
+ const why=motionWhy(s);$("startWhy").hidden=!why;$("startWhy").lastElementChild.textContent=why?"Start gesperrt: "+why+".":"";
+ $("gotoOrigin").disabled=$("gotoOrigin").disabled||!(s.origin?.user||s.config?.user_origin);
+ if(s.firmware)$("lbType").textContent=s.firmware[0].toUpperCase()+s.firmware.slice(1)+" · Network/TCP";
  // Material
  if(Array.isArray(s.features)&&!s.features.includes("materials")&&materialState!=="off")materialUnavailable("dieser Pi-Stand meldet kein Merkmal „materials“");
  else if(Array.isArray(s.features)&&s.features.includes("materials")&&materialState==="off"&&!materialRetry){materialRetry=true;loadMaterials().finally(()=>{materialRetry=false})}
@@ -1324,8 +1443,8 @@ function refreshUI(s){
  // Protokoll
  if(!$("logPause").checked){const c=$("console"),atEnd=c.scrollTop+c.clientHeight>=c.scrollHeight-8;c.textContent=(s.recent||[]).join("\n")||"Keine seriellen Nachrichten";if(atEnd)c.scrollTop=c.scrollHeight}
  drawBed(s);
- if(s.fault&&s.fault!==lastFault){show("SKR: "+s.fault,true);lastFault=s.fault}
- if(!s.fault)lastFault="";
+ if(s.fault&&s.fault!==lastFault){faultToast?.remove();faultToast=show("SKR: "+s.fault,true);lastFault=s.fault}
+ if(!s.fault){lastFault="";faultToast?.remove();faultToast=null}
 }
 function renderJobStrip(s){
  const jobState=s.job?.state||"idle",frameState=s.frame?.state||"idle",q=s.queue||{items:[],state:"idle"};
@@ -1345,7 +1464,7 @@ function renderJobStrip(s){
   line=s.job?.line||0;total=s.job?.total||0;
   label=PHASE_LABEL[s.job?.phase]||JOB_LABEL[jobState]||jobState;
   if(queueActive&&q.current!=null)label+=" · Warteschlange #"+q.current;
-  detail=(s.job?.file||"")+(s.job?.error?" · "+s.job.error:"");
+  detail=(s.job?.file||"")+(s.job?.error?" · "+s.job.error:"");$("jobDetails").classList.toggle("wrap",Boolean(s.job?.error));
   if(["error","aborted"].includes(jobState))cls="error";
   if(jobState==="complete")cls="done";
   $("activityLabel").textContent="Auftrag";
@@ -1360,7 +1479,7 @@ function renderJobStrip(s){
   if(!jobStartAt||lastJobState!=="running"){jobStartAt=now;rate={t:now,line}}
   const dt=(now-rate.t)/1000;
   if(dt>8&&line>rate.line){const r=(line-rate.line)/dt;rate.v=rate.v?rate.v*0.7+r*0.3:r;rate.t=now;rate.line=line}
-  $("jobEta").textContent=(rate.v?"noch ~"+dur((total-line)/rate.v)+" · ":"")+dur((now-jobStartAt)/1000);
+  $("jobEta").textContent=(rate.v?"noch ~"+dur((total-line)/rate.v)+" · ":"")+"seit "+dur((now-jobStartAt)/1000);
  }else $("jobEta").textContent="";
  if(lastJobState&&RUNNING.includes(lastJobState)&&finished)jobFinished(s);
  lastJobState=jobState;
@@ -1380,18 +1499,39 @@ function beep(ok){
  }catch{}
 }
 function lockAll(){
- // API nicht erreichbar: alles sperren, was die Maschine bewegt. Not-Aus bleibt aktiv.
- for(const b of $$("[data-motion],[data-axis],[data-accessory]"))b.disabled=true;
+ // API nicht erreichbar: alles sperren, was die Maschine bewegt. Not-Aus und Laser AUS bleiben aktiv.
+ for(const b of $$("[data-motion],[data-axis],[data-accessory],#serviceLaser,#serviceSupplyOn,#serviceSupplyOff,#lightRange,#lightFx,#lineLaserBtn,#fwInstall,#fwBannerInstall,#firmwareFlash,#panelUpdate"))b.disabled=true;
  pill("connectPill","bad");$("connectState").textContent="Pi nicht erreichbar";
+ $("staleBadge").textContent="Keine Verbindung zum Pi – die Anzeige ist veraltet, Fahrknöpfe sind gesperrt. Ein Service-Strahl geht nach 5 s von selbst aus.";
+ $("staleBanner").classList.add("show");
+ $("startWhy").hidden=false;$("startWhy").lastElementChild.textContent="Start gesperrt: Pi nicht erreichbar.";
 }
+// Immer nur eine Statusabfrage: eine hängende Verbindung darf keine Abfragen aufstauen,
+// und eine späte Antwort keinen neueren Stand überschreiben.
+let refreshing=false,refreshAgain=false,statusAskedAt=0;
 async function refresh(){
+ if(refreshing){refreshAgain=true;return}
+ refreshing=true;statusAskedAt=performance.now();
  try{
-  const s=await api("/api/status");apiOk=true;refreshUI(s);
-  if(offlineShown){show("Verbindung zum Pi wieder da");offlineShown=false}
+  const s=await api("/api/status",{timeout:6000});apiOk=true;refreshUI(s);
+  if(offlineShown){show("Verbindung zum Pi wieder da");offlineShown=false;if(page()==="kamera")loadCalibration()}
+  if(!calDone&&page()==="kamera")loadCalibration();
  }catch(e){
-  apiOk=false;lockAll();
-  if(!offlineShown){show("Pi nicht erreichbar: "+e.message,true);offlineShown=true}
+  apiOk=false;lockAll();offlineShown=true;
+ }finally{
+  refreshing=false;
+  if(refreshAgain){refreshAgain=false;refresh()}
  }
+}
+const IO_LABEL={laser_pwm:"Lasersignal",laser_supply_switch:"Laserversorgung 24 V",exhaust:"Abluft",lights:"Licht",fan_cooldown:"Lüfter-Nachlauf",aux:"Reserve"};
+let ioSig="";
+function renderIo(s){
+ const io=s.io||{},sig=JSON.stringify([io,s.expected_pwm]);if(sig===ioSig)return;ioSig=sig;
+ const list=$("ioList");list.replaceChildren();
+ for(const k of Object.keys(IO_LABEL))if(io[k]){const dd=el("dd","mono small",io[k]);list.append(el("dt",null,IO_LABEL[k]),dd)}
+ if(s.expected_pwm)list.append(el("dt",null,"Laser-Befehl"),el("dd","mono small",s.expected_pwm));
+ const pin=String(io.laser_pwm||"").split("/").map(x=>x.trim());
+ if(pin.length===2)$("servicePin").textContent=pin[1]+" an "+pin[0];
 }
 
 /* ================= Einstellungen ================= */
@@ -1424,7 +1564,7 @@ $("deviceSettings").onsubmit=ev=>{ev.preventDefault();saveSettings("deviceSettin
 $("exhaustSettings").onsubmit=ev=>{ev.preventDefault();saveSettings("exhaustSettings",{exhaust_auto:$("setExhaustAuto").checked?"1":"0",exhaust_after_s:$("setExhaustAfter").value||"0"},ev.submitter)};
 $("lineSettings").onsubmit=ev=>{ev.preventDefault();saveSettings("lineSettings",{line_laser_gpio:$("setLineGpio").value},ev.submitter)};
 $("motionSettings").onsubmit=async ev=>{ev.preventDefault();if(await call("motion_limits",{accel:$("motionAccel").value,speed:$("motionSpeed").value},$("motionSave")))dirty.delete("motionSettings")};
-$("motionReset").onclick=async ev=>{if(await ask("Firmware-Werte verwenden?","Beschleunigung und Tempo kommen dann wieder aus der Marlin-Firmware.","Zurücksetzen")){$("motionAccel").value="";$("motionSpeed").value="";if(await call("motion_limits",{accel:"",speed:""},ev.currentTarget))dirty.delete("motionSettings")}};
+$("motionReset").onclick=async ev=>{if(await ask("Firmware-Werte verwenden?","Beschleunigung und Tempo kommen dann wieder aus der Firmware.","Zurücksetzen")){$("motionAccel").value="";$("motionSpeed").value="";if(await call("motion_limits",{accel:"",speed:""},ev.currentTarget))dirty.delete("motionSettings")}};
 $("originX").oninput=$("originY").oninput=()=>dirty.add("originForm");
 $("originSet").onclick=async ev=>{if(await call("origin_set",{x:$("originX").value,y:$("originY").value},ev.currentTarget))dirty.delete("originForm")};
 $("originHead").onclick=async ev=>{if(await call("origin_set",{},ev.currentTarget))dirty.delete("originForm")};
@@ -1549,7 +1689,7 @@ async function files(){
   $("fileCount").textContent=jobs.length+" Datei"+(jobs.length===1?"":"en");
   if(!selectedJob()&&jobs.length)selectJob([...jobs].sort((a,b)=>b.modified-a.modified)[0].name,false);
   renderJobList();if(snapshot)refreshUI(snapshot);loadSelected();
- }catch(e){show(e.message,true)}
+ }catch(e){if(!e.offline)show(e.message,true)}
 }
 function renderJobList(){
  const list=$("jobList"),q=$("jobSearch").value.trim().toLowerCase(),sort=$("jobSort").value;
@@ -1663,10 +1803,12 @@ async function upload(list){
   if(!/\.(gcode|gc|nc)$/i.test(file.name)){show(file.name+": nur .gcode, .gc oder .nc",true);continue}
   const data=new FormData();data.append("file",file);
   try{
+   $("dropHint").textContent="Lädt hoch: "+file.name+" …";
    const r=await withPending($("dropZone"),()=>api("/api/upload",{method:"POST",body:data}));
    show(r.message);selected=file.name;store.set("lumacut.job",file.name);
   }catch(e){show(file.name+": "+e.message,true)}
  }
+ $("dropHint").textContent="oder antippen zum Auswählen · .gcode .gc .nc";
  await files();
 }
 $("file").onchange=()=>{upload([...$("file").files]);$("file").value=""};
@@ -1730,7 +1872,9 @@ $("frameJob").onclick=async ev=>{
   if(placeOrigin!=="absolute"){const p=await placeNow(btn);if(!p)return;b=p.bounds}
   else{if(!geometry||geometry.name!==name)await withPending(btn,()=>loadGeometry(name));b=geometry.bounds}
   if(!b){show("Keine Laserbahnen im Auftrag",true);return}
-  drawBed(snapshot);await call("frame",{mode:"box",gcode:frameGcode(b)},btn);
+  drawBed(snapshot);
+  if(!await askGo("Rahmen abfahren?","Der Kopf fährt das Rechteck um das Motiv ab: X "+de(b.xmin,0)+"–"+de(b.xmax,0)+" · Y "+de(b.ymin,0)+"–"+de(b.ymax,0)+" mm. Laser bleibt aus.","Fahren"))return;
+  await call("frame",{mode:"box",gcode:frameGcode(b)},btn);
  }catch(e){show(e.message,true)}
 };
 
@@ -1759,6 +1903,7 @@ async function loadMaterials(button=null){
   $("materialRevision").textContent=materials.length+" Einträge"+(materialRevision!=null?" · Rev. "+materialRevision:"");
   renderMaterials();renderMatTable();
  }catch(e){
+  if(e.offline&&materials)return;   // kurz keine Verbindung: Liste behalten
   const msg=String(e.message||"");
   materialUnavailable(/^\s*</.test(msg)||/404|Not Found/i.test(msg)?"Endpunkt /api/materials fehlt (älterer Pi-Stand)":msg.slice(0,160));
  }
@@ -1768,7 +1913,7 @@ async function syncWorkspace(s){
  const rev=s.sync?.workspace;
  if(rev!=null&&rev!==wsRev){wsRev=rev;try{ws=await api("/api/workspace");wsRev=ws.revision??rev;renderMaterials()}catch{}}
  const sr=s.sync?.scan;
- if(sr!=null&&sr!==scanRev){scanRev=sr;loadScan()}
+ if(sr!=null&&sr!==scanRev){scanRev=sr;if(sr>0)loadScan();else{$("scanRev").textContent="kein Scan";$("scanRev").className="tag"}}
 }
 function fillSelect(sel,values,current,label,placeholder){
  sel.replaceChildren();
@@ -1801,6 +1946,7 @@ function renderMaterials(){
 }
 function showMaterial(m){
  currentMaterial=m;
+ for(const id of ["materialEdit","materialDelete","materialCompare"])$(id).disabled=!m;
  const box=$("materialSettings");box.replaceChildren();
  if(!m){$("materialNote").textContent=$("materialName").value?"Für diese Kombination ist kein Eintrag vorhanden – „Neu“ legt einen an.":"";return}
  const p=materialPasses(m),z=Number(m.z_step_mm)||0,pw=Number(m.power_pct),sp=Number(m.speed_mm_min);
@@ -1902,16 +2048,17 @@ function renderMatTable(){
  body.replaceChildren();
  for(const m of rows){
   const tr=el("tr");if(cur&&cur.name===m.name&&Number(cur.thickness_mm)===thick(m))tr.className="current";
-  const n=el("td");n.append(el("b",null,m.name));if(m.builtin)n.append(" ",el("span","tag","Startwert"));
-  const p=el("td","num",fmt(m.power_pct,0)+" %");const bar=el("span","powerbar");const fill=el("span");fill.style.width=Math.min(100,Number(m.power_pct)||0)+"%";bar.append(fill);p.append(bar);
+  const cell=(cls,label,text)=>{const td=el("td",cls,text);td.dataset.l=label;return td};
+  const n=el("td","m-name");n.append(el("b",null,m.name));if(m.builtin)n.append(" ",el("span","tag","Startwert"));
+  const p=cell("num","Leistung",fmt(m.power_pct,0)+" %");const bar=el("span","powerbar");const fill=el("span");fill.style.width=Math.min(100,Number(m.power_pct)||0)+"%";bar.append(fill);p.append(bar);
   const acts=el("td","acts");
   const use=el("button","btn ghost sm","Verwenden");use.type="button";use.title="Als aktuelles Material für alle Geräte setzen";
   use.onclick=ev=>{ev.stopPropagation();store.set("lumacut.process",m.process);setSharedMaterial(m.name,thick(m))};
   const dup=el("button","btn ghost sm icon");dup.type="button";dup.title="Kopieren";dup.innerHTML=icon("dup");dup.onclick=ev=>{ev.stopPropagation();openMaterial(m,true)};
   const del=el("button","btn ghost sm icon");del.type="button";del.title="Löschen";del.innerHTML=icon("trash");del.onclick=ev=>{ev.stopPropagation();deleteMaterial(m,del)};
   acts.append(use,dup,del);
-  tr.append(n,el("td","num",de(thick(m),thick(m)%1?1:0)+" mm"),el("td",null,m.process+" · "+(MAT_MODE[m.mode]||m.mode)),p,
-   el("td","num",fmt(m.speed_mm_min,0)),el("td","num",String(materialPasses(m).n)),el("td","faint small",m.notes||""),acts);
+  tr.append(n,cell("num","Stärke",de(thick(m),thick(m)%1?1:0)+" mm"),cell("m-proc","Bearbeitung",m.process+" · "+(MAT_MODE[m.mode]||m.mode)),p,
+   cell("num","mm/min",fmt(m.speed_mm_min,0)),cell("num","Durchg.",String(materialPasses(m).n)),el("td","m-note faint small",m.notes||""),acts);
   tr.onclick=()=>openMaterial(m);
   body.append(tr);
  }
@@ -1951,7 +2098,7 @@ function setLayer(name,on){
  drawBed(snapshot);drawPreview();
 }
 for(const b of $$("[data-layer]"))b.onclick=()=>setLayer(b.dataset.layer,!layers[b.dataset.layer]);
-function setVB(v){bedVB=v;$("bed").setAttribute("viewBox",v.map(n=>n.toFixed(2)).join(" "))}
+function setVB(v){bedVB=v;$("bed").setAttribute("viewBox",v.map(n=>n.toFixed(2)).join(" "));$("bed").parentElement.classList.toggle("zoomed",Boolean(bedBase)&&v[2]<bedBase[2]-.5)}
 function drawBed(s){
  // Ansicht von vorne: X0/Y0 (Endschalter) oben rechts, +X nach links, +Y nach unten (Tür).
  // #bedFlip enthält alles in rohen Maschinen-mm; nur dort wird X gespiegelt.
@@ -2010,15 +2157,21 @@ function drawBed(s){
 function loadScan(){
  const url="/api/workspace/scan?rev="+scanRev;
  const probe=new Image();
- probe.onload=()=>{$("bedScan").setAttribute("href",url);$("scanImg").src=url;$("scanImg").hidden=false;$("scanRev").textContent="Revision "+scanRev;$("scanRev").className="tag ok";drawBed(snapshot)};
- probe.onerror=()=>{$("bedScan").removeAttribute("href");$("scanImg").hidden=true;$("scanRev").textContent="kein Scan";$("scanRev").className="tag";drawBed(snapshot)};
+ probe.onload=()=>{$("bedScan").setAttribute("href",url);$("scanImg").src=url;$("scanImg").hidden=false;$("scanRev").textContent="Revision "+scanRev;$("scanRev").className="tag ok";$("scanDelete").hidden=false;drawBed(snapshot)};
+ probe.onerror=()=>{$("bedScan").removeAttribute("href");$("scanImg").hidden=true;$("scanRev").textContent="kein Scan";$("scanRev").className="tag";$("scanDelete").hidden=true;drawBed(snapshot)};
  probe.src=url;
 }
+$("scanDelete").onclick=async ev=>{
+ if(!await ask("Scan löschen?","Das Scanbild verschwindet auf allen Geräten, auch als Hintergrund der Arbeitsfläche. Die App kann jederzeit neu scannen.","Löschen",true))return;
+ try{await withPending(ev.currentTarget,()=>api("/api/workspace/scan?base_revision="+encodeURIComponent(scanRev),{method:"DELETE"}));show("Scan gelöscht");refresh()}
+ catch(e){show(e.status===409?"Der Scan wurde gerade geändert – bitte nochmal":e.message,true);refresh()}
+};
 // Zoomen, Verschieben, Antippen
 function svgPoint(ev){const svg=$("bed"),pt=svg.createSVGPoint();pt.x=ev.clientX;pt.y=ev.clientY;return pt.matrixTransform(svg.getScreenCTM().inverse())}
 function machineAt(p){const {W}=bedDims();return {x:W-p.x,y:p.y}}
 function zoomAt(f,cx,cy){
  if(!bedVB)return;const [x,y,w,h]=bedVB,nw=Math.max(30,Math.min(bedBase[2],w/f)),nh=nw*h/w;
+ if(nw>=bedBase[2]){setVB(bedBase.slice());return}
  if(cx==null){cx=x+w/2;cy=y+h/2}
  setVB([cx-(cx-x)*nw/w,cy-(cy-y)*nh/h,nw,nh]);
 }
@@ -2031,7 +2184,9 @@ $("bed").addEventListener("pointermove",ev=>{
  $("bedCursor").textContent=m.x>=0&&m.x<=W&&m.y>=0&&m.y<=H?"X "+fmt(m.x,1)+"  Y "+fmt(m.y,1):"";
  if(!drag)return;
  const dx=ev.clientX-drag.x,dy=ev.clientY-drag.y;if(!drag.moved&&Math.hypot(dx,dy)<5)return;
- drag.moved=true;$("bed").classList.add("panning");
+ drag.moved=true;
+ if(bedVB[2]>=bedBase[2]-.5)return;   // ungezoomt gibt es nichts zu verschieben
+ $("bed").classList.add("panning");
  const r=$("bed").getBoundingClientRect(),k=drag.vb[2]/r.width;
  setVB([drag.vb[0]-dx*k,drag.vb[1]-dy*k,drag.vb[2],drag.vb[3]]);
 });
@@ -2039,6 +2194,7 @@ $("bed").addEventListener("pointerup",ev=>{
  if(!drag)return;const moved=drag.moved;drag=null;$("bed").classList.remove("panning");
  if(!moved)bedMenu(ev);
 });
+$("bed").addEventListener("pointercancel",()=>{drag=null;$("bed").classList.remove("panning")});   // Browser scrollt die Seite
 $("bed").addEventListener("pointerleave",()=>{$("bedCursor").textContent=""});
 $("bed").addEventListener("dblclick",()=>setVB(bedBase.slice()));
 function closePopover(){$$(".popover").forEach(p=>p.remove())}
@@ -2053,8 +2209,8 @@ function bedMenu(ev){
  const pop=el("div","popover");pop.setAttribute("role","menu");
  const head=el("header");head.append(el("span",null,"X "+de(x)+"  Y "+de(y)));const xb=el("button","btn ghost sm icon");xb.innerHTML=icon("x");xb.onclick=closePopover;head.append(xb);pop.append(head);
  const item=(ic,label,fn,disabled,hint)=>{const b=el("button","btn");b.type="button";b.innerHTML=icon(ic);b.append(label);b.disabled=disabled;b.title=hint||"";b.onclick=()=>{closePopover();fn()};pop.append(b)};
- item("move","Hierhin fahren (Laser aus)",()=>call("moveto",{x,y}),!free||!homed);
- item("probe","Hier abtasten",()=>call("probe",{x,y}),!free||!homed||!inCut,inCut?"":"Nur im Schneidbereich");
+ item("move","Hierhin fahren (Laser aus)",async()=>{if(await askGo("Hierhin fahren?","Kopf fährt auf X "+de(x)+" · Y "+de(y)+" mm. Laser bleibt aus.","Fahren"))call("moveto",{x,y})},!free||!homed);
+ item("probe","Hier abtasten",async()=>{if(await askGo("Hier abtasten?","Kopf fährt auf X "+de(x)+" · Y "+de(y)+" mm und tastet das Werkstück ab. Laser bleibt aus.","Abtasten"))call("probe",{x,y})},!free||!homed||!inCut,inCut?"":"Nur im Schneidbereich");
  item("target","Als Ursprung setzen",()=>call("origin_set",{x,y}),!free||!homed||!inCut,inCut?"":"Nur im Schneidbereich");
  if(why)pop.append(el("div","why",why));else if(!inCut)pop.append(el("div","why","In der Park-Ecke: nur Hinfahren"));
  document.body.append(pop);
@@ -2086,6 +2242,7 @@ $("camFull").onclick=()=>{const v=$("camView");(document.fullscreenElement?docum
 document.addEventListener("visibilitychange",()=>{if(document.hidden)camLiveStop()});
 const CAM_FIELDS=[["exposure","Belichtung","µs×100"],["gain","Verstärkung",""],["white_balance","Weißabgleich","K"],["light","Licht beim Scan","%"]];
 async function loadCamera(){
+ loadCalibration();
  if(camSettingsLoaded)return;
  try{
   const c=await api("/api/camera/settings");camSettingsLoaded=true;
@@ -2101,20 +2258,20 @@ async function loadCamera(){
    wrap.append(head,r,auto);form.append(wrap);
   }
   const row=el("div","row");const save=el("button","btn primary");save.type="submit";save.innerHTML=icon("check")+"Speichern";
-  const test=el("button","btn");test.type="button";test.innerHTML=icon("camera")+"Testbild";test.onclick=()=>{go("kamera");camShot(test)};
+  const test=el("button","btn");test.type="button";test.id="camTest";test.disabled=!snapshot?.camera?.available;test.innerHTML=icon("camera")+"Testbild";test.onclick=()=>{go("kamera");camShot(test)};
   row.append(save,test);form.append(row);
  }catch(e){$("camSettings").replaceChildren(el("p","help","Kamera-Einstellungen nicht verfügbar: "+e.message))}
- loadCalibration();
 }
 $("camSettings").onsubmit=async ev=>{
  ev.preventDefault();const body={};
  for(const r of $$("#camSettings input[type=range]")){const cb=$$("#camSettings input[type=checkbox]").find(c=>c.dataset.key===r.dataset.key);body[r.dataset.key]=cb.checked?null:Number(r.value)}
  try{const r=await withPending(ev.submitter,()=>api("/api/camera/settings",{method:"PUT",json:body}));show(r.message||"Gespeichert");camShot()}catch(e){show(e.message,true)}
 };
+let calDone=false;
 async function loadCalibration(){
- const list=$("calList");list.replaceChildren();
- const s=snapshot||{},c=s.config||{};
+ const s=snapshot||{},c=s.config||{};calDone=Boolean(snapshot);
  let cal=null;try{cal=await api("/api/camera/calibration")}catch{}
+ const list=$("calList");list.replaceChildren();
  const a=cal?.android||{};
  const rows=[
   ["Fokusabstand",c.focus_gap_mm!=null,c.focus_gap_mm!=null?de(c.focus_gap_mm)+" mm":"fehlt"],
@@ -2145,14 +2302,33 @@ async function jog(b){
 }
 for(const b of $$("[data-axis]"))b.onclick=()=>jog(b);
 // Z-Test: Richtung prüfen nach Antriebswechsel, auch ohne Referenz (op=z_test).
-/* Service-Menü Laser: Passwort bleibt nur im Speicher dieser Seite */
-let servicePw="",serviceBeam=0,serviceWant=null,serviceSending=false,serviceHold=false;
+/* Service-Menü Laser: Passwort bleibt nur im Speicher dieser Seite.
+   Ohne eingeschalteten Strahl sendet der Regler nichts: erst nach der Abfrage beim Loslassen.
+   Meldet der Pi den Strahl aus, ist er für diese Seite aus: Ziehen fragt dann wieder nach. */
+let servicePw="",serviceBeam=0,serviceWant=null,serviceLoop=null,serviceTouch=false,serviceAsking=false,serviceDone=0,serviceNoPing=false;
+function serviceSlider(v){$("serviceLaser").value=v;$("serviceLaserPct").textContent=v+" %"}
+let serviceToast=null;
+function serviceNote(text){if(!text){serviceToast?.remove();serviceToast=null}$("serviceOffNote").hidden=!text;$("serviceOffNote").lastElementChild.textContent=text||""}
 function renderService(s){
  const set=!!s.service_password_set,open=set&&!!servicePw;
  $("serviceSetForm").hidden=set;$("serviceUnlockForm").hidden=!set||open;$("serviceControls").hidden=!open;
  $("serviceTag").textContent=open?"entsperrt":"gesperrt";$("serviceTag").className="tag "+(open?"ok":"warn");
- $("serviceSupplyState").textContent=s.laser_cooling_fan_on?"AN":"AUS";
- if(!serviceHold&&!serviceSending){serviceBeam=Number(s.service_laser_percent)||0;$("serviceLaser").value=serviceBeam;$("serviceLaserPct").textContent=serviceBeam+" %"}
+ const on=Boolean(s.laser_cooling_fan_on);$("serviceSupplyState").textContent=on?"AN":"AUS";$("serviceSupplyState").className="tag"+(on?" warn":"");
+ // Regler und 24 V nur bei freier Steuerung; „Laser AUS“ wird nie gesperrt.
+ const blocked=s.emergency_latched?"Notstopp aktiv – erst quittieren":!s.connected?"Steuerboard nicht verbunden":(s.owner||"Frei")!=="Frei"?"Steuerung belegt: "+(OWNER_LABEL[s.owner]||s.owner):"";
+ $("serviceLaser").disabled=$("serviceSupplyOn").disabled=$("serviceSupplyOff").disabled=Boolean(blocked);
+ $("serviceBlocked").hidden=!blocked;$("serviceBlocked").lastElementChild.textContent=blocked?"Gesperrt: "+blocked+".":"";
+ // Nur einem Status trauen, der nach dem letzten eigenen Befehl abgefragt wurde.
+ if(serviceLoop||statusAskedAt<=serviceDone)return;
+ if(!open){serviceBeam=0;return}
+ const real=Number(s.service_laser_percent)||0;
+ if(serviceBeam&&!real){
+  serviceBeam=0;
+  const why="Der Pi hat den Laser abgeschaltet"+(s.emergency_latched?" (Notstopp).":" (die Seite hat sich zu lange nicht gemeldet oder der Strahl wurde anderswo beendet).")+" Zum Einschalten den Regler neu ziehen.";
+  serviceNote(why);serviceToast=show(why,true);
+ }
+ if(serviceTouch||serviceAsking)return;
+ serviceBeam=real;serviceSlider(real);
 }
 $("serviceSetForm").onsubmit=async ev=>{
  ev.preventDefault();
@@ -2165,35 +2341,70 @@ $("serviceUnlockForm").onsubmit=async ev=>{
  const pw=$("servicePw").value;
  if(await call("service_unlock",{password:pw})){servicePw=pw;$("servicePw").value=""}
 };
-$("serviceLock").onclick=async()=>{if(serviceBeam)await serviceLaserSend(0);servicePw="";refresh()};
+$("serviceLock").onclick=async()=>{if(serviceBeam||serviceLoop)await serviceOff();servicePw="";serviceNote("");refresh()};
 $("serviceSupplyOn").onclick=async ev=>{
  const btn=ev.currentTarget;
  if(!await ask("Laserversorgung 24 V an?","Der Strahl bleibt aus. Hände raus, Deckel zu.","Einschalten",true))return;
- call("service_supply",{password:servicePw,state:"on"},btn);
+ serviceSupply("on",btn);
 };
-$("serviceSupplyOff").onclick=ev=>call("service_supply",{password:servicePw,state:"off"},ev.currentTarget);
-async function serviceLaserSend(pct){
- serviceBeam=pct;serviceWant=pct;if(serviceSending)return;serviceSending=true;
- while(serviceWant!==null){const v=serviceWant;serviceWant=null;await call("service_laser",{password:servicePw,percent:String(v)},null,true)}
- serviceSending=false;refresh();
+$("serviceSupplyOff").onclick=ev=>serviceSupply("off",ev.currentTarget);
+// Schalten beendet einen Strahl: das ist dann keine Meldung „Pi hat abgeschaltet“ wert.
+async function serviceSupply(state,btn){
+ if(serviceLoop)await serviceLoop;
+ serviceBeam=0;serviceSlider(0);
+ serviceLoop=call("service_supply",{password:servicePw,state},btn).finally(serviceLoopEnd);
 }
-$("serviceLaser").onpointerdown=()=>{serviceHold=true};
-window.addEventListener("pointerup",()=>{if(serviceHold===true){serviceHold=false;refresh()}});
+function serviceLoopEnd(){
+ serviceLoop=null;serviceDone=performance.now();refresh();
+ if(serviceWant!==null)serviceLaserSend(serviceWant);
+}
+function serviceLaserSend(pct){
+ serviceBeam=pct;serviceWant=pct;
+ if(!serviceLoop)serviceLoop=(async()=>{
+  while(serviceWant!==null){
+   const v=serviceWant;serviceWant=null;
+   const res=await call("service_laser",{password:servicePw,percent:String(v)},null,true);
+   if(res)serviceNoPing=false;
+   else if(v){if(serviceWant===null)serviceBeam=0}            // Einschalten abgelehnt: bleibt aus
+   else{serviceNoPing=true;show("Laser AUS kam nicht an – ohne Meldung der Seite schaltet der Pi nach 5 s selbst ab",true)}
+  }
+ })().finally(serviceLoopEnd);
+ return serviceLoop;
+}
+function serviceOff(){
+ // Hängt noch ein älterer Befehl, geht „aus“ zusätzlich sofort los statt zu warten.
+ const pending=serviceLoop;
+ serviceTouch=false;serviceSlider(0);
+ const done=serviceLaserSend(0);
+ if(pending)api("/api/action",{method:"POST",body:param({op:"service_laser",password:servicePw,percent:"0"})}).catch(()=>{});
+ return done;
+}
+function serviceSettle(){if(serviceTouch){serviceTouch=false;refresh()}}
+$("serviceLaser").onpointerdown=()=>{serviceTouch=true};
+// Bricht der Browser die Geste ab, kommt kein change: dann zeigt der Regler wieder den Stand des Pi.
+for(const t of ["pointerup","pointercancel"])window.addEventListener(t,()=>{if(serviceTouch)setTimeout(serviceSettle,400)});
 $("serviceLaser").oninput=ev=>{
  const v=Number(ev.target.value);$("serviceLaserPct").textContent=v+" %";
  if(serviceBeam)serviceLaserSend(v);
 };
 $("serviceLaser").onchange=async ev=>{
- const v=Number(ev.target.value);serviceHold="ask";
- if(v&&!serviceBeam&&await ask("Laser an: "+v+" %?","Der Kopf steht still und brennt ohne Zeitbegrenzung auf eine Stelle, bis du ausschaltest. Darunter nur getestetes Material. Hände raus, Deckel zu, Brille – starten?","Laser an",true))serviceLaserSend(v);
- serviceHold=false;refresh();
+ const v=Number(ev.target.value);serviceTouch=false;
+ if(!v||serviceBeam)return;
+ serviceAsking=true;
+ const go=await ask("Laser an: "+v+" %?","Der Kopf steht still und brennt ohne Zeitbegrenzung auf eine Stelle, bis du ausschaltest. Darunter nur getestetes Material. Hände raus, Deckel zu, Brille – starten?","Laser an",true);
+ serviceAsking=false;
+ if(go){serviceNote("");serviceLaserSend(Number($("serviceLaser").value))}
+ else serviceSlider(0);
+ refresh();
 };
-$("serviceLaserOff").onclick=()=>{serviceHold=false;$("serviceLaser").value=0;$("serviceLaserPct").textContent="0 %";serviceLaserSend(0)};
-// The Pi switches the beam off when this stops (transport.service_laser_watchdog).
-setInterval(()=>{if(servicePw&&serviceBeam&&!serviceSending)api("/api/action",{method:"POST",body:param({op:"service_laser_ping",password:servicePw})}).catch(()=>{})},1500);
+$("serviceLaserOff").onclick=()=>{serviceNote("");serviceOff()};
+// The Pi switches the beam off when this stops (transport.service_laser_watchdog). Der Ping ändert nie die Leistung.
+setInterval(()=>{if(servicePw&&serviceBeam&&!serviceLoop&&!serviceNoPing)api("/api/action",{method:"POST",body:param({op:"service_laser_ping",password:servicePw})}).catch(()=>{})},1500);
+// Tab zu: sofort aus, nicht erst nach den 5 s.
+addEventListener("pagehide",()=>{if(servicePw&&serviceBeam)navigator.sendBeacon?.("/api/action",param({op:"service_laser",password:servicePw,percent:"0"}))});
 for(const b of $$("[data-ztest]"))b.onclick=async ev=>{
  const d=Number(b.dataset.ztest),btn=ev.currentTarget;
- if(!await ask("Z-Test "+(d>0?"+":"")+d+" mm?","Nur Z, langsam (2 mm/s). Hände raus, Deckel zu, Brille. Danach ist die Maschine nicht referenziert.","Fahren",true))return;
+ if(!await askGo("Z-Test "+(d>0?"+":"")+d+" mm?","Nur Z, langsam (2 mm/s). Danach ist die Maschine nicht referenziert.","Fahren"))return;
  call("z_test",{distance:String(d)},btn);
 };
 // Nullpunkt oben rechts: Pfeil zeigt die Fahrtrichtung des Kopfes (← = X+, ↓ = Y+ zur Tür).
@@ -2266,13 +2477,29 @@ async function startMatcal(kind,button){
 $("matcalEngrave").onclick=ev=>startMatcal("engrave",ev.currentTarget);
 $("matcalCut").onclick=ev=>startMatcal("cut",ev.currentTarget);
 $("bedMapRun").onclick=async ev=>{
- if(!await ask("Bett leer?","Der Taster fährt 36 Punkte auf dem ganzen Bett ab, dazwischen nur 10 mm über dem Bett. Alles muss herunter: Material, Anschläge, Klemmen, Werkzeug. Laser bleibt aus.","Bett ist leer"))return;
+ if(!await ask("Bett leer?","Der Taster fährt 36 Punkte auf dem ganzen Bett ab, dazwischen nur 10 mm über dem Bett. Alles muss herunter: Material, Anschläge, Klemmen, Werkzeug. Laser bleibt aus.\n\n"+GO_LINE,"Bett ist leer, starten",true))return;
  call("bedmap",{},ev.currentTarget);
 };
 $("bedMapClear").onclick=async ev=>{
  if(!await ask("Bettkarte löschen?","Danach zeigt das Abtasten keine Dicke über dem Bett mehr.","Löschen",true))return;
  call("bedmap_clear",{},ev.currentTarget);
 };
+// Go-Abfrage je Auftrag; "connect" und andere Abfragen bewegen nichts und fragen nicht.
+async function goFor(op){
+ const mat=ws?.material?ws.material.name+" "+de(Number(ws.material.thickness_mm),Number(ws.material.thickness_mm)%1?1:0)+" mm":"nicht gewählt";
+ const where={absolute:"wie im G-Code",current:"an der Kopfposition",user:"am Ursprung"}[placeOrigin]||placeOrigin;
+ const job="„"+selectedJob()+"“\nMaterial: "+mat+"\nPlatzierung: "+where;
+ const q=(snapshot?.queue?.items||[]).filter(i=>i.state==="queued").length;
+ switch(op){
+  case "home":return askGo("Referenzieren?","Der Kopf fährt zu den Endschaltern, erst X/Y, dann Z. Laser bleibt aus.","Fahren");
+  case "probe":return askGo("Abtasten?","Der Taster fährt unter dem Kopf auf das Werkstück. Laser bleibt aus. Wurde das Werkstück bewegt, vorher neu scannen.","Abtasten");
+  case "park":return askGo("Parken?","Laser aus, Z hoch, Kopf fährt in die Park-Ecke oben rechts.","Fahren");
+  case "autorun":return askGo("Auftrag starten?",job+"\n\nReferenziert bei Bedarf, tastet das Material ab, dann brennt der Laser.");
+  case "start":return askGo("Ohne Abtasten starten?",job+"\n\nNutzt die letzte Abtastung. Der Laser brennt sofort los.");
+  case "queue_run":return askGo("Warteschlange starten?",q+(q===1?" Auftrag läuft":" Aufträge laufen nacheinander")+" ohne weitere Rückfrage, der Laser brennt.");
+  default:return true;
+ }
+}
 for(const b of $$("[data-action]"))
  b.onclick=async()=>{
   const op=b.dataset.action,needsName=["start","autorun"].includes(op);
@@ -2283,8 +2510,18 @@ for(const b of $$("[data-action]"))
    if(has("workspace")&&!ws?.material){show("Erst Material wählen – die Stärke bestimmt die Fahrhöhe",true);go("auftraege");$("materialName").focus();return}
    Object.assign(extra,{name:selectedJob()},placeFields());
   }
+  if(!await goFor(op))return;
   call(op,extra,b);
  };
+$("gotoRun").onclick=async ev=>{
+ const btn=ev.currentTarget,x=Number($("gotoX").value),y=Number($("gotoY").value),{W,H}=bedDims();
+ if($("gotoX").value===""||$("gotoY").value===""||!(x>=0&&x<=W&&y>=0&&y<=H)){show("X 0–"+W+" und Y 0–"+H+" mm eintragen",true);return}
+ if(await askGo("Zu Position fahren?","Kopf fährt auf X "+de(x)+" · Y "+de(y)+" mm. Laser bleibt aus.","Fahren"))call("moveto",{x,y},btn);
+};
+$("gotoOrigin").onclick=async ev=>{
+ const btn=ev.currentTarget,o=snapshot?.origin?.user||snapshot?.config?.user_origin;if(!o)return;
+ if(await askGo("Zum Ursprung fahren?","Kopf fährt auf X "+de(o[0])+" · Y "+de(o[1])+" mm. Laser bleibt aus.","Fahren"))call("moveto",{x:o[0],y:o[1]},btn);
+};
 $("lineLaserBtn").onclick=ev=>call("line_laser",{on:snapshot?.line_laser?.on?"0":"1"},ev.currentTarget);
 for(const b of $$("[data-accessory]"))b.onclick=()=>{const type=b.dataset.accessory;call(type,{on:snapshot&&snapshot[type==="light"?"lights":"exhaust"]?"0":"1"},b)};
 $("abortJob").onclick=ev=>call("abort",{},ev.currentTarget);
@@ -2309,9 +2546,12 @@ $("firmwareForm").onsubmit=async ev=>{
  try{const r=await withPending($("firmwareFlash"),()=>api("/api/firmware",{method:"POST",body:data}));show(r.message);refresh()}catch(e){show(e.message,true)}
 };
 // Not-Aus: wird nie deaktiviert und ist in der Kopfzeile immer erreichbar.
+// Der Pi löst dafür M112 aus.
 async function estop(){
- if(await ask("NOT-AUS auslösen?","Marlin-Notstopp M112: Laser und Motoren stoppen sofort. Danach das SKR am Reset-Taster zurücksetzen, quittieren und neu referenzieren. Ersetzt keinen physischen Not-Aus.","Jetzt stoppen",true))
-  call("estop");
+ estopAsking=true;
+ const stopNow=await ask("NOT-AUS auslösen?","Laser und Motoren stoppen sofort. Danach das SKR am Reset-Taster zurücksetzen, quittieren und neu referenzieren. Ersetzt keinen physischen Not-Aus.","Jetzt stoppen",true);
+ estopAsking=false;
+ if(stopNow)call("estop");
 }
 $("stop").onclick=estop;
 
@@ -2356,6 +2596,7 @@ $("fwCheck").onclick=ev=>call("firmware_update_check",{},ev.currentTarget);
 /* ================= Bedienpanel (ESP32) ================= */
 function renderPanel(s){
  const p=s.panel;
+ $("panelAuto").disabled=!p;
  if(!p){$("panelStatus").textContent="Pi-Dienst ohne Panel-Brücke";$("panelUpdate").disabled=true;return}
  const flashing=p.state==="flashing";
  $("panelVersion").textContent=p.port?(p.version||"unbekannt (alt)"):"nicht angeschlossen";
@@ -2379,7 +2620,18 @@ function renderApp(a){
  $("appError").hidden=!a.error;$("appError").textContent=a.error?"Letzte Prüfung: "+a.error:"";
  $("appDownload").hidden=!a.available;
 }
-async function loadApp(){try{renderApp(await api("/api/app/android"))}catch{$("appVersion").textContent="Pi-Dienst ohne App-Updates"}}
+async function loadApp(){try{renderApp(await api("/api/app/android"))}catch(e){if(!e.offline)$("appVersion").textContent="Pi-Dienst ohne App-Updates"}}
+/* Pi selbst: Softwarestand, Speicher, Temperatur (nur lesen, /api/system) */
+function renderPiInfo(i){
+ $("piInfo").hidden=false;
+ $("piVersion").textContent=i.software_commit||"unbekannt";
+ $("piVersionDate").textContent=i.software_date?new Date(i.software_date).toLocaleDateString("de-DE"):"";
+ $("piDisk").textContent=i.disk_free_bytes==null?"—":de(i.disk_free_bytes/1073741824,1)+" GB";
+ $("piJobs").textContent=i.jobs_bytes==null?"":"Aufträge "+kb(i.jobs_bytes);
+ $("piTemp").textContent=i.cpu_temp_c==null?"—":de(i.cpu_temp_c,0)+" °C";
+ $("piUptime").textContent=i.service_uptime_s==null?"—":dur(i.service_uptime_s);
+}
+async function loadPiInfo(){try{renderPiInfo(await api("/api/system"))}catch(e){if(!e.offline)$("piInfo").hidden=true}}
 $("appCheck").onclick=async ev=>{
  try{const r=await withPending(ev.currentTarget,()=>api("/api/action",{method:"POST",body:param({op:"app_update_check"})}));show(r.message);renderApp(r)}
  catch(e){show(e.message,true);loadApp()}
@@ -2389,14 +2641,14 @@ $("appCheck").onclick=async ev=>{
 const COMMANDS=[
  ["control","Steuerung","Seite",()=>go("steuerung")],["jobs","Aufträge","Seite",()=>go("auftraege")],["layers","Material","Seite",()=>go("material")],
  ["camera","Kamera","Seite",()=>go("kamera")],["sliders","Einstellungen","Seite",()=>go("einstellungen")],["pulse","System","Seite",()=>go("system")],
- ["home","Referenzieren","Maschine",()=>document.querySelector('[data-action="home"]').click()],
- ["park","Parken","Maschine",()=>document.querySelector('[data-action="park"]').click()],
- ["probe","Abtasten unter dem Kopf","Maschine",()=>document.querySelector('[data-action="probe"]').click()],
- ["play","Auftrag starten","Auftrag",()=>document.querySelector('[data-action="autorun"]').click()],
- ["frame","Rahmen zeigen","Auftrag",()=>$("frameJob").click()],
+ ["home","Referenzieren","Maschine",()=>press('[data-action="home"]')],
+ ["park","Parken","Maschine",()=>press('[data-action="park"]')],
+ ["probe","Abtasten unter dem Kopf","Maschine",()=>press('[data-action="probe"]')],
+ ["play","Auftrag starten","Auftrag",()=>press('[data-action="autorun"]')],
+ ["frame","Rahmen zeigen","Auftrag",()=>press("#frameJob")],
  ["upload","G-Code hochladen","Auftrag",()=>{go("auftraege");$("file").click()}],
- ["bulb","Licht an/aus","Zubehör",()=>document.querySelector('[data-accessory="light"]').click()],
- ["wind","Abluft an/aus","Zubehör",()=>document.querySelector('[data-accessory="exhaust"]').click()],
+ ["bulb","Licht an/aus","Zubehör",()=>press('[data-accessory="light"]')],
+ ["wind","Abluft an/aus","Zubehör",()=>press('[data-accessory="exhaust"]')],
  ["camera","Kamerabild holen","Kamera",()=>{go("kamera");camShot()}],
  ["download","Sicherung herunterladen","System",()=>$("backupBtn").click()],
  ["moon","Hell/Dunkel umschalten","Oberfläche",()=>$("themeBtn").click()],
@@ -2449,6 +2701,7 @@ setTheme(document.documentElement.dataset.theme||"auto");
 route();drawBed(null);drawPreview();
 refresh();files();loadMaterials();loadApp();
 setInterval(loadApp,300000);
+setInterval(()=>{if(page()==="system"&&!document.hidden)loadPiInfo()},30000);
 setInterval(()=>{if(materialState==="on")loadMaterials()},60000);
 let tick=0;
 setInterval(()=>{if(!document.hidden||++tick%4===0)refresh()},1500);   // im Hintergrund seltener

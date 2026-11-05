@@ -117,6 +117,7 @@ läuft bereits`). Das Stopp-Signal `stop_job` ist für alle drei dasselbe
 | GET | `/api/status` | – | kompletter Maschinen-, Auftrags-, Rahmen-, Warteschlangenstatus |
 | POST | `/api/action` | form | alle Maschinenaktionen über `op` (Abschnitt 4) |
 | POST | `/api/settings` | form | Einstellungen dauerhaft speichern (jedes Feld optional, Abschnitt 4.9) |
+| GET | `/api/system` | – | Softwarestand, Speicher und Temperatur des Pi, nur lesen (Abschnitt 4.9) |
 | GET | `/api/backup` | – | alle Einstellungen, Materialien, Arbeitsstand und Kamera-Kalibrierung als JSON-Download (Abschnitt 4.9) |
 | POST | `/api/commission` | form | Mechanik-Freigabe ein/aus |
 | POST | `/api/firmware` | multipart | SKR-Firmware über USB flashen |
@@ -447,7 +448,7 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | --- | --- |
 | Parameter | `seconds`: 1..10 (Standard 10) |
 | Vorbedingungen | **frei**, Referenz nicht nötig; kein Notstopp |
-| Wirkung | `M5 I`, `M400`, `M107 P0` (Laser-Relais aus), `M3 S255`, `G4`, `M5`. TTL-Pin (ISP-SCK, Pin 3; bis 01.11. MISO) ~5 V zum Messen, Laser ohne Versorgung. ⚠ Hardware |
+| Wirkung | `M5 I`, `M400`, `M107 P0` (Laser-Relais aus), `M3 S255`, `G4`, `M5`. TTL-Pin (PA9 an EXP3) ~5 V zum Messen, Laser ohne Versorgung. ⚠ Hardware |
 | Erfolg | 200 `TTL-Pin 10 s auf S255 (Relais aus), wieder aus.` |
 
 #### `op=z_test`
@@ -834,6 +835,13 @@ Web-UI jede Gruppe für sich.
 | Wirkung | speichert dauerhaft (`config.json`); ändert sich Taster-/Fokus-Geometrie, wird die gemessene Werkstückoberfläche gelöscht (`workpiece_surface_z = null`) |
 | Erfolg | 200 `{message, z_clearance_mm, focus_gap_mm, z_switch_tip_offset_mm, probe_offset_x_mm, probe_offset_y_mm, config, note}` |
 | Fehler | 400 `Z-Rückzug muss zwischen 0,5 und 50 mm liegen`, `Fokusabstand muss zwischen 0,1 und 30 mm liegen`, `Schalter-zu-Spitze-Offset muss zwischen -20 und +20 mm liegen`, `Taster-X/Y-Versatz muss -80..80 mm sein`, `X/Y-Tasterversatz entweder beide eintragen oder beide leer lassen`, `Gerätename: 1 bis 40 Zeichen`, `Abluft-Nachlauf muss 0..900 s sein`, `exhaust_auto 0/1 erwartet` |
+
+#### `GET /api/system`
+
+Liest nur, fasst die Maschine nicht an. `{software_commit, software_date, service_uptime_s,
+disk_free_bytes, disk_total_bytes, jobs_bytes, cpu_temp_c}`. `software_commit`/`software_date`
+sind der Stand beim Dienststart (`null`, wenn kein git-Stand lesbar), `cpu_temp_c` ist `null`,
+wenn der Pi keinen Sensor meldet. Die Oberfläche zeigt das unter System → Zustand.
 
 #### `GET /api/backup`
 
