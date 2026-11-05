@@ -26,6 +26,19 @@ lies in the zone, draws the zone stronger and reports once whenever that
 changes – so a motif dragged into the corner is flagged at once instead of
 being refused at send.
 
+Cut options and scan offset: kerf offset (outwards), lead-ins / lead-outs
+and the fill scan offset burn *outside* the object boxes, so the Pi can
+refuse a job whose boxes stay clear. :func:`cut_margin_mm` bounds how far a
+layer's powered path can leave its objects (2 × kerf for mitred corners,
+lead length – √2 × for a quarter-circle lead –, half the scan offset of a
+fill). Only when that bound changes the verdict (boxes clear, boxes +
+margin in the corner) the job is planned exactly like at send
+(:func:`planned_powered_box`: planner, scan offset, G-code, powered extent;
+images keep their object box, cached like the fill preview) – so the live
+warning now matches the send-time check, without planning on every drag.
+Fill overscan runs with the laser off (``S0``) and is not part of the
+powered extent – neither for the Pi nor here.
+
 Qt glue only uses public APIs: ``editor.add_overlay`` / ``refresh_overlays``
 / ``documentChanged`` / ``selectionChanged`` / ``document`` / ``selection``
 and the machine panel's ``status_changed`` signal, ``job_origin()``,
@@ -34,6 +47,8 @@ and the machine panel's ``status_changed`` signal, ``job_origin()``,
 
 from __future__ import annotations
 
+import math
+import threading
 from typing import Any, Callable, Iterable
 
 from PySide6.QtCore import QObject, QRectF, Qt
@@ -95,6 +110,94 @@ def design_box(shapes: Iterable[Any]) -> Box | None:
     if not xs:
         return None
     return Box(min(xs), min(ys), max(xs), max(ys))
+
+
+def cut_margin_mm(layer: Any, table: Any = None) -> float:
+    """Upper bound (mm) for how far the powered path of ``layer`` can reach
+    outside the object boxes of its shapes.
+
+    * kerf offset ``|kerf_mm|``: mitred corners (limit 2) move up to 2 × kerf;
+    * lead-in / lead-out: a straight 45° lead ends ``length`` from the start
+      point, a quarter circle (``lead_in_arc``, also used for the lead-out)
+      up to √2 × ``length``; leads start on the offset contour, so they add;
+    * fill scan offset (``table``, :mod:`.scan_offset`): every hatch line
+      moves by half the offset of the layer speed.
+
+    Fill overscan is laser-off and never counts. 0 = the object boxes are exact.
+    """
+    def num(name: str) -> float:
+        try:
+            return float(getattr(layer, name, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    margin = 2.0 * abs(num("kerf_mm"))
+    factor = math.sqrt(2.0) if getattr(layer, "lead_in_arc", False) else 1.0
+    margin += factor * max(num("lead_in_mm"), num("lead_out_mm"), 0.0)
+    if (table is not None and getattr(table, "active", False)
+            and str(getattr(layer, "fill_mode", "none")) not in ("none", "offset")):
+        try:
+            margin += abs(float(table.offset_for(num("speed")))) / 2.0
+        except Exception:  # noqa: BLE001 - malformed table: no shift
+            pass
+    return margin
+
+
+def margin_box(items: Iterable[tuple[Any, Any]], table: Any = None) -> Box | None:
+    """:func:`design_box` with every shape's box grown by its layer's
+    :func:`cut_margin_mm` – a box the powered path never leaves."""
+    out: Box | None = None
+    for sh, layer in items:
+        b = design_box((sh,))
+        if b is None:
+            continue
+        m = cut_margin_mm(layer, table) if layer is not None else 0.0
+        b = Box(b.xmin - m, b.ymin - m, b.xmax + m, b.ymax + m)
+        out = b if out is None else Box(min(out.xmin, b.xmin), min(out.ymin, b.ymin),
+                                        max(out.xmax, b.xmax), max(out.ymax, b.ymax))
+    return out
+
+
+_PLAN_LOCK = threading.Lock()
+_PLAN_CACHE: dict = {}
+
+
+def planned_powered_box(doc: Any, table: Any = None) -> Box | None:
+    """Exact powered extent (machine mm) of the vector part of ``doc`` as sent:
+    :func:`lumacut_job.planner.optimize_layers` (kerf, leads, tabs, start
+    points, same defaults as send / save), the scan offset ``table`` and
+    :func:`lumacut_canvas.gcode.layers_to_gcode`, measured with
+    :func:`park_corner.powered_bounds` like the Pi. Images are not planned
+    (their object box counts, see :func:`design_box`). The last result is
+    cached on the job layers, so status ticks and edits that leave the job
+    unchanged do not plan again. None if nothing is lasered."""
+    from lumacut_canvas.export import job_layers
+    from lumacut_canvas.gcode import layers_to_gcode
+
+    from .park_corner import powered_bounds
+    from .planner import optimize_layers
+    from .scan_offset import apply_to_layers
+    if table is not None and not getattr(table, "active", False):
+        table = None
+    layers = job_layers(doc)
+    if not layers:
+        return None
+    key = (repr(layers), repr(table))
+    with _PLAN_LOCK:
+        if _PLAN_CACHE.get("key") == key:
+            return _PLAN_CACHE["value"]
+    box = powered_bounds(layers_to_gcode(apply_to_layers(optimize_layers(layers), table)))
+    with _PLAN_LOCK:
+        _PLAN_CACHE.clear()
+        _PLAN_CACHE.update(key=key, value=box)
+    return box
+
+
+def union_box(a: Box | None, b: Box | None) -> Box | None:
+    """Smallest box containing both (None ignored)."""
+    if a is None or b is None:
+        return a if b is None else b
+    return Box(min(a.xmin, b.xmin), min(a.ymin, b.ymin), max(a.xmax, b.xmax),
+               max(a.ymax, b.ymax))
 
 
 def placed_zone_rect(corner: tuple[float, float], origin: str, anchor: str,
@@ -179,6 +282,8 @@ class ParkZoneOverlay:
         self.hits: tuple[str, ...] = ()
         #: True when the design as a whole would be refused (Pi rule: design box).
         self.refused = False
+        #: True when only the cut options / scan offset (lead-ins, kerf …) reach in.
+        self.by_cut = False
 
     @property
     def rect(self) -> Rect | None:
@@ -187,7 +292,9 @@ class ParkZoneOverlay:
     def label(self) -> str:
         text = "Park-Ecke" + (f" ({self.placed_label})" if self.placed_label else "")
         n = len(self.hits)
-        if n:
+        if self.by_cut and self.refused:
+            text += " – Anfahrt / Versatz reicht hinein!"
+        elif n:
             text += f" – {n} Objekt{'e' if n != 1 else ''} darin!"
         elif self.refused:
             text += " – Motiv-Umriss reicht hinein!"
@@ -299,6 +406,53 @@ class ParkZoneSync(QObject):
                     out.append((sh, layer))
         return out
 
+    def job_document(self) -> Any:
+        """The document the job is built from (the selection with „Nur Auswahl“)."""
+        doc = getattr(self.editor, "document", None)
+        only = False
+        if self.selection_only is not None:
+            try:
+                only = bool(self.selection_only())
+            except Exception:  # noqa: BLE001
+                only = False
+        if not only or doc is None:
+            return doc
+        from .selection import selection_document
+        try:
+            return selection_document(doc, getattr(self.editor, "selection", ()) or ())
+        except ValueError:
+            return None
+
+    def job_box(self, items: list[tuple[Any, Any]], corner: tuple[float, float],
+                origin: str, anchor: str,
+                target: tuple[float, float] | None) -> tuple[Box | None, bool]:
+        """(design box the Pi rule is applied to, True if only the cut options
+        / scan offset push it into the corner).
+
+        The object boxes are used as long as the margin of the cut options
+        (:func:`margin_box`) cannot change the verdict; otherwise the job is
+        planned exactly (:func:`planned_powered_box`) and its powered extent
+        is added to the object boxes."""
+        plain = design_box(sh for sh, _l in items)
+        if plain is None:
+            return None, False
+        from .scan_offset import active_table
+        table = active_table()
+        grown = margin_box(items, table)
+        if grown is None or grown == plain:
+            return plain, False
+        if design_hits_zone(plain, corner, origin, anchor, target):
+            return plain, False
+        if not design_hits_zone(grown, corner, origin, anchor, target):
+            return plain, False
+        doc = self.job_document()
+        try:
+            exact = planned_powered_box(doc, table) if doc is not None else None
+        except Exception:  # noqa: BLE001 - planning failed: the send check decides
+            return plain, False
+        box = union_box(plain, exact)
+        return box, design_hits_zone(box, corner, origin, anchor, target)
+
     def update(self) -> bool:
         """Re-read corner, origin and document; redraw only on a change.
         Returns True if the overlay changed."""
@@ -308,42 +462,53 @@ class ParkZoneSync(QObject):
         items = self.job_shapes()
         placed = None
         label = ""
+        target = None if origin == "absolute" else origin_target(status, origin)
+        visible = origin == "absolute" or target is not None
+        box, by_cut = (self.job_box(items, corner, origin, anchor, target) if visible
+                       else (None, False))
         if origin == "absolute":
             zone = park_zone_rect(corner)
-            visible = True
         else:
-            target = origin_target(status, origin)
-            placed = placed_zone_rect(corner, origin, anchor, target,
-                                      design_box(sh for sh, _l in items))
+            placed = placed_zone_rect(corner, origin, anchor, target, box)
             zone = placed
-            visible = target is not None
             label = "am Ursprung „%s“" % ORIGIN_NAMES.get(origin, origin)
         hits: tuple[str, ...] = ()
         refused = False
         if visible and zone is not None:
-            box = design_box(sh for sh, _l in items)
-            target = None if origin == "absolute" else origin_target(status, origin)
             refused = design_hits_zone(box, corner, origin, anchor, target)
-            if refused:
+            if by_cut:
+                from .scan_offset import active_table
+                table = active_table()
+                hits = tuple(sh.id for sh, layer in items
+                             if object_hits_zone_rect(_grown(sh.bounds(),
+                                                             cut_margin_mm(layer, table)), zone))
+            elif refused:
                 hits = tuple(sh.id for sh, _l in items if object_hits_zone_rect(sh.bounds(), zone))
+        by_cut = by_cut and refused
         ov = self.overlay
-        state = (corner, visible, placed, label, hits, refused)
-        if state == (ov.corner, ov.visible, ov.placed, ov.placed_label, ov.hits, ov.refused):
+        state = (corner, visible, placed, label, hits, refused, by_cut)
+        if state == (ov.corner, ov.visible, ov.placed, ov.placed_label, ov.hits, ov.refused,
+                     ov.by_cut):
             return False
-        old = (ov.hits, ov.refused)
-        ov.corner, ov.visible, ov.placed, ov.placed_label, ov.hits, ov.refused = state
+        old = (ov.hits, ov.refused, ov.by_cut)
+        (ov.corner, ov.visible, ov.placed, ov.placed_label, ov.hits, ov.refused,
+         ov.by_cut) = state
         self.editor.refresh_overlays()
-        if (hits, refused) != old:
-            self._warn(hits, refused, corner, origin)
+        if (hits, refused, by_cut) != old:
+            self._warn(hits, refused, corner, origin, by_cut)
         return True
 
     def _warn(self, hits: tuple[str, ...], refused: bool, corner: tuple[float, float],
-              origin: str) -> None:
+              origin: str, by_cut: bool = False) -> None:
         where = "" if origin == "absolute" else \
             " am Ursprung „%s“" % ORIGIN_NAMES.get(origin, origin)
         tail = ("in der Park-Ecke X0–%g / Y0–%g mm (rot schraffiert) – dort lasert der Pi "
                 "nicht, der Auftrag würde abgelehnt." % (corner[0], corner[1]))
-        if hits:
+        if by_cut and refused:
+            text = ("Achtung: An-/Abfahrt, Kerf- oder Scan-Versatz (Schnitt-Optionen der "
+                    "Ebene) des Motivs%s reicht %s Motiv etwas weiter wegschieben oder "
+                    "An-/Abfahrt kürzen." % (where, tail))
+        elif hits:
             n = len(hits)
             text = ("Achtung: %d Objekt%s %s%s %s Bitte aus dem Bereich schieben."
                     % (n, "e" if n != 1 else "", "liegen" if n != 1 else "liegt", where, tail))
@@ -360,6 +525,10 @@ class ParkZoneSync(QObject):
                 self.report(text)
             except Exception:  # noqa: BLE001 - message only
                 pass
+
+
+def _grown(r: Rect, m: float) -> Rect:
+    return r if m <= 0 else Rect(r.x - m, r.y - m, r.w + 2 * m, r.h + 2 * m)
 
 
 def install_park_zone(editor: Any, machine_panel: Any = None, parent: QObject | None = None,
