@@ -80,6 +80,16 @@ def wait_for_answer(b, count=1):
     raise AssertionError("no answer from the bridge")
 
 
+class RunEsptoolTest(unittest.TestCase):
+    def test_home_points_at_the_data_folder(self):
+        # 05.11.: ProtectHome made esptool fail on ~/.config/esptool/esptool.cfg.
+        from unittest import mock
+        done = mock.Mock(returncode=0, stdout="ok", stderr="")
+        with mock.patch.object(panel.subprocess, "run", return_value=done) as run:
+            self.assertTrue(panel.run_esptool(["esptool"])[0])
+        self.assertEqual(run.call_args.kwargs["env"]["HOME"], str(panel.PYLIB.parent))
+
+
 class PanelActionTest(unittest.TestCase):
     def test_jog_goes_through_the_pi_api(self):
         b = bridge()
