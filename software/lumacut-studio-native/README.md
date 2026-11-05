@@ -429,6 +429,17 @@ G-Code byte-gleich).
 - Beschriftung: Leistung %, Geschwindigkeit mm/s, Linienabstand mm, Durchgänge „3x“; breite
   Zeilen-Beschriftungen verbreitern die Beschriftungsspalte (Arbeitsflächen-Prüfung inklusive).
 - Ein Undo-Schritt; Pi-sicherer G-Code wie jede andere Ebene.
+- **Bild-Testzellen** (wie LightBurns *Interval Test* „Dithered Image“, für Fotogravur):
+  „Art“ = „Bild (Graustufen-Verlauf)“ legt in jede Zelle einen Graustufen-Verlauf
+  (Weiß links → Schwarz rechts) als Bildobjekt, graviert im gewählten „Bildmodus“
+  (Schwellwert, Floyd-Steinberg, Atkinson, Jarvis, Stucki, Sierra, Bayer, Halbton,
+  Zeitungsdruck, Graustufen, 3D-Tiefe; Skizze nicht) mit Leistung (bei Schwarz),
+  Geschwindigkeit, Linienabstand und Durchgängen der Zelle; „Min.-Leistung (Weiß)“ gilt
+  für alle Zellen (höchstens die kleinste Leistung). Alle Achsen-Parameter gehen,
+  auch der Linienabstand-Test. Die Bilder laufen vor der Beschriftung (Bilder vor
+  Vektoren), die Zellen-Ebenen heißen wie bisher (Preset aus Testzelle funktioniert);
+  maßgeblich für den G-Code sind die Bild-Einstellungen der Zelle (*Datei ›
+  Bildeinstellungen…*), nicht die Ebenenwerte. Tests: `tests/test_material_test_image.py`.
 
 ### Füllung: Schraffur, Kreuzschraffur und Offset-Füllung je Ebene
 
