@@ -435,7 +435,7 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | --- | --- |
 | Parameter | `password`, `percent`: 0..100 |
 | Vorbedingungen | frei, Referenz nicht nötig; kein Notstopp; **Go des Besitzers, Material unter der Düse geprüft** |
-| Wirkung | Beim Einschalten `M5 I`, `M400`, dann `M3 S<round(percent·2,55)>`; 0 = `M5`. Keine Zeitgrenze, 24 V bleiben wie gesetzt. Die Seite wiederholt den Wert alle 1,5 s; bleibt er 5 s aus, schaltet der Pi mit `M5` ab. Status: `service_laser_percent`. Laser im Stillstand! ⚠ Hardware |
+| Wirkung | Beim Einschalten `M5 I`, `M400`, dann `M3 S<round(percent·2,55)>`; 0 = `M5`. Keine Zeitgrenze, 24 V bleiben wie gesetzt. Die Seite meldet sich alle 1,5 s mit `op=service_laser_ping` (`password`, ändert nie die Leistung); bleibt das 5 s aus, schaltet der Pi mit `M5` ab. Status: `service_laser_percent`. Laser im Stillstand! ⚠ Hardware |
 
 #### `op=ttl_test`
 

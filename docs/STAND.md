@@ -414,6 +414,9 @@ Voraussetzungen:
       PWM geht laut Besitzer später an und früher aus als die 24 V: Beim Schuss war das Absicht (0,8 s Wartezeit, 24 V blieben stehen).
       **Service-Menü (Besitzer):** Regler 0–100 %, keine Zeitgrenze, 24 V an/aus (`op=service_laser` statt `service_fire`, 24-V-Timer entfällt).
       Strahl aus bei 24-V-Schalten und wenn die Seite 5 s schweigt (Wächter im `monitor_loop`). Offen: Etiketten ändern, TQ/R1.
+      Besitzer sah 17:13–17:16 den Laser im Takt des Protokolls wechseln. Pi-Log: Leistung sprang von einer IP zwischen 23 % und dem Reglerwert
+      (mein Fehler: Seite wiederholte den Wert, vermutlich zwei Tabs). Behoben mit `op=service_laser_ping`. Offen: ob das Flackern damit weg ist;
+      das M114 alle 2 s (Monitor) schaltet laut Marlin-Quelltext nichts ab, im Stillstand mit festem Wert nachprüfen.
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut

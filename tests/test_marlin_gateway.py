@@ -1168,14 +1168,24 @@ class ServiceLaserTests(unittest.TestCase):
                 ctrl.service_laser(pct)
         self.assertEqual(ctrl.serial.writes, [])
 
-    def test_no_time_limit_while_the_page_repeats_the_value(self):
+    def test_no_time_limit_while_the_page_confirms(self):
         ctrl = ParkLowTests().machine()
         ctrl.service_laser(50)
         self.assertFalse(ctrl.service_laser_watchdog())
         ctrl.service_ping -= 3600
-        ctrl.service_laser(50)
+        ctrl.service_laser_ping()
         self.assertFalse(ctrl.service_laser_watchdog())
         self.assertEqual(ctrl.service_power, 127)
+
+    def test_ping_never_changes_the_power(self):
+        # 05.11.: a second tab repeated its old value and made the beam jump.
+        ctrl = ParkLowTests().machine()
+        ctrl.service_laser(50)
+        ctrl.service_laser(0)
+        sent = list(ctrl.serial.writes)
+        self.assertEqual(ctrl.service_laser_ping(), 0)
+        self.assertEqual(ctrl.service_power, 0)
+        self.assertEqual(ctrl.serial.writes, sent)
 
     def test_beam_off_when_the_page_is_gone(self):
         ctrl = ParkLowTests().machine()

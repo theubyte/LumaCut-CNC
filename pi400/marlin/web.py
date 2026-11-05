@@ -703,6 +703,10 @@ def action():
         if power != before:
             logging.warning("Service: Laser %g %% (S%d) im Stillstand", percent, power)
         return jsonify(message="Laser %g %%" % percent if power else "Laser aus")
+    if op == "service_laser_ping":
+        # Page still open: only keeps the beam from timing out (transport.service_laser_ping).
+        service_auth.check(request.form.get("password", ""))
+        return jsonify(message="Laser %d %%" % round(machine.service_laser_ping() / 2.55))
     if op == "ttl_test":
         # TTL pin at full duty, laser relay off (transport.ttl_test).
         seconds = float(request.form.get("seconds", "10"))

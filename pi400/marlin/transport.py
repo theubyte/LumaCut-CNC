@@ -105,7 +105,7 @@ Z_TEST_FEED_MM_MIN = 120
 Z_SPEED_DEFAULT = 9.0
 Z_SPEED_MAX = 30.0
 SUPPLY_TEST_MAX_S = 30.0  # op=supply_test: laser rail on for measuring, beam off
-SERVICE_LASER_PING_S = 5.0  # service slider: beam off when the page stops repeating its value
+SERVICE_LASER_PING_S = 5.0  # service slider: beam off when the page stops confirming
 TTL_TEST_MAX_S = 10.0  # op=ttl_test: PWM pin at full duty, laser relay off
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
@@ -1210,8 +1210,8 @@ class MarlinTransport:
     def service_laser(self, percent: float, owner: str = "web"):
         """Service menu slider: stationary beam 0..100 %, no time limit.
 
-        The page repeats its value while the beam is on; when it stops,
-        service_laser_watchdog() switches the beam off. The rail stays as set.
+        The page confirms with service_laser_ping() while the beam is on; when
+        it stops, service_laser_watchdog() switches the beam off. The rail stays as set.
         """
         if not isinstance(percent, (int, float)) or not 0 <= percent <= 100:
             raise ValueError("Laser: Leistung 0..100 %")
@@ -1233,6 +1233,12 @@ class MarlinTransport:
             self._exchange_locked("M3 S%d" % power, timeout=6.0)
             self.service_power = power
         return power
+
+    def service_laser_ping(self):
+        """The service page is still open. Never changes the power: an old
+        tab or a late request must not bring a switched-off beam back."""
+        self.service_ping = time.monotonic()
+        return self.service_power
 
     def service_laser_watchdog(self):
         """Beam off when the service page is gone (closed, hidden, network)."""

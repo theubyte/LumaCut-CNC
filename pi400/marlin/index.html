@@ -2190,7 +2190,7 @@ $("serviceLaser").onchange=async ev=>{
 };
 $("serviceLaserOff").onclick=()=>{serviceHold=false;$("serviceLaser").value=0;$("serviceLaserPct").textContent="0 %";serviceLaserSend(0)};
 // The Pi switches the beam off when this stops (transport.service_laser_watchdog).
-setInterval(()=>{if(servicePw&&serviceBeam&&!serviceSending)api("/api/action",{method:"POST",body:param({op:"service_laser",password:servicePw,percent:String(serviceBeam)})}).catch(()=>{})},1500);
+setInterval(()=>{if(servicePw&&serviceBeam&&!serviceSending)api("/api/action",{method:"POST",body:param({op:"service_laser_ping",password:servicePw})}).catch(()=>{})},1500);
 for(const b of $$("[data-ztest]"))b.onclick=async ev=>{
  const d=Number(b.dataset.ztest),btn=ev.currentTarget;
  if(!await ask("Z-Test "+(d>0?"+":"")+d+" mm?","Nur Z, langsam (2 mm/s). Hände raus, Deckel zu, Brille. Danach ist die Maschine nicht referenziert.","Fahren",true))return;
