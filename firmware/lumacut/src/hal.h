@@ -34,6 +34,7 @@ bool hal_usb_link_ok(void);
 void hal_usb_rx_resume(void); // call after freeing receive space
 
 // TMC UART, polled.
+void hal_tmc_bus_lock(bool locked); // no USB interrupt during a polled read
 void hal_tmc_send(const uint8_t *data, size_t len);
 size_t hal_tmc_recv(uint8_t *data, size_t max, uint32_t timeout_us);
 

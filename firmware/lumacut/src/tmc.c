@@ -134,8 +134,10 @@ static bool reg_read(uint8_t axis, uint8_t reg, uint32_t *value)
     uint8_t f[4], rx[8]; // hal_tmc_send already took our echo off the wire
     size_t n = tmc_frame_read(f, ADDR[axis], reg);
     for (int attempt = 0; attempt < 4; attempt++) {
+        hal_tmc_bus_lock(true);
         hal_tmc_send(f, n);
         size_t got = hal_tmc_recv(rx, sizeof rx, 4000);
+        hal_tmc_bus_lock(false);
         if (tmc_find_reply(rx, got, reg, value)) return true;
     }
     return false;
@@ -176,7 +178,11 @@ tmc_health_t tmc_check_reset(uint8_t *axis)
     for (uint8_t a = 0; a < AXES; a++) {
         uint32_t gstat;
         *axis = a;
-        if (!reg_read(a, REG_GSTAT, &gstat)) return TMC_NO_ANSWER;
+        // This verdict drops the reference: one lost read is not enough for it.
+        if (!reg_read(a, REG_GSTAT, &gstat) && !reg_read(a, REG_GSTAT, &gstat) &&
+            !reg_read(a, REG_GSTAT, &gstat)) {
+            return TMC_NO_ANSWER;
+        }
         if (gstat & 1u) return TMC_WAS_RESET;
     }
     return TMC_OK;

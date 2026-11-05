@@ -3,6 +3,7 @@
 // a late byte only costs a retry, it can never touch steps or the laser PWM.
 #include "../hal.h"
 #include "board.h"
+#include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/usart.h>
 
 // 115200: TMC_BAUD_RATE default for hardware serial, Marlin 2.1.2.9 trinamic.cpp.
@@ -22,6 +23,12 @@ void tmc_uart_init(void)
     USART_CR1(UART4) = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE;
 }
 
+void hal_tmc_bus_lock(bool locked)
+{
+    if (locked) nvic_disable_irq(NVIC_USB_LP_CAN_RX0_IRQ);
+    else nvic_enable_irq(NVIC_USB_LP_CAN_RX0_IRQ);
+}
+
 void hal_tmc_send(const uint8_t *data, size_t len)
 {
     while (USART_SR(UART4) & (USART_SR_RXNE | USART_SR_ORE)) (void)USART_DR(UART4);
@@ -35,6 +42,11 @@ void hal_tmc_send(const uint8_t *data, size_t len)
         }
         (void)USART_SR(UART4);
         (void)USART_DR(UART4); // our own echo
+    }
+    // The last echo can land just after TC; a reply needs over 150 us at the earliest.
+    uint32_t guard = 30u * LOOPS_PER_US;
+    while (guard--) {
+        if (USART_SR(UART4) & (USART_SR_RXNE | USART_SR_ORE)) (void)USART_DR(UART4);
     }
 }
 

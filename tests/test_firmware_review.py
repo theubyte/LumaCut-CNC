@@ -297,5 +297,19 @@ class BlindLiftTests(unittest.TestCase):
         self.assertEqual(ctrl.z_unhomed_lift, 25.0)
 
 
+class EndstopPolarityTests(unittest.TestCase):
+    """05.11. on the board: M119 was right, the step interrupt read the raw pin.
+
+    Motion then stopped at once on an unpressed switch and ran through a
+    pressed one. The simulator replaces these files, so check the source.
+    """
+    def test_only_hal_endstops_reads_the_pins(self):
+        src = Path(__file__).resolve().parent.parent / "firmware" / "lumacut" / "src" / "hw"
+        self.assertIn("sg_pre(hal_endstops())", (src / "step_timer.c").read_text("utf-8"))
+        readers = [p.name for p in sorted(src.glob("*.c")) if "GPIO_IDR(GPIOC)" in p.read_text("utf-8")]
+        self.assertEqual(readers, ["outputs.c"])
+        self.assertIn("~GPIO_IDR(GPIOC)", (src / "outputs.c").read_text("utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

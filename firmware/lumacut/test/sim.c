@@ -109,6 +109,8 @@ void hal_usb_rx_resume(void) { sim.inject_armed = sim.inject_after_pop != 0; }
 static uint8_t tmc_reply[8];
 static size_t tmc_reply_len;
 
+void hal_tmc_bus_lock(bool locked) { (void)locked; }
+
 void hal_tmc_send(const uint8_t *data, size_t len)
 {
     tmc_reply_len = 0;

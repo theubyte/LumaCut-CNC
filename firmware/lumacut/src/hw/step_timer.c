@@ -66,7 +66,7 @@ void tim2_isr(void)
         Y_STEP | Z_STEP,
         X_STEP | Y_STEP | Z_STEP,
     };
-    uint32_t bits = STEP_BITS[sg_pre((uint8_t)(GPIO_IDR(GPIOC) & 7u)) & 7u];
+    uint32_t bits = STEP_BITS[sg_pre(hal_endstops()) & 7u];
     if (bits) {
         GPIO_BSRR(GPIOB) = bits;
         __asm__ volatile(NOP36);
