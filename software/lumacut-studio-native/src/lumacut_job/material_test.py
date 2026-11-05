@@ -3,13 +3,17 @@ Material Test / Interval Test.
 
 By default columns vary power and rows vary speed. Like LightBurn's Material
 Test, the parameter of each axis can be chosen: power, speed, line interval
-(interval test, engrave cells only) or passes; a parameter that is not on an
-axis takes its fixed value (``power_min``, ``speed_min``, ``line_interval_mm``,
-``passes``). Every cell gets its own canvas layer (one layer = one laser
+(interval test, engrave cells only), passes or focus (relative Z offset /
+LightBurn *Focus Test*); a parameter that is not on an axis takes its fixed
+value (``power_min``, ``speed_min``, ``line_interval_mm``, ``passes``,
+``focus_min``). Every cell gets its own canvas layer (one layer = one laser
 setting in LumaCut), so the existing G-code path, layer panel and preview work
 unchanged. Cells are either outlines or filled with a serpentine hatch at the
 cell's line interval (engrave test). Optional labels go on a separate
-low-power layer.
+low-power layer. The focus axis sets ``Layer.z_offset`` (mm relative to the
+current focus when the job starts; negative = closer to the material) and
+keeps the ``Test P…% F…`` layer names so the material library still parses
+the cells.
 
 Image cells (LightBurn Interval Test "Dithered Image", photo-engraving test):
 with ``image_mode`` set, every cell is an image object holding a white-to-black
@@ -28,15 +32,16 @@ import zlib
 from dataclasses import dataclass
 
 from lumacut_canvas.model import (IMAGE_MODES, LAYER_COLORS, PASSES_RANGE, POWER_RANGE,
-                                  SPEED_RANGE, Document, Geometry, ImageSettings, Layer,
-                                  RasterImage, Shape)
+                                  SPEED_RANGE, Z_OFFSET_RANGE, Document, Geometry,
+                                  ImageSettings, Layer, RasterImage, Shape)
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
 
 # Parameters that can vary along the columns / rows of the grid.
-TEST_PARAMS = ("power", "speed", "interval", "passes")
+TEST_PARAMS = ("power", "speed", "interval", "passes", "focus")
 TEST_PARAM_LABELS = {"power": "Leistung", "speed": "Geschwindigkeit",
-                     "interval": "Linienabstand", "passes": "Durchgänge"}
+                     "interval": "Linienabstand", "passes": "Durchgänge",
+                     "focus": "Fokus-Versatz"}
 INTERVAL_TEST_RANGE = (0.05, 2.0)   # mm
 # Image modes offered for image test cells (sketch only draws edges, a ramp has none).
 TEST_IMAGE_MODES = tuple(m for m in IMAGE_MODES if m != "sketch")
@@ -69,6 +74,11 @@ class MaterialTestSpec:
     row_param: str = "speed"
     interval_max: float = 0.5      # mm, only used when "interval" is on an axis
     passes_max: int = 5            # only used when "passes" is on an axis
+    # Focus Test (LightBurn): relative Z offset in mm; only used when "focus" is
+    # on an axis. Relative to the focus height when the job starts; negative =
+    # closer to the material. Needs motorized Z (LumaCut has it).
+    focus_min: float = -1.0
+    focus_max: float = 1.0
     # Image cells: "" = vector cells (hatch / outline); an image mode (TEST_IMAGE_MODES)
     # = grey-ramp image cells engraved in that mode. image_min_power = power at white.
     image_mode: str = ""
@@ -90,6 +100,8 @@ class MaterialTestSpec:
             return _steps(self.line_interval_mm, self.interval_max, n, 3)
         if param == "passes":
             return [int(round(v)) for v in _steps(self.passes, self.passes_max, n, 6)]
+        if param == "focus":
+            return _steps(self.focus_min, self.focus_max, n, 3)
         raise ValueError(f"Unbekannter Testparameter: {param}")
 
     def column_values(self) -> list:
@@ -99,9 +111,10 @@ class MaterialTestSpec:
         return self.param_values(self.row_param, self.rows)
 
     def cell_settings(self, row: int, column: int) -> dict:
-        """power / speed / interval / passes of one cell (fixed values off-axis)."""
+        """power / speed / interval / passes / focus of one cell (fixed off-axis)."""
         st = {"power": round(self.power_min, 1), "speed": round(self.speed_min, 1),
-              "interval": self.line_interval_mm, "passes": int(self.passes)}
+              "interval": self.line_interval_mm, "passes": int(self.passes),
+              "focus": 0.0}  # off-axis: no focus offset (keeps default grids byte-identical)
         st[self.column_param] = self.column_values()[column]
         st[self.row_param] = self.row_values()[row]
         return st
@@ -142,6 +155,12 @@ class MaterialTestSpec:
                 raise ValueError("Linienabstand 0.05..2 mm (oder 0)")
         if "passes" in axes and not PASSES_RANGE[0] <= self.passes_max <= PASSES_RANGE[1]:
             raise ValueError("Durchgänge außerhalb 1..30")
+        if "focus" in axes:
+            for v in (self.focus_min, self.focus_max):
+                if not Z_OFFSET_RANGE[0] <= v <= Z_OFFSET_RANGE[1]:
+                    raise ValueError(f"Fokus-Versatz außerhalb {Z_OFFSET_RANGE[0]:g}..{Z_OFFSET_RANGE[1]:g} mm")
+            if self.focus_min == self.focus_max:
+                raise ValueError("Fokus von und bis müssen verschieden sein")
         for p in (self.power_min, self.power_max, self.label_power):
             if not POWER_RANGE[0] <= p <= POWER_RANGE[1]:
                 raise ValueError("Leistung außerhalb 1..100 %")
@@ -173,11 +192,13 @@ def _steps(lo: float, hi: float, n: int, digits: int = 1) -> list[float]:
 
 
 def _label_text(param: str, value: float) -> str:
-    """Label of one column / row: power %, speed mm/s, interval mm, passes."""
+    """Label of one column / row: power %, speed mm/s, interval mm, passes, focus mm."""
     if param == "speed":
         return f"{value / 60:.0f}"
     if param == "passes":
         return f"{int(value)}x"
+    if param == "focus":
+        return f"{value:+g}"
     return f"{value:g}"
 
 
@@ -243,7 +264,8 @@ def build_material_test(spec: MaterialTestSpec) -> tuple[list[Layer], list[Shape
             # The name format is parsed by lumacut_materials.testgrid (TEST_CELL_RE).
             layer = Layer(name=f"Test P{power:g}% F{speed:g}",
                           color=LAYER_COLORS[(r * spec.columns + c) % len(LAYER_COLORS)],
-                          power=power, speed=speed, passes=st["passes"])
+                          power=power, speed=speed, passes=st["passes"],
+                          z_offset=float(st.get("focus", 0.0) or 0.0))
             if interval_test:
                 # Recorded on the layer (fill stays off, so no effect on the G-code).
                 layer.line_interval_mm = st["interval"]
