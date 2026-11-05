@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-05
 
+- **Service-Menü Laser, Regler statt Schuss:** Wunsch des Besitzers: Regler 0–100 % ohne Zeitgrenze und 24 V an/aus, die Grenzen 20 % und 5 s sowie das Selbstabschalten der 24 V nach 5 min entfallen. Der Strahl bleibt an, bis man ausschaltet. Er geht auch aus, wenn 24 V geschaltet werden oder die Seite verschwindet (5–7 s ohne Rückmeldung). Beim Einschalten kommt weiter die Nachfrage. Passwort bleibt.
 - **SKR: Laser-PWM auf PA9 umgezogen (Wunsch des Besitzers):** Das Signal kommt jetzt von PA9 an EXP3 statt von PA1 am BL-Touch-Stecker. PA9 läuft auf Timer 1 mit 1 kHz, getrennt von Temperatur und Schrittmotoren. Anlass: Der Besitzer misst an PA1, dass ein Schuss von 5 s nur kurz angeht und wieder aus. Die Ursache ist noch nicht gefunden, der Pinwechsel grenzt sie ein. Das Interface V2 muss dafür am SKR umgesteckt werden. Etiketten sind noch nicht geändert.
 - **Laser-Treiber ZY62, Messbilder:** `hardware/laser-treiber-zy62/` zeigt, wo und wie am Treiber gemessen wird.
 

@@ -967,7 +967,7 @@ dialog.danger h2{color:var(--bad)}
    </section>
    <section class="card" id="servicePanel">
     <div class="card-head"><h2><svg class="i"><use href="#i-beam"/></svg>Service: Laser</h2><span class="tag warn" id="serviceTag">gesperrt</span></div>
-    <p class="small muted">Laserversorgung 24 V von Hand schalten und den Laser im Stillstand feuern – zur Fehlersuche. Geschützt mit eigenem Passwort.</p>
+    <p class="small muted">Laserversorgung 24 V schalten und den Laser im Stillstand stufenlos einstellen – zur Fehlersuche. Geschützt mit eigenem Passwort.</p>
     <form id="serviceSetForm" class="stack" style="margin-top:12px" hidden>
      <p class="help">Noch kein Service-Passwort festgelegt. Bitte jetzt eines vergeben (mindestens 4 Zeichen).</p>
      <div class="cols2">
@@ -986,16 +986,12 @@ dialog.danger h2{color:var(--bad)}
       <button class="btn" id="serviceSupplyOn" type="button">24 V AN</button>
       <button class="btn" id="serviceSupplyOff" type="button">24 V AUS</button>
      </div>
-     <p class="help">Strahl bleibt dabei aus. Die Versorgung schaltet nach 5 min selbst ab.</p>
-     <div class="cols2">
-      <label class="field">Leistung<span class="unit" data-unit="%"><input id="serviceFirePct" type="number" min="0.1" max="20" step="0.1" value="1" inputmode="decimal"></span></label>
-      <label class="field">Dauer<span class="unit" data-unit="s"><input id="serviceFireSec" type="number" min="0.1" max="5" step="0.1" value="1" inputmode="decimal"></span></label>
-     </div>
+     <label class="field">Laserleistung: <b id="serviceLaserPct">0 %</b><input type="range" id="serviceLaser" min="0" max="100" step="1" value="0" aria-label="Laserleistung in Prozent"></label>
      <div class="row">
-      <button class="btn solid-danger" id="serviceFire" type="button">Laser feuern (Stillstand)</button>
+      <button class="btn solid-danger" id="serviceLaserOff" type="button">Laser AUS</button>
       <button class="btn ghost" id="serviceLock" type="button">Sperren</button>
      </div>
-     <p class="help">Höchstens 20 % und 5 s. Nur auf getestetem Material (MDF), nie auf dunklem Kunststoff.</p>
+     <p class="help">Keine Zeitbegrenzung: Der Strahl bleibt an, bis du ihn ausschaltest. Er geht auch aus, wenn du 24 V schaltest oder diese Seite schließt, wegklickst oder die Verbindung verlierst. Ohne 24 V kommt nur das Signal, kein Strahl. Nur auf getestetem Material.</p>
     </div>
    </section>
    <section class="card">
@@ -2150,12 +2146,13 @@ async function jog(b){
 for(const b of $$("[data-axis]"))b.onclick=()=>jog(b);
 // Z-Test: Richtung prüfen nach Antriebswechsel, auch ohne Referenz (op=z_test).
 /* Service-Menü Laser: Passwort bleibt nur im Speicher dieser Seite */
-let servicePw="";
+let servicePw="",serviceBeam=0,serviceWant=null,serviceSending=false,serviceHold=false;
 function renderService(s){
  const set=!!s.service_password_set,open=set&&!!servicePw;
  $("serviceSetForm").hidden=set;$("serviceUnlockForm").hidden=!set||open;$("serviceControls").hidden=!open;
  $("serviceTag").textContent=open?"entsperrt":"gesperrt";$("serviceTag").className="tag "+(open?"ok":"warn");
  $("serviceSupplyState").textContent=s.laser_cooling_fan_on?"AN":"AUS";
+ if(!serviceHold&&!serviceSending){serviceBeam=Number(s.service_laser_percent)||0;$("serviceLaser").value=serviceBeam;$("serviceLaserPct").textContent=serviceBeam+" %"}
 }
 $("serviceSetForm").onsubmit=async ev=>{
  ev.preventDefault();
@@ -2168,18 +2165,32 @@ $("serviceUnlockForm").onsubmit=async ev=>{
  const pw=$("servicePw").value;
  if(await call("service_unlock",{password:pw})){servicePw=pw;$("servicePw").value=""}
 };
-$("serviceLock").onclick=()=>{servicePw="";refresh()};
+$("serviceLock").onclick=async()=>{if(serviceBeam)await serviceLaserSend(0);servicePw="";refresh()};
 $("serviceSupplyOn").onclick=async ev=>{
  const btn=ev.currentTarget;
  if(!await ask("Laserversorgung 24 V an?","Der Strahl bleibt aus. Hände raus, Deckel zu.","Einschalten",true))return;
  call("service_supply",{password:servicePw,state:"on"},btn);
 };
 $("serviceSupplyOff").onclick=ev=>call("service_supply",{password:servicePw,state:"off"},ev.currentTarget);
-$("serviceFire").onclick=async ev=>{
- const btn=ev.currentTarget,pct=$("serviceFirePct").value,sec=$("serviceFireSec").value;
- if(!await ask("Laser feuern: "+pct+" % für "+sec+" s?","Der Kopf steht still und brennt auf eine Stelle. Darunter nur getestetes Material. Hände raus, Deckel zu, Brille – starten?","Feuern",true))return;
- call("service_fire",{password:servicePw,percent:pct,seconds:sec},btn);
+async function serviceLaserSend(pct){
+ serviceBeam=pct;serviceWant=pct;if(serviceSending)return;serviceSending=true;
+ while(serviceWant!==null){const v=serviceWant;serviceWant=null;await call("service_laser",{password:servicePw,percent:String(v)},null,true)}
+ serviceSending=false;refresh();
+}
+$("serviceLaser").onpointerdown=()=>{serviceHold=true};
+window.addEventListener("pointerup",()=>{if(serviceHold===true){serviceHold=false;refresh()}});
+$("serviceLaser").oninput=ev=>{
+ const v=Number(ev.target.value);$("serviceLaserPct").textContent=v+" %";
+ if(serviceBeam)serviceLaserSend(v);
 };
+$("serviceLaser").onchange=async ev=>{
+ const v=Number(ev.target.value);serviceHold="ask";
+ if(v&&!serviceBeam&&await ask("Laser an: "+v+" %?","Der Kopf steht still und brennt ohne Zeitbegrenzung auf eine Stelle, bis du ausschaltest. Darunter nur getestetes Material. Hände raus, Deckel zu, Brille – starten?","Laser an",true))serviceLaserSend(v);
+ serviceHold=false;refresh();
+};
+$("serviceLaserOff").onclick=()=>{serviceHold=false;$("serviceLaser").value=0;$("serviceLaserPct").textContent="0 %";serviceLaserSend(0)};
+// The Pi switches the beam off when this stops (transport.service_laser_watchdog).
+setInterval(()=>{if(servicePw&&serviceBeam&&!serviceSending)api("/api/action",{method:"POST",body:param({op:"service_laser",password:servicePw,percent:String(serviceBeam)})}).catch(()=>{})},1500);
 for(const b of $$("[data-ztest]"))b.onclick=async ev=>{
  const d=Number(b.dataset.ztest),btn=ev.currentTarget;
  if(!await ask("Z-Test "+(d>0?"+":"")+d+" mm?","Nur Z, langsam (2 mm/s). Hände raus, Deckel zu, Brille. Danach ist die Maschine nicht referenziert.","Fahren",true))return;

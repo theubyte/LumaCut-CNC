@@ -1149,40 +1149,68 @@ class SupplyTestTests(unittest.TestCase):
         self.assertEqual(ctrl.serial.writes, [])
 
 
-class FireTestTests(unittest.TestCase):
-    """Service menu shot: at most 20 %, beam always switched off."""
-    def test_low_power_shot_then_off(self):
+class ServiceLaserTests(unittest.TestCase):
+    """Service menu slider: 0..100 %, no time limit, off when the page is gone."""
+    def test_slider_sets_power_and_zero_switches_off(self):
         ctrl = ParkLowTests().machine()
-        self.assertEqual(ctrl.fire_test(1, 0.1), 3)
+        self.assertEqual(ctrl.service_laser(100), 255)
+        self.assertEqual(ctrl.service_laser(100), 255)
+        self.assertEqual(ctrl.service_laser(20), 51)
+        self.assertEqual(ctrl.service_laser(0), 0)
         w = ParkLowTests().lines(ctrl)
-        self.assertEqual(w, ["M5 I", "M400", "M106 P0 S255", "G4 P800",
-                             "M3 S3", "G4 P100", "M5", "M107 P0"])
+        self.assertEqual(w, ["M5 I", "M400", "M3 S255", "M3 S51", "M5"])
+        self.assertEqual(ctrl.service_power, 0)
 
     def test_limits(self):
         ctrl = ParkLowTests().machine()
-        for pct, sec in ((0, 1), (20.5, 1), (1, 0), (1, 5.5)):
+        for pct in (-1, 100.5):
             with self.assertRaises(ValueError):
-                ctrl.fire_test(pct, sec)
+                ctrl.service_laser(pct)
         self.assertEqual(ctrl.serial.writes, [])
 
+    def test_no_time_limit_while_the_page_repeats_the_value(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.service_laser(50)
+        self.assertFalse(ctrl.service_laser_watchdog())
+        ctrl.service_ping -= 3600
+        ctrl.service_laser(50)
+        self.assertFalse(ctrl.service_laser_watchdog())
+        self.assertEqual(ctrl.service_power, 127)
 
-    def test_shot_keeps_a_manually_switched_rail_on(self):
+    def test_beam_off_when_the_page_is_gone(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.service_laser(50)
+        ctrl.service_ping -= 6
+        self.assertTrue(ctrl.service_laser_watchdog())
+        self.assertEqual(ParkLowTests().lines(ctrl)[-1], "M5")
+        self.assertEqual(ctrl.service_power, 0)
+        self.assertFalse(ctrl.service_laser_watchdog())
+
+    def test_rail_switch_ends_the_beam_and_rail_stays(self):
         ctrl = ParkLowTests().machine()
         ctrl.set_laser_supply(True)
-        ctrl.fire_test(1, 0.1)
-        w = ParkLowTests().lines(ctrl)
-        self.assertEqual(w, ["M5 I", "M400", "M106 P0 S255", "M5 I", "M400",
-                             "M3 S3", "G4 P100", "M5"])
+        ctrl.service_laser(50)
+        ctrl.set_laser_supply(True)
+        self.assertEqual(ctrl.service_power, 0)
         self.assertTrue(ctrl.fan_power)
+
+    def test_emergency_stop_clears_the_slider(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.service_laser(50)
+        ctrl.emergency_stop()
+        self.assertEqual(ctrl.service_power, 0)
+        with self.assertRaises(ConnectionError):
+            ctrl.service_laser(50)
 
 
 class LaserSupplySwitchTests(unittest.TestCase):
-    """Service menu: 24 V rail by hand, switches itself off after a while."""
-    def test_on_arms_the_auto_off_and_off_releases(self):
+    """Service menu: 24 V rail by hand, no timer."""
+    def test_on_stays_until_switched_off(self):
         ctrl = ParkLowTests().machine()
         ctrl.set_laser_supply(True)
         self.assertTrue(ctrl.fan_power)
-        self.assertIsNotNone(ctrl.fan_off_at)
+        self.assertIsNone(ctrl.fan_off_at)
+        self.assertFalse(ctrl.service_cooldown())
         ctrl.set_laser_supply(False)
         w = ParkLowTests().lines(ctrl)
         self.assertEqual(w, ["M5 I", "M400", "M106 P0 S255", "M5 I", "M400", "M107 P0"])

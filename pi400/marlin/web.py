@@ -17,8 +17,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import (Aborted, MarlinTransport, MarlinLaserGuard, ProbeFailed, normalize,
-                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM, Z_SPEED_MAX,
-                        SUPPLY_ON_MAX_S)
+                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM, Z_SPEED_MAX)
 from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
@@ -246,6 +245,7 @@ _LIVE_STATUS_FIELDS = {
     "emergency_latched": lambda m: m.emergency_latched,
     "laser_armed": lambda m: m.laser_enabled,
     "laser_cooling_fan_on": lambda m: m.fan_power,
+    "service_laser_percent": lambda m: int(round(m.service_power / 2.55)),
     "position": lambda m: m.position,
     "fault": lambda m: m.fault,
     "workpiece_surface_z": lambda m: m.surface_z,
@@ -692,18 +692,17 @@ def action():
         on = request.form.get("state") == "on"
         local_owner()
         machine.set_laser_supply(on)
-        return jsonify(message="Laserversorgung 24 V " + (
-            "AN (Strahl aus, schaltet nach %d min selbst ab)" % (SUPPLY_ON_MAX_S // 60) if on else "AUS"))
-    if op == "service_fire":
-        # Stationary shot by hand after the owner's go (transport.fire_test).
+        return jsonify(message="Laserversorgung 24 V %s, Strahl aus" % ("AN" if on else "AUS"))
+    if op == "service_laser":
+        # Stationary beam from the slider, no time limit (transport.service_laser).
         service_auth.check(request.form.get("password", ""))
-        percent = float(request.form.get("percent", "1"))
-        seconds = float(request.form.get("seconds", "1"))
+        percent = float(request.form.get("percent", "0"))
         local_owner()
-        power = machine.fire_test(percent, seconds)
-        logging.warning("Service: Laser %g %% (S%d) %g s im Stillstand gefeuert", percent, power, seconds)
-        return jsonify(message="Laser %g %% (S%d) %g s im Stillstand gefeuert, wieder aus."
-                       % (percent, power, seconds))
+        before = machine.service_power
+        power = machine.service_laser(percent)
+        if power != before:
+            logging.warning("Service: Laser %g %% (S%d) im Stillstand", percent, power)
+        return jsonify(message="Laser %g %%" % percent if power else "Laser aus")
     if op == "ttl_test":
         # TTL pin at full duty, laser relay off (transport.ttl_test).
         seconds = float(request.form.get("seconds", "10"))
@@ -2392,6 +2391,11 @@ def monitor_loop():
             machine.service_cooldown()
         except Exception:
             logging.exception("Laser fan cooldown processing failed")
+        try:
+            if machine.service_laser_watchdog():
+                logging.warning("Service: Seite weg, Laser aus")
+        except Exception:
+            logging.exception("Service laser watchdog failed")
         if machine.owner is not None or machine.emergency_latched:
             continue
         if machine.serial is None and time.monotonic()-last_attempt >= 8.0:

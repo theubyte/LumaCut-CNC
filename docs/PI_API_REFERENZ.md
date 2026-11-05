@@ -227,6 +227,7 @@ Transportfelder (`MarlinTransport.status()` in `transport.py`):
 | `exhaust` | bool | Abluft (M8) an |
 | `laser_armed` | bool | Laser per `M3 I` scharf; außerhalb eines Auftrags immer `false` |
 | `laser_cooling_fan_on` | bool | Laserversorgung/Kühlung (FAN1/PC6) an |
+| `service_laser_percent` | int | Service-Regler: aktuelle Leistung 0–100 % |
 | `service_password_set` | bool | Service-Menü (Laser) hat ein Passwort (`op=service_password`) |
 | `workpiece_surface_z` | number \| null | gemessene Werkstückoberfläche (Z, mm) nach `op=probe`/G30; kann bis −3 mm sein (das Bett liegt unter Z0) |
 | `workpiece_above_bed_mm` | number \| null | gemessene Oberfläche über dem Bett an der angetasteten Stelle (= Werkstückdicke), nur mit Bettkarte |
@@ -426,15 +427,15 @@ der Fahrt. Client-Timeout großzügig wählen (Abschnitt 8.3).
 | | |
 | --- | --- |
 | Parameter | `password`, `state`: `on` / `off` |
-| Wirkung | `M5 I`, `M400`, dann `M106 P0 S255` (an) bzw. `M107 P0` (aus). Strahl aus; an schaltet nach 5 min selbst ab. Status: `laser_cooling_fan_on`. ⚠ Hardware |
+| Wirkung | `M5 I`, `M400`, dann `M106 P0 S255` (an) bzw. `M107 P0` (aus). Strahl aus, bleibt wie gesetzt (kein Timer). Status: `laser_cooling_fan_on`. ⚠ Hardware |
 
-#### `op=service_fire`
+#### `op=service_laser`
 
 | | |
 | --- | --- |
-| Parameter | `password`, `percent`: >0..20 (Standard 1), `seconds`: >0..5 (Standard 1) |
+| Parameter | `password`, `percent`: 0..100 |
 | Vorbedingungen | frei, Referenz nicht nötig; kein Notstopp; **Go des Besitzers, Material unter der Düse geprüft** |
-| Wirkung | `M5 I`, `M400`, (Relais an + `G4 P800`, falls aus), `M3 S<round(percent·2,55)>`, `G4`, danach immer `M5`; Relais wie vorher. Laser im Stillstand! ⚠ Hardware |
+| Wirkung | Beim Einschalten `M5 I`, `M400`, dann `M3 S<round(percent·2,55)>`; 0 = `M5`. Keine Zeitgrenze, 24 V bleiben wie gesetzt. Die Seite wiederholt den Wert alle 1,5 s; bleibt er 5 s aus, schaltet der Pi mit `M5` ab. Status: `service_laser_percent`. Laser im Stillstand! ⚠ Hardware |
 
 #### `op=ttl_test`
 

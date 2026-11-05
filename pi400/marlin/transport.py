@@ -105,9 +105,7 @@ Z_TEST_FEED_MM_MIN = 120
 Z_SPEED_DEFAULT = 9.0
 Z_SPEED_MAX = 30.0
 SUPPLY_TEST_MAX_S = 30.0  # op=supply_test: laser rail on for measuring, beam off
-FIRE_TEST_MAX_PCT = 20.0  # service menu: stationary shot, password + go
-FIRE_TEST_MAX_S = 5.0
-SUPPLY_ON_MAX_S = 300.0  # service menu: laser rail switches itself off after this
+SERVICE_LASER_PING_S = 5.0  # service slider: beam off when the page stops repeating its value
 TTL_TEST_MAX_S = 10.0  # op=ttl_test: PWM pin at full duty, laser relay off
 # Z0 is where the switch homes, not the bed: the bare bed measured 0.7 to
 # 1.2 mm below it (2026-10-29), so a contact down to this depth is real.
@@ -347,6 +345,8 @@ class MarlinTransport:
         self.lightburn_clients = 0
         self.laser_enabled = False
         self.fan_power = False
+        self.service_power = 0
+        self.service_ping = 0.0
         self.fan_cooldown_s = 180
         self.laser_supply_settle_ms = 800
         # A workpiece contact probe must explicitly establish surface_z.
@@ -482,6 +482,8 @@ class MarlinTransport:
     def _exchange_locked(self, cmd: str, timeout: float = 15.0):
         if self.serial is None:
             raise ConnectionError("SKR USB nicht verbunden")
+        if cmd.startswith("M5"):
+            self.service_power = 0
         self._unpark_before_locked(cmd)
         if self.inflight or self.stream_error:
             # Any normal exchange (M114, M5, G30, ...) must not read the
@@ -1187,8 +1189,7 @@ class MarlinTransport:
     def set_laser_supply(self, on: bool, owner: str = "web"):
         """Service menu: laser 24 V rail (relay on FAN0) on or off, beam off.
 
-        On also arms the cooldown timer, so service_cooldown() switches the
-        rail off by itself after SUPPLY_ON_MAX_S if nobody does.
+        Stays as set, no timer: switching either way also ends a service beam.
         """
         with self.lock:
             if self.owner not in (None, owner):
@@ -1200,48 +1201,47 @@ class MarlinTransport:
             if on:
                 self._exchange_locked("M106 P0 S255", timeout=8)
                 self.fan_power = True
-                self.fan_off_at = time.monotonic() + SUPPLY_ON_MAX_S
+                self.fan_off_at = None
             else:
                 self._exchange_locked("M107 P0", timeout=8)
                 self.fan_power = False
                 self.fan_off_at = None
 
-    def fire_test(self, percent: float, seconds: float, owner: str = "web"):
-        """Stationary laser shot from the service menu (password + go).
+    def service_laser(self, percent: float, owner: str = "web"):
+        """Service menu slider: stationary beam 0..100 %, no time limit.
 
-        Checks whether the module fires at all when jobs leave no mark.
-        At most FIRE_TEST_MAX_PCT for FIRE_TEST_MAX_S; no motion. The beam
-        is switched off in ``finally`` even if the dwell fails; the rail is
-        left as it was before the shot.
+        The page repeats its value while the beam is on; when it stops,
+        service_laser_watchdog() switches the beam off. The rail stays as set.
         """
-        if not isinstance(percent, (int, float)) or not 0 < percent <= FIRE_TEST_MAX_PCT:
-            raise ValueError("Feuertest: Leistung 0..%g %%" % FIRE_TEST_MAX_PCT)
-        if not isinstance(seconds, (int, float)) or not 0 < seconds <= FIRE_TEST_MAX_S:
-            raise ValueError("Feuertest: höchstens %g s" % FIRE_TEST_MAX_S)
-        power = max(1, int(round(percent * 255 / 100)))
+        if not isinstance(percent, (int, float)) or not 0 <= percent <= 100:
+            raise ValueError("Laser: Leistung 0..100 %")
+        power = int(round(percent * 2.55))
         with self.lock:
             if self.owner not in (None, owner):
                 raise RuntimeError("Steuerung belegt: " + self.owner)
             if self.serial is None or not self.identity or self.emergency_latched:
                 raise ConnectionError("Marlin USB nicht bereit oder Notstopp verriegelt")
-            supply_was_on = self.fan_power
-            self._exchange_locked("M5 I", timeout=6.0)
-            self._exchange_locked("M400", timeout=15)
-            if not supply_was_on:
-                self._exchange_locked("M106 P0 S255", timeout=8)
-                self._exchange_locked(
-                    f"G4 P{int(self.laser_supply_settle_ms)}", timeout=10)
-            try:
-                self._exchange_locked("M3 S%d" % power, timeout=6.0)
-                self._exchange_locked("G4 P%d" % int(seconds * 1000),
-                                      timeout=seconds + 10)
-            finally:
+            self.service_ping = time.monotonic()
+            if power == self.service_power:
+                return power
+            if power == 0:
                 self._exchange_locked("M5", timeout=6.0)
-                if not supply_was_on:
-                    self._exchange_locked("M107 P0", timeout=8)
-                    self.fan_power = False
-                    self.fan_off_at = None
+                return 0
+            if not self.service_power:
+                self._exchange_locked("M5 I", timeout=6.0)
+                self._exchange_locked("M400", timeout=15)
+            self._exchange_locked("M3 S%d" % power, timeout=6.0)
+            self.service_power = power
         return power
+
+    def service_laser_watchdog(self):
+        """Beam off when the service page is gone (closed, hidden, network)."""
+        with self.lock:
+            if (not self.service_power or
+                    time.monotonic() - self.service_ping < SERVICE_LASER_PING_S):
+                return False
+            self._exchange_locked("M5", timeout=6.0)
+            return True
 
     def ttl_test(self, seconds: float, owner: str = "web"):
         """Laser PWM pin at full duty with the laser rail OFF (owner 01.11.).
@@ -2092,6 +2092,7 @@ class MarlinTransport:
                 "light_effects": self.light_effects,
                 "laser_armed": self.laser_enabled,
                 "laser_cooling_fan_on": self.fan_power,
+                "service_laser_percent": int(round(self.service_power / 2.55)),
                 "workpiece_surface_z": self.surface_z,
                 "park_corner_mm": {"x": self.park_corner[0], "y": self.park_corner[1]},
                 "probe_xy_offset_mm": self.probe_xy_offset_mm,
@@ -2118,6 +2119,7 @@ class MarlinTransport:
         # Do not acquire the long-running command lock: a streaming G28
         # or G1 may be awaiting 'ok'. Marlin's EMERGENCY_PARSER accepts M112
         # on the input stream while a move is underway.
+        self.service_power = 0
         serial_port = self.serial
         if serial_port is None:
             self.emergency_latched = True

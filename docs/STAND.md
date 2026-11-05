@@ -410,7 +410,10 @@ Voraussetzungen:
       über G4; `LASER_SAFETY_TIMEOUT_MS` ist nur Verdacht, keine abschaltende Stelle gefunden). Darum Laser-PWM auf
       **PA9 (EXP3, TIM1 CH2, 1 kHz)**: SKR-Plan des Besitzers (Mini MZ V1.0), EXP3 obere Reihe GND, PB8, PA10, PA9, PB5.
       Für dieses Board gilt der BTT-Plan, nicht Marlins E3-Pin-Datei (dort heißt der Stecker EXP1, andere Belegung).
-      Offen: Firmware per Knopf, Lage von PA9/GND am Stecker messen, V2 J3 umstecken, PA9 messen, Etiketten ändern.
+      marlin-62 geflasht, PA9/GND am Stecker geprüft, Signal an EXP3 (Besitzer). `ttl_test` 2 × 10 s an PA9 lief, Messwert offen.
+      PWM geht laut Besitzer später an und früher aus als die 24 V: Beim Schuss war das Absicht (0,8 s Wartezeit, 24 V blieben stehen).
+      **Service-Menü (Besitzer):** Regler 0–100 %, keine Zeitgrenze, 24 V an/aus (`op=service_laser` statt `service_fire`, 24-V-Timer entfällt).
+      Strahl aus bei 24-V-Schalten und wenn die Seite 5 s schweigt (Wächter im `monitor_loop`). Offen: Etiketten ändern, TQ/R1.
       Offen: bauen, ohne Laser testen (D'R ≈ 4,7 V).
       Bereit liegt die
       v6-Firmware `A:\mfw\dist-v6\firmware.bin` (Z 80 Schritte/mm, gebaut
