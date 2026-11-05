@@ -284,6 +284,15 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   „%“/Großbuchstaben alphanumerisch, Rest Byte) und werden dadurch kleiner; „Beispiel“ setzt
   Musterdaten ein, die Zeile unter dem Inhalt zeigt die kodierten Daten. Code:
   `src/lumacut_job/gs1_link.py`.
+  **Art** „Micro QR (klein, M1–M4)“: ISO/IEC 18004 Micro QR – ein Finder, 11×11 bis
+  17×17 Module, für Bauteilkennzeichnung und beengte Flächen. Version automatisch
+  (kleinste passende), Fehlerkorrektur D (nur M1, Erkennung) / L / M / Q (Q nur M4);
+  Modi numerisch, alphanumerisch und Byte (UTF-8); kein ECI, kein Kanji (UTF-8-Bytes
+  für Umlaute). Ruhezone Standard **2** Module (Norm), Größe = Kantenlänge ohne
+  Ruhezone, „Invertiert“ und Ebenen-Logik wie beim vollen QR (neue Ebene „Micro-QR“
+  mit Schraffur 0,1 mm). „Code bearbeiten…“ öffnet denselben Dialog mit Art Micro QR.
+  Reiner Python-Encoder ohne Zusatzbibliothek (`src/lumacut_job/micro_qr.py`); der
+  bisherige QR-Pfad bleibt unverändert.
 - **Barcode** („Barcode einfügen…“, *Alt+C*, Menü „Auftrag“ und Design-Menü): Strichcode
   **Code 128** (ASCII, Zeichensatz A/B/C automatisch und kürzest möglich, Prüfsumme mod 103;
   Steuerzeichen für Scanner – Tab, Enter, GS … – über die Option „Steuerzeichen als \t \r \n \g
