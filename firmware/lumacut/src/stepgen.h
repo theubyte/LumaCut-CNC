@@ -41,3 +41,4 @@ void sg_stop_clear(void);
 
 int32_t sg_count(int axis);
 void sg_set_count(int axis, int32_t value); // stepper idle only
+void sg_set_switch_zone(int axis, int32_t steps); // switch ignored at or below this count, -1 = never

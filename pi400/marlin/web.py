@@ -1554,7 +1554,12 @@ def _matcal_worker(kind, origin, centre, head, cam, search, name, thickness):
         run["state"] = "complete"
         restore_light()
         _set_phase("parking")
-        machine.park_safezone(owner="job")
+        try:
+            machine.park_safezone(owner="job")
+        except Exception as exc:
+            # The test is done and saved: only the way home failed.
+            logging.warning("Materialtest fertig, Parken fehlgeschlagen: %s", exc)
+            run["park_error"] = job_error_text(exc)
         job.update(state="complete", phase=None)
     except Exception as exc:
         run.update(state="aborted" if stop_job.is_set() or isinstance(exc, Aborted) else "error",

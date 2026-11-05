@@ -1180,6 +1180,22 @@ class SupplyTestTests(unittest.TestCase):
         self.assertEqual(ctrl.serial.writes, [])
 
 
+class ParkOntoSwitchTests(unittest.TestCase):
+    """05.11. on the board: every material test ended in a fault at Y0.038."""
+    def test_switch_just_short_of_zero_is_no_fault(self):
+        ctrl = ParkLowTests().machine()
+        ctrl.last_xy_commanded = (200.0, 150.0)     # the last field of the test
+        real_write = ctrl.serial.write
+        def write(data):
+            real_write(data)
+            if data.startswith(b"G0 X0.000 Y0.000"):
+                ctrl.serial.replies.append("endstops hit: Y:0.038\n")
+        ctrl.serial.write = write
+        ctrl.park_safezone(owner="web")
+        self.assertEqual(ctrl.fault, "")
+        self.assertEqual(ctrl.last_xy_commanded, (0.0, 0.0))
+
+
 class AxisTestTests(unittest.TestCase):
     """op=axis_test: X/Y direction check before the first homing."""
     def test_slow_relative_one_axis_and_stays_unhomed(self):

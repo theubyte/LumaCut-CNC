@@ -1611,11 +1611,12 @@ class MarlinTransport:
                 self.absolute_mode = True
             self._exchange_locked(f"G0 Z{z_target:.3f} F{self.z_feed}", timeout=45)
             self._exchange_locked("M400", timeout=45)
+            # Before the move: a switch reached just short of zero is judged by this target.
+            self.last_xy_commanded = (0.0, 0.0)
             self._exchange_locked("G0 X0.000 Y0.000 F9000", timeout=90)
             self._exchange_locked("M400", timeout=90)
             result = self._exchange_locked("M114", timeout=8)
             self.focused_this_job = False
-            self.last_xy_commanded = (0.0, 0.0)
             # parked at X0/Y0: the switches show whether the job lost steps
             self._check_parked_locked()
             if self._lower_to_park_locked():

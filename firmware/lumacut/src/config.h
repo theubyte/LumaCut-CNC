@@ -23,6 +23,8 @@ enum { AX_X = 0, AX_Y = 1, AX_Z = 2 };
 // A switch counts as hit after 1 ms unbroken: two samples at 9 kHz were only 0.1 ms,
 // and motor noise on the wires stopped Z in mid air. 1 ms is 9 um of Z at full speed.
 #define ENDSTOP_STABLE_TICKS 2000u
+// Referenced X/Y: the switch trips slightly before zero on the way there, normal within this.
+#define SWITCH_ZONE_MM 0.5f
 #define MAX_STEP_RATE 15000u  // steps/s per axis
 
 #define QUEUE_SLOTS 128       // planner ring; 127 usable, contract asks >= 32; must span

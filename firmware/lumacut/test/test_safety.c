@@ -328,6 +328,36 @@ void test_endstops(void)
     CHECK(!sim_out_has("endstops hit"));
     CHECK(sim.phys[0] == 0);
 
+    // Referenced X: the switch trips just before zero, the move still ends at zero.
+    sim_reset();
+    sim.trip_on[0] = true;
+    sim.trip[0] = -800;
+    sim_cmd("G28 X");
+    CHECK(motion_homed(AX_X));
+    sim_cmd("G0 X100 F3000");
+    CHECK(sim_run_until_idle(5000));
+    int32_t zero_phys = sim.phys[0] - 8000;
+    sim.trip[0] = zero_phys + 20; // 0.25 mm before zero
+    sim_out_clear();
+    sim_cmd("G0 X0 F3000");
+    CHECK(sim_run_until_idle(5000));
+    CHECK(!sim_out_has("endstops hit"));
+    CHECK(sim.phys[0] == zero_phys);
+
+    // Far from zero it is a real stop, and a new G28 still stops at the switch.
+    sim_cmd("G0 X100 F3000");
+    CHECK(sim_run_until_idle(5000));
+    sim.trip[0] = zero_phys + 4000; // 50 mm before zero
+    sim_out_clear();
+    sim_send("G0 X0 F3000\n");
+    CHECK(sim_run_until_idle(5000));
+    CHECK(sim_out_has("endstops hit: X:"));
+    sim.trip[0] = sim.phys[0] - 10;
+    sim_out_clear();
+    sim_cmd("G28 X");
+    CHECK(!sim_out_has("Error"));
+    CHECK(sim.phys[0] <= sim.trip[0] && sim.phys[0] >= sim.trip[0] - 8);
+
     // M119 reports the switches.
     sim_reset();
     sim.force_open = 2;

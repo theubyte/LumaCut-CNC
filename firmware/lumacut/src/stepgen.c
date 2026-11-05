@@ -17,6 +17,7 @@ static bool decel_started;
 static uint8_t next_mask;
 static bool first_step;
 static uint32_t low_ticks[AXES]; // how long each switch has read pressed, unbroken
+static int32_t switch_zone[AXES] = {-1, -1, -1};
 
 static volatile bool running;
 static uint8_t dir_neg;
@@ -77,6 +78,11 @@ uint8_t sg_pre(uint8_t endstops_raw)
     const block_t *b = cur;
     if (!b) return 0;
     uint8_t hit = stable & b->stop_mask;
+    if (!(b->flags & B_SEEK)) {
+        for (int a = 0; a < AXES; a++) {
+            if (counts[a] <= switch_zone[a]) hit &= (uint8_t)~(1u << a);
+        }
+    }
     if (hit) {
         bool seek = (b->flags & B_SEEK) != 0;
         if (seek) laser_block_gap();
@@ -274,3 +280,4 @@ void sg_stop_clear(void)
 
 int32_t sg_count(int axis) { return counts[axis]; }
 void sg_set_count(int axis, int32_t value) { counts[axis] = value; }
+void sg_set_switch_zone(int axis, int32_t steps) { switch_zone[axis] = steps; }

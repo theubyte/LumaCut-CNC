@@ -2474,6 +2474,7 @@ function renderMatcal(s){
  if(r.kind==="engrave")for(const k of ["dunkel","mittel","hell"]){const f=res[k];if(f)add(k[0].toUpperCase()+k.slice(1)+": "+n(f.power)+" % · "+fmt(f.speed,0)+" mm/min (Ton "+fmt(f.tone,2)+")"+(f.approximate?" – nur ungefähr":""))}
  else{for(const q of res.squares||[])add(fmt(q.speed,0)+" mm/min: "+(q.fell?q.passes+" Durchgänge":"nach "+q.passes+" nicht durch"));
   if(res.best)add("Beste: "+fmt(res.best.speed,0)+" mm/min × "+res.best.passes+" (wenigste Energie)")}
+ if(r.park_error)add("Ergebnis ist gespeichert, nur das Parken ging nicht: "+r.park_error);
  if(r.state==="complete"&&r.saved?.length)add("Gespeichert als: "+r.saved.map(m=>m.name+" ("+m.process+")").join(", "));
 }
 async function startMatcal(kind,button){

@@ -121,6 +121,8 @@ bool motion_set_position(int axis, int32_t fix)
     if (axis == AX_Z) {
         z_offset_fix += pos_fix[AX_Z] - fix;
         z_base_fix += fix - pos_fix[AX_Z]; // the motor did not move: same spot
+    } else {
+        sg_set_switch_zone(axis, -1); // zero is no longer where the switch is
     }
     apply_position(axis, fix);
     return true;
@@ -131,6 +133,8 @@ void motion_zero_axis(int axis)
     if (axis == AX_Z) z_offset_fix = 0;
     apply_position(axis, 0);
     homed |= (uint8_t)(1u << axis);
+    // Z never: it is the probe, and the lift pushes too hard to run on.
+    if (axis != AX_Z) sg_set_switch_zone(axis, steps_from_fix(axis, MM_FIX(SWITCH_ZONE_MM)));
 }
 
 void motion_set_steps_mm(int axis, float steps_mm)
@@ -148,6 +152,9 @@ void motion_set_unhomed(uint8_t axes)
     // Only when the reference really goes: repeated failures must not grow the budget.
     if ((axes & homed) & (1u << AX_Z)) z_base_fix = pos_fix[AX_Z];
     homed &= (uint8_t)~axes;
+    for (int a = 0; a < AXES; a++) {
+        if (axes & (1u << a)) sg_set_switch_zone(a, -1);
+    }
 }
 
 bool motion_idle(void) { return planner_empty() && !sg_running(); }

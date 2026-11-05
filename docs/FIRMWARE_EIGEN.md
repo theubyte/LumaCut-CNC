@@ -62,7 +62,7 @@ Ohne Z-Referenz (nach Reset, `M999`, fehlgeschlagener `G28 Z`, geändertem `M92 
 4. Im Inline-Modus (`M3 I`) brennt der Laser nur während einer G1/G2/G3-Fahrt mit S>0. Die Leistung gehört zum Block und wird im Schritt-Interrupt beim Blockstart gesetzt. Läuft kein Block, ist das PWM 0. G0 ist immer 0.
 5. Dauerleistung (`M3 S<n>` ohne I) nur im Stillstand, für das Service-Menü, ohne Zeitgrenze (Besitzer, 05.11.). Eine Fahrt beendet sie.
 6. USB getrennt (kein DTR oder Bus-Reset) oder USB-Stille während Dauerleistung > 5 s: Laser aus. Jeder empfangene Befehl zählt, auch M114.
-7. Endschalter wirken immer: Löst der Schalter der Fahrtrichtung aus (zum Minus-Ende), stoppen alle Achsen sofort, Laser aus, Warteschlange leer, Meldung `endstops hit: X:<mm> Y:<mm> Z:<mm>` mit den Achsen, die ausgelöst haben (Format: Pi-Regex `Z_ENDSTOP_HIT`). Vom Schalter wegfahren ist immer erlaubt. Der Schneckenlift drückt mit über 250 N.
+7. Endschalter wirken immer: Löst der Schalter der Fahrtrichtung aus (zum Minus-Ende), stoppen alle Achsen sofort, Laser aus, Warteschlange leer, Meldung `endstops hit: X:<mm> Y:<mm> Z:<mm>` mit den Achsen, die ausgelöst haben (Format: Pi-Regex `Z_ENDSTOP_HIT`). Vom Schalter wegfahren ist immer erlaubt. Ausnahme: Referenziertes X/Y läuft in den letzten 0,5 mm vor Null weiter, dort löst der Schalter beim Parken normal aus (`SWITCH_ZONE_MM`); die Referenzfahrt stoppt immer, Z ebenfalls. Der Schneckenlift drückt mit über 250 N.
 8. Motorstrom an erst mit der ersten Fahrt, oder durch `M17`. `M84` nimmt ihn weg. Kein Selbstabschalten sonst.
 
 ## Befehle
