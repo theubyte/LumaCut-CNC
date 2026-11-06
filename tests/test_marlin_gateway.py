@@ -1198,6 +1198,36 @@ else:
         GatewayFilesTests._run_web_script(self, script)
 
 
+class MatcalPhotoHeightTests(unittest.TestCase):
+    """06.11. on the board: photos from Z 23 measured beside the fields."""
+    def test_photo_goes_to_the_calibrated_height_or_stops(self):
+        self._run = None
+        script = r"""
+from marlin import web
+class Cam:
+    photo_w, photo_h = 4, 2
+    photo_z = staticmethod(lambda surface: surface + 51.32)
+calls = []
+def move_to(x, y, owner, min_z):
+    calls.append((x, y, owner, min_z))
+    web.machine.position = [x, y, reached]
+web.machine.move_to = move_to
+web.head_camera.snapshot = lambda *a: b"jpeg"
+web.matcal.decode_gray = lambda *a: "bild"
+reached = 54.32
+assert web._matcal_photo(Cam, (237.7, 163.0), 3.0) == ("bild", 54.32)
+assert calls == [(237.7, 163.0, "job", 54.32)], calls
+reached = 23.0
+try:
+    web._matcal_photo(Cam, (237.7, 163.0), 3.0)
+except RuntimeError as exc:
+    assert "abgebrochen" in str(exc), exc
+else:
+    raise AssertionError("falsche Hoehe nicht abgelehnt")
+"""
+        GatewayFilesTests._run_web_script(self, script)
+
+
 class ParkOntoSwitchTests(unittest.TestCase):
     """05.11. on the board: every material test ended in a fault at Y0.038."""
     def test_switch_just_short_of_zero_is_no_fault(self):
@@ -1601,6 +1631,22 @@ with web.app.test_client() as c:
         bridge.laser_enabled = True
         with self.assertRaisesRegex(RuntimeError, "Laser"):
             bridge.move_to(100.0, 100.0)
+
+    def test_move_to_raises_to_min_z_and_refuses_beyond_the_rail(self):
+        from marlin.transport import MarlinTransport
+        serial = FakeSerial(["ok\n", "ok\n", "X:10.00 Y:10.00 Z:23.00\n", "ok\n",
+                             "ok\n", "ok\n", "ok\n", "X:200.00 Y:150.00 Z:54.30\n", "ok\n"])
+        bridge = MarlinTransport("/dev/null")
+        bridge.serial = serial
+        bridge.identity = "FIRMWARE_NAME:LumaCut CNC 0.1 MACHINE_TYPE:LumaCut CNC"
+        bridge.homed = True
+        bridge.homing_verified = True
+        bridge.move_to(200.0, 150.0, min_z=54.3)
+        self.assertIn(b"G0 Z54.300 F600\n", serial.writes)
+        before = list(serial.writes)
+        with self.assertRaisesRegex(ValueError, "Höchstgrenze"):
+            bridge.move_to(200.0, 150.0, min_z=81.0)
+        self.assertEqual(serial.writes, before)
 
     def test_motion_test_uses_test_limits_and_restores_the_stored_ones(self):
         from marlin.transport import MarlinTransport

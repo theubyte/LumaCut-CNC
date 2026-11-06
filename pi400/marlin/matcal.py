@@ -37,7 +37,11 @@ MAX_FOCUS_DROP_MM = 3.0
 # Height of the camera's projection centre above the machine Z of the probe
 # tip: the image scale changes with (CAMERA_ABOVE_Z_MM + Z - surface). From
 # the scale of the same marks photographed at Z 24 and Z 70 (2026-10-29).
+# 2026-11-06 on the board this no longer held: at Z 23 the fields lay up to
+# 180 pixels off the model, at the calibrated height about 10. Measurements
+# therefore photograph at CameraModel.photo_z, where this factor is 1.
 CAMERA_ABOVE_Z_MM = 88.6
+PHOTO_Z_TOL_MM = 0.5
 PHOTO_W, PHOTO_H = 1920, 1080
 BED_X_MM, BED_Y_OFFSET_MM = 390.0, 30.0   # work = (390 - X, Y - 30), like the apps
 
@@ -100,7 +104,8 @@ class CameraModel:
         self.g = [float(v) for v in lens["g"]]
         self.inv = _inverse3(self.g)
         above = android.get("aboveSurface")
-        self.cal_distance = CAMERA_ABOVE_Z_MM + float(above if above is not None else 31.0)
+        self.above_surface = float(above if above is not None else 31.0)
+        self.cal_distance = CAMERA_ABOVE_Z_MM + self.above_surface
         self.centre = self._to_rel(self.cx, self.cy)
         self.photo_w = int(android.get("photoWidth") or PHOTO_W)
         self.photo_h = int(android.get("photoHeight") or PHOTO_H)
@@ -127,6 +132,10 @@ class CameraModel:
         """Laser position (machine) that puts machine point (x, y) in the picture centre."""
         cx, cy = self.centre                     # work mm relative to the head, any height
         return x + cx, y - cy                    # work x = 390 - X: rel x adds to -X
+
+    def photo_z(self, surface_z: float) -> float:
+        """Camera height the lens model was calibrated for, over this surface."""
+        return surface_z + self.above_surface
 
     def sampler(self, img: Gray, head, z: float, surface_z: float):
         """lum(x, y) for machine points on the surface, head (laser) at ``head``, camera at Z ``z``."""

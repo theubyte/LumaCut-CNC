@@ -1429,13 +1429,13 @@ class MarlinTransport:
             finally:
                 self.owner = previous_owner
 
-    def move_to(self, x: float, y: float, owner: str = "web"):
+    def move_to(self, x: float, y: float, owner: str = "web", min_z: float | None = None):
         """Laser-off absolute XY move (camera scan, positioning).
 
         Never burns: M5 I first, refused while the laser is armed. Z is only
-        ever raised (to the clearance height when lower), never lowered, so a
-        move cannot collide with the workpiece. XY may cross the safe zone
-        like parking does; the laser is off.
+        ever raised (to the clearance height, or min_z when that is higher),
+        never lowered, so a move cannot collide with the workpiece. XY may
+        cross the safe zone like parking does; the laser is off.
         """
         import math
         with self.lock:
@@ -1449,6 +1449,9 @@ class MarlinTransport:
                 raise RuntimeError("Fahren bei aktivem Laser unzulässig")
             if not (math.isfinite(x) and math.isfinite(y) and 0.0 <= x <= 390.0 and 0.0 <= y <= 370.0):
                 raise ValueError("Ziel außerhalb X0..390 / Y0..370")
+            lift = self.travel_z if min_z is None else max(self.travel_z, min_z)
+            if not (math.isfinite(lift) and lift <= Z_MAX_MM):
+                raise ValueError(f"Z{lift:g} liegt über der Höchstgrenze Z{Z_MAX_MM:g}")
             self._exchange_locked("M5 I", timeout=8)
             self._exchange_locked("M400", timeout=30)
             self._exchange_locked("M114", timeout=8)
@@ -1457,8 +1460,8 @@ class MarlinTransport:
             if not self.absolute_mode:
                 self._exchange_locked("G90", timeout=8)
                 self.absolute_mode = True
-            if self.position[2] < self.travel_z:
-                self._exchange_locked(f"G0 Z{self.travel_z:.3f} F{self.z_feed}", timeout=45)
+            if self.position[2] < lift:
+                self._exchange_locked(f"G0 Z{lift:.3f} F{self.z_feed}", timeout=45)
             self._exchange_locked(f"G0 X{x:.3f} Y{y:.3f} F9000", timeout=90)
             self._exchange_locked("M400", timeout=90)
             result = self._exchange_locked("M114", timeout=8)

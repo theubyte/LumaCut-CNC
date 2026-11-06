@@ -54,6 +54,19 @@ class CameraModelTests(unittest.TestCase):
         near, far = pixel(24.0), pixel(70.0)
         self.assertGreater(abs(near[1] - 540), abs(far[1] - 540))
 
+    def test_photo_height_is_the_calibrated_one_and_keeps_the_scale(self):
+        cam = matcal.CameraModel(ANDROID)
+        self.assertAlmostEqual(cam.photo_z(4.0), 35.04)
+        head = cam.head_for(150.0, 120.0)
+        seen = []
+        img = matcal.Gray(1920, 1080, bytes(1920 * 1080))
+        img.at = lambda u, v: seen.append((u, v)) or 0.0
+        cam.sampler(img, head, cam.photo_z(4.0), 4.0)(160.0, 120.0)
+        rx, ry = head[0] - 160.0, 120.0 - head[1]
+        want = cam._to_pixel(rx, ry)               # the lens model unscaled
+        self.assertAlmostEqual(seen[0][0], want[0], places=6)
+        self.assertAlmostEqual(seen[0][1], want[1], places=6)
+
     def test_uncalibrated_camera_is_refused(self):
         with self.assertRaisesRegex(RuntimeError, "Punktraster"):
             matcal.CameraModel({})
@@ -238,6 +251,8 @@ class Cam:
     photo_w, photo_h = 1920, 1080
     def head_for(self, x, y):
         return x - 51.3, y + 1.7
+    def photo_z(self, surface):
+        return surface + 31.0
     def sampler(self, img, head, z, surface):
         return img
 web._camera_model = lambda: Cam()
@@ -310,6 +325,7 @@ xs = [float(v) for x in w if x.startswith("G1 X") for v in re.findall(r"X([-+0-9
 assert min(xs) >= 147.0 - 0.01 and max(xs) <= 150 + 5 * 8 + 5 + 3 + 0.01, (min(xs), max(xs))
 assert len(shots) == len(fields) + 1, (len(shots), len(fields))
 assert all(abs(p[0] - (150 + 22.5 - 51.3)) < 0.01 for p in shots), shots[:2]
+assert all(abs(p[2] - (m.surface_z + 31.0)) < 0.5 for p in shots), shots[:2]
 assert lights[0][:2] == (True, web._camera_light_level()) and lights[-1][0] is False, lights
 assert s["material_calibration"]["state"] == "complete" and s["material_calibration"]["steps"] == len(fields)
 # a second run updates the same materials instead of adding new ones

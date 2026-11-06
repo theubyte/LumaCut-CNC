@@ -2,9 +2,13 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-06
+
+- **Materialtest misst auf der kalibrierten Fotohöhe:** Die Fotos entstanden auf Z 23. Dort lag das Kameramodell bis zu 180 Pixel (rund 6 mm) neben den Feldern, deshalb maß der erste Test daneben und speicherte 80 % als „hell“. Der Kopf fährt für jedes Foto jetzt auf Oberfläche + kalibrierte Höhe, dort waren es am Foto etwa 10 Pixel. Steht die Kamera anders, bricht der Test ab. Noch nicht in einem Testlauf bestätigt.
+
 ## 2026-11-05
 
-- **Materialtest speichert keine Fehlmessungen mehr:** Ein zu schwaches erstes Feld konnte den Kamera-Versatz verfälschen, danach maß der Test neben den Feldern und speicherte 80 % als „hell“. Der Versatz kommt jetzt nur aus sichtbaren Feldern, und ein Ton, der über 0,2 neben dem Ziel liegt, bricht ab, statt gespeichert zu werden.
+- **Materialtest speichert keine Fehlmessungen mehr:** Der Versatz kommt nur aus sichtbaren Feldern, und ein Ton, der über 0,2 neben dem Ziel liegt, bricht ab, statt gespeichert zu werden. Die eigentliche Ursache der Fehlmessung stand erst am 06.11. fest (siehe oben).
 - **Eigene Firmware 0.2.6, Treiber-Einrichtung:** Ging beim Einrichten ein Datenrahmen verloren, lehnte die Firmware jede Fahrt mit `Driver not responding` ab. Sie wiederholt jetzt je Treiber bis zu dreimal, schützt auch Schreibrahmen vor USB-Unterbrechungen, und M122 nennt die letzte Ursache.
 - **Materialtest brach beim Parken ab:** Der Y-Schalter löst kurz vor Y0 aus, das ist normal. Der Pi bewertete den Treffer aber noch nach dem letzten Testfeld als Fehler und meldete den fertigen, gespeicherten Test als gescheitert. Der Pi kennt das Parkziel jetzt vor der Fahrt, und ein Park-Fehler entwertet das Ergebnis nicht mehr. Firmware 0.2.5: Referenziertes X/Y fährt in den letzten 0,5 mm bis Null weiter.
 - **Eigene Firmware 0.2.4, Endschalter-Filter:** Ein Schalter gilt erst nach 1 ms ohne Unterbrechung als ausgelöst, vorher genügten zwei Abtastungen (bei schneller Z-Fahrt 0,1 ms). Am Board löste Z mitten in der Luft aus.

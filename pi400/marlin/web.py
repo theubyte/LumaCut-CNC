@@ -1424,9 +1424,13 @@ def _camera_model():
     return matcal.CameraModel(CalibrationStore().load().get("android") or {})
 
 
-def _matcal_photo(cam, head):
-    """Head to the camera position (laser off, Z only up), one grey picture."""
-    machine.move_to(head[0], head[1], owner="job")
+def _matcal_photo(cam, head, surface):
+    """Head to the camera position at the calibrated height (laser off, Z only
+    up), one grey picture. Only there the lens model hits the fields."""
+    target = cam.photo_z(surface)
+    machine.move_to(head[0], head[1], owner="job", min_z=target)
+    if abs(machine.position[2] - target) > matcal.PHOTO_Z_TOL_MM:
+        raise RuntimeError("Kamera steht auf Z%.2f statt Z%.2f: Messung abgebrochen" % (machine.position[2], target))
     settings = head_camera.validate(dict(head_camera.DEFAULTS, **(config.get("camera") or {})))
     error = None
     for _ in range(3):        # the USB camera sometimes drops out for a moment
@@ -1593,7 +1597,7 @@ def _matcal_check_tones(results):
 
 
 def _matcal_engrave(run, origin, head, cam, search, surface, focus_z):
-    before, z = _matcal_photo(cam, head)
+    before, z = _matcal_photo(cam, head, surface)
     lum_before = cam.sampler(before, head, z, surface)
     guess, reach = (0.0, 0.0), 3.0
     while True:
@@ -1605,7 +1609,7 @@ def _matcal_engrave(run, origin, head, cam, search, surface, focus_z):
         _set_phase("running", "running")
         _matcal_laser(matcal.engrave_field(x, y, step["power"], step["speed"], focus_z))
         _set_phase("measuring")
-        after, z = _matcal_photo(cam, head)
+        after, z = _matcal_photo(cam, head, surface)
         lum_after = cam.sampler(after, head, z, surface)
         dx, dy, dark = matcal.locate(lum_before, lum_after, x, y, matcal.ENGRAVE_CELL_MM, guess, reach)
         if dark < 8:
@@ -1621,7 +1625,7 @@ def _matcal_engrave(run, origin, head, cam, search, surface, focus_z):
 
 
 def _matcal_cut(run, origin, head, cam, search, surface, focus_z):
-    img, z = _matcal_photo(cam, head)
+    img, z = _matcal_photo(cam, head, surface)
     lum = cam.sampler(img, head, z, surface)
     start = None
     while True:
@@ -1634,7 +1638,7 @@ def _matcal_cut(run, origin, head, cam, search, surface, focus_z):
         _set_phase("running", "running")
         _matcal_laser(matcal.cut_pass(x, y, step["speed"], step["power"], focus_z, step["pass"]))
         _set_phase("measuring")
-        img, z = _matcal_photo(cam, head)
+        img, z = _matcal_photo(cam, head, surface)
         lum = cam.sampler(img, head, z, surface)
         ratio = matcal.hole_ratio(lum, x, y)
         fell = ratio < 0.5 * start
