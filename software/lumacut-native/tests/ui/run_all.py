@@ -43,12 +43,10 @@ def main():
         except Exception:
             if attempt == 1:
                 queue.append((name, 2))
-                print(f"NOCHMAL {name}
-{traceback.format_exc()}", flush=True)
+                print(f"NOCHMAL {name}\n{traceback.format_exc()}", flush=True)
             else:
                 failed.append(name)
-                print(f"FEHL  {name}
-{traceback.format_exc()}", flush=True)
+                print(f"FEHL  {name}\n{traceback.format_exc()}", flush=True)
             if app:
                 try:
                     app.shot(ROOT / "build" / "shots" / f"fehler-{name}.png")
