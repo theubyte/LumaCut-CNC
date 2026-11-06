@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import LumaCut
 
 ApplicationWindow {
     id: win
@@ -9,37 +10,80 @@ ApplicationWindow {
     minimumWidth: 1000; minimumHeight: 640
     visible: false   // main.cpp shows it after setup
     title: "LumaCut Studio"
-    flags: Qt.Window | Qt.FramelessWindowHint
+    flags: Qt.Window   // the native title bar is removed in WindowChrome, Qt must not treat this window as frameless
     color: Theme.bg
-    property string dest: "motiv"
     font.family: Theme.font
     font.pixelSize: Theme.fsMd
 
-    ColumnLayout {
+    Binding { target: Theme; property: "pref"; value: AppSettings.theme }
+    WindowChrome {
+        id: nativeChrome
+        titleBar: topBar
+        maxButton: topBar.maxButton
+        dark: Theme.dark
+    }
+    Component.onCompleted: {
+        nativeChrome.window = win
+        Shell.attachWindow(win)
+        Shell.overlay = overlay
+        Machine.start()
+        Materials.load()
+    }
+    Connections { target: Shell; function onEstopKey() { MachineActions.estop() } }
+
+    // Test handle for the driver: shell.setTheme("dark"), shell.resizeTo([1000, 640]).
+    Item {
+        id: shell
+        objectName: "shell"
         anchors.fill: parent
-        spacing: 0
-        TopBar { Layout.fillWidth: true; Layout.preferredHeight: Theme.topbar; z: 200; window: win }
-        RowLayout {
+        anchors.margins: nativeChrome.inset
+        function setTheme(v) { AppSettings.theme = v; return v }
+        function resizeTo(size) { win.showNormal(); win.width = size[0]; win.height = size[1]; return size }
+        function isDark() { return Theme.dark }
+        function machine(key) { return Machine.status[key] }
+        function lastToast() { return Toast.lastText }
+        function piUrl() { return Pi.baseUrl }
+
+        ColumnLayout {
+            anchors.fill: parent
             spacing: 0
-            Rail {
-                Layout.fillHeight: true; Layout.preferredWidth: Theme.rail
-                current: win.dest
-                onNavigate: (key) => win.dest = key
+            TopBar { id: topBar; Layout.fillWidth: true; Layout.preferredHeight: Theme.topbar; z: 200; chrome: nativeChrome; window: win }
+            JobStrip { Layout.fillWidth: true; z: 50 }
+            RowLayout {
+                spacing: 0
+                Rail {
+                    Layout.fillHeight: true; Layout.preferredWidth: Theme.rail
+                    current: Shell.dest
+                    onNavigate: (key) => Shell.navigate(key)
+                }
+                Rectangle {
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    color: Theme.bg
+                    Loader {
+                        objectName: "mainView"
+                        anchors.fill: parent
+                        source: "features/" + ({material:"Material",motiv:"Motiv",start:"Start",platine:"Platine",werkstatt:"Werkstatt",maschine:"Maschine",optionen:"Optionen"})[Shell.dest] + "View.qml"
+                    }
+                }
             }
-            Loader {
-                objectName: "mainView"
-                Layout.fillWidth: true; Layout.fillHeight: true
-                source: "features/" + ({material:"Material",motiv:"Motiv",start:"Start",platine:"Platine",werkstatt:"Werkstatt",maschine:"Maschine",optionen:"Optionen"})[win.dest] + "View.qml"
-            }
+            StatusBar { Layout.fillWidth: true; Layout.preferredHeight: Theme.statusbar }
         }
-        Rectangle {
-            Layout.fillWidth: true; Layout.preferredHeight: Theme.statusbar
-            color: Theme.surface
-            Rectangle { width: parent.width; height: 1; color: Theme.line }
-            Text {
-                anchors.verticalCenter: parent.verticalCenter; x: Theme.sp3
-                text: "Grundgerüst, keine Maschine verbunden"
-                color: Theme.muted; font.pixelSize: Theme.fsSm; font.family: Theme.font
+
+        // Everything modal lives here, below the top bar: NOT-AUS stays reachable above every dialog.
+        Item {
+            id: overlay
+            objectName: "overlay"
+            anchors.fill: parent
+            anchors.topMargin: Theme.topbar
+            z: 100
+            GoDialog {}
+            LcConfirmHost {}
+            LcToast {
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.rightMargin: Theme.sp4
+                anchors.bottomMargin: Theme.statusbar + Theme.sp3
+                z: 200
             }
         }
     }

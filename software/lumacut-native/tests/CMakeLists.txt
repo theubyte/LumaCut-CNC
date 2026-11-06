@@ -1,1 +1,18 @@
 # Tests that need no window. UI tests against the real window live in tests/ui (Python driver).
+set(LUMACUT_GOLDEN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/golden)
+
+function(lumacut_core_test name)
+  qt_add_executable(${name} ${name}.cpp)
+  target_link_libraries(${name} PRIVATE lumacut_core Qt6::Test)
+  target_compile_definitions(${name} PRIVATE LUMACUT_GOLDEN_DIR="${LUMACUT_GOLDEN_DIR}")
+  set_target_properties(${name} PROPERTIES WIN32_EXECUTABLE OFF MACOSX_BUNDLE OFF)
+  add_test(NAME ${name} COMMAND ${name})
+  # Qt liegt beim Testlauf auf dem Suchpfad, ohne Installation.
+  set_tests_properties(${name} PROPERTIES ENVIRONMENT_MODIFICATION
+    "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>")
+endfunction()
+
+lumacut_core_test(test_golden)   # bis aufs Zeichen gegen den Kotlin-Code
+lumacut_core_test(test_core)     # Projekt-JSON, Grenzfälle, Clipper, Vektorisieren, Kurven
+lumacut_core_test(test_speed)    # Messung: Foto 2000 × 2000 bis G-Code und Werkzeugweg
+set_tests_properties(test_speed PROPERTIES LABELS speed)

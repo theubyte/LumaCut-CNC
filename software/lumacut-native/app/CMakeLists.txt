@@ -13,7 +13,7 @@ qt_add_qml_module(lumacut_studio
 )
 target_link_libraries(lumacut_studio PRIVATE
   Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::Svg lumacut_gpu lumacut_core)
-target_include_directories(lumacut_studio PRIVATE src)
+target_include_directories(lumacut_studio PRIVATE src src/pi)
 target_compile_definitions(lumacut_studio PRIVATE QT_MESSAGELOGCONTEXT)
 
 install(TARGETS lumacut_studio RUNTIME DESTINATION bin BUNDLE DESTINATION bin)

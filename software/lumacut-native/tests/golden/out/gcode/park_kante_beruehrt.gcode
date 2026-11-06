@@ -1,0 +1,12 @@
+; LumaCut App golden – park_kante_beruehrt
+G21
+G90
+M5 I
+M3 I
+; Ebene Linie
+G0 X78.000 Y0.000
+G1 X78.000 Y30.000 F1500 S102
+G0 X78.000 Y35.000
+G1 X0.000 Y35.000 F1500 S102
+M5 I
+M400

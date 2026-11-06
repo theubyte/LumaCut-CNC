@@ -3,7 +3,9 @@ import QtQuick
 
 // Design tokens: same palette family as the Android app (ui/Theme.kt). All colours and sizes come from here.
 QtObject {
-    property bool dark: Qt.styleHints.colorScheme === Qt.Dark
+    // "system", "light" or "dark"; Main.qml binds it to the settings store.
+    property string pref: "system"
+    property bool dark: pref === "dark" || (pref === "system" && Qt.styleHints.colorScheme === Qt.Dark)
     readonly property color bg: dark ? "#0e1016" : "#f2f3f9"
     readonly property color surface: dark ? "#171a23" : "#ffffff"
     readonly property color surface2: dark ? "#1d2130" : "#f6f7fc"
@@ -34,6 +36,9 @@ QtObject {
     readonly property color park: Qt.alpha(bad, dark ? .13 : .10)
     readonly property color scrim: dark ? Qt.rgba(3/255, 4/255, 8/255, .58) : Qt.rgba(18/255, 20/255, 34/255, .34)
 
+    readonly property color shadowSoft: dark ? Qt.rgba(0, 0, 0, .45) : Qt.rgba(21/255, 24/255, 39/255, .12)
+    readonly property color shadowStrong: dark ? Qt.rgba(0, 0, 0, .6) : Qt.rgba(21/255, 24/255, 39/255, .24)
+
     readonly property string font: "Segoe UI Variable Text"
     readonly property string fontDisplay: "Segoe UI Variable Display"
     readonly property string mono: "Cascadia Mono"
@@ -53,6 +58,7 @@ QtObject {
     readonly property int sp4: 16
     readonly property int sp5: 24
     readonly property int sp6: 32
+    readonly property int hControlSm: 24
     readonly property int hControl: 30
     readonly property int hControlLg: 38
     readonly property int topbar: 46

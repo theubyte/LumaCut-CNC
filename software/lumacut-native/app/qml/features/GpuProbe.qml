@@ -6,12 +6,13 @@ Rectangle {
     id: root
     objectName: "gpuProbe"
     color: Theme.canvas
-    function benchmark(n) { view.loadBenchmark(n); return view.segmentCount }
+    function benchmark(n) { view.loadBenchmark(n); return n }
     Segments {
         id: view
         objectName: "segments"
         anchors.fill: parent
-        cutColor: Theme.text
+        cutColor: Theme.text; lowColor: Theme.accent; travelColor: Theme.faint
+        sheetColor: Theme.sheet; gridColor: Theme.grid; gridMajorColor: Theme.gridMajor; edgeColor: Theme.line2; parkColor: Theme.park
         property int tick: 0
     }
     // Animated scrub: forces a real GPU frame continuously, as playing a job would.

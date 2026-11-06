@@ -1,0 +1,23 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "architecture": { "value": "x64", "strategy": "external" },
+      "cacheVariables": { "CMAKE_PREFIX_PATH": "C:/Qt/6.10.3/msvc2022_64" },
+      "environment": { "PATH": "C:/Qt/6.10.3/msvc2022_64/bin;$penv{PATH}" }
+    },
+    { "name": "release", "displayName": "Release", "inherits": "base", "binaryDir": "${sourceDir}/build", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } },
+    { "name": "debug", "displayName": "Debug", "inherits": "base", "binaryDir": "${sourceDir}/build-debug", "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" },
+    { "name": "debug", "configurePreset": "debug" }
+  ],
+  "testPresets": [
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } }
+  ]
+}

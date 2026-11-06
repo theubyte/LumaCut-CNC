@@ -1,6 +1,12 @@
 #include "Automation.h"
+#include "gpu/FrameStats.h"
 #include <QCoreApplication>
+#include <QQmlComponent>
+#include <QQmlEngine>
+#include <QQuickGraphicsConfiguration>
+#include <QSurfaceFormat>
 #include <QImage>
+#include <QJSValue>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMetaObject>
@@ -45,6 +51,18 @@ Automation::Automation(QQuickWindow* window, quint16 port, const QElapsedTimer& 
         m_processAgeAtStart = (ticks(now) - ticks(created)) / 10000 - m_started.elapsed();
     }
 #endif
+    // Set here, before the window is first shown: both only count when the swap chain is created.
+    {
+        QQuickGraphicsConfiguration config = window->graphicsConfiguration();
+        config.setTimestamps(true);
+        window->setGraphicsConfiguration(config);
+    }
+    if (qEnvironmentVariableIsSet("LUMACUT_BENCH")) {
+        QSurfaceFormat fmt = window->requestedFormat();
+        fmt.setSwapInterval(0);
+        window->setFormat(fmt);
+    }
+    m_frameStats = new FrameStats(window, this);
     connect(window, &QQuickWindow::frameSwapped, this, [this] {
         if (m_firstFrameMs < 0) m_firstFrameMs = m_processAgeAtStart + m_started.elapsed();
         ++m_frames;
@@ -96,6 +114,7 @@ QJsonObject Automation::handle(const QJsonObject& c) {
             bool ok;
             if (a.isEmpty()) ok = QMetaObject::invokeMethod(item, c["method"].toString().toUtf8(), Qt::DirectConnection, Q_RETURN_ARG(QVariant, ret));
             else ok = QMetaObject::invokeMethod(item, c["method"].toString().toUtf8(), Qt::DirectConnection, Q_RETURN_ARG(QVariant, ret), Q_ARG(QVariant, v0));
+            if (ret.metaType() == QMetaType::fromType<QJSValue>()) ret = ret.value<QJSValue>().toVariant();   // objects returned by QML functions
             return ok ? QJsonObject{{"value", QJsonValue::fromVariant(ret)}} : QJsonObject{{"error", "invoke failed"}};
         }
         const QPointF p = r.center();
@@ -143,7 +162,7 @@ QJsonObject Automation::handle(const QJsonObject& c) {
         return img.save(c["path"].toString()) ? QJsonObject{{"ok", true}, {"w", img.width()}, {"h", img.height()}} : QJsonObject{{"error", "save failed"}};
     }
     if (cmd == "stats") {
-        QJsonObject r;
+        QJsonObject r = m_frameStats->snapshot(c["reset"].toBool());
         const qint64 now = m_fpsTimer.elapsed();
         if (now > m_markTime) m_lastFps = double(m_frames - m_markFrames) * 1000.0 / double(now - m_markTime);
         m_markTime = now; m_markFrames = m_frames;
@@ -152,12 +171,54 @@ QJsonObject Automation::handle(const QJsonObject& c) {
         r["firstFrameMs"] = double(m_firstFrameMs);
         auto* ri = m_window->rendererInterface();
         r["api"] = int(ri->graphicsApi());
-        r["device"] = m_window->property("gpuName").toString();
+        r["device"] = r["gpuName"];
 #ifdef Q_OS_WIN
         PROCESS_MEMORY_COUNTERS pmc{};
         if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof pmc)) r["memMb"] = double(pmc.WorkingSetSize) / (1024.0 * 1024.0);
 #endif
         return r;
+    }
+    if (cmd == "gpuBench") {     // the GPU test bench on top of the window, once
+        if (!findItem("gpuBench")) {
+            auto* engine = qmlEngine(m_window);
+            if (!engine && !m_window->contentItem()->childItems().isEmpty()) engine = qmlEngine(m_window->contentItem()->childItems().first());
+            if (!engine) return {{"error", "no engine"}};
+            QQmlComponent comp(engine, "LumaCut", "GpuBench");
+            auto* item = qobject_cast<QQuickItem*>(comp.create());
+            if (!item) return {{"error", comp.errorString()}};
+            item->setParent(m_window);
+            item->setParentItem(m_window->contentItem());
+            item->setZ(100000);
+        }
+        return {{"ok", true}};
+    }
+    if (cmd == "gpuReset") {     // tears down the scene graph and the GPU device, as a lost or changed device does
+        const bool g = m_window->isPersistentGraphics(), sg = m_window->isPersistentSceneGraph();
+        const auto state = m_window->visibility();
+        m_window->setPersistentGraphics(false);
+        m_window->setPersistentSceneGraph(false);
+        m_window->hide();
+        m_window->releaseResources();
+        QCoreApplication::processEvents();
+        m_window->setVisibility(state);
+        m_window->setPersistentGraphics(g);
+        m_window->setPersistentSceneGraph(sg);
+        return {{"ok", true}};
+    }
+    if (cmd == "pixel") {        // colour at a window position, from a real grab
+        const QImage img = m_window->grabWindow();
+        const qreal k = m_window->effectiveDevicePixelRatio();
+        const QColor col = img.pixelColor(int(c["x"].toDouble() * k), int(c["y"].toDouble() * k));
+        return {{"r", col.red()}, {"g", col.green()}, {"b", col.blue()}, {"a", col.alpha()}};
+    }
+    if (cmd == "resize") {
+        // Leave the maximised state first; the system's restore would otherwise overwrite the new size.
+        m_window->showNormal();
+        QCoreApplication::processEvents();
+        m_window->setMinimumSize({1, 1});
+        m_window->setGeometry(20, 40, c["w"].toInt(), c["h"].toInt());
+        QCoreApplication::processEvents();
+        return {{"ok", true}, {"w", m_window->width()}, {"h", m_window->height()}};
     }
     if (cmd == "quit") { QCoreApplication::quit(); return {{"ok", true}}; }
     return {{"error", "unknown command " + cmd}};

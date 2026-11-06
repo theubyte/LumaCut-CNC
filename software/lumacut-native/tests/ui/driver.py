@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_EXE = ROOT / "build" / "LumaCutStudio.exe"
+DEFAULT_EXE = Path(os.environ.get("LUMACUT_EXE") or ROOT / "build" / "LumaCutStudio.exe")
 QT_BIN = os.environ.get("QT_BIN", r"C:\Qt\6.10.3\msvc2022_64\bin")
 
 
@@ -48,6 +48,8 @@ class App:
     def find(self, name): return self.call("find", name=name)
     def get(self, name, prop): return self.call("get", name=name, prop=prop)["value"]
     def invoke(self, name, method, *args): return self.call("invoke", name=name, method=method, args=list(args)).get("value")
+    def key(self, key, mods=0, text=""): return self.call("key", key=key, mods=mods, text=text)
+    def text(self, text): return self.call("text", text=text)
     def shot(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         return self.call("shot", path=str(Path(path).resolve()).replace("\\", "/"))

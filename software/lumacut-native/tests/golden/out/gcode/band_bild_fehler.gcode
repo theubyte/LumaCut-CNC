@@ -1,0 +1,1 @@
+FEHLER: „Bild“ liegt im Bereich gesperrter Streifen (oben) – dort wird nicht gelasert

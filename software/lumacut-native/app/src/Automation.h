@@ -10,6 +10,7 @@ class QQuickItem;
 class QQuickWindow;
 class QTcpServer;
 class QTcpSocket;
+class FrameStats;
 
 /**
  * Drives and inspects the REAL window for tests (see tests/ui/driver.py). JSON lines over TCP on 127.0.0.1.
@@ -17,7 +18,11 @@ class QTcpSocket;
  * like a user; it has no way around the go dialog.
  *
  * Commands: find{name} get{name,prop} click{name} mouse{x,y,type,buttons?} wheel{x,y,dy} key{key,mods?} text{text}
- *           invoke{name,method,args?} shot{path} stats{} tree{} quit{}
+ *           invoke{name,method,args?} shot{path} stats{reset?} tree{} quit{}
+ *           gpuBench{} gpuReset{} resize{w,h} pixel{x,y}
+ *
+ * stats: frame times measured on the render thread (frameMs, cpuMs, gpuMs), GPU name, API, compute, vsync.
+ * With LUMACUT_BENCH set the window presents without vsync and records GPU timestamps.
  */
 class Automation : public QObject {
     Q_OBJECT
@@ -31,6 +36,7 @@ private:
 
     QPointer<QQuickWindow> m_window;
     QTcpServer* m_server;
+    FrameStats* m_frameStats;
     QElapsedTimer m_started;
     qint64 m_firstFrameMs = -1;   // since process creation, DLL loading included
     qint64 m_processAgeAtStart = 0;

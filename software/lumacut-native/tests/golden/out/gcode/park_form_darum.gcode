@@ -1,0 +1,1 @@
+FEHLER: „Rahmen“ liegt im Bereich Park-Ecke (oben) – dort wird nicht gelasert

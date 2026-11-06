@@ -1,0 +1,12 @@
+; LumaCut App golden – park_form_offen_darum
+G21
+G90
+M5 I
+M3 I
+; Ebene Linie
+G0 X90.000 Y40.000
+G1 X90.000 Y36.000 F1500 S102
+G1 X0.000 Y36.000 F1500 S102
+G1 X0.000 Y40.000 F1500 S102
+M5 I
+M400

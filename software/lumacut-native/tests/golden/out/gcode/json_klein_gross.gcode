@@ -1,0 +1,11 @@
+; LumaCut App golden – json_klein_gross
+G21
+G90
+M5 I
+M3 I
+; Ebene Linie
+G0 X350.000 Y50.100
+G1 X349.999 Y50.101 F1500 S102
+G1 X226.544 Y150.100 F1500 S102
+M5 I
+M400
