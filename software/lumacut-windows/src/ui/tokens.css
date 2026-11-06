@@ -1,0 +1,39 @@
+/* LumaCut Studio design tokens. All colours and sizes in the app come from here.
+   Palette family: the Android app's (ui/Theme.kt) so tablet and PC feel like one product. */
+:root {
+  color-scheme: light;
+  --bg: #f2f3f9; --surface: #ffffff; --surface-2: #f6f7fc; --surface-3: #eceef7;
+  --line: #e4e7f1; --line-2: #cfd4e5;
+  --text: #151827; --muted: #555b73; --faint: #7a8097;
+  --accent: #4a57e3; --accent-hover: #3d49cf; --accent-ink: #ffffff; --accent-soft: rgba(74,87,227,.10);
+  --ok: #12855a; --warn: #ad6500; --bad: #cf3340; --info: #2c68d6;
+  --ok-soft: rgba(18,133,90,.11); --warn-soft: rgba(173,101,0,.11); --bad-soft: rgba(207,51,64,.10); --info-soft: rgba(44,104,214,.10);
+  --estop: #d7262f; --estop-hover: #bb1c25; --estop-ink: #ffffff;
+  --canvas: #e9ebf5; --sheet: #ffffff; --grid: rgba(64,74,128,.08); --grid-major: rgba(64,74,128,.18); --park: rgba(207,51,64,.10);
+  --shadow-1: 0 1px 2px rgba(21,24,39,.06), 0 1px 3px rgba(21,24,39,.05);
+  --shadow-2: 0 4px 14px rgba(21,24,39,.10), 0 1px 3px rgba(21,24,39,.06);
+  --shadow-3: 0 16px 48px rgba(21,24,39,.22), 0 2px 8px rgba(21,24,39,.08);
+  --scrim: rgba(18,20,34,.34);
+
+  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 18px; --fs-2xl: 24px;
+  --r-sm: 5px; --r-md: 7px; --r-lg: 10px; --r-xl: 14px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --h-control: 30px; --h-control-lg: 38px; --topbar: 46px; --rail: 76px; --statusbar: 26px; --panel: 288px;
+  --ease: cubic-bezier(.2,.7,.2,1); --t-fast: 90ms; --t-med: 160ms;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0e1016; --surface: #171a23; --surface-2: #1d2130; --surface-3: #272c3d;
+  --line: #262b39; --line-2: #383e54;
+  --text: #eef0f8; --muted: #a6acc2; --faint: #7f859d;
+  --accent: #8f9bff; --accent-hover: #a5afff; --accent-ink: #0d113d; --accent-soft: rgba(143,155,255,.16);
+  --ok: #4fd8a4; --warn: #f2b45c; --bad: #ff6b70; --info: #6cb6ff;
+  --ok-soft: rgba(79,216,164,.14); --warn-soft: rgba(242,180,92,.14); --bad-soft: rgba(255,107,112,.14); --info-soft: rgba(108,182,255,.14);
+  --estop: #d92c35; --estop-hover: #ec3a43; --estop-ink: #ffffff;
+  --canvas: #0a0c11; --sheet: #131722; --grid: rgba(166,172,194,.08); --grid-major: rgba(166,172,194,.19); --park: rgba(255,107,112,.13);
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4); --shadow-2: 0 4px 14px rgba(0,0,0,.45); --shadow-3: 0 16px 48px rgba(0,0,0,.6);
+  --scrim: rgba(3,4,8,.58);
+}
