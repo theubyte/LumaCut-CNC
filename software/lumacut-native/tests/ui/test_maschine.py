@@ -94,7 +94,9 @@ def run(app):
     assert abs(pi_status(app)["position"][2] - z0 - 1) < 0.01
 
     # Light and exhaust: no dialog.
-    # The Pi may have switched the light itself (effects after a move), so compare with what it reports now.
+    # The Pi plays light effects after moves and restores the old state afterwards: wait them out, then
+    # compare with what it reports now. A click during an effect is undone by the Pi itself.
+    time.sleep(3)
     light0 = pi_status(app)["lights"]
     app.wait(lambda: app.get("m-light", "on") == light0)
     app.click("m-light")

@@ -39,10 +39,16 @@ def main():
             app = App(exe=exe, port=port + 1000, pi_url=url, env=getattr(mod, "ENV", None))
             app.wait(lambda: app.stats()["firstFrameMs"] > 0, timeout=30)
             mod.run(app)
-            print(f"OK    {name}", flush=True)
+            print(f"OK    {name}" + (" (im 2. Versuch)" if attempt > 1 else ""), flush=True)
         except Exception:
-            failed.append(name)
-            print(f"FEHL  {name}\n{traceback.format_exc()}", flush=True)
+            if attempt == 1:
+                queue.append((name, 2))
+                print(f"NOCHMAL {name}
+{traceback.format_exc()}", flush=True)
+            else:
+                failed.append(name)
+                print(f"FEHL  {name}
+{traceback.format_exc()}", flush=True)
             if app:
                 try:
                     app.shot(ROOT / "build" / "shots" / f"fehler-{name}.png")

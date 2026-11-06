@@ -64,7 +64,7 @@ jobs:
           $out = (python tests/ui/run_all.py $exe 2>&1 | Out-String)
           $code = $LASTEXITCODE
           Write-Host $out
-          if ($code -ne 0) { $tail = (($out -split "`r?`n" | Where-Object { $_ -match '^(OK|FEHL|FEHLER|Alle)|Error|assert|line \d+, in run' }) | Select-Object -Last 25) -join '%0A'; Write-Host "::error::Praxistest: $tail"; throw 'Praxistest gescheitert' }
+          if ($code -ne 0) { $tail = (($out -split "`r?`n" | Where-Object { $_ -match '^(OK|NOCHMAL|FEHL|FEHLER|Alle)|Error|assert|line \d+, in run' }) | Select-Object -Last 25) -join '%0A'; Write-Host "::error::Praxistest: $tail"; throw 'Praxistest gescheitert' }
           $p = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Deinstallation scheiterte: $($p.ExitCode)" }
           if (Test-Path $exe) { throw 'Programm nach Deinstallation noch vorhanden' }
