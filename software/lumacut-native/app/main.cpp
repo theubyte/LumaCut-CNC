@@ -36,5 +36,7 @@ int main(int argc, char* argv[]) {
     Automation* automation = nullptr;
     if (ok && port > 0 && window) automation = new Automation(window, quint16(port), started, &app);
     Q_UNUSED(automation);
+    // Shown only now, so the automation sees the very first frame.
+    if (window) window->showMaximized();
     return app.exec();
 }

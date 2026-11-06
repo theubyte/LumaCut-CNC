@@ -37,8 +37,16 @@ static void treeOf(QQuickItem* item, QJsonArray& out) {
 
 Automation::Automation(QQuickWindow* window, quint16 port, const QElapsedTimer& started, QObject* parent)
     : QObject(parent), m_window(window), m_server(new QTcpServer(this)), m_started(started) {
+#ifdef Q_OS_WIN
+    FILETIME created, a, b, c, now;
+    if (GetProcessTimes(GetCurrentProcess(), &created, &a, &b, &c)) {
+        GetSystemTimeAsFileTime(&now);
+        const auto ticks = [](const FILETIME& f) { return (qint64(f.dwHighDateTime) << 32) | f.dwLowDateTime; };
+        m_processAgeAtStart = (ticks(now) - ticks(created)) / 10000 - m_started.elapsed();
+    }
+#endif
     connect(window, &QQuickWindow::frameSwapped, this, [this] {
-        if (m_firstFrameMs < 0) m_firstFrameMs = m_started.elapsed();
+        if (m_firstFrameMs < 0) m_firstFrameMs = m_processAgeAtStart + m_started.elapsed();
         ++m_frames;
     }, Qt::QueuedConnection);
     m_fpsTimer.start();

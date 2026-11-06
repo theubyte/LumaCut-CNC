@@ -32,7 +32,8 @@ private:
     QPointer<QQuickWindow> m_window;
     QTcpServer* m_server;
     QElapsedTimer m_started;
-    qint64 m_firstFrameMs = -1;
+    qint64 m_firstFrameMs = -1;   // since process creation, DLL loading included
+    qint64 m_processAgeAtStart = 0;
     QElapsedTimer m_fpsTimer;
     quint64 m_frames = 0, m_markFrames = 0;
     double m_lastFps = 0;

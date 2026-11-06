@@ -7,7 +7,7 @@ ApplicationWindow {
     objectName: "mainWindow"
     width: 1440; height: 900
     minimumWidth: 1000; minimumHeight: 640
-    visible: true
+    visible: false   // main.cpp shows it after setup
     title: "LumaCut Studio"
     flags: Qt.Window | Qt.FramelessWindowHint
     color: Theme.bg
