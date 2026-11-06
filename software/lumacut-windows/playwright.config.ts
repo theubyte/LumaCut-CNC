@@ -9,7 +9,8 @@ export default defineConfig({
   timeout: 90_000,
   fullyParallel: false,
   workers: 1,
-  reporter: 'line',
+  reporter: process.env.CI ? 'github' : 'line',
+  retries: process.env.CI ? 2 : 0,
   use: {
     baseURL: `http://localhost:${port}`,
     channel: process.env.CI ? 'msedge' : 'chrome',
