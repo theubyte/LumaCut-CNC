@@ -22,13 +22,14 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import (Aborted, MarlinTransport, MarlinLaserGuard, ProbeFailed, normalize,
-                        serve_tcp, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM, Z_SPEED_MAX)
+                        serve_tcp, FIRMWARE_MOTION, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM, Z_SPEED_MAX)
 from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
 from . import bedmap
 from . import matcal
 from . import focus_compensation as focus
+from . import job_optimizer
 from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import CalibrationStore, create_blueprint as camera_calibration_api
 from . import camera as head_camera
@@ -107,6 +108,9 @@ config = {
     "machine_name": "LumaCut",
     # Exhaust on at every job start; off this many seconds after the job (fumes).
     "exhaust_auto": False,
+    "job_optimize": True,       # op=autorun plans the order of a job for time (job_optimizer.py)
+    "job_optimize_budget_s": 4.0,
+    "travel_lift_always": False,  # True: every long rapid goes up to the travel height, also over a flat plate
     "exhaust_after_s": 60,
     # Laser power (%) while tracing the frame, 0 = laser off. A visible dot
     # only: capped at FRAME_POWER_MAX and never slower than FRAME_POWER_MIN_FEED.
@@ -212,7 +216,7 @@ MATCAL_FILE = DATA / "matcal.json"
 # phase: finer step while active (homing, probing, focusing, running,
 # finishing, parking), None otherwise.
 job = {"file": "", "state": "idle", "line": 0, "total": 0, "error": "", "probe": None,
-       "phase": None}
+       "phase": None, "optimizer": None}
 job_lock = threading.Lock()
 stop_job = threading.Event()
 # Framing (op=frame) runs laser-off outline moves from a request payload. It
@@ -968,6 +972,18 @@ def action():
         span = float(request.form.get("span", "40")); cycles = int(request.form.get("cycles", "6"))
         machine.motion_test(accel, speed, x, y, span, cycles, owner="web")
         return jsonify(message="Testfahrt %g mm/s² · %g mm/s fertig" % (accel, speed), position=machine.position)
+    if op == "job_optimizer":
+        # optimize=0/1: plan the order of a job; lift=0/1: go up on every long rapid, also over a flat plate.
+        for key, name in (("optimize", "job_optimize"), ("lift", "travel_lift_always")):
+            value = request.form.get(key)
+            if value is not None:
+                if value not in ("0", "1"):
+                    raise ValueError(key + " muss 0 oder 1 sein")
+                config[name] = value == "1"
+        persist()
+        return jsonify(message="Optimierung %s, Anheben bei langen Fahrten %s" % (
+            "an" if config["job_optimize"] else "aus", "immer" if config["travel_lift_always"] else "nur wenn nötig"),
+            job_optimize=config["job_optimize"], travel_lift_always=config["travel_lift_always"])
     if op == "motion_limits":
         # Measured X/Y limits; both empty = back to the firmware values.
         accel_raw = request.form.get("accel", "").strip(); speed_raw = request.form.get("speed", "").strip()
@@ -1902,6 +1918,25 @@ def auto_plan(commands, point=None):
             "points": sum(sum(g.reachable) for g in grids)}
 
 
+#: Focus may be off by this much before Z moves. The comparison from 05.11. showed
+#: no measurable change in line width between 7 and 12 mm gap.
+FOCUS_TOLERANCE_MM = 0.15
+#: Measured heights within this span count as one flat plate.
+FLAT_PLATE_MM = 1.0
+
+
+def _travel_lift(grids):
+    """Height for long rapids, None when they need no lift. On one flat plate the head at focus
+    height clears it anyway, and going up for every jump cost more time than the jumps themselves.
+    Different heights mean a taller part may lie in between, so there it still goes up."""
+    if config["travel_lift_always"]:
+        return machine.travel_z
+    heights = [z for g in grids for z in g.z if z is not None]
+    if heights and max(heights) - min(heights) <= FLAT_PLATE_MM:
+        return None
+    return machine.travel_z
+
+
 def _check_stop():
     if stop_job.is_set():
         raise Aborted()
@@ -1957,11 +1992,21 @@ def _auto_prepare(auto):
     commands = auto["commands"]
     if auto["compensate"]:
         _set_phase("focusing")
+        if config["job_optimize"]:
+            accel, speed = machine.motion_limits or FIRMWARE_MOTION
+            start = tuple(machine.position[:2]) if machine.position else (0.0, 0.0)
+            commands, plan = job_optimizer.optimize(
+                commands, job_optimizer.Motion(accel, speed), budget_s=float(config["job_optimize_budget_s"]),
+                start=start, should_stop=stop_job.is_set)
+            job["optimizer"] = plan
+            logging.info("Job optimizer: %s", plan)
+            _check_stop()
         commands, report = focus.compensate(
             commands, heightmap.HeightMapSet(grids), machine.focus_gap_mm,
             machine.probe_tip_offset_mm,
             start_z=machine.position[2] if machine.position else None,
-            should_stop=stop_job.is_set, travel_z=machine.travel_z)
+            should_stop=stop_job.is_set, travel_z=_travel_lift(grids),
+            z_tolerance_mm=FOCUS_TOLERANCE_MM if config["job_optimize"] else 0.0)
         logging.info("Autorun focus compensation: %s", report.as_dict())
     _check_stop()
     job.update(state="running", phase="running", total=len(commands))
@@ -1981,7 +2026,7 @@ def _execute_job(filename, commands, auto=None):
     else:
         first = "probing" if machine.homed else "homing"
     job.update(file=filename, state=first, phase=first, line=0, total=len(commands),
-               error="", probe=None)
+               error="", probe=None, optimizer=None)
     if auto is not None:
         commands = _auto_prepare(auto)
     if machine.controller_motion() is not None:
