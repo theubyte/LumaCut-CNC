@@ -104,6 +104,21 @@ QJsonObject Automation::handle(const QJsonObject& c) {
     if (cmd == "find" || cmd == "get" || cmd == "click" || cmd == "invoke") {
         auto* item = findItem(c["name"].toString());
         if (!item) return {{"error", "not found: " + c["name"].toString()}};
+        // Like a user: scroll an element below the fold into view before clicking it (small screens, CI).
+        if (cmd == "click") {
+            for (QQuickItem* p = item->parentItem(); p; p = p->parentItem()) {
+                if (!p->property("contentY").isValid()) continue;
+                const QRectF inP = item->mapRectToItem(p, QRectF(0, 0, item->width(), item->height()));
+                double dy = 0;
+                if (inP.bottom() > p->height()) dy = inP.bottom() - p->height() + 8;
+                else if (inP.top() < 0) dy = inP.top() - 8;
+                if (dy != 0.0) {
+                    p->setProperty("contentY", p->property("contentY").toDouble() + dy);
+                    m_window->contentItem()->polish();
+                    QCoreApplication::processEvents();
+                }
+            }
+        }
         const QRectF r = item->mapRectToScene(QRectF(0, 0, item->width(), item->height()));
         if (cmd == "find") return {{"x", r.x()}, {"y", r.y()}, {"w", r.width()}, {"h", r.height()}, {"enabled", item->isEnabled()}, {"type", QString::fromLatin1(item->metaObject()->className())}};
         if (cmd == "get") return {{"value", QJsonValue::fromVariant(item->property(c["prop"].toString().toUtf8()))}};

@@ -21,6 +21,7 @@ def is_open(app, name):
 
 
 def run(app):
+    app.call("resize", w=1024, h=768)   # small screen: the lower actions need scrolling, as in the CI
     app.click("nav-maschine")
     time.sleep(0.4)
     app.click("m-tab-steuerung")
