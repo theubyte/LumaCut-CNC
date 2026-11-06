@@ -78,7 +78,9 @@ jobs:
           Write-Host $out
           if ($LASTEXITCODE -ne 0) {
             # Annotationen sind ohne Anmeldung lesbar, die Logs nicht.
-            Write-Host ("::error::Praxistest: " + ($out -replace "`r?`n", '%0A'))
+            $wv = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue).pv
+            $ev = (Get-WinEvent -FilterHashtable @{LogName='Application';Level=2} -MaxEvents 3 -ErrorAction SilentlyContinue | ForEach-Object { $_.Message.Substring(0,[Math]::Min(300,$_.Message.Length)) }) -join ' || '
+            Write-Host ("::error::Praxistest (WebView2 $wv) Ereignisse: $ev :: " + ($out -replace "`r?`n", '%0A'))
             throw 'Installierte App besteht den Praxistest nicht'
           }
           $p = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn" -Wait -PassThru

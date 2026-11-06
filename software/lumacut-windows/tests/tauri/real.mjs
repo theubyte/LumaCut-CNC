@@ -9,15 +9,19 @@ const sim = process.argv[3] ?? 'http://127.0.0.1:8090';
 const out = 'tests/e2e/screenshots/real';
 mkdirSync(out, { recursive: true });
 const app = spawn(exe, [], { env: { ...process.env, LUMACUT_PI_URL: sim, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: '--remote-debugging-port=9333' }, stdio: 'ignore' });
+let exited = null;
+app.on('exit', (code) => { exited = code; });
+app.on('error', (e) => { exited = String(e); });
 const fails = [];
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'OK  ' : 'FEHL'} ${name} ${extra}`); if (!ok) fails.push(name); };
 
 try {
   let browser;
-  for (let i = 0; i < 40 && !browser; i++) {
-    try { browser = await chromium.connectOverCDP('http://127.0.0.1:9333'); } catch { await new Promise((r) => setTimeout(r, 500)); }
+  let last = '';
+  for (let i = 0; i < 120 && !browser && exited === null; i++) {
+    try { browser = await chromium.connectOverCDP('http://127.0.0.1:9333'); } catch (e) { last = String(e).slice(0, 300); await new Promise((r) => setTimeout(r, 500)); }
   }
-  if (!browser) throw new Error('App-Fenster nicht erreichbar');
+  if (!browser) throw new Error(`App-Fenster nicht erreichbar, Prozess-Ende: ${exited}, zuletzt: ${last}`);
   const page = browser.contexts()[0].pages()[0];
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
