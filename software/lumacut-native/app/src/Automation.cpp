@@ -132,6 +132,13 @@ QJsonObject Automation::handle(const QJsonObject& c) {
         else if (t == "release") sendMouse(p, QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton, mods);
         else if (t == "rpress") sendMouse(p, QEvent::MouseButtonPress, Qt::RightButton, Qt::RightButton, mods);
         else if (t == "rrelease") sendMouse(p, QEvent::MouseButtonRelease, Qt::RightButton, Qt::NoButton, mods);
+        else if (t == "mpress") sendMouse(p, QEvent::MouseButtonPress, Qt::MiddleButton, Qt::MiddleButton, mods);
+        else if (t == "mrelease") sendMouse(p, QEvent::MouseButtonRelease, Qt::MiddleButton, Qt::NoButton, mods);
+        else if (t == "mmove") sendMouse(p, QEvent::MouseMove, Qt::NoButton, Qt::MiddleButton, mods);
+        else if (t == "dbl") {   // what the system sends for a double click after the first press and release
+            sendMouse(p, QEvent::MouseButtonDblClick, Qt::LeftButton, Qt::LeftButton, mods);
+            sendMouse(p, QEvent::MouseButtonRelease, Qt::LeftButton, Qt::NoButton, mods);
+        }
         return {{"ok", true}};
     }
     if (cmd == "wheel") {
@@ -146,6 +153,11 @@ QJsonObject Automation::handle(const QJsonObject& c) {
         QKeyEvent press(QEvent::KeyPress, key, mods, c["text"].toString()), rel(QEvent::KeyRelease, key, mods);
         QCoreApplication::sendEvent(m_window, &press);
         QCoreApplication::sendEvent(m_window, &rel);
+        return {{"ok", true}};
+    }
+    if (cmd == "keydown" || cmd == "keyup") {   // a key held down (Leertaste zum Verschieben)
+        QKeyEvent ev(cmd == "keydown" ? QEvent::KeyPress : QEvent::KeyRelease, c["key"].toInt(), Qt::KeyboardModifiers(c["mods"].toInt()), c["text"].toString());
+        QCoreApplication::sendEvent(m_window, &ev);
         return {{"ok", true}};
     }
     if (cmd == "text") {

@@ -180,7 +180,7 @@ QVariantMap Machine::jobInfo() const {
     if (!jobActive()) return {{"active", false}};
     const int total = j.value("total").toInt();
     const double pct = total > 0 ? qMin(100.0, 100.0 * j.value("line").toDouble() / total) : 0;
-    const QString st = j.value("state").toString();
+    const QString st = j.value("phase").toString().isEmpty() ? j.value("state").toString() : j.value("phase").toString();   // phase is the finer step
     const QVariantMap p = j.value("probe").toMap();
     QString phase = st;
     if (st == QLatin1String("homing")) phase = QStringLiteral("Referenzfahrt");

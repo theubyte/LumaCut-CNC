@@ -48,6 +48,7 @@ QtObject {
     readonly property int fsLg: 15
     readonly property int fsXl: 18
     readonly property int fs2xl: 24
+    readonly property int fs3xl: 32
     readonly property int rSm: 5
     readonly property int rMd: 7
     readonly property int rLg: 10
@@ -65,6 +66,13 @@ QtObject {
     readonly property int rail: 76
     readonly property int statusbar: 26
     readonly property int panel: 288
+    readonly property int mvBar: 42
+    readonly property int mvTools: 44
+    readonly property int mvSide: 304
+    readonly property int mvPlates: 34
+    readonly property int ruler: 24
+    readonly property int panelWide: 376
+    readonly property int dockBody: 232
     readonly property int tFast: 90
     readonly property int tMed: 160
 }

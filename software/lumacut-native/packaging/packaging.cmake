@@ -13,4 +13,8 @@ set(CPACK_WIX_PROGRAM_MENU_FOLDER "LumaCut Studio")
 set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_LIST_DIR}/icon.ico")
 set(CPACK_PACKAGE_FILE_NAME "LumaCut-Studio")
 # Install path bin\ inside: the shortcut comes from CPACK_PACKAGE_EXECUTABLES.
+# MSVC runtime next to the program: it must also start on a PC without Visual Studio.
+set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
+set(CMAKE_INSTALL_UCRT_LIBRARIES FALSE)
+include(InstallRequiredSystemLibraries)
 include(CPack)

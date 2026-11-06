@@ -105,7 +105,8 @@ void MachineActions::send(const QString& op, const QVariantMap& fields, const QV
     const bool quiet = opts.value("quiet").toBool();
     PiClient::instance()->action(op, fields, timeout, [this, op, quiet, done = std::move(done)](const PiReply& r) {
         if (m_busy == op) { m_busy.clear(); emit busyChanged(); }
-        const QVariantMap reply = r.map();
+        QVariantMap reply = r.map();
+        if (!r.ok() && !reply.contains("error")) reply.insert("error", r.error);   // a refusal always carries its sentence, also without an answer from the Pi
         if (r.ok()) {
             const QString msg = reply.value("message").toString();
             if (!msg.isEmpty() && !quiet) Toast::instance()->show(msg, "ok");

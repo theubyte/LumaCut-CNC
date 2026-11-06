@@ -109,7 +109,8 @@ def run(app):
     assert app.get("o-test", "active") is False
     app.key(0x41, CTRL); app.text(app.invoke("shell", "piUrl").replace("http://", "")); time.sleep(0.2)
     app.click("o-test")
-    app.wait(lambda: "Erreichbar" in app.get("o-check", "text"))
+    app.wait(lambda: any(i["name"] == "o-check" for i in app.tree()))
+    assert "Erreichbar" in app.get("o-check", "text")
     app.click("o-theme-seg-dark"); time.sleep(0.2)
     assert app.invoke("shell", "isDark") is True
     app.click("o-theme-seg-light"); time.sleep(0.2)

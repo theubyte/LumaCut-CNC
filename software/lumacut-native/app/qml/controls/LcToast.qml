@@ -12,7 +12,7 @@ Column {
         Item {
             id: t
             required property var modelData
-            anchors.right: parent ? parent.right : undefined
+            anchors.horizontalCenter: parent ? parent.horizontalCenter : undefined
             width: Math.min(root.width, label.implicitWidth + 30)
             height: label.implicitHeight + 18
             objectName: "toast-" + modelData.tone

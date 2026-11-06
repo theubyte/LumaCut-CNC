@@ -8,8 +8,8 @@ Item {
     objectName: "view-Material"
     property string query: ""
     property string sel: ""
-    readonly property var groups: { Materials.items; return Materials.groups(query) }
-    readonly property var all: { Materials.items; return Materials.groups("") }
+    readonly property var groups: Materials.groups(query, Materials.items)
+    readonly property var all: Materials.groups("", Materials.items)
     readonly property string currentKey: Workspace.hasMaterial ? Materials.groupKey(Workspace.materialName, Workspace.materialThickness) : ""
     // The search only filters the list: the open material stays open while it still exists.
     readonly property var openGroup: {
@@ -324,7 +324,7 @@ Item {
         property var procs: ["Gravieren", "Schneiden"]
         property bool busy: false
         readonly property string clean: name.trim()
-        readonly property bool exists: { Materials.items; return Materials.groups("").some((g) => g.name === clean && g.thicknessMm === thick) }
+        readonly property bool exists: root.all.some((g) => g.name === clean && g.thicknessMm === thick)
         readonly property bool unchanged: !!edit && clean === edit.name && thick === edit.thicknessMm
         readonly property bool valid: clean.length > 0 && clean.length <= 80 && (edit ? !unchanged : procs.length > 0) && !exists
         function start(group) {

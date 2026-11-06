@@ -131,7 +131,7 @@ QStringList Calibration::recentLines() const {
     }
     return out.mid(std::max<qsizetype>(0, out.size() - 14));
 }
-QString Calibration::matcalLock(const QString& kind, bool raised) const {
+QString Calibration::matcalLock(const QString& kind, bool raised, const QVariant&) const {
     auto* m = Machine::instance();
     const QString move = m->moveLock();
     if (!move.isEmpty()) return move;
@@ -187,7 +187,7 @@ void Calibration::clearOrigin() {
         if (yes) MachineActions::instance()->run(QStringLiteral("origin_clear"), QVariantMap{}, QVariantMap{}, MachineActions::Done{});
     });
 }
-QVariantList Calibration::bedCells() const {
+QVariantList Calibration::bedCells(const QVariant&) const {
     const int cols = m_bedMap.value("cols").toInt(), rows = m_bedMap.value("rows").toInt();
     const QVariantList z = m_bedMap.value("z").toList();
     if (cols <= 0 || rows <= 0 || z.size() < cols * rows) return {};

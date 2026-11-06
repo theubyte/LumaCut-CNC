@@ -44,7 +44,7 @@ void Materials::load() {
     }));
 }
 QString Materials::groupKey(const QString& name, double thicknessMm) { return name + u'|' + QString::number(thicknessMm); }
-QVariantList Materials::groups(const QString& query) const {
+QVariantList Materials::groups(const QString& query, const QVariant&) const {
     const QString q = query.trimmed().toLower();
     QList<QVariantMap> out;
     for (const QVariant& v : m_items) {

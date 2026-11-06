@@ -10,7 +10,13 @@ Rectangle {
     radius: Theme.rMd
     color: Theme.surface3
     implicitHeight: Theme.hControl
-    implicitWidth: row.implicitWidth + 4
+    // From the parts' natural widths, never their stretched ones: a stretched control must not feed back into layout.
+    readonly property real naturalWidth: {
+        let w = 4 + 2 * Math.max(0, parts.count - 1);
+        for (let i = 0; i < parts.count; ++i) { const p = parts.itemAt(i); if (p) w += p.natural; }
+        return w;
+    }
+    implicitWidth: naturalWidth
     opacity: enabled ? 1 : .5
     Row {
         id: row
@@ -18,6 +24,7 @@ Rectangle {
         height: parent.height - 4
         spacing: 2
         Repeater {
+            id: parts
             model: root.options
             Rectangle {
                 id: seg
@@ -26,7 +33,8 @@ Rectangle {
                 readonly property bool on: root.value === modelData.value
                 objectName: root.objectName.length ? root.objectName + "-" + modelData.value : ""
                 height: row.height
-                width: Math.max(segRow.implicitWidth + 20, root.width > root.implicitWidth ? (root.width - 4 - 2 * (root.options.length - 1)) / root.options.length : 0)
+                readonly property real natural: segRow.implicitWidth + 20
+                width: Math.max(natural, root.width > root.naturalWidth ? (root.width - 4 - 2 * (root.options.length - 1)) / root.options.length : 0)
                 radius: Theme.rSm
                 color: on ? Theme.surface : "transparent"
                 activeFocusOnTab: true

@@ -16,3 +16,11 @@ lumacut_core_test(test_golden)   # bis aufs Zeichen gegen den Kotlin-Code
 lumacut_core_test(test_core)     # Projekt-JSON, Grenzfälle, Clipper, Vektorisieren, Kurven
 lumacut_core_test(test_speed)    # Messung: Foto 2000 × 2000 bis G-Code und Werkzeugweg
 set_tests_properties(test_speed PROPERTIES LABELS speed)
+
+lumacut_core_test(test_import)         # alle Fälle aus Android und TypeScript, Rückimport des Exports
+lumacut_core_test(test_import_robust)  # kaputte Dateien: abgeschnitten, zufällig verändert, Bomben
+lumacut_core_test(test_import_big)     # Messung: 100.000 Pfade, Zeit und Speicher
+target_link_libraries(test_import PRIVATE lumacut_import)
+target_link_libraries(test_import_robust PRIVATE lumacut_import)
+target_link_libraries(test_import_big PRIVATE lumacut_import)
+set_tests_properties(test_import_big PROPERTIES LABELS speed)

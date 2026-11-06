@@ -43,6 +43,8 @@ ApplicationWindow {
         function machine(key) { return Machine.status[key] }
         function lastToast() { return Toast.lastText }
         function piUrl() { return Pi.baseUrl }
+        function updateState() { return Updater.installState }
+        function tryAction(op) { MachineActions.run(op); return MachineActions.isAllowed(op) }
 
         ColumnLayout {
             anchors.fill: parent
@@ -78,10 +80,11 @@ ApplicationWindow {
             z: 100
             GoDialog {}
             LcConfirmHost {}
+            SyncHost {}
             LcToast {
-                anchors.right: parent.right
+                // Bottom centre: the primary buttons sit in the bottom right corner and stay readable.
+                anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
-                anchors.rightMargin: Theme.sp4
                 anchors.bottomMargin: Theme.statusbar + Theme.sp3
                 z: 200
             }

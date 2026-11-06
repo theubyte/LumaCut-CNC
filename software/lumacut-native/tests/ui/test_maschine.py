@@ -130,6 +130,12 @@ def run(app):
     app.click("m-estop-reset")
     app.wait(lambda: not pi_status(app)["emergency_latched"], timeout=15)
 
+    # Whatever is not on the list is refused without a request; fired-laser service ops do not exist here.
+    for op in ("service_laser", "ttl_test", "supply_test", "firmware_update_install", "was_neues"):
+        assert app.invoke("shell", "tryAction", op) is False
+        assert "nicht freigegeben" in app.invoke("shell", "lastToast")
+    assert not is_open(app, "go-confirm")
+
     # Strg+1..6
     app.key(0x31, CTRL); time.sleep(0.2)
     assert "Material" in app.get("mainView", "source")
@@ -149,7 +155,9 @@ def run(app):
     app.click("kal-taster"); time.sleep(0.2)
     assert app.get("kal-title", "text") == "Taster-Versatz"
     app.click("probe-edit"); time.sleep(0.2)
+    assert app.get("set-probe_offset_x_mm", "value") == -27.4, "Der Dialog muss die Werte vom Pi zeigen"
     app.click("settings-save")
     time.sleep(0.5)
+    assert pi_status(app)["probe_xy_offset_mm"] == [-27.4, 13.0]
     assert not is_open(app, "settings-save")
     app.click("m-tab-steuerung")

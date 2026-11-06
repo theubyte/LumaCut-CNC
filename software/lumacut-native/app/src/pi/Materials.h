@@ -33,7 +33,7 @@ public:
 
     Q_INVOKABLE void load();
     /** One physical material (name and thickness) with its processes, sorted; optional filter on name or process. */
-    Q_INVOKABLE QVariantList groups(const QString& query = {}) const;
+    Q_INVOKABLE QVariantList groups(const QString& query = {}, const QVariant& dependsOn = {}) const;
     Q_INVOKABLE static QString groupKey(const QString& name, double thicknessMm);
     /** The entry for a process in a group, or an empty map. */
     Q_INVOKABLE static QVariantMap entryOf(const QVariantMap& group, const QString& process);

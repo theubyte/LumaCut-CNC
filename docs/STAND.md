@@ -33,7 +33,7 @@ LumaCut ist ein selbst gebauter Diodenlaser (Gravieren und Schneiden) mit
 ablösen; der Besitzer bedient alles vom Tablet aus.
 
 ```
- Android-App (Tablet, Hauptgerät)   Browser (Web-Oberfläche)   [Windows-Studio: ruht]
+ Android-App (Tablet, Hauptgerät)   Browser (Web-Oberfläche)   [LumaCut Studio Windows, nativ]
                  │  HTTP :8080 (Pi-API)          │
                  ▼                               ▼
  ┌──────────────────────── Raspberry Pi 400 ─────────────────────────┐
@@ -60,7 +60,7 @@ ablösen; der Besitzer bedient alles vom Tablet aus.
 | Android-App | `android/core` (reines Kotlin: G-Code, Geometrie, Pi-Client, lokal testbar), `android/app` (Oberfläche) |
 | Firmware | `firmware/marlin/build.py` (baut Marlin reproduzierbar aus dem Beispiel-Config + Patches) |
 | Tests Pi | `tests/` (Python unittest/pytest) |
-| Windows-Studio (ruht) | `software/lumacut-studio-native` |
+| Windows-App LumaCut Studio, nativ (Zweig `windows-native`) | `software/lumacut-native`, Aufbau, Messwerte und Stand in [WINDOWS_APP.md](WINDOWS_APP.md). Überholt: `software/lumacut-studio`, `software/lumacut-studio-native`, Tauri-Fassung auf Zweig `windows-app` |
 | Doku | `docs/` – Einstieg ist diese Datei |
 | Auf dem Pi | Programm `/opt/lumacut` (Git-Checkout), Dienst `lumacut-marlin`, Daten `/var/lib/lumacut/marlin/` (`config.json`, Materialien, Projekte, Bettkarte …) |
 | Kopf-Konstruktion (CAD) | `A:\mfw\zmount\v6\build_kopf_v6.py` (CadQuery, erzeugt STEP/STL/Vorschaubilder), auch auf dem NAS unter `Export\kopf_v6`; ältere Stände `v5`, Idee des Besitzers `A:\mfw\zmount\in\new_laser_head.step`. **Entwurf v7** (Schneckenlift, nicht gebaut): `A:\mfw\zmount\v7\build_kopf_v7.py`, Anleitung `LIESMICH.md` dort |
@@ -125,8 +125,8 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   Material, Projekt und jede Grenze liegt auf dem Pi; Apps lesen und
   synchronisieren nur. Grenzen (Z ≤ 80 mm, Material ≤ 60 mm, Sperrzonen)
   setzt der Pi selbst durch.
-- **Android zuerst.** Die Android-App ist die Referenz; das Windows-Studio
-  ruht und wird später nach ihrem Vorbild neu gebaut.
+- **Android ist die fachliche Referenz.** Seit 06.11. entsteht die Windows-App LumaCut Studio
+  nativ (C++, Qt Quick, Direct3D) auf dem Zweig `windows-native`, keine Webtechnik (Wunsch des Besitzers).
 - **Web-Oberfläche des Pi** (`index.html`) pflegt seit 28.10. Claude (vorher Grok).
 - **Kalibrieren adaptiv:** Feld für Feld lasern → fotografieren → messen →
   nächsten Wert rechnen; platzsparend. Schnitt-Tests auf hochgelegter Platte,
@@ -247,7 +247,9 @@ Diese Regeln sind aus echten Vorfällen entstanden und gelten immer:
   jetzt auf `$110/$111`, öffnet einen 7 s stummen Port neu und quittiert
   Zeilen, deren ok verloren ging, sobald Grbl Idle meldet. Die Brücke fragt verlorene
   Statusmeldungen dreimal nach und meldet ein getrenntes Board sofort.
-- **Windows-Studio:** ruht.
+- **Windows-App LumaCut Studio (06.11., Zweig `windows-native`, nicht auf `main`):** nativ mit GPU-Vorschau und
+  -Bühne. Bedienung, Motiv, Starten und Import laufen gegen den Simulator, an der echten Maschine noch nicht.
+  Werkstatt und Platine folgen. Stand in [WINDOWS_APP.md](WINDOWS_APP.md).
 - **LightBurn** geht übergangsweise noch über TCP 23.
 
 ## 8. Chronik: was bisher geschah
@@ -483,7 +485,7 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
 - Android-App 1.0.56, Ebenen neu (06.11., auf dem Pi bereit): Leere Ebenen verschwinden von selbst, Liste zeigt nur Ebenen mit Inhalt, Antippen wählt die Teile, Zahnrad öffnet die Werte, Aktionen in der Liste. Core-Tests grün, Bedienung am Tablet vom Besitzer noch nicht geprüft.
 - Android-App, SVG (06.11.): Struktur, Farb-Ebenen, Aufteilen, Gruppen-Teil antippen (siehe CHANGELOG). Core-Tests grün, am Tablet und mit echten SVG-Dateien noch nicht geprüft. DXF und HPGL bleiben ohne Farben/Ebenen.
 - Bettkarte in der App anzeigen; Materialstärke mit der Bettkarte prüfen.
-- Später: Windows-Studio nach dem Vorbild der Android-App neu bauen.
+- Windows-App: nächste Etappen in [WINDOWS_APP.md](WINDOWS_APP.md).
 - Weitere Pi-Punkte: [PI_STATUS_UND_OFFENE_PUNKTE.md §4](PI_STATUS_UND_OFFENE_PUNKTE.md#4-offene-punkte).
 
 ## 11. Offene Fragen und Messungen

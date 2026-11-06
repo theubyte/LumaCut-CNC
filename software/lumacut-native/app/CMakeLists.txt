@@ -12,8 +12,15 @@ qt_add_qml_module(lumacut_studio
   DEPENDENCIES QtQuick QtQuick.Controls
 )
 target_link_libraries(lumacut_studio PRIVATE
-  Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::Svg lumacut_gpu lumacut_core)
-target_include_directories(lumacut_studio PRIVATE src src/pi)
+  Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::Svg lumacut_gpu lumacut_import lumacut_text lumacut_core)
+# Generated type registration includes headers by bare name: every folder under src/ goes on the include path.
+set(APP_SOURCE_DIRS src)
+foreach(f ${APP_SOURCES})
+  get_filename_component(d ${f} DIRECTORY)
+  list(APPEND APP_SOURCE_DIRS ${d})
+endforeach()
+list(REMOVE_DUPLICATES APP_SOURCE_DIRS)
+target_include_directories(lumacut_studio PRIVATE ${APP_SOURCE_DIRS})
 target_compile_definitions(lumacut_studio PRIVATE QT_MESSAGELOGCONTEXT)
 
 install(TARGETS lumacut_studio RUNTIME DESTINATION bin BUNDLE DESTINATION bin)
@@ -24,5 +31,6 @@ qt_generate_deploy_qml_app_script(
   DEPLOY_USER_QML_MODULES_ON_UNSUPPORTED_PLATFORM
   NO_TRANSLATIONS
   NO_COMPILER_RUNTIME
+  DEPLOY_TOOL_OPTIONS --skip-plugin-types qmltooling --no-opengl-sw --no-system-d3d-compiler
 )
 install(SCRIPT ${deploy_script})

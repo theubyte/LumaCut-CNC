@@ -39,6 +39,7 @@ struct StageImage {
     QTransform transform;        // from the unit square (0,0)-(1,1), y down, to bed mm
     float opacity = 1.0f;
     bool visible = true;
+    bool below = false;          // goes under all other images, e.g. a camera background
 };
 
 /**
@@ -59,6 +60,7 @@ struct StageImage {
  *   stage->setSelectionFrame(corners);        // 4 corners in bed mm, frame with 8 handles; empty = none
  *   stage->setMarquee(QRectF(...));           // rubber band, in bed mm; null = none
  *   stage->setImage(img); stage->removeImage(id);
+ *   stage->setImageTransform(id, t);          // moving a picture: no conversion, no new texture
  *
  * View: properties zoom/pan, zoomAt(), panBy(), fit(), mmToItem(), itemToMm() from GpuViewItem. `interactive` = true
  * gives wheel zoom and drag pan straight away; leave it false if the editor routes the mouse itself. Text such as
@@ -94,6 +96,7 @@ public:
     void setMarquee(QRectF rect);
     void setImage(StageImage image);
     void removeImage(quint64 id);
+    void setImageTransform(quint64 id, QTransform transform);
 
     /** Test content on the worker: `paths` closed shapes of `segmentsPerPath` segments on a fill and a line layer. */
     Q_INVOKABLE void loadBenchmark(int paths, int segmentsPerPath);

@@ -49,7 +49,8 @@ def main():
             if app:
                 app.close()
             if sim:
-                sim.kill()
+                # The venv python is a launcher: kill the whole tree, or the old simulator keeps the port.
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(sim.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print(f"FEHLER in: {', '.join(failed)}" if failed else f"Alle {len(names)} Prüfungen grün", flush=True)
     sys.exit(1 if failed else 0)
 

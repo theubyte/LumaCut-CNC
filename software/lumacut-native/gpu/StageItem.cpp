@@ -688,9 +688,13 @@ void StageItem::setImage(StageImage image) {
                     if (!same) im.version = v;
                     return;
                 }
-                s.images.push_back({*held, v});
+                if (held->below) s.images.insert(s.images.begin(), {*held, v});
+                else s.images.push_back({*held, v});
             });
         });
+}
+void StageItem::setImageTransform(quint64 id, QTransform transform) {
+    push([id, transform](Scene& s) { for (auto& im : s.images) if (im.img.id == id) { im.img.transform = transform; return; } });
 }
 void StageItem::removeImage(quint64 id) {
     push([id](Scene& s) { s.images.erase(std::remove_if(s.images.begin(), s.images.end(), [&](const auto& im) { return im.img.id == id; }), s.images.end()); });

@@ -132,12 +132,13 @@ LcScroll {
     Component {
         id: probeDetail
         ColumnLayout {
+            id: pd
             spacing: Theme.sp3
             readonly property var off: page.st.probe_xy_offset_mm
             Para { text: "So weit liegt die Tasterspitze neben dem Laserpunkt. Ohne diesen Wert tastet der Pi nicht ab." }
             Stats {
-                Sub { label: "Versatz X"; value: parent.parent.off ? Fmt.de(parent.parent.off[0]) + " mm" : "–"; tone: parent.parent.off ? "" : "bad" }
-                Sub { label: "Versatz Y"; value: parent.parent.off ? Fmt.de(parent.parent.off[1]) + " mm" : "–"; tone: parent.parent.off ? "" : "bad" }
+                Sub { label: "Versatz X"; value: pd.off ? Fmt.de(pd.off[0]) + " mm" : "–"; tone: pd.off ? "" : "bad" }
+                Sub { label: "Versatz Y"; value: pd.off ? Fmt.de(pd.off[1]) + " mm" : "–"; tone: pd.off ? "" : "bad" }
                 Sub { mono: false; label: "Taster in Firmware"; value: page.st.z_probe_supported === false ? "Nein" : page.st.z_probe_supported ? "Ja" : "unbekannt" }
             }
             RowLayout { LcButton { objectName: "probe-edit"; text: "Werte eintragen"; onClicked: probeDlg.open = true } }
@@ -147,7 +148,7 @@ LcScroll {
                 objectName: "probeDialog"
                 title: "Taster-Versatz"
                 note: "Der Pi vergisst dabei die gemessene Werkstückoberfläche."
-                fields: [{ key: "probe_offset_x_mm", label: "Versatz X", value: parent.off ? parent.off[0] : 0, min: -80, max: 80 }, { key: "probe_offset_y_mm", label: "Versatz Y", value: parent.off ? parent.off[1] : 0, min: -80, max: 80 }]
+                fields: [{ key: "probe_offset_x_mm", label: "Versatz X", value: pd.off ? pd.off[0] : 0, min: -80, max: 80 }, { key: "probe_offset_y_mm", label: "Versatz Y", value: pd.off ? pd.off[1] : 0, min: -80, max: 80 }]
             }
         }
     }
@@ -217,7 +218,7 @@ LcScroll {
             id: bd
             spacing: Theme.sp3
             readonly property var summary: page.st.bed_map
-            readonly property var cells: { Calibration.bedMap; return Calibration.bedCells() }
+            readonly property var cells: Calibration.bedCells(Calibration.bedMap)
             Para { text: "Höhenprofil des leeren Betts, damit Stärke und Höhenkorrektur stimmen." }
             Stats {
                 visible: !!bd.summary
@@ -266,7 +267,7 @@ LcScroll {
             property string kind: "engrave"
             property bool raised: false
             readonly property var last: page.st.material_calibration
-            readonly property string lock: { Machine.status; Workspace.hasMaterial; Calibration.cameraOk; return Calibration.matcalLock(kind, raised) }
+            readonly property string lock: Calibration.matcalLock(kind, raised, [Machine.status, Workspace.hasMaterial, Calibration.cameraOk])
             Para { text: "Der Pi lasert, fotografiert und misst selbst, bis die Werte sitzen, und speichert sie als Material. Kopf vorher über eine freie, glatte Stelle fahren: Der Test beginnt am Laserpunkt." }
             RowLayout {
                 spacing: Theme.sp3

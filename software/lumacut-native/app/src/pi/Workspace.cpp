@@ -1,6 +1,7 @@
 #include "Workspace.h"
 #include "Machine.h"
 #include "PiClient.h"
+#include <QTimer>
 
 Workspace::Workspace(QObject* parent) : QObject(parent) {
     connect(Machine::instance(), &Machine::syncChanged, this, [this](const QVariantMap& sync) {
@@ -9,6 +10,9 @@ Workspace::Workspace(QObject* parent) : QObject(parent) {
         if (sync.value("workspace").toInt() != m_rev && !m_loading) load();
     });
     connect(PiClient::instance(), &PiClient::baseUrlChanged, this, [this] { m_rev = -1; m_material.clear(); emit changed(); });
+    // Created on first use, possibly long after the first status: read the stand now, the sync signal will not repeat it.
+    m_scanRev = Machine::instance()->status().value("sync").toMap().value("scan").toInt();
+    if (Machine::instance()->online()) QTimer::singleShot(0, this, [this] { load(); });
 }
 void Workspace::take(const QVariantMap& w) {
     m_material = w.value("material").toMap();

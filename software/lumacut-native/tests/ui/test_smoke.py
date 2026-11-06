@@ -9,7 +9,7 @@ def run(app):
     assert s["api"] in (4, 5), f"Grafik-API ist nicht Direct3D: {s['api']}"  # QSGRendererInterface: 4 = D3D11, 5 = D3D12
     app.click("nav-start")
     time.sleep(0.3)
-    assert app.invoke("gpuProbe", "benchmark", 1000000) == 1000000
+    assert app.invoke("start-stage", "benchmark", 1000000) == 1000000
     time.sleep(1.5)
     app.stats()
     time.sleep(2)

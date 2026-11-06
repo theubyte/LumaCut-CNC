@@ -28,7 +28,7 @@ jobs:
         with:
           version: '6.10.3'
           arch: win64_msvc2022_64
-          modules: qtshadertools qtimageformats
+          modules: qtshadertools qtimageformats qtpdf
           cache: true
       - uses: actions/setup-python@v5
         with:

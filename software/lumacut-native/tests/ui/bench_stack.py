@@ -15,13 +15,13 @@ try:
     app.shot("build/shots/probe-leer.png")
     for n in (100_000, 1_000_000, 5_000_000):
         t = time.time()
-        app.invoke("gpuProbe", "benchmark", n)
+        app.invoke("start-stage", "benchmark", n)
         time.sleep(1.0)
         app.stats()
         time.sleep(3.0)
         s = app.stats()
         print(f"{n:>8} Segmente: {s['fps']:.0f} Bilder/s, Speicher {s['memMb']:.0f} MB, Grafik-API {s['api']}")
         app.shot(f"build/shots/probe-{n}.png")
-    print(json.dumps(app.find("segments")))
+    print(json.dumps(app.find("start-preview")))
 finally:
     app.close()

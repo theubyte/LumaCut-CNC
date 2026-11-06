@@ -7,7 +7,7 @@ Rectangle {
     implicitHeight: 6
     implicitWidth: 120
     radius: 3
-    color: Theme.surface3
+    color: Theme.line2
     clip: true
     Rectangle {
         height: parent.height

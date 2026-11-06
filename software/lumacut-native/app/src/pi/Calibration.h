@@ -45,7 +45,7 @@ public:
     /** Entered offsets and heights go to /api/settings; the Pi then forgets the measured surface. cb(ok). */
     Q_INVOKABLE void saveSettings(const QVariantMap& fields, const QJSValue& cb);
     /** Sentence why the material test cannot start, empty when it can. */
-    Q_INVOKABLE QString matcalLock(const QString& kind, bool raised) const;
+    Q_INVOKABLE QString matcalLock(const QString& kind, bool raised, const QVariant& dependsOn = {}) const;
     Q_INVOKABLE void startMatcal(const QString& kind, bool raised);
     Q_INVOKABLE void motionTest(double accel, double speed, double span, int cycles);
     Q_INVOKABLE void motionSave(double accel, double speed);
@@ -53,7 +53,7 @@ public:
     Q_INVOKABLE void clearBedMap();
     Q_INVOKABLE void clearOrigin();
     /** Bed heights as seen from the door: [{text, level 0..1}], row by row. */
-    Q_INVOKABLE QVariantList bedCells() const;
+    Q_INVOKABLE QVariantList bedCells(const QVariant& dependsOn = {}) const;
     /** Sicherung herunterladen: writes to `path` (no dialog here). cb(ok, text). */
     Q_INVOKABLE void saveBackup(const QString& path, const QJSValue& cb);
     Q_INVOKABLE static QString uptimeText(const QVariant& seconds);
