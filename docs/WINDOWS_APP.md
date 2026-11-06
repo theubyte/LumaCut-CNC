@@ -53,7 +53,7 @@ führt alles im installierten Programm aus, deinstalliert und legt eine Vorabver
 | Compute 12 MP Graustufen und Kontrast | 0,8 ms GPU, 14,5 ms CPU mit 16 Threads |
 | Import SVG 100.000 Pfade | 224 ms, 105 MB (TypeScript: 764 bis 920 ms, 318 bis 343 MB) |
 | Import DXF 100.000 Linien | 94 ms, 44 MB (TypeScript: 304 bis 310 ms) |
-| MSI | 37 MB |
+| MSI | 36 MB |
 
 Die CI hat keine echte GPU; dort läuft die App auf dem Software-Adapter.
 
