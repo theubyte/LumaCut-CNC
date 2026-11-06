@@ -55,6 +55,8 @@ POWER_RANGE = (1.0, 80.0)
 # area (P / v) and go faster instead of lower, up to ENGRAVE_MAX_SPEED.
 MIN_POWER_PCT = 8.0
 ENGRAVE_MAX_SPEED = 6000.0
+# Above the power range the same energy goes slower, down to this speed.
+ENGRAVE_MIN_SPEED = 1500.0
 # A field counts as clean below these (fractions of the material brightness);
 # tuned on plywood: 1500 mm/min smoke halo 0.2-0.4, flickering low power
 # stripes 0.1-0.14, good fields 0.02-0.08.
@@ -341,8 +343,12 @@ class EngraveSearch:
             return None
         name, target = TARGETS[self._target]
         power = self._next if self._next is not None else self._propose(target)
-        power = min(POWER_RANGE[1], max(POWER_RANGE[0], power))
+        power = max(POWER_RANGE[0], power)
         speed = self.speed
+        if power > POWER_RANGE[1]:
+            # 06.11. MDF: 76.5 % at 4500 reached tone 0.67 of 0.85: more energy means slower
+            speed = min(speed, max(ENGRAVE_MIN_SPEED, speed * POWER_RANGE[1] / power))
+            power = POWER_RANGE[1]
         if power < MIN_POWER_PCT:
             # same energy faster, at the lowest power the laser fires reliably
             speed = min(ENGRAVE_MAX_SPEED, max(speed, speed * MIN_POWER_PCT / power))
@@ -366,10 +372,22 @@ class EngraveSearch:
             if self.speed > 1500:
                 self.speed, self._next = self.speed * 2 / 3, f["power"] * 2 / 3  # flicker: slower
                 return
-        if self._tries >= MAX_PER_TARGET:
+        if hit:
+            return self._finish(name, f)     # the same setting again would not change the tone
+        limit = MAX_PER_TARGET + 2 if name == "dunkel" else MAX_PER_TARGET
+        if self._tries >= limit or self._at_the_end(f, target):
             near = [g for g in self.fields if g["target"] == name]
-            ok = [g for g in near if g["clean"]] or near
-            self._finish(name, min(ok, key=lambda g: abs(g["tone"] - target)), approximate=True)
+            within = [g for g in near if abs(g["tone"] - target) <= TONE_TOL]
+            # Clean only decides among right tones: 06.11. a clean field at 0.46 became "dark".
+            pool = [g for g in within if g["clean"]] or within or near
+            self._finish(name, min(pool, key=lambda g: abs(g["tone"] - target)), approximate=not within)
+
+    @staticmethod
+    def _at_the_end(f, target):
+        """Power and speed cannot move this tone any further towards the target."""
+        if f["tone"] < target:
+            return f["power"] >= POWER_RANGE[1] and f["speed"] <= ENGRAVE_MIN_SPEED
+        return f["power"] <= MIN_POWER_PCT and f["speed"] >= ENGRAVE_MAX_SPEED
 
     def _finish(self, name, f, approximate=False):
         self.results[name] = dict(f, approximate=approximate or abs(f["tone"] - TARGETS[self._target][1]) > TONE_TOL)

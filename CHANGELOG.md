@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-06
 
+- **Materialtest sucht besser:** Reicht die höchste Leistung (80 %) nicht, wird er langsamer, bis 1500 mm/min. Ein „sauberes“ Feld schlägt ein besser passendes nur noch, wenn beide den Zielton treffen, und ein richtiger Ton mit Streifen wird bei Mittel und Hell nicht mehr wiederholt. Am Board noch nicht gelaufen.
 - **Materialtest misst auf der kalibrierten Fotohöhe:** Die Fotos entstanden auf Z 23. Dort lag das Kameramodell bis zu 180 Pixel (rund 6 mm) neben den Feldern, deshalb maß der erste Test daneben und speicherte 80 % als „hell“. Der Kopf fährt für jedes Foto jetzt auf Oberfläche + kalibrierte Höhe, dort waren es am Foto etwa 10 Pixel. Steht die Kamera anders, bricht der Test ab. Noch nicht in einem Testlauf bestätigt.
 
 ## 2026-11-05

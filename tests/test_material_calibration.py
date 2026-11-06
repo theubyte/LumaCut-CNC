@@ -155,6 +155,45 @@ class SearchTests(unittest.TestCase):
         self.assertGreater(hell["speed"], 4500)
         self.assertLessEqual(abs(hell["tone"] - 0.30), matcal.TONE_TOL)
 
+    @staticmethod
+    def mdf_tone(power, speed):
+        """Fields of the MDF run 2026-11-06, log-linear between them and beyond."""
+        pts = [(6.56, 0.335), (10.0, 0.437), (20.8, 0.462), (37.8, 0.534), (42.1, 0.566), (76.5, 0.669)]
+        e = power * 4500 / speed
+        a, b = next(((p, q) for p, q in zip(pts, pts[1:]) if e <= q[0]), (pts[-2], pts[-1]))
+        return a[1] + (b[1] - a[1]) * (math.log(e) - math.log(a[0])) / (math.log(b[0]) - math.log(a[0]))
+
+    def test_dark_out_of_reach_at_full_power_goes_slower(self):
+        s = matcal.EngraveSearch()
+        while (step := s.next()) is not None:
+            self.assertLessEqual(step["power"], matcal.POWER_RANGE[1])
+            self.assertGreaterEqual(step["speed"], matcal.ENGRAVE_MIN_SPEED)
+            s.add(step, {"tone": self.mdf_tone(step["power"], step["speed"]),
+                         "uneven": 0.13, "stripes": 0.10, "halo": 0.01})
+        for name, target in matcal.TARGETS:
+            self.assertLessEqual(abs(s.results[name]["tone"] - target), 0.1, name)
+        self.assertLess(s.results["dunkel"]["speed"], 4500)
+        self.assertLessEqual(len(s.fields), 12)
+
+    def test_clean_field_far_off_does_not_beat_the_nearest(self):
+        s = matcal.EngraveSearch()
+        tones = iter([(0.40, 0.02), (0.60, 0.10), (0.70, 0.10), (0.75, 0.10), (0.76, 0.10), (0.77, 0.10)])
+        while "dunkel" not in s.results:
+            tone, stripes = next(tones)
+            s.add(s.next(), {"tone": tone, "uneven": 0.05, "stripes": stripes, "halo": 0.02})
+        self.assertEqual(s.results["dunkel"]["tone"], 0.77)
+        self.assertTrue(s.results["dunkel"]["approximate"])
+
+    def test_right_tone_with_stripes_is_not_burned_again(self):
+        s = matcal.EngraveSearch()
+        s.results = {"dunkel": {}}
+        s._target = 1
+        step = s.next()
+        s.add(step, {"tone": 0.55, "uneven": 0.13, "stripes": 0.10, "halo": 0.01})
+        self.assertFalse(s.results["mittel"]["clean"])
+        self.assertFalse(s.results["mittel"]["approximate"])
+        self.assertEqual(s.results["mittel"]["power"], step["power"])
+
     def test_tone_curve_from_the_fields(self):
         fields = [{"power": 12.8, "speed": 4500, "tone": 0.92, "clean": True},
                   {"power": 8.0, "speed": 5100, "tone": 0.31, "clean": False}]
