@@ -1,0 +1,16 @@
+# MSI via CPack + WiX 3. Fixed upgrade code: a newer MSI replaces the older one in place.
+set(CPACK_PACKAGE_NAME "LumaCut Studio")
+set(CPACK_PACKAGE_VENDOR "LumaCut")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "LumaCut Studio")
+set(CPACK_PACKAGE_EXECUTABLES "LumaCutStudio;LumaCut Studio")
+set(CPACK_GENERATOR "WIX")
+set(CPACK_WIX_VERSION 3)
+set(CPACK_WIX_UPGRADE_GUID "7C1F5C2E-3D84-4B6A-9E7B-1A4D6F20B8C1")
+set(CPACK_WIX_LICENSE_RTF "${CMAKE_CURRENT_LIST_DIR}/license.rtf")
+set(CPACK_WIX_CULTURES "de-DE")
+set(CPACK_WIX_PROGRAM_MENU_FOLDER "LumaCut Studio")
+set(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_LIST_DIR}/icon.ico")
+set(CPACK_PACKAGE_FILE_NAME "LumaCut-Studio")
+# Install path bin\ inside: the shortcut comes from CPACK_PACKAGE_EXECUTABLES.
+include(CPack)

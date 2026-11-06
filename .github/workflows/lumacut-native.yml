@@ -1,0 +1,87 @@
+name: LumaCut Studio nativ (MSI)
+# Baut die native App, prüft Kern-Tests, installiert die MSI, startet das echte Fenster gegen den
+# Simulator und deinstalliert wieder. Vorabversionen "windows-<version>" sieht /releases/latest des Pi
+# nicht (Android-Update), das Präfix passt nicht zur Firmware-Suche, es löst also kein Update aus.
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-native]
+    paths:
+      - 'software/lumacut-native/**'
+      - '.github/workflows/lumacut-native.yml'
+permissions:
+  contents: write
+concurrency:
+  group: lumacut-native
+  cancel-in-progress: true
+jobs:
+  msi:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: software/lumacut-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: win64_msvc2022_64
+          modules: qtshadertools qtimageformats
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: WiX 3 holen
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip -OutFile $env:RUNNER_TEMP\wix.zip
+          Expand-Archive $env:RUNNER_TEMP\wix.zip -DestinationPath $env:RUNNER_TEMP\wix
+          "WIX=$env:RUNNER_TEMP\wix\" | Out-File -Append $env:GITHUB_ENV
+          "$env:RUNNER_TEMP\wix" | Out-File -Append $env:GITHUB_PATH
+          "VERSION=0.2.$env:GITHUB_RUN_NUMBER" | Out-File -Append $env:GITHUB_ENV
+      - name: Bauen
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLUMACUT_VERSION=%VERSION%
+          cmake --build build
+        shell: cmd
+      - name: Kern-Tests
+        run: ctest --test-dir build --output-on-failure
+      - name: MSI bauen
+        run: cmake --build build --target package
+      - name: MSI installieren, Praxistest im echten Fenster, deinstallieren
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+        run: |
+          $msi = (Resolve-Path build/LumaCut-Studio.msi).Path
+          $p = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { $t = (Get-Content install.log -Tail 25 | Out-String) -replace "`r?`n", '%0A'; Write-Host "::error::Installation $($p.ExitCode): $t"; throw 'Installation scheiterte' }
+          $exe = "$env:ProgramFiles\LumaCut Studio\bin\LumaCutStudio.exe"
+          if (-not (Test-Path $exe)) { Write-Host "::error::Programm fehlt: $exe"; throw 'Programm fehlt' }
+          pip install -q flask pyserial
+          $out = (python tests/ui/run_all.py $exe 2>&1 | Out-String)
+          $code = $LASTEXITCODE
+          Write-Host $out
+          if ($code -ne 0) { $tail = ($out -split "`n" | Select-Object -Last 25) -join '%0A'; Write-Host "::error::Praxistest: $tail"; throw 'Praxistest gescheitert' }
+          $p = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Deinstallation scheiterte: $($p.ExitCode)" }
+          if (Test-Path $exe) { throw 'Programm nach Deinstallation noch vorhanden' }
+      - name: Screenshots hochladen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: software/lumacut-native/build/shots
+          if-no-files-found: ignore
+      - name: Vorabversion veröffentlichen
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = 'upload'; New-Item -ItemType Directory $dir | Out-Null
+          Copy-Item build/LumaCut-Studio.msi "$dir/LumaCut-Studio.msi"
+          $hash = (Get-FileHash "$dir/LumaCut-Studio.msi" -Algorithm SHA256).Hash.ToLower()
+          @{ version = $env:VERSION; sha256 = $hash; size = (Get-Item "$dir/LumaCut-Studio.msi").Length; commit = $env:GITHUB_SHA } | ConvertTo-Json | Set-Content "$dir/LumaCut-Studio.json" -Encoding ascii
+          gh release create "windows-$env:VERSION" "$dir/LumaCut-Studio.msi" "$dir/LumaCut-Studio.json" --prerelease --latest=false --target $env:GITHUB_SHA --title "LumaCut Studio nativ $env:VERSION" --notes "Native Windows-Vorabversion vom Zweig windows-native. Unsigniert: Windows SmartScreen warnt bei der Installation."
