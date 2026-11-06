@@ -5,7 +5,7 @@
 #include <QQuickWindow>
 #include <QSurfaceFormat>
 #include <QElapsedTimer>
-#include "Automation.h"
+#include "src/Automation.h"
 
 int main(int argc, char* argv[]) {
     QElapsedTimer started;

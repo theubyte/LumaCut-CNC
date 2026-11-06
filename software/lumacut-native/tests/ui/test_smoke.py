@@ -15,7 +15,7 @@ def run(app):
     time.sleep(2)
     print("Bilder/s bei 1 Mio. Segmenten:", round(app.stats()["fps"]))
     app.shot("build/shots/smoke-gpu.png")
-    for key in ("material", "motiv", "platine", "werkstatt", "maschine"):
+    for key in ("material", "motiv", "platine", "werkstatt", "maschine", "optionen"):
         app.click(f"nav-{key}")
         time.sleep(0.1)
     app.shot("build/shots/smoke.png")

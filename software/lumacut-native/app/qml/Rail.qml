@@ -29,5 +29,13 @@ Rectangle {
             }
         }
         Item { Layout.fillHeight: true }
+        Rectangle {
+            objectName: "nav-optionen"
+            Layout.alignment: Qt.AlignHCenter
+            Layout.preferredWidth: 64; Layout.preferredHeight: 56; radius: Theme.rLg
+            color: rail.current === "optionen" ? Theme.accentSoft : (mo.containsMouse ? Theme.surface3 : "transparent")
+            Text { anchors.centerIn: parent; text: "Optionen"; color: rail.current === "optionen" ? Theme.accent : Theme.muted; font.pixelSize: Theme.fsXs; font.weight: Font.Medium }
+            MouseArea { id: mo; anchors.fill: parent; hoverEnabled: true; onClicked: rail.navigate("optionen") }
+        }
     }
 }

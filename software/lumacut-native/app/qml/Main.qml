@@ -29,7 +29,7 @@ ApplicationWindow {
             Loader {
                 objectName: "mainView"
                 Layout.fillWidth: true; Layout.fillHeight: true
-                sourceComponent: win.dest === "start" ? probe : placeholder
+                source: "features/" + ({material:"Material",motiv:"Motiv",start:"Start",platine:"Platine",werkstatt:"Werkstatt",maschine:"Maschine",optionen:"Optionen"})[win.dest] + "View.qml"
             }
         }
         Rectangle {
@@ -43,6 +43,4 @@ ApplicationWindow {
             }
         }
     }
-    Component { id: probe; GpuProbe {} }
-    Component { id: placeholder; Placeholder { title: win.dest } }
 }
