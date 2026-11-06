@@ -69,13 +69,18 @@ jobs:
         run: |
           $msi = (Get-ChildItem src-tauri/target/release/bundle/msi -Filter *.msi | Select-Object -First 1).FullName
           $p = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 40; throw "Installation scheiterte: $($p.ExitCode)" }
+          if ($p.ExitCode -ne 0) { $t = (Get-Content install.log -Tail 25 | Out-String) -replace "`r?`n", '%0A'; Write-Host "::error::Installation $($p.ExitCode): $t"; throw "Installation scheiterte: $($p.ExitCode)" }
           $exe = Get-ChildItem "$env:ProgramFiles\LumaCut Studio" -Filter *.exe | Where-Object Name -notlike 'unins*' | Select-Object -First 1
-          if (-not $exe) { throw 'Programm nach der Installation nicht gefunden' }
+          if (-not $exe) { $l = (Get-ChildItem "$env:ProgramFiles" | Select-Object -ExpandProperty Name) -join ', '; Write-Host "::error::Programm nicht gefunden in: $l"; throw 'Programm nach der Installation nicht gefunden' }
           Start-Process python -ArgumentList 'tools/sim_pi.py','--port','8097' -WindowStyle Hidden
           Start-Sleep 6
-          node tests/tauri/real.mjs $exe.FullName http://127.0.0.1:8097
-          if ($LASTEXITCODE -ne 0) { throw 'Installierte App besteht den Praxistest nicht' }
+          $out = (node tests/tauri/real.mjs $exe.FullName http://127.0.0.1:8097 2>&1 | Out-String)
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) {
+            # Annotationen sind ohne Anmeldung lesbar, die Logs nicht.
+            Write-Host ("::error::Praxistest: " + ($out -replace "`r?`n", '%0A'))
+            throw 'Installierte App besteht den Praxistest nicht'
+          }
           $p = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Deinstallation scheiterte: $($p.ExitCode)" }
           if (Test-Path "$env:ProgramFiles\LumaCut Studio\$($exe.Name)") { throw 'Programm nach Deinstallation noch vorhanden' }
