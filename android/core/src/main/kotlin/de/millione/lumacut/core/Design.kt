@@ -122,6 +122,23 @@ data class Element(
 }
 
 /**
+ * The element as smaller parts, in place, on the same layer and group. First pass: outer contours with their holes;
+ * when it is one such part already: each line on its own, so a frame around other shapes can always be taken apart.
+ * Text and pictures stay whole; a result of one means there is nothing to split.
+ */
+fun Element.splitParts(): List<Element> {
+    if (isImage || text != null || paths.size < 2) return listOf(this)
+    val world = worldPaths()
+    val split = PartSplitter.split(world)
+    val parts = if (split.tooMany || split.parts.size < 2) world.map { listOf(it) } else split.parts
+    return parts.mapNotNull { part ->
+        val box = boundsOf(part) ?: return@mapNotNull null
+        copy(id = UUID.randomUUID().toString(), transform = Transform(box.minX, box.minY),
+            paths = part.map { poly -> poly.map { Pt(it.x - box.minX, it.y - box.minY) } })
+    }
+}
+
+/**
  * A project. A motif that does not fit on one sheet continues on further plates
  * ([plateCount], each a full work area); layers (material) are shared by all plates.
  */

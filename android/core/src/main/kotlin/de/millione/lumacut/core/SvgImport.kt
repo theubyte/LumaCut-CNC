@@ -11,6 +11,7 @@ import kotlin.math.acos
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.math.tan
@@ -31,12 +32,16 @@ data class Matrix(val a: Double = 1.0, val b: Double = 0.0, val c: Double = 0.0,
  * Reads the visible geometry of an SVG as polylines in millimetres,
  * origin at the SVG's top-left. Supports path (all commands), rect,
  * circle, ellipse, line, polyline, polygon and nested transforms.
+ * [parseImport] keeps the structure: every drawable is its own part, <g> become
+ * groups, colours become layers, embedded pictures come along.
  */
 object SvgImport {
     private const val CURVE_MM = 0.2
     private const val MAX_POINTS = 400_000
 
-    fun parse(bytes: ByteArray): List<Poly> {
+    fun parse(bytes: ByteArray): List<Poly> = parseImport(bytes).polys
+
+    fun parseImport(bytes: ByteArray): VectorImport {
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = false
             isExpandEntityReferences = false
@@ -49,10 +54,110 @@ object SvgImport {
                   catch (e: Exception) { throw SvgException("SVG konnte nicht gelesen werden") }
         val root = doc.documentElement
         if (root.tagName.substringAfter(':') != "svg") throw SvgException("Keine SVG-Datei")
-        val out = ArrayList<Poly>()
-        walk(root, rootMatrix(root), out)
-        if (out.isEmpty()) throw SvgException("Keine Vektoren gefunden (Text vorher in Pfade umwandeln)")
-        if (out.sumOf { it.size } > MAX_POINTS) throw SvgException("SVG zu komplex")
+        val state = Walk(cssRules(doc))
+        walk(root, rootMatrix(root), Paint("#000000", "none"), emptyList(), state)
+        val polys = state.items.flatMap { it.polys }
+        if (polys.isEmpty() && state.images.isEmpty()) throw SvgException("Keine Vektoren gefunden (Text vorher in Pfade umwandeln)")
+        if (polys.sumOf { it.size } > MAX_POINTS) throw SvgException("SVG zu komplex")
+        val skipped = ArrayList<String>()
+        if (state.texts > 0) skipped += "Text (${state.texts})"
+        if (state.linkedImages > 0) skipped += "verlinkte Bilder (${state.linkedImages})"
+        if (state.clones > 0) skipped += "Klone (${state.clones})"
+        val (items, layers) = finish(state.items)
+        return VectorImport(polys, state.images, skipped, items, layers)
+    }
+
+    /** What a drawable looks like: "#rrggbb", "none", or null when it is not a plain colour (gradient, currentColor). */
+    private class Paint(val fill: String?, val stroke: String?)
+
+    private class Raw(val polys: List<Poly>, val colour: String?, val fill: Boolean, val groups: List<String>, val name: String?)
+
+    private class Walk(val css: Map<String, Map<String, String>>) {
+        val items = ArrayList<Raw>()
+        val images = ArrayList<EmbeddedImage>()
+        var texts = 0; var linkedImages = 0; var clones = 0; var ids = 0
+    }
+
+    /**
+     * Groups: a group around everything says nothing and is dropped, a file without groups becomes one group
+     * (it moves as one until it is resolved). Colours: at least two different ones become layers, a file in one
+     * colour goes on the layer the operator chose. White is usually a background and starts hidden, so it never burns.
+     */
+    private fun finish(raw: List<Raw>): Pair<List<ImportItem>, List<ImportLayerInfo>> {
+        var groups = raw.map { it.groups }
+        while (groups.isNotEmpty() && groups.all { it.isNotEmpty() } && groups.map { it.first() }.distinct().size == 1) groups = groups.map { it.drop(1) }
+        if (raw.size > 1 && groups.all { it.isEmpty() }) groups = groups.map { listOf("*") }
+        val kinds = raw.filter { it.colour != null }.map { it.colour to it.fill }.distinct()
+        val colours = if (kinds.size >= 2) kinds.mapNotNull { it.first }.distinct() else emptyList()
+        val names = colours.associateWith(::colourName)
+        val infos = colours.mapIndexed { i, c ->
+            val name = names.getValue(c).let { n -> if (names.values.count { it == n } > 1) "$n $c" else n }
+            ImportLayerInfo(c, name, i, c != "#ffffff")
+        }
+        val items = raw.mapIndexed { i, r -> ImportItem(r.polys, r.colour?.takeIf { it in colours }, r.fill, groups[i], r.name) }
+        return items to infos
+    }
+
+    private val COLOUR_NAMES = listOf(
+        "Schwarz" to "000000", "Weiß" to "ffffff", "Grau" to "808080", "Rot" to "ff0000", "Grün" to "00a000", "Blau" to "0000ff",
+        "Gelb" to "ffff00", "Orange" to "ff8000", "Violett" to "8000c0", "Rosa" to "ff80c0", "Türkis" to "00c0c0", "Braun" to "804000")
+
+    private fun colourName(c: String): String {
+        fun rgb(h: String) = listOf(h.substring(0, 2), h.substring(2, 4), h.substring(4, 6)).map { it.toInt(16) }
+        val want = rgb(c.removePrefix("#"))
+        return COLOUR_NAMES.minByOrNull { (_, h) -> rgb(h).zip(want).sumOf { (a, b) -> (a - b) * (a - b) } }!!.first
+    }
+
+    private val CSS_NAMES = mapOf("black" to "#000000", "white" to "#ffffff", "red" to "#ff0000", "green" to "#008000", "lime" to "#00ff00", "blue" to "#0000ff",
+        "yellow" to "#ffff00", "orange" to "#ffa500", "purple" to "#800080", "magenta" to "#ff00ff", "fuchsia" to "#ff00ff", "cyan" to "#00ffff", "aqua" to "#00ffff",
+        "gray" to "#808080", "grey" to "#808080", "silver" to "#c0c0c0", "brown" to "#a52a2a", "pink" to "#ffc0cb", "navy" to "#000080", "maroon" to "#800000", "teal" to "#008080")
+
+    /** A CSS paint value in our form; [inherited] for "inherit". */
+    internal fun colour(value: String, inherited: String?): String? {
+        val v = value.trim().lowercase()
+        if (v == "none" || v == "transparent") return "none"
+        if (v == "inherit") return inherited
+        CSS_NAMES[v]?.let { return it }
+        Regex("^#([0-9a-f]{6})$").find(v)?.let { return "#" + it.groupValues[1] }
+        Regex("^#([0-9a-f])([0-9a-f])([0-9a-f])$").find(v)?.let { m -> return "#" + m.groupValues.drop(1).joinToString("") { it + it } }
+        Regex("^rgba?\\(([^)]*)\\)$").find(v)?.let { m ->
+            val parts = m.groupValues[1].split(Regex("[\\s,/]+")).filter { it.isNotEmpty() }
+            if (parts.size < 3) return null
+            val c = parts.take(3).map { p ->
+                val n = p.removeSuffix("%").toDoubleOrNull() ?: return null
+                (if (p.endsWith("%")) n * 2.55 else n).toInt().coerceIn(0, 255)
+            }
+            return "#%02x%02x%02x".format(c[0], c[1], c[2])
+        }
+        return null
+    }
+
+    /** Rules of the <style> blocks by selector (".name" or a tag); Illustrator writes its colours this way. */
+    private fun cssRules(doc: org.w3c.dom.Document): Map<String, Map<String, String>> {
+        val rules = HashMap<String, MutableMap<String, String>>()
+        val blocks = doc.getElementsByTagName("style")
+        for (i in 0 until blocks.length) {
+            val text = blocks.item(i).textContent ?: continue
+            for (m in Regex("([^{}]+)\\{([^{}]*)\\}").findAll(text)) {
+                val props = declarations(m.groupValues[2])
+                for (sel in m.groupValues[1].split(',')) rules.getOrPut(sel.trim()) { HashMap() }.putAll(props)
+            }
+        }
+        return rules
+    }
+
+    private fun declarations(s: String): Map<String, String> = s.split(';').mapNotNull { d ->
+        val k = d.substringBefore(':', "").trim().lowercase()
+        if (k.isEmpty()) null else k to d.substringAfter(':').trim()
+    }.toMap()
+
+    /** Attributes, then <style> rules, then style="": later wins, as in CSS. */
+    private fun properties(node: XmlElement, css: Map<String, Map<String, String>>): Map<String, String> {
+        val out = HashMap<String, String>()
+        for (k in listOf("fill", "stroke", "stroke-width", "display", "visibility")) node.getAttribute(k).takeIf { it.isNotBlank() }?.let { out[k] = it }
+        css[node.tagName.substringAfter(':')]?.let(out::putAll)
+        for (c in node.getAttribute("class").split(Regex("\\s+"))) if (c.isNotEmpty()) css[".$c"]?.let(out::putAll)
+        out.putAll(declarations(node.getAttribute("style")))
         return out
     }
 
@@ -84,12 +189,18 @@ object SvgImport {
     private val SKIP = setOf("defs", "clipPath", "mask", "symbol", "marker", "pattern", "title", "desc",
                              "metadata", "style", "script", "text", "image", "linearGradient", "radialGradient", "filter")
 
-    private fun walk(node: XmlElement, parent: Matrix, out: MutableList<Poly>) {
+    private fun walk(node: XmlElement, parent: Matrix, inherited: Paint, parentGroups: List<String>, st: Walk) {
         val tag = node.tagName.substringAfter(':')
-        if (tag in SKIP) return
-        val style = node.getAttribute("style")
-        if (node.getAttribute("display") == "none" || style.contains(Regex("display\\s*:\\s*none"))) return
+        if (tag == "text") st.texts++
+        if (tag in SKIP && tag != "image") return
+        val props = properties(node, st.css)
+        if (props["display"]?.trim() == "none" || props["visibility"]?.trim() == "hidden") return
         val m = parent * transform(node.getAttribute("transform"))
+        if (tag == "image") { image(node, m, st); return }
+        if (tag == "use") { st.clones++; return }
+        val paint = Paint(props["fill"]?.let { colour(it, inherited.fill) } ?: if ("fill" in props) null else inherited.fill,
+                          props["stroke"]?.let { colour(it, inherited.stroke) } ?: if ("stroke" in props) null else inherited.stroke)
+        val groups = if (tag == "g") parentGroups + "g${st.ids++}" else parentGroups
         val local: List<Poly> = when (tag) {
             "path" -> pathData(node.getAttribute("d"))
             "rect" -> {
@@ -107,12 +218,34 @@ object SvgImport {
             }
             else -> emptyList()
         }
-        local.filter { it.size >= 2 }.forEach { poly -> out += poly.map(m::apply) }
+        val world = local.filter { it.size >= 2 }.map { poly -> poly.map(m::apply) }
+        if (world.isNotEmpty()) addDrawable(world, node, props, paint, groups, st)
         var child = node.firstChild
         while (child != null) {
-            if (child.nodeType == Node.ELEMENT_NODE) walk(child as XmlElement, m, out)
+            if (child.nodeType == Node.ELEMENT_NODE) walk(child as XmlElement, m, paint, groups, st)
             child = child.nextSibling
         }
+    }
+
+    /** One drawable: a stroke makes it a line in the stroke colour, else a closed shape is a fill. Letters keep their holes. */
+    private fun addDrawable(world: List<Poly>, node: XmlElement, props: Map<String, String>, paint: Paint, groups: List<String>, st: Walk) {
+        val noWidth = props["stroke-width"]?.trim()?.removeSuffix("px")?.toDoubleOrNull() == 0.0
+        val stroked = paint.stroke != "none" && !noWidth
+        val filled = !stroked && paint.fill != "none" && world.all { it.size >= 4 && it.isClosed() }
+        val colour = when { stroked -> paint.stroke; filled -> paint.fill; else -> null }
+        val parts = PartSplitter.split(world).parts
+        val own = if (parts.size > 1) groups + "p${st.ids++}" else groups
+        val name = node.getAttribute("inkscape:label").ifBlank { node.getAttribute("data-name") }.ifBlank { null }
+        for (part in parts) st.items += Raw(part, colour, filled, own, name)
+    }
+
+    private fun image(node: XmlElement, m: Matrix, st: Walk) {
+        val href = node.getAttribute("href").ifBlank { node.getAttribute("xlink:href") }
+        val bytes = if (href.startsWith("data:image")) ImportFormats.decodeBase64(href) else null
+        val w = num(node, "width"); val h = num(node, "height")
+        if (bytes == null || w <= 0 || h <= 0) { st.linkedImages++; return }
+        val a = m.apply(Pt(num(node, "x"), num(node, "y"))); val b = m.apply(Pt(num(node, "x") + w, num(node, "y") + h))
+        st.images += EmbeddedImage(bytes, Box(min(a.x, b.x), min(a.y, b.y), max(a.x, b.x), max(a.y, b.y)))
     }
 
     private fun num(e: XmlElement, name: String) = e.getAttribute(name).trim().removeSuffix("px").toDoubleOrNull() ?: 0.0

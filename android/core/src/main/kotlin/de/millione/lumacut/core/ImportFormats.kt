@@ -75,7 +75,7 @@ class ImportException(message: String) : IllegalArgumentException(message)
 object ImportFormats {
     /** Parses any vector format ([kind] from [FileKinds.detect]). Images and PDF are handled by the app. */
     fun parseVector(kind: FileKind, bytes: ByteArray): VectorImport = when (kind) {
-        FileKind.SVG -> VectorImport(SvgImport.parse(bytes), emptyList(), emptyList())
+        FileKind.SVG -> SvgImport.parseImport(bytes)
         FileKind.DXF -> VectorImport(DxfImport.parse(bytes), emptyList(), emptyList())
         FileKind.XCS -> Xcs.parse(bytes)
         FileKind.XS -> Xs.parse(bytes)

@@ -271,6 +271,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                         item(if (multi) "Mehrfachauswahl aus" else "Mehrfachauswahl an") { editor.setMulti(!multi) }
                         item("Gruppieren", selected.size >= 2) { editor.groupSelected() }
                         item("Gruppe auflösen", doc.elements.any { it.id in selected && it.groupId != null }) { editor.ungroupSelected() }
+                        item("In Teile aufteilen", editor.canSplitSelected()) { editor.splitSelected() }
                         item(if (selected.isEmpty()) "Alles zentrieren" else "Auswahl zentrieren", doc.elements.isNotEmpty()) { editor.centerInWorkArea() }
                         item("Kamerafoto als Hintergrund") { cameraOpen = true }
                         item("Materialtest …") {
@@ -477,6 +478,7 @@ private fun SelectionPill(editor: EditorViewModel, doc: Document, selected: Set<
         de.millione.lumacut.app.ui.PillBtn(LcIcons.center, "Zentrieren", editor::centerInWorkArea)
         if (sel.size >= 2) de.millione.lumacut.app.ui.PillBtn(if (grouped) LcIcons.ungroup else LcIcons.group,
             if (grouped) "Gruppe auflösen" else "Gruppieren", { if (grouped) editor.ungroupSelected() else editor.groupSelected() }, labels)
+        if (editor.canSplitSelected()) de.millione.lumacut.app.ui.PillBtn(LcIcons.ungroup, "Aufteilen", editor::splitSelected, labels)
         de.millione.lumacut.app.ui.PillBtn(LcIcons.polygon, "Kontur", onContour, labels)
         de.millione.lumacut.app.ui.PillDivider()
         de.millione.lumacut.app.ui.PillBtn(LcIcons.trash, "Löschen", editor::deleteSelected, labels, tint = Color(0xFFFF8A8E))
@@ -842,6 +844,13 @@ private fun SelectionCard(editor: EditorViewModel, e: Element, onAdjust: () -> U
     LcCard(padding = 16.dp, accent = Lc.accent) {
         Text(e.text?.let { "Text: $it" } ?: e.kind, style = LcTypography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (e.groupId != null) SmallText("Teil einer Gruppe", Lc.faint)
+        if (e.groupId != null || editor.canSplitSelected()) {
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (e.groupId != null) LcButton("Gruppe auflösen", editor::ungroupSelected, Modifier.weight(1f), LcIcons.ungroup)
+                if (editor.canSplitSelected()) LcButton("In Teile aufteilen", editor::splitSelected, Modifier.weight(1f), LcIcons.ungroup)
+            }
+        }
         Spacer(Modifier.height(12.dp))
         var keep by remember { mutableStateOf(true) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -890,7 +899,7 @@ private fun MultiCard(editor: EditorViewModel, sel: List<Element>) {
     val grouped = sel.all { it.groupId != null } && sel.map { it.groupId }.distinct().size == 1
     LcCard(padding = 16.dp, accent = Lc.accent) {
         Text(if (grouped) "Gruppe · ${sel.size} Elemente" else "${sel.size} Elemente", style = LcTypography.titleLarge)
-        SmallText("%.1f × %.1f mm".format(b.width, b.height), Lc.faint)
+        SmallText("%.1f × %.1f mm".format(b.width, b.height) + if (grouped) " · nochmal antippen wählt ein Teil" else "", Lc.faint)
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Num("X", b.minX, Modifier.weight(1f)) { editor.placeSelected(it, null) }

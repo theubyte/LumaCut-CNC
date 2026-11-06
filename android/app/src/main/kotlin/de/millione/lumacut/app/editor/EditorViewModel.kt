@@ -35,6 +35,7 @@ import de.millione.lumacut.core.MeasPt
 import de.millione.lumacut.core.Measurement
 import de.millione.lumacut.core.Snap
 import de.millione.lumacut.core.SnapHit
+import de.millione.lumacut.core.FileKind
 import de.millione.lumacut.core.FocusCompensation
 import de.millione.lumacut.core.FocusReport
 import de.millione.lumacut.core.HeightMapSet
@@ -47,6 +48,7 @@ import de.millione.lumacut.core.PartSplitter
 import de.millione.lumacut.core.Poly
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Transform
+import de.millione.lumacut.core.splitParts
 import de.millione.lumacut.core.Work
 import de.millione.lumacut.core.boundsOf
 import de.millione.lumacut.core.isClosed
@@ -548,13 +550,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun withGroup(e: Element): Set<String> =
         if (e.groupId == null) setOf(e.id) else _doc.value.elements.filter { it.groupId == e.groupId }.map { it.id }.toSet()
 
-    /** Tap selection: groups are selected as a whole; with [additive] the tap toggles. */
+    /** Tap selection: groups are selected as a whole, the next tap picks the part; with [additive] the tap toggles. */
     fun select(id: String?, additive: Boolean = _multi.value) {
         lastEditKey = null
         val e = id?.let { i -> _doc.value.elements.firstOrNull { it.id == i } }?.takeIf(::selectable)
         if (e == null) { if (!additive) _selected.value = emptySet(); return }
         val ids = withGroup(e)
         _selected.value = when {
+            // Second tap into a selected group picks the single part (for its layer, or to move it alone).
+            !additive && ids.size > 1 && _selected.value == ids -> setOf(e.id)
             !additive -> ids
             _selected.value.containsAll(ids) -> _selected.value - ids
             else -> _selected.value + ids
@@ -631,7 +635,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             return if (scale == 1.0) Pt(p.x + o.x, p.y + o.y) else Pt(Work.center.x + (p.x - all.x) * scale, Work.center.y + (p.y - all.y) * scale)
         }
         val placed = layout.units.indices.filter { layout.offsets[it] != null }
-        val cutBase = doc.layers.firstOrNull { it.name == "Schneiden" } ?: doc.layers.last()
+        // SVG colours say nothing about cutting: their lines start with the gentle marking values, not with cutting power.
+        val lineLayer = if (kind == FileKind.SVG.label) "Linie" else "Schneiden"
+        val cutBase = doc.layers.firstOrNull { it.name == lineLayer } ?: doc.layers.last()
         val engraveBase = doc.layers.firstOrNull { it.name == "Gravieren" } ?: doc.layers.first()
         val order = infos.associate { it.key to it.order }
         val used = placed.flatMap { layout.units[it].items }.filter { it.layerKey != null }
@@ -1074,6 +1080,20 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         if (selectedElements().none { it.groupId != null }) return
         updateSelected(null) { it.copy(groupId = null) }
         notify("Gruppe aufgelöst")
+    }
+
+    /** True when "Aufteilen" can do something with the selection. */
+    fun canSplitSelected() = selectedElements().any { !it.isImage && it.text == null && it.paths.size >= 2 }
+
+    /** Takes the selected shapes apart (Element.splitParts); the parts stay selected and in the same place. */
+    fun splitSelected() {
+        val ids = _selected.value
+        val pieces = selectedElements().associate { it.id to it.splitParts() }
+        val made = pieces.values.filter { it.size > 1 }.sumOf { it.size }
+        if (made == 0) { notify("Besteht nur aus einem Teil"); return }
+        change { d -> d.copy(elements = d.elements.flatMap { e -> if (e.id in ids) pieces[e.id] ?: listOf(e) else listOf(e) }) }
+        _selected.value = pieces.values.flatten().map { it.id }.toSet()
+        notify("In $made Teile aufgeteilt – antippen wählt ein einzelnes")
     }
 
     /** Centres the selection, or everything, in the work area. */

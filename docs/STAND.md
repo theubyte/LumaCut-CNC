@@ -478,6 +478,7 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
 - Projekte-Dialog am Tablet ausprobieren (App 1.0.49).
 - Materialtest mit Kamera (`op=matcal`) einmal echt an der Maschine laufen lassen.
 - Android-App 1.0.56, Ebenen neu (06.11., auf dem Pi bereit): Leere Ebenen verschwinden von selbst, Liste zeigt nur Ebenen mit Inhalt, Antippen wählt die Teile, Zahnrad öffnet die Werte, Aktionen in der Liste. Core-Tests grün, Bedienung am Tablet vom Besitzer noch nicht geprüft.
+- Android-App, SVG (06.11.): Struktur, Farb-Ebenen, Aufteilen, Gruppen-Teil antippen (siehe CHANGELOG). Core-Tests grün, am Tablet und mit echten SVG-Dateien noch nicht geprüft. DXF und HPGL bleiben ohne Farben/Ebenen.
 - Bettkarte in der App anzeigen; Materialstärke mit der Bettkarte prüfen.
 - Später: Windows-Studio nach dem Vorbild der Android-App neu bauen.
 - Weitere Pi-Punkte: [PI_STATUS_UND_OFFENE_PUNKTE.md §4](PI_STATUS_UND_OFFENE_PUNKTE.md#4-offene-punkte).
