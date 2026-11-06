@@ -160,6 +160,43 @@ data class Document(
     fun moveToPlate(ids: Set<String>, target: Int): Document =
         if (target !in 0 until plateCount) this else copy(elements = elements.map { if (it.id in ids) it.copy(plate = target) else it })
 
+    /**
+     * Layers follow the motif: a layer nothing lies on (on any plate) goes away. The standard layers
+     * stay because the tools put their results there; they are only hidden while empty. [keep] = a
+     * layer the operator just created and has not used yet. There is always at least one layer.
+     */
+    fun withoutEmptyLayers(keep: Set<String> = emptySet()): Document {
+        val used = elements.mapTo(HashSet()) { it.layerId }
+        val left = layers.filter { it.id in used || it.id in keep || it.name in STANDARD_LAYERS }
+        return when {
+            left.size == layers.size -> this
+            left.isEmpty() -> copy(layers = defaultLayers())
+            else -> copy(layers = left)
+        }
+    }
+
+    /** The layers the operator sees: those with content on any plate, and [keep]. */
+    fun shownLayers(keep: Set<String> = emptySet()): List<Layer> {
+        val used = elements.mapTo(HashSet()) { it.layerId }
+        return layers.filter { it.id in used || it.id in keep }
+    }
+
+    /** Removes the layer and everything on it, on all plates. */
+    fun deletingLayer(id: String): Document =
+        copy(elements = elements.filterNot { it.layerId == id }, layers = layers.filterNot { it.id == id && it.name !in STANDARD_LAYERS })
+
+    /** Moves layer [id] past its neighbour in [shown]; hidden layers in between do not swallow the step. */
+    fun movingLayer(id: String, up: Boolean, shown: List<String>): Document {
+        val k = shown.indexOf(id)
+        val neighbour = shown.getOrNull(if (up) k - 1 else k + 1)
+        if (k < 0 || neighbour == null) return this
+        val layer = layer(id) ?: return this
+        val list = layers.filterNot { it.id == id }.toMutableList()
+        val n = list.indexOfFirst { it.id == neighbour }
+        list.add(if (up) n else n + 1, layer)
+        return copy(layers = list)
+    }
+
     /** Old or hand-edited files: plate indices and the active plate inside 0 until plateCount. */
     fun normalized(): Document {
         val n = maxOf(plateCount, (elements.maxOfOrNull { it.plate } ?: 0) + 1, 1)
@@ -171,6 +208,8 @@ data class Document(
 
     companion object {
         val JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = false }
+        /** The tools rely on these names (the standard "Linie" layer is called "Markieren" in the app). */
+        val STANDARD_LAYERS = setOf("Gravieren", "Linie", "Schneiden")
         fun fromJson(text: String): Document = JSON.decodeFromString(serializer(), text).normalized()
 
         fun defaultLayers() = listOf(

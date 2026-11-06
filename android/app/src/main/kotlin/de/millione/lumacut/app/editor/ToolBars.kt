@@ -24,7 +24,7 @@ import de.millione.lumacut.core.ShapeKind
 
 /** Small choice chip for the option bar over the canvas. */
 @Composable
-private fun Chip(text: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun Chip(text: String, on: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     Text(
         text, style = LcTypography.labelLarge, color = if (!enabled) Lc.faint else if (on) Lc.accentInk else Lc.text, maxLines = 1,
         modifier = Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp))

@@ -44,6 +44,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import de.millione.lumacut.app.ui.BtnKind
+import de.millione.lumacut.app.ui.Confirm
+import de.millione.lumacut.app.ui.ConfirmDialog
+import de.millione.lumacut.app.ui.rememberConfirm
 import de.millione.lumacut.app.ui.IconBtn
 import de.millione.lumacut.app.ui.Lc
 import de.millione.lumacut.app.ui.LcButton
@@ -77,8 +80,8 @@ private fun fmtMm(v: Double) = if (v % 1.0 == 0.0) v.toInt().toString() else "%.
 /**
  * The laser part of the inspector, in the order a job is set up: which
  * material lies on the bed, what the laser does with the selection, and the
- * layers (= processing order) with their values at a glance. Tapping a
- * layer opens its settings; it never moves the selection by itself.
+ * layers (= processing order) with their values at a glance. Only layers with
+ * content are listed. Tapping one selects its parts, the gear opens its values.
  */
 @Composable
 internal fun LaserCard(editor: EditorViewModel, doc: Document, sel: List<Element>, active: String) {
@@ -86,7 +89,21 @@ internal fun LaserCard(editor: EditorViewModel, doc: Document, sel: List<Element
     val key by editor.materialKey.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<String?>(null) }
     var materialMenu by remember { mutableStateOf(false) }
+    var confirm by rememberConfirm()
     val focus = sel.firstOrNull()?.layerId ?: active
+    val usage = editor.layerUsage()
+    val rows = editor.shownLayers()
+    val askDelete = { layer: Layer ->
+        val parts = usage[layer.id] ?: 0
+        if (parts == 0) {
+            editor.deleteLayer(layer.id)
+        } else {
+            confirm = Confirm("Ebene „${layer.label()}“ löschen?",
+                (if (parts == 1) "1 Teil wird" else "$parts Teile werden") + " mitgelöscht, auch auf anderen Platten. Rückgängig holt alles zurück.",
+                "Löschen", danger = true) { editor.deleteLayer(layer.id) }
+        }
+        Unit
+    }
     LcCard(padding = 14.dp) {
         Text("Laser", style = LcTypography.titleLarge)
         Spacer(Modifier.height(10.dp))
@@ -132,30 +149,41 @@ internal fun LaserCard(editor: EditorViewModel, doc: Document, sel: List<Element
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Ebenen", style = LcTypography.titleMedium)
-                SmallText("von oben nach unten gelasert · antippen = Werte", Lc.faint)
+                SmallText("von oben nach unten gelasert · antippen = auswählen", Lc.faint)
             }
             IconBtn(LcIcons.plus, "Ebene hinzufügen", { editor.addLayer(); editing = editor.activeLayer.value })
         }
         Spacer(Modifier.height(8.dp))
-        for (layer in doc.layers) {
-            val count = doc.elements.count { it.layerId == layer.id }
-            LayerLine(editor, layer, layer.id == focus, count) { editing = layer.id }
+        if (rows.isEmpty()) SmallText("Noch keine. Ebenen erscheinen von selbst, sobald etwas darauf liegt, und verschwinden wieder, wenn es gelöscht ist.", Lc.faint)
+        rows.forEachIndexed { i, layer ->
+            LayerLine(editor, layer, layer.id == focus, usage[layer.id] ?: 0, sel, i > 0, i < rows.lastIndex,
+                onOpen = { editing = layer.id }, onDelete = { askDelete(layer) })
         }
+        val cut = rows.indexOfFirst { it.name == "Schneiden" && it.output && it.visible }
+        if (cut >= 0 && rows.drop(cut + 1).any { it.output && it.visible })
+            SmallText("„Schneiden“ läuft nicht zuletzt: ausgeschnittene Teile können verrutschen, bevor der Rest gelasert ist.", Lc.warn)
     }
-    editing?.let { id -> doc.layer(id)?.let { LayerDialog(editor, it, materials, sel, doc.elements.any { e -> e.layerId == id && e.isImage }) { editing = null } } ?: run { editing = null } }
+    ConfirmDialog(confirm) { confirm = null }
+    editing?.let { id -> doc.layer(id)?.let {
+        LayerDialog(editor, it, materials, sel, doc.elements.any { e -> e.layerId == id && e.isImage }, onDelete = { editing = null; askDelete(it) }) { editing = null }
+    } ?: run { editing = null } }
 }
 
 @Composable
-private fun LayerLine(editor: EditorViewModel, layer: Layer, focused: Boolean, count: Int, onOpen: () -> Unit) {
+private fun LayerLine(editor: EditorViewModel, layer: Layer, focused: Boolean, count: Int, sel: List<Element>, canUp: Boolean, canDown: Boolean,
+                      onOpen: () -> Unit, onDelete: () -> Unit) {
     val color = Color(layer.color.toInt())
     val off = !layer.visible || !layer.output
-    Row(
+    val incoming = sel.count { it.layerId != layer.id }
+    Column(
         Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(12.dp))
             .background(if (focused) Lc.surface3 else Lc.surface2)
-            .border(1.dp, if (focused) color.copy(alpha = .8f) else Lc.line, RoundedCornerShape(12.dp))
-            .clickable(onClick = onOpen).padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .border(1.dp, if (focused) color.copy(alpha = .8f) else Lc.line, RoundedCornerShape(12.dp)),
     ) {
+      Row(
+        Modifier.fillMaxWidth().clickable { editor.selectLayer(layer.id) }.padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
         Box(Modifier.size(width = 5.dp, height = 34.dp).clip(RoundedCornerShape(3.dp)).background(color.copy(alpha = if (off) .3f else 1f)))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
@@ -167,6 +195,7 @@ private fun LayerLine(editor: EditorViewModel, layer: Layer, focused: Boolean, c
                     modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Lc.bg).padding(horizontal = 6.dp, vertical = 2.dp))
             }
             SmallText(when {
+                !layer.visible -> "ausgeblendet, wird nicht gelasert"
                 !layer.output -> "wird nicht gelasert"
                 else -> layer.values()
             } + " · " + when (count) { 0 -> "leer"; 1 -> "1 Teil"; else -> "$count Teile" }, if (off) Lc.faint else Lc.muted)
@@ -174,7 +203,20 @@ private fun LayerLine(editor: EditorViewModel, layer: Layer, focused: Boolean, c
         }
         IconBtn(if (layer.visible) LcIcons.eye else LcIcons.eyeOff, if (layer.visible) "Ausblenden" else "Einblenden",
             { editor.updateLayer(layer.id) { it.copy(visible = !it.visible) } }, tint = if (layer.visible) Lc.muted else Lc.faint)
-        Icon(LcIcons.right, null, tint = Lc.faint, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(4.dp))
+        IconBtn(LcIcons.settings, "Werte der Ebene", onOpen, tint = Lc.muted)
+      }
+      if (incoming > 0) Row(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 8.dp)) {
+          Chip("Auswahl hierher ($incoming)", false) { editor.setActiveLayer(layer.id) }
+      }
+      if (focused) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 10.dp, end = 10.dp, bottom = 8.dp),
+          horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+          IconBtn(LcIcons.laser, if (layer.output) "Nicht lasern" else "Lasern", { editor.updateLayer(layer.id) { it.copy(output = !it.output) } },
+              selected = layer.output, tint = if (layer.output) Lc.accent else Lc.faint)
+          IconBtn(LcIcons.up, "Früher lasern", { editor.moveLayer(layer.id, true) }, enabled = canUp)
+          IconBtn(LcIcons.down, "Später lasern", { editor.moveLayer(layer.id, false) }, enabled = canDown)
+          IconBtn(LcIcons.trash, "Ebene löschen", onDelete, tint = Lc.bad)
+      }
     }
 }
 
@@ -185,10 +227,10 @@ internal fun Layer.withSafeZStep(): Layer =
 /**
  * Settings of one layer, only what fits its kind: line or fill, the three
  * laser values, engraving details for fills, depth for several passes, a
- * material to take the values from, and order / delete.
+ * material to take the values from, and delete. The order is set in the list.
  */
 @Composable
-private fun LayerDialog(editor: EditorViewModel, layer: Layer, materials: List<Material>, sel: List<Element>, hasImage: Boolean, onClose: () -> Unit) {
+private fun LayerDialog(editor: EditorViewModel, layer: Layer, materials: List<Material>, sel: List<Element>, hasImage: Boolean, onDelete: () -> Unit, onClose: () -> Unit) {
     var materialMenu by remember { mutableStateOf(false) }
     val maxFeed = editor.motion.maxFeed
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -273,9 +315,7 @@ private fun LayerDialog(editor: EditorViewModel, layer: Layer, materials: List<M
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (sel.isNotEmpty() && sel.any { it.layerId != layer.id })
                     LcButton("Auswahl hierher (${sel.size})", { editor.setActiveLayer(layer.id) }, icon = LcIcons.layers)
-                IconBtn(LcIcons.up, "Früher lasern", { editor.moveLayer(layer.id, true) })
-                IconBtn(LcIcons.down, "Später lasern", { editor.moveLayer(layer.id, false) })
-                IconBtn(LcIcons.trash, "Ebene löschen", { editor.deleteLayer(layer.id); onClose() }, tint = Lc.bad)
+                IconBtn(LcIcons.trash, "Ebene löschen", onDelete, tint = Lc.bad)
                 Spacer(Modifier.weight(1f))
                 LcButton("Fertig", onClose, kind = BtnKind.PRIMARY)
             }

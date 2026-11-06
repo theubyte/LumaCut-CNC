@@ -161,7 +161,28 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val merge = coalesce != null && coalesce == lastEditKey && now - lastEditAt < 1500
         if (!merge) { undo.addLast(_project.value); if (undo.size > 100) undo.removeFirst(); redo.clear() }
         lastEditKey = coalesce; lastEditAt = now
-        _project.value = block(_project.value)
+        _project.value = tidyLayers(block(_project.value))
+        afterChange()
+    }
+
+    /** Layer created with "+" and not used yet; every other empty layer goes away on its own. */
+    private var unusedNewLayer: String? = null
+
+    private fun tidyLayers(p: Document): Document {
+        unusedNewLayer?.let { id -> if (p.layer(id) == null || p.elements.any { it.layerId == id }) unusedNewLayer = null }
+        val tidied = p.withoutEmptyLayers(setOfNotNull(unusedNewLayer))
+        val gone = p.layers.filter { l -> tidied.layer(l.id) == null }
+        if (gone.size == 1) notify("Leere Ebene „${gone[0].name}“ entfernt")
+        else if (gone.size > 1) notify("${gone.size} leere Ebenen entfernt")
+        return tidied
+    }
+
+    /** Another layer was chosen: a new layer that stayed unused is dropped. Not an undo step. */
+    private fun forgetUnusedLayer(chosen: String) {
+        val id = unusedNewLayer ?: return
+        if (id == chosen) return
+        unusedNewLayer = null
+        _project.value = _project.value.withoutEmptyLayers()
         afterChange()
     }
 
@@ -191,7 +212,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun load(): Document = runCatching { Document.fromJson(projectFile.readText()) }.getOrElse { Document() }
+    private fun load(): Document = runCatching { Document.fromJson(projectFile.readText()).withoutEmptyLayers() }.getOrElse { Document() }
 
     /** The whole project (all plates) as JSON, for "Projekt speichern". */
     fun projectJson(): String = _project.value.toJson()
@@ -550,8 +571,20 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectAll() { _selected.value = _doc.value.elements.filter(::selectable).map { it.id }.toSet() }
 
+    /**
+     * Tapping a layer in the list: selects everything on it (on this plate), tapping it again clears the
+     * selection. It never moves anything; groups stay whole.
+     */
+    fun selectLayer(id: String) {
+        _activeLayer.value = id
+        forgetUnusedLayer(id)
+        val ids = _doc.value.elements.filter { it.layerId == id && selectable(it) }.flatMap(::withGroup).toSet()
+        _selected.value = if (ids.isNotEmpty() && ids == _selected.value) emptySet() else ids
+    }
+
     fun setActiveLayer(id: String) {
         _activeLayer.value = id
+        forgetUnusedLayer(id)
         val ids = _selected.value
         if (ids.isNotEmpty() && _doc.value.layer(id)?.locked == false)
             change("layer") { d -> d.copy(elements = d.elements.map { if (it.id in ids) it.copy(layerId = id) else it }) }
@@ -1064,21 +1097,28 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val taken = _doc.value.layers.map { it.name }.toSet()
         val k = generateSequence(1) { it + 1 }.first { "Ebene $it" !in taken }
         val layer = Layer(name = "Ebene $k", color = palette[n % palette.size], mode = LayerMode.LINE, powerPct = 50.0, speed = 1200.0)
+        unusedNewLayer = layer.id
         change { it.copy(layers = it.layers + layer) }
         _activeLayer.value = layer.id
     }
 
+    /** Parts per layer over all plates: a layer with content on another plate is not empty. */
+    fun layerUsage(): Map<String, Int> = _project.value.elements.groupingBy { it.layerId }.eachCount()
+
+    /** The layers of the list: with content, or just created. */
+    fun shownLayers(): List<Layer> = _project.value.shownLayers(setOfNotNull(unusedNewLayer))
+
+    /** Deletes the layer with everything on it, on all plates (undo brings it back). */
     fun deleteLayer(id: String) {
-        val d = _doc.value
-        if (d.layers.size <= 1) { notify("Die letzte Ebene bleibt bestehen", true); return }
-        if (d.elements.any { it.layerId == id }) { notify("Ebene enthält noch Elemente", true); return }
-        change { it.copy(layers = it.layers.filterNot { l -> l.id == id }) }
+        val name = _project.value.layer(id)?.name ?: return
+        val parts = _project.value.elements.count { it.layerId == id }
+        changeProject { it.deletingLayer(id) }
+        notify(if (parts == 0) "Ebene „$name“ gelöscht" else "Ebene „$name“ mit $parts Teil(en) gelöscht")
     }
 
-    fun moveLayer(id: String, up: Boolean) = change { d ->
-        val i = d.layers.indexOfFirst { it.id == id }
-        val j = if (up) i - 1 else i + 1
-        if (i < 0 || j !in d.layers.indices) d else d.copy(layers = d.layers.toMutableList().apply { add(j, removeAt(i)) })
+    fun moveLayer(id: String, up: Boolean) {
+        val shown = shownLayers().map { it.id }
+        changeProject { it.movingLayer(id, up, shown) }
     }
 
     fun applyMaterial(layerId: String, m: Material) {

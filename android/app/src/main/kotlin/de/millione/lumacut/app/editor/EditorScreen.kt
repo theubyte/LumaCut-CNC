@@ -277,7 +277,7 @@ fun EditorScreen(editor: EditorViewModel, machine: MachineViewModel, onNext: () 
                             confirm = Confirm("Materialtest erstellen?", "Das aktuelle Projekt wird durch ein Testraster ersetzt (Rückgängig holt es zurück).", "Weiter") { materialTest = true }
                         }
                         HorizontalDivider(color = Lc.line)
-                        item("Neues Projekt") { confirm = Confirm("Neues Projekt?", "Alle Platten und Elemente werden entfernt. Ebenen bleiben.", "Neu", danger = true) { editor.newDocument() } }
+                        item("Neues Projekt") { confirm = Confirm("Neues Projekt?", "Alle Platten, Elemente und eigenen Ebenen werden entfernt. Die Werte von Gravieren, Markieren und Schneiden bleiben.", "Neu", danger = true) { editor.newDocument() } }
                         item("Vom Pi öffnen …") { piProjects = false }
                         item("Auf dem Pi speichern …") { piProjects = true }
                         item("Datei öffnen (Gerät) …") { projectOpener.launch(arrayOf("application/json", "*/*")) }
