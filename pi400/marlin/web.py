@@ -30,6 +30,7 @@ from . import bedmap
 from . import matcal
 from . import focus_compensation as focus
 from . import job_optimizer
+from . import scan_offset
 from .materials import ConflictError, MaterialStore, NotFoundError
 from .camera_calibration import CalibrationStore, create_blueprint as camera_calibration_api
 from . import camera as head_camera
@@ -108,6 +109,7 @@ config = {
     "machine_name": "LumaCut",
     # Exhaust on at every job start; off this many seconds after the job (fumes).
     "exhaust_auto": False,
+    "scan_offset": None,        # [[feed, mm]]: forward minus backward raster row, measured on a burn (scan_offset.py)
     "blocked_band_y_mm": None,  # number: nothing is burnt anywhere in Y0..this (strip glued along X), else only the park corner
     # Off: planning for time made lines of one row run in opposite directions, which
     # shows the X backlash inside a motif (06.11., engravings got worse). Not for rasters.
@@ -985,6 +987,15 @@ def action():
         span = float(request.form.get("span", "40")); cycles = int(request.form.get("cycles", "6"))
         machine.motion_test(accel, speed, x, y, span, cycles, owner="web")
         return jsonify(message="Testfahrt %g mm/s² · %g mm/s fertig" % (accel, speed), position=machine.position)
+    if op == "scan_offset":
+        # table=1000:-0.44,3000:-0.64 (feed:forward minus backward row, mm); empty: off.
+        if job_lock.locked():
+            raise RuntimeError("Ein Auftrag läuft")
+        table = scan_offset.parse_table(request.form.get("table", ""))
+        config["scan_offset"] = [list(p) for p in table] if table else None
+        persist()
+        return jsonify(message=("Hin/Rück-Ausgleich an, %d Stützstellen" % len(table)) if table else "Hin/Rück-Ausgleich aus",
+                       scan_offset=config["scan_offset"])
     if op == "work_band":
         # y=35: nothing is burnt in Y0..35 over the whole width (a strip is glued there); y empty: only the park corner.
         if job_lock.locked():
@@ -2027,6 +2038,9 @@ def _auto_prepare(auto):
             job["optimizer"] = plan
             logging.info("Job optimizer: %s", plan)
             _check_stop()
+        if config["scan_offset"]:
+            commands, rows = scan_offset.apply(commands, [tuple(p) for p in config["scan_offset"]], float(config["travels"]["x"]))
+            logging.info("Hin/Rück-Ausgleich: %d Zeilen", rows)
         commands, report = focus.compensate(
             commands, heightmap.HeightMapSet(grids), machine.focus_gap_mm,
             machine.probe_tip_offset_mm,
