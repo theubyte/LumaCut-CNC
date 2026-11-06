@@ -66,7 +66,8 @@ fun SettingsScreen(machine: MachineViewModel) {
         UpdateCard(machine)
         LcCard {
             CardTitle("Arbeitsbereich")
-            SmallText("${de.millione.lumacut.core.Work.sizeLabel}, Nullpunkt oben links, so wie von der Tür gesehen. Die Werte kommen vom Pi. Oben rechts liegt die schraffierte Park-Ecke mit %.0f × %.0f mm: Dort parkt und referenziert der Kopf, dort wird nie gelasert. Überall sonst darf gelasert werden.".format(de.millione.lumacut.core.Bed.PARK_X, de.millione.lumacut.core.Bed.PARK_Y))
+            SmallText("${de.millione.lumacut.core.Work.sizeLabel}, Nullpunkt oben links, so wie von der Tür gesehen. Die Werte kommen vom Pi. " + (if (de.millione.lumacut.core.Work.bandBlocked) "Der schraffierte Streifen oben über die ganze Breite (%.0f mm hoch) ist gesperrt: Dort wird nie gelasert, dort parkt und referenziert der Kopf.".format(de.millione.lumacut.core.Bed.PARK_Y)
+                else "Oben rechts liegt die schraffierte Park-Ecke mit %.0f × %.0f mm: Dort parkt und referenziert der Kopf, dort wird nie gelasert.".format(de.millione.lumacut.core.Bed.PARK_X, de.millione.lumacut.core.Bed.PARK_Y)) + " Überall sonst darf gelasert werden.")
         }
         LcCard {
             CardTitle("Über")

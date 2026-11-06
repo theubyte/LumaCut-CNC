@@ -94,7 +94,7 @@ object ImportLayout {
     }
 
     /** Factor (< 1) that shrinks everything into the work area with a 5 mm border. */
-    fun shrinkFactor(units: List<ImportUnit>, w: Double = Work.WIDTH, h: Double = Work.HEIGHT, border: Double = 5.0): Double {
+    fun shrinkFactor(units: List<ImportUnit>, w: Double = Work.WIDTH, h: Double = Work.usableHeight, border: Double = 5.0): Double {
         val all = union(units)
         return min(1.0, min((w - 2 * border) / max(all.width, 1e-9), (h - 2 * border) / max(all.height, 1e-9)))
     }

@@ -22,7 +22,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, send_from_directory
 
 from .transport import (Aborted, MarlinTransport, MarlinLaserGuard, ProbeFailed, normalize,
-                        serve_tcp, FIRMWARE_MOTION, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM, Z_SPEED_MAX)
+                        serve_tcp, FIRMWARE_MOTION, PARK_CORNER_MM, MOTION_ACCEL_RANGE, MOTION_SPEED_RANGE, Z_MAX_MM, Z_SPEED_MAX)
 from .smart_cam import analyze_job
 from . import placement as placing
 from . import heightmap
@@ -108,6 +108,7 @@ config = {
     "machine_name": "LumaCut",
     # Exhaust on at every job start; off this many seconds after the job (fumes).
     "exhaust_auto": False,
+    "blocked_band_y_mm": None,  # number: nothing is burnt anywhere in Y0..this (strip glued along X), else only the park corner
     "job_optimize": True,       # op=autorun plans the order of a job for time (job_optimizer.py)
     "job_optimize_budget_s": 4.0,
     "travel_lift_always": False,  # True: every long rapid goes up to the travel height, also over a flat plate
@@ -176,6 +177,15 @@ for _key, _value in (read_json_object(CONFIG) or {}).items():
 config["travels"]["z"] = min(float(config["travels"].get("z", Z_MAX_MM)), Z_MAX_MM)
 machine.homing_verified = bool(config["validated"])
 machine.travel_xy = (float(config["travels"]["x"]), float(config["travels"]["y"]))
+
+
+def _apply_blocked_band():
+    """The band replaces the park corner in every check: the corner just grows to the whole width."""
+    band = config.get("blocked_band_y_mm")
+    machine.park_corner = (float(config["travels"]["x"]), float(band)) if band else PARK_CORNER_MM
+
+
+_apply_blocked_band()
 machine.clearance_mm = float(config["z_clearance_mm"])
 machine.park_z_mm = float(config.get("park_z_mm", 1.0) or 0.0)
 machine.z_speed_mm_s = float(config.get("z_speed_mm_s", 9.0) or 9.0)
@@ -589,6 +599,7 @@ def settings():
             machine.surface_z = None
             machine.focused_this_job = False
     config["travels"] = dict(config["travels"], x=travel_x, y=travel_y)
+    _apply_blocked_band()
     config.update(probe_offset_x_mm=probe_x, probe_offset_y_mm=probe_y,
                   z_clearance_mm=clearance, focus_gap_mm=gap, z_switch_tip_offset_mm=offset,
                   thickness_tolerance_mm=tolerance, machine_name=name,
@@ -972,6 +983,22 @@ def action():
         span = float(request.form.get("span", "40")); cycles = int(request.form.get("cycles", "6"))
         machine.motion_test(accel, speed, x, y, span, cycles, owner="web")
         return jsonify(message="Testfahrt %g mm/s² · %g mm/s fertig" % (accel, speed), position=machine.position)
+    if op == "work_band":
+        # y=35: nothing is burnt in Y0..35 over the whole width (a strip is glued there); y empty: only the park corner.
+        if job_lock.locked():
+            raise RuntimeError("Ein Auftrag läuft")
+        raw = request.form.get("y", "").strip()
+        if raw:
+            band = float(raw)
+            if not PARK_CORNER_MM[1] <= band <= 120:
+                raise ValueError("Sperrstreifen %g..120 mm" % PARK_CORNER_MM[1])
+        else:
+            band = None
+        config["blocked_band_y_mm"] = band
+        _apply_blocked_band()
+        persist()
+        return jsonify(message=("Oberer Streifen Y0..%g gesperrt" % band) if band else "Nur die Park-Ecke ist gesperrt",
+                       blocked_band_y_mm=band, park_corner_mm={"x": machine.park_corner[0], "y": machine.park_corner[1]})
     if op == "job_optimizer":
         # optimize=0/1: plan the order of a job; lift=0/1: go up on every long rapid, also over a flat plate.
         for key, name in (("optimize", "job_optimize"), ("lift", "travel_lift_always")):

@@ -1228,6 +1228,29 @@ else:
         GatewayFilesTests._run_web_script(self, script)
 
 
+class BlockedBandTests(unittest.TestCase):
+    """The top strip can be blocked over the whole width; a strip of MDF is glued there."""
+    def test_band_blocks_the_whole_width_and_can_be_lifted(self):
+        self._run = None
+        script = r"""
+from marlin import web
+web.persist = lambda: None
+c = web.app.test_client()
+web.local_owner = lambda: None
+m = web.machine
+assert m.park_corner == (78.0, 35.0) and not m.in_park_corner(200.0, 10.0)
+r = c.post("/api/action", data={"op": "work_band", "y": "35"})
+assert r.status_code == 200, r.data
+assert r.get_json()["park_corner_mm"] == {"x": web.config["travels"]["x"], "y": 35.0}
+assert m.in_park_corner(200.0, 10.0) and m.in_park_corner(5.0, 34.0) and not m.in_park_corner(200.0, 35.0)
+assert c.post("/api/action", data={"op": "work_band", "y": "10"}).status_code == 400, "smaller than the park corner"
+assert m.in_park_corner(200.0, 10.0)
+assert c.post("/api/action", data={"op": "work_band", "y": ""}).status_code == 200
+assert m.park_corner == (78.0, 35.0)
+"""
+        GatewayFilesTests._run_web_script(self, script)
+
+
 class ParkOntoSwitchTests(unittest.TestCase):
     """05.11. on the board: every material test ended in a fault at Y0.038."""
     def test_switch_just_short_of_zero_is_no_fault(self):

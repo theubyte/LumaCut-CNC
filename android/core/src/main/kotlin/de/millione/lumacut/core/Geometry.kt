@@ -27,7 +27,7 @@ object Bed {
     fun configure(w: Double?, h: Double?, px: Double?, py: Double?) {
         if (w != null && w in 100.0..600.0) width = w
         if (h != null && h in 100.0..600.0) height = h
-        if (px != null && px in 0.0..200.0) parkX = px
+        if (px != null && px in 0.0..600.0) parkX = px       // the Pi may block the whole width (op=work_band)
         if (py != null && py in 0.0..200.0) parkY = py
     }
 
@@ -81,7 +81,14 @@ object Work {
     fun touchesPark(b: Box) = park.let { k -> b.maxX > k.minX + EPS && b.minY < k.maxY - EPS }
     fun contains(p: Pt) = p.x >= -EPS && p.y >= -EPS && p.x <= WIDTH + EPS && p.y <= HEIGHT + EPS
     fun contains(b: Box) = b.minX >= -EPS && b.minY >= -EPS && b.maxX <= WIDTH + EPS && b.maxY <= HEIGHT + EPS
-    val center get() = Pt(WIDTH / 2, HEIGHT / 2)
+    /** The park corner reaches over the whole width: the top strip is blocked (op=work_band). */
+    val bandBlocked get() = Bed.PARK_X >= WIDTH
+    /** What the operator calls the blocked area. */
+    val parkName get() = if (bandBlocked) "gesperrter Streifen" else "Park-Ecke"
+    /** Height a motif can have: with the blocked strip the area starts below it. */
+    val usableHeight get() = if (bandBlocked) HEIGHT - Bed.PARK_Y else HEIGHT
+    /** Middle of what can be lasered. */
+    val center get() = Pt(WIDTH / 2, (HEIGHT - usableHeight + HEIGHT) / 2)
 }
 
 @Serializable

@@ -84,7 +84,7 @@ private val labelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIA
 fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, onClose: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var x0 by remember { mutableStateOf("20") }; var y0 by remember { mutableStateOf("20") }
+    var x0 by remember { mutableStateOf("20") }; var y0 by remember { mutableStateOf("50") }
     var x1 by remember { mutableStateOf("340") }; var y1 by remember { mutableStateOf("320") }
     var photo by remember { mutableStateOf<Bitmap?>(null) }
     val markers = remember { mutableStateListOf<Offset>() }   // in photo pixels

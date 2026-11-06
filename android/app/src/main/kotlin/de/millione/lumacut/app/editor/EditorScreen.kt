@@ -893,7 +893,7 @@ private fun SelectionCard(editor: EditorViewModel, e: Element, onAdjust: () -> U
         Spacer(Modifier.height(8.dp))
         AlignRows(editor, 1)
         if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (${Work.sizeLabel}) – so wird nicht gelasert.", Lc.bad) }
-        else if (e.touchesPark()) { Spacer(Modifier.height(8.dp)); Banner("Liegt in der Park-Ecke – dort wird nicht gelasert.", Lc.bad) }
+        else if (e.touchesPark()) { Spacer(Modifier.height(8.dp)); Banner("Liegt im Bereich ${Work.parkName} – dort wird nicht gelasert.", Lc.bad) }
     }
 }
 
@@ -920,7 +920,7 @@ private fun MultiCard(editor: EditorViewModel, sel: List<Element>) {
         Spacer(Modifier.height(8.dp))
         AlignRows(editor, sel.map { it.groupId ?: it.id }.distinct().size)
         if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (${Work.sizeLabel}).", Lc.bad) }
-        else if (sel.any { it.touchesPark() }) { Spacer(Modifier.height(8.dp)); Banner("Liegt in der Park-Ecke – dort wird nicht gelasert.", Lc.bad) }
+        else if (sel.any { it.touchesPark() }) { Spacer(Modifier.height(8.dp)); Banner("Liegt im Bereich ${Work.parkName} – dort wird nicht gelasert.", Lc.bad) }
     }
 }
 

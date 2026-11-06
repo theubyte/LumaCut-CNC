@@ -50,7 +50,7 @@ class MarlinWriter(private val appVersion: String = "dev", private val motion: M
         for (element in content) {
             val box = element.worldBounds() ?: continue
             if (!Work.contains(box)) throw JobBuildException("„${element.text ?: element.kind}“ ragt über die Arbeitsfläche hinaus")
-            if (element.touchesPark()) throw JobBuildException("„${element.text ?: element.kind}“ liegt in der Park-Ecke (oben rechts) – dort wird nicht gelasert")
+            if (element.touchesPark()) throw JobBuildException("„${element.text ?: element.kind}“ liegt im Bereich ${Work.parkName} (oben) – dort wird nicht gelasert")
             if (element.isImage && abs(element.transform.rotation) > 1e-6)
                 throw JobBuildException("Gedrehte Bilder werden noch nicht unterstützt – Drehung auf 0° setzen")
         }

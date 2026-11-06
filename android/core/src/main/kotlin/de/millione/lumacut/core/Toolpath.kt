@@ -98,7 +98,7 @@ class Toolpath(val segments: List<Segment>, val bounds: Box?, val stats: Toolpat
             if (b == null) warnings += "Keine Laserbewegung gefunden"
             else if (b.minX < 0.0 || b.minY < 0.0 || b.maxX > Bed.WIDTH || b.maxY > Bed.HEIGHT)
                 warnings += "Motiv liegt außerhalb der Arbeitsfläche"
-            if (inPark) warnings += "Motiv läuft durch die Park-Ecke, dort wird nicht gelasert"
+            if (inPark) warnings += "Motiv läuft durch den Bereich ${Work.parkName}, dort wird nicht gelasert"
             return Toolpath(segments, b, ToolpathStats(cutMm, travelMm, seconds, maxPower, warnings), lines.size)
         }
 

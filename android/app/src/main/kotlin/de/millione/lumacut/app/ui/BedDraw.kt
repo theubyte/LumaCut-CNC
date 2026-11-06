@@ -90,7 +90,7 @@ fun DrawScope.drawParkCorner(m: WorkMapper) {
     drawRect(Lc.warn.copy(alpha = .7f), pTop, pSize, style = Stroke(1f))
     labelPaint.textSize = 12.dp.toPx()
     labelPaint.color = Lc.warn.toArgb()
-    val label = "Park-Ecke"
+    val label = if (Work.bandBlocked) "Gesperrt, hier wird nicht gelasert" else "Park-Ecke"
     val labelWidth = labelPaint.measureText(label)
     if (labelWidth + 12f < pSize.width && labelPaint.textSize + 8f < pSize.height)
         drawContext.canvas.nativeCanvas.drawText(label, pTop.x + (pSize.width - labelWidth) / 2, pTop.y + (pSize.height + labelPaint.textSize) / 2 - 2f, labelPaint)

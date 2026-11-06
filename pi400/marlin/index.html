@@ -597,7 +597,7 @@ dialog h2{padding-right:92px}
     </div>
    </div>
    <div class="legend">
-    <span><i style="background:var(--safe-line)"></i>Park-Ecke (frei halten)</span>
+    <span><i style="background:var(--safe-line)"></i><span id="bedParkLegend">Park-Ecke (frei halten)</span></span>
     <span><i style="background:var(--cut)"></i>Laserwege</span>
     <span><i style="background:var(--accent)"></i>Motiv</span>
     <span><i style="background:var(--info)"></i>Ursprung / Platzierung</span>
@@ -2120,7 +2120,9 @@ function drawBed(s){
   const sc=$("bedScan");sc.setAttribute("x",0);sc.setAttribute("y",0);sc.setAttribute("width",W);sc.setAttribute("height",H);
   // Park-Ecke X<cx und Y<cy in Maschinen-mm → Rechteck oben rechts.
   $("bedSafe").setAttribute("d","M0 0H"+cx+"V"+cy+"H0Z");
-  $("bedInfo").textContent="Arbeitsfläche X0–"+W+" · Y0–"+H+" mm · Park-Ecke "+cx+" × "+cy+" mm oben rechts";
+  const band=cx>=W;
+  $("bedInfo").textContent="Arbeitsfläche X0–"+W+" · Y0–"+H+" mm · "+(band?"oberer Streifen Y0–"+cy+" mm gesperrt":"Park-Ecke "+cx+" × "+cy+" mm oben rechts");
+  $("bedParkLegend").textContent=band?"Oberer Streifen (gesperrt)":"Park-Ecke (frei halten)";
   const labels=$("bedLabels"),axes=$("bedAxes");labels.replaceChildren();axes.replaceChildren();
   const NS="http://www.w3.org/2000/svg";
   const mk=(tag,attrs,parent,text)=>{const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;parent.append(e);return e};

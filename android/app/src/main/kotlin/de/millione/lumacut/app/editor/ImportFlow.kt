@@ -117,7 +117,7 @@ private suspend fun placeBitmap(editor: EditorViewModel, bitmap: Bitmap, widthMm
     val raster = withContext(Dispatchers.Default) { Images.toRaster(bitmap) }
     var w = widthMm
     var h = w * raster.height / raster.width
-    val k = minOf(1.0, (Work.WIDTH - 10) / w, (Work.HEIGHT - 10) / h)
+    val k = minOf(1.0, (Work.WIDTH - 10) / w, (Work.usableHeight - 10) / h)
     w *= k; h *= k
     editor.addElement(Element(layerId = editor.layerIdByName("Gravieren"), kind = "Bild",
         transform = Transform(Work.center.x - w / 2, Work.center.y - h / 2), raster = raster, imageWidthMm = w, imageHeightMm = h))
