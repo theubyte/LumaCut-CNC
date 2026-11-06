@@ -529,7 +529,7 @@ Sperrt den oberen Streifen über die ganze Breite. `y=35`: In Y0..35 wird nirgen
 
 #### `op=job_optimizer`
 
-Schaltet die Auftragsplanung im automatischen Ablauf. `optimize=0|1`: Reihenfolge auf Zeit planen (Vorgabe 1). `lift=0|1`: bei jeder langen Eilfahrt auf Fahrhöhe heben, auch über einer flachen Platte (Vorgabe 0). Beide Felder sind optional, die Werte bleiben gespeichert. Antwort: `{message, job_optimize, travel_lift_always}`.
+Schaltet die Auftragsplanung im automatischen Ablauf. `optimize=0|1`: Reihenfolge auf Zeit planen (Vorgabe 0, für Gravuren nicht freigegeben, Befund 06.11. in `docs/STAND.md`). `lift=0|1`: bei jeder langen Eilfahrt auf Fahrhöhe heben, auch über einer flachen Platte (Vorgabe 0). Beide Felder sind optional, die Werte bleiben gespeichert. Antwort: `{message, job_optimize, travel_lift_always}`.
 
 #### `op=motion_limits`
 

@@ -109,7 +109,9 @@ config = {
     # Exhaust on at every job start; off this many seconds after the job (fumes).
     "exhaust_auto": False,
     "blocked_band_y_mm": None,  # number: nothing is burnt anywhere in Y0..this (strip glued along X), else only the park corner
-    "job_optimize": True,       # op=autorun plans the order of a job for time (job_optimizer.py)
+    # Off: planning for time made lines of one row run in opposite directions, which
+    # shows the X backlash inside a motif (06.11., engravings got worse). Not for rasters.
+    "job_optimize": False,      # op=autorun plans the order of a job for time (job_optimizer.py)
     "job_optimize_budget_s": 4.0,
     "travel_lift_always": False,  # True: every long rapid goes up to the travel height, also over a flat plate
     "exhaust_after_s": 60,
@@ -1945,9 +1947,6 @@ def auto_plan(commands, point=None):
             "points": sum(sum(g.reachable) for g in grids)}
 
 
-#: Focus may be off by this much before Z moves. The comparison from 05.11. showed
-#: no measurable change in line width between 7 and 12 mm gap.
-FOCUS_TOLERANCE_MM = 0.15
 #: Measured heights within this span count as one flat plate.
 FLAT_PLATE_MM = 1.0
 
@@ -2032,8 +2031,7 @@ def _auto_prepare(auto):
             commands, heightmap.HeightMapSet(grids), machine.focus_gap_mm,
             machine.probe_tip_offset_mm,
             start_z=machine.position[2] if machine.position else None,
-            should_stop=stop_job.is_set, travel_z=_travel_lift(grids),
-            z_tolerance_mm=FOCUS_TOLERANCE_MM if config["job_optimize"] else 0.0)
+            should_stop=stop_job.is_set, travel_z=_travel_lift(grids))
         logging.info("Autorun focus compensation: %s", report.as_dict())
     _check_stop()
     job.update(state="running", phase="running", total=len(commands))

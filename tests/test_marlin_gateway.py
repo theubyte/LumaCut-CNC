@@ -1834,7 +1834,8 @@ web.job_lock.acquire()
 web._job_worker("a.gcode", auto["commands"], auto)
 # Surface 3 + focus 7 - switch offset 1.5 = Z8.5; G28/M2 of the file dropped.
 assert calls == ["home", "probe", "M5 I", "G90", "G0 X40.000 Y40.000",
-                 "G0 Z8.500 F600", "M3 I", "G1 X44.000 Y40.000 S10", "M5 I", "park"], calls
+                 "G0 Z8.500 F600", "M3 I", "G1 X42.000 Y40.000 S10",
+                 "G1 X44.000 Y40.000 S10", "M5 I", "park"], calls
 assert web.job["state"] == "complete"
 calls.clear()
 web.job_lock.acquire()
@@ -2212,10 +2213,10 @@ for c in w[w.index("M3 I"):]:
     if c.startswith("G1 X") and "S77" in c:
         cuts += 1
         expected = surface(float(words["X"]), float(words["Y"])) + 5.5
-        assert abs(z - expected) < 0.2, (c, z, expected)   # Z follows from 0.15 mm off (FOCUS_TOLERANCE_MM)
+        assert abs(z - expected) < 0.05, (c, z, expected)
     if c == "M5 I":
         break
-assert cuts >= 5, "long lines are split where the surface changes"
+assert cuts > 100, "lines split into <= 2 mm pieces"
 assert w.index("G4 P800") < w.index("M3 I")
 park = w.index("G0 X0.000 Y0.000 F9000")
 assert park > w.index("M3 I") and w[park - 2].startswith("G0 Z20.000")

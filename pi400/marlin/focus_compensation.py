@@ -12,9 +12,6 @@ Same rules as Android ``FocusCompensation`` and the Windows app's
   low over a taller part.
 * Per-pass focus drops ``G91`` / ``G0 Z-0.5`` / ``G90`` are not sent; they
   become an offset on the map Z (and a positive one returns to focus).
-* With ``z_tolerance_mm`` the head does not chase small height changes: Z only moves
-  when it is off by more than that, lines stay whole while it is not, and small
-  changes on a rapid happen during the rapid instead of stopping for them.
 * Arcs, relative X/Y moves and absolute Z words are refused: a job with its
   own Z is already compensated and must not be compensated again.
 * Workflow lines (G28, G30, M2) belong to the automatic run, not here.
@@ -112,7 +109,7 @@ def _f(value):
 
 def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
                clearance_mm=2.0, max_segment_mm=2.0, z_max_mm_s=9.0, start_z=None,
-               should_stop=None, travel_z=None, long_travel_mm=20.0, z_tolerance_mm=0.0, rapid_feed=9000):
+               should_stop=None, travel_z=None, long_travel_mm=20.0):
     """(compensated lines, Report). Raises ValueError for unsupported input.
 
     With ``travel_z``, rapids longer than ``long_travel_mm`` go up to that
@@ -197,15 +194,6 @@ def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
                     and travel_z > max(z, target) + Z_RESOLUTION_MM):
                 z_only(travel_z)                # long rapid: over everything
                 rep.travel_lifts += 1
-            if z_tolerance_mm > 0 and z is not None and abs(target - z) <= LOWER_BEFORE_CUT_MM:
-                if abs(target - z) <= z_tolerance_mm:
-                    out.append("G0 X%s Y%s%s" % (_f(nx), _f(ny), (" F%g" % values["F"]) if "F" in values else ""))
-                else:                           # small change: on the way, without stopping
-                    out.append("G0 X%s Y%s Z%s F%g" % (_f(nx), _f(ny), _f(target), values.get("F", rapid_feed)))
-                    z = target
-                out_feed = None
-                x, y = nx, ny
-                continue
             if z is not None and target > z + Z_RESOLUTION_MM:
                 z_only(target)                  # up first
             out.append("G0 X%s Y%s%s" % (_f(nx), _f(ny), (" F%g" % values["F"]) if "F" in values else ""))
@@ -220,25 +208,19 @@ def compensate(lines, maps: HeightMapSet, focus_gap_mm, tip_offset_mm, *,
                 z_only(start)
             length = math.hypot(nx - x, ny - y)
             pieces = max(1, math.ceil(length / max_segment_mm))
-            done = 0
             for k in range(1, pieces + 1):
                 px = x + (nx - x) * k / pieces
                 py = y + (ny - y) * k / pieces
                 target = surface_z(px, py, length / pieces)
-                if z_tolerance_mm > 0 and z is not None and abs(target - z) <= z_tolerance_mm:
-                    if k < pieces:
-                        continue                # still close enough: the line stays whole
-                    target = z
-                piece_length = length * (k - done) / pieces
-                done = k
                 parts = ["G1 X%s Y%s" % (_f(px), _f(py))]
                 piece_feed = feed
                 if z is None or abs(target - z) > Z_RESOLUTION_MM:
                     if z is not None and feed:
-                        t_xy = piece_length / (feed / 60.0)
+                        t_xy = (length / pieces) / (feed / 60.0)
                         t_z = abs(target - z) / z_max_mm_s
                         if t_z > t_xy:
-                            piece_feed = max(1.0, piece_length / t_z * 60.0)
+                            # The firmware applies F along the 3D path, not along XY.
+                            piece_feed = max(1.0, math.hypot(length / pieces, target - z) / t_z * 60.0)
                             rep.feed_limited += 1
                     parts.append("Z" + _f(target))
                     z = target
