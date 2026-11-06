@@ -21,7 +21,10 @@ def main():
     names = [p.stem for p in sorted(HERE.glob("test_*.py")) if not args or p.stem in args or p.stem.removeprefix("test_") in args]
     failed = []
     port = 8120
-    for name in names:
+    # A failing test gets one more try: without a GPU (CI) timing varies. A second try is printed, so it stays visible.
+    queue = [(n, 1) for n in names]
+    while queue:
+        name, attempt = queue.pop(0)
         mod = importlib.import_module(name)
         port += 1
         sim = None

@@ -58,6 +58,8 @@ public:
     /** Starts or restarts polling on the client's current address. */
     Q_INVOKABLE void start();
     Q_INVOKABLE void refreshNow();
+    /** Shows an accepted change at once, so a second click does not act on the previous state. The next poll confirms it. */
+    void applyLocal(const QString& key, const QVariant& value);
 
     bool online() const { return m_online; }
     QString lastError() const { return m_error; }

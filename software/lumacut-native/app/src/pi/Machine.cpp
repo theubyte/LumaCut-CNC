@@ -26,6 +26,11 @@ void Machine::start() {
 }
 void Machine::refreshNow() { if (!PiClient::instance()->baseUrl().isEmpty()) tick(false); }
 
+void Machine::applyLocal(const QString& key, const QVariant& value) {
+    m_status.insert(key, value);
+    emit changed();
+}
+
 void Machine::tick(bool schedule) {
     const int gen = m_gen;
     PiClient::instance()->get(QStringLiteral("/api/status"), PiCallback([this, gen, schedule](const PiReply& r) {

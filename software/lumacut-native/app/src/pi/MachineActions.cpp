@@ -101,6 +101,8 @@ void MachineActions::run(const QString& op, const QVariantMap& fields, const QVa
 }
 void MachineActions::send(const QString& op, const QVariantMap& fields, const QVariantMap& opts, Done done) {
     if (!kQuietBusy.contains(op) && m_busy != op) { m_busy = op; emit busyChanged(); }
+    if ((op == QLatin1String("exhaust") || op == QLatin1String("light")) && fields.contains("on"))
+        Machine::instance()->applyLocal(op == QLatin1String("light") ? QStringLiteral("lights") : op, fields.value("on").toString() == QLatin1String("1"));
     const int timeout = opts.value("timeoutMs", 180000).toInt();  // long moves block their request
     const bool quiet = opts.value("quiet").toBool();
     PiClient::instance()->action(op, fields, timeout, [this, op, quiet, done = std::move(done)](const PiReply& r) {

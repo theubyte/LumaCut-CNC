@@ -66,7 +66,12 @@ class App:
     def wait(self, fn, timeout=10, every=0.1):
         deadline = time.time() + timeout
         while time.time() < deadline:
-            v = fn()
+            try:
+                v = fn()
+            except RuntimeError as e:      # the element is not there yet (views load asynchronously)
+                if "not found" not in str(e):
+                    raise
+                v = None
             if v:
                 return v
             time.sleep(every)
