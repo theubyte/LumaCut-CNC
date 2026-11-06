@@ -66,7 +66,7 @@ fun SettingsScreen(machine: MachineViewModel) {
         UpdateCard(machine)
         LcCard {
             CardTitle("Arbeitsbereich")
-            SmallText("360 × 340 mm, Nullpunkt oben links. Der 30-mm-Rand der Maschine ist für den Laser reserviert (Parken, Referenzieren) und wird nicht angezeigt – dort wird nie gelasert, auch kein Überlauf.")
+            SmallText("${de.millione.lumacut.core.Work.sizeLabel}, Nullpunkt oben links, so wie von der Tür gesehen. Die Werte kommen vom Pi. Oben rechts liegt die schraffierte Park-Ecke mit %.0f × %.0f mm: Dort parkt und referenziert der Kopf, dort wird nie gelasert. Überall sonst darf gelasert werden.".format(de.millione.lumacut.core.Bed.PARK_X, de.millione.lumacut.core.Bed.PARK_Y))
         }
         LcCard {
             CardTitle("Über")

@@ -122,6 +122,23 @@ data class Element(
 }
 
 /**
+ * True when this element burns in the park corner: a line through it, a closed shape around it, a
+ * picture over it. Its box alone says too little: one element can hold parts far apart.
+ */
+fun Element.touchesPark(): Boolean {
+    val box = worldBounds() ?: return false
+    if (!Work.touchesPark(box)) return false
+    if (isImage) return true
+    val park = Work.park
+    val paths = worldPaths()
+    if (paths.any { poly -> poly.zipWithNext().any { (a, b) -> segmentCrosses(a.x, a.y, b.x, b.y, park) } }) return true
+    val c = park.center
+    return paths.any { poly ->
+        poly.isClosed() && poly.zipWithNext().count { (a, b) -> (a.y > c.y) != (b.y > c.y) && c.x < a.x + (c.y - a.y) * (b.x - a.x) / (b.y - a.y) } % 2 == 1
+    }
+}
+
+/**
  * The element as smaller parts, in place, on the same layer and group. First pass: outer contours with their holes;
  * when it is one such part already: each line on its own, so a frame around other shapes can always be taken apart.
  * Text and pictures stay whole; a result of one means there is nothing to split.

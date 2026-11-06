@@ -35,6 +35,27 @@ object Bed {
     /** A machine box (min corner) reaching into the park corner. */
     fun touchesPark(b: Box) = b.minX < PARK_X && b.minY < PARK_Y
     fun inWorkArea(x: Double, y: Double) = x >= 0.0 && y >= 0.0 && x <= WIDTH && y <= HEIGHT && !inPark(x, y)
+    /** A machine line crossing the park corner, as the Pi checks every line that burns. */
+    fun segmentInPark(x0: Double, y0: Double, x1: Double, y1: Double) =
+        segmentCrosses(x0, y0, x1, y1, Box(0.0, 0.0, PARK_X, PARK_Y))
+}
+
+/** Liang-Barsky: does the line reach the inside of [b]? Touching its edge from outside does not count. */
+internal fun segmentCrosses(x0: Double, y0: Double, x1: Double, y1: Double, b: Box): Boolean {
+    var t0 = 0.0
+    var t1 = 1.0
+    val dx = x1 - x0
+    val dy = y1 - y0
+    for ((p, q) in listOf(-dx to x0 - b.minX, dx to b.maxX - x0, -dy to y0 - b.minY, dy to b.maxY - y0)) {
+        if (p == 0.0) {
+            if (q <= 0.0) return false
+        } else {
+            val r = q / p
+            if (p < 0) { if (r > t0) t0 = r } else { if (r < t1) t1 = r }
+            if (t0 >= t1) return false
+        }
+    }
+    return true
 }
 
 /**
@@ -52,6 +73,8 @@ object Work {
     fun toMachine(p: Pt) = Pt(Bed.WIDTH - p.x, p.y)
     fun fromMachine(p: Pt) = fromMachine(p.x, p.y)
     fun fromMachine(x: Double, y: Double) = Pt(Bed.WIDTH - x, y)
+    /** The size as the operator reads it, from the Pi's measured travel: "370 × 360 mm". */
+    val sizeLabel get() = "%.0f × %.0f mm".format(WIDTH, HEIGHT)
     /** The park corner in work mm (top right on screen). */
     val park get() = Box(WIDTH - Bed.PARK_X, 0.0, WIDTH, Bed.PARK_Y)
     /** A work-mm box overlapping the park corner (conservative, like the Pi's check). */

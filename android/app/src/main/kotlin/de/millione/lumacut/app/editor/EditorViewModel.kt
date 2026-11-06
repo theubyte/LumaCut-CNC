@@ -49,6 +49,7 @@ import de.millione.lumacut.core.Poly
 import de.millione.lumacut.core.Pt
 import de.millione.lumacut.core.Transform
 import de.millione.lumacut.core.splitParts
+import de.millione.lumacut.core.touchesPark
 import de.millione.lumacut.core.Work
 import de.millione.lumacut.core.boundsOf
 import de.millione.lumacut.core.isClosed
@@ -416,7 +417,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val base = _project.value.plateCount
         val first = if (reuse) _project.value.activePlate else base
         val used = (placed.filterNotNull().maxOfOrNull { it.first } ?: -1) + 1
-        if (used == 0) { notify("Zu groß für eine Platte (360 × 340 mm)", true); return 0 }
+        if (used == 0) { notify("Zu groß für eine Platte (${Work.sizeLabel})", true); return 0 }
         val newPlates = used - if (reuse) 1 else 0
         val all = pieces.flatMapIndexed { i, u -> placed[i]?.let { (k, o) ->
             u.map { e -> e.copy(plate = if (k == 0) first else (if (reuse) base + k - 1 else base + k),
@@ -851,7 +852,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val panels = try { BoxMaker.panels(spec) } catch (e: IllegalArgumentException) { notify(e.message ?: "Box nicht möglich", true); return 0 }
         val units = panels.map { (name, poly) -> ImportUnit(listOf(ImportItem(listOf(poly), null, false, listOf("box"), name)), emptyList()) }
         val spread = ImportLayout.spread(units)
-        if (spread.plates.isEmpty()) { notify("Die Box ist größer als eine Platte (360 × 340 mm)", true); return 0 }
+        if (spread.plates.isEmpty()) { notify("Die Box ist größer als eine Platte (${Work.sizeLabel})", true); return 0 }
         val cut = layerIdByName("Schneiden")
         val n = if (spread.plates.size == 1) addImported("Box", spread.plates[0], 1.0, emptyList(), emptyMap(), cut)
                 else addImportedOnPlates("Box", spread.plates, emptyList(), emptyMap(), cut)
@@ -894,7 +895,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val e = Element(layerId = layerIdByName(layerName), kind = kind, transform = Transform(box.minX + dx, box.minY + dy), paths = local)
         change { it.copy(elements = it.elements + e) }
         _selected.value = setOf(e.id)
-        if (box.width > Work.WIDTH || box.height > Work.HEIGHT) notify("Größer als der Arbeitsbereich 360 × 340 mm – bitte verkleinern", true)
+        if (box.width > Work.WIDTH || box.height > Work.HEIGHT) notify("Größer als der Arbeitsbereich ${Work.sizeLabel} – bitte verkleinern", true)
         return e
     }
 
@@ -985,7 +986,20 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
         val dx = shift(b.minX, b.maxX, Work.WIDTH); val dy = shift(b.minY, b.maxY, Work.HEIGHT)
         if (dx != 0.0 || dy != 0.0) updateSelected(coalesce) { it.copy(transform = it.transform.copy(x = it.transform.x + dx, y = it.transform.y + dy)) }
-        if (b.width > Work.WIDTH || b.height > Work.HEIGHT) notify("Größer als der Arbeitsbereich 360 × 340 mm – bitte verkleinern", true)
+        if (selectedElements().any { it.touchesPark() }) {      // inside the area but in the park corner: the shorter way out
+            val s = selectionBounds() ?: return
+            val park = Work.park
+            val left = park.minX - s.maxX
+            val down = park.maxY - s.minY
+            val canLeft = s.minX + left >= 0.0
+            val canDown = s.maxY + down <= Work.HEIGHT
+            if (canLeft || canDown) {
+                val moveLeft = canLeft && (!canDown || -left <= down)
+                updateSelected(coalesce) { it.copy(transform = it.transform.copy(
+                    x = it.transform.x + if (moveLeft) left else 0.0, y = it.transform.y + if (moveLeft) 0.0 else down)) }
+            }
+        }
+        if (b.width > Work.WIDTH || b.height > Work.HEIGHT) notify("Größer als der Arbeitsbereich ${Work.sizeLabel} – bitte verkleinern", true)
     }
 
     /** Sets the world size of a single selection by scaling its local content. */

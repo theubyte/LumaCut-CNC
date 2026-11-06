@@ -69,7 +69,7 @@ fun ScanMenu(machine: MachineViewModel, editor: EditorViewModel, ws: WorkspaceVi
                 onClick = { open = false; ws.scan(machine, editor, region) })
             item(ScanRegion.AREAS, if (areas.isEmpty()) "Noch keine Bereiche markiert" else "${areas.size} Bereich(e) – nur dort Bilder", areas.isNotEmpty())
             item(ScanRegion.MOTIF, if (doc.elements.isEmpty()) "Noch kein Motiv" else "Fläche unter dem Motiv + 1 cm Rand", doc.elements.isNotEmpty())
-            item(ScanRegion.ALL, "Ganze Fläche 360 × 340 mm, dauert am längsten", true)
+            item(ScanRegion.ALL, "Ganze Fläche ${de.millione.lumacut.core.Work.sizeLabel}, dauert am längsten", true)
             if (onSetup != null) {
                 HorizontalDivider(color = Lc.line)
                 DropdownMenuItem(text = { Text("Bereiche markieren / Kamera …") }, leadingIcon = { Icon(LcIcons.camera, null) },

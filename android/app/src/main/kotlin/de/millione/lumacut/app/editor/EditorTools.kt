@@ -336,7 +336,7 @@ fun ImportFitDialog(p: PendingImport, onDismiss: () -> Unit) {
         title = { Text("Passt nicht in den Arbeitsbereich", style = LcTypography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${p.kindLabel}: ${p.total - p.fitting} von ${p.total} Teilen sind auch nebeneinander angeordnet zu groß für 360 × 340 mm.", style = LcTypography.bodyLarge)
+                Text("${p.kindLabel}: ${p.total - p.fitting} von ${p.total} Teilen sind auch nebeneinander angeordnet zu groß für ${Work.sizeLabel}.", style = LcTypography.bodyLarge)
                 SmallText("Funktionsteile (Steckmaße, Flex-Muster) sollten nicht verkleinert werden.")
                 LcButton("Nur Teile nehmen, die passen (${p.fitting})", { p.onFitting(); onDismiss() }, Modifier.fillMaxWidth(), enabled = p.fitting > 0)
                 p.onPlates?.let { onPlates ->

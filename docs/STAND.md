@@ -477,6 +477,7 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   (`M593`) selbst einstellen; Abrutschen von Z und Stöße erkennen; Verschleiß bemerken.
 - Projekte-Dialog am Tablet ausprobieren (App 1.0.49).
 - Materialtest mit Kamera (`op=matcal`) einmal echt an der Maschine laufen lassen.
+- Android-App, Arbeitsbereich geprüft (06.11.): Fläche und Park-Ecke kommen vom Pi und stimmen (370 × 360, Ecke oben rechts, Maschine X0–78 / Y0–35). Korrigiert: alte Angabe 360 × 340 in zehn Texten und der 30-mm-Rand in den Einstellungen, Park-Ecke unter dem Kamerafoto verdeckt, Import und „im Bereich halten“ legten Teile in die Ecke, Prüfungen nach der ganzen Umrissbox statt nach der echten Bahn. Am Tablet noch nicht geprüft.
 - Auftragsplanung auf dem Pi (`job_optimizer.py`, 06.11.): Am Auftrag `Neues-Projekt` (41 102 Zeilen) rechnerisch 2680 s mit alter Z-Regel und Reihenfolge, 1427 s mit neuer; nur geschätzt, am Board noch nicht gemessen. Rechenzeit am Pi 9 s. Auf einer flachen Platte hebt der Kopf bei langen Fahrten nicht mehr an (`op=job_optimizer lift=1` schaltet das Anheben wieder ein): Ein Hindernis zwischen Motivteilen, höher als der Fokusabstand, würde dann getroffen.
 - Android-App 1.0.56, Ebenen neu (06.11., auf dem Pi bereit): Leere Ebenen verschwinden von selbst, Liste zeigt nur Ebenen mit Inhalt, Antippen wählt die Teile, Zahnrad öffnet die Werte, Aktionen in der Liste. Core-Tests grün, Bedienung am Tablet vom Besitzer noch nicht geprüft.
 - Android-App, SVG (06.11.): Struktur, Farb-Ebenen, Aufteilen, Gruppen-Teil antippen (siehe CHANGELOG). Core-Tests grün, am Tablet und mit echten SVG-Dateien noch nicht geprüft. DXF und HPGL bleiben ohne Farben/Ebenen.
@@ -487,7 +488,6 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
 ## 11. Offene Fragen und Messungen
 
 - Abstand Tasterspitze ↔ Düsenspitze mit Hut (Besitzer misst).
-- Realer Y-Weg (alt ~350 statt 370) und X-Weg mit v6.
 - Kopftiefe in Y für die Breite des Parkbands.
 - Einladungskarte Smaragd: Ergebnis der gelaserten Karte noch nicht besprochen.
 - **Anet V1.7 als Ersatz mit Z (31.10. am PC ausgelesen, nichts geschrieben):**

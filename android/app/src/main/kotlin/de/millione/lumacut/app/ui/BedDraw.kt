@@ -15,9 +15,8 @@ import de.millione.lumacut.core.Work
 import kotlin.math.min
 
 /**
- * Maps work-area millimetres (0..360 × 0..340, origin top-left, Y down) to
- * screen pixels. The 30 mm safezone belongs to the laser and is never
- * shown; machine positions are converted with [machine].
+ * Maps work-area millimetres (the Pi's measured travel, origin top-left, Y down)
+ * to screen pixels; machine positions are converted with [machine].
  */
 class WorkMapper(val scale: Float, val ox: Float, val oy: Float) {
     fun x(mm: Double): Float = ox + mm.toFloat() * scale
@@ -64,7 +63,18 @@ fun DrawScope.drawWorkArea(m: WorkMapper, showGrid: Boolean = true) {
             v += step
         }
     }
-    // Park corner (top right): the head homes and parks there, nothing is burnt.
+    drawParkCorner(m)
+    drawRect(Lc.line2, topLeft, size, style = Stroke(1.5f))
+    // In dp, not pixels: 26 px were huge on an mdpi tablet and tiny on an xxhdpi phone.
+    labelPaint.textSize = 12.dp.toPx()
+    labelPaint.color = Lc.faint.toArgb()
+    drawContext.canvas.nativeCanvas.drawText("0/0", topLeft.x + 6f, topLeft.y + labelPaint.textSize + 4f, labelPaint)
+    val dims = Work.sizeLabel
+    drawContext.canvas.nativeCanvas.drawText(dims, topLeft.x + size.width - labelPaint.measureText(dims) - 8f, topLeft.y + size.height - 10f, labelPaint)
+}
+
+/** Park corner (top right): the head homes and parks there, nothing is burnt. Always the Pi's measured size. */
+fun DrawScope.drawParkCorner(m: WorkMapper) {
     val park = Work.park
     val pTop = m.at(Pt(park.minX, park.minY)); val pBot = m.at(Pt(park.maxX, park.maxY))
     val pSize = Size(pBot.x - pTop.x, pBot.y - pTop.y)
@@ -78,13 +88,12 @@ fun DrawScope.drawWorkArea(m: WorkMapper, showGrid: Boolean = true) {
         d += hatch
     }
     drawRect(Lc.warn.copy(alpha = .7f), pTop, pSize, style = Stroke(1f))
-    drawRect(Lc.line2, topLeft, size, style = Stroke(1.5f))
-    // In dp, not pixels: 26 px were huge on an mdpi tablet and tiny on an xxhdpi phone.
     labelPaint.textSize = 12.dp.toPx()
-    labelPaint.color = Lc.faint.toArgb()
-    drawContext.canvas.nativeCanvas.drawText("0/0", topLeft.x + 6f, topLeft.y + labelPaint.textSize + 4f, labelPaint)
-    val dims = "%.0f × %.0f mm".format(w, h)
-    drawContext.canvas.nativeCanvas.drawText(dims, topLeft.x + size.width - labelPaint.measureText(dims) - 8f, topLeft.y + size.height - 10f, labelPaint)
+    labelPaint.color = Lc.warn.toArgb()
+    val label = "Park-Ecke"
+    val labelWidth = labelPaint.measureText(label)
+    if (labelWidth + 12f < pSize.width && labelPaint.textSize + 8f < pSize.height)
+        drawContext.canvas.nativeCanvas.drawText(label, pTop.x + (pSize.width - labelWidth) / 2, pTop.y + (pSize.height + labelPaint.textSize) / 2 - 2f, labelPaint)
 }
 
 /** Head marker from a machine position; outside the work area (parked) it sits on the edge, hollow. */

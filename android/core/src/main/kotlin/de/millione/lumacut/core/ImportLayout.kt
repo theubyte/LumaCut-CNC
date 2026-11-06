@@ -50,7 +50,17 @@ object ImportLayout {
     fun arrange(units0: List<ImportUnit>, w: Double = Work.WIDTH, h: Double = Work.HEIGHT): Layout {
         val all = union(units0)
         if (all.width <= w && all.height <= h) {
-            val d = Pt(w / 2 - all.center.x, h / 2 - all.center.y)
+            var d = Pt(w / 2 - all.center.x, h / 2 - all.center.y)
+            val placed = Box(all.minX + d.x, all.minY + d.y, all.maxX + d.x, all.maxY + d.y)
+            if (Work.touchesPark(placed)) {          // centred it would reach the park corner: move it clear if it fits
+                val park = Work.park
+                val left = park.minX - placed.maxX
+                val down = park.maxY - placed.minY
+                val canLeft = placed.minX + left >= 0.0
+                val canDown = placed.maxY + down <= h
+                if (canLeft && (!canDown || -left <= down)) d = Pt(d.x + left, d.y)
+                else if (canDown) d = Pt(d.x, d.y + down)
+            }
             return Layout(FitKind.AS_IS, units0, units0.map { d })
         }
         val units = explode(units0)
@@ -97,7 +107,12 @@ object ImportLayout {
             val b = boxes[i]
             if (b.width > w - 2 * MARGIN || b.height > h - 2 * MARGIN) continue
             var px = x; var py = y; var newRow = false
-            if (px + b.width > w - MARGIN) { px = MARGIN; py = y + rowH + gap; newRow = true }
+            // The park corner sits at the right end of the top rows.
+            fun rightEnd(top: Double) = if (top < Bed.PARK_Y) w - Bed.PARK_X else w - MARGIN
+            if (px + b.width > rightEnd(py)) {
+                px = MARGIN; py = y + rowH + gap; newRow = true
+                if (px + b.width > rightEnd(py)) py = max(py, Bed.PARK_Y)
+            }
             if (py + b.height > h - MARGIN) continue
             out[i] = Pt(px - b.minX, py - b.minY)
             x = px + b.width + gap

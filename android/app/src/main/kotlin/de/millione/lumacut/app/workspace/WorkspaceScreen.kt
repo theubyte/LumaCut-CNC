@@ -69,6 +69,7 @@ import de.millione.lumacut.app.ui.Segmented
 import de.millione.lumacut.app.ui.SmallText
 import de.millione.lumacut.app.ui.WorkMapper
 import de.millione.lumacut.app.ui.drawHead
+import de.millione.lumacut.app.ui.drawParkCorner
 import de.millione.lumacut.app.ui.drawWorkArea
 import de.millione.lumacut.app.ui.rememberConfirm
 import de.millione.lumacut.core.Box as WBox
@@ -259,6 +260,7 @@ private fun WorkspaceCanvas(editor: EditorViewModel, ws: WorkspaceViewModel, hea
         background?.let { bmp ->
             val a = m.at(Pt(0.0, 0.0)); val b = m.at(Pt(Work.WIDTH, Work.HEIGHT))
             drawImage(bmp, dstOffset = IntOffset(a.x.roundToInt(), a.y.roundToInt()), dstSize = IntSize((b.x - a.x).roundToInt(), (b.y - a.y).roundToInt()))
+            drawParkCorner(m)       // a photo must not hide where nothing is burnt
         }
         for (e in doc.elements) {
             val layer = doc.layer(e.layerId) ?: continue

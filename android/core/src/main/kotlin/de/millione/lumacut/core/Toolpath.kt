@@ -40,6 +40,7 @@ class Toolpath(val segments: List<Segment>, val bounds: Box?, val stats: Toolpat
             var x = 0.0; var y = 0.0; var absolute = true; var scale = 1.0
             var feed = 1000.0; var power = 0; var armed = false
             var cutMm = 0.0; var travelMm = 0.0; var seconds = 0.0; var maxPower = 0; var cuts = 0
+            var inPark = false
             var unpowered = 0
             var dirX = 0.0; var dirY = 0.0
             var box: Box? = null
@@ -80,6 +81,7 @@ class Toolpath(val segments: List<Segment>, val bounds: Box?, val stats: Toolpat
                         if (cut) {
                             cutMm += len; cuts++; maxPower = max(maxPower, power)
                             box = Box(minOf(px, p.x), minOf(py, p.y), maxOf(px, p.x), maxOf(py, p.y)).union(box)
+                            if (Bed.segmentInPark(px, py, p.x, p.y)) inPark = true
                         } else travelMm += len
                         seconds += len / max(speed, 1.0) * 60
                         val ux = (p.x - px) / len; val uy = (p.y - py) / len
@@ -94,8 +96,9 @@ class Toolpath(val segments: List<Segment>, val bounds: Box?, val stats: Toolpat
             if (unpowered > 0) warnings += "$unpowered Laserfahrten nach Leerfahrt ohne S-Wert: Marlin lasert dort mit 0"
             val b = box
             if (b == null) warnings += "Keine Laserbewegung gefunden"
-            else if (b.minX < 0.0 || b.minY < 0.0 || b.maxX > Bed.WIDTH || b.maxY > Bed.HEIGHT || Bed.touchesPark(b))
-                warnings += "Motiv berührt die Park-Ecke oder liegt außerhalb der Arbeitsfläche"
+            else if (b.minX < 0.0 || b.minY < 0.0 || b.maxX > Bed.WIDTH || b.maxY > Bed.HEIGHT)
+                warnings += "Motiv liegt außerhalb der Arbeitsfläche"
+            if (inPark) warnings += "Motiv läuft durch die Park-Ecke, dort wird nicht gelasert"
             return Toolpath(segments, b, ToolpathStats(cutMm, travelMm, seconds, maxPower, warnings), lines.size)
         }
 

@@ -106,6 +106,7 @@ import de.millione.lumacut.app.ui.TextInput
 import de.millione.lumacut.app.ui.Tile
 import de.millione.lumacut.app.ui.WorkMapper
 import de.millione.lumacut.app.ui.drawHead
+import de.millione.lumacut.app.ui.drawParkCorner
 import de.millione.lumacut.app.ui.drawWorkArea
 import de.millione.lumacut.app.ui.rememberConfirm
 import de.millione.lumacut.core.Box as WBox
@@ -129,6 +130,7 @@ import de.millione.lumacut.core.SvgImport
 import de.millione.lumacut.core.Toolpath
 import de.millione.lumacut.core.Transform
 import de.millione.lumacut.core.Work
+import de.millione.lumacut.core.touchesPark
 import de.millione.lumacut.core.formatDuration
 import de.millione.lumacut.core.simplify
 import kotlinx.coroutines.Dispatchers
@@ -679,6 +681,7 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, view: Can
             val a = m.at(Pt(0.0, 0.0)); val b = m.at(Pt(Work.WIDTH, Work.HEIGHT))
             drawImage(bmp, dstOffset = IntOffset(a.x.roundToInt(), a.y.roundToInt()),
                 dstSize = IntSize((b.x - a.x).roundToInt(), (b.y - a.y).roundToInt()), alpha = bgAlpha)
+            drawParkCorner(m)       // a photo must not hide where nothing is burnt
         }
         for (e in doc.elements) {
             val layer = doc.layer(e.layerId) ?: continue
@@ -712,7 +715,7 @@ private fun EditorCanvas(editor: EditorViewModel, head: List<Double>?, view: Can
         }
         sel.mapNotNull { it.worldBounds() }.reduceOrNull { a, b -> a.union(b) }?.let { b ->
             val h = Handles.of(m, b)
-            val outside = !Work.contains(b)
+            val outside = !Work.contains(b) || sel.any { it.touchesPark() }
             val c = if (outside) Lc.bad else Lc.accent
             drawRect(c, h.topLeft, h.size, style = Stroke(2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))))
             for (corner in listOf(h.topLeft, h.topLeft + Offset(h.size.width, 0f), h.topLeft + Offset(0f, h.size.height))) drawCircle(c, 6f, corner)
@@ -889,7 +892,8 @@ private fun SelectionCard(editor: EditorViewModel, e: Element, onAdjust: () -> U
         NudgePad(editor)
         Spacer(Modifier.height(8.dp))
         AlignRows(editor, 1)
-        if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (360 × 340 mm) – so wird nicht gelasert.", Lc.bad) }
+        if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (${Work.sizeLabel}) – so wird nicht gelasert.", Lc.bad) }
+        else if (e.touchesPark()) { Spacer(Modifier.height(8.dp)); Banner("Liegt in der Park-Ecke – dort wird nicht gelasert.", Lc.bad) }
     }
 }
 
@@ -915,7 +919,8 @@ private fun MultiCard(editor: EditorViewModel, sel: List<Element>) {
         NudgePad(editor)
         Spacer(Modifier.height(8.dp))
         AlignRows(editor, sel.map { it.groupId ?: it.id }.distinct().size)
-        if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (360 × 340 mm).", Lc.bad) }
+        if (!Work.contains(b)) { Spacer(Modifier.height(8.dp)); Banner("Liegt nicht vollständig im Arbeitsbereich (${Work.sizeLabel}).", Lc.bad) }
+        else if (sel.any { it.touchesPark() }) { Spacer(Modifier.height(8.dp)); Banner("Liegt in der Park-Ecke – dort wird nicht gelasert.", Lc.bad) }
     }
 }
 
