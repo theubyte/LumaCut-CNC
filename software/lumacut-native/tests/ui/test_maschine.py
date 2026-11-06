@@ -94,13 +94,17 @@ def run(app):
     assert abs(pi_status(app)["position"][2] - z0 - 1) < 0.01
 
     # Light and exhaust: no dialog.
+    # The Pi may have switched the light itself (effects after a move), so compare with what it reports now.
+    light0 = pi_status(app)["lights"]
+    app.wait(lambda: app.get("m-light", "on") == light0)
     app.click("m-light")
-    app.wait(lambda: pi_status(app)["lights"] is True)
+    app.wait(lambda: pi_status(app)["lights"] is (not light0))
     assert not is_open(app, "go-confirm")
+    exhaust0 = pi_status(app)["exhaust"]
     app.click("m-exhaust")
-    app.wait(lambda: pi_status(app)["exhaust"] is True)
+    app.wait(lambda: pi_status(app)["exhaust"] is (not exhaust0))
     app.click("m-exhaust"); app.click("m-light")
-    app.wait(lambda: pi_status(app)["exhaust"] is False and pi_status(app)["lights"] is False)
+    app.wait(lambda: pi_status(app)["exhaust"] is exhaust0 and pi_status(app)["lights"] is light0)
 
     # The locked strip: from the Pi, visible, and back.
     w0 = app.get("bed-blocked", "width")
