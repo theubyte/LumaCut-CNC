@@ -1,0 +1,1 @@
+FEHLER: „Rechteck“ liegt in der Park-Ecke (oben rechts) – dort wird nicht gelasert

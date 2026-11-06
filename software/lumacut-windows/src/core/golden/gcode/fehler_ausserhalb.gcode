@@ -1,0 +1,1 @@
+FEHLER: „Rechteck“ ragt über die Arbeitsfläche hinaus

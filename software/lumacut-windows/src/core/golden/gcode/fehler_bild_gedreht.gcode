@@ -1,0 +1,1 @@
+FEHLER: Gedrehte Bilder werden noch nicht unterstützt – Drehung auf 0° setzen

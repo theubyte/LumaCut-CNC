@@ -49,7 +49,13 @@ export const Limits = {
   MIN_RELIABLE_POWER_PCT: 8,
 } as const;
 
-export type DarknessCurve = Record<string, unknown>;
+/** Ein Feld der Kamera-Kalibrierung (Pi op=matcal): tone 0 = unberührt, 1 = schwarz. */
+export interface DarknessPoint { power: number; speed: number; tone: number; clean?: boolean }
+/** Schwärze-Kurve wie auf dem Pi gespeichert (tone_curve), Feldnamen wie Android. Rechnen: core/darkness.ts. */
+export interface DarknessCurve {
+  points?: DarknessPoint[]; min_power_pct?: number; interval_mm?: number; speed_min?: number; speed_max?: number;
+  [extra: string]: unknown;
+}
 export interface Layer {
   id: string; name: string;
   /** ARGB as in Kotlin (0xFF4FD8B4). Use `layerCss()` for drawing. */
@@ -66,7 +72,8 @@ export const layerLabel = (l: Pick<Layer, 'name'>) => l.name === 'Linie' ? 'Mark
 export const STANDARD_LAYERS = new Set(['Gravieren', 'Linie', 'Schneiden']);
 
 export interface Raster { width: number; height: number; grayBase64: string }
-export type ImageAdjust = Record<string, unknown>;
+/** Korrekturen fürs Fotogravieren, alles 0/false = unverändert (wie ImageAdjust in ImageTools.kt). */
+export interface ImageAdjust { brightness?: number; contrast?: number; sharpen?: number; invert?: boolean; [extra: string]: unknown }
 
 /** Windows-only: cubic curve node for the path editor. `paths` is its flattening. */
 export interface CurveNode { x: number; y: number; hx1?: number; hy1?: number; hx2?: number; hy2?: number; smooth?: boolean }

@@ -20,12 +20,14 @@ export function Field({ label, hint, children }: { label: ReactNode; hint?: Reac
 export function NumberInput({ value, onChange, unit, step = 1, min, max, digits = 2, disabled, title, ariaLabel }: {
   value: number; onChange(v: number): void; unit?: string; step?: number; min?: number; max?: number; digits?: number; disabled?: boolean; title?: string; ariaLabel?: string;
 }) {
-  const fmt = (v: number) => Number.isFinite(v) ? String(+v.toFixed(digits)) : '';
+  const fmt = (v: number) => Number.isFinite(v) ? String(+v.toFixed(digits)).replace('.', ',') : '';
   const [text, setText] = useState(fmt(value));
   const focused = useRef(false);
   useEffect(() => { if (!focused.current) setText(fmt(value)); }, [value]); // eslint-disable-line
   const clamp = (v: number) => Math.min(max ?? Infinity, Math.max(min ?? -Infinity, v));
   const commit = () => {
+    // Nur Anzeige gerundet: ohne Eingabe bleibt der genaue Wert erhalten.
+    if (text === fmt(value)) return;
     const v = parseFloat(text.replace(',', '.'));
     if (Number.isFinite(v)) { const c = clamp(v); setText(fmt(c)); if (c !== value) onChange(c); } else setText(fmt(value));
   };

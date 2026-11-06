@@ -106,3 +106,10 @@ export async function appVersion(): Promise<string> {
   const { getVersion } = await import('@tauri-apps/api/app');
   return getVersion();
 }
+
+/** LUMACUT_PI_URL at app start wins over the stored address, for test runs against the simulator. */
+export async function piUrlOverride(): Promise<string | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string | null>('pi_url_override');
+}

@@ -1,0 +1,161 @@
+// Erzeugt die Golden-Dateien aus dem echten Kotlin-Code. So neu erzeugen:
+// 1. android/ in einen Scratch-Ordner kopieren, in settings.gradle.kts nur :core lassen, Android-Plugins aus build.gradle.kts entfernen.
+// 2. Diese Datei als core/src/test/kotlin/de/millione/lumacut/core/GoldenGen.kt ablegen.
+// 3. Im Ordner software/lumacut-windows: GOLDEN_WRITE=<scratch>/golden-in npx vitest run src/core/golden.test.ts
+// 4. Im Scratch-Ordner: gradle :core:test --tests '*GoldenGen*'
+// 5. <scratch>/golden-out/* nach src/core/golden/ kopieren.
+package de.millione.lumacut.core
+
+import kotlinx.serialization.json.*
+import java.io.File
+import java.security.MessageDigest
+import kotlin.test.Test
+
+class GoldenGen {
+    private val input = File("../golden-in")
+    private val output = File("../golden-out")
+
+    private fun sha(s: String) = MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+    private fun num(d: Double): JsonElement = if (d.isNaN() || d.isInfinite()) JsonNull else JsonPrimitive(d)
+    private fun pt(p: Pt) = buildJsonArray { add(num(p.x)); add(num(p.y)) }
+    private fun poly(p: Poly) = JsonArray(p.map(::pt))
+    private fun polys(l: List<Poly>) = JsonArray(l.map(::poly))
+    private fun box(b: Box?): JsonElement = if (b == null) JsonNull else buildJsonArray { add(num(b.minX)); add(num(b.minY)); add(num(b.maxX)); add(num(b.maxY)) }
+    private fun ptsN(l: List<Pt?>) = JsonArray(l.map { if (it == null) JsonNull else pt(it) })
+    private fun parts(p: Parts) = buildJsonObject {
+        put("engrave", polys(p.engrave)); put("cut", polys(p.cut)); put("marks", polys(p.marks))
+        put("labels", JsonArray(p.labels.map { (q, s) -> buildJsonArray { add(pt(q)); add(JsonPrimitive(s)) } }))
+    }
+    private fun readPolys(e: JsonElement): List<Poly> = e.jsonArray.map(::readPoly)
+    private fun readPoly(e: JsonElement): Poly = e.jsonArray.map { val o = it.jsonObject; Pt(o["x"]!!.jsonPrimitive.double, o["y"]!!.jsonPrimitive.double) }
+    private fun readBox(e: JsonElement): Box { val o = e.jsonObject; return Box(o["minX"]!!.jsonPrimitive.double, o["minY"]!!.jsonPrimitive.double, o["maxX"]!!.jsonPrimitive.double, o["maxY"]!!.jsonPrimitive.double) }
+
+    private fun stats(gcode: String): JsonObject {
+        val tp = Toolpath.parse(gcode)
+        val seg = StringBuilder()
+        for (s in tp.segments) seg.append(s.x0.toRawBits()).append(' ').append(s.y0.toRawBits()).append(' ').append(s.x1.toRawBits()).append(' ').append(s.y1.toRawBits())
+            .append(' ').append(s.power).append(' ').append(s.cut).append(' ').append(s.line).append('\n')
+        val cuts = Frame.cutPoints(tp)
+        return buildJsonObject {
+            put("cutMm", num(tp.stats.cutMm)); put("travelMm", num(tp.stats.travelMm)); put("seconds", num(tp.stats.seconds))
+            put("maxPower", tp.stats.maxPower); put("warnings", JsonArray(tp.stats.warnings.map { JsonPrimitive(it) }))
+            put("bounds", box(tp.bounds)); put("lineCount", tp.lineCount); put("count", tp.segments.size); put("segments", sha(seg.toString()))
+            put("remaining", num(tp.remainingSeconds(tp.lineCount / 3))); put("duration", formatDuration(tp.stats.seconds))
+            put("frameBox", if (cuts.isEmpty()) "" else sha(Frame.program(cuts, Frame.Mode.BOX)))
+            put("frameHull", if (cuts.isEmpty()) "" else sha(Frame.program(cuts, Frame.Mode.HULL, 5000)))
+        }
+    }
+
+    private fun run(c: JsonObject): String {
+        val doc = Document.fromJson(c["doc"].toString())
+        val m = c["motion"]?.takeIf { it !is JsonNull }?.jsonObject
+        val motion = if (m == null) MarlinWriter.Motion.FIRMWARE else MarlinWriter.Motion(m["accel"]!!.jsonPrimitive.double, m["speed"]!!.jsonPrimitive.double)
+        val bed = c["bed"]?.takeIf { it !is JsonNull }?.jsonArray?.map { it.jsonPrimitive.double }
+        Bed.configure(bed?.get(0) ?: 370.0, bed?.get(1) ?: 360.0, bed?.get(2) ?: 78.0, bed?.get(3) ?: 35.0)
+        return try { MarlinWriter("golden", motion).write(doc) } catch (e: JobBuildException) { "FEHLER: " + e.message }
+    }
+
+    @Test fun generate() {
+        File(output, "gcode").mkdirs()
+        val named = Json.parseToJsonElement(File(input, "named.json").readText()).jsonArray
+        val statsOut = buildJsonObject {
+            for (c in named) {
+                val o = c.jsonObject
+                val name = o["name"]!!.jsonPrimitive.content
+                val g = run(o)
+                File(output, "gcode/$name.gcode").writeText(g)
+                put(name, if (g.startsWith("FEHLER")) JsonObject(emptyMap()) else stats(g))
+            }
+        }
+        File(output, "stats.json").writeText(statsOut.toString())
+        val fuzz = Json.parseToJsonElement(File(input, "fuzz.json").readText()).jsonArray
+        val fuzzOut = buildJsonObject {
+            for (c in fuzz) {
+                val o = c.jsonObject
+                val g = run(o)
+                put(o["name"]!!.jsonPrimitive.content, buildJsonObject {
+                    put("sha", sha(g)); put("len", g.length)
+                    if (g.startsWith("FEHLER")) put("error", g) else put("stats", stats(g))
+                })
+            }
+        }
+        File(output, "fuzz.json").writeText(fuzzOut.toString())
+        Bed.configure(370.0, 360.0, 78.0, 35.0)
+        File(output, "geometry.json").writeText(geometry(Json.parseToJsonElement(File(input, "geo.json").readText()).jsonObject).toString())
+    }
+
+    private fun geometry(g: JsonObject): JsonObject {
+        val nested = readPolys(g["nested"]!!); val ring = readPolys(g["ring"]!!); val open = readPolys(g["open"]!!); val text = readPolys(g["text"]!!)
+        val dense = readPoly(g["dense"]!!); val boxes = g["boxes"]!!.jsonArray.map(::readBox); val points = readPoly(g["points"]!!)
+        val m = run {
+            val w = 60; val h = 40
+            val a = IntArray(w * h)
+            for (y in 0 until h) for (x in 0 until w) {
+                val d = (x - 20) * (x - 20) + (y - 20) * (y - 20)
+                val on = (d < 144 && d > 25) || (x > 40 && x < 55 && y > 10 && y < 30) || (x == 50 && y == 36)
+                a[y * w + x] = if (x < 3 && y < 3) 0 else if (on) 0xFF102030.toInt() else 0xFFF0F0E8.toInt()
+            }
+            Mask.fromArgb(a, w, h, 30.0, 20.0)
+        }
+        return buildJsonObject {
+            put("hatch", polys(hatch(nested, 0.5)))
+            put("hatchRing", polys(hatch(ring, 1.3)))
+            put("orderPaths", polys(orderPaths(open, Pt(5.0, 5.0))))
+            put("orderForCutting", polys(orderForCutting(nested + open, Pt(0.0, 0.0))))
+            put("simplify", poly(simplify(dense, 0.3)))
+            put("rect", poly(Shapes.rect(30.0, 20.0))); put("rectR", poly(Shapes.rect(30.0, 20.0, 4.0)))
+            put("ellipse", poly(Shapes.ellipse(30.0, 20.0))); put("polygon", poly(Shapes.polygon(7, 30.0, 20.0)))
+            put("contourOut", polys(Contour.fromPolys(nested, 2.0)))
+            put("contourIn", polys(Contour.fromPolys(nested, -0.5)))
+            put("contourOuter", polys(Contour.fromPolys(ring, 1.0, outerOnly = true)))
+            put("maskCount", m.count); put("maskFilled", m.filled().count); put("maskSpecks", m.withoutSpecks(0.5).count)
+            put("sticker", polys(Contour.sticker(m, 2.0))); put("stickerJoin", polys(Contour.sticker(m, 1.0, true))); put("edge", polys(Contour.edge(m, 0.2)))
+            put("split", JsonArray(PartSplitter.split(nested + open).parts.map(::polys)))
+            for (mode in listOf("LEFT", "CENTER_X", "RIGHT", "TOP", "CENTER_Y", "BOTTOM")) put("align$mode", ptsN(Align.offsets(boxes, Align.Mode.valueOf(mode), boxes[1])))
+            put("distH", ptsN(Align.distribute(boxes, true))); put("distV", ptsN(Align.distribute(boxes, false)))
+            for (op in Booleans.Op.entries) put("bool${op.name}", polys(Booleans.apply(listOf(ring, listOf(Shapes.rect(20.0, 50.0).map { Pt(it.x + 10, it.y - 5) })), op)))
+            put("tabs", polys(Tabs.apply(ring + open, 3, 1.5)))
+            put("shelf", ptsN(ImportLayout.shelf(boxes, 370.0, 360.0)))
+            put("nest", JsonArray(Nest.place(boxes).map { if (it == null) JsonNull else buildJsonArray { add(it.first); add(pt(it.second)) } }))
+            for ((k, c) in listOf("boxOpen" to false, "boxClosed" to true))
+                put(k, JsonArray(BoxMaker.panels(BoxSpec(60.0, 40.0, 30.0, 3.0, 8.0, c)).map { (n, p) -> buildJsonArray { add(n); add(poly(p)) } }))
+            put("arcUp", polys(ArcText.bend(text, 30.0))); put("arcDown", polys(ArcText.bend(text, -30.0)))
+            put("grid", ptsN(Arrange.gridOffsets(boxes[0], 3, 4, 2.0, 5.0)))
+            put("gridInside", ptsN(Arrange.inside(boxes[4], Arrange.gridOffsets(boxes[0], 3, 4, 20.0, 5.0))))
+            put("heart", poly(ShapeLib.heart(30.0, 25.0))); put("star", poly(ShapeLib.star(6, 30.0, 25.0, 0.5))); put("pendant", polys(ShapeLib.pendant(30.0, 25.0)))
+            for (k in ShapeKind.entries) put("make${k.name}", poly(ShapeLib.make(k, 30.0, 25.0)))
+            put("curveOpen", poly(Curves.catmullRom(points.take(4), false))); put("curveClosed", poly(Curves.catmullRom(points.take(4), true, 5)))
+            for (s in TagStyle.entries) { put("tag${s.name}", parts(Personalize.tag(text, s, 4.0))); put("tagNo${s.name}", parts(Personalize.tag(text, s, null))) }
+            put("emblem", parts(Personalize.emblem(text, text, text, 60.0))); put("emblemPlain", parts(Personalize.emblem(text, null, null, 40.0)))
+            for (s in Personalize.FrameStyle.entries) put("frame${s.name}", polys(Personalize.frame(boxes[0], s, 3.0)))
+            put("dashes", polys(Personalize.dashes(ring[0], 4.0, 2.5)))
+            put("ruler", parts(Personalize.ruler(50, 20.0, 4.0)))
+            put("puzzle7", polys(Personalize.puzzle(60.0, 40.0, 3, 2)))
+            put("puzzle2", polys(Personalize.puzzle(60.0, 40.0, 2, 3, 123456)))
+            put("puzzle3", polys(Personalize.puzzle(60.0, 40.0, 2, 2, -5)))
+            put("hull", poly(Frame.convexHull(points)))
+            put("frameBox", Frame.program(points, Frame.Mode.BOX)); put("frameHull", Frame.program(points, Frame.Mode.HULL, 12000))
+            put("toolpath", stats(g["toolpath"]!!.jsonPrimitive.content))
+            val mt = MaterialTest.build(MaterialTest.Spec(powerSteps = 3, speedSteps = 2)) { t, h -> listOf(Shapes.rect(t.length * h, h)) }
+            put("materialTest", buildJsonObject {
+                put("title", mt.title)
+                put("layers", JsonArray(mt.layers.map { l -> buildJsonArray { add(l.name); add(l.color); add(num(l.powerPct)); add(num(l.speed)); add(l.mode.name) } }))
+                put("elements", JsonArray(mt.elements.map { e -> buildJsonArray { add(e.kind); add(pt(Pt(e.transform.x, e.transform.y))); add(polys(e.paths)); add(JsonPrimitive(e.text)) } }))
+            })
+            val c0 = g["curve"]!!.jsonObject
+            val curve = DarknessCurve(c0["points"]!!.jsonArray.mapIndexed { i, p -> val o = p.jsonObject; DarknessPoint(listOf(20.0, 40.0, 60.0, 90.0)[i], 3000.0, listOf(0.1, 0.3, 0.25, 0.8)[i]).let { d -> if (o.isEmpty()) d else d } })
+            val lay = Layer(name = "G", color = 1L, mode = LayerMode.FILL, powerPct = 30.0, speed = 3000.0, intervalMm = 0.1, darkness = curve)
+            val plain = Layer(name = "L", color = 1L, mode = LayerMode.LINE, powerPct = 30.0, speed = 1500.0)
+            fun res(r: Darkness.Result) = buildJsonArray { add(num(r.layer.speed)); add(num(r.layer.powerPct)); add(JsonPrimitive(r.limit)) }
+            put("dark", buildJsonArray {
+                add(num(Darkness.speedRange(lay, 9000.0).start)); add(num(Darkness.speedRange(lay, 9000.0).endInclusive))
+                add(num(Darkness.speedRange(plain, 9000.0).start)); add(num(Darkness.speedRange(plain, 9000.0).endInclusive))
+                add(res(Darkness.atSpeed(lay, 500.0, 9000.0))); add(res(Darkness.atSpeed(lay, 8000.0, 9000.0))); add(res(Darkness.atSpeed(plain, 100.0, 9000.0))); add(res(Darkness.atSpeed(plain, 2000.0, 9000.0)))
+                add(num(Darkness.speedPosition(lay, 9000.0))); add(num(Darkness.speedAt(lay, 0.7, 9000.0)))
+                add(num(Darkness.tone(lay) ?: -1.0)); add(num(Darkness.tone(plain) ?: -1.0))
+                add(res(Darkness.atTone(lay, 0.5, 9000.0))); add(res(Darkness.atTone(lay, 0.05, 9000.0))); add(res(Darkness.atTone(lay, 0.95, 9000.0))); add(res(Darkness.atTone(lay, 0.11, 1000.0))); add(res(Darkness.atTone(plain, 0.5, 9000.0)))
+                add(num(lay.copy(toneCurve = listOf(0.0, 0.2, 0.9)).powerShare(0.3))); add(num(lay.powerShare(1.5)))
+            })
+        }
+    }
+}

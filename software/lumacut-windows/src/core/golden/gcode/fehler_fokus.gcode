@@ -1,0 +1,1 @@
+FEHLER: Fokus-Absenkung zu groß auf „Tief“ (3,50 mm > 3 mm)

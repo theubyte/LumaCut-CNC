@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "sim": "python tools/sim_pi.py",
-    "shots": "playwright test",
+    "shots": "node tools/e2e_all.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -77,6 +77,12 @@ async fn pi_request(request: Request<'_>) -> Result<Response, String> {
     Ok(Response::new(out))
 }
 
+/// Test run of the installed app against the simulator: set LUMACUT_PI_URL before starting it.
+#[tauri::command]
+fn pi_url_override() -> Option<String> {
+    std::env::var("LUMACUT_PI_URL").ok().filter(|s| !s.is_empty())
+}
+
 #[derive(Serialize)]
 struct SystemFont {
     family: String,
@@ -240,7 +246,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![pi_request, list_system_fonts, read_system_font, update_check, update_install])
+        .invoke_handler(tauri::generate_handler![pi_request, pi_url_override, list_system_fonts, read_system_font, update_check, update_install])
         .run(tauri::generate_context!())
         .expect("LumaCut Studio konnte nicht starten");
 }

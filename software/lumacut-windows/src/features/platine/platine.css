@@ -1,0 +1,70 @@
+/* Platine: board colours for the preview and the layout of the assistant. Everything else comes from base.css. */
+:root {
+  --pcb-fr4: #dcd6bd; --pcb-copper: #c9743a; --pcb-silk: #2f3342; --pcb-mask: #1c9a78; --pcb-laser: #4a57e3; --pcb-drill: #5b6178; --pcb-mark: #b23fb0; --pcb-edge: #7a8097;
+}
+:root[data-theme="dark"] {
+  --pcb-fr4: #3a3d30; --pcb-copper: #e6975c; --pcb-silk: #f3f1e6; --pcb-mask: #4fd8b4; --pcb-laser: #8f9bff; --pcb-drill: #0a0c11; --pcb-mark: #e58ae0; --pcb-edge: #a6acc2;
+}
+
+.pcb { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.pcb-body { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-5) var(--sp-6); }
+.pcb-body.flush { padding: 0; overflow: hidden; display: flex; }
+.pcb-wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-4); }
+.pcb-foot { flex: none; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-6); background: var(--surface); border-top: 1px solid var(--line); }
+
+.pcb-steps { flex: none; display: flex; align-items: center; gap: var(--sp-1); margin: 0; padding: 0 var(--sp-5); height: 52px; list-style: none; background: var(--surface); border-bottom: 1px solid var(--line); }
+.pcb-steps li { display: flex; align-items: center; gap: var(--sp-1); }
+.pcb-steps li + li::before { content: ""; width: 28px; height: 1px; background: var(--line-2); margin-right: var(--sp-1); }
+.pcb-step { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px 0 6px; border: 0; background: none; border-radius: 999px; color: var(--muted); font-weight: 500; cursor: pointer; white-space: nowrap; }
+.pcb-step:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.pcb-step:disabled { opacity: .5; cursor: not-allowed; }
+.pcb-step .n { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pcb-step[aria-current="step"] { color: var(--text); font-weight: 600; background: var(--accent-soft); }
+.pcb-step[aria-current="step"] .n { background: var(--accent); color: var(--accent-ink); }
+.pcb-step.done .n { background: var(--ok-soft); color: var(--ok); }
+
+.pcb-drop { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: var(--sp-2); padding: var(--sp-6); border: 1.5px dashed var(--line-2); border-radius: var(--r-xl); background: var(--surface); text-align: center; transition: border-color var(--t-fast), background var(--t-fast); }
+.pcb-drop.big { min-height: 320px; }
+.pcb-drop.slim { flex-direction: row; padding: var(--sp-3) var(--sp-4); justify-content: flex-start; text-align: left; }
+.pcb-drop.over { border-color: var(--accent); background: var(--accent-soft); }
+
+.pcb-two { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--sp-4); align-items: start; }
+.pcb-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); align-items: start; }
+@media (max-width: 1180px) { .pcb-two { grid-template-columns: minmax(0, 1fr) 280px; } }
+@media (max-width: 1040px) { .pcb-pair { grid-template-columns: minmax(0, 1fr); } }
+
+.pcb-table { width: 100%; border-collapse: collapse; }
+.pcb-table th { text-align: left; font-size: var(--fs-sm); font-weight: 600; color: var(--muted); padding: 10px var(--sp-3); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.pcb-table td { padding: 6px var(--sp-3); border-bottom: 1px solid var(--line); vertical-align: middle; }
+.pcb-table tr:last-child td { border-bottom: 0; }
+.pcb-table th.r, .pcb-table td.r { text-align: right; }
+
+.pcb-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px var(--sp-4); margin: 0; }
+.pcb-facts dt { color: var(--muted); }
+.pcb-facts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; }
+
+.pcb-proc { display: flex; flex-direction: column; gap: var(--sp-3); }
+.pcb-proc.off > :not(.pcb-proc-head) { display: none; }
+.pcb-proc-head { display: flex; align-items: center; gap: var(--sp-2); }
+.pcb-proc-head .check { font: 600 var(--fs-lg) var(--font); }
+.pcb-needs { font-size: var(--fs-sm); color: var(--muted); }
+.pcb-needs b { font-weight: 600; color: var(--text); }
+.pcb-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--sp-3); align-items: end; }
+.pcb-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 5px; }
+
+.pcb-view { flex: 1; min-width: 0; position: relative; background: var(--canvas); }
+.pcb-view canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; outline: none; }
+.pcb-view canvas:active { cursor: grabbing; }
+.pcb-view-bar { position: absolute; left: var(--sp-3); top: var(--sp-3); display: flex; gap: var(--sp-2); align-items: center; }
+.pcb-view-zoom { position: absolute; right: var(--sp-3); bottom: var(--sp-3); display: flex; gap: 2px; align-items: center; background: var(--surface); border-radius: var(--r-md); box-shadow: var(--shadow-1); padding: 2px; }
+.pcb-side { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+.pcb-layer { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.pcb-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+.pcb-bed { width: 100%; max-height: calc(100vh - 290px); min-height: 240px; display: block; border-radius: var(--r-lg); background: var(--canvas); touch-action: none; }
+.pcb-workflow { margin: 0; padding: 0; list-style: none; counter-reset: wf; display: flex; flex-direction: column; }
+.pcb-workflow li { counter-increment: wf; position: relative; padding: 7px 0 7px 32px; border-top: 1px solid var(--line); }
+.pcb-workflow li:first-child { border-top: 0; }
+.pcb-workflow li::before { content: counter(wf); position: absolute; left: 0; top: 7px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
+.pcb-workflow b { font-weight: 600; }
+.pcb-workflow li.is-laser::before { background: var(--accent); color: var(--accent-ink); }

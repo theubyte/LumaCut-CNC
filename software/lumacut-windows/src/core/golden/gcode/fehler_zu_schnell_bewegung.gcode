@@ -1,0 +1,1 @@
+FEHLER: Ebene „Schnell“: 7501 mm/min – die Maschine fährt höchstens 6000 mm/min (Maschine → Kalibrieren → Bewegung)

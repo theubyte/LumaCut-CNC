@@ -1,0 +1,12 @@
+.o-page { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-3); padding-bottom: var(--sp-5); }
+.o-page > .h1 { margin-bottom: var(--sp-2); }
+.o-gap { gap: var(--sp-3); }
+.o-small { font-size: var(--fs-sm); }
+.o-line { display: flex; align-items: center; gap: var(--sp-3); }
+.o-addr { flex: 1; font-family: var(--mono); }
+.o-notes { white-space: pre-wrap; margin-top: 3px; }
+.o-keys { display: grid; grid-template-columns: 1fr; gap: var(--sp-4); }
+.o-key { display: grid; grid-template-columns: 170px minmax(0, 1fr); align-items: baseline; gap: var(--sp-2); }
+.o-key-keys { display: inline-flex; gap: 3px; flex-wrap: wrap; }
+.o-about { display: flex; gap: var(--sp-3); }
+.o-logo { width: 34px; height: 34px; border-radius: 9px; flex: none; }

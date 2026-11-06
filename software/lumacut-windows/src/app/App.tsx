@@ -1,13 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { CircuitBoard, Cog, Hammer, Layers3, Minus, OctagonX, Pencil, Play, Settings, Square, Wifi, WifiOff, X, Zap } from 'lucide-react';
-import { estop, setBaseUrl } from '@/pi/client';
+import { fromMachine } from '@/core/model';
+import { estop, getBaseUrl, setBaseUrl } from '@/pi/client';
 import { frameActive, jobActive, refreshNow, startPolling, useMachine } from '@/pi/machine';
 import { machineAction } from '@/pi/actions';
-import { windowControls, type WindowControls } from '@/platform';
+import { piUrlOverride, windowControls, type WindowControls } from '@/platform';
 import { type Dest, useUi, applyTheme } from '@/store/ui';
 import { useDoc } from '@/store/doc';
 import { Button, ConfirmHost, toast, Toasts } from '@/ui/kit';
 import { GoDialog } from './GoDialog';
+import { SyncHost } from '@/features/start/SyncDialogs';
 
 const views: Record<Dest, ReturnType<typeof lazy>> = {
   material: lazy(() => import('@/features/material')),
@@ -33,7 +35,11 @@ const NAV2: typeof NAV = [
 export function App() {
   const { dest, go, theme, piUrl } = useUi();
   useEffect(() => { applyTheme(theme); const m = matchMedia('(prefers-color-scheme: dark)'); const h = () => applyTheme(useUi.getState().theme); m.addEventListener('change', h); return () => m.removeEventListener('change', h); }, [theme]);
-  useEffect(() => { setBaseUrl(piUrl); startPolling(piUrl); }, [piUrl]);
+  useEffect(() => {
+    let live = true;
+    void piUrlOverride().then((over) => { if (live) { setBaseUrl(over ?? piUrl); startPolling(over ?? piUrl); } });
+    return () => { live = false; };
+  }, [piUrl]);
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       // Pause key: NOT-AUS from anywhere, also while typing.
@@ -59,7 +65,7 @@ export function App() {
       </nav>
       <main className="main"><Suspense fallback={null}><View /></Suspense></main>
       <StatusBar />
-      <GoDialog /><ConfirmHost /><Toasts />
+      <GoDialog /><ConfirmHost /><SyncHost /><Toasts />
     </div>
   );
 }
@@ -133,13 +139,13 @@ function JobStrip() {
 
 function StatusBar() {
   const { status: s, online } = useMachine();
-  const url = useUi((u) => u.piUrl);
-  const p = s.position;
+  const m = s.position;
+  const w = m && fromMachine({ x: m[0], y: m[1] });
   return <footer className="statusbar">
-    <span className="mono">{p ? `X ${p[0].toFixed(1)}  Y ${p[1].toFixed(1)}  Z ${p[2].toFixed(1)}` : 'X –  Y –  Z –'}</span>
+    <span className="mono">{m && w ? `X ${w.x.toFixed(1)}  Y ${w.y.toFixed(1)}  Z ${m[2].toFixed(1)}` : 'X –  Y –  Z –'}</span>
     <span>{s.state ?? '–'}</span>
     {s.laser_armed && <span style={{ color: 'var(--bad)', fontWeight: 600 }}>LASER SCHARF</span>}
     <span id="statusbar-slot" className="grow" />
-    <span>{online ? url.replace(/^https?:\/\//, '') : 'getrennt'}</span>
+    <span>{online ? getBaseUrl().replace(/^https?:\/\//, '') : 'getrennt'}</span>
   </footer>;
 }

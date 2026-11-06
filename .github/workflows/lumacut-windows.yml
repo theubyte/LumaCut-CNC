@@ -52,9 +52,7 @@ jobs:
           PYTHONUTF8: '1'
         run: |
           pip install -q flask pyserial
-          Start-Process python -ArgumentList 'tools/sim_pi.py','--port','8090' -WindowStyle Hidden
-          Start-Sleep 6
-          npx playwright test
+          node tools/e2e_all.mjs
       - name: Screenshots hochladen
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,33 +62,29 @@ jobs:
           if-no-files-found: ignore
       - name: MSI bauen
         run: npx tauri build
-      - name: MSI installieren, starten, deinstallieren
+      - name: MSI installieren, Praxistest im echten Fenster, deinstallieren
         shell: pwsh
+        env:
+          PYTHONUTF8: '1'
         run: |
           $msi = (Get-ChildItem src-tauri/target/release/bundle/msi -Filter *.msi | Select-Object -First 1).FullName
           $p = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 40; throw "Installation scheiterte: $($p.ExitCode)" }
           $exe = Get-ChildItem "$env:ProgramFiles\LumaCut Studio" -Filter *.exe | Where-Object Name -notlike 'unins*' | Select-Object -First 1
           if (-not $exe) { throw 'Programm nach der Installation nicht gefunden' }
-          $app = Start-Process $exe.FullName -PassThru
-          Start-Sleep 12
-          if ($app.HasExited) { throw "App beendet sich beim Start: $($app.ExitCode)" }
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
-          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-          New-Item -ItemType Directory -Force tests/e2e/screenshots | Out-Null
-          $bmp.Save("$PWD/tests/e2e/screenshots/installiert.png")
-          Stop-Process -Id $app.Id -Force
+          Start-Process python -ArgumentList 'tools/sim_pi.py','--port','8097' -WindowStyle Hidden
+          Start-Sleep 6
+          node tests/tauri/real.mjs $exe.FullName http://127.0.0.1:8097
+          if ($LASTEXITCODE -ne 0) { throw 'Installierte App besteht den Praxistest nicht' }
           $p = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Deinstallation scheiterte: $($p.ExitCode)" }
           if (Test-Path "$env:ProgramFiles\LumaCut Studio\$($exe.Name)") { throw 'Programm nach Deinstallation noch vorhanden' }
-      - name: Screenshot der installierten App hochladen
+      - name: Screenshots der installierten App hochladen
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: installiert
-          path: software/lumacut-windows/tests/e2e/screenshots/installiert.png
+          path: software/lumacut-windows/tests/e2e/screenshots/real
           if-no-files-found: ignore
       - name: Vorabversion veröffentlichen
         shell: pwsh

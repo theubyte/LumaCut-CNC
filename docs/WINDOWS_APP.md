@@ -69,3 +69,52 @@ npm test                 # Kern-Tests
 npm run shots            # Screenshots aller Ansichten nach tests/e2e/screenshots
 npx tauri build          # MSI
 ```
+
+Das echte App-Fenster prüfen (immer gegen den Simulator):
+`node tests/tauri/real.mjs src-tauri/target/release/lumacut-studio.exe http://127.0.0.1:8090`.
+Die CI macht das mit der installierten MSI.
+
+## Stand der ersten Etappe (06.11.2026)
+
+Nichts davon lief bisher an der echten Maschine. Vom echten Pi wurde nur `/api/status` gelesen.
+
+**Fertig und gegen den Simulator oder Kotlin geprüft**
+- G-Code zeichengenau wie Android (Golden-Dateien aus dem echten Kotlin-Code, 2000 Zufallsprojekte).
+  Projektformat in beide Richtungen zwischen Kotlin und TypeScript geprüft.
+- Maschine: Status, Referenz, Jog mit Tastatur, Abtasten, Parken, Fahren, Licht, Abluft, Ursprung,
+  Bettkarte, NOT-AUS mit Quittieren, Kamera-Live-Bild, System-Anzeige, Backup.
+- Material: Bibliothek vom Pi, Prozesse, Verwenden.
+- Motiv: Formen, Text mit Systemschriften, Stift und Knoten mit Bézier-Griffen, Ebenen, Boolesche
+  Operationen, Kontur, Ausrichten, Spiegeln, Platten, Bilder mit Dithering, Vektorisieren, Import, Export.
+- Starten: Vorschau mit Abspielen, Zeitschätzung, Prüfungen, Rahmen, Start mit Go, Warteschlange, Aufträge.
+- Werkstatt: Materialtest-Raster, Fotogravur, Stempel, Box, Zahnrad, Lineal, Maßstab, Rahmen, QR,
+  Seriennummern, Schachteln (Rechteck-Regal), vier Vorlagen.
+- Platine: Gerber und Excellon, Isolationsbahnen und Negativ-Raster, Lötstopp, Bohrmarken, Beschriftung,
+  Spiegeln, Passmarken, Prüfung gegen die Strahlbreite, Assistent.
+
+**Begonnen oder eingeschränkt**
+- Kalibrier-Assistenten nur für Bewegung, Bettkarte und Materialtest; Kamera, Licht, Taster, Fokus zeigen
+  den Stand und verweisen aufs Tablet.
+- Arbeitsplatz-Scan läuft nur am Tablet; das Scanbild erscheint am PC als Hintergrund, aber Einmessen und
+  Platzieren per Kamera fehlen.
+- Einstellungen auf dem Pi (Gerätename, Abluft-Automatik) nur als Anzeige. Firmware nur als Anzeige.
+- Materialtest mit Kamera kommt an zwei Stellen vor (Werkstatt, Kalibrieren).
+- Schachteln nur nach Umriss-Rechtecken. Platine: je Seite ein Durchgang, zweite Seite von Hand;
+  große Platinen rechnen ohne Worker (frieren einige Sekunden).
+- PDF: nur Seite 1, Text und Bilder im Vektor-PDF werden gemeldet, nicht übernommen.
+
+**Nicht geprüft**
+- Echte Maschine, echtes Lasern und Ätzen, alle Startwerte für Platinen.
+- Erfolgreicher Materialtest-Lauf mit Ergebnisanzeige (dem Simulator fehlt das Kamerafoto).
+- Echte Dateien aus LightBurn, xTool, KiCad, EasyEDA: nur mit nachgebauten Testdaten.
+- Auto-Update von Version zu Version (Code steht, ein echter Sprung steht aus).
+
+**Nächste Etappen**
+1. Am echten Pi mit dem Besitzer vor Ort: lesen, Verbinden, Referenz, Jog, dann ein kleiner Auftrag auf Testmaterial.
+2. Arbeitsplatz-Scan und Platzierung per Kamera, restliche Kalibrier-Assistenten.
+3. Pi-Einstellungen bearbeiten, Firmware-Anzeige mit Update vor Ort.
+4. Platine: Rechnen im Worker, beidseitiger Ablauf, reale Testplatine mit Materialtest auf Lack.
+5. Schachteln nach echter Kontur, gedrehte Bilder.
+6. Code-Signing, wenn der Besitzer ein Zertifikat kauft.
+
+Rotary gibt es hardwareseitig nicht (`docs/MASCHINE.md`), daher nur ein Hinweis in der App.
