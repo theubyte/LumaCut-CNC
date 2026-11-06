@@ -132,7 +132,7 @@ fun CameraBackgroundDialog(editor: EditorViewModel, machine: MachineViewModel, o
                 }
                 Spacer(Modifier.height(10.dp))
                 LcButton("Kalibrier-Rechteck an Laser senden", {
-                    val ref = reference() ?: run { editor.notify("Rechteck mindestens 50 × 50 mm, ganz im Arbeitsbereich 360 × 340", true); return@LcButton }
+                    val ref = reference() ?: run { editor.notify("Rechteck mindestens 50 × 50 mm, ganz im Arbeitsbereich ${de.millione.lumacut.core.Work.sizeLabel}", true); return@LcButton }
                     machine.uploadJob("kamera-kalibrierung.gcode", calibrationJob(ref))
                     editor.notify("Kalibrier-Rechteck gesendet: unter Aufträge starten")
                 }, Modifier.fillMaxWidth(), LcIcons.send)
