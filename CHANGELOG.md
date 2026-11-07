@@ -4,7 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-07
 
-- **Beschleunigung 1050 mm/s²:** Auf Wunsch des Besitzers von 2100 gesenkt, Höchsttempo bleibt 150 mm/s. Die Welle war im Test bei F3000 von 0,038 auf 0,022 mm gesunken, bei F4500 von 0,052 auf 0,038 mm. Der Hin/Rück-Ausgleich ist noch bei 2100 gemessen, bei 1050 steht die Prüfung am Brand aus.
+- **Beschleunigung 1050 mm/s²:** Auf Wunsch des Besitzers von 2100 gesenkt, Höchsttempo bleibt 150 mm/s. Die Welle war im Test bei F3000 von 0,038 auf 0,022 mm gesunken, bei F4500 von 0,052 auf 0,038 mm. Der Hin/Rück-Ausgleich ist bei 1050 am Brand geprüft, die Tabelle bleibt unverändert: Rest höchstens 0,04 mm bei 8 mm Vorlauf.
 - **Hin/Rück-Ausgleich überlebt den Neustart:** Die Prüfung beim Laden der `config.json` kannte das Tabellenformat nicht und setzte `scan_offset` beim Neustart auf aus, so geschehen beim Nacht-Update am 07.11. um 04:28. Die Prüfung kennt die Tabelle jetzt, die kalibrierten Werte sind wieder eingetragen.
 
 ## 2026-11-06
