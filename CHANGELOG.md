@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-07
 
+- **Neues Netzteil, MDF-Gravur neu kalibriert:** Das alte 24-V-Netzteil hatte laut Besitzer nur 60 W, der Laser ist mit 80 W angegeben. Nach dem Tausch gegen das Anet-Netzteil brennt der Laser deutlich stärker: Dunkel jetzt 73,4 % bei 4500 mm/min (Ton 0,87) statt 80 % bei 2823 mm/min (0,84), Mittel 11,3 % / 4500 (0,57), Hell 8 % / 6000 (0,32). Gespeichert, alte Werte gesichert.
 - **Beschleunigung 1050 mm/s²:** Auf Wunsch des Besitzers von 2100 gesenkt, Höchsttempo bleibt 150 mm/s. Die Welle war im Test bei F3000 von 0,038 auf 0,022 mm gesunken, bei F4500 von 0,052 auf 0,038 mm. Der Hin/Rück-Ausgleich ist bei 1050 am Brand geprüft, die Tabelle bleibt unverändert: Rest höchstens 0,04 mm bei 8 mm Vorlauf.
 - **Hin/Rück-Ausgleich überlebt den Neustart:** Die Prüfung beim Laden der `config.json` kannte das Tabellenformat nicht und setzte `scan_offset` beim Neustart auf aus, so geschehen beim Nacht-Update am 07.11. um 04:28. Die Prüfung kennt die Tabelle jetzt, die kalibrierten Werte sind wieder eingetragen.
 
