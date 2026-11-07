@@ -88,7 +88,7 @@ Für jede Stufe festhalten: Datum, App-Version, Pi-Software, Firmware, bestanden
   Danach meldete der Pi um 09:32 „X-Schalter offen an X0/Y0“ und um 09:36 einen USB-Abbruch zum SKR. Beides ist ungeklärt, auf der Gravur ist keine Folge zu sehen.
   Der Pi lehnte um 09:03 eine Z-Fahrt ohne Werkstückhöhe ab, obwohl die App Z dann sperren sollte. Außerdem lehnte er einen Abtastpunkt außerhalb von X10..360/Y10..350 ab, den die App nicht vorher gesperrt hatte.
 - **Stufe 2:** laut Besitzer Referenz, Jog, Zu Position, Abbrechen, Parken, NOT-AUS, Quittieren und erneute Referenz wie erwartet. Den NOT-AUS kann das Pi-Log nicht belegen, denn es schreibt keine Aktionsnamen.
-- **Nebenbei:** Die App fragte den Auftrag „Materialtest Gravur“ ab, bevor er auf dem Pi lag.
-- **Abbruch im laufenden Auftrag:** noch nicht getestet. Er wartet auf den Umbau des Z-Antriebs: Der Taster streute am 07.11. an derselben Stelle zwischen 1,36 und 5,72 mm, damit ist der Autofokus nicht verlässlich (`STAND.md`).
+- **Nebenbei:** Die Abfrage des nicht vorhandenen Auftrags „Materialtest Gravur“ um 09:50 kam von 127.0.0.1, also vom Bedienpanel am Pi, nicht von der App.
+- **Abbruch im laufenden Auftrag:** Laut Besitzer ging der Laser beim Abbrechen sofort aus. Im Pi-Log steht nach 09:16 kein weiterer Auftrag aus der App. Zu sehen sind von 09:57 bis 10:00 rund 40 Aktionen vom Windows-PC und ein Materialtest Gravur MDF mit 7 Schritten. Was abgebrochen wurde, ist noch zu klären. Ein Abbruch-Test an einem Auftrag Er wartet auf den Umbau des Z-Antriebs: Der Taster streute am 07.11. an derselben Stelle zwischen 1,36 und 5,72 mm, damit ist der Autofokus nicht verlässlich (`STAND.md`).
 
-**Nacharbeiten in der App:** Speichern auf dem Pi prüfen, Z-Sperre gegen Tastatur und Zustandswechsel, Abtasten außerhalb des erlaubten Bereichs vorher sperren, Abruf von Aufträgen, die noch nicht da sind.
+**Nacharbeiten in der App:** Speichern auf dem Pi prüfen, Z-Sperre gegen Tastatur und Zustandswechsel, Abtasten außerhalb des erlaubten Bereichs vorher sperren.
