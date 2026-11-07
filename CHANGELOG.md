@@ -2,9 +2,15 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-07
+
+- **Hin/Rück-Ausgleich überlebt den Neustart:** Die Prüfung beim Laden der `config.json` kannte das Tabellenformat nicht und setzte `scan_offset` beim Neustart auf aus, so geschehen beim Nacht-Update am 07.11. um 04:28. Die Prüfung kennt die Tabelle jetzt, die kalibrierten Werte sind wieder eingetragen.
+
 ## 2026-11-06
 
 - **Windows-App LumaCut Studio nativ (Zweig `windows-native`):** Neubau mit C++20, Qt Quick und Direct3D, MSI per CI. Auftragsvorschau und Editor-Bühne auf der GPU, G-Code zeichengenau wie Android. Maschine, Material, Motiv, Starten, Import laufen gegen den Simulator, noch nicht an der Maschine. Werkstatt und Platine folgen. Details und Messwerte: `docs/WINDOWS_APP.md`.
+- **Hin/Rück-Ausgleich für Rasterzeilen (am Brand geprüft, an):** Am Brand gemessen liegt eine Zeile in +X je nach Tempo 0,44 bis 0,64 mm neben einer Zeile in −X. Das ist etwa das Dreifache der Linienbreite und die Hauptursache der unscharfen, versetzten Kanten. `op=scan_offset` trägt die gemessene Tabelle ein, der Pi verschiebt dann jede Rasterzeile im automatischen Ablauf. Vektorlinien bleiben unberührt.
+- **Z-Toleranz und Planung zurückgenommen:** Gravuren wurden damit schlechter. Die Z-Toleranz von 0,15 mm sammelte den Höhenausgleich in einem Pixel und bremste dort beim Lasern, nachgerechnet von F3000 bis auf F359, also rund achtfache Energie in dunklen Flecken. Die Planung ließ Teile derselben Zeile gegenläufig fahren (232 von 726 Zeilen im echten Auftrag). Fokuskorrektur wieder wie zuvor, Planung standardmäßig aus. Wo Z das Tempo begrenzt, zählt jetzt der 3D-Weg.
 - **Oberer Streifen sperrbar:** `op=work_band y=35` sperrt Y0..35 über die ganze Breite, für einen aufgeklebten MDF-Streifen als Anschlag. Der Pi lehnt dort jedes Lasern ab, App und Weboberfläche zeigen den Streifen schraffiert, Import und Zentrieren richten sich nach der Restfläche. Fahren bleibt erlaubt.
 - **Android-App, Arbeitsbereich und Park-Ecke:** Alle Texte nennen jetzt die echte Fläche vom Pi (370 × 360 statt 360 × 340), die Einstellungen beschreiben die Park-Ecke statt des alten 30-mm-Rands. Die Ecke bleibt über dem Kamerafoto sichtbar und ist beschriftet. Import und Verschieben halten Teile aus ihr heraus, der Editor warnt rot. Geprüft wird die echte Bahn: Ein Element, dessen Umrissbox die Ecke nur streift, wird nicht mehr abgelehnt.
 - **Pi plant Aufträge auf Zeit:** Neuer Optimierer im automatischen Ablauf. Zeilen werden an lohnenden Lücken getrennt, jedes Teil des Motivs wird fertig gelasert, bevor der Kopf weiterfährt, die Reihenfolge sucht der Pi in bis zu 4 Sekunden. Schnitte bleiben zuletzt und in ihrer Reihenfolge. Z folgt nur noch ab 0,15 mm Abweichung, kleine Änderungen laufen während der Eilfahrt mit, auf einer flachen Platte (Messwerte innerhalb 1 mm) hebt der Kopf bei langen Fahrten nicht mehr an. `op=job_optimizer` schaltet beides.

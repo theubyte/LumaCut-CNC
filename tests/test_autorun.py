@@ -602,7 +602,7 @@ for name in ("A.gcode", "B.gcode"):
     assert seen[-2:] == ["probing", "running"] and "complete" not in seen[:-1], (name, seen)
 # Two passes with a 0.5 mm focus drop: compensated, no G91 sent.
 assert "G91" not in w[w.index("G30"):], "relative drop became a Z offset"
-assert "G0 Z8.500 F600" in w and any(c.endswith("Z8.000 F9000") for c in w), [c for c in w if " Z" in c]
+assert "G0 Z8.500 F600" in w and "G0 Z8.000 F600" in w, [c for c in w if c.startswith("G0 Z")]
 assert "M112" not in w
 """)
 

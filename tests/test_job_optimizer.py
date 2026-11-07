@@ -175,46 +175,33 @@ class OptimizerTests(unittest.TestCase):
             opt.optimize(two_islands(), opt.Motion(2100, 150), budget_s=0.2, should_stop=lambda: True)
 
 
-class TravelAndFocusTests(unittest.TestCase):
-    def test_tolerance_keeps_rows_whole_and_z_still(self):
-        lines = ["G0 X50 Y50", "M3 I", "G1 X150 Y50 F5000 S66", "G0 X150 Y50.1", "G1 X50 Y50.1 F5000 S66"]
-        out, rep = focus.compensate(lines, Flat(3.0, 0.001), 10.0, 2.0, start_z=11.0, z_tolerance_mm=0.15)
-        burns = [l for l in out if l.startswith("G1")]
-        self.assertEqual(len(burns), 2)
-        self.assertFalse([l for l in out if l.startswith("G0 Z")])
+class FocusKeepsTheRasterTests(unittest.TestCase):
+    """06.11.: Z gathered into one pixel slowed the head to F359 at F3000, about 8 x the energy, in dark spots."""
 
-    def test_without_tolerance_nothing_changes(self):
-        lines = ["G0 X50 Y50", "M3 I", "G1 X60 Y50 F5000 S66"]
-        self.assertEqual(len([l for l in focus.compensate(lines, Flat(3.0, 0.01), 10.0, 2.0, start_z=11.0)[0] if l.startswith("G1")]), 5)
+    def test_a_tilted_surface_never_slows_a_burning_row(self):
+        lines = ["G0 X0 Y50", "M3 I"]
+        x = 0.0
+        for k in range(600):
+            lines.append("G1 X%.1f Y50 F3000 S%d" % (x + 0.1, 64 if k % 2 else 0))
+            x += 0.1
+        out, rep = focus.compensate(lines, Flat(3.0, 0.01), 10.0, 2.0, start_z=11.0)
+        self.assertEqual(rep.feed_limited, 0)
+        self.assertFalse([l for l in out if l.startswith("G1") and " F" in l and "F3000" not in l])
 
-    def test_z_follows_when_the_surface_really_changes(self):
-        lines = ["G0 X0 Y50", "M3 I", "G1 X100 Y50 F5000 S66"]
-        out, _ = focus.compensate(lines, Flat(3.0, 0.02), 10.0, 2.0, start_z=11.0, z_tolerance_mm=0.15)
-        zs = [float(l.split("Z")[1].split()[0]) for l in out if l.startswith("G1") and "Z" in l]
-        self.assertGreater(len(zs), 5)
-        self.assertLess(len([l for l in out if l.startswith("G1")]), 50)
-        self.assertAlmostEqual(zs[-1], 3.0 + 2.0 + 8.0, delta=0.16)
-
-    def test_small_changes_on_a_rapid_happen_on_the_way(self):
-        lines = ["G0 X0 Y50", "M3 I", "G1 X1 Y50 F5000 S66", "G0 X50 Y50", "G1 X51 Y50 F5000 S66"]
-        out, _ = focus.compensate(lines, Flat(3.0, 0.01), 10.0, 2.0, start_z=11.0, z_tolerance_mm=0.15)
-        self.assertTrue(any(l.startswith("G0 X50.000 Y50.000 Z") and l.endswith("F9000") for l in out))
-        self.assertEqual(len([l for l in out if l.startswith("G0 Z")]), 0)
-
-    def test_big_changes_still_go_up_first(self):
+    def test_where_z_cannot_follow_the_feed_counts_the_3d_path(self):
         class Step:
             def surface(self, x, y):
-                return (3.0 if x < 25 else 13.0), True
-        lines = ["G0 X0 Y50", "M3 I", "G1 X1 Y50 F5000 S66", "G0 X50 Y50", "G1 X51 Y50 F5000 S66"]
-        out, _ = focus.compensate(lines, Step(), 10.0, 2.0, start_z=11.0, z_tolerance_mm=0.15)
-        i = out.index("G0 X50.000 Y50.000")
-        self.assertEqual(out[i - 1], "G0 Z21.000 F600")
+                return (3.0 if x < 0.5 else 3.5), True
+        out, rep = focus.compensate(["G0 X0 Y50", "M3 I", "G1 X1 Y50 F3000 S200"], Step(), 10.0, 2.0, start_z=11.0)
+        self.assertEqual(rep.feed_limited, 1)
+        line = next(l for l in out if l.startswith("G1") and "Z" in l)
+        feed = float(line.split("F")[1])
+        self.assertAlmostEqual(feed, math.hypot(1.0, 0.5) / (0.5 / 9.0) * 60.0, delta=0.5)
 
     def test_no_lift_when_no_travel_height_is_given(self):
         lines = ["G0 X0 Y50", "M3 I", "G1 X1 Y50 F5000 S66", "G0 X200 Y50", "G1 X201 Y50 F5000 S66"]
-        out, rep = focus.compensate(lines, Flat(), 10.0, 2.0, start_z=11.0, z_tolerance_mm=0.15, travel_z=None)
+        out, rep = focus.compensate(lines, Flat(), 10.0, 2.0, start_z=11.0, travel_z=None)
         self.assertEqual(rep.travel_lifts, 0)
-        self.assertFalse([l for l in out if l.startswith("G0 Z")])
 
     def test_estimate_counts_the_lifts(self):
         m = opt.Motion(2100, 150)
