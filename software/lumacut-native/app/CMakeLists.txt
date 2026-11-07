@@ -12,7 +12,7 @@ qt_add_qml_module(lumacut_studio
   DEPENDENCIES QtQuick QtQuick.Controls
 )
 target_link_libraries(lumacut_studio PRIVATE
-  Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::Svg lumacut_gpu lumacut_import lumacut_text lumacut_core)
+  Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::Svg lumacut_gpu lumacut_pcb lumacut_import lumacut_text lumacut_core)
 # Generated type registration includes headers by bare name: every folder under src/ goes on the include path.
 set(APP_SOURCE_DIRS src)
 foreach(f ${APP_SOURCES})

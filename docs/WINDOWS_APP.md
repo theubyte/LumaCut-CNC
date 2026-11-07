@@ -70,7 +70,8 @@ Am 07.11. lief die App mit dem Besitzer vor Ort an der echten Maschine, Ergebnis
 - Import: SVG, DXF, HPGL, LightBurn, xTool, Bilder. Export: SVG, DXF, PNG. Kaputte Dateien bringen die App nicht zum Absturz.
 
 **Begonnen oder eingeschränkt**
-- Werkstatt und Platine sind Platzhalter mit ehrlichem Hinweis. Beides gibt es fertig in der Tauri-Fassung als Vorlage.
+- Werkstatt (07.11.): Materialtest-Raster, Box mit Fingerzinken, Zahnrad, Lineal, Maßstab, Rahmen, Seriennummern, Stempel, QR-Code (eigene Umsetzung, Bit für Bit gegen eine Vergleichsbibliothek geprüft), jeweils mit GPU-Vorschau und „Ins Projekt“. Es fehlen Vorlagen (Schild, Untersetzer, Anhänger, Etikett), Schachteln und ein eigener Fotogravur-Assistent (bis dahin Verweis auf die Bildwerkzeuge im Motiv).
+- Platine (07.11.): Gerber RS-274X (Aperturen, Makros, Regionen, Bögen, Step-and-Repeat, X2) und Excellon, Lagen erkennen, ZIP, Raster, Isolation, Fotofilm, Bohrmarken, Passmarken, Lötstopp, Bestückungsdruck, Spiegeln der Unterseite, Prüfungen, Zeitschätzung, GPU-Vorschau mit Ebenen, „Ins Projekt“ auf eigene Platte, gelasert wird nur über Starten. Beispielplatine 150 × 100 mm mit 1000 Pads: lesen 102 ms, Isolation 438 ms. Nur mit selbst gebauten Dateien geprüft, nicht mit echten KiCad- oder EasyEDA-Exporten; Dateidialog, ZIP und Drag & Drop nicht im Fenster geprüft; Platine liegt immer mittig, Verschieben im Motiv; Schlitze ohne Bohrmarke.
 - Kalibrier-Assistenten nur für Bewegung, Bettkarte und Materialtest. Arbeitsplatz-Scan und Platzieren per Kamera fehlen.
 - PDF nur Seite 1 als Bild. Die Compute-Vorschau zeigt bei allen Dither-Arten geordnetes Dither, exakt ist erst das Bild auf der Bühne.
 - Fortschritt im Lauf ist anteilig über die Zeilen. Der Pi teilt Bahnen auf, deshalb weicht die Anzeige ab.
@@ -85,5 +86,5 @@ Am 07.11. lief die App mit dem Besitzer vor Ort an der echten Maschine, Ergebnis
 
 **Nächste Etappen**
 1. Am echten Pi mit dem Besitzer vor Ort: lesen, Referenz, Jog, ein kleiner Auftrag auf Testmaterial.
-2. Werkstatt nativ. 3. Platine nativ. 4. Arbeitsplatz-Scan, Platzieren, restliche Kalibrierungen.
+2. Werkstatt: Vorlagen und Fotogravur-Assistent. 3. Platine: echte Exporte, Lage auf dem Bett. 4. Arbeitsplatz-Scan, Platzieren, restliche Kalibrierungen.
 5. Pi-Einstellungen bearbeiten, Firmware-Update vor Ort. 6. Vektor-PDF. 7. Code-Signing, wenn der Besitzer ein Zertifikat kauft.

@@ -24,3 +24,9 @@ target_link_libraries(test_import PRIVATE lumacut_import)
 target_link_libraries(test_import_robust PRIVATE lumacut_import)
 target_link_libraries(test_import_big PRIVATE lumacut_import)
 set_tests_properties(test_import_big PROPERTIES LABELS speed)
+
+lumacut_core_test(test_werkstatt)  # Werkstatt-Generatoren: QR, Box, Zahnrad, Materialtest, Seriennummern
+
+lumacut_core_test(test_pcb)            # Platine: Gerber, Excellon, Lagen, Isolation, Spiegeln, Ins Projekt
+target_link_libraries(test_pcb PRIVATE lumacut_pcb)
+target_compile_definitions(test_pcb PRIVATE LUMACUT_PCB_DIR="${CMAKE_CURRENT_SOURCE_DIR}/pcb")

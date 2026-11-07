@@ -17,6 +17,7 @@ add_library(lumacut_core STATIC
   curves.h curves.cpp
   vectorize.h vectorize.cpp
   boolean.h boolean.cpp
+  werkstatt/qr.h werkstatt/qr.cpp werkstatt/generators.h werkstatt/generators.cpp
 )
 target_include_directories(lumacut_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(lumacut_core PUBLIC Qt6::Core Qt6::Concurrent Clipper2)
@@ -38,3 +39,13 @@ target_link_libraries(lumacut_import PUBLIC lumacut_core Qt6::Gui)
 # Text als Umrisse über Systemschriften: braucht QtGui, darum eine eigene kleine Bibliothek.
 add_library(lumacut_text STATIC text.h text.cpp)
 target_link_libraries(lumacut_text PUBLIC lumacut_core Qt6::Gui)
+
+# Platine: Gerber, Excellon, isolation and resist geometry (core/pcb). Example board as a resource.
+add_library(lumacut_pcb STATIC
+  pcb/geom.h pcb/geom.cpp pcb/gerber.h pcb/gerber.cpp pcb/excellon.h pcb/excellon.cpp
+  pcb/layers.h pcb/layers.cpp pcb/board.h pcb/board.cpp pcb/job.h pcb/job.cpp
+)
+target_link_libraries(lumacut_pcb PUBLIC lumacut_core lumacut_import)
+qt_add_resources(lumacut_pcb pcb_example PREFIX /pcb BASE pcb/beispiel FILES
+  pcb/beispiel/beispiel.GTL pcb/beispiel/beispiel.GBL pcb/beispiel/beispiel.GTS pcb/beispiel/beispiel.GBS
+  pcb/beispiel/beispiel.GTO pcb/beispiel/beispiel.GKO pcb/beispiel/beispiel.DRL)

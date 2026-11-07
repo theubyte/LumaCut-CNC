@@ -73,6 +73,16 @@ QtObject {
     readonly property int ruler: 24
     readonly property int panelWide: 376
     readonly property int dockBody: 232
+    // Platine preview: board, copper and process colours.
+    readonly property color pcbBoard: dark ? "#3a3d30" : "#dcd6bd"
+    readonly property color pcbCopper: dark ? "#e6975c" : "#c9743a"
+    readonly property color pcbSilk: dark ? "#f3f1e6" : "#2f3342"
+    readonly property color pcbMask: dark ? "#4fd8b4" : "#1c9a78"
+    readonly property color pcbLaser: dark ? "#8f9bff" : "#4a57e3"
+    readonly property color pcbDrill: dark ? "#0a0c11" : "#5b6178"
+    readonly property color pcbMark: dark ? "#e58ae0" : "#b23fb0"
+    readonly property color pcbEdge: dark ? "#a6acc2" : "#7a8097"
     readonly property int tFast: 90
     readonly property int tMed: 160
+    readonly property int wsList: 228   // workshop: list of generators
 }
