@@ -12,7 +12,7 @@ Item {
     Loader {
         id: loader
         width: root.width
-        sourceComponent: root.field.type === "num" ? numC : root.field.type === "seg" ? segC : root.field.type === "text" ? textC : checkC
+        sourceComponent: root.field.type === "num" ? numC : root.field.type === "seg" ? segC : root.field.type === "select" ? selectC : root.field.type === "text" ? textC : checkC
     }
     Component {
         id: numC
@@ -38,6 +38,26 @@ Item {
                 options: root.field.options
                 value: root.current
                 onActivated: (v) => Workshop.setParam(root.field.key, v)
+            }
+        }
+    }
+    // Dropdown for longer lists: button ws-<key>, entries ws-<key>-menu-<index>.
+    Component {
+        id: selectC
+        LcField {
+            label: root.field.label
+            hint: root.field.hint || ""
+            LcButton {
+                id: pick
+                objectName: "ws-" + root.field.key
+                icon: "chevron-down"
+                text: { for (const o of root.field.options) if (o.value === root.current) return o.label; return "" }
+                onClicked: menu.openAt(pick)
+                LcMenu {
+                    id: menu
+                    objectName: "ws-" + root.field.key + "-menu"
+                    items: root.field.options.map((o) => ({ label: o.label, icon: o.value === root.current ? "check" : "", action: () => Workshop.setParam(root.field.key, o.value) }))
+                }
             }
         }
     }

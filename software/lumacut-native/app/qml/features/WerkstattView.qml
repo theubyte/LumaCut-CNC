@@ -23,6 +23,8 @@ Item {
     function elementNames(_) { return JSON.parse(Document.jsonText()).elements.map((e) => e.kind) }
     function stageState(_) { return { loading: stage.loading, elements: stage.elementCount, zoom: stage.effectiveZoom } }
     function reset(_) { Document.reset(); return true }
+    function layerByName(name) { return JSON.parse(Document.jsonText()).layers.find((l) => l.name === name) || null }
+    function setting(key) { return AppSettings.value(key, null) }
     function undo(_) { Document.undo(); return Document.elementCount }
 
     RowLayout {

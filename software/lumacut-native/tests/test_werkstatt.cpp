@@ -216,6 +216,62 @@ private slots:
         QVERIFY(W::plateCount(W::serials(s, fakeShape, Work::width(), Work::height())) > 1);
     }
 
+    void perfboardHolder() {
+        W::HolderSpec s;   // 50 × 70, play 0.3, kerf 0.15, rim 15, centre 185 / 197.5
+        const W::HolderGeometry g = W::holderGeometry(s);
+        // Finished pocket = board + play; drawn pocket smaller by the kerf, outline larger by it.
+        QVERIFY(std::fabs(g.pocket.width() - 50.3) < 1e-9 && std::fabs(g.pocket.height() - 70.3) < 1e-9);
+        QVERIFY(std::fabs(g.pocketPath.width() - 50.15) < 1e-9 && std::fabs(g.pocketPath.height() - 70.15) < 1e-9);
+        QVERIFY(std::fabs(g.outer.width() - 80.45) < 1e-9 && std::fabs(g.outer.height() - 100.45) < 1e-9);
+        QVERIFY(dist(g.pocket.center(), Pt{185, 197.5}) < 1e-9);
+        QVERIFY(dist(g.outer.center(), Pt{185, 197.5}) < 1e-9);
+        const W::GenResult r = W::perfboardHolder(s, fakeShape);
+        QVERIFY(!r.center);
+        QCOMPARE(r.parts.size(), size_t(3));
+        QCOMPARE(r.parts[0].layer, QStringLiteral("Halterung schneiden"));
+        QCOMPARE(r.layers.size(), size_t(1));
+        QCOMPARE(r.layers[0].name, QStringLiteral("Halterung schneiden"));
+        QVERIFY(r.layers[0].mode == LayerMode::Line);
+        QCOMPARE(r.parts[1].layer, QStringLiteral("Gravieren"));
+        QCOMPARE(r.parts[2].layer, QStringLiteral("Linie"));
+        // Outline and pocket with the finger notch: the notch reaches 8 mm into the right rim.
+        const PolySet& cut = r.parts[0].paths;
+        QCOMPARE(cut.size(), size_t(2));
+        for (PolyView p : cut) QVERIFY(isClosed(p));
+        const Box pocket = *boundsOf(cut[1]);
+        QVERIFY(std::fabs(pocket.minX - g.pocketPath.minX) < 1e-6 && std::fabs(pocket.minY - g.pocketPath.minY) < 1e-6);
+        QVERIFY(std::fabs(pocket.maxX - (g.pocketPath.maxX + 8 - 0.075)) < 0.01);
+        for (const auto& p : r.parts) QVERIFY(Work::contains(*boundsOf(p.paths)) && !Work::touchesPark(*boundsOf(p.paths)));
+        // All five standard sizes fit at the shared position.
+        for (const W::PerfboardSize& z : W::PERFBOARD_SIZES) { s.boardW = z.w; s.boardH = z.h; QVERIFY(W::perfboardHolder(s, fakeShape).parts.size() == 3); }
+        // Into the park corner (top right) or out of the work area: refused with a sentence.
+        s.boardW = 50; s.boardH = 70; s.centerX = 320; s.centerY = 60;
+        try { W::holderGeometry(s); QFAIL("Park-Ecke nicht erkannt"); } catch (const W::GenError& e) { QVERIFY(QString::fromUtf8(e.what()).contains(Work::parkName())); }
+        // A Pi that locks the whole top band: the same place is refused there too.
+        Bed::configure(std::nullopt, std::nullopt, 600, 60);
+        s.centerX = 185; s.centerY = 70;
+        QVERIFY_THROWS_EXCEPTION(W::GenError, W::holderGeometry(s));
+        Bed::configure(std::nullopt, std::nullopt, 78, 35);
+        QVERIFY(W::holderGeometry(s).outer.minY > 0);
+        s.centerY = 340;
+        QVERIFY_THROWS_EXCEPTION(W::GenError, W::holderGeometry(s));
+    }
+    void solderMaskTest() {
+        W::MaskTestSpec s;   // 4 powers × 3 speeds
+        const W::GenResult r = W::maskTest(s, fakeShape);
+        QCOMPARE(r.layers.size(), size_t(13));
+        int fields = 0;
+        for (const auto& p : r.parts) if (p.name == QLatin1String("Testfeld")) { ++fields; QVERIFY(!isClosed(p.paths[0])); }
+        QCOMPARE(fields, 12);
+        for (const Layer& l : r.layers) { QVERIFY(l.mode == LayerMode::Line); QVERIFY(l.name.startsWith(QStringLiteral("Markieren"))); QVERIFY(l.powerPct >= 8 && l.powerPct <= 20); }
+        const Box b = *partsBounds(r);
+        QVERIFY(std::fabs(b.center().x - 185) < 1e-9 && std::fabs(b.center().y - 197.5) < 1e-9);
+        // Small enough for a 30 × 40 offcut.
+        QVERIFY(b.width() < 30 && b.height() < 25);
+        s.powerFrom = 5;
+        QVERIFY_THROWS_EXCEPTION(W::GenError, W::maskTest(s, fakeShape));
+    }
+
     void stampAndElements() {
         W::StampSpec s;
         s.lines = QStringList{QStringLiteral("Muster"), QString()};

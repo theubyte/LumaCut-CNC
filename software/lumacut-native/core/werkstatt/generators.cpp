@@ -475,4 +475,157 @@ GenResult qr(const QrSpec& s) {
     return r;
 }
 
+// ---- Perfboard holder ----
+
+namespace {
+Box boxAround(Pt c, double w, double h) { return {c.x - w / 2, c.y - h / 2, c.x + w / 2, c.y + h / 2}; }
+Poly rectPoly(const Box& b, double r = 0) { return movedPoly(Shapes::rect(b.width(), b.height(), r), b.minX, b.minY); }
+/** The area must lie in the work area and keep clear of the park corner or locked strip. */
+void checkPlace(const Box& b, const QString& what) {
+    if (!Work::contains(b))
+        throw GenError(QStringLiteral("%1 ragt über die Arbeitsfläche (%2). Lage der Platinenmitte ändern.").arg(what, Work::sizeLabel()));
+    if (Work::touchesPark(b))
+        throw GenError(QStringLiteral("%1 trifft den Bereich „%2“, dort fährt der Laser nicht hin. Lage der Platinenmitte ändern.").arg(what, Work::parkName()));
+}
+/** Text rotated a quarter turn so it reads from bottom to top, centered at c. */
+PolySet upwardText(const TextShaper& shape, const QString& text, double h, Pt c) {
+    PolySet t = shape(text, h, false);
+    for (Pt& p : t.allPoints()) p = {p.y, -p.x};
+    const auto b = boundsOf(t);
+    if (b) moveBy(t, c.x - b->center().x, c.y - b->center().y);
+    return t;
+}
+}  // namespace
+
+HolderGeometry holderGeometry(const HolderSpec& s) {
+    if (!(s.boardW >= 10 && s.boardW <= 200 && s.boardH >= 10 && s.boardH <= 200)) throw GenError(QStringLiteral("Platinengröße: 10 bis 200 mm je Seite."));
+    if (!(s.playMm >= 0 && s.playMm <= 2)) throw GenError(QStringLiteral("Spiel: 0 bis 2 mm."));
+    if (!(s.kerfMm >= 0 && s.kerfMm <= 1)) throw GenError(QStringLiteral("Schnittbreite: 0 bis 1 mm."));
+    if (!(s.rimMm >= 10 && s.rimMm <= 40)) throw GenError(QStringLiteral("Rahmenbreite: 10 bis 40 mm, sonst passt die Beschriftung nicht."));
+    if (!finite(s.centerX) || !finite(s.centerY)) throw GenError(QStringLiteral("Lage der Platinenmitte fehlt."));
+    const Pt c{s.centerX, s.centerY};
+    HolderGeometry g;
+    g.pocket = boxAround(c, s.boardW + s.playMm, s.boardH + s.playMm);
+    g.pocketPath = boxAround(c, s.boardW + s.playMm - s.kerfMm, s.boardH + s.playMm - s.kerfMm);
+    g.outer = boxAround(c, g.pocket.width() + 2 * s.rimMm + s.kerfMm, g.pocket.height() + 2 * s.rimMm + s.kerfMm);
+    g.gripRadius = std::min({8.0, s.rimMm - 4, g.pocket.height() / 4});
+    checkPlace(g.outer, QStringLiteral("Die Halterung"));
+    return g;
+}
+
+GenResult perfboardHolder(const HolderSpec& s, const TextShaper& shape) {
+    const HolderGeometry g = holderGeometry(s);
+    const Pt c{s.centerX, s.centerY};
+    // Cut: outer outline and the pocket with a half-round finger notch on the right edge.
+    PolySet cut;
+    cut.add(rectPoly(g.outer, 3));
+    const double r = g.gripRadius - s.kerfMm / 2;
+    const PolySet pocket = booleanOp(BooleanOp::Union, one(rectPoly(g.pocketPath)), one(circleAt(g.pocketPath.maxX, c.y, 2 * r)));
+    cut.append(pocket);
+
+    // Engrave: corner A1 and "OBEN" on the top rim, size on the left rim, turning arrow on the bottom rim.
+    const double topMid = (g.outer.minY + g.pocket.minY) / 2, botRim = g.pocket.maxY;
+    PolySet text;
+    const double th = 3.5;
+    text.add({Pt{g.pocket.minX - 1, g.pocket.minY - 1}, Pt{g.pocket.minX - 4.5, g.pocket.minY - 1}, Pt{g.pocket.minX - 1, g.pocket.minY - 4.5}, Pt{g.pocket.minX - 1, g.pocket.minY - 1}});
+    {
+        PolySet a1 = shape(QStringLiteral("A1"), th, true);
+        if (const auto b = boundsOf(a1)) { moveBy(a1, g.pocket.minX + 0.5 - b->minX, topMid - b->center().y); text.append(a1); }
+    }
+    const Poly up{{c.x, topMid - 3.5}, {c.x + 2.5, topMid - 0.5}, {c.x + 0.8, topMid - 0.5}, {c.x + 0.8, topMid + 3.5},
+                  {c.x - 0.8, topMid + 3.5}, {c.x - 0.8, topMid - 0.5}, {c.x - 2.5, topMid - 0.5}, {c.x, topMid - 3.5}};
+    text.add(up);
+    {
+        PolySet oben = shape(QStringLiteral("OBEN"), th, true);
+        if (const auto b = boundsOf(oben)) { moveBy(oben, c.x + 4 - b->minX, topMid - b->center().y); text.append(oben); }
+    }
+    const QString size = QStringLiteral("%1 × %2 mm").arg(num(s.boardW), num(s.boardH));
+    const double sizeH = fitText(shape, size, th, g.pocket.height() - 6);
+    text.append(upwardText(shape, size, sizeH, {(g.outer.minX + g.pocket.minX) / 2, c.y}));
+    const double L = std::min(24.0, std::max(12.0, g.pocket.width() * 0.6)), ay = botRim + 4.5;
+    text.add({Pt{c.x - L / 2, ay}, Pt{c.x - L / 2 + 2.5, ay - 1.6}, Pt{c.x - L / 2 + 2.5, ay - 0.6}, Pt{c.x + L / 2 - 2.5, ay - 0.6}, Pt{c.x + L / 2 - 2.5, ay - 1.6},
+              Pt{c.x + L / 2, ay}, Pt{c.x + L / 2 - 2.5, ay + 1.6}, Pt{c.x + L / 2 - 2.5, ay + 0.6}, Pt{c.x - L / 2 + 2.5, ay + 0.6}, Pt{c.x - L / 2 + 2.5, ay + 1.6},
+              Pt{c.x - L / 2, ay}});
+    text.append(centeredText(shape, QStringLiteral("Lötseite: hier wenden"), std::min(2.5, fitText(shape, QStringLiteral("Lötseite: hier wenden"), 2.5, g.outer.width() - 8)), c.x, ay + 2.8));
+    // Mark: the turning axis on both rims (the vertical centre line).
+    PolySet marks;
+    marks.add({Pt{c.x, g.pocket.maxY + 1}, Pt{c.x, g.pocket.maxY + 2.5}});
+    marks.add({Pt{c.x, g.outer.maxY - 1.5}, Pt{c.x, g.outer.maxY - 4}});
+    marks.add({Pt{c.x, g.outer.minY + 1.5}, Pt{c.x, g.outer.minY + 3}});
+
+    GenResult res;
+    res.center = false;
+    // Own cut layer, started from the standard cut values; the app puts the measured MDF values on it.
+    for (const Layer& l : Document::defaultLayers())
+        if (l.name == SCHNEIDEN) { Layer h = l; h.id = newId(); h.name = HOLDER_LAYER; h.color = 0xFFFF8A5CLL; res.layers.push_back(h); }
+    res.parts.push_back({QStringLiteral("Halterung Umriss"), HOLDER_LAYER, std::move(cut), 0, QStringLiteral("halterung")});
+    res.parts.push_back({QStringLiteral("Halterung Beschriftung"), GRAVIEREN, std::move(text), 0, QStringLiteral("halterung")});
+    res.parts.push_back({QStringLiteral("Halterung Wendeachse"), LINIE, std::move(marks), 0, QStringLiteral("halterung")});
+    res.notes << QStringLiteral("Tasche %1 × %2 mm für die Platine %3 × %4 mm, Mitte bei X %5, Y %6. Halterung außen %7 × %8 mm.")
+                     .arg(num(g.pocket.width(), 2), num(g.pocket.height(), 2), num(s.boardW), num(s.boardH), num(s.centerX), num(s.centerY))
+                     .arg(num(g.outer.width()), num(g.outer.height()));
+    res.notes << QStringLiteral("Zum Bearbeiten der Lötseite die Platine um die senkrechte Mittelachse wenden: A1 liegt dann oben rechts.");
+    return res;
+}
+
+// ---- Solder mask test ----
+
+GenResult maskTest(const MaskTestSpec& s, const TextShaper& shape) {
+    if (!(s.powerSteps >= 1 && s.powerSteps <= 6 && s.speedSteps >= 1 && s.speedSteps <= 6)) throw GenError(QStringLiteral("Höchstens 6 × 6 Felder: es soll auf ein Reststück passen."));
+    if (std::min(s.powerFrom, s.powerTo) < Limits::MIN_RELIABLE_POWER_PCT)
+        throw GenError(QStringLiteral("Unter %1 % zündet der Laser nicht sicher. Untere Leistung anheben.").arg(Limits::MIN_RELIABLE_POWER_PCT));
+    if (std::max(s.powerFrom, s.powerTo) > 60) throw GenError(QStringLiteral("Für Lötstopplack höchstens 60 %: mehr brennt durch bis aufs Trägermaterial."));
+    if (std::min(s.speedFrom, s.speedTo) < 100 || std::max(s.speedFrom, s.speedTo) > Limits::SPEED_MAX) throw GenError(QStringLiteral("Tempo 100 bis 30000 mm/min."));
+    if (!(s.cellMm >= 2 && s.cellMm <= 10 && s.gapMm >= 0.5 && s.gapMm <= 5)) throw GenError(QStringLiteral("Feldgröße 2 bis 10 mm, Abstand 0,5 bis 5 mm."));
+    if (!(s.lineMm >= 0.1 && s.lineMm <= 1)) throw GenError(QStringLiteral("Linienabstand 0,1 bis 1 mm."));
+    static constexpr qint64 PALETTE[] = {0xFF4FD8B4LL, 0xFF6CB6FFLL, 0xFFFFB45CLL, 0xFFB98CFFLL, 0xFFFF8AD8LL, 0xFF9BE15DLL};
+    const std::vector<double> powers = testSteps(s.powerFrom, s.powerTo, s.powerSteps), speeds = testSteps(s.speedFrom, s.speedTo, s.speedSteps);
+    const double labelH = 2, pitch = s.cellMm + s.gapMm;
+    double labelW = 0;
+    for (double v : speeds) if (const auto b = boundsOf(shape(QString::number(int(v)), labelH, false))) labelW = std::max(labelW, b->width());
+    const double left = labelW + 1.5, top = labelH + 1.5;
+
+    GenResult r;
+    r.center = false;
+    Layer label = newLayer(QStringLiteral("Markieren Beschriftung"), 0xFF8A93A8LL, LayerMode::Line);
+    // The gentlest of the tested values: the labels must not burn more than the fields.
+    label.powerPct = std::min(s.powerFrom, s.powerTo);
+    label.speed = std::max(s.speedFrom, s.speedTo);
+    r.layers.push_back(label);
+    PolySet labels;
+    for (size_t i = 0; i < powers.size(); ++i) labels.append(centeredText(shape, QStringLiteral("%1").arg(int(powers[i])), labelH, left + i * pitch + s.cellMm / 2, 0));
+    for (size_t j = 0; j < speeds.size(); ++j) {
+        PolySet t = shape(QString::number(int(speeds[j])), labelH, false);
+        if (const auto b = boundsOf(t)) { moveBy(t, left - 1.5 - b->maxX, top + j * pitch + s.cellMm / 2 - b->center().y); labels.append(t); }
+    }
+    r.parts.push_back({QStringLiteral("Beschriftung"), label.name, labels, 0, QStringLiteral("lack")});
+    const int lines = int(std::floor(s.cellMm / s.lineMm + 1e-9)) + 1;
+    for (size_t j = 0; j < speeds.size(); ++j)
+        for (size_t i = 0; i < powers.size(); ++i) {
+            Layer l = newLayer(QStringLiteral("Markieren %1 % · %2 mm/min").arg(int(powers[i])).arg(int(speeds[j])), PALETTE[(i + j) % 6], LayerMode::Line);
+            l.powerPct = powers[i];
+            l.speed = speeds[j];
+            const double x0 = left + i * pitch, y0 = top + j * pitch;
+            // One serpentine line: the whole field is marked in a single path.
+            Poly p;
+            for (int k = 0; k < lines; ++k) {
+                const double y = y0 + std::min(s.cellMm, k * s.lineMm);
+                if (k % 2 == 0) { p.push_back({x0, y}); p.push_back({x0 + s.cellMm, y}); }
+                else { p.push_back({x0 + s.cellMm, y}); p.push_back({x0, y}); }
+            }
+            r.parts.push_back({QStringLiteral("Testfeld"), l.name, one(p), 0, QStringLiteral("lack")});
+            r.layers.push_back(std::move(l));
+        }
+    const Box b = *partsBounds(r);
+    const double dx = s.centerX - b.center().x, dy = s.centerY - b.center().y;
+    for (GenPart& p : r.parts) moveBy(p.paths, dx, dy);
+    const Box placed{b.minX + dx, b.minY + dy, b.maxX + dx, b.maxY + dy};
+    checkPlace(placed, QStringLiteral("Das Testraster"));
+    r.notes << QStringLiteral("%1 Felder, zusammen %2 × %3 mm, Mitte an der Lochraster-Lage (X %4, Y %5). Oben die Leistung in %, links das Tempo in mm/min.")
+                   .arg(s.powerSteps * s.speedSteps).arg(num(placed.width()), num(placed.height()), num(s.centerX), num(s.centerY));
+    r.warnings << QStringLiteral("Leistung und Tempo sind ein Vorschlag, nicht auf dieser Maschine geprüft. Nur markieren, FR4 nie schneiden: giftige Dämpfe.");
+    if (std::max(s.powerFrom, s.powerTo) > 30) r.warnings << QStringLiteral("Über 30 % kann der Lack verkohlen und das Kupfer darunter freilegen.");
+    return r;
+}
+
 }  // namespace lumacut::Werkstatt

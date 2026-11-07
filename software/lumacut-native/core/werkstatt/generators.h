@@ -129,6 +129,45 @@ GenResult stamp(const StampSpec& s, const TextShaper& shape);
 struct QrSpec { QString text; double moduleMm = 1; bool plate = false; };
 GenResult qr(const QrSpec& s);
 
+/**
+ * Halterung für Lochrasterplatinen: Rahmen aus Plattenmaterial mit Tasche, deren Mitte an der gemeinsamen Lage liegt
+ * (AppSettings perfboard/x, perfboard/y). Spiel = Tasche minus Platine je Richtung. Kerf: die Tasche wird um die halbe
+ * Schnittbreite kleiner gezeichnet, der Außenumriss um die halbe größer, damit die fertigen Maße stimmen.
+ */
+struct PerfboardSize { double w, h; };
+inline constexpr PerfboardSize PERFBOARD_SIZES[] = {{20, 80}, {30, 70}, {40, 60}, {50, 70}, {70, 90}};
+inline constexpr double PERFBOARD_X = 185, PERFBOARD_Y = 197.5;
+struct HolderSpec {
+    double boardW = 50, boardH = 70;
+    double centerX = PERFBOARD_X, centerY = PERFBOARD_Y;
+    double playMm = 0.3, kerfMm = 0.15, rimMm = 15;
+};
+struct HolderGeometry {
+    Box pocket;        /// fertige Tasche (nach dem Schnitt), Arbeitsflächen-mm
+    Box pocketPath;    /// gezeichnete Tasche ohne Griffmulde
+    Box outer;         /// gezeichneter Außenumriss
+    double gripRadius = 0;
+};
+/** Wirft GenError bei unsinnigen Maßen, außerhalb der Arbeitsfläche oder im gesperrten Bereich. */
+HolderGeometry holderGeometry(const HolderSpec& s);
+/** Eigene Ebene des Rahmens, damit die Ebene Schneiden des Projekts unberührt bleibt. */
+inline const QString HOLDER_LAYER = QStringLiteral("Halterung schneiden");
+GenResult perfboardHolder(const HolderSpec& s, const TextShaper& shape);
+
+/**
+ * Materialtest für Lötstopplack: kleine Felder aus Linien (Prozess Markieren), jedes auf eigener Ebene, Mitte an der
+ * gemeinsamen Lochraster-Lage. Werte sind Vorschläge, keine geprüften.
+ */
+struct MaskTestSpec {
+    double powerFrom = 8, powerTo = 20;
+    int powerSteps = 4;
+    double speedFrom = 3000, speedTo = 1000;
+    int speedSteps = 3;
+    double cellMm = 4, gapMm = 1.5, lineMm = 0.3;
+    double centerX = PERFBOARD_X, centerY = PERFBOARD_Y;
+};
+GenResult maskTest(const MaskTestSpec& s, const TextShaper& shape);
+
 /** Deutsches Zahlenformat ohne überflüssige Nullen: 12,5. */
 QString num(double v, int digits = 1);
 

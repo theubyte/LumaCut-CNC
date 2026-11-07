@@ -3,15 +3,19 @@ import QtQuick.Dialogs
 import QtQuick.Layouts
 import LumaCut
 
-// Platine: fabrication files left, the board as it lies under the laser in the middle, settings, laser values and the
-// workshop steps right. All logic is in the Platine singleton; the diode removes lacquer, the board is etched afterwards.
+// Platine: two modes. Gerber: fabrication files left, the board as it lies under the laser in the middle, settings, laser
+// values and the workshop steps right (Platine singleton; the diode removes lacquer, the board is etched afterwards).
+// Lochraster: plan and mark perfboards (Perfboard singleton; marking only, nothing is cut).
 Item {
     id: root
     objectName: "view-Platine"
+    property string mode: AppSettings.value("platine/mode", "gerber")
+    function setMode(m) { mode = m; AppSettings.setValue("platine/mode", m) }
 
     // Test handle: everything a native file dialog cannot reach.
     Item {
         objectName: "platine-api"
+        function setMode(m) { root.setMode(m); return root.mode }
         function loadExample(_) { Platine.loadExample(); return true }
         function loadFiles(paths) { Platine.loadPaths(paths); return true }
         function info(_) { return Platine.info() }
@@ -28,134 +32,173 @@ Item {
         function fit(_) { preview.fitView(); return true }
     }
 
-    Connections {
-        target: Platine
-        function onFilesRequested() { picker.nameFilters = Platine.fileFilters(); picker.open() }
-    }
-    FileDialog {
-        id: picker
-        title: "Gerber- und Bohrdateien wählen"
-        fileMode: FileDialog.OpenFiles
-        onAccepted: {
-            const list = []
-            for (const u of selectedFiles) list.push(u.toString())
-            Platine.loadPaths(list)
+    // Mode switch above both.
+    Rectangle {
+        id: modeBar
+        width: parent.width
+        height: Theme.mvBar
+        color: Theme.surface
+        z: 2
+        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
+        LcSegmented {
+            objectName: "pcb-mode"
+            anchors.left: parent.left
+            anchors.leftMargin: Theme.sp4
+            anchors.verticalCenter: parent.verticalCenter
+            options: [{ value: "gerber", label: "Gerber", icon: "circuit-board", tip: "Geätzte Platine aus Fertigungsdaten" },
+                      { value: "lochraster", label: "Lochraster", icon: "grid-3x3", tip: "Lochrasterplatine planen und markieren" }]
+            value: root.mode
+            onActivated: (v) => root.setMode(v)
+        }
+        LcText {
+            anchors.right: parent.right
+            anchors.rightMargin: Theme.sp4
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.mode === "gerber" ? "Lack entfernen, danach ätzen" : "Nur markieren: Umrisse, Beschriftung, Verbindungswege"
+            kind: "smallFaint"
         }
     }
 
-    // Nothing loaded yet: one clear invitation.
+    PlRaster {
+        anchors.fill: parent
+        anchors.topMargin: Theme.mvBar
+        visible: root.mode === "lochraster"
+    }
+
     Item {
+        id: gerber
         anchors.fill: parent
-        visible: Platine.files.length === 0
-        Rectangle { anchors.fill: parent; color: Theme.bg }
-        LcCard {
-            objectName: "pcb-empty"
-            anchors.centerIn: parent
-            width: Math.min(parent.width - 2 * Theme.sp6, 560)
-            padding: Theme.sp6
-            spacing: Theme.sp3
-            LcIcon { name: "circuit-board"; size: 34; width: 34; height: 34; color: Theme.faint; Layout.alignment: Qt.AlignHCenter }
-            LcText { text: "Gerber-Daten laden"; kind: "h2"; Layout.alignment: Qt.AlignHCenter }
-            LcText {
-                text: "Gerber RS-274X und Excellon, einzeln oder als ZIP, zum Beispiel aus KiCad oder EasyEDA. Der Laser entfernt Lack, nicht Kupfer: geätzt wird danach von Hand."
-                kind: "muted"; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true
-            }
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                Layout.topMargin: Theme.sp2
-                spacing: Theme.sp2
-                LcButton { objectName: "pcb-pick"; variant: "primary"; icon: "file-up"; text: "Dateien wählen"; onClicked: Platine.askFiles() }
-                LcButton { objectName: "pcb-example"; icon: "wand-2"; text: "Beispielplatine laden"; onClicked: Platine.loadExample() }
-            }
-            RowLayout {
-                visible: Platine.busy
-                Layout.alignment: Qt.AlignHCenter
-                spacing: Theme.sp2
-                LcSpinner {}
-                LcText { text: Platine.busyText; kind: "smallMuted" }
+        anchors.topMargin: Theme.mvBar
+        visible: root.mode === "gerber"
+        Connections {
+            target: Platine
+            function onFilesRequested() { picker.nameFilters = Platine.fileFilters(); picker.open() }
+        }
+        FileDialog {
+            id: picker
+            title: "Gerber- und Bohrdateien wählen"
+            fileMode: FileDialog.OpenFiles
+            onAccepted: {
+                const list = []
+                for (const u of selectedFiles) list.push(u.toString())
+                Platine.loadPaths(list)
             }
         }
-    }
 
-    RowLayout {
-        anchors.fill: parent
-        spacing: 0
-        visible: Platine.files.length > 0
-        PlFiles {
-            Layout.fillHeight: true
-            Layout.preferredWidth: Theme.panel
-        }
-        Rectangle {
-            objectName: "pcb-canvas"
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.minimumWidth: 0
-            color: Theme.canvas
-            clip: true
-            PlatineStage {
-                id: preview
-                objectName: "pcb-preview"
-                anchors.fill: parent
-                anchors.margins: Theme.sp4
-                canvasColor: "transparent"
-                sheetColor: Theme.sheet
-                edgeColor: Theme.line2
-                boardColor: Theme.pcbBoard
-                copperColor: Theme.pcbCopper
-                laserColor: Theme.pcbLaser
-                drillColor: Theme.pcbDrill
-                markColor: Theme.pcbMark
-                maskColor: Theme.pcbMask
-                silkColor: Theme.pcbSilk
-                badColor: Theme.bad
-                function fitView() { fit() }
-            }
-            // What the picture shows, and how it relates to the machine.
-            Row {
-                x: Theme.sp4 + Theme.sp2
-                y: Theme.sp4 + Theme.sp2
-                spacing: Theme.sp2
-                LcChip {
-                    objectName: "pcb-view-chip"
-                    text: (Platine.settings.side === "bottom" ? "Unterseite" : "Oberseite") + (Platine.settings.mirror ? ", gespiegelt" : "") + ", so liegt sie unter dem Laser"
-                    icon: "eye"
+        // Nothing loaded yet: one clear invitation.
+        Item {
+            anchors.fill: parent
+            visible: Platine.files.length === 0
+            Rectangle { anchors.fill: parent; color: Theme.bg }
+            LcCard {
+                objectName: "pcb-empty"
+                anchors.centerIn: parent
+                width: Math.min(parent.width - 2 * Theme.sp6, 560)
+                padding: Theme.sp6
+                spacing: Theme.sp3
+                LcIcon { name: "circuit-board"; size: 34; width: 34; height: 34; color: Theme.faint; Layout.alignment: Qt.AlignHCenter }
+                LcText { text: "Gerber-Daten laden"; kind: "h2"; Layout.alignment: Qt.AlignHCenter }
+                LcText {
+                    text: "Gerber RS-274X und Excellon, einzeln oder als ZIP, zum Beispiel aus KiCad oder EasyEDA. Der Laser entfernt Lack, nicht Kupfer: geätzt wird danach von Hand."
+                    kind: "muted"; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true
                 }
-                LcChip { visible: Platine.jobSize.length > 0; text: "Auftrag " + Platine.jobSize }
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: Theme.sp2
+                    spacing: Theme.sp2
+                    LcButton { objectName: "pcb-pick"; variant: "primary"; icon: "file-up"; text: "Dateien wählen"; onClicked: Platine.askFiles() }
+                    LcButton { objectName: "pcb-example"; icon: "wand-2"; text: "Beispielplatine laden"; onClicked: Platine.loadExample() }
+                }
+                RowLayout {
+                    visible: Platine.busy
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: Theme.sp2
+                    LcSpinner {}
+                    LcText { text: Platine.busyText; kind: "smallMuted" }
+                }
             }
-            LcButton {
-                objectName: "pcb-fit"
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.margins: Theme.sp4 + Theme.sp2
-                size: "sm"
-                icon: "maximize"
-                tip: "Ganze Platine zeigen"
-                onClicked: preview.fit()
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            spacing: 0
+            visible: Platine.files.length > 0
+            PlFiles {
+                Layout.fillHeight: true
+                Layout.preferredWidth: Theme.panel
             }
             Rectangle {
-                objectName: "pcb-busy"
-                visible: Platine.busy
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: Theme.sp5
-                width: busyRow.implicitWidth + 2 * Theme.sp3
-                height: Theme.hControl
-                radius: Theme.rMd
-                color: Theme.surface
-                border.width: 1
-                border.color: Theme.line
+                objectName: "pcb-canvas"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumWidth: 0
+                color: Theme.canvas
+                clip: true
+                PlatineStage {
+                    id: preview
+                    objectName: "pcb-preview"
+                    anchors.fill: parent
+                    anchors.margins: Theme.sp4
+                    canvasColor: "transparent"
+                    sheetColor: Theme.sheet
+                    edgeColor: Theme.line2
+                    boardColor: Theme.pcbBoard
+                    copperColor: Theme.pcbCopper
+                    laserColor: Theme.pcbLaser
+                    drillColor: Theme.pcbDrill
+                    markColor: Theme.pcbMark
+                    maskColor: Theme.pcbMask
+                    silkColor: Theme.pcbSilk
+                    badColor: Theme.bad
+                    function fitView() { fit() }
+                }
+                // What the picture shows, and how it relates to the machine.
                 Row {
-                    id: busyRow
-                    anchors.centerIn: parent
+                    x: Theme.sp4 + Theme.sp2
+                    y: Theme.sp4 + Theme.sp2
                     spacing: Theme.sp2
-                    LcSpinner { anchors.verticalCenter: parent.verticalCenter }
-                    LcText { text: Platine.busyText; kind: "smallMuted"; anchors.verticalCenter: parent.verticalCenter }
+                    LcChip {
+                        objectName: "pcb-view-chip"
+                        text: (Platine.settings.side === "bottom" ? "Unterseite" : "Oberseite") + (Platine.settings.mirror ? ", gespiegelt" : "") + ", so liegt sie unter dem Laser"
+                        icon: "eye"
+                    }
+                    LcChip { visible: Platine.jobSize.length > 0; text: "Auftrag " + Platine.jobSize }
+                }
+                LcButton {
+                    objectName: "pcb-fit"
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: Theme.sp4 + Theme.sp2
+                    size: "sm"
+                    icon: "maximize"
+                    tip: "Ganze Platine zeigen"
+                    onClicked: preview.fit()
+                }
+                Rectangle {
+                    objectName: "pcb-busy"
+                    visible: Platine.busy
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: Theme.sp5
+                    width: busyRow.implicitWidth + 2 * Theme.sp3
+                    height: Theme.hControl
+                    radius: Theme.rMd
+                    color: Theme.surface
+                    border.width: 1
+                    border.color: Theme.line
+                    Row {
+                        id: busyRow
+                        anchors.centerIn: parent
+                        spacing: Theme.sp2
+                        LcSpinner { anchors.verticalCenter: parent.verticalCenter }
+                        LcText { text: Platine.busyText; kind: "smallMuted"; anchors.verticalCenter: parent.verticalCenter }
+                    }
                 }
             }
-        }
-        PlSide {
-            Layout.fillHeight: true
-            Layout.preferredWidth: Math.max(Theme.panel + Theme.sp6, Math.min(root.width * 0.3, Theme.panelWide))
+            PlSide {
+                Layout.fillHeight: true
+                Layout.preferredWidth: Math.max(Theme.panel + Theme.sp6, Math.min(root.width * 0.3, Theme.panelWide))
+            }
         }
     }
 }

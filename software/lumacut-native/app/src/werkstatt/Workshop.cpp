@@ -3,7 +3,10 @@
 #include <QSet>
 #include <algorithm>
 #include <cmath>
+#include "AppSettings.h"
+#include "Materials.h"
 #include "Toast.h"
+#include "core/material.h"
 #include "core/text.h"
 #include "doc/Document.h"
 #include "gpu/StageItem.h"
@@ -23,6 +26,11 @@ QVariantMap seg(const QString& key, const QString& label, const QList<std::pair<
     for (const auto& [v, l] : opts) o.push_back(QVariantMap{{"value", v}, {"label", l}});
     return {{"type", "seg"}, {"key", key}, {"label", label}, {"options", o}, {"hint", hint}};
 }
+QVariantMap select(const QString& key, const QString& label, const QList<std::pair<QString, QString>>& opts, const QString& hint = {}) {
+    QVariantMap m = seg(key, label, opts, hint);
+    m.insert("type", "select");
+    return m;
+}
 QVariantMap text(const QString& key, const QString& label, const QString& hint = {}, const QString& placeholder = {}) {
     return {{"type", "text"}, {"key", key}, {"label", label}, {"hint", hint}, {"placeholder", placeholder}};
 }
@@ -41,6 +49,34 @@ double cutThickness() {
         if (l.name == QLatin1String("Schneiden") && l.thicknessMm > 0) return l.thicknessMm;
     return 3;
 }
+bool perfboardTool(const QString& id) { return id == QLatin1String("halterung") || id == QLatin1String("loetstopp"); }
+double perfX() { return AppSettings::instance()->value("perfboard/x", ws::PERFBOARD_X).toDouble(); }
+double perfY() { return AppSettings::instance()->value("perfboard/y", ws::PERFBOARD_Y).toDouble(); }
+lc::PolySet plainText(const QString& t, double h, bool bold) { return lc::textPaths(t, h / 0.7, bold); }
+
+/** The MDF 3 mm cut from the Pi's list, if there is one. Nothing is made up when it is missing. */
+std::optional<lc::Material> mdfCut() {
+    for (const QVariant& v : Materials::instance()->items()) {
+        const QVariantMap m = v.toMap();
+        if (!m.value("name").toString().trimmed().toLower().startsWith(QLatin1String("mdf"))) continue;
+        if (std::abs(m.value("thickness_mm").toDouble() - 3) >= 0.01 || m.value("process").toString() != QLatin1String("Schneiden")) continue;
+        lc::Material x;
+        x.id = m.value("id").toString();
+        x.name = m.value("name").toString();
+        x.thicknessMm = m.value("thickness_mm").toDouble();
+        x.process = m.value("process").toString();
+        x.mode = m.value("mode").toString() == QLatin1String("fill") ? lc::LayerMode::Fill : lc::LayerMode::Line;
+        x.powerPct = m.value("power_pct").toDouble();
+        x.speed = m.value("speed_mm_min").toDouble();
+        x.passes = m.value("passes", 1).toInt();
+        x.intervalMm = m.value("interval_mm", 0.1).toDouble();
+        x.depthPerPassMm = m.value("depth_per_pass_mm").toDouble();
+        x.zStepMm = m.value("z_step_mm").toDouble();
+        x.builtin = m.value("builtin").toBool();
+        return x;
+    }
+    return std::nullopt;
+}
 }  // namespace
 
 Workshop::Workshop(QObject* parent) : QObject(parent) {
@@ -49,6 +85,7 @@ Workshop::Workshop(QObject* parent) : QObject(parent) {
     m_timer.setInterval(40);
     connect(&m_timer, &QTimer::timeout, this, &Workshop::recompute);
     // The frame around the motif follows the project.
+    connect(Materials::instance(), &Materials::changed, this, [this] { if (m_tool == QLatin1String("halterung")) m_timer.start(); });
     connect(Document::instance(), &Document::changed, this, [this] {
         if (m_tool == QLatin1String("rahmen") && params().value("source").toString() == QLatin1String("motiv")) m_timer.start();
     });
@@ -243,6 +280,72 @@ void Workshop::buildTools() {
         },
         [](const QVariantMap& p) { return ws::qr({s(p, "text"), d(p, "module"), b(p, "plate")}); }});
 
+    m_list.push_back({"halterung", "Platinen", "Halterung für Lochraster", "Tasche an fester Lage, zum genauen Wenden", "grid-3x3", true,
+        [] { return QVariantMap{{"size", "50x70"}, {"custom", false}, {"w", 50}, {"h", 70}, {"orient", "hoch"}, {"x", perfX()}, {"y", perfY()}, {"play", 0.3}, {"kerf", 0.15}, {"rim", 15}}; },
+        [](const QVariantMap& p) {
+            QVariantList f{
+                note("Halterung aus MDF 3 mm schneiden, auf dem Bett liegen lassen und nicht verschieben. Ab dann passt jede Lochraster-Markierung, auch nach dem Wenden."),
+                select("size", "Platine", {{"20x80", "20 × 80 mm"}, {"30x70", "30 × 70 mm"}, {"40x60", "40 × 60 mm"}, {"50x70", "50 × 70 mm"}, {"70x90", "70 × 90 mm"}}),
+                check("custom", "Eigene Größe"),
+            };
+            if (b(p, "custom")) f.push_back(row({mm("w", "Breite", 10, 200, 1), mm("h", "Höhe", 10, 200, 1)}));
+            f.push_back(seg("orient", "Lage", {{"hoch", "Hochkant"}, {"quer", "Quer"}}));
+            f.push_back(section("Lage der Platinenmitte"));
+            f.push_back(row({mm("x", "X", 0, 600, 0.5, 1), mm("y", "Y", 0, 600, 0.5, 1)}));
+            f.push_back(note("Gemeinsame Lage mit dem Lochraster-Editor: eine Änderung hier gilt auch dort. Nach dem Schneiden der Halterung nicht mehr ändern."));
+            f.push_back(section("Passung"));
+            f.push_back(row({mm("play", "Spiel", 0, 2, 0.05, 2), mm("kerf", "Schnittbreite", 0, 1, 0.05, 2), mm("rim", "Rahmen", 10, 40, 1)}));
+            f.push_back(note("Spiel: um so viel ist die fertige Tasche größer als die Platine, je Richtung. Die Schnittbreite ist dabei schon herausgerechnet."));
+            return f;
+        },
+        [](const QVariantMap& p) {
+            ws::HolderSpec h;
+            const QString size = s(p, "size");
+            if (b(p, "custom")) { h.boardW = d(p, "w"); h.boardH = d(p, "h"); }
+            else { const QStringList wh = size.split(QLatin1Char('x')); h.boardW = wh.value(0).toDouble(); h.boardH = wh.value(1).toDouble(); }
+            if (s(p, "orient") == QLatin1String("quer")) std::swap(h.boardW, h.boardH);
+            h.centerX = d(p, "x"); h.centerY = d(p, "y"); h.playMm = d(p, "play"); h.kerfMm = d(p, "kerf"); h.rimMm = d(p, "rim");
+            ws::GenResult r = ws::perfboardHolder(h, plainText);
+            const auto mdf = mdfCut();
+            if (!mdf) {
+                r.warnings << QStringLiteral("MDF 3 mm (Schneiden) fehlt in der Materialliste des Pi. Die Ebene „Halterung schneiden“ hat dann nur Vorgabewerte: vor dem Start prüfen oder das Material anlegen.");
+            } else {
+                r.notes << QStringLiteral("Der Rahmen kommt auf die eigene Ebene „Halterung schneiden“ mit den Werten von %1 3 mm aus der Materialliste: %2 %, %3 mm/min, %4 Durchgänge. Die Ebene Schneiden des Projekts bleibt unverändert.")
+                               .arg(mdf->name, ws::num(mdf->powerPct), ws::num(mdf->speed, 0)).arg(mdf->effectivePasses());
+                if (mdf->builtin) r.warnings << QStringLiteral("Für MDF 3 mm gibt es nur den Startwert, noch keinen auf dieser Maschine gemessenen. Erst einen Probeschnitt machen und das Ergebnis als Material speichern.");
+            }
+            r.notes << QStringLiteral("Die Beschriftung brennt die Ebene Gravieren, die Wendeachse wird markiert.");
+            return r;
+        }});
+
+    m_list.push_back({"loetstopp", "Platinen", "Materialtest Lötstopplack", "Kleines Raster für Lochraster-Reststücke", "flask-conical", true,
+        [] { return QVariantMap{{"powerFrom", 8}, {"powerTo", 20}, {"powerSteps", 4}, {"speedFrom", 3000}, {"speedTo", 1000}, {"speedSteps", 3},
+                                {"cell", 4}, {"gap", 1.5}, {"line", 0.3}, {"x", perfX()}, {"y", perfY()}}; },
+        [](const QVariantMap&) {
+            return QVariantList{
+                note("Vorschlag, nicht geprüft: 8 bis 20 % bei 3000 bis 1000 mm/min. Nur markieren, FR4 nie schneiden.", "warn"),
+                section("Leistung"),
+                row({num("powerFrom", "Von", "%", 8, 60, 1, 0), num("powerTo", "Bis", "%", 8, 60, 1, 0), num("powerSteps", "Stufen", "", 1, 6, 1, 0)}),
+                section("Tempo in mm/min"),
+                row({num("speedFrom", "Von", "", 100, 30000, 100, 0), num("speedTo", "Bis", "", 100, 30000, 100, 0), num("speedSteps", "Stufen", "", 1, 6, 1, 0)}),
+                section("Felder"),
+                row({mm("cell", "Feldgröße", 2, 10, 0.5), mm("gap", "Abstand", 0.5, 5, 0.5), mm("line", "Linienabstand", 0.1, 1, 0.05, 2)}),
+                section("Lage der Mitte"),
+                row({mm("x", "X", 0, 600, 0.5, 1), mm("y", "Y", 0, 600, 0.5, 1)}),
+                note("So geht es: Abluft an. Ein Reststück einer Lochrasterplatine in die Halterung legen, Bestückungsseite oben. Raster ins Projekt und unter Starten laufen lassen. "
+                     "Das sauberste Feld danach unter Material als neues Material speichern, zum Beispiel „Lötstopplack grün“ mit Prozess Markieren."),
+                note("Die Felder sind Linien quer über Lack und Pads. Ein Feld nur zwischen den Pads wäre kaum 0,7 mm breit und nicht zu beurteilen; "
+                     "auf dem Zinn der Pads bleibt bei kleiner Leistung höchstens ein Schleier. Auf eine 20 × 80-Platine passen nur 2 bis 3 Leistungsstufen."),
+            };
+        },
+        [](const QVariantMap& p) {
+            ws::MaskTestSpec m;
+            m.powerFrom = d(p, "powerFrom"); m.powerTo = d(p, "powerTo"); m.powerSteps = i(p, "powerSteps");
+            m.speedFrom = d(p, "speedFrom"); m.speedTo = d(p, "speedTo"); m.speedSteps = i(p, "speedSteps");
+            m.cellMm = d(p, "cell"); m.gapMm = d(p, "gap"); m.lineMm = d(p, "line"); m.centerX = d(p, "x"); m.centerY = d(p, "y");
+            return ws::maskTest(m, plainText);
+        }});
+
     m_list.push_back({"foto", "Fotos", "Fotogravur", "Foto vorbereiten mit den Bildwerkzeugen im Motiv", "image", false,
         [] { return QVariantMap{}; }, [](const QVariantMap&) { return QVariantList{}; }, nullptr});
 }
@@ -267,6 +370,8 @@ void Workshop::setTool(const QString& id) {
     if (it == m_list.end()) return;
     m_tool = id;
     if (!m_params.contains(id)) m_params.insert(id, it->defaults());
+    // The perfboard position is shared with the perfboard editor: always the stored one.
+    if (perfboardTool(id)) { m_params[id].insert("x", perfX()); m_params[id].insert("y", perfY()); }
     m_plate = 0;
     m_fields.clear();
     emit toolChanged();
@@ -285,6 +390,11 @@ void Workshop::setParam(const QString& key, const QVariant& value) {
     QVariantMap& p = m_params[m_tool];
     if (p.value(key) == value) return;
     p.insert(key, value);
+    if (perfboardTool(m_tool) && (key == QLatin1String("x") || key == QLatin1String("y"))) {
+        AppSettings::instance()->setValue(QStringLiteral("perfboard/") + key, value.toDouble());
+        for (const QString& other : {QStringLiteral("halterung"), QStringLiteral("loetstopp")})
+            if (other != m_tool && m_params.contains(other)) m_params[other].insert(key, value.toDouble());
+    }
     emit paramsChanged();
     syncFields();
     m_timer.start();
@@ -448,6 +558,10 @@ QVariantMap Workshop::apply() {
             return layers.front().id;
         };
         std::vector<lc::Element> raw = ws::toElements(r, ensure);
+        // The holder is cut with the MDF values from the Pi's list, never with invented ones.
+        if (m_tool == QLatin1String("halterung"))
+            if (const auto mdf = mdfCut())
+                for (lc::Layer& l : layers) if (l.name == ws::HOLDER_LAYER) l = mdf->applyTo(l);
         const auto& existing = st.elements();
         const bool busy = std::any_of(existing.begin(), existing.end(), [&](const auto& e) { return e->plate == st.activePlate; });
         start = r.freshPlate && busy ? st.plateCount : st.activePlate;

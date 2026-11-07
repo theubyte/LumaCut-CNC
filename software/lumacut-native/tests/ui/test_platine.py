@@ -44,6 +44,7 @@ def run(app):
     app.call("resize", w=1440, h=900)
     app.click("nav-platine")
     app.wait(lambda: app.find("view-Platine")["w"] > 100)
+    app.invoke("platine-api", "setMode", "gerber")
     api(app, "clear")
     time.sleep(0.2)
 

@@ -100,7 +100,8 @@ def run(app):
     assert apply(app) == 2
     # One undo step per "Ins Projekt".
     n = inv(app, "count")
-    assert inv(app, "undo") == n - 2
+    u = inv(app, "undo")
+    assert u == n - 2, (n, u)
     assert apply(app) == 2
 
     # Ruler with a name, scale bar, stamp, frame around the motif.
@@ -149,10 +150,70 @@ def run(app):
         hidden = "not found" in str(e)
     assert hidden
 
+    # Perfboard holder 50 × 70 at the shared position, cut with the MDF values from the Pi's list.
+    tool(app, "halterung")
+    for k, want in ((1, "30x70"), (3, "50x70")):
+        app.click("ws-size")
+        time.sleep(0.2)
+        app.click(f"ws-size-menu-{k}")
+        time.sleep(0.1)
+        assert inv(app, "params")["size"] == want
+    time.sleep(0.1)
+    assert inv(app, "params")["size"] == "50x70"
+    r = settle(app)
+    assert r["ok"] and r["parts"] == 3, r
+    assert any("Tasche 50,3 × 70,3 mm" in n and "X 185, Y 197,5" in n for n in r["notes"]), r["notes"]
+    own_cut = inv(app, "layerByName", "Schneiden")
+    app.shot(SHOTS / "werkstatt-halterung.png")
+    assert apply(app) == 3
+    names = inv(app, "elementNames")
+    assert all(n in names for n in ("Halterung Umriss", "Halterung Beschriftung", "Halterung Wendeachse")), names
+    # The project's own cut layer stays as it was; the frame has its own layer with the MDF values.
+    after = inv(app, "layerByName", "Schneiden")
+    assert after == own_cut, (own_cut, after)
+    holder = inv(app, "layerByName", "Halterung schneiden")
+    assert holder is not None and inv(app, "layerByName", "Gravieren") is not None
+    if any("aus der Materialliste" in n for n in r["notes"]):
+        assert holder.get("materialName") == "MDF" and holder["powerPct"] == 95, holder
+    # A second holder reuses the layer.
+    n_layers = len(inv(app, "layerNames"))
+    assert apply(app) == 3
+    assert len(inv(app, "layerNames")) == n_layers
+    assert inv(app, "layerNames").count("Halterung schneiden") == 1
+    # The position is shared: typed here, stored for the perfboard editor, seen by the mask test.
+    type_into(app, "ws-y-input", "180")
+    assert inv(app, "setting", "perfboard/y") == 180
+    # Own size.
+    app.click("ws-custom")
+    time.sleep(0.2)
+    type_into(app, "ws-w-input", "60")
+    r = settle(app)
+    assert r["ok"] and any("Platine 60 × 70 mm" in n for n in r["notes"]), r
+    app.click("ws-custom")
+    # Into the park corner: refused with a sentence.
+    inv(app, "setParam", ["x", 340])
+    inv(app, "setParam", ["y", 60])
+    r = settle(app)
+    assert not r["ok"] and "Park-Ecke" in r["error"], r
+    inv(app, "setParam", ["x", 185])
+    inv(app, "setParam", ["y", 197.5])
+    assert settle(app)["ok"]
+
+    # Solder mask test preset: 4 × 3 small line fields on the Markieren process, centred on the same position.
+    r = tool(app, "loetstopp")
+    assert inv(app, "params")["y"] == 197.5
+    assert r["ok"] and r["parts"] == 13 and any("Vorschlag" in w for w in r["warnings"]), r
+    app.shot(SHOTS / "werkstatt-loetstopp.png")
+    assert apply(app) == 13
+    assert inv(app, "layerByName", "Markieren 8 % · 3000 mm/min")["powerPct"] == 8
+
     # Dark, small window.
     app.invoke("shell", "setTheme", "dark")
     app.invoke("shell", "resizeTo", [1000, 640])
     tool(app, "box")
     time.sleep(0.3)
     app.shot(SHOTS / "werkstatt-box-dunkel-klein.png")
+    tool(app, "halterung")
+    time.sleep(0.3)
+    app.shot(SHOTS / "werkstatt-halterung-dunkel-klein.png")
     app.invoke("shell", "setTheme", "system")

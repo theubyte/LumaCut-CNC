@@ -82,6 +82,8 @@ QtObject {
     readonly property color pcbDrill: dark ? "#0a0c11" : "#5b6178"
     readonly property color pcbMark: dark ? "#e58ae0" : "#b23fb0"
     readonly property color pcbEdge: dark ? "#a6acc2" : "#7a8097"
+    readonly property color pcbPerf: dark ? "#14402f" : "#1f7a52"
+    readonly property color pcbTin: dark ? "#b9bcc4" : "#d4d6dc"
     readonly property int tFast: 90
     readonly property int tMed: 160
     readonly property int wsList: 228   // workshop: list of generators

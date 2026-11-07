@@ -30,3 +30,6 @@ lumacut_core_test(test_werkstatt)  # Werkstatt-Generatoren: QR, Box, Zahnrad, Ma
 lumacut_core_test(test_pcb)            # Platine: Gerber, Excellon, Lagen, Isolation, Spiegeln, Ins Projekt
 target_link_libraries(test_pcb PRIVATE lumacut_pcb)
 target_compile_definitions(test_pcb PRIVATE LUMACUT_PCB_DIR="${CMAKE_CURRENT_SOURCE_DIR}/pcb")
+
+lumacut_core_test(test_perfboard)      # Lochraster: Raster, Bauteile, Drehung, Pad-Aussparung, Spiegeln, Prüfungen, Datei
+target_link_libraries(test_perfboard PRIVATE lumacut_pcb Qt6::Gui)

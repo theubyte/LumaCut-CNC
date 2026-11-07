@@ -44,8 +44,10 @@ target_link_libraries(lumacut_text PUBLIC lumacut_core Qt6::Gui)
 add_library(lumacut_pcb STATIC
   pcb/geom.h pcb/geom.cpp pcb/gerber.h pcb/gerber.cpp pcb/excellon.h pcb/excellon.cpp
   pcb/layers.h pcb/layers.cpp pcb/board.h pcb/board.cpp pcb/job.h pcb/job.cpp
+  pcb/perfboard.h pcb/perfboard.cpp
 )
-target_link_libraries(lumacut_pcb PUBLIC lumacut_core lumacut_import)
+target_link_libraries(lumacut_pcb PUBLIC lumacut_core lumacut_import lumacut_text)
 qt_add_resources(lumacut_pcb pcb_example PREFIX /pcb BASE pcb/beispiel FILES
   pcb/beispiel/beispiel.GTL pcb/beispiel/beispiel.GBL pcb/beispiel/beispiel.GTS pcb/beispiel/beispiel.GBS
   pcb/beispiel/beispiel.GTO pcb/beispiel/beispiel.GKO pcb/beispiel/beispiel.DRL)
+qt_add_resources(lumacut_pcb perfboard_parts PREFIX /pcb BASE pcb FILES pcb/perfboard_parts.json)
