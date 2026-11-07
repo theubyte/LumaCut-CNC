@@ -59,7 +59,7 @@ Die CI hat keine echte GPU; dort läuft die App auf dem Software-Adapter.
 
 ## Stand der ersten nativen Etappe
 
-Nichts davon lief an der echten Maschine. Vom echten Pi wurde nur `/api/status` gelesen.
+Nichts davon lief an der echten Maschine. Vom echten Pi wird nur gelesen: `tools/pi_readonly_check.py` führt die App durch alle Ansichten und sperrt jeden Schreibzugriff, am 07.11. bestanden. Ablauf des Tests vor Ort: [WINDOWS_APP_PI_TEST.md](WINDOWS_APP_PI_TEST.md).
 
 **Fertig, im echten Fenster gegen den Simulator geprüft**
 - Hülle: Kopfzeile, NOT-AUS auch über Dialogen und mit Taste Pause, Fortschrittsstreifen, Statuszeile, hell und dunkel.
