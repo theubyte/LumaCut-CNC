@@ -627,6 +627,7 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
   eine **Kappe auf der Wellenspitze** (nimmt den Lastschub zum Motor auf, dreht mit, reibt nicht), D-Bohrung
   gegen Durchdrehen und eine **eingelegte M3-Mutter** für die Madenschraube (Stahl- statt Kunststoffgewinde).
   T7e (2.0) bekommt nur die Mutter, Anschlag ist dort die Bremsscheibe. Beide Prüfberichte OK, nicht gedruckt. **07.11., Besitzer:** Die Madenschraube ist M4, nicht M3; Mutterntasche im CAD dafür anpassen (M4: SW 7, 3,2 mm).
+- **Kopf v8 „T8-Spindel“ (07.11., konstruiert, nicht gedruckt), ersetzt die Schnecke:** `A:\mfw\zmount8\` und NAS `ProjekteD_Druck\Export\kopf_v8` (Anleitung `LIESMICH.md`). Motor fest oben auf T10 Motorturm (Gabel auf der linken Rippe von T1, 2 Löcher bohren), Kupplung 5/8, T8-Spindel 136,5 mm durch das vorhandene Haubenloch Ø12 (alte Motorachse x −10, z 46), Messingmutter auf T11 Mutterhalter an den 4 alten Motorlöchern. T1–T4 bleiben, Haube bekommt ein neues Kabelloch Ø10. Motor ~78 mm über der Grundplatte (Besitzer: Platz reicht). Kopf rund 280 g leichter, keine Bremse nötig. Firmware Z 400 Schritte/mm statt 1018,59 (Flashen nur mit Besitzer). Prüfbericht: alle Prüfungen OK, Kollisionen in 9 Lagen über den Hub. Mutter- und Kupplungsmaße angenommen (Handelsmaß), am Teil nachmessen.
 - Weitere Ideen zu Höhe/Kollision: [IDEE_HOEHE_KOLLISION_KAMERA_3D.md](IDEE_HOEHE_KOLLISION_KAMERA_3D.md).
 
 ## 13. Nebenprojekte im Ordner
