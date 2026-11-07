@@ -33,3 +33,5 @@ target_compile_definitions(test_pcb PRIVATE LUMACUT_PCB_DIR="${CMAKE_CURRENT_SOU
 
 lumacut_core_test(test_perfboard)      # Lochraster: Raster, Bauteile, Drehung, Pad-Aussparung, Spiegeln, Prüfungen, Datei
 target_link_libraries(test_perfboard PRIVATE lumacut_pcb Qt6::Gui)
+
+lumacut_core_test(test_scan)       # Kopfkamera: Kalibrierung, Kachelplan, Mosaik, Entzerrung

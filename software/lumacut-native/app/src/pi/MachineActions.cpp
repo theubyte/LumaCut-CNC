@@ -92,6 +92,14 @@ void MachineActions::run(const QString& op, const QVariantMap& fields, const QVa
         send(op, fields, opts, std::move(done));
     }));
 }
+void MachineActions::runApproved(const QString& op, const QVariantMap& fields, const QVariantMap& opts, Done done) {
+    if (!gates().contains(op)) {
+        Toast::instance()->show(QStringLiteral("Aktion %1 ist in dieser App nicht freigegeben").arg(op), "bad");
+        if (done) done(false, {});
+        return;
+    }
+    send(op, fields, opts, std::move(done));
+}
 void MachineActions::run(const QString& op, const QVariantMap& fields, const QVariantMap& opts, const QJSValue& cb) {
     run(op, fields, opts, Done([cb](bool ok, const QVariantMap& reply) mutable {
         if (!cb.isCallable()) return;

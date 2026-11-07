@@ -96,6 +96,8 @@ public:
     /** Selected single element the node tool works on, or -1. */
     int nodeItem() const;
     QImage background() const { return m_bgImage; }
+    /** The camera scan from the Pi or from a scan here; show switches it on. */
+    void setBackground(QImage img, bool show) { m_bgImage = std::move(img); m_bgOn = show && !m_bgImage.isNull(); emit backgroundChanged(); }
     bool bgOn() const { return m_bgOn; }
     double bgAlpha() const { return m_bgAlpha; }
     static QTransform matrixOf(const lumacut::Transform& t);

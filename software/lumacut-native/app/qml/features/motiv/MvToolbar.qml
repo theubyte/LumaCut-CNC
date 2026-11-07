@@ -103,8 +103,8 @@ Rectangle {
             id: camBtn
             objectName: "bg-button"
             icon: "camera"
-            tip: "Kamerabild als Hintergrund"
-            pressedLook: Editor.bgOn && Editor.bgLoaded
+            tip: "Kamera: scannen, Hintergrund, Live-Bild"
+            pressedLook: (Editor.bgOn && Editor.bgLoaded) || Scanner.liveOn || Scanner.running
             onClicked: bgPop.openAt(camBtn)
         }
         Sep {}
@@ -128,27 +128,7 @@ Rectangle {
     MvPopover {
         id: bgPop
         objectName: "bg-pop"
-        popWidth: 270
-        ColumnLayout {
-            width: parent.width
-            spacing: Theme.sp2
-            LcText { text: "Kamerabild als Hintergrund"; font.weight: Font.DemiBold }
-            LcButton {
-                objectName: "bg-load"
-                size: "sm"
-                Layout.alignment: Qt.AlignLeft
-                busy: Editor.bgBusy
-                text: Editor.bgBusy ? "Lädt …" : Editor.bgLoaded ? "Neu vom Pi laden" : "Scan vom Pi laden"
-                onClicked: Editor.loadBackground()
-            }
-            LcCheck { objectName: "bg-show"; visible: Editor.bgLoaded; text: "Anzeigen"; checked: Editor.bgOn; onToggled: (on) => Editor.bgOn = on }
-            LcField {
-                visible: Editor.bgLoaded
-                Layout.fillWidth: true
-                label: "Deckkraft"
-                LcSlider { objectName: "bg-alpha"; min: 10; max: 100; unit: "%"; value: Math.round(Editor.bgAlpha * 100); onMoved: (v) => Editor.bgAlpha = v / 100 }
-            }
-            LcNote { Layout.fillWidth: true; text: "Nur zur Orientierung, wird nie gelasert. Das Werkstück kann verschoben sein: vor dem Lasern neu scannen." }
-        }
+        popWidth: 320
+        ScanPanel { width: parent.width; stage: root.stage; popup: bgPop }
     }
 }

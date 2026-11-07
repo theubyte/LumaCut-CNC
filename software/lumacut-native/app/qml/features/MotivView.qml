@@ -128,6 +128,19 @@ Item {
                         warnColor: Theme.warn
                         onContextMenuRequested: (x, y) => ctx.show(x, y)
                         onFileKey: (a) => files.run(a)
+                        Component.onCompleted: Scanner.attachMotivStage(stage)
+                    }
+                    // Head camera: movable live window and the scan in progress.
+                    LiveWindow {}
+                    ScanHandles {}
+                    MvPill {
+                        objectName: "scan-progress"
+                        visible: Scanner.running
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: Theme.sp5
+                        text: "Scan: " + Scanner.stepText
+                        tone: "accent"
                     }
                     // Label of the park corner or locked strip.
                     LcText {

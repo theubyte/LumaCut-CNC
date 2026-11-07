@@ -44,6 +44,27 @@ ColumnLayout {
             TapHandler { onDoubleTapped: view.fit() }
             Connections { target: Start; function onSourceSwitched() { view.fit() } }
         }
+        // The camera scan over the bed, see-through so the job stays readable (the GPU view draws its sheet opaque).
+        // Same switch and opacity as in the motif, at most half.
+        readonly property bool showScan: Editor.bgLoaded && Editor.bgOn
+        ScanImage {
+            objectName: "start-scan"
+            visible: stage.showScan
+            source: "background"
+            opacity: Math.min(Editor.bgAlpha, 0.5)
+            x: stage.origin.x; y: stage.origin.y
+            width: Machine.bedWidth * stage.k; height: Machine.bedHeight * stage.k
+        }
+        LcCheck {
+            objectName: "start-scan-show"
+            visible: Editor.bgLoaded
+            z: 5
+            anchors.left: parent.left; anchors.bottom: parent.bottom
+            anchors.leftMargin: Theme.sp6; anchors.bottomMargin: Theme.sp1
+            text: "Scan zeigen (" + (Scanner.backgroundStamp || "geladen") + ")"
+            checked: Editor.bgOn
+            onToggled: (on) => Editor.bgOn = on
+        }
 
         // Where the bed lies in this item: every overlay reckons from here.
         readonly property real k: view.effectiveZoom

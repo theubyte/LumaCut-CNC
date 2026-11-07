@@ -40,6 +40,11 @@ public:
     Q_INVOKABLE void run(const QString& op, const QVariantMap& fields = {}, const QVariantMap& opts = {}, const QJSValue& cb = {});
     /** Ask for the go directly, before several steps that belong together. */
     void askGo(const QVariantMap& request, std::function<void(bool)> cb);
+    /**
+     * One step of a series the operator already said yes to with askGo (the camera scan: one go, many moves).
+     * Only a known gated op; never call it without that answer.
+     */
+    void runApproved(const QString& op, const QVariantMap& fields, const QVariantMap& opts, Done done);
     Q_INVOKABLE void askGo(const QVariantMap& request, const QJSValue& cb);
     Q_INVOKABLE void answerGo(bool yes);
     Q_INVOKABLE static bool isAllowed(const QString& op);
