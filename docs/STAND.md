@@ -626,7 +626,7 @@ Ablauf (jede Fahrt mit Go, langsam F1500, Besitzer beobachtet):
 - **Schnecke rutscht nicht mehr (01.11., Besitzer: T7n verrutschte, Madenschraube hielt nicht):** T7n hat jetzt
   eine **Kappe auf der Wellenspitze** (nimmt den Lastschub zum Motor auf, dreht mit, reibt nicht), D-Bohrung
   gegen Durchdrehen und eine **eingelegte M3-Mutter** für die Madenschraube (Stahl- statt Kunststoffgewinde).
-  T7e (2.0) bekommt nur die Mutter, Anschlag ist dort die Bremsscheibe. Beide Prüfberichte OK, nicht gedruckt.
+  T7e (2.0) bekommt nur die Mutter, Anschlag ist dort die Bremsscheibe. Beide Prüfberichte OK, nicht gedruckt. **07.11., Besitzer:** Die Madenschraube ist M4, nicht M3; Mutterntasche im CAD dafür anpassen (M4: SW 7, 3,2 mm).
 - Weitere Ideen zu Höhe/Kollision: [IDEE_HOEHE_KOLLISION_KAMERA_3D.md](IDEE_HOEHE_KOLLISION_KAMERA_3D.md).
 
 ## 13. Nebenprojekte im Ordner
