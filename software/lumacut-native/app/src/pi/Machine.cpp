@@ -126,7 +126,15 @@ QString Machine::probeLock() const {
     if (!m.isEmpty()) return m;
     const QVariant zp = m_status.value("z_probe_supported");
     if (zp.isValid() && !zp.isNull() && !zp.toBool()) return QStringLiteral("Die Firmware meldet keinen Z-Taster.");
-    if (m_status.value("probe_xy_offset_mm").isNull()) return QStringLiteral("Taster-Versatz fehlt. Unter Kalibrieren eintragen.");
+    const QVariantList off = m_status.value("probe_xy_offset_mm").toList();
+    if (off.size() < 2) return QStringLiteral("Taster-Versatz fehlt. Unter Kalibrieren eintragen.");
+    // Same rule as the Pi (transport._probe_head_ok): the head, shifted by the probe offset, stays 10 mm inside the travel.
+    const QVariantList p = m_status.value("position").toList();
+    if (p.size() >= 2) {
+        const double hx = p[0].toDouble() - off[0].toDouble(), hy = p[1].toDouble() - off[1].toDouble();
+        if (hx < 10 || hx > m_bedW - 10 || hy < 10 || hy > m_bedH - 10)
+            return QStringLiteral("Hier erreicht der Taster das Material nicht. Erst weiter zur Mitte fahren.");
+    }
     return {};
 }
 

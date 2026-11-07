@@ -76,6 +76,8 @@ def run(app):
     assert not is_open(app, "go-confirm")
     # Z stays locked until a surface is measured.
     assert app.get("jog-zup", "lock").startswith("Z erst")
+    # Near Y0 the probe beside the laser would leave the travel: locked here, not refused by the Pi.
+    assert app.get("m-probe", "lock").startswith("Hier erreicht der Taster"), app.get("m-probe", "lock")
 
     # Zu Position: go dialog names the target; machine X = bed width - work X.
     app.click("m-moveto"); time.sleep(0.2)

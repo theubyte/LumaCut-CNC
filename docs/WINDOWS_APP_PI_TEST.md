@@ -91,4 +91,7 @@ Für jede Stufe festhalten: Datum, App-Version, Pi-Software, Firmware, bestanden
 - **Nebenbei:** Die Abfrage des nicht vorhandenen Auftrags „Materialtest Gravur“ um 09:50 kam von 127.0.0.1, also vom Bedienpanel am Pi, nicht von der App.
 - **Abbruch im laufenden Auftrag:** Laut Besitzer ging der Laser beim Abbrechen sofort aus. Im Pi-Log steht nach 09:16 kein weiterer Auftrag aus der App. Zu sehen sind von 09:57 bis 10:00 rund 40 Aktionen vom Windows-PC und ein Materialtest Gravur MDF mit 7 Schritten. Was abgebrochen wurde, ist noch zu klären. Ein Abbruch-Test an einem richtigen Auftrag wartet auf den Umbau des Z-Antriebs: Der Taster streute am 07.11. an derselben Stelle zwischen 1,36 und 5,72 mm, damit ist der Autofokus nicht verlässlich (`STAND.md`).
 
-**Nacharbeiten in der App:** Speichern auf dem Pi prüfen, Z-Sperre gegen Tastatur und Zustandswechsel, Abtasten außerhalb des erlaubten Bereichs vorher sperren.
+**Nachgearbeitet am selben Tag:**
+- Speichern auf dem Pi: gegen den echten Pi hinter der Schreibsperre wiederholt. Die App schickt `POST /api/projects` ab, ein Fehler in der App ist nicht zu finden. Am Termin kam der Aufruf nicht an, warum, ist offen.
+- Z-Sperre: Die App sperrt Z ohne gemessene Oberfläche, auch für die Tasten. Die Ablehnung um 09:03 passt zu einem Statusstand, der bis zu 1 s alt ist. Der Pi hat abgelehnt, wie er soll.
+- Abtasten: Die App sperrt den Knopf jetzt, wenn der Taster neben dem Laser die Fläche verlassen würde. Es gilt dieselbe Regel wie am Pi (10 mm Rand), geprüft in `test_maschine`.
