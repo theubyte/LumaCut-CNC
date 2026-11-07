@@ -7,6 +7,7 @@
 #include <QImage>
 #include <QtTest>
 #include <cmath>
+#include <map>
 
 using namespace lumacut;
 using namespace lumacut::pcb;
@@ -19,7 +20,7 @@ PerfBoard board5070() {
     qFatal("Vorlage 50 x 70 fehlt");
 }
 Placed part(const QString& id, const QString& ref, int c, int r, int rot = 0) { return {ref, id, ref, findPart(id)->value, {c, r}, rot}; }
-Wire wire(const QString& id, bool solder, std::vector<GridPt> pts) { return {id, solder, std::move(pts)}; }
+Wire wire(const QString& id, bool solder, std::vector<GridPt> pts) { return {id, solder, 0, {}, std::move(pts)}; }
 bool hasCheck(const std::vector<PerfCheck>& cs, const char* id, PerfTone tone) {
     for (const PerfCheck& c : cs) if (c.id == QLatin1String(id) && c.tone == tone) return true;
     return false;
@@ -50,7 +51,8 @@ private slots:
         NEAR(b.hole(1, 0).x - b.hole(0, 0).x, 2.54, 1e-12);
         QCOMPARE(PerfBoard::colName(0), QStringLiteral("A"));
         QCOMPARE(PerfBoard::colName(25), QStringLiteral("Z"));
-        QCOMPARE(PerfBoard::colName(26), QStringLiteral("AA"));
+        QCOMPARE(PerfBoard::colName(26), QStringLiteral("A'"));   // as printed on the board: A'..F' after Z
+        QCOMPARE(PerfBoard::colName(29), QStringLiteral("D'"));
         QCOMPARE(b.holeName({2, 4}), QStringLiteral("C5"));
         QCOMPARE(*b.holeAt({3.41 + 2.54 * 2 + 0.8, 5.79 + 2.54 * 4 - 0.8}), (GridPt{2, 4}));
         QVERIFY(!b.holeAt({0.5, 0.5}));
@@ -59,7 +61,7 @@ private slots:
     void templates() {
         const auto t = PerfBoard::templates();
         QCOMPARE(t.size(), size_t(5));
-        const int want[5][4] = {{20, 80, 6, 28}, {30, 70, 10, 24}, {40, 60, 14, 20}, {50, 70, 18, 24}, {70, 90, 24, 32}};
+        const int want[5][4] = {{20, 80, 6, 28}, {30, 70, 10, 24}, {40, 60, 14, 20}, {50, 70, 18, 24}, {70, 90, 26, 32}};
         for (size_t i = 0; i < t.size(); ++i) {
             const PerfBoard& b = t[i];
             QCOMPARE(int(b.width), want[i][0]); QCOMPARE(int(b.height), want[i][1]);
@@ -178,7 +180,7 @@ private slots:
         QVERIFY(bb->minX > 50 - d.board.hole(5, 10).x - 0.01 && bb->maxX < 50 - d.board.hole(2, 10).x + 0.01);
         NEAR(bb->minY, d.board.hole(2, 10).y + 1.27, 1e-6);
         // Pin-1 ring of the LED on the solder side, mirrored as well.
-        Polys solderOnly = buildMarks(PerfDesign{d.title, d.board, {part("led-3", "LED1", 2, 5)}, {}, {}, false, false, false}, MarkOptions{}).solder;
+        Polys solderOnly = buildMarks(PerfDesign{d.title, {}, d.board, {part("led-3", "LED1", 2, 5)}, {}, {}, false, false, false}, MarkOptions{}).solder;
         QVERIFY(!solderOnly.empty());
         const Box ring = *boundsOfPolys(solderOnly);
         NEAR((ring.minX + ring.maxX) / 2, d.board.hole(2, 5).x - 1.27, 0.01);
@@ -255,7 +257,7 @@ private slots:
         d.markValues = true;
         const PerfDesign e = perfFromJson(perfToJson(d));
         QCOMPARE(e.title, d.title);
-        QCOMPARE(e.board.cols, 24); QCOMPARE(e.board.rows, 32);
+        QCOMPARE(e.board.cols, 26); QCOMPARE(e.board.rows, 32);
         NEAR(e.board.padDia, 1.7, 1e-12);
         QCOMPARE(e.parts.size(), size_t(2));
         QCOMPARE(e.parts[0].rot, 3);
@@ -284,6 +286,110 @@ private slots:
         QCOMPARE(png.width(), 500);
         QCOMPARE(png.height(), 700);
         QVERIFY(!assemblySvg(d, true).contains("U1"));
+    }
+    // ---- Template Laser-Interface V2 against hardware/laser-interface-v2 (build_perfboard.py, lochraster_liste.txt) ----
+    void laserInterfaceTemplate() {
+        const PerfDesign d = loadPerfTemplate("laser-interface-v2");
+        const PerfBoard& b = d.board;
+        // 9 x 7 cm lying across, 32 columns A..Z, A'..F', 26 rows A..Z, row A at the top, column A left.
+        NEAR(b.width, 90, 1e-12); NEAR(b.height, 70, 1e-12);
+        QCOMPARE(b.cols, 32); QCOMPARE(b.rows, 26);
+        QVERIFY(b.rowLetters && !b.edgeRows);
+        QCOMPARE(*b.parseHole("D'E"), (GridPt{29, 4}));
+        QCOMPARE(*b.parseHole("A'T"), (GridPt{26, 19}));
+        QCOMPARE(b.holeName({29, 4}), QStringLiteral("D'E"));
+        QVERIFY(!b.parseHole("G'A"));   // column 32 does not exist
+        // Hole centres as in build_perfboard.py: X0 = (90 - 31 * 2.54) / 2 = 5.63, Y0 = (70 - 25 * 2.54) / 2 = 3.25,
+        // the same as the footprint positions in lochraster.kicad_pcb.
+        const auto at = [&](const char* h) { return b.hole(*b.parseHole(QString::fromUtf8(h))); };
+        NEAR(at("GS").x, 20.87, 1e-9);  NEAR(at("GS").y, 48.97, 1e-9);    // R1 pin 1
+        NEAR(at("D'E").x, 79.29, 1e-9); NEAR(at("D'E").y, 13.41, 1e-9);   // J1 pin 1 (GND)
+        NEAR(at("UQ").x, 56.43, 1e-9);  NEAR(at("UQ").y, 43.89, 1e-9);    // U2 pin 1 (ADJ)
+        NEAR(at("B'T").x, 74.21, 1e-9); NEAR(at("B'T").y, 51.51, 1e-9);   // LED1 cathode
+        NEAR(at("II").x, 25.95, 1e-9);  NEAR(at("II").y, 23.57, 1e-9);    // K1 COM
+        NEAR(at("GF").x, 20.87, 1e-9);  NEAR(at("GF").y, 15.95, 1e-9);    // D1 cathode
+        // Every pin on the hole of the list (library pin order; D1 and LED1 have pin 1 = anode here, KiCad pad 1 = cathode).
+        const std::map<QString, QStringList> want = {
+            {"C1", {"VO", "VQ"}}, {"C2", {"RS", "RU"}}, {"C3", {"XO", "XP"}}, {"D1", {"GJ", "GF"}}, {"F1", {"PC", "RC", "VC", "XC"}},
+            {"J1", {"D'E", "D'C"}}, {"J2", {"D'R", "D'P", "D'N"}}, {"J3", {"CR", "CT"}}, {"J4", {"CF", "CH"}},
+            {"K1", {"II", "JK", "OK", "OG", "JG"}}, {"LED1", {"A'T", "B'T"}}, {"R1", {"GS", "KS"}}, {"R4", {"YX", "YT"}},
+            {"R5", {"A'O", "A'S"}}, {"R6", {"TS", "US"}}, {"R7", {"UT", "UU"}}, {"U1", {"MS", "MT", "PT", "PS"}}, {"U2", {"UQ", "TQ", "SQ"}}};
+        QCOMPARE(d.parts.size(), want.size());
+        for (const Placed& p : d.parts) {
+            QStringList got;
+            for (const GridPt& g : pinsOf(p, *findPart(p.partId))) got << b.holeName(g);
+            QVERIFY2(want.count(p.ref), qPrintable(p.ref));
+            QCOMPARE(got, want.at(p.ref));
+        }
+        // Values as built on 04.11., not as planned.
+        std::map<QString, QString> value;
+        for (const Placed& p : d.parts) value[p.ref] = p.value;
+        QCOMPARE(value["R5"], QStringLiteral("5k6")); QCOMPARE(value["C1"], QStringLiteral("100n"));
+        QCOMPARE(value["C2"], QStringLiteral("1µ")); QCOMPARE(value["C3"], QStringLiteral("47µ"));
+        QCOMPARE(value["U2"], QStringLiteral("LM317T")); QCOMPARE(value["R6"], QStringLiteral("220")); QCOMPARE(value["R7"], QStringLiteral("680"));
+        QCOMPARE(value["K1"], QStringLiteral("NAIS JS1-24V"));
+        for (const Placed& p : d.parts) if (p.ref == "C3") QCOMPARE(p.partId, QStringLiteral("elko-254"));
+        QVERIFY(d.note.contains("Pins vor dem Verdrahten messen") && d.note.contains("Noch nicht lasern"));
+        // Wires: all on the solder side, four thick (24 V, GND), paths from the list.
+        QCOMPARE(d.wires.size(), size_t(23));
+        int thick = 0;
+        for (const Wire& w : d.wires) { QVERIFY(w.solder && !w.net.isEmpty()); thick += isThick(w); }
+        QCOMPARE(thick, 4);
+        QStringList pwm;
+        for (const Wire& w : d.wires) if (w.net == "PWM") for (const GridPt& g : w.pts) pwm << b.holeName(g);
+        QCOMPARE(pwm, (QStringList{"PT", "PX", "D'X", "D'R"}));
+        // Terminal names on the board.
+        QStringList texts;
+        for (const Label& l : d.labels) texts << l.text;
+        for (const char* t : {"J1 Netzteil", "J2 Laser", "J3 SKR BL_Touch", "J4 SKR FAN1", "PWM", "FAN+", "PA1"}) QVERIFY2(texts.contains(QString::fromUtf8(t)), t);
+        // No errors in the checks (hints are fine), the note is shown.
+        const auto cs = perfChecks(d, MarkOptions{}, Pt{185, 197.5});
+        for (const PerfCheck& c : cs) QVERIFY2(c.tone != PerfTone::Bad, qPrintable(c.text));
+        QVERIFY(hasCheck(cs, "note", PerfTone::Warn));
+        // Thick lines are marked double, pads stay free, the solder side mirrors about the vertical axis.
+        const PerfMarks m = buildMarks(d, MarkOptions{});
+        QVERIFY(m.solder.size() >= 23 + 4);
+        NEAR(polysArea(intersectPolys(strokeAll(m.solder, 0.15), allPads(d))), 0, 1e-6);
+        NEAR(polysArea(intersectPolys(strokeAll(m.component, 0.15), allPads(d))), 0, 1e-6);
+        std::vector<Layer> layers = Document::defaultLayers();
+        const auto els = perfElements(layers, m, d, 0, 1, {185, 197.5}, 10, 3000);
+        QCOMPARE(els.size(), size_t(2));
+        NEAR(els[1].transform.x, 140, 1e-9);
+        const Box sb = *boundsOfPolys(m.solder), eb = *boundsOf(els[1].paths);
+        NEAR(eb.minX, 90 - sb.maxX, 1e-6);
+        NEAR(eb.maxX, 90 - sb.minX, 1e-6);
+    }
+    void netsAndVersion() {
+        PerfDesign d;
+        d.board = board5070();
+        d.wires = {wire("a", true, {{0, 8}, {6, 8}}), wire("b", true, {{3, 6}, {3, 11}})};
+        d.wires[0].net = "GND"; d.wires[1].net = "GND";
+        QVERIFY(!hasCheck(perfChecks(d, MarkOptions{}), "short", PerfTone::Bad));   // one net may cross itself
+        d.wires[1].net = "+5V";
+        QVERIFY(hasCheck(perfChecks(d, MarkOptions{}), "short", PerfTone::Bad));
+        // A bridge collecting pads of its own net is fine; one that also touches another net is a short.
+        d.parts = {part("res-762", "R1", 2, 8)};   // pins C9 and F9, on wire a
+        d.wires = {wire("a", true, {{0, 8}, {6, 8}})};
+        d.wires[0].net = "GND";
+        QVERIFY(!hasCheck(perfChecks(d, MarkOptions{}), "over-pad", PerfTone::Bad));
+        d.wires.push_back(wire("b", true, {{5, 8}, {5, 12}}));
+        d.wires[1].net = "+5V";
+        QVERIFY(hasCheck(perfChecks(d, MarkOptions{}), "over-pad", PerfTone::Bad));
+        // Version 2 keeps width, net, note and row letters; version 1 files still read.
+        d.wires[0].widthMm = 1.4;
+        d.note = "Pins messen";
+        d.board.rowLetters = true;
+        const PerfDesign e = perfFromJson(perfToJson(d));
+        NEAR(e.wires[0].widthMm, 1.4, 1e-12);
+        QCOMPARE(e.wires[1].net, QStringLiteral("+5V"));
+        QCOMPARE(e.note, QStringLiteral("Pins messen"));
+        QVERIFY(e.board.rowLetters);
+        QVERIFY(perfToJson(d).contains("\"version\": 2"));
+        const PerfDesign old = perfFromJson("{\"format\":\"lumaraster\",\"version\":1,\"board\":{\"width\":50,\"height\":70,\"cols\":18,\"rows\":24},"
+                                            "\"wires\":[{\"id\":\"w\",\"side\":\"loet\",\"points\":[[1,1],[4,1]]}]}");
+        QCOMPARE(old.wires.size(), size_t(1));
+        QCOMPARE(old.wires[0].widthMm, 0.0);
+        QVERIFY(old.wires[0].net.isEmpty() && !old.board.rowLetters && old.note.isEmpty());
     }
 };
 

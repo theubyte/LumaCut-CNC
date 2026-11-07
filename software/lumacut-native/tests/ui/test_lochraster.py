@@ -158,7 +158,7 @@ def run(app):
     tmp = Path(tempfile.mkdtemp(prefix="lochraster-"))
     assert api(app, "save", str(tmp / "blinker.lumaraster"))
     saved = json.loads((tmp / "blinker.lumaraster").read_text(encoding="utf-8"))
-    assert saved["format"] == "lumaraster" and saved["version"] == 1 and len(saved["parts"]) == 3
+    assert saved["format"] == "lumaraster" and saved["version"] == 2 and len(saved["parts"]) == 3
     api(app, "newDesign", 1)
     assert info(app)["parts"] == 0
     assert api(app, "open", str(tmp / "blinker.lumaraster"))

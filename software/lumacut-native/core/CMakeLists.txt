@@ -51,4 +51,5 @@ target_link_libraries(lumacut_pcb PUBLIC lumacut_core lumacut_import lumacut_tex
 qt_add_resources(lumacut_pcb pcb_example PREFIX /pcb BASE pcb/beispiel FILES
   pcb/beispiel/beispiel.GTL pcb/beispiel/beispiel.GBL pcb/beispiel/beispiel.GTS pcb/beispiel/beispiel.GBS
   pcb/beispiel/beispiel.GTO pcb/beispiel/beispiel.GKO pcb/beispiel/beispiel.DRL)
-qt_add_resources(lumacut_pcb perfboard_parts PREFIX /pcb BASE pcb FILES pcb/perfboard_parts.json)
+qt_add_resources(lumacut_pcb perfboard_parts PREFIX /pcb BASE pcb FILES pcb/perfboard_parts.json
+  pcb/vorlagen/laser-interface-v2.lumaraster)

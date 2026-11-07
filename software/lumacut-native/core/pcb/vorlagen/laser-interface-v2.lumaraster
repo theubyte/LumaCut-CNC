@@ -1,0 +1,724 @@
+{
+  "format": "lumaraster",
+  "version": 2,
+  "title": "Laser-Interface V2",
+  "note": "Wie am 04.11. gebaut: Relais NAIS JS1-24V statt G5LE-1, andere Pinbelegung: Pins vor dem Verdrahten messen. R5 5,6 kΩ, C1 100 nF, C2 1 µF, C3 Elko 47 µF, U2 LM317T mit R6 220 Ω und R7 680 Ω. Noch nicht lasern: Z-Antrieb unzuverlässig, Materialtest auf Lötstopplack fehlt.",
+  "board": {
+    "name": "Laser-Interface V2, 90 × 70",
+    "width": 90,
+    "height": 70,
+    "pitch": 2.54,
+    "cols": 32,
+    "rows": 26,
+    "padDia": 1.7,
+    "holeDia": 1.0,
+    "mountDia": 2.0,
+    "mountInset": 2.0,
+    "edgeRows": false,
+    "rowLetters": true
+  },
+  "parts": [
+    {
+      "id": "c1",
+      "part": "cap-508",
+      "ref": "C1",
+      "value": "100n",
+      "col": 21,
+      "row": 14,
+      "rot": 1
+    },
+    {
+      "id": "c2",
+      "part": "cap-508",
+      "ref": "C2",
+      "value": "1µ",
+      "col": 17,
+      "row": 18,
+      "rot": 1
+    },
+    {
+      "id": "c3",
+      "part": "elko-254",
+      "ref": "C3",
+      "value": "47µ",
+      "col": 23,
+      "row": 14,
+      "rot": 1
+    },
+    {
+      "id": "d1",
+      "part": "diode",
+      "ref": "D1",
+      "value": "1N4007",
+      "col": 6,
+      "row": 9,
+      "rot": 3
+    },
+    {
+      "id": "f1",
+      "part": "fuse-5x20",
+      "ref": "F1",
+      "value": "2A T",
+      "col": 15,
+      "row": 2,
+      "rot": 0
+    },
+    {
+      "id": "j1",
+      "part": "term-2",
+      "ref": "J1",
+      "value": "Netzteil",
+      "col": 29,
+      "row": 4,
+      "rot": 3
+    },
+    {
+      "id": "j2",
+      "part": "term-3",
+      "ref": "J2",
+      "value": "Laser",
+      "col": 29,
+      "row": 17,
+      "rot": 3
+    },
+    {
+      "id": "j3",
+      "part": "term-2",
+      "ref": "J3",
+      "value": "SKR BL_Touch",
+      "col": 2,
+      "row": 17,
+      "rot": 1
+    },
+    {
+      "id": "j4",
+      "part": "term-2",
+      "ref": "J4",
+      "value": "SKR FAN1",
+      "col": 2,
+      "row": 5,
+      "rot": 1
+    },
+    {
+      "id": "k1",
+      "part": "relay-g5le",
+      "ref": "K1",
+      "value": "NAIS JS1-24V",
+      "col": 8,
+      "row": 8,
+      "rot": 0
+    },
+    {
+      "id": "led1",
+      "part": "led-3",
+      "ref": "LED1",
+      "value": "LED",
+      "col": 26,
+      "row": 19,
+      "rot": 0
+    },
+    {
+      "id": "r1",
+      "part": "res-1016",
+      "ref": "R1",
+      "value": "680",
+      "col": 6,
+      "row": 18,
+      "rot": 0
+    },
+    {
+      "id": "r4",
+      "part": "res-1016",
+      "ref": "R4",
+      "value": "2k2",
+      "col": 24,
+      "row": 23,
+      "rot": 3
+    },
+    {
+      "id": "r5",
+      "part": "res-1016",
+      "ref": "R5",
+      "value": "5k6",
+      "col": 26,
+      "row": 14,
+      "rot": 1
+    },
+    {
+      "id": "r6",
+      "part": "res-254",
+      "ref": "R6",
+      "value": "220",
+      "col": 19,
+      "row": 18,
+      "rot": 0
+    },
+    {
+      "id": "r7",
+      "part": "res-254",
+      "ref": "R7",
+      "value": "680",
+      "col": 20,
+      "row": 19,
+      "rot": 1
+    },
+    {
+      "id": "u1",
+      "part": "dip4",
+      "ref": "U1",
+      "value": "SFH618A/PC817",
+      "col": 12,
+      "row": 18,
+      "rot": 0
+    },
+    {
+      "id": "u2",
+      "part": "to220",
+      "ref": "U2",
+      "value": "LM317T",
+      "col": 20,
+      "row": 16,
+      "rot": 2
+    }
+  ],
+  "wires": [
+    {
+      "id": "w1",
+      "side": "loet",
+      "points": [
+        [
+          23,
+          2
+        ],
+        [
+          29,
+          2
+        ]
+      ],
+      "net": "+24V_IN",
+      "width": 1.4
+    },
+    {
+      "id": "w2",
+      "side": "loet",
+      "points": [
+        [
+          8,
+          8
+        ],
+        [
+          12,
+          8
+        ],
+        [
+          12,
+          3
+        ],
+        [
+          15,
+          3
+        ],
+        [
+          15,
+          2
+        ]
+      ],
+      "net": "+24V_F",
+      "width": 1.4
+    },
+    {
+      "id": "w3",
+      "side": "loet",
+      "points": [
+        [
+          14,
+          10
+        ],
+        [
+          14,
+          10
+        ],
+        [
+          14,
+          13
+        ],
+        [
+          29,
+          13
+        ]
+      ],
+      "net": "+24V_SW",
+      "width": 1.4
+    },
+    {
+      "id": "w4",
+      "side": "loet",
+      "points": [
+        [
+          29,
+          4
+        ],
+        [
+          30,
+          4
+        ],
+        [
+          30,
+          15
+        ],
+        [
+          29,
+          15
+        ]
+      ],
+      "net": "GND",
+      "width": 1.4
+    },
+    {
+      "id": "w5",
+      "side": "loet",
+      "points": [
+        [
+          29,
+          15
+        ],
+        [
+          28,
+          15
+        ],
+        [
+          28,
+          20
+        ],
+        [
+          17,
+          20
+        ]
+      ],
+      "net": "GND"
+    },
+    {
+      "id": "w6",
+      "side": "loet",
+      "points": [
+        [
+          18,
+          13
+        ],
+        [
+          18,
+          16
+        ]
+      ],
+      "net": "+24V_SW"
+    },
+    {
+      "id": "w7",
+      "side": "loet",
+      "points": [
+        [
+          21,
+          13
+        ],
+        [
+          21,
+          14
+        ]
+      ],
+      "net": "+24V_SW"
+    },
+    {
+      "id": "w8",
+      "side": "loet",
+      "points": [
+        [
+          23,
+          13
+        ],
+        [
+          23,
+          14
+        ]
+      ],
+      "net": "+24V_SW"
+    },
+    {
+      "id": "w9",
+      "side": "loet",
+      "points": [
+        [
+          26,
+          13
+        ],
+        [
+          26,
+          14
+        ]
+      ],
+      "net": "+24V_SW"
+    },
+    {
+      "id": "w10",
+      "side": "loet",
+      "points": [
+        [
+          21,
+          16
+        ],
+        [
+          21,
+          20
+        ]
+      ],
+      "net": "GND"
+    },
+    {
+      "id": "w11",
+      "side": "loet",
+      "points": [
+        [
+          23,
+          15
+        ],
+        [
+          23,
+          20
+        ]
+      ],
+      "net": "GND"
+    },
+    {
+      "id": "w12",
+      "side": "loet",
+      "points": [
+        [
+          24,
+          19
+        ],
+        [
+          24,
+          20
+        ]
+      ],
+      "net": "GND"
+    },
+    {
+      "id": "w13",
+      "side": "loet",
+      "points": [
+        [
+          27,
+          19
+        ],
+        [
+          27,
+          20
+        ]
+      ],
+      "net": "GND"
+    },
+    {
+      "id": "w14",
+      "side": "loet",
+      "points": [
+        [
+          26,
+          18
+        ],
+        [
+          26,
+          19
+        ]
+      ],
+      "net": "LED_A"
+    },
+    {
+      "id": "w15",
+      "side": "loet",
+      "points": [
+        [
+          19,
+          16
+        ],
+        [
+          19,
+          18
+        ],
+        [
+          15,
+          18
+        ]
+      ],
+      "net": "+5V"
+    },
+    {
+      "id": "w16",
+      "side": "loet",
+      "points": [
+        [
+          20,
+          16
+        ],
+        [
+          20,
+          19
+        ]
+      ],
+      "net": "ADJ"
+    },
+    {
+      "id": "w17",
+      "side": "loet",
+      "points": [
+        [
+          15,
+          19
+        ],
+        [
+          15,
+          23
+        ],
+        [
+          29,
+          23
+        ],
+        [
+          29,
+          17
+        ]
+      ],
+      "net": "PWM"
+    },
+    {
+      "id": "w18",
+      "side": "loet",
+      "points": [
+        [
+          2,
+          5
+        ],
+        [
+          8,
+          5
+        ],
+        [
+          9,
+          6
+        ]
+      ],
+      "net": "FAN+"
+    },
+    {
+      "id": "w19",
+      "side": "loet",
+      "points": [
+        [
+          2,
+          7
+        ],
+        [
+          4,
+          7
+        ],
+        [
+          4,
+          11
+        ],
+        [
+          8,
+          11
+        ],
+        [
+          9,
+          10
+        ]
+      ],
+      "net": "FAN-"
+    },
+    {
+      "id": "w20",
+      "side": "loet",
+      "points": [
+        [
+          6,
+          9
+        ],
+        [
+          6,
+          11
+        ]
+      ],
+      "net": "FAN-"
+    },
+    {
+      "id": "w21",
+      "side": "loet",
+      "points": [
+        [
+          2,
+          17
+        ],
+        [
+          4,
+          17
+        ],
+        [
+          4,
+          18
+        ],
+        [
+          6,
+          18
+        ]
+      ],
+      "net": "PA1"
+    },
+    {
+      "id": "w22",
+      "side": "loet",
+      "points": [
+        [
+          10,
+          18
+        ],
+        [
+          12,
+          18
+        ]
+      ],
+      "net": "OPTO_A"
+    },
+    {
+      "id": "w23",
+      "side": "loet",
+      "points": [
+        [
+          2,
+          19
+        ],
+        [
+          12,
+          19
+        ]
+      ],
+      "net": "GND_SKR"
+    }
+  ],
+  "labels": [
+    {
+      "id": "t1",
+      "text": "+24V",
+      "x": 87.61,
+      "y": 8.33,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t2",
+      "text": "GND",
+      "x": 87.61,
+      "y": 13.41,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t3",
+      "text": "+24V",
+      "x": 87.61,
+      "y": 36.27,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t4",
+      "text": "GND",
+      "x": 87.61,
+      "y": 41.35,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t5",
+      "text": "PWM",
+      "x": 87.61,
+      "y": 46.43,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t6",
+      "text": "FAN+",
+      "x": 2.39,
+      "y": 15.95,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t7",
+      "text": "FAN-",
+      "x": 2.39,
+      "y": 21.03,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t8",
+      "text": "PA1",
+      "x": 2.39,
+      "y": 46.43,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t9",
+      "text": "GND",
+      "x": 2.39,
+      "y": 51.51,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t10",
+      "text": "J1 Netzteil",
+      "x": 79.29,
+      "y": 1.2,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t11",
+      "text": "J4 SKR FAN1",
+      "x": 13.71,
+      "y": 1.2,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t12",
+      "text": "J3 SKR BL_Touch",
+      "x": 15.71,
+      "y": 68.8,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t13",
+      "text": "J2 Laser",
+      "x": 79.29,
+      "y": 68.8,
+      "height": 1.2,
+      "side": "bestueckung"
+    },
+    {
+      "id": "t14",
+      "text": "LumaCut Laser-IF V2",
+      "x": 45,
+      "y": 68.8,
+      "height": 1.2,
+      "side": "bestueckung"
+    }
+  ],
+  "holeNumbers": false,
+  "markRefs": true,
+  "markValues": true
+}

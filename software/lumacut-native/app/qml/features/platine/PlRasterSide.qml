@@ -43,6 +43,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: Theme.sp4
+            LcNote { objectName: "pf-note"; visible: (root.b.note || "").length > 0; tone: "warn"; text: root.b.note || ""; Layout.fillWidth: true }
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: Theme.sp2
@@ -157,6 +158,7 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: Theme.sp2
                 LcText { text: "Verbindung " + (root.sel.from || "") + " → " + (root.sel.to || ""); kind: "h3" }
+                LcText { visible: (root.sel.net || "").length > 0 || root.sel.thick === true; text: (root.sel.net ? "Netz " + root.sel.net : "") + (root.sel.thick ? (root.sel.net ? ", " : "") + "dicke Leitung: als Doppellinie markiert" : ""); kind: "smallMuted"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 LcSegmented {
                     Layout.fillWidth: true
                     options: [{ value: true, label: "Lötseite (Lötbrücke)" }, { value: false, label: "Bestückungsseite (Draht)" }]

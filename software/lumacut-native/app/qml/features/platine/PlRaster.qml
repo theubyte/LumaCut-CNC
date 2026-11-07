@@ -13,6 +13,7 @@ Item {
         objectName: "lochraster-api"
         function info(_) { return Perfboard.info() }
         function newDesign(i) { Perfboard.newDesign(i); return Perfboard.info() }
+        function openTemplate(id) { Perfboard.openTemplate(id); return Perfboard.info() }
         function place(a) { return Perfboard.placePart(a[0], a[1], a[2], a[3] || 0) }
         function wire(a) { Perfboard.addWire(a[0], a[1], a[2], a[3], a[4], a[5] || false); return Perfboard.info().wires }
         function label(a) { Perfboard.addLabel(a[0], a[1], a[2]); return Perfboard.info().labels }
@@ -71,6 +72,8 @@ Item {
         id: newMenu
         objectName: "pf-new-menu"
         items: Perfboard.templates.map(t => ({ label: "Neu: " + t.label + " mm", action: function() { Perfboard.newDesign(t.value) } }))
+               .concat([{ separator: true }])
+               .concat(Perfboard.designTemplates.map(t => ({ label: "Vorlage öffnen: " + t.name, icon: "circuit-board", action: function() { Perfboard.openTemplate(t.id) } })))
     }
 
     RowLayout {
@@ -146,7 +149,7 @@ Item {
                     anchors.leftMargin: Theme.sp3
                     anchors.rightMargin: Theme.sp3
                     spacing: Theme.sp2
-                    LcButton { id: newBtn; objectName: "pf-new"; size: "sm"; variant: "ghost"; icon: "plus"; tip: "Neuer Entwurf"; onClicked: newMenu.openAt(newBtn) }
+                    LcButton { id: newBtn; objectName: "pf-new"; size: "sm"; variant: "ghost"; icon: "plus"; tip: "Neuer Entwurf oder Vorlage öffnen"; onClicked: newMenu.openAt(newBtn) }
                     LcButton { objectName: "pf-open"; size: "sm"; variant: "ghost"; icon: "folder-open"; tip: "Öffnen (.lumaraster)"; onClicked: Perfboard.askOpen() }
                     LcButton { objectName: "pf-save"; size: "sm"; variant: "ghost"; icon: "save"; tip: "Speichern (.lumaraster)"; onClicked: Perfboard.askSave() }
                     LcButton { id: expBtn; objectName: "pf-export"; size: "sm"; variant: "ghost"; icon: "download"; tip: "Bestückungsplan und Stückliste exportieren"; onClicked: exportMenu.openAt(expBtn) }

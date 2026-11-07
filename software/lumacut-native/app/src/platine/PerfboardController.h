@@ -26,6 +26,7 @@ class PerfboardController : public QObject {
     Q_PROPERTY(QVariantMap board READ board NOTIFY changed)
     Q_PROPERTY(QVariantList templates READ templates CONSTANT)
     Q_PROPERTY(QVariantList library READ library CONSTANT)
+    Q_PROPERTY(QVariantList designTemplates READ designTemplates CONSTANT)
     Q_PROPERTY(QString tool READ tool WRITE setTool NOTIFY toolChanged)
     Q_PROPERTY(QString partId READ partId NOTIFY toolChanged)
     Q_PROPERTY(bool wireSolder READ wireSolder WRITE setWireSolder NOTIFY toolChanged)
@@ -59,6 +60,7 @@ public:
     QVariantMap board() const;
     QVariantList templates() const;
     QVariantList library() const;
+    QVariantList designTemplates() const;
     QString tool() const { return m_tool; }
     void setTool(const QString& t);
     QString partId() const { return m_partId; }
@@ -99,6 +101,8 @@ public:
 
     // ---- Editing (each one undo step) ----
     Q_INVOKABLE void newDesign(int templateIndex);
+    /** Opens a shipped design (e.g. laser-interface-v2) as a new, unsaved design. */
+    Q_INVOKABLE bool openTemplate(const QString& id);
     Q_INVOKABLE void setTemplate(int templateIndex);
     Q_INVOKABLE void setBoard(const QString& key, const QVariant& value);
     Q_INVOKABLE void pickPart(const QString& id);

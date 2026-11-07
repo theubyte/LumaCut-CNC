@@ -60,8 +60,9 @@ QVariantMap PerfboardController::board() const {
     const pcb::PerfBoard& b = m_design.board;
     return {{"name", b.name}, {"width", b.width}, {"height", b.height}, {"pitch", b.pitch}, {"cols", b.cols}, {"rows", b.rows},
             {"padDia", b.padDia}, {"holeDia", b.holeDia}, {"mountDia", b.mountDia}, {"mountInset", b.mountInset}, {"edgeRows", b.edgeRows},
+            {"rowLetters", b.rowLetters}, {"note", m_design.note},
             {"size", QStringLiteral("%1 × %2 mm").arg(de(b.width, 1), de(b.height, 1))},
-            {"grid", QStringLiteral("%1 × %2 Löcher, A–%3, 1–%4").arg(b.cols).arg(b.rows).arg(pcb::PerfBoard::colName(b.cols - 1)).arg(b.rows)}};
+            {"grid", QStringLiteral("%1 × %2 Löcher, A–%3, %4–%5").arg(b.cols).arg(b.rows).arg(pcb::PerfBoard::colName(b.cols - 1), b.rowName(0), b.rowName(b.rows - 1))}};
 }
 QVariantList PerfboardController::templates() const {
     QVariantList out;
@@ -69,6 +70,26 @@ QVariantList PerfboardController::templates() const {
     for (const pcb::PerfBoard& b : pcb::PerfBoard::templates())
         out << QVariantMap{{"value", i++}, {"label", QString(b.name).remove(QLatin1Char(' '))}, {"tip", QStringLiteral("%1 × %2 Löcher").arg(b.cols).arg(b.rows)}};
     return out;
+}
+QVariantList PerfboardController::designTemplates() const {
+    QVariantList out;
+    for (const pcb::PerfTemplate& t : pcb::perfTemplates()) out << QVariantMap{{"id", t.id}, {"name", t.name}};
+    return out;
+}
+bool PerfboardController::openTemplate(const QString& id) {
+    try {
+        PerfDesign d = pcb::loadPerfTemplate(id);
+        edit([&](PerfDesign& x) { x = std::move(d); });
+    } catch (const std::exception& e) {
+        Toast::instance()->show(QString::fromUtf8(e.what()), QStringLiteral("bad"));
+        return false;
+    }
+    m_path.clear();
+    m_selKind = 0;
+    m_assist = -1;
+    emit changed();
+    emit selectionChanged();
+    return true;
 }
 QVariantList PerfboardController::library() const {
     QVariantList out;
@@ -109,7 +130,7 @@ QVariantMap PerfboardController::selection() const {
     }
     if (m_selKind == 2 && m_selIndex >= 0 && m_selIndex < int(d.wires.size())) {
         const pcb::Wire& w = d.wires[size_t(m_selIndex)];
-        return {{"kind", "wire"}, {"index", m_selIndex}, {"solder", w.solder},
+        return {{"kind", "wire"}, {"index", m_selIndex}, {"solder", w.solder}, {"net", w.net}, {"thick", pcb::isThick(w)},
                 {"from", d.board.holeName(w.pts.front())}, {"to", d.board.holeName(w.pts.back())}};
     }
     if (m_selKind == 3 && m_selIndex >= 0 && m_selIndex < int(d.labels.size())) {
@@ -286,7 +307,7 @@ QString PerfboardController::placePart(const QString& id, int c, int r, int rot)
 }
 void PerfboardController::addWire(int c1, int r1, int c2, int r2, bool solder, bool verticalFirst) {
     if (c1 == c2 && r1 == r2) return;
-    edit([&](PerfDesign& d) { d.wires.push_back({newItemId(), solder, pcb::route({c1, r1}, {c2, r2}, verticalFirst)}); });
+    edit([&](PerfDesign& d) { d.wires.push_back({newItemId(), solder, 0, {}, pcb::route({c1, r1}, {c2, r2}, verticalFirst)}); });
     m_selKind = 2;
     m_selIndex = int(m_design.wires.size()) - 1;
     emit selectionChanged();

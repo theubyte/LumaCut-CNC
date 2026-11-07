@@ -109,9 +109,30 @@ Poly PerfBoard::padShape(GridPt g, double grow) const {
     return out;
 }
 QString PerfBoard::colName(int c) {
-    QString s;
-    for (int n = c + 1; n > 0; n = (n - 1) / 26) s.prepend(QChar(u'A' + (n - 1) % 26));
-    return s;
+    return QString(QChar(u'A' + c % 26)) + QString(c / 26, QLatin1Char(0x27));
+}
+std::optional<GridPt> PerfBoard::parseHole(const QString& name) const {
+    // Column: a letter and primes. Row: a letter and primes, or a number.
+    qsizetype i = 0;
+    const auto letter = [&](int& out) {
+        if (i >= name.size() || !name[i].isLetter()) return false;
+        out = name[i].toUpper().unicode() - u'A';
+        ++i;
+        while (i < name.size() && name[i] == QLatin1Char(0x27)) { out += 26; ++i; }
+        return out >= 0 && out < 26 * 8;
+    };
+    int c = 0, r = 0;
+    if (!letter(c)) return std::nullopt;
+    if (rowLetters) {
+        if (!letter(r) || i != name.size()) return std::nullopt;
+    } else {
+        bool ok = false;
+        r = name.mid(i).toInt(&ok) - 1;
+        if (!ok) return std::nullopt;
+    }
+    const GridPt g{c, r};
+    if (!contains(g)) return std::nullopt;
+    return g;
 }
 std::vector<PerfBoard> PerfBoard::templates() {
     const auto make = [](double w, double h, int c, int r) {
@@ -120,7 +141,8 @@ std::vector<PerfBoard> PerfBoard::templates() {
         b.width = w; b.height = h; b.cols = c; b.rows = r;
         return b;
     };
-    return {make(20, 80, 6, 28), make(30, 70, 10, 24), make(40, 60, 14, 20), make(50, 70, 18, 24), make(70, 90, 24, 32)};
+    // 70 × 90: 26 × 32 holes like the owner's board in hardware/laser-interface-v2 (build_perfboard.py, there lying across).
+    return {make(20, 80, 6, 28), make(30, 70, 10, 24), make(40, 60, 14, 20), make(50, 70, 18, 24), make(70, 90, 26, 32)};
 }
 
 // ---- Library ----
@@ -221,11 +243,11 @@ QString nextRef(const PerfDesign& d, const QString& prefix) {
 
 // ---- Markings ----
 
-Poly wireMarkLine(const Wire& w, const PerfBoard& b) {
+Poly wireMarkLine(const Wire& w, const PerfBoard& b, int side) {
     // Shifted half a pitch into the channel beside the pads: horizontal runs below their row, vertical runs right of their
     // column. There the lacquer is free of pads all along, the line stays whole.
     Poly out;
-    const double h = b.pitch / 2;
+    const double h = side * b.pitch / 2;
     for (size_t i = 0; i < w.pts.size(); ++i) {
         double dx = 0, dy = 0;
         const auto seg = [&](GridPt a, GridPt c) { if (a.r == c.r && a.c != c.c) dy = h; if (a.c == c.c && a.r != c.r) dx = h; };
@@ -299,6 +321,11 @@ PerfMarks buildMarks(const PerfDesign& d, const MarkOptions& o) {
     for (const Wire& w : d.wires) {
         Poly line = wireMarkLine(w, b);
         if (line.size() >= 2) (w.solder ? solder : comp).push_back(std::move(line));
+        // A thick line (24 V, GND) gets a second line in the channel on the other side: there is no room for a wider one.
+        if (isThick(w)) {
+            Poly other = wireMarkLine(w, b, -1);
+            if (other.size() >= 2) (w.solder ? solder : comp).push_back(std::move(other));
+        }
     }
     for (const Label& l : d.labels)
         for (Poly& q : textAt(l.text, l.at, l.heightMm, l.solder)) (l.solder ? solderText : compText).push_back(std::move(q));
@@ -350,6 +377,7 @@ std::vector<GridPt> wireHoles(const Wire& w) {
 std::vector<PerfCheck> perfChecks(const PerfDesign& d, const MarkOptions& o, std::optional<Pt> bedCentre) {
     const PerfBoard& b = d.board;
     std::vector<PerfCheck> out;
+    if (!d.note.trimmed().isEmpty()) out.push_back({"note", PerfTone::Warn, d.note.trimmed(), {}});
     out.push_back({"materialtest", PerfTone::Warn,
                    QStringLiteral("Zuerst Materialtest auf einem Reststück: Für Lötstopplack gibt es noch keine gemessenen Werte. Der Startwert ist ungeprüft."), {}});
     std::map<std::pair<int, int>, QStringList> holes;   // hole -> refs of pins on it
@@ -387,12 +415,17 @@ std::vector<PerfCheck> perfChecks(const PerfDesign& d, const MarkOptions& o, std
             if (w > 0.05 && h > 0.05)
                 out.push_back({"overlap", PerfTone::Warn, QStringLiteral("Die Körper von %1 und %2 überlappen.").arg(d.parts[i].ref, d.parts[j].ref), {d.parts[i].ref, d.parts[j].ref}});
         }
-    // Wires: crossing on the same side is a short; a solder bridge over a foreign pad joins it.
+    // Wires: crossing on the same side is a short; a solder bridge over a foreign pad joins it. With nets named, wires
+    // of one net may meet anywhere, and a bridge may collect pads that only its own net touches.
+    std::map<std::pair<int, int>, std::set<QString>> netsAt;
+    for (const Wire& w : d.wires)
+        if (!w.net.isEmpty()) for (const GridPt& g : wireHoles(w)) netsAt[{g.c, g.r}].insert(w.net);
     for (size_t i = 0; i < d.wires.size(); ++i) {
         const Wire& wi = d.wires[i];
         for (size_t j = i + 1; j < d.wires.size(); ++j) {
             const Wire& wj = d.wires[j];
             if (wi.solder != wj.solder) continue;
+            if (!wi.net.isEmpty() && wi.net == wj.net) continue;
             bool shorted = false;
             for (size_t a = 0; a + 1 < wi.pts.size() && !shorted; ++a)
                 for (size_t c = 0; c + 1 < wj.pts.size() && !shorted; ++c) {
@@ -410,6 +443,15 @@ std::vector<PerfCheck> perfChecks(const PerfDesign& d, const MarkOptions& o, std
         for (size_t k = 1; k + 1 < through.size(); ++k) {
             auto it = holes.find({through[k].c, through[k].r});
             if (it == holes.end()) continue;
+            if (!wi.net.isEmpty()) {
+                QStringList others;
+                for (const QString& n : netsAt[{through[k].c, through[k].r}]) if (n != wi.net) others << n;
+                if (others.isEmpty()) continue;   // the pad belongs to this net only: collected on purpose
+                out.push_back({"over-pad", wi.solder ? PerfTone::Bad : PerfTone::Warn,
+                               QStringLiteral("Die Verbindung %1 führt über das Pad %2 von %3, das auch an %4 hängt: Kurzschluss.")
+                                   .arg(wi.net, b.holeName(through[k]), it->second.join(QStringLiteral(", ")), others.join(QStringLiteral(", "))), it->second});
+                continue;
+            }
             out.push_back({"over-pad", wi.solder ? PerfTone::Bad : PerfTone::Warn,
                            QStringLiteral("Eine Verbindung führt über das Pad %1 von %2.").arg(b.holeName(through[k]), it->second.join(QStringLiteral(", "))), it->second});
         }
@@ -495,19 +537,24 @@ QByteArray bomCsv(const PerfDesign& d) {
 QByteArray perfToJson(const PerfDesign& d) {
     const PerfBoard& b = d.board;
     QJsonObject board{{"name", b.name}, {"width", b.width}, {"height", b.height}, {"pitch", b.pitch}, {"cols", b.cols}, {"rows", b.rows},
-                      {"padDia", b.padDia}, {"holeDia", b.holeDia}, {"mountDia", b.mountDia}, {"mountInset", b.mountInset}, {"edgeRows", b.edgeRows}};
+                      {"padDia", b.padDia}, {"holeDia", b.holeDia}, {"mountDia", b.mountDia}, {"mountInset", b.mountInset}, {"edgeRows", b.edgeRows},
+                      {"rowLetters", b.rowLetters}};
     QJsonArray parts, wires, labels;
     for (const Placed& p : d.parts)
         parts.append(QJsonObject{{"id", p.id}, {"part", p.partId}, {"ref", p.ref}, {"value", p.value}, {"col", p.at.c}, {"row", p.at.r}, {"rot", p.rot}});
     for (const Wire& w : d.wires) {
         QJsonArray pts;
         for (const GridPt& g : w.pts) pts.append(QJsonArray{g.c, g.r});
-        wires.append(QJsonObject{{"id", w.id}, {"side", w.solder ? "loet" : "bestueckung"}, {"points", pts}});
+        QJsonObject o{{"id", w.id}, {"side", w.solder ? "loet" : "bestueckung"}, {"points", pts}};
+        if (w.widthMm > 0) o.insert("width", w.widthMm);
+        if (!w.net.isEmpty()) o.insert("net", w.net);
+        wires.append(o);
     }
     for (const Label& l : d.labels)
         labels.append(QJsonObject{{"id", l.id}, {"text", l.text}, {"x", l.at.x}, {"y", l.at.y}, {"height", l.heightMm}, {"side", l.solder ? "loet" : "bestueckung"}});
-    const QJsonObject root{{"format", "lumaraster"}, {"version", 1}, {"title", d.title}, {"board", board}, {"parts", parts}, {"wires", wires},
-                           {"labels", labels}, {"holeNumbers", d.holeNumbers}, {"markRefs", d.markRefs}, {"markValues", d.markValues}};
+    QJsonObject root{{"format", "lumaraster"}, {"version", 2}, {"title", d.title}, {"board", board}, {"parts", parts}, {"wires", wires},
+                     {"labels", labels}, {"holeNumbers", d.holeNumbers}, {"markRefs", d.markRefs}, {"markValues", d.markValues}};
+    if (!d.note.isEmpty()) root.insert("note", d.note);
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
 }
 PerfDesign perfFromJson(const QByteArray& json) {
@@ -516,7 +563,7 @@ PerfDesign perfFromJson(const QByteArray& json) {
     if (err.error != QJsonParseError::NoError || !doc.isObject()) throw std::runtime_error("Die Datei ist kein Lochraster-Entwurf.");
     const QJsonObject o = doc.object();
     if (o.value("format").toString() != QLatin1String("lumaraster")) throw std::runtime_error("Die Datei ist kein Lochraster-Entwurf.");
-    if (o.value("version").toInt() > 1) throw std::runtime_error("Die Datei stammt aus einer neueren Version. Bitte die App aktualisieren.");
+    if (o.value("version").toInt() > 2) throw std::runtime_error("Die Datei stammt aus einer neueren Version. Bitte die App aktualisieren.");
     PerfDesign d;
     d.title = o.value("title").toString(d.title);
     const QJsonObject b = o.value("board").toObject();
@@ -532,6 +579,7 @@ PerfDesign perfFromJson(const QByteArray& json) {
     pb.mountDia = std::clamp(b.value("mountDia").toDouble(pb.mountDia), 0.0, 6.0);
     pb.mountInset = std::clamp(b.value("mountInset").toDouble(pb.mountInset), 0.0, 20.0);
     pb.edgeRows = b.value("edgeRows").toBool(pb.edgeRows);
+    pb.rowLetters = b.value("rowLetters").toBool(false);
     for (const QJsonValue& v : o.value("parts").toArray()) {
         const QJsonObject p = v.toObject();
         d.parts.push_back({p.value("id").toString(), p.value("part").toString(), p.value("ref").toString(), p.value("value").toString(),
@@ -539,7 +587,8 @@ PerfDesign perfFromJson(const QByteArray& json) {
     }
     for (const QJsonValue& v : o.value("wires").toArray()) {
         const QJsonObject w = v.toObject();
-        Wire x{w.value("id").toString(), w.value("side").toString() != QLatin1String("bestueckung"), {}};
+        Wire x{w.value("id").toString(), w.value("side").toString() != QLatin1String("bestueckung"),
+               std::clamp(w.value("width").toDouble(0), 0.0, 5.0), w.value("net").toString(), {}};
         for (const QJsonValue& p : w.value("points").toArray()) x.pts.push_back({p.toArray().at(0).toInt(), p.toArray().at(1).toInt()});
         if (x.pts.size() >= 2) d.wires.push_back(std::move(x));
     }
@@ -551,6 +600,7 @@ PerfDesign perfFromJson(const QByteArray& json) {
     d.holeNumbers = o.value("holeNumbers").toBool();
     d.markRefs = o.value("markRefs").toBool(true);
     d.markValues = o.value("markValues").toBool();
+    d.note = o.value("note").toString();
     return d;
 }
 
@@ -673,6 +723,19 @@ QByteArray assemblyPng(const PerfDesign& d, double pxPerMm, bool fromBelow) {
 }
 
 // ---- Into the project ----
+
+std::vector<PerfTemplate> perfTemplates() {
+    return {{QStringLiteral("laser-interface-v2"), QStringLiteral("Laser-Interface V2 (7 × 9 cm)"), QStringLiteral(":/pcb/vorlagen/laser-interface-v2.lumaraster")}};
+}
+PerfDesign loadPerfTemplate(const QString& id) {
+    for (const PerfTemplate& t : perfTemplates()) {
+        if (t.id != id) continue;
+        QFile f(t.file);
+        if (!f.open(QIODevice::ReadOnly)) throw std::runtime_error("Vorlage fehlt.");
+        return perfFromJson(f.readAll());
+    }
+    throw std::runtime_error("Unbekannte Vorlage.");
+}
 
 QString perfLayerName(bool solder) { return solder ? QStringLiteral("Lochraster Lötseite") : QStringLiteral("Lochraster Bestückungsseite"); }
 

@@ -30,6 +30,7 @@ struct PerfBoard {
     double padDia = 1.8, holeDia = 1.0;
     double mountDia = 2.0, mountInset = 2.0;   // corner mounting holes: diameter, centre distance from both edges
     bool edgeRows = true;                       // first and last row are oblong bus pads
+    bool rowLetters = false;                    // rows A, B, ... instead of 1, 2, ... (as printed on some boards)
 
     /** Centre of a hole; the grid sits in the middle of the board. */
     Pt hole(int c, int r) const;
@@ -44,8 +45,12 @@ struct PerfBoard {
     /** Outline of one pad (round, or oblong in an edge row). */
     Poly padShape(GridPt g, double grow = 0) const;
 
-    static QString colName(int c);                 // A..Z, AA, AB, ...
-    QString holeName(GridPt g) const { return colName(g.c) + QString::number(g.r + 1); }
+    /** A..Z, then A'..Z', A''.. as printed on the boards. */
+    static QString colName(int c);
+    QString rowName(int r) const { return rowLetters ? colName(r) : QString::number(r + 1); }
+    QString holeName(GridPt g) const { return colName(g.c) + rowName(g.r); }
+    /** The inverse of holeName ("D'E", "C5"); nullopt if it is not a hole of this board. */
+    std::optional<GridPt> parseHole(const QString& name) const;
     /** The owner's boards: 20×80, 30×70, 40×60, 50×70, 70×90. */
     static std::vector<PerfBoard> templates();
 };
@@ -75,6 +80,8 @@ struct Placed {
 struct Wire {
     QString id;
     bool solder = true;          // solder side: solder bridge; component side: wire bridge
+    double widthMm = 0;          // 0: normal; from 1 mm on a thick line (24 V, GND), marked as a double line
+    QString net;                 // optional: wires of the same net may cross and run over each other's pads
     std::vector<GridPt> pts;     // orthogonal polyline through hole centres
 };
 struct Label {
@@ -85,6 +92,7 @@ struct Label {
 };
 struct PerfDesign {
     QString title = QStringLiteral("Lochraster");
+    QString note;                // shown with the checks, e.g. "Pins vor dem Verdrahten messen"
     PerfBoard board;
     std::vector<Placed> parts;
     std::vector<Wire> wires;
@@ -115,7 +123,8 @@ inline double minTextHeight(double beamMm) { return std::max(1.0, 8 * beamMm); }
 Polys markRegion(const PerfDesign& d, const MarkOptions& o);
 Polys padKeepOut(const PerfDesign& d, double grow);
 /** The marked way of a connection: in the lacquer channel half a pitch beside the holes it joins. */
-Poly wireMarkLine(const Wire& w, const PerfBoard& b);
+Poly wireMarkLine(const Wire& w, const PerfBoard& b, int side = 1);
+inline bool isThick(const Wire& w) { return w.widthMm >= 1.0; }
 
 struct PerfMarks {
     Polys component;   // component side, board mm, as seen from the top
@@ -146,7 +155,7 @@ QByteArray bomCsv(const PerfDesign& d);
 /** Assembly order: parts sorted low to high, then by reference. Indices into d.parts. */
 std::vector<int> assemblyOrder(const PerfDesign& d);
 
-/** `.lumaraster`: {"format":"lumaraster","version":1,...}. */
+/** `.lumaraster`: {"format":"lumaraster","version":2,...}. Version 1 files (no wire width, net, note) still read. */
 QByteArray perfToJson(const PerfDesign& d);
 /** Throws std::runtime_error with a German sentence. */
 PerfDesign perfFromJson(const QByteArray& json);
@@ -157,6 +166,11 @@ QByteArray assemblyPng(const PerfDesign& d, double pxPerMm = 12, bool fromBelow 
 
 /** Layer names in the project. */
 QString perfLayerName(bool solder);
+/** Ready-made designs shipped as resources: {id, name}. */
+struct PerfTemplate { QString id, name, file; };
+std::vector<PerfTemplate> perfTemplates();
+/** Throws std::runtime_error if missing or broken. */
+PerfDesign loadPerfTemplate(const QString& id);
 /**
  * Elements for the project: component side on `plateTop`, solder side mirrored on `plateBottom`, the board centre at
  * `centre` (work mm). Creates or updates the two layers (process Markieren, line mode) in `layers`.
