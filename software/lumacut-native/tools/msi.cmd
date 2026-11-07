@@ -25,6 +25,8 @@ if /i "%~1"=="fenster" "%LUMACUT_PY%" tests\ui\run_all.py || goto fail
 cmake --build build --target package || goto fail
 if not exist dist mkdir dist
 copy /y build\LumaCut-Studio.msi "dist\LumaCut-Studio-%VERSION%.msi" >nul || goto fail
+rem Symbols stay here, not in the MSI: with them a crash dump from %LOCALAPPDATA%\LumaCut\crashes can be read.
+if exist build\LumaCutStudio.pdb copy /y build\LumaCutStudio.pdb "dist\LumaCutStudio-%VERSION%.pdb" >nul
 echo.
 echo MSI fertig: %CD%\dist\LumaCut-Studio-%VERSION%.msi
 popd

@@ -134,7 +134,10 @@ bool WindowChrome::nativeEventFilter(const QByteArray& type, void* message, qint
 #ifdef Q_OS_WIN
     if (type != "windows_generic_MSG" || !m_window || !m_hwnd) return false;
     MSG* msg = static_cast<MSG*>(message);
-    if (quintptr(msg->hwnd) != m_hwnd) return false;
+    if (!msg || quintptr(msg->hwnd) != m_hwnd) return false;
+    // Qt may pass no result slot for some messages (crash 07.11. on WM_NCMOUSEMOVE over the maximize button).
+    qintptr ignored = 0;
+    if (!result) result = &ignored;
     switch (msg->message) {
     case WM_NCCALCSIZE:
         // The client area is the whole window, title bar and frame included.
@@ -157,7 +160,6 @@ bool WindowChrome::nativeEventFilter(const QByteArray& type, void* message, qint
             TRACKMOUSEEVENT t{sizeof t, TME_LEAVE | TME_NONCLIENT, msg->hwnd, 0};
             TrackMouseEvent(&t);
             setMaxState(true, m_maxPressed);
-            *result = 0;
             return false;    // Windows still needs it for the snap layout flyout
         }
         setMaxState(false, false);

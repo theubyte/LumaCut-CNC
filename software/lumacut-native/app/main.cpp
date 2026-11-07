@@ -6,9 +6,11 @@
 #include <QSurfaceFormat>
 #include <QElapsedTimer>
 #include "src/Automation.h"
+#include "src/CrashDump.h"
 namespace lumacut { const char* version(); }
 
 int main(int argc, char* argv[]) {
+    installCrashDump();
     QElapsedTimer started;
     started.start();
     // Direct3D 11 through QRhi: broad driver support and compute shaders. LUMACUT_RHI overrides for tests (d3d12).

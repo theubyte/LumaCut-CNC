@@ -12,6 +12,10 @@ set(CMAKE_AUTOUIC OFF)
 set(CMAKE_AUTORCC ON)
 if(MSVC)
   add_compile_options(/W3 /utf-8 /permissive- /Zc:__cplusplus /MP)
+  # Symbols for crash dumps: /Z7 keeps them in the objects (parallel-safe), the linker writes one .pdb next to the exe.
+  # Same optimisation as before: /OPT:REF and /OPT:ICF stay on although /DEBUG would switch them off.
+  add_compile_options($<$<CONFIG:Release>:/Z7>)
+  add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
   # No exceptions off, no RTTI off: Qt and Clipper2 need neither removed, std::variant etc. stay simple.
 endif()
 
