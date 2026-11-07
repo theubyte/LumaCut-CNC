@@ -4,7 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-07
 
-- **Windows-App, Pi-Test vorbereitet (Zweig `windows-native`):** Lesender Vorab-Check `tools/pi_readonly_check.py` führt die App hinter einer Schreibsperre durch alle Ansichten des echten Pi, bestanden. Ablauf für den Termin vor Ort in `docs/WINDOWS_APP_PI_TEST.md`. Nichts wurde gefahren oder gelasert.
+- **Windows-App, Pi-Test vorbereitet (Zweig `windows-native`):** Lesender Vorab-Check `tools/pi_readonly_check.py` führt die App hinter einer Schreibsperre durch alle Ansichten des echten Pi, bestanden. Ablauf in `docs/WINDOWS_APP_PI_TEST.md`. Danach erster Lauf mit dem Besitzer vor Ort: Referenz, Jog, Parken, NOT-AUS und zwei Aufträge aus der App liefen, Gravur ohne Versatz. Offen: Speichern auf dem Pi kam nicht an, Abbruch im Auftrag erst nach dem Z-Umbau.
 - **Hin/Rück-Ausgleich überlebt den Neustart:** Die Prüfung beim Laden der `config.json` kannte das Tabellenformat nicht und setzte `scan_offset` beim Neustart auf aus, so geschehen beim Nacht-Update am 07.11. um 04:28. Die Prüfung kennt die Tabelle jetzt, die kalibrierten Werte sind wieder eingetragen.
 
 ## 2026-11-06

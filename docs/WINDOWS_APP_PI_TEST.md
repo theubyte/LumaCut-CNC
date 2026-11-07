@@ -79,3 +79,16 @@ Werkstatt, Platine, Arbeitsplatz-Scan und Platzieren per Kamera gibt es nativ no
 ## Protokoll
 
 Für jede Stufe festhalten: Datum, App-Version, Pi-Software, Firmware, bestanden oder Abweichung, Foto vom Ergebnis. Das Ergebnis kommt in `WINDOWS_APP.md`.
+
+## Ergebnis 07.11.2026 (Besitzer vor Ort, App 0.2.9, Pi `3963bd6b5`, Firmware 0.2.6)
+
+- **Stufe 0:** bestanden (siehe oben).
+- **Stufe 1:** laut Besitzer alles wie erwartet. **Abweichung:** Die Sicherung „Auf dem Pi speichern“ kam nie an. Im Pi-Log steht kein `POST /api/projects`, nur fünf Abrufe der Liste. Das gemeinsame Projekt ging dadurch von Revision 401 auf 413 ohne Sicherung. Ursache offen: Dialog ohne Bestätigen geschlossen oder Fehler in der App.
+- **Stufe 3 (vor Stufe 2 gelaufen):** Rahmen und zwei Aufträge aus der App, der große mit 67.874 Zeilen, Gravur 25 % / 3000 mm/min plus Kontur 100 % / 150 mm/min. Hin/Rück-Ausgleich und Höhenkorrektur griffen. Der Besitzer sieht keinen Versatz in Lage oder Form.
+  Danach meldete der Pi um 09:32 „X-Schalter offen an X0/Y0“ und um 09:36 einen USB-Abbruch zum SKR. Beides ist ungeklärt, auf der Gravur ist keine Folge zu sehen.
+  Der Pi lehnte um 09:03 eine Z-Fahrt ohne Werkstückhöhe ab, obwohl die App Z dann sperren sollte. Außerdem lehnte er einen Abtastpunkt außerhalb von X10..360/Y10..350 ab, den die App nicht vorher gesperrt hatte.
+- **Stufe 2:** laut Besitzer Referenz, Jog, Zu Position, Abbrechen, Parken, NOT-AUS, Quittieren und erneute Referenz wie erwartet. Den NOT-AUS kann das Pi-Log nicht belegen, denn es schreibt keine Aktionsnamen.
+- **Nebenbei:** Die App fragte den Auftrag „Materialtest Gravur“ ab, bevor er auf dem Pi lag.
+- **Abbruch im laufenden Auftrag:** noch nicht getestet. Er wartet auf den Umbau des Z-Antriebs: Der Taster streute am 07.11. an derselben Stelle zwischen 1,36 und 5,72 mm, damit ist der Autofokus nicht verlässlich (`STAND.md`).
+
+**Nacharbeiten in der App:** Speichern auf dem Pi prüfen, Z-Sperre gegen Tastatur und Zustandswechsel, Abtasten außerhalb des erlaubten Bereichs vorher sperren, Abruf von Aufträgen, die noch nicht da sind.
