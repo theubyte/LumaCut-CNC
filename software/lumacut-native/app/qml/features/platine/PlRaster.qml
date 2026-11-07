@@ -80,7 +80,8 @@ Item {
         // ---- Left: tools and parts ----
         Rectangle {
             Layout.fillHeight: true
-            Layout.preferredWidth: Theme.panel
+            // Narrow windows (1024 wide) keep the board usable: the side panels give way first.
+            Layout.preferredWidth: Math.round(Math.min(Theme.panel, Math.max(200, rr.width * 0.22)))
             color: Theme.surface
             Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.line }
             LcScroll {
@@ -133,9 +134,12 @@ Item {
             Layout.minimumWidth: 0
             spacing: 0
             Rectangle {
+                id: toolbar
+                readonly property bool compact: width < 560
                 Layout.fillWidth: true
                 Layout.preferredHeight: Theme.mvBar
                 color: Theme.surface
+                clip: true
                 Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.line }
                 RowLayout {
                     anchors.fill: parent
@@ -152,22 +156,17 @@ Item {
                     Rectangle { width: 1; height: 18; color: Theme.line }
                     LcSegmented {
                         objectName: "pf-tool"
-                        options: [{ value: "select", label: "Auswählen", icon: "mouse-pointer-2", tip: "V" }, { value: "wire", label: "Verbindung", icon: "spline", tip: "W" },
-                                  { value: "text", label: "Text", icon: "type", tip: "T" }]
+                        options: [{ value: "select", label: toolbar.compact ? "" : "Auswählen", icon: "mouse-pointer-2", tip: "Auswählen (V)" },
+                                  { value: "wire", label: toolbar.compact ? "" : "Verbindung", icon: "spline", tip: "Verbindung (W)" },
+                                  { value: "text", label: toolbar.compact ? "" : "Text", icon: "type", tip: "Text (T)" }]
                         value: Perfboard.tool === "part" ? "select" : Perfboard.tool
                         onActivated: (v) => { Perfboard.tool = v; stage.forceActiveFocus() }
-                    }
-                    LcSegmented {
-                        objectName: "pf-wireside"
-                        visible: Perfboard.tool === "wire"
-                        options: [{ value: true, label: "Lötseite", tip: "Lötbrücke unten" }, { value: false, label: "Bestückungsseite", tip: "Drahtbrücke oben" }]
-                        value: Perfboard.wireSolder
-                        onActivated: (v) => Perfboard.wireSolder = v
                     }
                     Item { Layout.fillWidth: true }
                 }
             }
             Rectangle {
+                id: canvas
                 objectName: "pf-canvas"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -221,14 +220,22 @@ Item {
                     Rectangle {
                         width: marksCheck.implicitWidth + 2 * Theme.sp3; height: Theme.hControl; radius: Theme.rMd
                         color: Theme.surface; border.width: 1; border.color: Theme.line
-                        LcCheck { id: marksCheck; objectName: "pf-marks"; anchors.centerIn: parent; text: "Laser-Markierung zeigen"; checked: Perfboard.showMarks; onToggled: (on) => Perfboard.showMarks = on }
+                        LcCheck { id: marksCheck; objectName: "pf-marks"; anchors.centerIn: parent; text: canvas.width < 520 ? "Markierung" : "Laser-Markierung zeigen"; checked: Perfboard.showMarks; onToggled: (on) => Perfboard.showMarks = on }
                     }
                 }
                 Row {
+                    id: topRow
                     x: Theme.sp4; y: Theme.sp4
                     spacing: Theme.sp2
-                    LcChip { objectName: "pf-view-chip"; icon: "eye"; text: Perfboard.viewBelow ? "Von unten: Lötseite, gespiegelt" : "Von oben: Bestückungsseite" }
-                    LcChip { text: Perfboard.board.size + ", " + Perfboard.board.grid }
+                    LcSegmented {
+                        objectName: "pf-wireside"
+                        visible: Perfboard.tool === "wire"
+                        options: [{ value: true, label: "Lötseite", tip: "Lötbrücke unten" }, { value: false, label: "Bestückungsseite", tip: "Drahtbrücke oben" }]
+                        value: Perfboard.wireSolder
+                        onActivated: (v) => Perfboard.wireSolder = v
+                    }
+                    LcChip { objectName: "pf-view-chip"; visible: canvas.width >= 760 && Perfboard.tool !== "wire"; icon: "eye"; text: Perfboard.viewBelow ? "Von unten: Lötseite, gespiegelt" : "Von oben: Bestückungsseite" }
+                    LcChip { visible: canvas.width >= 420 && Perfboard.tool !== "wire"; text: canvas.width >= 600 ? Perfboard.board.size + ", " + Perfboard.board.grid : Perfboard.board.size }
                 }
                 LcButton {
                     anchors.right: parent.right; anchors.top: parent.top; anchors.margins: Theme.sp4
@@ -239,22 +246,21 @@ Item {
                     objectName: "pf-hint"
                     visible: Perfboard.hint.length > 0
                     anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: Theme.sp4
+                    y: Theme.sp4 + Theme.hControl + Theme.sp2
                     width: Math.min(hintText.implicitWidth + 2 * Theme.sp3, parent.width - 2 * Theme.sp5)
-                    height: hintText.implicitHeight + 2 * Theme.sp1 + 2
+                    height: hintText.height + 2 * Theme.sp1 + 2
                     radius: Theme.rMd
                     color: Theme.surface
                     border.width: 1
                     border.color: Theme.line
-                    LcText { id: hintText; anchors.centerIn: parent; text: Perfboard.hint; kind: "smallMuted" }
+                    LcText { id: hintText; anchors.centerIn: parent; width: Math.min(implicitWidth, parent.parent.width - 2 * Theme.sp5 - 2 * Theme.sp3); text: Perfboard.hint; kind: "smallMuted"; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter }
                 }
             }
         }
 
         PlRasterSide {
             Layout.fillHeight: true
-            Layout.preferredWidth: Math.max(Theme.panel + Theme.sp6, Math.min(rr.width * 0.3, Theme.panelWide))
+            Layout.preferredWidth: Math.round(Math.max(300, Math.min(rr.width * 0.3, Theme.panelWide)))
         }
     }
 }

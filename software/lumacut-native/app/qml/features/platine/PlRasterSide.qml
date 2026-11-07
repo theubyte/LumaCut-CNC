@@ -25,8 +25,13 @@ Rectangle {
         LcTabs {
             objectName: "pf-tabs"
             Layout.fillWidth: true
-            tabs: [{ value: "board", label: "Platine" }, { value: "sel", label: root.sel.kind === "part" ? "Auswahl " + root.sel.ref : "Auswahl" },
-                   { value: "check", label: Perfboard.badCount > 0 ? "Prüfung (" + Perfboard.badCount + ")" : "Prüfung" }, { value: "bom", label: "Bestückung" }]
+            // Short labels when the panel is narrow, so all four tabs stay reachable. The labels are separate string
+            // properties: they notify only on a real change, so the tab strip is not rebuilt under the mouse on every edit.
+            readonly property bool narrow: width < 360
+            readonly property string selLabel: narrow ? "Teil" : root.sel.kind === "part" ? "Auswahl " + root.sel.ref : "Auswahl"
+            readonly property string checkLabel: (narrow ? "Prüfen" : "Prüfung") + (Perfboard.badCount > 0 ? " (" + Perfboard.badCount + ")" : "")
+            readonly property string bomLabel: narrow ? "Bestücken" : "Bestückung"
+            tabs: [{ value: "board", label: "Platine" }, { value: "sel", label: selLabel }, { value: "check", label: checkLabel }, { value: "bom", label: bomLabel }]
             value: root.tab
             onActivated: (v) => root.tab = v
         }
@@ -240,11 +245,13 @@ Rectangle {
                 LcText { objectName: "pf-assist-title"; text: "Schritt " + (Perfboard.assistStep + 1) + " von " + Perfboard.assistItems.length + ": " + (assistCard.it.ref || ""); kind: "h3" }
                 LcText { text: (assistCard.it.name || "") + (assistCard.it.value ? ", " + assistCard.it.value : "") + ", Pin 1 auf " + (assistCard.it.at || ""); wrapMode: Text.WordWrap; Layout.fillWidth: true }
                 LcText { visible: (assistCard.it.hint || "").length > 0; text: assistCard.it.hint || ""; kind: "smallMuted"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                RowLayout {
+                Flow {
+                    // Wraps in a narrow panel, so "Beenden" stays reachable.
+                    Layout.fillWidth: true
                     spacing: Theme.sp2
                     LcButton { icon: "arrow-left"; text: "Zurück"; enabled: Perfboard.assistStep > 0; onClicked: Perfboard.assistGo(Perfboard.assistStep - 1) }
                     LcButton { objectName: "pf-assist-next"; variant: "primary"; icon: "check"; text: "Eingelötet, weiter"; onClicked: { Perfboard.toggleDone(Perfboard.assistStep); Perfboard.assistGo(Perfboard.assistStep + 1) } }
-                    LcButton { variant: "ghost"; text: "Beenden"; onClicked: Perfboard.stopAssist() }
+                    LcButton { objectName: "pf-assist-stop"; variant: "ghost"; text: "Beenden"; onClicked: Perfboard.stopAssist() }
                 }
             }
             Repeater {

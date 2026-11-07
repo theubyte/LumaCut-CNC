@@ -45,12 +45,19 @@ def click_hole(app, c, r, mods=0):
     time.sleep(0.15)
 
 
+def tab(app, name):
+    """Opens a tab of the right panel and waits until it is really shown."""
+    app.click("pf-tabs-" + name)
+    app.wait(lambda: app.get("pf-tabs", "value") == name, timeout=10)
+    time.sleep(0.2)
+
+
 def check_ids(app):
     return [c["id"] for c in api(app, "checks")]
 
 
 def run(app):
-    app.call("resize", w=1440, h=900)
+    app.call("resize", w=1024, h=700)   # CI screen is small: everything must stay reachable
     app.click("nav-platine")
     app.wait(lambda: app.find("view-Platine")["w"] > 100)
     app.invoke("platine-api", "setMode", "lochraster")
@@ -120,7 +127,7 @@ def run(app):
     api(app, "undo")
     assert "text-small" not in check_ids(app)
 
-    app.click("pf-tabs-check")
+    tab(app, "check")
     idle(app)
     app.shot(SHOTS / "lochraster-1-oben-dunkel.png")
 
@@ -135,7 +142,7 @@ def run(app):
     app.click("pf-view-false")
 
     # Parts list and assistant: resistor first, LED last.
-    app.click("pf-tabs-bom")
+    tab(app, "bom")
     rows = api(app, "bom")
     assert [r["refs"] for r in rows] == ["R1", "U1", "LED1"], rows
     # Without a GPU (CI) the tab builds slowly: wait for the button and for each step instead of asserting at once.
@@ -166,7 +173,7 @@ def run(app):
     # Into the project: component side and mirrored solder side on two plates, process Markieren only.
     bx, by = api(app, "bed")
     assert abs(bx - 185) < 1e-9 and abs(by - 197.5) < 1e-9
-    app.click("pf-tabs-board")
+    tab(app, "board")
     app.click("pf-to-project")
     app.wait(lambda: shown(app, "view-Start"), timeout=10)
     app.wait(lambda: any(r.get("name") == "Lochraster Bestückungsseite" for r in app.invoke("start-api", "layers")), timeout=20)
@@ -195,7 +202,7 @@ def run(app):
     app.click("o-theme-seg-light")
     app.click("nav-platine")
     app.wait(lambda: shown(app, "pf-stage"))
-    app.click("pf-tabs-board")
+    tab(app, "board")
     time.sleep(0.6)
     app.shot(SHOTS / "lochraster-6-hell.png")
     app.click("pf-view-true")
@@ -204,11 +211,27 @@ def run(app):
     app.click("pf-view-false")
 
 
+def listening(port):
+    import socket
+    with socket.socket() as s:
+        s.settimeout(0.3)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def free_port(start):
+    """Simulator and automation port both free. An older app still on the automation port would otherwise answer
+    in place of the new one and vanish mid-test (ConnectionResetError at the first call)."""
+    for p in range(start, 8499):
+        if not listening(p) and not listening(p + 1000):
+            return p
+    raise RuntimeError("Kein freier Port zwischen %d und 8499" % start)
+
+
 def main():
     sys.path.insert(0, str(HERE))
     from driver import App
     exe = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("LUMACUT_EXE") or str(ROOT / "build-platine" / "LumaCutStudio.exe")
-    port = int(os.environ.get("LOCHRASTER_SIM_PORT", "8421"))
+    port = free_port(int(os.environ.get("LOCHRASTER_SIM_PORT", "8421")))
     sim = subprocess.Popen([sys.executable, str(ROOT / "tools" / "sim_pi.py"), "--port", str(port)],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env={**os.environ, "PYTHONUTF8": "1"})
     app = None

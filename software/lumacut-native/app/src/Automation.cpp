@@ -15,6 +15,8 @@
 #include <QSGRendererInterface>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <cstdio>
+#include <cstdlib>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QWheelEvent>
@@ -68,7 +70,12 @@ Automation::Automation(QQuickWindow* window, quint16 port, const QElapsedTimer& 
         ++m_frames;
     }, Qt::QueuedConnection);
     m_fpsTimer.start();
-    m_server->listen(QHostAddress::LocalHost, port);
+    if (!m_server->listen(QHostAddress::LocalHost, port)) {
+        // Port taken, usually by an older instance still shutting down: the driver would talk to that one and lose it.
+        // Leave at once with a clear exit code instead.
+        fprintf(stderr, "Automation-Port %u belegt: %s\n", unsigned(port), qPrintable(m_server->errorString()));
+        std::exit(3);
+    }
     connect(m_server, &QTcpServer::newConnection, this, [this] {
         while (auto* s = m_server->nextPendingConnection()) {
             connect(s, &QTcpSocket::disconnected, s, &QObject::deleteLater);
