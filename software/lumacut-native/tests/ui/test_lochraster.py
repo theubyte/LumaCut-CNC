@@ -138,11 +138,13 @@ def run(app):
     app.click("pf-tabs-bom")
     rows = api(app, "bom")
     assert [r["refs"] for r in rows] == ["R1", "U1", "LED1"], rows
+    # Without a GPU (CI) the tab builds slowly: wait for the button and for each step instead of asserting at once.
+    app.wait(lambda: app.get("pf-assist-start", "visible"), timeout=10)
     app.click("pf-assist-start")
-    assert info(app)["assist"] == 0
-    assert app.get("pf-assist-title", "text").endswith(": R1")
+    app.wait(lambda: info(app)["assist"] == 0, timeout=10)
+    app.wait(lambda: app.get("pf-assist-title", "text").endswith(": R1"), timeout=10)
     app.click("pf-assist-next")
-    assert info(app)["assist"] == 1
+    app.wait(lambda: info(app)["assist"] == 1, timeout=10)
     app.shot(SHOTS / "lochraster-3-bestueckung.png")
 
     # File round trip and exports.
