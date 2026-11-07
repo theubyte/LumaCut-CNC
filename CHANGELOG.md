@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-07
+
+- **Hin/Rück-Ausgleich überlebt den Neustart:** Die Prüfung beim Laden der `config.json` kannte das Tabellenformat nicht und setzte `scan_offset` beim Neustart auf aus, so geschehen beim Nacht-Update am 07.11. um 04:28. Die Prüfung kennt die Tabelle jetzt, die kalibrierten Werte sind wieder eingetragen.
+
 ## 2026-11-06
 
 - **Hin/Rück-Ausgleich für Rasterzeilen (am Brand geprüft, an):** Am Brand gemessen liegt eine Zeile in +X je nach Tempo 0,44 bis 0,64 mm neben einer Zeile in −X. Das ist etwa das Dreifache der Linienbreite und die Hauptursache der unscharfen, versetzten Kanten. `op=scan_offset` trägt die gemessene Tabelle ein, der Pi verschiebt dann jede Rasterzeile im automatischen Ablauf. Vektorlinien bleiben unberührt.

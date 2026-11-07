@@ -17,6 +17,21 @@ NO_SCAN_OFFSET = "LUMACUT-NO-SCAN-OFFSET"
 MAX_OFFSET_MM = 2.0
 
 
+def valid_table(value):
+    """The stored form, [[feed, offset], ...], as read back from config.json."""
+    if not isinstance(value, list) or not value:
+        return False
+    for pair in value:
+        if not isinstance(pair, list) or len(pair) != 2:
+            return False
+        for n in pair:
+            if isinstance(n, bool) or not isinstance(n, (int, float)) or n != n:
+                return False
+        if not 1 <= pair[0] <= 30000 or abs(pair[1]) > MAX_OFFSET_MM:
+            return False
+    return True
+
+
 def parse_table(text):
     """'1000:-0.44,3000:-0.64' -> [(feed, offset)] ascending. Empty text: None."""
     text = (text or "").strip()

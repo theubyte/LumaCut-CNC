@@ -1,4 +1,5 @@
 """Forward and backward raster rows land in the same place; nothing else moves (pi400/marlin/scan_offset.py)."""
+import json
 import pathlib
 import sys
 import types
@@ -18,6 +19,13 @@ BACK = ["G0 X112.500 Y50.100", "G1 X110.000 Y50.100 F3000 S0", "G1 X100.000 Y50.
 
 
 class ScanOffsetTests(unittest.TestCase):
+    def test_stored_table_survives_the_check_at_startup(self):
+        table = so.parse_table("1000:-0.44,1500:-0.495,3000:-0.59")
+        stored = json.loads(json.dumps([list(p) for p in table]))
+        self.assertTrue(so.valid_table(stored))
+        for bad in ([], [[1000.0]], [["a", 0.1]], [[0.0, 0.1]], [[1000.0, 5.0]], [[1000.0, float("nan")]], 3.0, [True, 1]):
+            self.assertFalse(so.valid_table(bad), bad)
+
     def test_both_directions_move_half_against_the_error(self):
         out, n = so.apply(FORWARD + BACK, TABLE, 370.0)
         self.assertEqual(n, 2)

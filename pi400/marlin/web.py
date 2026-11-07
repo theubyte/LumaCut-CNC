@@ -165,6 +165,8 @@ def valid_setting(key, value):
     if isinstance(default, dict):
         return (isinstance(value, dict) and all(v is None or _is_number(v) for v in value.values())
                 and all(v is None or _is_number(value.get(k)) for k, v in default.items()))
+    if key == "scan_offset":
+        return value is None or scan_offset.valid_table(value)
     if key == "user_origin":
         return value is None or (isinstance(value, list) and len(value) == 2 and all(map(_is_number, value)))
     return value is None or _is_number(value)
