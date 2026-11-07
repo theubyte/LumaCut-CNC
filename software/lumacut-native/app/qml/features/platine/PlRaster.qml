@@ -7,6 +7,15 @@ import LumaCut
 // All logic is in the Perfboard singleton. The laser only marks the solder mask here; nothing is cut.
 Item {
     id: rr
+    // Parts list filtered by the search line: every word must appear in name, value, category or id.
+    readonly property var libFound: {
+        const words = libSearch.text.toLowerCase().split(/\s+/).filter(w => w.length > 0)
+        if (words.length === 0) return Perfboard.library
+        return Perfboard.library.filter(p => {
+            const hay = (p.name + " " + p.value + " " + p.category + " " + p.id).toLowerCase()
+            return words.every(w => hay.indexOf(w) >= 0)
+        })
+    }
 
     // Test handle: what a native file dialog or a hand on the mouse is not needed for.
     Item {
@@ -93,8 +102,21 @@ Item {
                 spacing: Theme.sp3
                 LcText { text: "Bauteile"; kind: "section" }
                 LcText { text: "Bauteil wählen, dann auf das Loch für Pin 1 klicken. R dreht."; kind: "smallFaint"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                LcInput {
+                    id: libSearch
+                    objectName: "pf-lib-search"
+                    Layout.fillWidth: true
+                    icon: "search"
+                    placeholder: "Suchen, z. B. ESP, DIP, Elko"
+                    Keys.onEscapePressed: { text = ""; stage.forceActiveFocus() }
+                }
+                LcText {
+                    visible: rr.libFound.length === 0
+                    text: "Kein Bauteil gefunden."
+                    kind: "smallFaint"
+                }
                 Repeater {
-                    model: [...new Set(Perfboard.library.map(p => p.category))]
+                    model: [...new Set(rr.libFound.map(p => p.category))]
                     ColumnLayout {
                         id: cat
                         required property var modelData
@@ -102,7 +124,7 @@ Item {
                         spacing: 2
                         LcText { text: cat.modelData; kind: "smallMuted"; font.weight: Font.DemiBold; Layout.topMargin: Theme.sp1 }
                         Repeater {
-                            model: Perfboard.library.filter(p => p.category === cat.modelData)
+                            model: rr.libFound.filter(p => p.category === cat.modelData)
                             Rectangle {
                                 id: libRow
                                 required property var modelData

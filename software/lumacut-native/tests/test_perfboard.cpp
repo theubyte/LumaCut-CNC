@@ -8,6 +8,7 @@
 #include <QtTest>
 #include <cmath>
 #include <map>
+#include <set>
 
 using namespace lumacut;
 using namespace lumacut::pcb;
@@ -84,6 +85,38 @@ private slots:
         QCOMPARE(findPart("nano")->pins[15], (GridPt{6, 0}));   // 15.24 mm between the rows
         QCOMPARE(findPart("esp32")->pins[15], (GridPt{10, 0}));
         QVERIFY(findPart("elko-254")->polarized && !findPart("res-762")->polarized);
+    }
+    void libraryMore() {
+        const auto& lib = partLibrary();
+        QVERIFY(lib.size() >= 120);
+        int esp = 0;
+        for (const PartDef& d : lib) {
+            if (d.category == QLatin1String("ESP")) ++esp;
+            // No two pins on one hole, a name, a prefix, and the body (if given) sits on the pins.
+            std::set<std::pair<int, int>> seen;
+            for (const GridPt& g : d.pins) QVERIFY2(seen.insert({g.c, g.r}).second, qPrintable(d.id));
+            QVERIFY2(!d.name.isEmpty() && !d.prefix.isEmpty() && !d.category.isEmpty(), qPrintable(d.id));
+            double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+            bool rect = false;
+            for (const PartShape& s : d.body) if (s.kind == PartShape::Rect) {
+                rect = true;
+                x0 = std::min({x0, s.a, s.c}); x1 = std::max({x1, s.a, s.c}); y0 = std::min({y0, s.b, s.d}); y1 = std::max({y1, s.b, s.d});
+            }
+            if (rect)   // axial legs stick out of the body (1N5408: 1,5 pitch)
+                for (const GridPt& g : d.pins) QVERIFY2(g.c >= x0 - 1.6 && g.c <= x1 + 1.6 && g.r >= y0 - 1.6 && g.r <= y1 + 1.6, qPrintable(d.id));
+        }
+        QVERIFY(esp >= 10);
+        QCOMPARE(findPart("pico")->pins.size(), size_t(40));
+        QCOMPARE(findPart("pico")->pins[20], (GridPt{7, 19}));   // pin 21 bottom right, counted upwards like the board
+        QCOMPARE(findPart("esp32-38")->pins.size(), size_t(38));
+        QCOMPARE(findPart("esp32-s3")->pins[22], (GridPt{9, 0}));
+        QCOMPARE(findPart("nodemcu-v3")->pins[15], (GridPt{11, 0}));
+        QCOMPARE(findPart("d1-mini")->pins.size(), size_t(16));
+        QCOMPARE(findPart("esp01")->pins.size(), size_t(8));
+        QCOMPARE(findPart("idc-2x5")->pins[1], (GridPt{1, 0}));   // odd left, even right
+        QCOMPARE(findPart("hdr-2x20")->pins[39], (GridPt{1, 19}));
+        QCOMPARE(findPart("dip28n")->pins[14], (GridPt{3, 13}));
+        QCOMPARE(findPart("dip40")->pins.size(), size_t(40));
     }
     void rotateDip8() {
         const PartDef& dip = *findPart("dip8");

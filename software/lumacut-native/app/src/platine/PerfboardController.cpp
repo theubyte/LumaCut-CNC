@@ -94,7 +94,7 @@ bool PerfboardController::openTemplate(const QString& id) {
 QVariantList PerfboardController::library() const {
     QVariantList out;
     for (const pcb::PartDef& d : pcb::partLibrary())
-        out << QVariantMap{{"id", d.id}, {"name", d.name}, {"category", d.category}, {"prefix", d.prefix}, {"hint", d.hint}, {"pins", int(d.pins.size())}};
+        out << QVariantMap{{"id", d.id}, {"name", d.name}, {"category", d.category}, {"prefix", d.prefix}, {"value", d.value}, {"hint", d.hint}, {"pins", int(d.pins.size())}};
     return out;
 }
 void PerfboardController::setTool(const QString& t) {

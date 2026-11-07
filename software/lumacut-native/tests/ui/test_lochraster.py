@@ -72,6 +72,14 @@ def run(app):
     app.click("pf-template-3")
     assert info(app)["cols"] == 18 and abs(info(app)["width"] - 50) < 1e-9
 
+    # Search in the parts list: "esp 38" leaves the 38-pin board, Escape empties it again.
+    assert shown(app, "pf-lib-res-762") and shown(app, "pf-lib-esp32-38")
+    app.click("pf-lib-search"); app.text("esp 38"); time.sleep(0.3)
+    assert shown(app, "pf-lib-esp32-38") and not shown(app, "pf-lib-res-762") and not shown(app, "pf-lib-esp32")
+    app.key(K_ESC); time.sleep(0.3)
+    assert app.get("pf-lib-search", "text") == ""
+    assert shown(app, "pf-lib-res-762")
+
     # DIP-8 with the mouse: pick it in the library, click the hole for pin 1 (I7).
     app.click("pf-lib-dip8")
     assert info(app)["tool"] == "part"
