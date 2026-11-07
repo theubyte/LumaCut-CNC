@@ -31,6 +31,14 @@ tools/build.cmd Release
 python tests/ui/run_all.py
 ```
 
+Schnell eine MSI zum Ausprobieren, lokal in einem Schritt (inkrementell bauen, Kern-Tests, packen, etwa 1 Minute ohne Codeänderung):
+
+```bash
+tools/msi.cmd            # oder: tools/msi.cmd schnell (ohne Tests), tools/msi.cmd fenster (mit Fenster-Tests)
+```
+
+Die MSI liegt danach in `software/lumacut-native/dist/LumaCut-Studio-<version>.msi`. Die Version folgt in CI und lokal derselben Regel (`tools/version.ps1`: 0.<Monat seit 12/2025>.<Tag × 1440 + Minute>, UTC), so ersetzt jede neuere MSI die ältere. Die CI läuft nebenher weiter und prüft die installierte MSI auf einem leeren Rechner.
+
 `tests/ui/run_all.py` startet das echte Fenster gegen je einen frischen Simulator (`tools/sim_pi.py`, braucht flask und pyserial).
 Kern-Tests mit `ctest --test-dir build -LE speed`. Die CI (`.github/workflows/lumacut-native.yml`) baut die MSI, installiert sie,
 führt alles im installierten Programm aus, deinstalliert und legt eine Vorabversion `windows-<version>` an.

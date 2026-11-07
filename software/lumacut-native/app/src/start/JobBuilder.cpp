@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <algorithm>
 #include <exception>
+namespace lumacut { const char* version(); }
 
 using lumacut::Motion;
 using lumacut::Toolpath;
@@ -179,7 +180,7 @@ void JobBuilder::runBuild() {
             }, Qt::QueuedConnection);
             if (stale()) return;
             lumacut::WriteOptions opt;
-            opt.appVersion = LUMACUT_VERSION_STR;
+            opt.appVersion = lumacut::version();
             opt.motion = mo;
             auto b = std::make_shared<Built>();
             b->name = jobNameFrom(title);

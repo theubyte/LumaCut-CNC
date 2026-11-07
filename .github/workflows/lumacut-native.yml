@@ -40,7 +40,7 @@ jobs:
           Expand-Archive $env:RUNNER_TEMP\wix.zip -DestinationPath $env:RUNNER_TEMP\wix
           "WIX=$env:RUNNER_TEMP\wix\" | Out-File -Append $env:GITHUB_ENV
           "$env:RUNNER_TEMP\wix" | Out-File -Append $env:GITHUB_PATH
-          "VERSION=0.2.$env:GITHUB_RUN_NUMBER" | Out-File -Append $env:GITHUB_ENV
+          "VERSION=$(& ./tools/version.ps1)" | Out-File -Append $env:GITHUB_ENV   # same rule as tools/msi.cmd: 0.<month>.<day*1440+minute>
       - name: Bauen
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLUMACUT_VERSION=%VERSION%

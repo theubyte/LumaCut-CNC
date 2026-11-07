@@ -21,7 +21,8 @@ add_library(lumacut_core STATIC
 )
 target_include_directories(lumacut_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(lumacut_core PUBLIC Qt6::Core Qt6::Concurrent Clipper2)
-target_compile_definitions(lumacut_core PUBLIC LUMACUT_VERSION_STR="${PROJECT_VERSION}")
+# Only version.cpp sees the number, so a new version recompiles one file, not the whole program.
+set_source_files_properties(version.cpp PROPERTIES COMPILE_DEFINITIONS LUMACUT_VERSION_STR="${PROJECT_VERSION}")
 if(MSVC)
   # Fließkomma streng und ohne FMA-Zusammenziehen: die Golden-Dateien hängen am letzten Bit.
   target_compile_options(lumacut_core PRIVATE /fp:precise)

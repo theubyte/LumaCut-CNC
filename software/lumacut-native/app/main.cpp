@@ -6,6 +6,7 @@
 #include <QSurfaceFormat>
 #include <QElapsedTimer>
 #include "src/Automation.h"
+namespace lumacut { const char* version(); }
 
 int main(int argc, char* argv[]) {
     QElapsedTimer started;
@@ -20,7 +21,7 @@ int main(int argc, char* argv[]) {
     }
     QGuiApplication::setApplicationName("LumaCut Studio");
     QGuiApplication::setOrganizationName("LumaCut");
-    QGuiApplication::setApplicationVersion(LUMACUT_VERSION_STR);
+    QGuiApplication::setApplicationVersion(QString::fromLatin1(lumacut::version()));
     QGuiApplication app(argc, argv);
     QQuickStyle::setStyle("Basic");
 
