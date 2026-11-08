@@ -1,5 +1,8 @@
 #include "Workshop.h"
 #include <QColor>
+#include <QImage>
+#include <QPainter>
+#include <QPainterPath>
 #include <QSet>
 #include <algorithm>
 #include <cmath>
@@ -7,6 +10,7 @@
 #include "Materials.h"
 #include "Toast.h"
 #include "core/material.h"
+#include "core/papier/papier.h"
 #include "core/text.h"
 #include "doc/Document.h"
 #include "gpu/StageItem.h"
@@ -54,12 +58,12 @@ double perfX() { return AppSettings::instance()->value("perfboard/x", ws::PERFBO
 double perfY() { return AppSettings::instance()->value("perfboard/y", ws::PERFBOARD_Y).toDouble(); }
 lc::PolySet plainText(const QString& t, double h, bool bold) { return lc::textPaths(t, h / 0.7, bold); }
 
-/** The MDF 3 mm cut from the Pi's list, if there is one. Nothing is made up when it is missing. */
-std::optional<lc::Material> mdfCut() {
+/** A cut material from the Pi's list that matches; nothing is made up when it is missing. */
+std::optional<lc::Material> cutMaterial(const std::function<bool(const QString& lowerName)>& name, double thickness, double tol) {
     for (const QVariant& v : Materials::instance()->items()) {
         const QVariantMap m = v.toMap();
-        if (!m.value("name").toString().trimmed().toLower().startsWith(QLatin1String("mdf"))) continue;
-        if (std::abs(m.value("thickness_mm").toDouble() - 3) >= 0.01 || m.value("process").toString() != QLatin1String("Schneiden")) continue;
+        if (!name(m.value("name").toString().trimmed().toLower())) continue;
+        if (std::abs(m.value("thickness_mm").toDouble() - thickness) >= tol || m.value("process").toString() != QLatin1String("Schneiden")) continue;
         lc::Material x;
         x.id = m.value("id").toString();
         x.name = m.value("name").toString();
@@ -76,6 +80,15 @@ std::optional<lc::Material> mdfCut() {
         return x;
     }
     return std::nullopt;
+}
+/** The MDF 3 mm cut from the Pi's list, if there is one. */
+std::optional<lc::Material> mdfCut() {
+    return cutMaterial([](const QString& n) { return n.startsWith(QLatin1String("mdf")); }, 3, 0.01);
+}
+/** Paper, card or board of this thickness from the Pi's list. */
+std::optional<lc::Material> paperCut(double t) {
+    return cutMaterial([](const QString& n) { return n.contains(QLatin1String("papier")) || n.contains(QLatin1String("karton")) || n.contains(QLatin1String("pappe")); },
+                       t, std::max(0.03, t * 0.15));
 }
 }  // namespace
 
@@ -348,11 +361,27 @@ void Workshop::buildTools() {
 
     m_list.push_back({"foto", "Fotos", "Fotogravur", "Foto vorbereiten mit den Bildwerkzeugen im Motiv", "image", false,
         [] { return QVariantMap{}; }, [](const QVariantMap&) { return QVariantList{}; }, nullptr});
+
+    // Papier und Karton: eigene Ansicht, dieselbe Vorschau und dasselbe "Ins Projekt".
+    for (const lc::Papier::Template& t : lc::Papier::templates()) {
+        Tool x;
+        x.id = t.id; x.group = t.group; x.title = t.title; x.blurb = t.blurb; x.icon = t.icon;
+        x.defaults = t.defaults;
+        x.fields = t.fields;
+        x.run = [run = t.run, shaper](const QVariantMap& p) {
+            lc::Werkstatt::GenResult r = run(p, shaper);
+            if (const auto m = paperCut(lc::Papier::stockById(p.value("stock").toString()).t))
+                r.notes << QStringLiteral("Schneiden mit den Werten von %1 aus der Materialliste: %2 %, %3 mm/min.").arg(m->name, ws::num(m->powerPct), ws::num(m->speed, 0));
+            return r;
+        };
+        x.area = QStringLiteral("papier");
+        m_list.push_back(std::move(x));
+    }
 }
 
 QVariantList Workshop::tools() const {
     QVariantList out;
-    for (const Tool& t : m_list) out.push_back(QVariantMap{{"id", t.id}, {"group", t.group}, {"title", t.title}, {"blurb", t.blurb}, {"icon", t.icon}, {"compute", t.compute}});
+    for (const Tool& t : m_list) out.push_back(QVariantMap{{"id", t.id}, {"group", t.group}, {"title", t.title}, {"blurb", t.blurb}, {"icon", t.icon}, {"compute", t.compute}, {"area", t.area}});
     return out;
 }
 const Workshop::Tool* Workshop::current() const {
@@ -362,13 +391,14 @@ const Workshop::Tool* Workshop::current() const {
 QVariantMap Workshop::toolInfo() const {
     const Tool* t = current();
     if (!t) return {};
-    return {{"id", t->id}, {"group", t->group}, {"title", t->title}, {"blurb", t->blurb}, {"icon", t->icon}, {"compute", t->compute}};
+    return {{"id", t->id}, {"group", t->group}, {"title", t->title}, {"blurb", t->blurb}, {"icon", t->icon}, {"compute", t->compute}, {"area", t->area}};
 }
 void Workshop::setTool(const QString& id) {
     if (id == m_tool) return;
     const auto it = std::find_if(m_list.begin(), m_list.end(), [&](const Tool& t) { return t.id == id; });
     if (it == m_list.end()) return;
     m_tool = id;
+    AppSettings::instance()->setValue(it->area == QLatin1String("papier") ? QStringLiteral("papier/tool") : QStringLiteral("werkstatt/tool"), id);
     if (!m_params.contains(id)) m_params.insert(id, it->defaults());
     // The perfboard position is shared with the perfboard editor: always the stored one.
     if (perfboardTool(id)) { m_params[id].insert("x", perfX()); m_params[id].insert("y", perfY()); }
@@ -562,6 +592,19 @@ QVariantMap Workshop::apply() {
         if (m_tool == QLatin1String("halterung"))
             if (const auto mdf = mdfCut())
                 for (lc::Layer& l : layers) if (l.name == ws::HOLDER_LAYER) l = mdf->applyTo(l);
+        if (current() && current()->area == QLatin1String("papier")) {
+            // Paper: a measured material from the Pi's list wins over the suggestion; the cut layer runs last.
+            if (const auto m = paperCut(lc::Papier::stockById(params().value("stock").toString()).t))
+                for (lc::Layer& l : layers) if (l.name == lc::Papier::L_CUT) l = m->applyTo(l);
+            const auto cut = std::find_if(layers.begin(), layers.end(), [](const lc::Layer& l) { return l.name == lc::Papier::L_CUT; });
+            if (cut != layers.end()) {
+                const lc::Layer keep = *cut;
+                layers.erase(cut);
+                const auto after = std::find_if(layers.rbegin(), layers.rend(), [](const lc::Layer& l) {
+                    return l.name == lc::Papier::L_ENGRAVE || l.name == lc::Papier::L_MARK || l.name == lc::Papier::L_FOLD; });
+                layers.insert(after == layers.rend() ? layers.end() : after.base(), keep);
+            }
+        }
         const auto& existing = st.elements();
         const bool busy = std::any_of(existing.begin(), existing.end(), [&](const auto& e) { return e->plate == st.activePlate; });
         start = r.freshPlate && busy ? st.plateCount : st.activePlate;
@@ -585,4 +628,71 @@ QVariantMap Workshop::apply() {
     const QString where = plates > 1 ? QStringLiteral("ab Platte %1 auf %2 Platten").arg(start + 1).arg(plates) : QStringLiteral("auf Platte %1").arg(start + 1);
     Toast::instance()->show(QStringLiteral("%1 %2 ins Projekt gelegt, %3.").arg(count).arg(count == 1 ? QStringLiteral("Teil") : QStringLiteral("Teile"), where), QStringLiteral("ok"));
     return {{"ok", true}, {"count", count}, {"plates", plates}, {"firstPlate", start}};
+}
+
+QVariantMap Workshop::thumb(const QString& id) {
+    const QImage img = thumbImage(id);
+    int ink = 0;
+    for (int y = 0; y < img.height(); ++y) {
+        const QRgb* row = reinterpret_cast<const QRgb*>(img.constScanLine(y));
+        for (int x = 0; x < img.width(); ++x) ink += qAlpha(row[x]) > 40;
+    }
+    return {{"ok", !img.isNull() && ink > 0}, {"url", QStringLiteral("image://papier/") + id}, {"ink", ink}};
+}
+
+QImage Workshop::thumbImage(const QString& id) {
+    if (const auto f = m_thumbs.constFind(id); f != m_thumbs.constEnd()) return *f;
+    const Tool* t = nullptr;
+    for (const Tool& x : m_list) if (x.id == id) t = &x;
+    QImage out;
+    if (!t || !t->run) return out;
+    try {
+        QVariantMap p = t->defaults();
+        if (t->area == QLatin1String("papier")) p.insert("sheet", "bett");
+        const ws::GenResult r = t->run(p);
+        std::optional<lc::Box> box;
+        for (const auto& part : r.parts) {
+            if (part.plate != 0 || part.layer == lc::Papier::L_SHEET) continue;
+            if (const auto b = lc::boundsOf(part.paths)) box = box ? box->united(*b) : *b;
+        }
+        if (!box || box->width() <= 0 || box->height() <= 0) return out;
+        constexpr int W = 240, H = 160, M = 6;
+        const double k = std::min((W - 2 * M) / box->width(), (H - 2 * M) / box->height());
+        const double ox = (W - box->width() * k) / 2 - box->minX * k, oy = (H - box->height() * k) / 2 - box->minY * k;
+        QImage img(W, H, QImage::Format_ARGB32_Premultiplied);
+        img.fill(Qt::transparent);
+        QPainter g(&img);
+        g.setRenderHint(QPainter::Antialiasing);
+        const auto path = [&](const lc::PolySet& s, bool close) {
+            QPainterPath pp;
+            pp.setFillRule(Qt::OddEvenFill);
+            for (lc::PolyView v : s) {
+                if (v.size() < 2) continue;
+                pp.moveTo(v[0].x * k + ox, v[0].y * k + oy);
+                for (size_t i = 1; i < v.size(); ++i) pp.lineTo(v[i].x * k + ox, v[i].y * k + oy);
+                if (close) pp.closeSubpath();
+            }
+            return pp;
+        };
+        const auto stroke = [&](const lc::PolySet& s, QColor c, double w) { g.setPen(QPen(c, w)); g.setBrush(Qt::NoBrush); g.drawPath(path(s, false)); };
+        lc::PolySet cut, fold, mark, eng;
+        for (const auto& part : r.parts) {
+            if (part.plate != 0) continue;
+            if (part.layer == lc::Papier::L_FOLD) fold.append(part.paths);
+            else if (part.layer == lc::Papier::L_ENGRAVE || part.layer == QLatin1String("Gravieren")) eng.append(part.paths);
+            else if (part.layer == lc::Papier::L_MARK || part.layer == QLatin1String("Linie")) mark.append(part.paths);
+            else if (part.layer != lc::Papier::L_SHEET) cut.append(part.paths);
+        }
+        g.setPen(Qt::NoPen);
+        g.setBrush(QColor(0x3F, 0xBF, 0x9F, 170));
+        g.drawPath(path(eng, true));
+        stroke(mark, QColor(0x6C, 0xB6, 0xFF), 1.0);
+        stroke(fold, QColor(0xFF, 0xB4, 0x5C), 1.0);
+        stroke(cut, QColor(0xFF, 0x6B, 0x70), 1.3);
+        g.end();
+        out = img;
+    } catch (const std::exception&) {
+    }
+    m_thumbs.insert(id, out);
+    return out;
 }

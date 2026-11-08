@@ -18,6 +18,7 @@ add_library(lumacut_core STATIC
   vectorize.h vectorize.cpp
   boolean.h boolean.cpp
   werkstatt/qr.h werkstatt/qr.cpp werkstatt/generators.h werkstatt/generators.cpp
+  papier/papier.h papier/papier_net.h papier/papier_core.cpp papier/papier_vorlagen.cpp
   camera/scan.h camera/scan.cpp
 )
 target_include_directories(lumacut_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)

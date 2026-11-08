@@ -10,6 +10,9 @@ Item {
     readonly property var res: Workshop.result
     readonly property bool computes: !!info.compute
     readonly property bool narrow: width < 1100
+    // Paper templates have their own view; the workshop lists only its own tools.
+    readonly property var wsTools: Workshop.tools.filter((t) => t.area !== "papier")
+    Component.onCompleted: if (Workshop.toolInfo.area === "papier") Workshop.tool = AppSettings.value("werkstatt/tool", "materialtest") || "materialtest"
 
     // Test handles for the driver.
     function setTool(id) { Workshop.tool = id; return Workshop.tool }
@@ -44,12 +47,12 @@ Item {
                 spacing: 2
                 LcText { text: "Werkstatt"; kind: "h2"; Layout.leftMargin: Theme.sp2; Layout.topMargin: Theme.sp2; Layout.bottomMargin: Theme.sp1 }
                 Repeater {
-                    model: Workshop.tools
+                    model: root.wsTools
                     ColumnLayout {
                         id: entry
                         required property var modelData
                         required property int index
-                        readonly property bool firstOfGroup: index === 0 || Workshop.tools[index - 1].group !== modelData.group
+                        readonly property bool firstOfGroup: index === 0 || root.wsTools[index - 1].group !== modelData.group
                         readonly property bool on: Workshop.tool === modelData.id
                         Layout.fillWidth: true
                         spacing: 2

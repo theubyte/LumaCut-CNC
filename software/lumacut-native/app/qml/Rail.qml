@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import LumaCut
 
-// Same words and order as the Android app; Platine and Werkstatt are additions.
+// Same words and order as the Android app; Platine, Werkstatt and Papier are additions.
 Rectangle {
     id: rail
     property string current
@@ -18,6 +18,7 @@ Rectangle {
         Rectangle { Layout.alignment: Qt.AlignHCenter; Layout.preferredWidth: 36; Layout.preferredHeight: 1; Layout.topMargin: 6; Layout.bottomMargin: 6; color: Theme.line }
         NavButton { key: "platine"; label: "Platine"; icon: "circuit-board"; kbd: "4" }
         NavButton { key: "werkstatt"; label: "Werkstatt"; icon: "hammer"; kbd: "5" }
+        NavButton { key: "papier"; label: "Papier"; icon: "scissors"; kbd: "7" }
         NavButton { key: "maschine"; label: "Maschine"; icon: "cog"; kbd: "6" }
         Item { Layout.fillHeight: true }
         NavButton { key: "optionen"; label: "Optionen"; icon: "settings"; kbd: "" }

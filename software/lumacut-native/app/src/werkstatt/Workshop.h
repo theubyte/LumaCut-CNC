@@ -1,5 +1,6 @@
 #pragma once
 #include <QHash>
+#include <QImage>
 #include <QObject>
 #include <QPointer>
 #include <QQuickItem>
@@ -55,6 +56,11 @@ public:
     Q_INVOKABLE void fitPreview();
     /** Puts the current result into the project. {ok, count, plates, firstPlate} or {ok: false, error}. */
     Q_INVOKABLE QVariantMap apply();
+    /** Small picture of a tool with its default values: {ok, url ("image://papier/<id>"), ink (painted pixels)}.
+     *  Painted once with QPainter and shown as a texture; drawn as QtQuick Shapes, big outlines hung the graphics driver. */
+    Q_INVOKABLE QVariantMap thumb(const QString& id);
+    /** The picture itself (240 x 160, transparent background); empty when the tool has none. Cached. */
+    QImage thumbImage(const QString& id);
 
 signals:
     void toolChanged();
@@ -70,6 +76,7 @@ private:
         std::function<QVariantMap()> defaults;
         std::function<QVariantList(const QVariantMap&)> fields;
         std::function<lumacut::Werkstatt::GenResult(const QVariantMap&)> run;
+        QString area = QStringLiteral("werkstatt");   // "papier": shown in the paper view, not in the workshop list
     };
     void buildTools();
     const Tool* current() const;
@@ -88,4 +95,5 @@ private:
     QPointer<StageItem> m_stage;
     QTimer m_timer;
     QHash<QString, lumacut::PolySet> m_textCache;
+    QHash<QString, QImage> m_thumbs;
 };

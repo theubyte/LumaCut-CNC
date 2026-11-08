@@ -5,7 +5,7 @@
 #include <QMouseEvent>
 #include <QQuickWindow>
 
-static const QStringList kDests = {"material", "motiv", "start", "platine", "werkstatt", "maschine", "optionen"};
+static const QStringList kDests = {"material", "motiv", "start", "platine", "werkstatt", "maschine", "optionen", "papier"};
 
 Shell::Shell(QObject* parent) : QObject(parent) {
     const QString d = AppSettings::instance()->value("dest", "motiv").toString();
@@ -79,6 +79,7 @@ bool Shell::eventFilter(QObject* watched, QEvent* event) {
         if (mods == Qt::AltModifier && key == Qt::Key_S) { emit goKey(); return true; }
         return false;
     }
+    if (mods == Qt::ControlModifier && key == Qt::Key_7) { navigate(QStringLiteral("papier")); return true; }
     if (mods == Qt::ControlModifier && key >= Qt::Key_1 && key <= Qt::Key_6) {
         navigate(kDests[key - Qt::Key_1]);
         return true;

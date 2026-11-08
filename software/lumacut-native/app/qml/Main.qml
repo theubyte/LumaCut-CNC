@@ -64,7 +64,7 @@ ApplicationWindow {
                     Loader {
                         objectName: "mainView"
                         anchors.fill: parent
-                        source: "features/" + ({material:"Material",motiv:"Motiv",start:"Start",platine:"Platine",werkstatt:"Werkstatt",maschine:"Maschine",optionen:"Optionen"})[Shell.dest] + "View.qml"
+                        source: "features/" + ({material:"Material",motiv:"Motiv",start:"Start",platine:"Platine",werkstatt:"Werkstatt",papier:"Papier",maschine:"Maschine",optionen:"Optionen"})[Shell.dest] + "View.qml"
                     }
                 }
             }

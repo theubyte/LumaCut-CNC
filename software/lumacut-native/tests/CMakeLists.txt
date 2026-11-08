@@ -26,6 +26,7 @@ target_link_libraries(test_import_big PRIVATE lumacut_import)
 set_tests_properties(test_import_big PROPERTIES LABELS speed)
 
 lumacut_core_test(test_werkstatt)  # Werkstatt-Generatoren: QR, Box, Zahnrad, Materialtest, Seriennummern
+lumacut_core_test(test_papier)     # Papier und Karton: alle Vorlagen, Laschen, Falze, Bögen
 
 lumacut_core_test(test_pcb)            # Platine: Gerber, Excellon, Lagen, Isolation, Spiegeln, Ins Projekt
 target_link_libraries(test_pcb PRIVATE lumacut_pcb)

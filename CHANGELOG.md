@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-08
+
+- **Windows-App, Papier und Karton (Zweig `windows-native`):** Neuer Bereich „Papier“ mit 43 Vorlagen für eigene Verpackungen, Umschläge, Karten mit Pop-up, Deko und Körper. Schneiden, Falzen (geritzt, perforiert oder angezeichnet), Markieren und Gravieren auf eigenen Ebenen, Laschen automatisch, Verteilung auf Papierbögen. Laserwerte sind Vorschläge; noch nichts gelasert.
+
 ## 2026-11-07
 
 - **Windows-App, Lochraster-Bauteile (Zweig `windows-native`):** Bibliothek von 38 auf 129 Bauteile erweitert, darunter zehn ESP-Boards (ESP32 30/38 Pins, S3, C3 Super Mini, XIAO, CAM, NodeMCU V2/V3, D1 mini, ESP-01), Pico, Blue Pill, Pro Mini, Sensor- und Funkmodule, Wannenstecker, JST-XH und Spannungswandler. Suchzeile über der Liste. Modulmaße am eigenen Board prüfen, der Hinweis am Bauteil sagt wie.

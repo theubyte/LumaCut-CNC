@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QLoggingCategory>
 #include <QQmlApplicationEngine>
+#include "PaperThumbs.h"
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSurfaceFormat>
@@ -29,6 +30,7 @@ int main(int argc, char* argv[]) {
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app, [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
+    engine.addImageProvider(QStringLiteral("papier"), new PaperThumbs);
     engine.loadFromModule("LumaCut", "Main");
     if (engine.rootObjects().isEmpty()) return 1;
     auto* window = qobject_cast<QQuickWindow*>(engine.rootObjects().first());
