@@ -278,8 +278,10 @@ class ImageSettingsDialog(QDialog):
         # oder alle übereinander – vorher war nur der erste zu sehen.
         self.preview_pass = QComboBox()
         self.preview_pass.setObjectName("image_preview_pass")
-        self.preview_pass.setToolTip("Vorschau eines Durchgangs mit seinem Scan-Winkel oder "
+        self.preview_pass.setToolTip("Vorschau eines Durchgangs mit seinem Scan-Winkel, "
                                      "aller Durchgänge übereinander (dunkelster Punkt je Stelle) "
+                                     "oder der Brennsumme (Leistung aller Durchgänge je Punkt "
+                                     "addiert – mehrfach gelaserte Punkte werden dunkler) "
                                      "– nur bei Winkel-Schritt und mehreren Durchgängen")
         self.preview_pass_row = QWidget()
         pass_row = QHBoxLayout(self.preview_pass_row)
@@ -397,6 +399,7 @@ class ImageSettingsDialog(QDialog):
         self._schedule_preview()
 
     ALL_PASSES = -1
+    ALL_PASSES_SUM = -2
 
     def _update_pass_choices(self) -> None:
         """Auswahl „Vorschau zeigt“ an Durchgänge / Winkel anpassen; die Wahl
@@ -410,6 +413,8 @@ class ImageSettingsDialog(QDialog):
             angles = pass_angles(st)
             choices = [(k, f"{k + 1}. Durchgang ({a:g}°)") for k, a in enumerate(angles)]
             choices.append((self.ALL_PASSES, f"Alle {len(angles)} Durchgänge übereinander"))
+            choices.append((self.ALL_PASSES_SUM,
+                            f"Alle {len(angles)} Durchgänge aufaddiert (Brennsumme)"))
         if choices != self._pass_choices:
             current = self.preview_pass.currentData()
             self.preview_pass.blockSignals(True)
@@ -423,7 +428,8 @@ class ImageSettingsDialog(QDialog):
         self.preview_pass_row.setVisible(multi)
 
     def preview_pass_index(self) -> int:
-        """Gewählter Durchgang der Vorschau (0 = erster, ``ALL_PASSES`` = alle)."""
+        """Gewählter Durchgang der Vorschau (0 = erster, ``ALL_PASSES`` = alle,
+        ``ALL_PASSES_SUM`` = Brennsumme aller)."""
         if not self._pass_choices:
             return 0
         data = self.preview_pass.currentData()
@@ -444,9 +450,10 @@ class ImageSettingsDialog(QDialog):
         self.update_histogram(st)
         sel = self.preview_pass_index()
         try:
-            if self._shape is not None and sel == self.ALL_PASSES:
+            if self._shape is not None and sel in (self.ALL_PASSES, self.ALL_PASSES_SUM):
                 pv = preview_shape_passes(self._shape, st,
-                                          rendered_for=lambda k: self._render_cached(st, k))
+                                          rendered_for=lambda k: self._render_cached(st, k),
+                                          burn_sum=sel == self.ALL_PASSES_SUM)
             elif self._shape is not None:
                 pv = preview_shape(self._shape, st, rendered=self._render_cached(st, sel),
                                    pass_index=sel)
@@ -476,6 +483,11 @@ class ImageSettingsDialog(QDialog):
             elif sel == self.ALL_PASSES:
                 text += (f" (Vorschau: alle {st.passes} Durchgänge übereinander, "
                          f"Anteil je Durchgang gemittelt)")
+            elif sel == self.ALL_PASSES_SUM:
+                multi = pv.multi_share or 0.0
+                text += (f" (Vorschau: Brennsumme aller {st.passes} Durchgänge – Schwarz = "
+                         f"alle mit voller Leistung; {multi * 100:.0f} % der gelaserten "
+                         f"Punkte mehrfach gelasert, Anteil je Durchgang gemittelt)")
             else:
                 text += f" (Vorschau: {sel + 1}. Durchgang, {pass_angle(st, sel):g}°)"
         self.preview_label.setText(text)
