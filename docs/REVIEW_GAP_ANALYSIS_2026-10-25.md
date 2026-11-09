@@ -4470,3 +4470,167 @@ Still open:
   PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
   codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
   incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), rebuilt exe).
+
+## 54. Status update 2026-11-09 (review round 47)
+
+Done this round (image scan angle – burn sum of all passes in the preview; Canvas / Machine /
+Scan Probe / Materials untouched):
+
+- Closed since §53 by others: none – main had no new commits since `1d8bf0c`.
+- Gap picked from the §53 „Still open“ list (Image / scan angle): **the all-passes preview
+  shows the darkest dot per position – the extra burn of dots hit by several passes is not
+  added up**. With an angle increment (cross raster 0° / 90°, 30° / 45° steps against the
+  wood grain) the dots where the passes cross get the power of every pass; in greyscale a
+  50 % dot burnt twice ends up as dark as one full-power dot. The round-45 overlay showed
+  such a raster like a single pass, so the user could not see the over-burnt crossings /
+  the darker tone before sending. LightBurn's preview of a multi-pass image shades by the
+  number of passes; xTool Creative Space has no angle increment. Chosen before the variable
+  text value drawn in the object itself (canvas rendering – Canvas), the boolean / angle
+  increment material-test axes (less calibration value than the image preview the user
+  sees for every multi-pass engraving) and the per-axis acceleration model (needs SKR
+  measurements); purely preview-side, so the G-code is unchanged.
+- **Engine** (`lumacut_import/image_preview.py`): new `sum_previews(previews, counts)` –
+  per dot the darkness (`255 - value`) of every pass is added and divided by the number of
+  passes (black = every pass at full power, one of N passes at full power = 1/N grey);
+  rotated rasters of different size are centred like `overlay_previews()`; `counts` weighs
+  an angle that repeats (0° / 90° / 0° → `[2, 1]`), so each angle is still rendered once.
+  `Preview` gets an optional `multi_share` (share of the lasered dots hit by more than one
+  pass; `None` for single passes and the overlay), `burn_share` is the pass-weighted mean.
+  `preview_shape_passes(…, burn_sum=True)` returns the sum; the default (`False`) keeps the
+  round-45 darkest-dot overlay byte-identical.
+- **Dialog** („Bildeinstellungen“, `lumacut_import/qt.py`): „Vorschau zeigt“ gets a last
+  entry „Alle N Durchgänge aufaddiert (Brennsumme)“ (`ALL_PASSES_SUM`, preview-only like the
+  other entries, shown under the same rule – image object, more than one pass, angle
+  increment); it reuses the per-angle render cache. The label says „Brennsumme aller N
+  Durchgänge – Schwarz = alle mit voller Leistung; X % der gelaserten Punkte mehrfach
+  gelasert“; the tooltip explains the three views.
+
+Tests:
+
+- New `tests/test_image_burn_sum_preview.py` (6 tests): sum arithmetic (full / half power,
+  one of two passes = half grey, rounding, weighted burn share, multi share); repeated-angle
+  counts, centring of different sizes, single preview, invalid counts; threshold cross raster
+  (never darker than the overlay, lasered exactly where it lasers, crossings black / single
+  hits half grey, overlay unchanged without `multi_share`); a 0° / 90° / 0° greyscale image
+  renders each angle once and counts 0° twice; a mid-grey greyscale image sums to the
+  mean darkness; dialog entry label / position, the shown sum equals the engine, label with
+  the multi share, render cache reused (also when switching to the overlay), choice kept on
+  a new increment, preview-only, hidden for one pass.
+- `tests/test_image_scan_angle_pass_preview.py`: the choice list now ends with the new entry
+  (labels and the count after reducing the passes updated).
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **2329 passed, 3 skipped**, 0 failed (11 min; 2323 + 6 new), first run green.
+
+Output change for old files: none – the burn sum is a dialog-only preview; G-code, project
+files and `ImageSettings` are unchanged. Checked against `1d8bf0c`: single-pass previews of
+every pass, the darkest-dot overlay (pixels and burn share) and the G-code of floyd /
+greyscale / threshold / halftone images with and without angle increment are byte-identical.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Material test: several cells of an interval test share the same layer name (power / speed are
+  equal) – the canvas labels tell them apart. Image cells: the G-code follows each cell's image
+  settings, so editing a cell *layer's* power / speed in the layer panel does not change an image
+  cell (the image settings dialog does). Image-cell options cover every image setting
+  (mode parameters, adjustments, sharpen, levels, tone curve – presets only in the test
+  dialog, a custom curve only via a reopened spec –, dot width, scan angle / increment,
+  bidirectional, overscan); since round 43 threshold, halftone cells / angle, brightness,
+  contrast, gamma, sharpen and scan angle, since round 46 also black / white point, dot
+  width and overscan can be swept on an axis. Not on an axis: 3D levels / Z step, angle
+  increment, the tone curve and the booleans (negative, bidirectional); one shared test
+  image per grid.
+- Material library (Materials): `lumacut_materials.testgrid.TEST_CELL_RE` is anchored
+  (`…F<speed>$`), so cell layers of a grid with an image-option axis (`Test P50% F1200
+  Gamma 1.2`, `… Schwarzpunkt 32`, `… Punktbreitenkorrektur 0.05mm`) are not offered by „Preset aus Testzelle“; relaxing it to accept a trailing
+  ` <Option> <Wert>` suffix (and keeping the swept image value in the preset notes) is up to
+  the Materials agent. Grids without an image axis keep the classic names.
+- Image: the preview shows one pixel per dot and does not model the material's real dot size /
+  beam spread (needs the material library – Materials); mode and adjustment presets (incl. the
+  curve presets) are not linked to the material library (Materials); no per-channel / colour
+  curves (images are grey only). Scan angle: the dialog previews each pass, all passes overlaid
+  (darkest dot per position) or, since round 47, their burn sum (power per dot added up and
+  divided by the passes – a linear model: real wood / card darkens non-linearly with the
+  absorbed energy, which needs the material library – Materials); the time estimate plans oblique rows like X
+  rows (acceleration and junction deviation per `G1`, collinear row segments keep their speed),
+  but with one XY acceleration, so Marlin's per-axis limits on diagonal moves are not modelled
+  (to be compared on the SKR); the park-corner live box keeps using the object box (the powered
+  extent of an angled image never leaves it).
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder. The advanced counter / CSV row lives in memory
+  outside the undo history only until the history is cleared (new / opened project) – after
+  a reopen the saved project values apply, so an advanced but unsaved project still loses
+  its values when closed without saving (the close prompt asks, as before).
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  Micro QR has no Kanji mode (UTF-8 byte mode covers Japanese text at a higher bit cost).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine. Same for
+  `test_machine_origin.py::OriginPanelTests::test_user_origin_from_head_and_placed_start_and_frame`
+  (round 46: „ok start“ wait timed out once under load, green alone and in the rerun).
+- Windows hardware tests (material test grids interval × power and passes × speed on wood /
+  card incl. the labels, focus × power / focus × speed grids (relative Z) on wood / card with
+  motorized Z, image test cells (Floyd / Jarvis / greyscale / halftone ramps, step wedges and
+  user photos × power × speed and × line interval, incl. non-default threshold / halftone
+  cells and angle / 3D levels with Z step / brightness / contrast / gamma / negative, and with
+  the „Weitere Bildoptionen“ sharpen / black-white point / S-curve / dot width / scan angle
+  45° / unidirectional / reduced overscan, and image-option axes – threshold sweep
+  64..192, halftone angle 0..45° and cells 20..60 /Zoll, gamma 0.6..1.8 × contrast,
+  brightness × power and scan angle 0..90° × speed, black point 0..64 × white point,
+  dot width 0..0.1 mm × power and overscan 0..5 mm × speed – line ends –, incl. the labels
+  and layer names) on
+  wood / card against real photo engravings with the chosen setting, QR codes with umlauts (ECI 26) and Japanese Kanji text
+  with phone scanners (iOS / Android camera apps) and a handheld scanner, Micro QR M1–M4 on
+  small parts with phone / handheld scanners, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, photos at scan angles 30° / 45° /
+  90° and with a 90° angle increment (cross raster, against the „Alle Durchgänge
+  übereinander“ and the „aufaddiert (Brennsumme)“ preview, incl. greyscale photos with 2–3
+  passes at 0° / 45° / 90°) on wood against the X-only raster (line
+  quality of oblique `G1` rows at 3000–6000 mm/min on the SKR), photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera (incl. short-name aliases `/gtin/`, `/lot/`, `?exp=`), plain-text QR codes
+  with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / Micro QR / barcode / Data Matrix / Aztec /
+  PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
+  codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
+  incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), rebuilt exe).
