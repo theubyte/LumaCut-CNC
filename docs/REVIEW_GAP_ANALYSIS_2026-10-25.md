@@ -3693,3 +3693,143 @@ Still open:
   PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
   codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
   incl. the canvas value labels, rebuilt exe).
+
+## 49. Status update 2026-11-09 (review round 42)
+
+Done this round (material test image cells – remaining image settings; Canvas / Machine /
+Scan Probe / Materials untouched):
+
+- Closed since §48 by others: none – main had no new commits since `73b1269`.
+- Gap picked from the §48 „Still open“ list: **material test image cells – sharpen, black /
+  white point, tone curve, dot width correction, scan angle and bidirectional / overscan
+  still take their defaults**. With round 41 a grid could already test threshold / halftone /
+  3D / adjustments, but a photo that is engraved with an S-curve, levels, a 45° scan angle or
+  unidirectional rows could not be reproduced in the test cells. Chosen before an image
+  option on an axis (bigger change to the axis / label / layer-name model, kept for later).
+- **Engine** (`lumacut_job/material_test.py`): `IMAGE_EXTRA_OPTIONS` = `sharpen`,
+  `sharpen_radius`, `black_point`, `white_point`, `curve`, `dot_width_mm`, `scan_angle`,
+  `angle_increment`, `bidirectional`, `overscan_mm` join `IMAGE_OPTION_KEYS` and apply to
+  every image mode (like the adjustments). `image_overrides()` types them (bool / int /
+  float, the curve through `normalize_curve`, so a list from JSON or a straight line gives
+  the stored tuple / `()`); new `min_interval()` = smallest cell line interval (interval axis
+  included). Validate adds the ranges of `ImageSettings.normalized()`, black point < white
+  point, the curve (2..16 points, 0..255, rising inputs) and dot width ≤ smallest line
+  interval with German errors („Schwarzpunkt muss kleiner als der Weißpunkt sein“,
+  „Punktbreitenkorrektur 0.3 mm > kleinster Linienabstand 0.25 mm“, „Kurve: …“).
+- **Dialog** (`lumacut_job/qt_tools.py`): under the Modus-Parameter a checkbox „Weitere
+  Bildoptionen (Schärfen, Tonwerte, Kurve, Scan)“ (only for Art Bild) shows „Schärfen“,
+  „Schärferadius“ (enabled when sharpening), „Schwarzpunkt“, „Weißpunkt“, „Kurve“ (the
+  curve presets of the image settings; a custom curve from the spec appears as
+  „Benutzerdefiniert“), „Punktbreitenkorrektur“, „Scan-Winkel“, „Winkel-Schritt je
+  Durchgang“, „Overscan“ and „Bidirektional (hin und zurück lasern)“, with German tooltips.
+  Off = hidden and not applied (the dialog stays as short as in round 41); it starts on when
+  the spec carries one of these options. `spec()` emits only changed values (`None` when
+  untouched). Black ≥ white point or a dot width above the smallest line interval disables
+  OK with a German hint.
+
+Tests:
+
+- New `tests/test_material_test_image_extra_options.py` (37 tests): extra keys are
+  `ImageSettings` fields with ranges; default-valued extras give byte-identical G-code for
+  floyd / grayscale / threshold / halftone / depth3d; each option reaches every cell and
+  changes the (Pi-safe) G-code; extras apply to greyscale / halftone / 3D; 90° scan angle
+  gives rows along Y; unidirectional rows all run one way; no overscan shortens the program;
+  curve normalisation; range / levels / curve / dot-width validation incl. the interval axis;
+  save / load round-trip; dialog checkbox visibility, sharpen-radius enabling,
+  changed-values-only round-trip, reopen with a custom curve, OK blocked on bad levels /
+  dot width. Round-41 `test_material_test_image_options.py` unchanged and green.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **2245 passed, 3 skipped**, 0 failed (11 min). (The
+Python 3.11 venv in the main checkout still SIGABRTs in `test_barcode.py`, as noted in §48 –
+an environment issue, not a code one.)
+
+Output change for old files: none – `image_options` defaults to `None`, and the dialog only
+emits extra options when „Weitere Bildoptionen“ is on and a value was changed.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Material test: several cells of an interval test share the same layer name (power / speed are
+  equal) – the canvas labels tell them apart. Image cells: the G-code follows each cell's image
+  settings, so editing a cell *layer's* power / speed in the layer panel does not change an image
+  cell (the image settings dialog does). Image-cell options now cover every image setting
+  (mode parameters, adjustments, sharpen, levels, tone curve – presets only in the test
+  dialog, a custom curve only via a reopened spec –, dot width, scan angle / increment,
+  bidirectional, overscan), but one option set applies to the whole grid (no image option on
+  an axis, e.g. a threshold, halftone-angle or scan-angle sweep).
+- Image: the preview shows one pixel per dot and does not model the material's real dot size /
+  beam spread (needs the material library – Materials); mode and adjustment presets (incl. the
+  curve presets) are not linked to the material library (Materials); no per-channel / colour
+  curves (images are grey only). Scan angle: the dialog preview shows pass 1 only (with an angle
+  increment the later passes are not previewed); the time estimate plans oblique rows like X
+  rows (acceleration and junction deviation per `G1`, collinear row segments keep their speed),
+  but with one XY acceleration, so Marlin's per-axis limits on diagonal moves are not modelled
+  (to be compared on the SKR); the park-corner live box keeps using the object box (the powered
+  extent of an angled image never leaves it).
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder; undoing the advance step rewinds the counter.
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  Micro QR has no Kanji mode (UTF-8 byte mode covers Japanese text at a higher bit cost).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine.
+- Windows hardware tests (material test grids interval × power and passes × speed on wood /
+  card incl. the labels, focus × power / focus × speed grids (relative Z) on wood / card with
+  motorized Z, image test cells (Floyd / Jarvis / greyscale / halftone ramps, step wedges and
+  user photos × power × speed and × line interval, incl. non-default threshold / halftone
+  cells and angle / 3D levels with Z step / brightness / contrast / gamma / negative, and with
+  the „Weitere Bildoptionen“ sharpen / black-white point / S-curve / dot width / scan angle
+  45° / unidirectional / reduced overscan) on wood / card against real photo
+  engravings with the chosen setting, QR codes with umlauts (ECI 26) and Japanese Kanji text
+  with phone scanners (iOS / Android camera apps) and a handheld scanner, Micro QR M1–M4 on
+  small parts with phone / handheld scanners, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, photos at scan angles 30° / 45° /
+  90° and with a 90° angle increment (cross raster) on wood against the X-only raster (line
+  quality of oblique `G1` rows at 3000–6000 mm/min on the SKR), photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera (incl. short-name aliases `/gtin/`, `/lot/`, `?exp=`), plain-text QR codes
+  with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / Micro QR / barcode / Data Matrix / Aztec /
+  PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
+  codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
+  incl. the canvas value labels, rebuilt exe).
