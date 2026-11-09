@@ -37,6 +37,16 @@ black / white point, tone curve, dot width correction, scan angle / angle
 increment, bidirectional and overscan. Keys that do not apply to the chosen mode
 are ignored; ``None`` (default) = ImageSettings defaults, so existing grids stay
 byte-identical.
+
+Image-option axes (LightBurn Interval Test with a swept image setting): with image
+cells, a column or row axis can also sweep one numeric image option
+(``IMAGE_AXIS_PARAMS``: threshold, halftone cells / screen angle, brightness,
+contrast, gamma, sharpen, scan angle) from ``image_axis_ranges[param] = (from, to)``
+(default ``IMAGE_AXIS_DEFAULT_RANGES``). The cell's value overrides the grid-wide
+``image_options`` value; mode-specific options only on an axis in their mode
+(threshold → ``threshold``, halftone → ``halftone``). Cell layers get the swept
+value appended (``Test P…% F… Gamma 1.2``) so the cells stay distinguishable;
+grids without an image axis keep their names and output byte-identical.
 """
 
 from __future__ import annotations
@@ -97,6 +107,36 @@ IMAGE_OPTION_LABELS = {"threshold": "Schwellwert", "halftone_cpi": "Halbton-Zell
                        "curve": "Kurve", "dot_width_mm": "Punktbreitenkorrektur",
                        "scan_angle": "Scan-Winkel", "angle_increment": "Winkel-Schritt",
                        "bidirectional": "Bidirektional", "overscan_mm": "Overscan"}
+# Numeric image options that can be swept along a column / row axis (image cells only).
+IMAGE_AXIS_PARAMS = ("threshold", "halftone_cpi", "halftone_angle", "brightness",
+                     "contrast", "gamma", "sharpen", "scan_angle")
+# Default from/to of an image axis without an explicit range.
+IMAGE_AXIS_DEFAULT_RANGES = {"threshold": (64, 192), "halftone_cpi": (20.0, 60.0),
+                             "halftone_angle": (0.0, 45.0), "brightness": (-40.0, 40.0),
+                             "contrast": (-40.0, 40.0), "gamma": (0.6, 1.8),
+                             "sharpen": (0.0, 200.0), "scan_angle": (0.0, 90.0)}
+# Unit of an image axis value in layer names / the dialog.
+IMAGE_AXIS_UNITS = {"threshold": "", "halftone_cpi": "/Zoll", "halftone_angle": "°",
+                    "brightness": "%", "contrast": "%", "gamma": "", "sharpen": "%",
+                    "scan_angle": "°"}
+# Decimals of the swept values (threshold is an integer grey value).
+IMAGE_AXIS_DIGITS = {"threshold": 0, "gamma": 2}
+# German names of the image modes a mode-specific axis needs (error messages).
+IMAGE_AXIS_MODE_LABELS = {"threshold": "Schwellwert", "halftone": "Halbton"}
+# Every axis parameter (vector + image) and its label.
+AXIS_PARAMS = TEST_PARAMS + IMAGE_AXIS_PARAMS
+AXIS_PARAM_LABELS = {**TEST_PARAM_LABELS,
+                     **{k: IMAGE_OPTION_LABELS[k] for k in IMAGE_AXIS_PARAMS}}
+
+
+def image_axis_mode(param: str) -> str:
+    """Image mode a mode-specific image axis needs ("" = every image mode)."""
+    for mode, keys in IMAGE_MODE_OPTIONS.items():
+        if param in keys:
+            return mode
+    return ""
+
+
 # Pixel size of the embedded grey ramp / step wedge (white left -> black right).
 RAMP_PX = (256, 16)
 # Number of equal grey bands in a step wedge (white → black).
@@ -142,6 +182,20 @@ class MaterialTestSpec:
     image_png: bytes | None = None
     # Extra image-mode parameters (IMAGE_OPTION_KEYS -> value); None = defaults.
     image_options: dict | None = None
+    # From/to of an image-option axis (IMAGE_AXIS_PARAMS -> (from, to)); missing =
+    # IMAGE_AXIS_DEFAULT_RANGES. Only used when that option is on an axis.
+    image_axis_ranges: dict | None = None
+
+    def image_axes(self) -> tuple[str, ...]:
+        """Image options on an axis (column first)."""
+        return tuple(p for p in (self.column_param, self.row_param) if p in IMAGE_AXIS_PARAMS)
+
+    def image_axis_range(self, param: str) -> tuple[float, float]:
+        rng = (self.image_axis_ranges or {}).get(param)
+        if rng is None:
+            rng = IMAGE_AXIS_DEFAULT_RANGES[param]
+        lo, hi = rng
+        return float(lo), float(hi)
 
     def image_overrides(self) -> dict:
         """ImageSettings overrides for the image cells: only the keys that apply to
@@ -189,6 +243,11 @@ class MaterialTestSpec:
             return [int(round(v)) for v in _steps(self.passes, self.passes_max, n, 6)]
         if param == "focus":
             return _steps(self.focus_min, self.focus_max, n, 3)
+        if param in IMAGE_AXIS_PARAMS:
+            lo, hi = self.image_axis_range(param)
+            digits = IMAGE_AXIS_DIGITS.get(param, 1)
+            vals = _steps(lo, hi, n, digits)
+            return [int(v) for v in vals] if digits == 0 else vals
         raise ValueError(f"Unbekannter Testparameter: {param}")
 
     def column_values(self) -> list:
@@ -198,13 +257,31 @@ class MaterialTestSpec:
         return self.param_values(self.row_param, self.rows)
 
     def cell_settings(self, row: int, column: int) -> dict:
-        """power / speed / interval / passes / focus of one cell (fixed off-axis)."""
+        """power / speed / interval / passes / focus of one cell (fixed off-axis), plus
+        the swept image option(s) when an image option is on an axis."""
         st = {"power": round(self.power_min, 1), "speed": round(self.speed_min, 1),
               "interval": self.line_interval_mm, "passes": int(self.passes),
               "focus": 0.0}  # off-axis: no focus offset (keeps default grids byte-identical)
         st[self.column_param] = self.column_values()[column]
         st[self.row_param] = self.row_values()[row]
         return st
+
+    def cell_image_values(self, row: int, column: int) -> dict:
+        """Swept image options of one cell ({} without an image axis)."""
+        out = {}
+        if self.column_param in IMAGE_AXIS_PARAMS:
+            out[self.column_param] = self.column_values()[column]
+        if self.row_param in IMAGE_AXIS_PARAMS:
+            out[self.row_param] = self.row_values()[row]
+        return out
+
+    def cell_layer_name(self, row: int, column: int) -> str:
+        """Layer name of one cell; swept image values are appended."""
+        st = self.cell_settings(row, column)
+        name = f"Test P{st['power']:g}% F{st['speed']:g}"
+        for k, v in self.cell_image_values(row, column).items():
+            name += f" {IMAGE_OPTION_LABELS[k]} {_label_text(k, v)}{IMAGE_AXIS_UNITS[k]}"
+        return name
 
     def label_texts(self) -> tuple[list[str], list[str]]:
         """Column and row label texts."""
@@ -228,7 +305,7 @@ class MaterialTestSpec:
         return w, h
 
     def validate(self) -> None:
-        if self.column_param not in TEST_PARAMS or self.row_param not in TEST_PARAMS:
+        if self.column_param not in AXIS_PARAMS or self.row_param not in AXIS_PARAMS:
             raise ValueError("Unbekannter Testparameter")
         if self.column_param == self.row_param:
             raise ValueError("Spalten und Zeilen brauchen verschiedene Parameter")
@@ -272,6 +349,7 @@ class MaterialTestSpec:
                 if not self.image_png.startswith(b"\x89PNG"):
                     raise ValueError("Eigenes Bild muss ein PNG sein")
             self._validate_image_options()
+        self._validate_image_axes()
         if not 2 <= self.cell_mm <= 60 or not 0 <= self.gap_mm <= 30:
             raise ValueError("Zellgröße 2..60 mm, Abstand 0..30 mm")
         if self.line_interval_mm and not 0.05 <= self.line_interval_mm <= 2:
@@ -279,6 +357,33 @@ class MaterialTestSpec:
         w, h = self.size()
         if self.x < 0 or self.y < 0 or self.x + w > WORK_WIDTH_MM or self.y + h > WORK_HEIGHT_MM:
             raise ValueError("Testraster passt nicht auf die Arbeitsfläche")
+
+    def _validate_image_axes(self) -> None:
+        ranges = self.image_axis_ranges or {}
+        if not isinstance(ranges, dict):
+            raise ValueError("Bild-Achsenbereiche müssen ein Wörterbuch sein")
+        for k, rng in ranges.items():
+            if k not in IMAGE_AXIS_PARAMS:
+                raise ValueError(f"Unbekannte Bild-Achse: {k}")
+            try:
+                lo, hi = (float(v) for v in rng)
+            except (TypeError, ValueError):
+                raise ValueError(f"{IMAGE_OPTION_LABELS[k]}: von/bis-Zahlen erwartet") from None
+        for k in self.image_axes():
+            label = IMAGE_OPTION_LABELS[k]
+            if not self.image_mode:
+                raise ValueError(f"{label} als Achse nur mit Bild-Testzellen")
+            mode = image_axis_mode(k)
+            if mode and self.image_mode != mode:
+                raise ValueError(f"{label}-Achse nur im Bildmodus "
+                                 f"{IMAGE_AXIS_MODE_LABELS.get(mode, mode)}")
+            lo, hi = self.image_axis_range(k)
+            rlo, rhi = IMAGE_OPTION_RANGES[k]
+            if not (rlo <= lo <= rhi and rlo <= hi <= rhi):
+                raise ValueError(f"{label} außerhalb {rlo:g}..{rhi:g}")
+            vals = self.param_values(k, self.columns if k == self.column_param else self.rows)
+            if lo == hi or (len(vals) > 1 and len(set(vals)) < len(vals)):
+                raise ValueError(f"{label} von und bis müssen verschieden sein")
 
     def _validate_image_options(self) -> None:
         opts = self.image_options or {}
@@ -335,12 +440,13 @@ def _steps(lo: float, hi: float, n: int, digits: int = 1) -> list[float]:
 
 
 def _label_text(param: str, value: float) -> str:
-    """Label of one column / row: power %, speed mm/s, interval mm, passes, focus mm."""
+    """Label of one column / row: power %, speed mm/s, interval mm, passes, focus mm,
+    image option value (brightness / contrast signed)."""
     if param == "speed":
         return f"{value / 60:.0f}"
     if param == "passes":
         return f"{int(value)}x"
-    if param == "focus":
+    if param in ("focus", "brightness", "contrast"):
         return f"{value:+g}"
     return f"{value:g}"
 
@@ -414,6 +520,15 @@ def cell_image_png(spec: MaterialTestSpec) -> tuple[bytes, int, int]:
     return png, RAMP_PX[0], RAMP_PX[1]
 
 
+def _cell_overrides(spec: MaterialTestSpec, settings: dict) -> dict:
+    """Grid-wide image options with the cell's swept image values on top."""
+    ov = spec.image_overrides()
+    for k in spec.image_axes():
+        if k in settings:
+            ov[k] = int(settings[k]) if k in IMAGE_INT_OPTIONS else float(settings[k])
+    return ov
+
+
 def image_cell(spec: MaterialTestSpec, settings: dict, x: float, y: float,
                layer_id: str, png: bytes | None = None,
                px: tuple[int, int] | None = None) -> Shape:
@@ -421,7 +536,7 @@ def image_cell(spec: MaterialTestSpec, settings: dict, x: float, y: float,
     st = ImageSettings(mode=spec.image_mode, line_interval_mm=settings["interval"],
                        power=settings["power"], min_power=spec.image_min_power,
                        speed_mm_min=settings["speed"], passes=settings["passes"],
-                       **spec.image_overrides()).normalized()
+                       **_cell_overrides(spec, settings)).normalized()
     if png is None or px is None:
         png, w, h = cell_image_png(spec)
     else:
@@ -450,8 +565,9 @@ def build_material_test(spec: MaterialTestSpec) -> tuple[list[Layer], list[Shape
         for c in range(spec.columns):
             st = spec.cell_settings(r, c)
             power, speed = st["power"], st["speed"]
-            # The name format is parsed by lumacut_materials.testgrid (TEST_CELL_RE).
-            layer = Layer(name=f"Test P{power:g}% F{speed:g}",
+            # "Test P…% F…" is parsed by lumacut_materials.testgrid (TEST_CELL_RE);
+            # an image axis appends the swept value (cell_layer_name).
+            layer = Layer(name=spec.cell_layer_name(r, c),
                           color=LAYER_COLORS[(r * spec.columns + c) % len(LAYER_COLORS)],
                           power=power, speed=speed, passes=st["passes"],
                           z_offset=float(st.get("focus", 0.0) or 0.0))
