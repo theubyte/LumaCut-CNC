@@ -331,10 +331,9 @@ def test_tracker_advances_only_after_successful_upload(qapp):
     panel.send_gcode("a.gcode", g)
     panel.command_finished.emit("Senden", True)
     assert cur() == [3, 3]
-    # undo rewinds the counter (one step)
-    ed.undo_stack.undo()
-    assert cur() == [1, 1]
-    ed.undo_stack.redo()
+    # advancing is no undo step: nothing to undo, the counter stays (round 44)
+    assert ed.undo_stack.count() == 0 and not ed.undo_stack.canUndo()
+    assert cur() == [3, 3]
     # plain G-code without marker never advances
     panel.send_gcode("b.gcode", "G0 X1\n")
     panel._uploaded = "b.gcode"
