@@ -120,6 +120,8 @@ class ImageSettingsDialog(QDialog):
         self._shape = shape
         self._render_key = None
         self._rendered = None
+        self._render_cache: dict = {}     # (Linienabstand, Negativ, Winkel) → (gray, inside)
+        self._pass_choices: list = []     # Einträge der Durchgangs-Auswahl (Vorschau)
         self.histogram_runs = 0
         self.last_histograms = None
         self.setWindowTitle("Bildeinstellungen")
@@ -272,6 +274,19 @@ class ImageSettingsDialog(QDialog):
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumSize(PREVIEW_SIZE, PREVIEW_SIZE)
         self.preview.setStyleSheet("background: white; border: 1px solid #bbb;")
+        # Durchgang der Vorschau (Winkel-Schritt): jeder Durchgang einzeln
+        # oder alle übereinander – vorher war nur der erste zu sehen.
+        self.preview_pass = QComboBox()
+        self.preview_pass.setObjectName("image_preview_pass")
+        self.preview_pass.setToolTip("Vorschau eines Durchgangs mit seinem Scan-Winkel oder "
+                                     "aller Durchgänge übereinander (dunkelster Punkt je Stelle) "
+                                     "– nur bei Winkel-Schritt und mehreren Durchgängen")
+        self.preview_pass_row = QWidget()
+        pass_row = QHBoxLayout(self.preview_pass_row)
+        pass_row.setContentsMargins(0, 0, 0, 0)
+        pass_row.addWidget(QLabel("Vorschau zeigt"))
+        pass_row.addWidget(self.preview_pass, 1)
+        self.preview_pass_row.setVisible(False)
         self.preview_label = QLabel()
         self.preview_label.setWordWrap(True)
         self.preview_label.setMaximumWidth(PREVIEW_SIZE)
@@ -300,6 +315,7 @@ class ImageSettingsDialog(QDialog):
         if self._gray is not None:
             right = QVBoxLayout()
             right.addWidget(self.preview)
+            right.addWidget(self.preview_pass_row)
             right.addWidget(self.preview_label)
             right.addWidget(self.histogram)
             right.addWidget(self.histogram_label)
@@ -323,6 +339,8 @@ class ImageSettingsDialog(QDialog):
         self.sharpen.valueChanged.connect(self._update)
         self.passes.valueChanged.connect(self._update)
         self.scan_angle.valueChanged.connect(self._update)
+        self.angle_increment.valueChanged.connect(self._update)
+        self.preview_pass.currentIndexChanged.connect(self._schedule_preview)
         for w in (self.power, self.min_power, self.threshold, self.angle, self.levels,
                   self.brightness, self.contrast, self.gamma, self.sharpen_radius,
                   self.black_point, self.white_point):
@@ -354,6 +372,7 @@ class ImageSettingsDialog(QDialog):
         self.dot_width.setMaximum(self.interval.value())
         self.sharpen_radius.setEnabled(self.sharpen.value() > 0)
         self.angle_increment.setEnabled(self.passes.value() > 1)
+        self._update_pass_choices()
         dpi = 25.4 / self.interval.value()
         src_dpi = self._px / self._width_mm * 25.4 if self._width_mm > 0 else 0
         self.dpi_label.setText(f"= {dpi:.0f} DPI (Bild: {src_dpi:.0f} DPI)")
@@ -377,6 +396,39 @@ class ImageSettingsDialog(QDialog):
             self.hint.setText("")
         self._schedule_preview()
 
+    ALL_PASSES = -1
+
+    def _update_pass_choices(self) -> None:
+        """Auswahl „Vorschau zeigt“ an Durchgänge / Winkel anpassen; die Wahl
+        bleibt erhalten, solange es den Durchgang noch gibt."""
+        from lumacut_job.images import pass_angles
+        st = self.settings()
+        multi = (self._shape is not None and self._gray is not None
+                 and bool(st.angle_increment) and st.passes > 1)
+        choices = []
+        if multi:
+            angles = pass_angles(st)
+            choices = [(k, f"{k + 1}. Durchgang ({a:g}°)") for k, a in enumerate(angles)]
+            choices.append((self.ALL_PASSES, f"Alle {len(angles)} Durchgänge übereinander"))
+        if choices != self._pass_choices:
+            current = self.preview_pass.currentData()
+            self.preview_pass.blockSignals(True)
+            self.preview_pass.clear()
+            for data, label in choices:
+                self.preview_pass.addItem(label, data)
+            idx = self.preview_pass.findData(current) if current is not None else -1
+            self.preview_pass.setCurrentIndex(max(0, idx) if choices else -1)
+            self.preview_pass.blockSignals(False)
+            self._pass_choices = choices
+        self.preview_pass_row.setVisible(multi)
+
+    def preview_pass_index(self) -> int:
+        """Gewählter Durchgang der Vorschau (0 = erster, ``ALL_PASSES`` = alle)."""
+        if not self._pass_choices:
+            return 0
+        data = self.preview_pass.currentData()
+        return 0 if data is None else int(data)
+
     def _schedule_preview(self, *_args) -> None:
         if self._gray is not None:
             self._preview_timer.start()
@@ -385,14 +437,19 @@ class ImageSettingsDialog(QDialog):
         """Vorschau sofort neu rechnen (sonst entprellt nach jeder Änderung)."""
         if self._gray is None:
             return
-        from .image_preview import preview_array, preview_shape, to_qimage
+        from .image_preview import (pass_angle, preview_array, preview_shape,
+                                    preview_shape_passes, to_qimage)
         self._preview_timer.stop()
         st = self.settings()
         self.update_histogram(st)
+        sel = self.preview_pass_index()
         try:
-            if self._shape is not None:
-                self._render_cached(st)
-                pv = preview_shape(self._shape, st, rendered=self._rendered)
+            if self._shape is not None and sel == self.ALL_PASSES:
+                pv = preview_shape_passes(self._shape, st,
+                                          rendered_for=lambda k: self._render_cached(st, k))
+            elif self._shape is not None:
+                pv = preview_shape(self._shape, st, rendered=self._render_cached(st, sel),
+                                   pass_index=sel)
             else:
                 pv = preview_array(self._gray, self._width_mm, self._height_mm, st)
         except ValueError as exc:
@@ -414,16 +471,30 @@ class ImageSettingsDialog(QDialog):
         if st.scan_angle:
             text += f", Scan-Winkel {st.scan_angle:g}°"
         if st.angle_increment and st.passes > 1:
-            text += " (Vorschau: 1. Durchgang)"
+            if self._shape is None:
+                text += " (Vorschau: 1. Durchgang)"
+            elif sel == self.ALL_PASSES:
+                text += (f" (Vorschau: alle {st.passes} Durchgänge übereinander, "
+                         f"Anteil je Durchgang gemittelt)")
+            else:
+                text += f" (Vorschau: {sel + 1}. Durchgang, {pass_angle(st, sel):g}°)"
         self.preview_label.setText(text)
 
-    def _render_cached(self, st: ImageSettings):
-        """Bildobjekt wie im Auftrag rendern (Cache je Linienabstand / Negativ)."""
-        from .image_preview import render_for_preview
-        from lumacut_job.images import pass_angles
-        key = (st.line_interval_mm, st.negative, pass_angles(st)[0])
+    def _render_cached(self, st: ImageSettings, pass_index: int = 0):
+        """Bildobjekt wie im Auftrag rendern (Cache je Linienabstand / Negativ /
+        Scan-Winkel des Durchgangs; Winkel-Schritt: ein Eintrag je Winkel)."""
+        from . import image_preview
+        angle = image_preview.pass_angle(st, pass_index)
+        key = (st.line_interval_mm, st.negative, angle)
         if key != self._render_key:
-            self._rendered = render_for_preview(self._shape, st)
+            if any(k[:2] != key[:2] for k in self._render_cache):
+                self._render_cache.clear()      # anderer Linienabstand / Negativ
+            if key not in self._render_cache:
+                if len(self._render_cache) >= 8:
+                    self._render_cache.clear()
+                self._render_cache[key] = image_preview.render_for_preview(
+                    self._shape, st, pass_index)
+            self._rendered = self._render_cache[key]
             self._render_key = key
         return self._rendered
 
