@@ -24,8 +24,9 @@ from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 from .estimate import estimate_gcode, frame_gcode
 from lumacut_canvas.model import Z_OFFSET_RANGE
 
-from .material_test import (IMAGE_SOURCE_LABELS, IMAGE_SOURCES, INTERVAL_TEST_RANGE,
-                            TEST_IMAGE_MODES, TEST_PARAM_LABELS, TEST_PARAMS,
+from .material_test import (IMAGE_ADJUST_OPTIONS, IMAGE_MODE_OPTIONS, IMAGE_OPTION_RANGES,
+                            IMAGE_SOURCE_LABELS, IMAGE_SOURCES, INTERVAL_TEST_RANGE,
+                            MAX_DEPTH_DROP_MM, TEST_IMAGE_MODES, TEST_PARAM_LABELS, TEST_PARAMS,
                             MaterialTestSpec, build_material_test)
 from .planner import PlanReport, optimize_layers, optimized_document_gcode
 
@@ -104,6 +105,7 @@ class MaterialTestDialog(QDialog):
         photo_lay.addWidget(self.photo_btn)
         if self._photo_png:
             self.photo_label.setText(f"eingebettet ({len(self._photo_png)} Bytes)")
+        self._build_image_options(s)
         self.interval = _spin(*INTERVAL_TEST_RANGE, s.line_interval_mm or 0.2, 0.05, 2, " mm")
         self.interval_max = _spin(*INTERVAL_TEST_RANGE, s.interval_max, 0.05, 2, " mm")
         # Focus Test (LightBurn): relative Z offset; needs motorized Z.
@@ -142,6 +144,15 @@ class MaterialTestDialog(QDialog):
                               ("photo", "Eigenes Bild", self.photo_row),
                               ("image_mode", "Bildmodus", self.image_mode),
                               ("image_min", "Min.-Leistung (Weiß)", self.image_min),
+                              ("opt_threshold", "Schwellwert", self.opt_threshold),
+                              ("opt_cpi", "Halbton-Zellen", self.opt_cpi),
+                              ("opt_angle", "Rasterwinkel", self.opt_angle),
+                              ("opt_levels", "3D-Stufen", self.opt_levels),
+                              ("opt_zstep", "Z-Schritt je Stufe", self.opt_zstep),
+                              ("opt_brightness", "Helligkeit", self.opt_brightness),
+                              ("opt_contrast", "Kontrast", self.opt_contrast),
+                              ("opt_gamma", "Gamma", self.opt_gamma),
+                              ("opt_negative", "", self.opt_negative),
                               ("interval", "Linienabstand", self.interval),
                               ("interval_max", "Linienabstand bis", self.interval_max),
                               ("focus_min", "Fokus von", self.focus_min),
@@ -156,11 +167,80 @@ class MaterialTestDialog(QDialog):
         self.bb.accepted.connect(self.accept)
         self.bb.rejected.connect(self.reject)
         f.addRow(self.bb)
-        for combo in (self.col_param, self.row_param, self.mode, self.image_source):
+        for combo in (self.col_param, self.row_param, self.mode, self.image_source,
+                      self.image_mode):
             combo.currentIndexChanged.connect(self._update_fields)
-        for spin in (self.image_min, self.p_min, self.focus_min, self.focus_max):
+        for spin in (self.image_min, self.p_min, self.focus_min, self.focus_max,
+                     self.opt_levels, self.opt_zstep):
             spin.valueChanged.connect(self._update_fields)
         self._update_fields()
+
+    def _build_image_options(self, s: MaterialTestSpec) -> None:
+        """Extra image-mode parameters for all image cells (LightBurn applies the
+        full image settings in an Interval Test). Start values: spec or defaults."""
+        from lumacut_canvas.model import ImageSettings
+        d = ImageSettings()
+        o = dict(s.image_options or {})
+        r = IMAGE_OPTION_RANGES
+
+        def val(key):
+            return o.get(key, getattr(d, key))
+
+        self.opt_threshold = _spin(*r["threshold"], int(val("threshold")))
+        self.opt_threshold.setToolTip("Schwellwert-Modus: Pixel dunkler als dieser Wert "
+                                      "werden gelasert (0..255).")
+        self.opt_cpi = _spin(*r["halftone_cpi"], float(val("halftone_cpi")), 1, 1, " /Zoll")
+        self.opt_cpi.setToolTip("Halbton: Rasterzellen je Zoll (LightBurn „Cells per Inch“). "
+                                "Weniger Zellen = gröbere Punkte.")
+        self.opt_angle = _spin(*r["halftone_angle"], float(val("halftone_angle")), 7.5, 1, " °")
+        self.opt_angle.setToolTip("Halbton: Rasterwinkel in Grad (LightBurn „Halftone Angle“).")
+        self.opt_levels = _spin(*r["depth_levels"], int(val("depth_levels")))
+        self.opt_levels.setToolTip("3D-Tiefe: Anzahl der Graustufen-Scheiben (Durchgänge "
+                                   "je Bild). Dunkle Bereiche werden öfter gelasert.")
+        self.opt_zstep = _spin(*r["z_step_mm"], float(val("z_step_mm")), 0.05, 2, " mm")
+        self.opt_zstep.setToolTip("3D-Tiefe: Fokus je Stufe tiefer nachführen (0 = aus). "
+                                  f"Gesamt höchstens {MAX_DEPTH_DROP_MM:g} mm.")
+        self.opt_brightness = _spin(*r["brightness"], float(val("brightness")), 5, 1, " %")
+        self.opt_brightness.setDecimals(0)
+        self.opt_brightness.setToolTip("Helligkeit: + hellt auf (weniger lasern), − dunkelt ab. "
+                                       "Gilt für alle Bild-Testzellen.")
+        self.opt_contrast = _spin(*r["contrast"], float(val("contrast")), 5, 1, " %")
+        self.opt_contrast.setDecimals(0)
+        self.opt_contrast.setToolTip("Kontrast um Mittelgrau: +100 = 10-fach, −100 = ein Zehntel. "
+                                     "Gilt für alle Bild-Testzellen.")
+        self.opt_gamma = _spin(*r["gamma"], float(val("gamma")), 0.05, 2)
+        self.opt_gamma.setToolTip("Gamma: > 1 hellt die Mitteltöne auf, < 1 dunkelt sie ab. "
+                                  "Gilt für alle Bild-Testzellen.")
+        self.opt_negative = QCheckBox("Negativ (Helles lasern)")
+        self.opt_negative.setChecked(bool(val("negative")))
+        self.opt_negative.setToolTip("Bild invertieren – z. B. für Schiefer oder eloxiertes Alu.")
+        self._opt_widgets = {"threshold": self.opt_threshold, "halftone_cpi": self.opt_cpi,
+                             "halftone_angle": self.opt_angle, "depth_levels": self.opt_levels,
+                             "z_step_mm": self.opt_zstep, "brightness": self.opt_brightness,
+                             "contrast": self.opt_contrast, "gamma": self.opt_gamma,
+                             "negative": self.opt_negative}
+        self._opt_rows = {"threshold": "opt_threshold", "halftone_cpi": "opt_cpi",
+                          "halftone_angle": "opt_angle", "depth_levels": "opt_levels",
+                          "z_step_mm": "opt_zstep", "brightness": "opt_brightness",
+                          "contrast": "opt_contrast", "gamma": "opt_gamma",
+                          "negative": "opt_negative"}
+
+    def _option_keys(self) -> tuple[str, ...]:
+        """Image options that apply to the chosen image mode."""
+        return IMAGE_MODE_OPTIONS.get(self.image_mode.currentData(), ()) + IMAGE_ADJUST_OPTIONS
+
+    def image_options(self) -> dict | None:
+        """Options of the chosen mode that differ from the defaults (None = all default,
+        so an untouched dialog gives the same spec / G-code as before)."""
+        from lumacut_canvas.model import ImageSettings
+        d = ImageSettings()
+        out = {}
+        for key in self._option_keys():
+            w = self._opt_widgets[key]
+            v = w.isChecked() if key == "negative" else w.value()
+            if v != getattr(d, key):
+                out[key] = v
+        return out or None
 
     def _axes(self) -> tuple[str, str]:
         return self.col_param.currentData(), self.row_param.currentData()
@@ -177,6 +257,10 @@ class MaterialTestDialog(QDialog):
             self._rows[key].setVisible(image)
             w.setVisible(image)
         self._rows["photo"].setVisible(photo)
+        shown = set(self._option_keys()) if image else set()
+        for key, w in self._opt_widgets.items():
+            self._rows[self._opt_rows[key]].setVisible(key in shown)
+            w.setVisible(key in shown)
         self.photo_row.setVisible(photo)
         fields = {"power": ("p_min", "p_max", "Leistung", self.p_max),
                   "speed": ("s_min", "s_max", "Geschw.", self.s_max),
@@ -206,6 +290,12 @@ class MaterialTestDialog(QDialog):
             problem = "Min.-Leistung (Weiß) darf die kleinste Leistung nicht übersteigen."
         elif photo and not self._photo_png:
             problem = "Eigenes Bild fehlt – bitte eine Bilddatei wählen."
+        elif (image and self.image_mode.currentData() == "depth3d"
+              and self.opt_zstep.value() * (self.opt_levels.value() - 1)
+              > MAX_DEPTH_DROP_MM + 1e-9):
+            drop = self.opt_zstep.value() * (self.opt_levels.value() - 1)
+            problem = (f"Fokus-Absenkung {drop:.2f} mm > {MAX_DEPTH_DROP_MM:g} mm – "
+                       "Z-Schritt oder 3D-Stufen verkleinern.")
         elif "focus" in axes and self.focus_min.value() == self.focus_max.value():
             problem = "Fokus von und bis müssen verschieden sein."
         self.hint.setText(problem)
@@ -232,7 +322,9 @@ class MaterialTestDialog(QDialog):
                           if self.mode.currentIndex() == CELL_IMAGE else "ramp"),
             image_png=(self._photo_png
                        if (self.mode.currentIndex() == CELL_IMAGE
-                           and self.image_source.currentData() == "photo") else None))
+                           and self.image_source.currentData() == "photo") else None),
+            image_options=(self.image_options()
+                           if self.mode.currentIndex() == CELL_IMAGE else None))
 
 
     def _pick_photo(self) -> None:
