@@ -8,6 +8,15 @@ carries a comment ``; VARIABLE TEXT <token>``; only an upload of exactly such
 a job (and only once the panel reports the upload as done) advances the
 values. Re-sending an older job from the history, a failed or refused upload
 or a G-code file never advances anything.
+
+Advancing is not an undo step: a lasered serial number must not come back
+with Ctrl+Z. :class:`VarTextLedger` keeps the advanced values per
+(series, epoch) outside the undo history and re-applies them after every
+undo / redo, so undoing an older edit (whose stored copy still carries the
+old counter) does not rewind the counter / CSV row either. Applying the
+dialog gives the series a new epoch, so a deliberate change there („Auf
+Start“, another next value or row) wins, and undoing that change restores
+the advanced values again.
 """
 
 from __future__ import annotations
@@ -16,7 +25,7 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDialog, QDialogButtonBox,
@@ -40,7 +49,7 @@ HELP = ("{n} Zähler · {n:3} dreistellig mit Nullen · {date} Datum · {date:%Y
 # --- job marker ---------------------------------------------------------------
 
 def usage_token(usage: vt.JobUsage) -> str:
-    data = [(u.key, asdict(u.spec), u.ids, u.texts) for u in usage.series]
+    data = [(u.key, vt.spec_dict(u.spec), u.ids, u.texts) for u in usage.series]
     return hashlib.sha1(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()[:12]
 
 
@@ -79,6 +88,8 @@ def apply_vartext(editor, ids, spec: vt.VarTextSpec | None, template: str | None
         spec = spec.normalized()
         if not spec.series:
             spec = replace(spec, series=vt.new_series())
+        # A deliberate dialog change: its counter / row win over values advanced before.
+        spec = replace(spec, epoch=vt.new_epoch())
         meta = vt.make_meta(spec)
     stack = editor.undo_stack
     stack.beginMacro("Variabler Text" if meta else "Variablen Text entfernen")
@@ -94,9 +105,83 @@ def apply_vartext(editor, ids, spec: vt.VarTextSpec | None, template: str | None
     return [s.id for s in shapes]
 
 
+class VarTextLedger:
+    """Counter / CSV row values reached by sent jobs, outside the undo history.
+
+    ``values[(series key, epoch)] = (current, csv_row)``. After every change
+    of the undo index (undo, redo, a new step) every variable text whose
+    series and epoch have an entry gets these values again (without an undo
+    step). Cleared when the undo history is cleared (new / opened project):
+    without undo steps no stored copy can bring an old value back.
+    """
+
+    def __init__(self, editor):
+        self.editor = editor
+        self.values: dict[tuple[str, str], tuple[int, int]] = {}
+        editor.undo_stack.indexChanged.connect(self._index_changed)
+
+    def record(self, key: str, spec: vt.VarTextSpec) -> None:
+        if self.editor.undo_stack.count() == 0:
+            return          # nothing to undo: no stale copy can rewind the values
+        self.values[(key, spec.epoch)] = (spec.current, spec.csv_row)
+
+    def _index_changed(self, _index: int) -> None:
+        if self.editor.undo_stack.count() == 0:
+            self.values.clear()
+            return
+        self.sync()
+
+    def sync(self) -> list[str]:
+        """Re-apply the recorded values; returns the ids of changed shapes."""
+        if not self.values:
+            return []
+        todo = []
+        for s in self.editor.document.shapes:
+            if not vt.is_variable(s):
+                continue
+            try:
+                spec = vt.spec_of(s)
+            except vt.VarTextError:
+                continue
+            val = self.values.get((vt.series_key(s), spec.epoch))
+            if val is None or val == (spec.current, spec.csv_row):
+                continue
+            new = s.copy()
+            new.generator = vt.make_meta(replace(spec, current=val[0], csv_row=val[1]))
+            todo.append(new)
+        put_shapes(self.editor.document, todo)
+        return [s.id for s in todo]
+
+
+def ledger_of(editor) -> VarTextLedger:
+    ledger = getattr(editor, "_vartext_ledger", None)
+    if ledger is None:
+        ledger = VarTextLedger(editor)
+        editor._vartext_ledger = ledger
+    return ledger
+
+
+def put_shapes(doc, shapes) -> None:
+    """Replace shapes in place (same id and z order), without an undo step."""
+    if not shapes:
+        return
+    doc.begin_batch()
+    try:
+        for s in shapes:
+            idx, _ = doc.remove_shape(s.id)
+            doc.add_shape(s.copy(), idx)
+    finally:
+        doc.end_batch()
+
+
 def advance(editor, usage: vt.JobUsage) -> list[vt.VarTextSpec]:
-    """Store the next values of every series in ``usage`` (one undo step)."""
+    """Store the next values of every series in ``usage``.
+
+    Not an undo step (Ctrl+Z must not bring a lasered value back); the values
+    are recorded in the :class:`VarTextLedger` and the project is marked as
+    changed, so closing it asks to save the new values."""
     doc = editor.document
+    ledger = ledger_of(editor)
     todo = []
     for u in usage.series:
         nxt = u.next_spec()
@@ -104,15 +189,11 @@ def advance(editor, usage: vt.JobUsage) -> list[vt.VarTextSpec]:
             new = s.copy()
             new.generator = vt.make_meta(replace(nxt, series=vt.spec_of(s).series))
             todo.append(new)
+        ledger.record(u.key, nxt)
     if not todo:
         return []
-    stack = editor.undo_stack
-    stack.beginMacro("Variablen Text weiterschalten")
-    try:
-        for new in todo:
-            stack.push(ReplaceShapeCommand(doc, new, "Variablen Text weiterschalten"))
-    finally:
-        stack.endMacro()
+    put_shapes(doc, todo)
+    editor.undo_stack.resetClean()
     return [u.next_spec() for u in usage.series]
 
 
@@ -137,6 +218,7 @@ class VarTextTracker(QObject):
         self.report = report
         self._pending: dict[str, vt.JobUsage] = {}
         self._awaiting: tuple[str, str, vt.JobUsage] | None = None
+        ledger_of(editor)                   # undo / redo never rewinds advanced values
         self.original = panel.send_gcode
         panel.send_gcode = self._send_gcode
         self._signal = getattr(panel, "command_finished", None)
@@ -184,7 +266,8 @@ class VarTextTracker(QObject):
         specs = advance(self.editor, usage)
         if specs and self.report is not None:
             text = "; ".join(describe(s) for s in specs if describe(s))
-            self.report(f"Variabler Text weitergeschaltet: {text}")
+            self.report(f"Variabler Text weitergeschaltet: {text} (kein Rückgängig-Schritt – "
+                        "zurücksetzen in „Variabler Text…“)")
 
 
 # --- dialog ---------------------------------------------------------------------
@@ -223,7 +306,8 @@ class VarTextDialog(QDialog):
         self.pad.setToolTip("Stellen mit führenden Nullen für {n} (0 = ohne)")
         self.current = self._int(vt.VALUE_RANGE, spec.current)
         self.current.setToolTip("Dieser Wert wird beim nächsten Senden gelasert; danach wird "
-                                "weitergezählt (im Projekt gespeichert)")
+                                "weitergezählt (im Projekt gespeichert). Rückgängig (Strg+Z) "
+                                "zählt nicht zurück – zurücksetzen nur hier")
         self.reset_button = QPushButton("Auf Start")
         self.reset_button.clicked.connect(lambda: self.current.setValue(self.start.value()))
         row = QHBoxLayout()
@@ -385,6 +469,6 @@ class VarTextDialog(QDialog):
         self.preview.setStyleSheet("")
 
 
-__all__ = ["HELP", "MARKER", "UPLOAD_LABELS", "VarTextDialog", "VarTextTracker", "advance",
-           "apply_vartext", "describe", "gcode_token", "mark_gcode", "series_members",
-           "usage_token"]
+__all__ = ["HELP", "MARKER", "UPLOAD_LABELS", "VarTextDialog", "VarTextLedger", "VarTextTracker",
+           "advance", "apply_vartext", "describe", "gcode_token", "ledger_of", "mark_gcode",
+           "put_shapes", "series_members", "usage_token"]

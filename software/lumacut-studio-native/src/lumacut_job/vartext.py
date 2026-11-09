@@ -83,6 +83,11 @@ class VarTextSpec:
     csv_path: str = ""
     csv_row: int = 1             # next CSV data row, 1-based (header excluded)
     advance_row: bool = True     # next row(s) after every sent job
+    # Set anew whenever the user applies the dialog (``apply_vartext``). The counter values a
+    # sent job advanced to are kept per (series, epoch) outside the undo history
+    # (``vartext_qt.VarTextLedger``): undo / redo of an older step with the same epoch never
+    # rewinds them, a dialog change (new epoch, e.g. „Auf Start“) sets them on purpose.
+    epoch: str = ""
 
     def normalized(self) -> "VarTextSpec":
         return VarTextSpec(
@@ -95,7 +100,17 @@ class VarTextSpec:
             csv_path=str(self.csv_path or "").strip(),
             csv_row=int(_clamp(int(self.csv_row), *ROW_RANGE)),
             advance_row=bool(self.advance_row),
+            epoch=str(self.epoch or ""),
         )
+
+
+def spec_dict(spec: VarTextSpec) -> dict:
+    """Normalized spec as a dict; an empty ``epoch`` is left out (files and job
+    markers of specs from before the epoch stay byte-identical)."""
+    d = asdict(spec.normalized())
+    if not d.get("epoch"):
+        d.pop("epoch", None)
+    return d
 
 
 # --- placeholders -------------------------------------------------------------
@@ -309,7 +324,7 @@ def load_csv(path: str) -> CsvTable:
 # --- shapes / meta ------------------------------------------------------------
 
 def make_meta(spec: VarTextSpec) -> dict:
-    return {"kind": KIND, "version": VERSION, "spec": asdict(spec.normalized())}
+    return {"kind": KIND, "version": VERSION, "spec": spec_dict(spec)}
 
 
 def is_variable(shape: Shape) -> bool:
@@ -534,8 +549,13 @@ def new_series() -> str:
     return new_id()
 
 
+def new_epoch() -> str:
+    return new_id()
+
+
 __all__ = ["CsvTable", "JobUsage", "KIND", "SeriesUse", "VarTextError", "VarTextSpec",
            "advanced_spec", "evaluate", "evaluate_document", "format_counter", "format_datetime",
-           "has_placeholders", "is_variable", "load_csv", "make_meta", "new_series", "parse_csv",
+           "has_placeholders", "is_variable", "load_csv", "make_meta", "new_epoch", "new_series",
+           "parse_csv", "spec_dict",
            "placeholders", "PreviewValue", "preview_values", "reading_order", "refit_text", "series_key", "spec_of", "uses_counter",
            "uses_clock", "uses_csv"]
