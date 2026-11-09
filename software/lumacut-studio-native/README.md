@@ -453,7 +453,13 @@ bisherige Raster, G-Code byte-gleich).
   Die Bilder laufen vor der Beschriftung (Bilder vor Vektoren), die Zellen-Ebenen
   heißen wie bisher (Preset aus Testzelle funktioniert); maßgeblich für den G-Code
   sind die Bild-Einstellungen der Zelle (*Datei › Bildeinstellungen…*), nicht die
-  Ebenenwerte. Tests: `tests/test_material_test_image.py`.
+  Ebenenwerte. **Modus-Parameter** (wie die Bild-Einstellungen in LightBurns
+  Interval Test): je nach Bildmodus erscheinen Schwellwert (Schwellwert),
+  Halbton-Zellen und Rasterwinkel (Halbton), 3D-Stufen und Z-Schritt je Stufe
+  (3D-Tiefe, Fokus-Absenkung höchstens 3 mm) sowie für alle Modi Helligkeit,
+  Kontrast, Gamma und Negativ; sie gelten für alle Bild-Zellen. Unveränderte Werte
+  = Vorgaben, G-Code byte-gleich zu früheren Rastern.
+  Tests: `tests/test_material_test_image.py`, `tests/test_material_test_image_options.py`.
 
 ### Füllung: Schraffur, Kreuzschraffur und Offset-Füllung je Ebene
 
