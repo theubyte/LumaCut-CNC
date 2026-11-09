@@ -31,9 +31,12 @@ same way. Default ``image_mode = ""`` = vector cells, output unchanged.
 cell (LightBurn applies the layer's full image settings in an Interval Test):
 threshold (``threshold``), halftone cells per inch / screen angle
 (``halftone``), 3D depth levels / Z step (``depth3d``) and the adjustments
-brightness / contrast / gamma / negative (all modes). Keys that do not apply to
-the chosen mode are ignored; ``None`` (default) = ImageSettings defaults, so
-existing grids stay byte-identical.
+brightness / contrast / gamma / negative (all modes), plus the remaining image
+settings for every mode (``IMAGE_EXTRA_OPTIONS``): sharpen / sharpen radius,
+black / white point, tone curve, dot width correction, scan angle / angle
+increment, bidirectional and overscan. Keys that do not apply to the chosen mode
+are ignored; ``None`` (default) = ImageSettings defaults, so existing grids stay
+byte-identical.
 """
 
 from __future__ import annotations
@@ -42,9 +45,9 @@ import struct
 import zlib
 from dataclasses import dataclass
 
-from lumacut_canvas.model import (IMAGE_MODES, LAYER_COLORS, PASSES_RANGE, POWER_RANGE,
-                                  SPEED_RANGE, Z_OFFSET_RANGE, Document, Geometry,
-                                  ImageSettings, Layer, RasterImage, Shape)
+from lumacut_canvas.model import (CURVE_MAX_POINTS, IMAGE_MODES, LAYER_COLORS, PASSES_RANGE,
+                                  POWER_RANGE, SPEED_RANGE, Z_OFFSET_RANGE, Document, Geometry,
+                                  ImageSettings, Layer, RasterImage, Shape, normalize_curve)
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
 from .raster import MAX_DEPTH_DROP_MM  # 3D depth: max. z_step × (levels − 1)
@@ -67,17 +70,33 @@ IMAGE_MODE_OPTIONS = {"threshold": ("threshold",),
                       "halftone": ("halftone_cpi", "halftone_angle"),
                       "depth3d": ("depth_levels", "z_step_mm")}
 IMAGE_ADJUST_OPTIONS = ("brightness", "contrast", "gamma", "negative")
+# Remaining image settings, also for every mode (dialog: „Weitere Bildoptionen“).
+IMAGE_EXTRA_OPTIONS = ("sharpen", "sharpen_radius", "black_point", "white_point", "curve",
+                       "dot_width_mm", "scan_angle", "angle_increment", "bidirectional",
+                       "overscan_mm")
 IMAGE_OPTION_KEYS = ("threshold", "halftone_cpi", "halftone_angle", "depth_levels",
-                     "z_step_mm") + IMAGE_ADJUST_OPTIONS
+                     "z_step_mm") + IMAGE_ADJUST_OPTIONS + IMAGE_EXTRA_OPTIONS
+# Option value types besides float (curve: ((in, out), ...) grey values).
+IMAGE_BOOL_OPTIONS = ("negative", "bidirectional")
+IMAGE_INT_OPTIONS = ("threshold", "depth_levels", "black_point", "white_point")
 # Allowed range of each numeric option (same limits as ImageSettings.normalized()).
 IMAGE_OPTION_RANGES = {"threshold": (0, 255), "halftone_cpi": (5.0, 150.0),
                        "halftone_angle": (-90.0, 90.0), "depth_levels": (2, 64),
                        "z_step_mm": (0.0, 2.0), "brightness": (-100.0, 100.0),
-                       "contrast": (-100.0, 100.0), "gamma": (0.2, 5.0)}
+                       "contrast": (-100.0, 100.0), "gamma": (0.2, 5.0),
+                       "sharpen": (0.0, 500.0), "sharpen_radius": (0.5, 10.0),
+                       "black_point": (0, 254), "white_point": (1, 255),
+                       "dot_width_mm": (0.0, 2.0), "scan_angle": (-90.0, 90.0),
+                       "angle_increment": (-90.0, 90.0), "overscan_mm": (0.0, 20.0)}
 IMAGE_OPTION_LABELS = {"threshold": "Schwellwert", "halftone_cpi": "Halbton-Zellen",
                        "halftone_angle": "Rasterwinkel", "depth_levels": "3D-Stufen",
                        "z_step_mm": "Z-Schritt", "brightness": "Helligkeit",
-                       "contrast": "Kontrast", "gamma": "Gamma", "negative": "Negativ"}
+                       "contrast": "Kontrast", "gamma": "Gamma", "negative": "Negativ",
+                       "sharpen": "Schärfen", "sharpen_radius": "Schärferadius",
+                       "black_point": "Schwarzpunkt", "white_point": "Weißpunkt",
+                       "curve": "Kurve", "dot_width_mm": "Punktbreitenkorrektur",
+                       "scan_angle": "Scan-Winkel", "angle_increment": "Winkel-Schritt",
+                       "bidirectional": "Bidirektional", "overscan_mm": "Overscan"}
 # Pixel size of the embedded grey ramp / step wedge (white left -> black right).
 RAMP_PX = (256, 16)
 # Number of equal grey bands in a step wedge (white → black).
@@ -129,19 +148,28 @@ class MaterialTestSpec:
         ``image_mode`` (mode-specific + adjustments); {} without options."""
         if not self.image_mode or not self.image_options:
             return {}
-        keys = IMAGE_MODE_OPTIONS.get(self.image_mode, ()) + IMAGE_ADJUST_OPTIONS
+        keys = (IMAGE_MODE_OPTIONS.get(self.image_mode, ()) + IMAGE_ADJUST_OPTIONS
+                + IMAGE_EXTRA_OPTIONS)
         out = {}
         for k in keys:
             if k not in self.image_options:
                 continue
             v = self.image_options[k]
-            if k == "negative":
+            if k in IMAGE_BOOL_OPTIONS:
                 out[k] = bool(v)
-            elif k in ("threshold", "depth_levels"):
+            elif k in IMAGE_INT_OPTIONS:
                 out[k] = int(v)
+            elif k == "curve":
+                out[k] = normalize_curve(v)
             else:
                 out[k] = float(v)
         return out
+
+    def min_interval(self) -> float:
+        """Smallest line interval of all cells (interval axis included)."""
+        if "interval" in (self.column_param, self.row_param):
+            return min(self.param_values("interval", 2))
+        return self.line_interval_mm
 
     def powers(self) -> list[float]:
         return _steps(self.power_min, self.power_max, self.columns)
@@ -259,7 +287,10 @@ class MaterialTestSpec:
         for k, v in opts.items():
             if k not in IMAGE_OPTION_KEYS:
                 raise ValueError(f"Unbekannte Bildoption: {k}")
-            if k == "negative":
+            if k in IMAGE_BOOL_OPTIONS:
+                continue
+            if k == "curve":
+                _validate_curve(v)
                 continue
             lo, hi = IMAGE_OPTION_RANGES[k]
             try:
@@ -274,6 +305,27 @@ class MaterialTestSpec:
             if drop > MAX_DEPTH_DROP_MM + 1e-9:
                 raise ValueError(f"Fokus-Absenkung {drop:.2f} mm > {MAX_DEPTH_DROP_MM:g} mm "
                                  "(Z-Schritt × (Stufen − 1))")
+        if ov.get("black_point", 0) >= ov.get("white_point", 255):
+            raise ValueError("Schwarzpunkt muss kleiner als der Weißpunkt sein")
+        if ov.get("dot_width_mm", 0.0) > self.min_interval() + 1e-9:
+            raise ValueError(f"Punktbreitenkorrektur {ov['dot_width_mm']:g} mm > kleinster "
+                             f"Linienabstand {self.min_interval():g} mm")
+
+
+def _validate_curve(points) -> None:
+    """Tone curve option: 2..CURVE_MAX_POINTS points (in, out) 0..255, inputs rising
+    (empty = linear)."""
+    try:
+        pts = [(float(a), float(b)) for a, b in (points or ())]
+    except (TypeError, ValueError):
+        raise ValueError("Kurve: Punkte (Eingang, Ausgang) erwartet") from None
+    if not pts:
+        return
+    xs = [a for a, _ in pts]
+    if not 2 <= len(pts) <= CURVE_MAX_POINTS:
+        raise ValueError(f"Kurve: 2..{CURVE_MAX_POINTS} Punkte")
+    if any(not 0 <= v <= 255 for p in pts for v in p) or any(b <= a for a, b in zip(xs, xs[1:])):
+        raise ValueError("Kurve: Punkte 0..255, Eingänge aufsteigend")
 
 
 def _steps(lo: float, hi: float, n: int, digits: int = 1) -> list[float]:
