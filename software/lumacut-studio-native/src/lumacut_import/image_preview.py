@@ -13,7 +13,9 @@ gespiegelt (Fehlerverteilung, Halbtonwinkel) – Vorschau = Pixel des Auftrags;
 mit Scan-Winkel im gedrehten Raster des gewählten Durchgangs (``pass_index``,
 Vorgabe der erste), für die Anzeige zurückgedreht (:func:`rotate_pixels`);
 :func:`preview_shape_passes` legt die Durchgänge mit Winkel-Schritt übereinander
-(dunkelster Wert je Punkt, wie LightBurns Vorschau aller Durchgänge);
+(dunkelster Wert je Punkt, wie LightBurns Vorschau aller Durchgänge) oder
+addiert mit ``burn_sum`` die Leistung je Punkt über alle Durchgänge
+(:func:`sum_previews`: Brennsumme, mehrfach gelaserte Punkte werden dunkler);
 :func:`preview_array` (nur Bilddaten) ignoriert die Drehung.
 :func:`histograms` / :func:`auto_points_for`: Histogramm vor/nach der
 Bildanpassung und Schwarz-/Weißpunkt für „Auto-Tonwert“ (:func:`auto_levels_for`
@@ -45,6 +47,9 @@ class Preview:
     pixels: np.ndarray            # uint8, 0 = volle Leistung / tiefste Stufe, 255 = nicht lasern
     cropped: bool                 # nur ein mittiger Ausschnitt
     burn_share: float             # Anteil gelaserter Punkte (0..1)
+    # Brennsumme (:func:`sum_previews`): Anteil der gelaserten Punkte, die
+    # mehr als ein Durchgang trifft; sonst None.
+    multi_share: float | None = None
 
 
 def preview_settings(st: ImageSettings) -> RasterSettings:
@@ -220,17 +225,58 @@ def overlay_previews(previews: list[Preview]) -> Preview:
     return Preview(out, any(p.cropped for p in previews), share)
 
 
+def sum_previews(previews: list[Preview], counts: list[int] | None = None) -> Preview:
+    """Brennsumme mehrerer Durchgänge: je Punkt wird die Leistung (Schwärzung
+    ``255 - Wert``) aller Durchgänge addiert und durch die Zahl der Durchgänge
+    geteilt – Schwarz = alle Durchgänge mit voller Leistung, ein einzelner
+    Durchgang von N mit voller Leistung = 1/N Grau. So werden Punkte, die
+    mehrere Durchgänge treffen (Kreuzraster, Graustufen), dunkler als Punkte
+    eines Durchgangs, statt wie bei :func:`overlay_previews` nur den dunkelsten
+    Wert zu zeigen. ``counts``: wie oft jede Vorschau vorkommt (gleicher
+    Scan-Winkel in mehreren Durchgängen, z. B. 0° / 90° / 0° → ``[2, 1]``).
+    Größen wie bei :func:`overlay_previews` mittig; ``burn_share`` = nach
+    ``counts`` gewichtetes Mittel, ``multi_share`` = Anteil der gelaserten
+    Punkte, die mehr als ein Durchgang lasert."""
+    if not previews:
+        raise ValueError("keine Durchgänge")
+    counts = [1] * len(previews) if counts is None else [int(c) for c in counts]
+    if len(counts) != len(previews) or any(c < 1 for c in counts):
+        raise ValueError("ungültige Anzahl Durchgänge")
+    h = max(p.pixels.shape[0] for p in previews)
+    w = max(p.pixels.shape[1] for p in previews)
+    energy = np.zeros((h, w), dtype=np.float64)
+    hits = np.zeros((h, w), dtype=np.int32)
+    for p, c in zip(previews, counts):
+        ph, pw = p.pixels.shape
+        y0, x0 = (h - ph) // 2, (w - pw) // 2
+        energy[y0:y0 + ph, x0:x0 + pw] += c * (255.0 - p.pixels.astype(np.float64))
+        hits[y0:y0 + ph, x0:x0 + pw] += c * (p.pixels < 255)
+    n = sum(counts)
+    out = np.clip(np.rint(255.0 - energy / n), 0, 255).astype(np.uint8)
+    lit = int((hits > 0).sum())
+    multi = float((hits > 1).sum()) / lit if lit else 0.0
+    share = float(sum(p.burn_share * c for p, c in zip(previews, counts)) / n)
+    return Preview(out, any(p.cropped for p in previews), share, multi)
+
+
 def preview_shape_passes(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_PIXELS,
-                         rendered_for=None) -> Preview:
+                         rendered_for=None, burn_sum: bool = False) -> Preview:
     """Alle Durchgänge eines Bildobjekts mit Winkel-Schritt übereinander
     (:func:`overlay_previews`); jeder Winkel wird nur einmal gerechnet.
     ``rendered_for(pass_index)``: liefert ein bereits gerechnetes
-    ``(gray, inside)`` (Cache des Dialogs), sonst wird gerendert."""
+    ``(gray, inside)`` (Cache des Dialogs), sonst wird gerendert.
+    ``burn_sum``: Brennsumme (:func:`sum_previews`) statt dunkelstem Wert –
+    ein Winkel, der in mehreren Durchgängen vorkommt, zählt so oft."""
+    from lumacut_job.images import pass_angles
     st = settings.normalized()
-    previews = []
+    angles = pass_angles(st)
+    previews, counts = [], []
     for k in distinct_pass_indices(st):
         rendered = rendered_for(k) if rendered_for is not None else None
         previews.append(preview_shape(shape, st, max_pixels, rendered=rendered, pass_index=k))
+        counts.append(angles.count(angles[k]))
+    if burn_sum:
+        return sum_previews(previews, counts)
     return overlay_previews(previews)
 
 
