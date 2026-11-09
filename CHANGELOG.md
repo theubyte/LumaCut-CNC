@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-09
+
+- **Gestell v1 konstruiert (neue Maschine):** Eigenbau-Gestell mit CoreXY auf Linearschienen, fahrendem Bett mit 200 mm Z und Rollen-Drehachse für Becher. Nutzt die Teile des Anet-A8-Satzes (Motoren, Stangen, LM8UU, T8-Spindeln). 3D-Modell, Druckteile, Bauplan und Teileliste auf dem NAS (`gestell_v1`), noch nicht gebaut.
+
 ## 2026-11-07
 
 - **Kopf v9 konstruiert (neuer Z-Antrieb):** Die T8-Spindel steht fest, die Mutter dreht sich im Kopf: Motor senkrecht im Kopf, Riemen 2 : 1 auf ein Mutterrad in zwei Dünnringlagern. Ersetzt den unzuverlässigen Schneckenantrieb und die Fassung v8 C, über der Grundplatte stehen nur noch 13 mm statt 57. Druckteile und Anleitung auf dem NAS (`kopf_v9`), noch nicht gedruckt.
