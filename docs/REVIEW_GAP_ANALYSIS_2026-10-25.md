@@ -4634,3 +4634,174 @@ Still open:
   PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
   codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
   incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), rebuilt exe).
+
+## 55. Status update 2026-11-09 (review round 48)
+
+Done this round (material test image cells – angle increment and the on / off options
+negative / bidirectional on an axis; Canvas / Machine / Scan Probe / Materials untouched):
+
+- Closed since §54 by others: none – main had no new commits since `799891a`.
+- Gap picked from the §54 „Still open“ list (Material test): **angle increment and the
+  booleans (negative, bidirectional) cannot be swept on an axis**. For a diode laser these
+  are everyday questions per material: does bidirectional engraving stay sharp at this
+  speed or does it need the slower unidirectional mode (line offset / „ghosting“ at
+  3000–6000 mm/min), does an inverted image (slate, anodised aluminium, dark wood) look
+  better, and which cross-raster angle increment evens out the wood grain with 2–3 passes.
+  So far each answer needed a second grid. LightBurn's Interval Test sweeps power / speed /
+  interval only, xTool Creative Space's material test power / speed only. Chosen before
+  the node edits on code parts (path editing – Canvas), the keyboard / serial
+  variable-text placeholder (send path – Machine), in/min speeds (unit UI shared with
+  Materials' presets) and the per-axis acceleration model (needs SKR measurements): it
+  completes the image-option axes with the round-43 machinery, no user decision needed.
+- **Engine** (`lumacut_job/material_test.py`): `IMAGE_AXIS_PARAMS` += `angle_increment`
+  (default 0..90°, unit `°`, layer names `Test P20% F600 Winkel-Schritt 45°`); new
+  `IMAGE_BOOL_AXIS_PARAMS = ("negative", "bidirectional")` (`IMAGE_ALL_AXIS_PARAMS` = both
+  lists, part of `AXIS_PARAMS`): an on / off axis has exactly two columns / rows, first aus
+  then an, no range (`image_axis_ranges` still only accepts numeric options); labels
+  „aus“ / „an“, layer names `… Bidirektional aus`, `… Negativ an`. The swept value
+  overrides the grid-wide option as before. Validation: „Negativ-Achse braucht genau 2
+  Spalten (aus / an)“; an angle-increment axis needs more than one pass in some cell
+  (fixed passes or the passes axis, `MaterialTestSpec.max_passes()`): „Winkel-Schritt-Achse
+  braucht mehr als einen Durchgang (dreht erst den 2. und jeden weiteren Durchgang)“.
+- **Dialog** (`lumacut_job/qt_tools.py`): „Winkel-Schritt (Bild)“, „Negativ (Bild)“ and
+  „Bidirektional (Bild)“ in the Spalten- / Zeilen-Parameter combos (any Bildmodus, image
+  cells only). The angle increment gets von / bis spins (15° step); an on / off axis sets
+  its Spalten / Zeilen count to 2 and locks it (re-enabled when another parameter is
+  chosen), shows no von / bis spins, and hides / does not emit the grid-wide checkbox. OK is
+  disabled with „Winkel-Schritt-Achse braucht mehr als einen Durchgang („Durchgänge“ ≥ 2).“
+  until Durchgänge (or Durchgänge bis on a passes axis) is ≥ 2; the passes spins now
+  refresh the check.
+
+Tests:
+
+- New `tests/test_material_test_toggle_axis.py` (21 tests): new axes offered (default
+  range, aus / an values, combined axis list); each on / off option on a column reaches the
+  cells and changes the (Pi-safe) G-code; the axis overrides the grid-wide value and keeps
+  the others; negative × bidirectional 2 × 2 grid (cells, unique layer names, „aus“ / „an“
+  labels); angle increment 0 / 45 / 90° with 2 passes (pass angles, layer name, G-code),
+  with a scan angle and a passes axis; validation (2 columns / rows, image cells only,
+  passes ≥ 2 also via the passes axis, range, from = to, no range for an on / off option);
+  classic names without the new axes; save / load round-trip; dialog: offered only for
+  image cells with „(Bild)“, on / off axis locks the count at 2 and hides the grid-wide
+  checkbox (also on both axes, unlocked again for power), angle-increment spins and the
+  passes hint, reopened spec equals the dialog spec.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **2350 passed, 3 skipped**, 0 failed (11 min; 2329 + 21 new), first run green.
+
+Output change for old files: none – the axis defaults stay power × speed and only grids with
+one of the new axes get different names / G-code. Checked against `799891a`: G-code and
+layer names of the default, outline, Floyd, greyscale with grid-wide negative /
+unidirectional / 90° angle increment over 2 passes, threshold × interval and gamma ×
+3 passes with scan angle 45° / increment 30° grids are byte-identical.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Material test: several cells of an interval test share the same layer name (power / speed are
+  equal) – the canvas labels tell them apart. Image cells: the G-code follows each cell's image
+  settings, so editing a cell *layer's* power / speed in the layer panel does not change an image
+  cell (the image settings dialog does). Image-cell options cover every image setting
+  (mode parameters, adjustments, sharpen, levels, tone curve – presets only in the test
+  dialog, a custom curve only via a reopened spec –, dot width, scan angle / increment,
+  bidirectional, overscan); since round 43 threshold, halftone cells / angle, brightness,
+  contrast, gamma, sharpen and scan angle, since round 46 also black / white point, dot
+  width and overscan, since round 48 the angle increment and – as aus / an axes over
+  exactly two columns / rows – negative and bidirectional can be swept on an axis. Not on
+  an axis: 3D levels / Z step and the tone curve; one shared test image per grid.
+- Material library (Materials): `lumacut_materials.testgrid.TEST_CELL_RE` is anchored
+  (`…F<speed>$`), so cell layers of a grid with an image-option axis (`Test P50% F1200
+  Gamma 1.2`, `… Schwarzpunkt 32`, `… Punktbreitenkorrektur 0.05mm`, `… Bidirektional aus`,
+  `… Winkel-Schritt 45°`) are not offered by „Preset aus Testzelle“; relaxing it to accept a trailing
+  ` <Option> <Wert>` suffix (and keeping the swept image value in the preset notes) is up to
+  the Materials agent. Grids without an image axis keep the classic names.
+- Image: the preview shows one pixel per dot and does not model the material's real dot size /
+  beam spread (needs the material library – Materials); mode and adjustment presets (incl. the
+  curve presets) are not linked to the material library (Materials); no per-channel / colour
+  curves (images are grey only). Scan angle: the dialog previews each pass, all passes overlaid
+  (darkest dot per position) or, since round 47, their burn sum (power per dot added up and
+  divided by the passes – a linear model: real wood / card darkens non-linearly with the
+  absorbed energy, which needs the material library – Materials); the time estimate plans oblique rows like X
+  rows (acceleration and junction deviation per `G1`, collinear row segments keep their speed),
+  but with one XY acceleration, so Marlin's per-axis limits on diagonal moves are not modelled
+  (to be compared on the SKR); the park-corner live box keeps using the object box (the powered
+  extent of an angled image never leaves it).
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder. The advanced counter / CSV row lives in memory
+  outside the undo history only until the history is cleared (new / opened project) – after
+  a reopen the saved project values apply, so an advanced but unsaved project still loses
+  its values when closed without saving (the close prompt asks, as before).
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  Micro QR has no Kanji mode (UTF-8 byte mode covers Japanese text at a higher bit cost).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine. Same for
+  `test_machine_origin.py::OriginPanelTests::test_user_origin_from_head_and_placed_start_and_frame`
+  (round 46: „ok start“ wait timed out once under load, green alone and in the rerun).
+- Windows hardware tests (material test grids interval × power and passes × speed on wood /
+  card incl. the labels, focus × power / focus × speed grids (relative Z) on wood / card with
+  motorized Z, image test cells (Floyd / Jarvis / greyscale / halftone ramps, step wedges and
+  user photos × power × speed and × line interval, incl. non-default threshold / halftone
+  cells and angle / 3D levels with Z step / brightness / contrast / gamma / negative, and with
+  the „Weitere Bildoptionen“ sharpen / black-white point / S-curve / dot width / scan angle
+  45° / unidirectional / reduced overscan, and image-option axes – threshold sweep
+  64..192, halftone angle 0..45° and cells 20..60 /Zoll, gamma 0.6..1.8 × contrast,
+  brightness × power and scan angle 0..90° × speed, black point 0..64 × white point,
+  dot width 0..0.1 mm × power and overscan 0..5 mm × speed – line ends –, bidirectional
+  aus / an × speed at 3000–6000 mm/min (line offset), negative aus / an on slate / anodised
+  aluminium and angle increment 0..90° × 2–3 passes, incl. the labels
+  and layer names) on
+  wood / card against real photo engravings with the chosen setting, QR codes with umlauts (ECI 26) and Japanese Kanji text
+  with phone scanners (iOS / Android camera apps) and a handheld scanner, Micro QR M1–M4 on
+  small parts with phone / handheld scanners, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, photos at scan angles 30° / 45° /
+  90° and with a 90° angle increment (cross raster, against the „Alle Durchgänge
+  übereinander“ and the „aufaddiert (Brennsumme)“ preview, incl. greyscale photos with 2–3
+  passes at 0° / 45° / 90°) on wood against the X-only raster (line
+  quality of oblique `G1` rows at 3000–6000 mm/min on the SKR), photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera (incl. short-name aliases `/gtin/`, `/lot/`, `?exp=`), plain-text QR codes
+  with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / Micro QR / barcode / Data Matrix / Aztec /
+  PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
+  codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
+  incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), rebuilt exe).
