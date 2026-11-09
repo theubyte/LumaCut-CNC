@@ -10,8 +10,10 @@ so bleibt die echte Punktstruktur sichtbar statt einer verkleinerten.
 :func:`preview_shape` (Dialog mit Bildobjekt) rendert das Bild wie der Auftrag
 samt Drehung und Glättung und rechnet im Maschinen-Nullpunkt oben rechts
 gespiegelt (Fehlerverteilung, Halbtonwinkel) – Vorschau = Pixel des Auftrags;
-mit Scan-Winkel im gedrehten Raster des ersten Durchgangs, für die Anzeige
-zurückgedreht (:func:`rotate_pixels`);
+mit Scan-Winkel im gedrehten Raster des gewählten Durchgangs (``pass_index``,
+Vorgabe der erste), für die Anzeige zurückgedreht (:func:`rotate_pixels`);
+:func:`preview_shape_passes` legt die Durchgänge mit Winkel-Schritt übereinander
+(dunkelster Wert je Punkt, wie LightBurns Vorschau aller Durchgänge);
 :func:`preview_array` (nur Bilddaten) ignoriert die Drehung.
 :func:`histograms` / :func:`auto_points_for`: Histogramm vor/nach der
 Bildanpassung und Schwarz-/Weißpunkt für „Auto-Tonwert“ (:func:`auto_levels_for`
@@ -112,19 +114,28 @@ def _job_shape(shape, settings: ImageSettings):
     return replace(shape, image=replace(shape.image, settings=settings.normalized()))
 
 
-def render_for_preview(shape, settings: ImageSettings):
+def pass_angle(settings: ImageSettings, pass_index: int = 0) -> float:
+    """Scan-Winkel des Durchgangs ``pass_index`` (0 = erster; außerhalb
+    der Durchgänge auf den ersten / letzten begrenzt)."""
+    from lumacut_job.images import pass_angles
+    angles = pass_angles(settings)
+    return angles[min(max(0, int(pass_index)), len(angles) - 1)]
+
+
+def render_for_preview(shape, settings: ImageSettings, pass_index: int = 0):
     """Bild wie im Auftrag rendern: ``(gray, inside)`` im Linienabstand,
     mit Drehung des Objekts und Glättung wie :func:`lumacut_job.images.render_gray`.
 
     ``inside`` (nur bei gedrehten Bildern) markiert die Pixel im Bild;
-    ohne Bildanpassung / Skizze nutzt der Auftrag die Maske nicht."""
-    from lumacut_job.images import (pass_angles, render_gray, render_gray_frame,
+    ohne Bildanpassung / Skizze nutzt der Auftrag die Maske nicht.
+    ``pass_index``: Durchgang, dessen Scan-Winkel gilt (Winkel-Schritt)."""
+    from lumacut_job.images import (render_gray, render_gray_frame,
                                     render_inside, render_inside_frame, scan_geometry)
     tmp = _job_shape(shape, settings)
     interval = tmp.image.settings.line_interval_mm
-    angle = pass_angles(tmp.image.settings)[0]
+    angle = pass_angle(tmp.image.settings, pass_index)
     if angle:
-        # Scan-Winkel: im gedrehten Raster wie der Auftrag (erster Durchgang).
+        # Scan-Winkel: im gedrehten Raster wie der Auftrag (gewählter Durchgang).
         geo = scan_geometry(tmp, angle, interval)
         return render_gray_frame(tmp, geo), render_inside_frame(tmp, geo)
     gray, _ = render_gray(tmp, interval)
@@ -135,24 +146,25 @@ def render_for_preview(shape, settings: ImageSettings):
 
 
 def preview_shape(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_PIXELS,
-                  rendered=None) -> Preview:
+                  rendered=None, pass_index: int = 0) -> Preview:
     """Vorschau eines Bildobjekts mit genau den Pixeln des Auftrags
     (:func:`lumacut_job.images.image_job`): gerendert samt Drehung, im
     Maschinen-Nullpunkt oben rechts gespiegelt gerechnet (Fehlerverteilung
     und Halbtonwinkel wie in der Ausgabe) und für die Anzeige zurückgespiegelt.
     Ecken der Hüllbox außerhalb des gedrehten Bildes bleiben weiß.
-    ``rendered``: bereits gerechnetes ``(gray, inside)`` (Cache des Dialogs)."""
+    ``rendered``: bereits gerechnetes ``(gray, inside)`` (Cache des Dialogs).
+    ``pass_index``: Durchgang mit Winkel-Schritt (0 = erster, wie bisher)."""
     from lumacut_canvas.workarea import IMAGE_FLIP_X
-    from lumacut_job.images import pass_angles
     from lumacut_job.raster import wrap_angle
     st = settings.normalized()
-    gray, inside = rendered if rendered is not None else render_for_preview(shape, st)
+    gray, inside = (rendered if rendered is not None
+                    else render_for_preview(shape, st, pass_index))
     s = preview_settings(st)
     mask = inside
     if not (st.mode == "sketch" or s.adjusted()):
         inside = None
     from dataclasses import replace
-    angle = pass_angles(st)[0]
+    angle = pass_angle(st, pass_index)
     if angle:
         # Gerechnet im gedrehten Raster (Halbton wie im Auftrag), angezeigt
         # zurückgedreht – so liegt das Bild wie auf dem Canvas.
@@ -172,6 +184,54 @@ def preview_shape(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_
     if IMAGE_FLIP_X:
         pv.pixels = np.ascontiguousarray(pv.pixels[:, ::-1])
     return pv
+
+
+def distinct_pass_indices(settings: ImageSettings) -> list[int]:
+    """Je verschiedenem Scan-Winkel der erste Durchgang (gleicher Winkel =
+    gleiche Pixel, z. B. 0° / 90° / 0° beim Kreuzraster → [0, 1])."""
+    from lumacut_job.images import pass_angles
+    seen, out = set(), []
+    for k, a in enumerate(pass_angles(settings)):
+        if a not in seen:
+            seen.add(a)
+            out.append(k)
+    return out
+
+
+def overlay_previews(previews: list[Preview]) -> Preview:
+    """Vorschauen mehrerer Durchgänge mittig übereinanderlegen: je Punkt der
+    dunkelste Wert (gelasert, wenn ein Durchgang ihn lasert). Unterschiedlich
+    große Bilder (gedrehte Raster) werden mittig auf die größte Fläche gelegt,
+    Ränder weiß. ``burn_share`` = Mittel der Anteile je Durchgang."""
+    if not previews:
+        raise ValueError("keine Durchgänge")
+    if len(previews) == 1:
+        p = previews[0]
+        return Preview(p.pixels.copy(), p.cropped, p.burn_share)
+    h = max(p.pixels.shape[0] for p in previews)
+    w = max(p.pixels.shape[1] for p in previews)
+    out = np.full((h, w), 255, dtype=np.uint8)
+    for p in previews:
+        ph, pw = p.pixels.shape
+        y0, x0 = (h - ph) // 2, (w - pw) // 2
+        view = out[y0:y0 + ph, x0:x0 + pw]
+        np.minimum(view, p.pixels, out=view)
+    share = float(np.mean([p.burn_share for p in previews]))
+    return Preview(out, any(p.cropped for p in previews), share)
+
+
+def preview_shape_passes(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_PIXELS,
+                         rendered_for=None) -> Preview:
+    """Alle Durchgänge eines Bildobjekts mit Winkel-Schritt übereinander
+    (:func:`overlay_previews`); jeder Winkel wird nur einmal gerechnet.
+    ``rendered_for(pass_index)``: liefert ein bereits gerechnetes
+    ``(gray, inside)`` (Cache des Dialogs), sonst wird gerendert."""
+    st = settings.normalized()
+    previews = []
+    for k in distinct_pass_indices(st):
+        rendered = rendered_for(k) if rendered_for is not None else None
+        previews.append(preview_shape(shape, st, max_pixels, rendered=rendered, pass_index=k))
+    return overlay_previews(previews)
 
 
 def rotate_pixels(pixels: np.ndarray, angle: float) -> np.ndarray:
