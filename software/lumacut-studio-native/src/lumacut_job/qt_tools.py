@@ -24,7 +24,8 @@ from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 from .estimate import estimate_gcode, frame_gcode
 from lumacut_canvas.model import Z_OFFSET_RANGE
 
-from .material_test import (IMAGE_ADJUST_OPTIONS, IMAGE_MODE_OPTIONS, IMAGE_OPTION_RANGES,
+from .material_test import (IMAGE_ADJUST_OPTIONS, IMAGE_EXTRA_OPTIONS, IMAGE_MODE_OPTIONS,
+                            IMAGE_OPTION_RANGES,
                             IMAGE_SOURCE_LABELS, IMAGE_SOURCES, INTERVAL_TEST_RANGE,
                             MAX_DEPTH_DROP_MM, TEST_IMAGE_MODES, TEST_PARAM_LABELS, TEST_PARAMS,
                             MaterialTestSpec, build_material_test)
@@ -153,6 +154,18 @@ class MaterialTestDialog(QDialog):
                               ("opt_contrast", "Kontrast", self.opt_contrast),
                               ("opt_gamma", "Gamma", self.opt_gamma),
                               ("opt_negative", "", self.opt_negative),
+                              ("opt_more", "", self.opt_more),
+                              ("opt_sharpen", "Schärfen", self.opt_sharpen),
+                              ("opt_sharpen_radius", "Schärferadius", self.opt_sharpen_radius),
+                              ("opt_black", "Schwarzpunkt", self.opt_black),
+                              ("opt_white", "Weißpunkt", self.opt_white),
+                              ("opt_curve", "Kurve", self.opt_curve),
+                              ("opt_dot_width", "Punktbreitenkorrektur", self.opt_dot_width),
+                              ("opt_scan_angle", "Scan-Winkel", self.opt_scan_angle),
+                              ("opt_angle_increment", "Winkel-Schritt je Durchgang",
+                               self.opt_angle_increment),
+                              ("opt_overscan", "Overscan", self.opt_overscan),
+                              ("opt_bidirectional", "", self.opt_bidirectional),
                               ("interval", "Linienabstand", self.interval),
                               ("interval_max", "Linienabstand bis", self.interval_max),
                               ("focus_min", "Fokus von", self.focus_min),
@@ -171,8 +184,10 @@ class MaterialTestDialog(QDialog):
                       self.image_mode):
             combo.currentIndexChanged.connect(self._update_fields)
         for spin in (self.image_min, self.p_min, self.focus_min, self.focus_max,
-                     self.opt_levels, self.opt_zstep):
+                     self.opt_levels, self.opt_zstep, self.opt_black, self.opt_white,
+                     self.opt_dot_width, self.opt_sharpen, self.interval, self.interval_max):
             spin.valueChanged.connect(self._update_fields)
+        self.opt_more.toggled.connect(self._update_fields)
         self._update_fields()
 
     def _build_image_options(self, s: MaterialTestSpec) -> None:
@@ -214,20 +229,106 @@ class MaterialTestDialog(QDialog):
         self.opt_negative = QCheckBox("Negativ (Helles lasern)")
         self.opt_negative.setChecked(bool(val("negative")))
         self.opt_negative.setToolTip("Bild invertieren – z. B. für Schiefer oder eloxiertes Alu.")
+        self._build_extra_options(o, d)
         self._opt_widgets = {"threshold": self.opt_threshold, "halftone_cpi": self.opt_cpi,
                              "halftone_angle": self.opt_angle, "depth_levels": self.opt_levels,
                              "z_step_mm": self.opt_zstep, "brightness": self.opt_brightness,
                              "contrast": self.opt_contrast, "gamma": self.opt_gamma,
-                             "negative": self.opt_negative}
+                             "negative": self.opt_negative, "sharpen": self.opt_sharpen,
+                             "sharpen_radius": self.opt_sharpen_radius,
+                             "black_point": self.opt_black, "white_point": self.opt_white,
+                             "curve": self.opt_curve, "dot_width_mm": self.opt_dot_width,
+                             "scan_angle": self.opt_scan_angle,
+                             "angle_increment": self.opt_angle_increment,
+                             "bidirectional": self.opt_bidirectional,
+                             "overscan_mm": self.opt_overscan}
         self._opt_rows = {"threshold": "opt_threshold", "halftone_cpi": "opt_cpi",
                           "halftone_angle": "opt_angle", "depth_levels": "opt_levels",
                           "z_step_mm": "opt_zstep", "brightness": "opt_brightness",
                           "contrast": "opt_contrast", "gamma": "opt_gamma",
-                          "negative": "opt_negative"}
+                          "negative": "opt_negative", "sharpen": "opt_sharpen",
+                          "sharpen_radius": "opt_sharpen_radius", "black_point": "opt_black",
+                          "white_point": "opt_white", "curve": "opt_curve",
+                          "dot_width_mm": "opt_dot_width", "scan_angle": "opt_scan_angle",
+                          "angle_increment": "opt_angle_increment",
+                          "bidirectional": "opt_bidirectional", "overscan_mm": "opt_overscan"}
+
+    def _build_extra_options(self, o: dict, d) -> None:
+        """„Weitere Bildoptionen“ (all modes): sharpen, levels, tone curve, dot width,
+        scan angle, overscan, bidirectional. Hidden and not applied unless the
+        checkbox is on; it starts on when the spec carries one of them."""
+        from lumacut_canvas.model import normalize_curve
+        from lumacut_import.curve_widget import CURVE_PRESETS, CUSTOM_LABEL
+        r = IMAGE_OPTION_RANGES
+
+        def val(key):
+            return o.get(key, getattr(d, key))
+
+        self.opt_more = QCheckBox("Weitere Bildoptionen (Schärfen, Tonwerte, Kurve, Scan)")
+        self.opt_more.setChecked(any(k in o for k in IMAGE_EXTRA_OPTIONS))
+        self.opt_more.setToolTip("Restliche Bildeinstellungen für alle Bild-Testzellen. "
+                                 "Aus = Vorgaben der Bildeinstellungen.")
+        self.opt_sharpen = _spin(*r["sharpen"], float(val("sharpen")), 10, 1, " %")
+        self.opt_sharpen.setDecimals(0)
+        self.opt_sharpen.setToolTip("Schärfen (Unscharf maskieren): betont Kanten und feine "
+                                    "Details. 0 = aus.")
+        self.opt_sharpen_radius = _spin(*r["sharpen_radius"], float(val("sharpen_radius")),
+                                        0.5, 1, " Punkte")
+        self.opt_sharpen_radius.setToolTip("Radius des Schärfens in Laserpunkten "
+                                           "(Linienabstand).")
+        self.opt_black = _spin(*r["black_point"], int(val("black_point")))
+        self.opt_black.setToolTip("Schwarzpunkt: Grauwerte bis hier werden reines Schwarz "
+                                  "(0..254).")
+        self.opt_white = _spin(*r["white_point"], int(val("white_point")))
+        self.opt_white.setToolTip("Weißpunkt: Grauwerte ab hier werden reines Weiß – muss "
+                                  "größer als der Schwarzpunkt sein.")
+        self.opt_curve = QComboBox()
+        self._curve_choices = [normalize_curve(pts) for pts in CURVE_PRESETS.values()]
+        for name in CURVE_PRESETS:
+            self.opt_curve.addItem(name)
+        cur = normalize_curve(val("curve"))
+        if cur not in self._curve_choices:
+            self._curve_choices.append(cur)
+            self.opt_curve.addItem(CUSTOM_LABEL)
+        self.opt_curve.setCurrentIndex(self._curve_choices.index(cur))
+        self.opt_curve.setToolTip("Gradationskurve für alle Bild-Testzellen (Vorlagen wie in "
+                                  "den Bildeinstellungen).")
+        self.opt_dot_width = _spin(*r["dot_width_mm"], float(val("dot_width_mm")),
+                                   0.01, 3, " mm")
+        self.opt_dot_width.setToolTip("Punktbreitenkorrektur: jede gelaserte Strecke wird um "
+                                      "diesen Wert kürzer (höchstens der kleinste "
+                                      "Linienabstand). 0 = aus.")
+        self.opt_scan_angle = _spin(*r["scan_angle"], float(val("scan_angle")), 15, 1, " °")
+        self.opt_scan_angle.setToolTip("Rasterzeilen unter diesem Winkel lasern (0 = entlang X, "
+                                       "90 = entlang Y).")
+        self.opt_angle_increment = _spin(*r["angle_increment"], float(val("angle_increment")),
+                                         15, 1, " °")
+        self.opt_angle_increment.setToolTip("Jeder weitere Durchgang wird um diesen Winkel "
+                                            "weiter gedreht (nur bei mehreren Durchgängen).")
+        self.opt_overscan = _spin(*r["overscan_mm"], float(val("overscan_mm")), 0.5, 1, " mm")
+        self.opt_overscan.setToolTip("Overscan: Anlauf/Auslauf ohne Leistung an jedem "
+                                     "Zeilenende.")
+        self.opt_bidirectional = QCheckBox("Bidirektional (hin und zurück lasern)")
+        self.opt_bidirectional.setChecked(bool(val("bidirectional")))
+        self.opt_bidirectional.setToolTip("Aus = jede Zeile in derselben Richtung (langsamer, "
+                                          "ohne Hin-/Rück-Versatz).")
 
     def _option_keys(self) -> tuple[str, ...]:
-        """Image options that apply to the chosen image mode."""
-        return IMAGE_MODE_OPTIONS.get(self.image_mode.currentData(), ()) + IMAGE_ADJUST_OPTIONS
+        """Image options that apply to the chosen image mode (plus the further options
+        when „Weitere Bildoptionen“ is on)."""
+        keys = IMAGE_MODE_OPTIONS.get(self.image_mode.currentData(), ()) + IMAGE_ADJUST_OPTIONS
+        return keys + IMAGE_EXTRA_OPTIONS if self.opt_more.isChecked() else keys
+
+    def _option_value(self, key: str):
+        w = self._opt_widgets[key]
+        if key == "curve":
+            return self._curve_choices[w.currentIndex()]
+        return w.isChecked() if isinstance(w, QCheckBox) else w.value()
+
+    def _min_interval(self) -> float:
+        if "interval" in self._axes():
+            return min(self.interval.value(), self.interval_max.value())
+        return self.interval.value()
 
     def image_options(self) -> dict | None:
         """Options of the chosen mode that differ from the defaults (None = all default,
@@ -236,8 +337,7 @@ class MaterialTestDialog(QDialog):
         d = ImageSettings()
         out = {}
         for key in self._option_keys():
-            w = self._opt_widgets[key]
-            v = w.isChecked() if key == "negative" else w.value()
+            v = self._option_value(key)
             if v != getattr(d, key):
                 out[key] = v
         return out or None
@@ -261,6 +361,10 @@ class MaterialTestDialog(QDialog):
         for key, w in self._opt_widgets.items():
             self._rows[self._opt_rows[key]].setVisible(key in shown)
             w.setVisible(key in shown)
+        self._rows["opt_more"].setVisible(image)
+        self.opt_more.setVisible(image)
+        self.opt_sharpen_radius.setEnabled(self.opt_sharpen.value() > 0)
+        more = image and self.opt_more.isChecked()
         self.photo_row.setVisible(photo)
         fields = {"power": ("p_min", "p_max", "Leistung", self.p_max),
                   "speed": ("s_min", "s_max", "Geschw.", self.s_max),
@@ -296,6 +400,11 @@ class MaterialTestDialog(QDialog):
             drop = self.opt_zstep.value() * (self.opt_levels.value() - 1)
             problem = (f"Fokus-Absenkung {drop:.2f} mm > {MAX_DEPTH_DROP_MM:g} mm – "
                        "Z-Schritt oder 3D-Stufen verkleinern.")
+        elif more and self.opt_black.value() >= self.opt_white.value():
+            problem = "Schwarzpunkt muss kleiner als der Weißpunkt sein."
+        elif more and self.opt_dot_width.value() > self._min_interval() + 1e-9:
+            problem = (f"Punktbreitenkorrektur {self.opt_dot_width.value():g} mm > kleinster "
+                       f"Linienabstand {self._min_interval():g} mm.")
         elif "focus" in axes and self.focus_min.value() == self.focus_max.value():
             problem = "Fokus von und bis müssen verschieden sein."
         self.hint.setText(problem)
