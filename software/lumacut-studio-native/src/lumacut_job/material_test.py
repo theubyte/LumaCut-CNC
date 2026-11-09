@@ -42,14 +42,18 @@ Image-option axes (LightBurn Interval Test with a swept image setting): with ima
 cells, a column or row axis can also sweep one numeric image option
 (``IMAGE_AXIS_PARAMS``: threshold, halftone cells / screen angle, brightness,
 contrast, gamma, sharpen, scan angle, black / white point, dot width correction,
-overscan) from ``image_axis_ranges[param] = (from, to)``
-(default ``IMAGE_AXIS_DEFAULT_RANGES``). The cell's value overrides the grid-wide
+overscan, angle increment) from ``image_axis_ranges[param] = (from, to)``
+(default ``IMAGE_AXIS_DEFAULT_RANGES``), or one on / off image option
+(``IMAGE_BOOL_AXIS_PARAMS``: negative, bidirectional) over exactly two columns /
+rows (off, on – no range). The cell's value overrides the grid-wide
 ``image_options`` value; mode-specific options only on an axis in their mode
 (threshold → ``threshold``, halftone → ``halftone``). Cell layers get the swept
 value appended (``Test P…% F… Gamma 1.2``) so the cells stay distinguishable;
 grids without an image axis keep their names and output byte-identical.
 Coupled options are checked per cell: black point < white point (axis value against
 the grid-wide or the other axis's value) and dot width ≤ the cell's line interval.
+An angle-increment axis needs more than one pass in some cell (it only turns the
+second and later passes).
 """
 
 from __future__ import annotations
@@ -113,28 +117,37 @@ IMAGE_OPTION_LABELS = {"threshold": "Schwellwert", "halftone_cpi": "Halbton-Zell
 # Numeric image options that can be swept along a column / row axis (image cells only).
 IMAGE_AXIS_PARAMS = ("threshold", "halftone_cpi", "halftone_angle", "brightness",
                      "contrast", "gamma", "sharpen", "scan_angle", "black_point",
-                     "white_point", "dot_width_mm", "overscan_mm")
+                     "white_point", "dot_width_mm", "overscan_mm", "angle_increment")
+# On / off image options that can be put on an axis: exactly two columns / rows,
+# first off, then on (``IMAGE_BOOL_AXIS_VALUES``).
+IMAGE_BOOL_AXIS_PARAMS = ("negative", "bidirectional")
+IMAGE_BOOL_AXIS_VALUES = (False, True)
+IMAGE_BOOL_LABELS = {False: "aus", True: "an"}
+# Every image option that can be on an axis (numeric + on / off).
+IMAGE_ALL_AXIS_PARAMS = IMAGE_AXIS_PARAMS + IMAGE_BOOL_AXIS_PARAMS
 # Default from/to of an image axis without an explicit range.
 IMAGE_AXIS_DEFAULT_RANGES = {"threshold": (64, 192), "halftone_cpi": (20.0, 60.0),
                              "halftone_angle": (0.0, 45.0), "brightness": (-40.0, 40.0),
                              "contrast": (-40.0, 40.0), "gamma": (0.6, 1.8),
                              "sharpen": (0.0, 200.0), "scan_angle": (0.0, 90.0),
                              "black_point": (0, 64), "white_point": (192, 255),
-                             "dot_width_mm": (0.0, 0.1), "overscan_mm": (0.0, 5.0)}
+                             "dot_width_mm": (0.0, 0.1), "overscan_mm": (0.0, 5.0),
+                             "angle_increment": (0.0, 90.0)}
 # Unit of an image axis value in layer names / the dialog.
 IMAGE_AXIS_UNITS = {"threshold": "", "halftone_cpi": "/Zoll", "halftone_angle": "°",
                     "brightness": "%", "contrast": "%", "gamma": "", "sharpen": "%",
                     "scan_angle": "°", "black_point": "", "white_point": "",
-                    "dot_width_mm": "mm", "overscan_mm": "mm"}
+                    "dot_width_mm": "mm", "overscan_mm": "mm", "angle_increment": "°",
+                    "negative": "", "bidirectional": ""}
 # Decimals of the swept values (threshold is an integer grey value).
 IMAGE_AXIS_DIGITS = {"threshold": 0, "gamma": 2, "black_point": 0, "white_point": 0,
                      "dot_width_mm": 3}
 # German names of the image modes a mode-specific axis needs (error messages).
 IMAGE_AXIS_MODE_LABELS = {"threshold": "Schwellwert", "halftone": "Halbton"}
 # Every axis parameter (vector + image) and its label.
-AXIS_PARAMS = TEST_PARAMS + IMAGE_AXIS_PARAMS
+AXIS_PARAMS = TEST_PARAMS + IMAGE_ALL_AXIS_PARAMS
 AXIS_PARAM_LABELS = {**TEST_PARAM_LABELS,
-                     **{k: IMAGE_OPTION_LABELS[k] for k in IMAGE_AXIS_PARAMS}}
+                     **{k: IMAGE_OPTION_LABELS[k] for k in IMAGE_ALL_AXIS_PARAMS}}
 
 
 def image_axis_mode(param: str) -> str:
@@ -196,7 +209,8 @@ class MaterialTestSpec:
 
     def image_axes(self) -> tuple[str, ...]:
         """Image options on an axis (column first)."""
-        return tuple(p for p in (self.column_param, self.row_param) if p in IMAGE_AXIS_PARAMS)
+        return tuple(p for p in (self.column_param, self.row_param)
+                     if p in IMAGE_ALL_AXIS_PARAMS)
 
     def image_axis_range(self, param: str) -> tuple[float, float]:
         rng = (self.image_axis_ranges or {}).get(param)
@@ -227,6 +241,12 @@ class MaterialTestSpec:
                 out[k] = float(v)
         return out
 
+    def max_passes(self) -> int:
+        """Largest number of passes of all cells (passes axis included)."""
+        if "passes" in (self.column_param, self.row_param):
+            return max(self.param_values("passes", 2))
+        return int(self.passes)
+
     def min_interval(self) -> float:
         """Smallest line interval of all cells (interval axis included)."""
         if "interval" in (self.column_param, self.row_param):
@@ -251,6 +271,9 @@ class MaterialTestSpec:
             return [int(round(v)) for v in _steps(self.passes, self.passes_max, n, 6)]
         if param == "focus":
             return _steps(self.focus_min, self.focus_max, n, 3)
+        if param in IMAGE_BOOL_AXIS_PARAMS:
+            # off / on; validate() requires exactly two columns / rows.
+            return [IMAGE_BOOL_AXIS_VALUES[i % 2] for i in range(n)]
         if param in IMAGE_AXIS_PARAMS:
             lo, hi = self.image_axis_range(param)
             digits = IMAGE_AXIS_DIGITS.get(param, 1)
@@ -277,9 +300,9 @@ class MaterialTestSpec:
     def cell_image_values(self, row: int, column: int) -> dict:
         """Swept image options of one cell ({} without an image axis)."""
         out = {}
-        if self.column_param in IMAGE_AXIS_PARAMS:
+        if self.column_param in IMAGE_ALL_AXIS_PARAMS:
             out[self.column_param] = self.column_values()[column]
-        if self.row_param in IMAGE_AXIS_PARAMS:
+        if self.row_param in IMAGE_ALL_AXIS_PARAMS:
             out[self.row_param] = self.row_values()[row]
         return out
 
@@ -385,6 +408,15 @@ class MaterialTestSpec:
             if mode and self.image_mode != mode:
                 raise ValueError(f"{label}-Achse nur im Bildmodus "
                                  f"{IMAGE_AXIS_MODE_LABELS.get(mode, mode)}")
+            if k in IMAGE_BOOL_AXIS_PARAMS:
+                n = self.columns if k == self.column_param else self.rows
+                if n != 2:
+                    side = "Spalten" if k == self.column_param else "Zeilen"
+                    raise ValueError(f"{label}-Achse braucht genau 2 {side} (aus / an)")
+                continue
+            if k == "angle_increment" and self.max_passes() < 2:
+                raise ValueError("Winkel-Schritt-Achse braucht mehr als einen Durchgang "
+                                 "(dreht erst den 2. und jeden weiteren Durchgang)")
             lo, hi = self.image_axis_range(k)
             rlo, rhi = IMAGE_OPTION_RANGES[k]
             if not (rlo <= lo <= rhi and rlo <= hi <= rhi):
@@ -483,6 +515,8 @@ def _label_text(param: str, value: float) -> str:
         return f"{int(value)}x"
     if param in ("focus", "brightness", "contrast"):
         return f"{value:+g}"
+    if param in IMAGE_BOOL_AXIS_PARAMS:
+        return IMAGE_BOOL_LABELS[bool(value)]
     return f"{value:g}"
 
 
@@ -560,7 +594,9 @@ def _cell_overrides(spec: MaterialTestSpec, settings: dict) -> dict:
     ov = spec.image_overrides()
     for k in spec.image_axes():
         if k in settings:
-            ov[k] = int(settings[k]) if k in IMAGE_INT_OPTIONS else float(settings[k])
+            v = settings[k]
+            ov[k] = (bool(v) if k in IMAGE_BOOL_OPTIONS
+                     else int(v) if k in IMAGE_INT_OPTIONS else float(v))
     return ov
 
 
