@@ -41,12 +41,15 @@ byte-identical.
 Image-option axes (LightBurn Interval Test with a swept image setting): with image
 cells, a column or row axis can also sweep one numeric image option
 (``IMAGE_AXIS_PARAMS``: threshold, halftone cells / screen angle, brightness,
-contrast, gamma, sharpen, scan angle) from ``image_axis_ranges[param] = (from, to)``
+contrast, gamma, sharpen, scan angle, black / white point, dot width correction,
+overscan) from ``image_axis_ranges[param] = (from, to)``
 (default ``IMAGE_AXIS_DEFAULT_RANGES``). The cell's value overrides the grid-wide
 ``image_options`` value; mode-specific options only on an axis in their mode
 (threshold → ``threshold``, halftone → ``halftone``). Cell layers get the swept
 value appended (``Test P…% F… Gamma 1.2``) so the cells stay distinguishable;
 grids without an image axis keep their names and output byte-identical.
+Coupled options are checked per cell: black point < white point (axis value against
+the grid-wide or the other axis's value) and dot width ≤ the cell's line interval.
 """
 
 from __future__ import annotations
@@ -109,18 +112,23 @@ IMAGE_OPTION_LABELS = {"threshold": "Schwellwert", "halftone_cpi": "Halbton-Zell
                        "bidirectional": "Bidirektional", "overscan_mm": "Overscan"}
 # Numeric image options that can be swept along a column / row axis (image cells only).
 IMAGE_AXIS_PARAMS = ("threshold", "halftone_cpi", "halftone_angle", "brightness",
-                     "contrast", "gamma", "sharpen", "scan_angle")
+                     "contrast", "gamma", "sharpen", "scan_angle", "black_point",
+                     "white_point", "dot_width_mm", "overscan_mm")
 # Default from/to of an image axis without an explicit range.
 IMAGE_AXIS_DEFAULT_RANGES = {"threshold": (64, 192), "halftone_cpi": (20.0, 60.0),
                              "halftone_angle": (0.0, 45.0), "brightness": (-40.0, 40.0),
                              "contrast": (-40.0, 40.0), "gamma": (0.6, 1.8),
-                             "sharpen": (0.0, 200.0), "scan_angle": (0.0, 90.0)}
+                             "sharpen": (0.0, 200.0), "scan_angle": (0.0, 90.0),
+                             "black_point": (0, 64), "white_point": (192, 255),
+                             "dot_width_mm": (0.0, 0.1), "overscan_mm": (0.0, 5.0)}
 # Unit of an image axis value in layer names / the dialog.
 IMAGE_AXIS_UNITS = {"threshold": "", "halftone_cpi": "/Zoll", "halftone_angle": "°",
                     "brightness": "%", "contrast": "%", "gamma": "", "sharpen": "%",
-                    "scan_angle": "°"}
+                    "scan_angle": "°", "black_point": "", "white_point": "",
+                    "dot_width_mm": "mm", "overscan_mm": "mm"}
 # Decimals of the swept values (threshold is an integer grey value).
-IMAGE_AXIS_DIGITS = {"threshold": 0, "gamma": 2}
+IMAGE_AXIS_DIGITS = {"threshold": 0, "gamma": 2, "black_point": 0, "white_point": 0,
+                     "dot_width_mm": 3}
 # German names of the image modes a mode-specific axis needs (error messages).
 IMAGE_AXIS_MODE_LABELS = {"threshold": "Schwellwert", "halftone": "Halbton"}
 # Every axis parameter (vector + image) and its label.
@@ -384,6 +392,30 @@ class MaterialTestSpec:
             vals = self.param_values(k, self.columns if k == self.column_param else self.rows)
             if lo == hi or (len(vals) > 1 and len(set(vals)) < len(vals)):
                 raise ValueError(f"{label} von und bis müssen verschieden sein")
+        problem = self.image_cell_problem()
+        if problem:
+            raise ValueError(problem)
+
+    def image_cell_problem(self) -> str:
+        """German error for coupled image options that a swept value breaks in some
+        cell (black point ≥ white point, dot width > the cell's line interval);
+        "" = every cell is fine or no coupled option is on an axis."""
+        swept = set(self.image_axes())
+        if not self.image_mode or not swept & {"black_point", "white_point", "dot_width_mm"}:
+            return ""
+        for r in range(self.rows):
+            for c in range(self.columns):
+                st = self.cell_settings(r, c)
+                ov = _cell_overrides(self, st)
+                bp, wp = ov.get("black_point", 0), ov.get("white_point", 255)
+                if swept & {"black_point", "white_point"} and bp >= wp:
+                    return (f"Schwarzpunkt {bp} muss kleiner als der Weißpunkt {wp} sein "
+                            "(in jeder Testzelle)")
+                dot = ov.get("dot_width_mm", 0.0)
+                if "dot_width_mm" in swept and dot > st["interval"] + 1e-9:
+                    return (f"Punktbreitenkorrektur {dot:g} mm > Linienabstand "
+                            f"{st['interval']:g} mm der Testzelle")
+        return ""
 
     def _validate_image_options(self) -> None:
         opts = self.image_options or {}
@@ -410,9 +442,12 @@ class MaterialTestSpec:
             if drop > MAX_DEPTH_DROP_MM + 1e-9:
                 raise ValueError(f"Fokus-Absenkung {drop:.2f} mm > {MAX_DEPTH_DROP_MM:g} mm "
                                  "(Z-Schritt × (Stufen − 1))")
-        if ov.get("black_point", 0) >= ov.get("white_point", 255):
+        swept = set(self.image_axes())  # swept options: checked per cell instead
+        if (not swept & {"black_point", "white_point"}
+                and ov.get("black_point", 0) >= ov.get("white_point", 255)):
             raise ValueError("Schwarzpunkt muss kleiner als der Weißpunkt sein")
-        if ov.get("dot_width_mm", 0.0) > self.min_interval() + 1e-9:
+        if ("dot_width_mm" not in swept
+                and ov.get("dot_width_mm", 0.0) > self.min_interval() + 1e-9):
             raise ValueError(f"Punktbreitenkorrektur {ov['dot_width_mm']:g} mm > kleinster "
                              f"Linienabstand {self.min_interval():g} mm")
 
