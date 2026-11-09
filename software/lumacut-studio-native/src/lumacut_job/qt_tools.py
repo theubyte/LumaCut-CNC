@@ -25,7 +25,7 @@ from .estimate import estimate_gcode, frame_gcode
 from lumacut_canvas.model import Z_OFFSET_RANGE
 
 from .material_test import (AXIS_PARAM_LABELS, AXIS_PARAMS, IMAGE_ADJUST_OPTIONS,
-                            IMAGE_AXIS_DIGITS, IMAGE_AXIS_MODE_LABELS, IMAGE_AXIS_PARAMS,
+                            IMAGE_ALL_AXIS_PARAMS, IMAGE_BOOL_AXIS_PARAMS, IMAGE_AXIS_DIGITS, IMAGE_AXIS_MODE_LABELS, IMAGE_AXIS_PARAMS,
                             IMAGE_AXIS_UNITS, IMAGE_EXTRA_OPTIONS, IMAGE_MODE_OPTIONS,
                             IMAGE_OPTION_RANGES, image_axis_mode,
                             IMAGE_SOURCE_LABELS, IMAGE_SOURCES, INTERVAL_TEST_RANGE,
@@ -125,7 +125,7 @@ class MaterialTestDialog(QDialog):
         for combo, value in ((self.col_param, s.column_param), (self.row_param, s.row_param)):
             for key in AXIS_PARAMS:
                 label = AXIS_PARAM_LABELS[key]
-                combo.addItem(f"{label} (Bild)" if key in IMAGE_AXIS_PARAMS else label, key)
+                combo.addItem(f"{label} (Bild)" if key in IMAGE_ALL_AXIS_PARAMS else label, key)
             combo.setCurrentIndex(AXIS_PARAMS.index(value) if value in AXIS_PARAMS else 0)
         self._build_image_axes(s)
         self.labels = QCheckBox(
@@ -195,7 +195,8 @@ class MaterialTestDialog(QDialog):
         for spin in (self.image_min, self.p_min, self.focus_min, self.focus_max,
                      self.opt_levels, self.opt_zstep, self.opt_black, self.opt_white,
                      self.opt_dot_width, self.opt_sharpen, self.interval, self.interval_max,
-                     self.cols, self.rows, *self.axis_from, *self.axis_to):
+                     self.cols, self.rows, self.passes, self.passes_max,
+                     *self.axis_from, *self.axis_to):
             spin.valueChanged.connect(self._update_fields)
         self.opt_more.toggled.connect(self._update_fields)
         self._update_fields()
@@ -228,7 +229,8 @@ class MaterialTestDialog(QDialog):
             rlo, rhi = IMAGE_OPTION_RANGES[key]
             unit = IMAGE_AXIS_UNITS[key]
             step = {"threshold": 16, "gamma": 0.1, "halftone_cpi": 5, "black_point": 16,
-                    "white_point": 16, "dot_width_mm": 0.01, "overscan_mm": 0.5}.get(key, 5)
+                    "white_point": 16, "dot_width_mm": 0.01, "overscan_mm": 0.5,
+                    "angle_increment": 15}.get(key, 5)
             for w, v in zip((lo_w, hi_w), self._axis_ranges[key]):
                 w.blockSignals(True)
                 w.setDecimals(digits)
@@ -241,7 +243,7 @@ class MaterialTestDialog(QDialog):
                 w.blockSignals(False)
 
     def _image_axes(self) -> tuple[str, ...]:
-        return tuple(p for p in self._axes() if p in IMAGE_AXIS_PARAMS)
+        return tuple(p for p in self._axes() if p in IMAGE_ALL_AXIS_PARAMS)
 
     def image_axis_ranges(self) -> dict | None:
         """From/to of the image options on an axis (None without an image axis)."""
@@ -428,10 +430,20 @@ class MaterialTestDialog(QDialog):
         img_mode = self.image_mode.currentData()
         for combo in (self.col_param, self.row_param):
             model = combo.model()
-            for key in IMAGE_AXIS_PARAMS:
+            for key in IMAGE_ALL_AXIS_PARAMS:
                 need = image_axis_mode(key)
                 model.item(combo.findData(key)).setEnabled(
                     image and (not need or need == img_mode))
+        # An on / off axis (Negativ / Bidirektional) has exactly two columns / rows
+        # (aus, an): the count is fixed while it is on the axis.
+        for key, count in zip(axes, (self.cols, self.rows)):
+            on_off = key in IMAGE_BOOL_AXIS_PARAMS
+            if on_off and count.value() != 2:
+                count.blockSignals(True)
+                count.setValue(2)
+                count.blockSignals(False)
+            count.setEnabled(not on_off)
+            count.setToolTip("Aus / An – genau 2" if on_off else "")
         for i, key in enumerate(axes):
             on = key in IMAGE_AXIS_PARAMS
             name = AXIS_PARAM_LABELS[key]
@@ -508,7 +520,7 @@ class MaterialTestDialog(QDialog):
     def _image_axis_problem(self, image: bool, img_mode: str) -> str:
         """German hint for an image-option axis that cannot run ("" = fine)."""
         for i, key in enumerate(self._axes()):
-            if key not in IMAGE_AXIS_PARAMS:
+            if key not in IMAGE_ALL_AXIS_PARAMS:
                 continue
             name = AXIS_PARAM_LABELS[key]
             if not image:
@@ -517,6 +529,15 @@ class MaterialTestDialog(QDialog):
             if need and need != img_mode:
                 return (f"{name}-Achse nur im Bildmodus "
                         f"„{IMAGE_AXIS_MODE_LABELS.get(need, need)}“.")
+            if key in IMAGE_BOOL_AXIS_PARAMS:
+                continue                      # aus / an: no range
+            if key == "angle_increment":
+                passes = self.passes.value()
+                if "passes" in self._axes():
+                    passes = max(passes, self.passes_max.value())
+                if passes < 2:
+                    return ("Winkel-Schritt-Achse braucht mehr als einen Durchgang "
+                            "(„Durchgänge“ ≥ 2).")
             ranges = self.image_axis_ranges() or {}
             lo, hi = ranges[key]
             n = (self.cols, self.rows)[i].value()
