@@ -227,7 +227,8 @@ class MaterialTestDialog(QDialog):
             digits = IMAGE_AXIS_DIGITS.get(key, 1)
             rlo, rhi = IMAGE_OPTION_RANGES[key]
             unit = IMAGE_AXIS_UNITS[key]
-            step = {"threshold": 16, "gamma": 0.1, "halftone_cpi": 5}.get(key, 5)
+            step = {"threshold": 16, "gamma": 0.1, "halftone_cpi": 5, "black_point": 16,
+                    "white_point": 16, "dot_width_mm": 0.01, "overscan_mm": 0.5}.get(key, 5)
             for w, v in zip((lo_w, hi_w), self._axis_ranges[key]):
                 w.blockSignals(True)
                 w.setDecimals(digits)
@@ -468,6 +469,7 @@ class MaterialTestDialog(QDialog):
         self._rows["cols"].setText(f"Spalten ({AXIS_PARAM_LABELS[axes[0]]})")
         self._rows["rows"].setText(f"Zeilen ({AXIS_PARAM_LABELS[axes[1]]})")
         problem = ""
+        swept = set(self._image_axes())
         if axes[0] == axes[1]:
             problem = "Spalten und Zeilen brauchen verschiedene Parameter."
         elif self._image_axis_problem(image, img_mode):
@@ -484,13 +486,21 @@ class MaterialTestDialog(QDialog):
             drop = self.opt_zstep.value() * (self.opt_levels.value() - 1)
             problem = (f"Fokus-Absenkung {drop:.2f} mm > {MAX_DEPTH_DROP_MM:g} mm – "
                        "Z-Schritt oder 3D-Stufen verkleinern.")
-        elif more and self.opt_black.value() >= self.opt_white.value():
+        elif (more and not swept & {"black_point", "white_point"}
+              and self.opt_black.value() >= self.opt_white.value()):
             problem = "Schwarzpunkt muss kleiner als der Weißpunkt sein."
-        elif more and self.opt_dot_width.value() > self._min_interval() + 1e-9:
+        elif (more and "dot_width_mm" not in swept
+              and self.opt_dot_width.value() > self._min_interval() + 1e-9):
             problem = (f"Punktbreitenkorrektur {self.opt_dot_width.value():g} mm > kleinster "
                        f"Linienabstand {self._min_interval():g} mm.")
         elif "focus" in axes and self.focus_min.value() == self.focus_max.value():
             problem = "Fokus von und bis müssen verschieden sein."
+        elif image and swept & {"black_point", "white_point", "dot_width_mm"}:
+            # Swept black / white point or dot width: check every cell (axis value
+            # against the grid-wide or the other axis's value, the cell's interval).
+            cell_problem = self.spec().image_cell_problem()
+            if cell_problem:
+                problem = cell_problem + "."
         self.hint.setText(problem)
         self.hint.setVisible(bool(problem))
         self.bb.button(QDialogButtonBox.Ok).setEnabled(not problem)
