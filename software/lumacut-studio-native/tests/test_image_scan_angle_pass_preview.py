@@ -122,7 +122,8 @@ def test_dialog_pass_choice_lists_every_pass_and_all(qapp):
     assert dlg.preview_pass_row.isVisibleTo(dlg)
     labels = [dlg.preview_pass.itemText(i) for i in range(dlg.preview_pass.count())]
     assert labels == ["1. Durchgang (30°)", "2. Durchgang (75°)", "3. Durchgang (-60°)",
-                      "Alle 3 Durchgänge übereinander"]
+                      "Alle 3 Durchgänge übereinander",
+                      "Alle 3 Durchgänge aufaddiert (Brennsumme)"]
     assert dlg.preview_pass_index() == 0
     assert "(Vorschau: 1. Durchgang, 30°)" in dlg.preview_label.text()
     # changing the increment relabels and keeps the chosen pass
@@ -133,7 +134,7 @@ def test_dialog_pass_choice_lists_every_pass_and_all(qapp):
     # fewer passes: a vanished choice falls back to pass 1
     dlg.preview_pass.setCurrentIndex(2)
     dlg.passes.setValue(2)
-    assert dlg.preview_pass.count() == 3 and dlg.preview_pass_index() == 0
+    assert dlg.preview_pass.count() == 4 and dlg.preview_pass_index() == 0
     dlg.passes.setValue(1)
     assert not dlg.preview_pass_row.isVisibleTo(dlg) and dlg.preview_pass_index() == 0
     dlg.passes.setValue(3)
