@@ -24,10 +24,12 @@ from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 from .estimate import estimate_gcode, frame_gcode
 from lumacut_canvas.model import Z_OFFSET_RANGE
 
-from .material_test import (IMAGE_ADJUST_OPTIONS, IMAGE_EXTRA_OPTIONS, IMAGE_MODE_OPTIONS,
-                            IMAGE_OPTION_RANGES,
+from .material_test import (AXIS_PARAM_LABELS, AXIS_PARAMS, IMAGE_ADJUST_OPTIONS,
+                            IMAGE_AXIS_DIGITS, IMAGE_AXIS_MODE_LABELS, IMAGE_AXIS_PARAMS,
+                            IMAGE_AXIS_UNITS, IMAGE_EXTRA_OPTIONS, IMAGE_MODE_OPTIONS,
+                            IMAGE_OPTION_RANGES, image_axis_mode,
                             IMAGE_SOURCE_LABELS, IMAGE_SOURCES, INTERVAL_TEST_RANGE,
-                            MAX_DEPTH_DROP_MM, TEST_IMAGE_MODES, TEST_PARAM_LABELS, TEST_PARAMS,
+                            MAX_DEPTH_DROP_MM, TEST_IMAGE_MODES,
                             MaterialTestSpec, build_material_test)
 from .planner import PlanReport, optimize_layers, optimized_document_gcode
 
@@ -116,13 +118,16 @@ class MaterialTestDialog(QDialog):
                "Material (Kopf senken). Braucht motorisierte Z-Achse (LumaCut hat sie).")
         for w in (self.focus_min, self.focus_max):
             w.setToolTip(tip)
-        # Parameter per axis (LightBurn Material Test: X / Y parameter).
+        # Parameter per axis (LightBurn Material Test: X / Y parameter); image options
+        # (Bild-Achse) only selectable with image cells.
         self.col_param = QComboBox()
         self.row_param = QComboBox()
         for combo, value in ((self.col_param, s.column_param), (self.row_param, s.row_param)):
-            for key in TEST_PARAMS:
-                combo.addItem(TEST_PARAM_LABELS[key], key)
-            combo.setCurrentIndex(TEST_PARAMS.index(value) if value in TEST_PARAMS else 0)
+            for key in AXIS_PARAMS:
+                label = AXIS_PARAM_LABELS[key]
+                combo.addItem(f"{label} (Bild)" if key in IMAGE_AXIS_PARAMS else label, key)
+            combo.setCurrentIndex(AXIS_PARAMS.index(value) if value in AXIS_PARAMS else 0)
+        self._build_image_axes(s)
         self.labels = QCheckBox(
             "Beschriftung (Leistung % / Geschw. mm/s / Abstand mm / Durchgänge / Fokus mm)")
         self.labels.setChecked(s.labels)
@@ -131,8 +136,12 @@ class MaterialTestDialog(QDialog):
         self._rows: dict = {}
         for key, label, w in (("cparam", "Spalten-Parameter", self.col_param),
                               ("cols", "Spalten", self.cols),
+                              ("c_from", "Spalten von", self.axis_from[0]),
+                              ("c_to", "Spalten bis", self.axis_to[0]),
                               ("rparam", "Zeilen-Parameter", self.row_param),
                               ("rows", "Zeilen", self.rows),
+                              ("r_from", "Zeilen von", self.axis_from[1]),
+                              ("r_to", "Zeilen bis", self.axis_to[1]),
                               ("p_min", "Leistung von", self.p_min),
                               ("p_max", "Leistung bis", self.p_max),
                               ("s_min", "Geschw. von", self.s_min),
@@ -185,10 +194,64 @@ class MaterialTestDialog(QDialog):
             combo.currentIndexChanged.connect(self._update_fields)
         for spin in (self.image_min, self.p_min, self.focus_min, self.focus_max,
                      self.opt_levels, self.opt_zstep, self.opt_black, self.opt_white,
-                     self.opt_dot_width, self.opt_sharpen, self.interval, self.interval_max):
+                     self.opt_dot_width, self.opt_sharpen, self.interval, self.interval_max,
+                     self.cols, self.rows, *self.axis_from, *self.axis_to):
             spin.valueChanged.connect(self._update_fields)
         self.opt_more.toggled.connect(self._update_fields)
         self._update_fields()
+
+    def _build_image_axes(self, s: MaterialTestSpec) -> None:
+        """From/to spins of an image-option axis (column, row). Ranges are remembered
+        per option, so switching the axis parameter keeps the entered values."""
+        self._axis_ranges = {k: s.image_axis_range(k) for k in IMAGE_AXIS_PARAMS}
+        self._axis_shown: list = [None, None]
+        self.axis_from = (QDoubleSpinBox(), QDoubleSpinBox())
+        self.axis_to = (QDoubleSpinBox(), QDoubleSpinBox())
+        for w in self.axis_from + self.axis_to:
+            w.setKeyboardTracking(True)
+        self._configure_image_axes()
+
+    def _configure_image_axes(self) -> None:
+        """Adapt the from/to spins to the image option on each axis."""
+        for i, combo in enumerate((self.col_param, self.row_param)):
+            key = combo.currentData()
+            old = self._axis_shown[i]
+            if old == key:
+                continue
+            lo_w, hi_w = self.axis_from[i], self.axis_to[i]
+            if old in IMAGE_AXIS_PARAMS:
+                self._axis_ranges[old] = (lo_w.value(), hi_w.value())
+            self._axis_shown[i] = key
+            if key not in IMAGE_AXIS_PARAMS:
+                continue
+            digits = IMAGE_AXIS_DIGITS.get(key, 1)
+            rlo, rhi = IMAGE_OPTION_RANGES[key]
+            unit = IMAGE_AXIS_UNITS[key]
+            step = {"threshold": 16, "gamma": 0.1, "halftone_cpi": 5}.get(key, 5)
+            for w, v in zip((lo_w, hi_w), self._axis_ranges[key]):
+                w.blockSignals(True)
+                w.setDecimals(digits)
+                w.setRange(rlo, rhi)
+                w.setSingleStep(step)
+                w.setSuffix(f" {unit}" if unit else "")
+                w.setValue(v)
+                w.setToolTip(f"{AXIS_PARAM_LABELS[key]} je Zelle – ersetzt den Wert der "
+                             "Bildoptionen für das ganze Raster.")
+                w.blockSignals(False)
+
+    def _image_axes(self) -> tuple[str, ...]:
+        return tuple(p for p in self._axes() if p in IMAGE_AXIS_PARAMS)
+
+    def image_axis_ranges(self) -> dict | None:
+        """From/to of the image options on an axis (None without an image axis)."""
+        out = {}
+        for i, key in enumerate(self._axes()):
+            if key in IMAGE_AXIS_PARAMS:
+                lo, hi = self.axis_from[i].value(), self.axis_to[i].value()
+                if IMAGE_AXIS_DIGITS.get(key, 1) == 0:
+                    lo, hi = int(round(lo)), int(round(hi))
+                out[key] = (lo, hi)
+        return out or None
 
     def _build_image_options(self, s: MaterialTestSpec) -> None:
         """Extra image-mode parameters for all image cells (LightBurn applies the
@@ -336,7 +399,10 @@ class MaterialTestDialog(QDialog):
         from lumacut_canvas.model import ImageSettings
         d = ImageSettings()
         out = {}
+        swept = self._image_axes()
         for key in self._option_keys():
+            if key in swept:
+                continue                      # per cell from the axis
             v = self._option_value(key)
             if v != getattr(d, key):
                 out[key] = v
@@ -347,6 +413,7 @@ class MaterialTestDialog(QDialog):
 
     def _update_fields(self) -> None:
         """Range fields only for parameters on an axis; fixed value otherwise."""
+        self._configure_image_axes()
         axes = self._axes()
         kind = self.mode.currentIndex()
         engrave = kind in (CELL_FILL, CELL_IMAGE)
@@ -357,7 +424,22 @@ class MaterialTestDialog(QDialog):
             self._rows[key].setVisible(image)
             w.setVisible(image)
         self._rows["photo"].setVisible(photo)
-        shown = set(self._option_keys()) if image else set()
+        img_mode = self.image_mode.currentData()
+        for combo in (self.col_param, self.row_param):
+            model = combo.model()
+            for key in IMAGE_AXIS_PARAMS:
+                need = image_axis_mode(key)
+                model.item(combo.findData(key)).setEnabled(
+                    image and (not need or need == img_mode))
+        for i, key in enumerate(axes):
+            on = key in IMAGE_AXIS_PARAMS
+            name = AXIS_PARAM_LABELS[key]
+            for row, w, text in ((("c_from", "r_from")[i], self.axis_from[i], f"{name} von"),
+                                 (("c_to", "r_to")[i], self.axis_to[i], f"{name} bis")):
+                self._rows[row].setText(text)
+                self._rows[row].setVisible(on)
+                w.setVisible(on)
+        shown = (set(self._option_keys()) - set(self._image_axes())) if image else set()
         for key, w in self._opt_widgets.items():
             self._rows[self._opt_rows[key]].setVisible(key in shown)
             w.setVisible(key in shown)
@@ -383,11 +465,13 @@ class MaterialTestDialog(QDialog):
             w.setVisible(focus_on)
         self.interval.setEnabled(engrave)
         self._rows["interval"].setEnabled(engrave)
-        self._rows["cols"].setText(f"Spalten ({TEST_PARAM_LABELS[axes[0]]})")
-        self._rows["rows"].setText(f"Zeilen ({TEST_PARAM_LABELS[axes[1]]})")
+        self._rows["cols"].setText(f"Spalten ({AXIS_PARAM_LABELS[axes[0]]})")
+        self._rows["rows"].setText(f"Zeilen ({AXIS_PARAM_LABELS[axes[1]]})")
         problem = ""
         if axes[0] == axes[1]:
             problem = "Spalten und Zeilen brauchen verschiedene Parameter."
+        elif self._image_axis_problem(image, img_mode):
+            problem = self._image_axis_problem(image, img_mode)
         elif "interval" in axes and not engrave:
             problem = "Linienabstand-Test nur mit „Füllen (Gravur)“ oder „Bild“."
         elif image and self.image_min.value() > self.p_min.value():
@@ -411,6 +495,27 @@ class MaterialTestDialog(QDialog):
         self.hint.setVisible(bool(problem))
         self.bb.button(QDialogButtonBox.Ok).setEnabled(not problem)
 
+    def _image_axis_problem(self, image: bool, img_mode: str) -> str:
+        """German hint for an image-option axis that cannot run ("" = fine)."""
+        for i, key in enumerate(self._axes()):
+            if key not in IMAGE_AXIS_PARAMS:
+                continue
+            name = AXIS_PARAM_LABELS[key]
+            if not image:
+                return f"„{name}“ als Achse nur mit Art „Bild“."
+            need = image_axis_mode(key)
+            if need and need != img_mode:
+                return (f"{name}-Achse nur im Bildmodus "
+                        f"„{IMAGE_AXIS_MODE_LABELS.get(need, need)}“.")
+            ranges = self.image_axis_ranges() or {}
+            lo, hi = ranges[key]
+            n = (self.cols, self.rows)[i].value()
+            digits = IMAGE_AXIS_DIGITS.get(key, 1)
+            vals = {round(lo + (hi - lo) * j / max(1, n - 1), digits) for j in range(n)}
+            if lo == hi or len(vals) < n:
+                return f"{name} von und bis müssen verschieden sein."
+        return ""
+
     def spec(self) -> MaterialTestSpec:
         return MaterialTestSpec(
             power_min=self.p_min.value(), power_max=self.p_max.value(), columns=self.cols.value(),
@@ -433,7 +538,9 @@ class MaterialTestDialog(QDialog):
                        if (self.mode.currentIndex() == CELL_IMAGE
                            and self.image_source.currentData() == "photo") else None),
             image_options=(self.image_options()
-                           if self.mode.currentIndex() == CELL_IMAGE else None))
+                           if self.mode.currentIndex() == CELL_IMAGE else None),
+            image_axis_ranges=(self.image_axis_ranges()
+                               if self.mode.currentIndex() == CELL_IMAGE else None))
 
 
     def _pick_photo(self) -> None:
