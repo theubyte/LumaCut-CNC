@@ -26,6 +26,14 @@ step wedge / Stufenkeil) or ``photo`` (user-supplied 8-bit grey PNG in
 the vector layers, so the labels still run last. The cell layer keeps the same
 name and values, so the material library's "Preset aus Testzelle" works the
 same way. Default ``image_mode = ""`` = vector cells, output unchanged.
+
+``image_options`` carries the image mode's extra parameters for every image
+cell (LightBurn applies the layer's full image settings in an Interval Test):
+threshold (``threshold``), halftone cells per inch / screen angle
+(``halftone``), 3D depth levels / Z step (``depth3d``) and the adjustments
+brightness / contrast / gamma / negative (all modes). Keys that do not apply to
+the chosen mode are ignored; ``None`` (default) = ImageSettings defaults, so
+existing grids stay byte-identical.
 """
 
 from __future__ import annotations
@@ -39,6 +47,8 @@ from lumacut_canvas.model import (IMAGE_MODES, LAYER_COLORS, PASSES_RANGE, POWER
                                   ImageSettings, Layer, RasterImage, Shape)
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
+from .raster import MAX_DEPTH_DROP_MM  # 3D depth: max. z_step × (levels − 1)
+
 
 # Parameters that can vary along the columns / rows of the grid.
 TEST_PARAMS = ("power", "speed", "interval", "passes", "focus")
@@ -51,6 +61,23 @@ TEST_IMAGE_MODES = tuple(m for m in IMAGE_MODES if m != "sketch")
 # Shared test-image sources for image cells (LightBurn Interval Test style).
 IMAGE_SOURCES = ("ramp", "wedge", "photo")
 IMAGE_SOURCE_LABELS = {"ramp": "Verlauf", "wedge": "Stufenkeil", "photo": "Eigenes Bild…"}
+# Extra image-settings parameters per image mode (ImageSettings field names) and the
+# adjustments that apply to every mode. Applied to every image cell of the grid.
+IMAGE_MODE_OPTIONS = {"threshold": ("threshold",),
+                      "halftone": ("halftone_cpi", "halftone_angle"),
+                      "depth3d": ("depth_levels", "z_step_mm")}
+IMAGE_ADJUST_OPTIONS = ("brightness", "contrast", "gamma", "negative")
+IMAGE_OPTION_KEYS = ("threshold", "halftone_cpi", "halftone_angle", "depth_levels",
+                     "z_step_mm") + IMAGE_ADJUST_OPTIONS
+# Allowed range of each numeric option (same limits as ImageSettings.normalized()).
+IMAGE_OPTION_RANGES = {"threshold": (0, 255), "halftone_cpi": (5.0, 150.0),
+                       "halftone_angle": (-90.0, 90.0), "depth_levels": (2, 64),
+                       "z_step_mm": (0.0, 2.0), "brightness": (-100.0, 100.0),
+                       "contrast": (-100.0, 100.0), "gamma": (0.2, 5.0)}
+IMAGE_OPTION_LABELS = {"threshold": "Schwellwert", "halftone_cpi": "Halbton-Zellen",
+                       "halftone_angle": "Rasterwinkel", "depth_levels": "3D-Stufen",
+                       "z_step_mm": "Z-Schritt", "brightness": "Helligkeit",
+                       "contrast": "Kontrast", "gamma": "Gamma", "negative": "Negativ"}
 # Pixel size of the embedded grey ramp / step wedge (white left -> black right).
 RAMP_PX = (256, 16)
 # Number of equal grey bands in a step wedge (white → black).
@@ -94,6 +121,27 @@ class MaterialTestSpec:
     image_min_power: float = 0.0
     image_source: str = "ramp"
     image_png: bytes | None = None
+    # Extra image-mode parameters (IMAGE_OPTION_KEYS -> value); None = defaults.
+    image_options: dict | None = None
+
+    def image_overrides(self) -> dict:
+        """ImageSettings overrides for the image cells: only the keys that apply to
+        ``image_mode`` (mode-specific + adjustments); {} without options."""
+        if not self.image_mode or not self.image_options:
+            return {}
+        keys = IMAGE_MODE_OPTIONS.get(self.image_mode, ()) + IMAGE_ADJUST_OPTIONS
+        out = {}
+        for k in keys:
+            if k not in self.image_options:
+                continue
+            v = self.image_options[k]
+            if k == "negative":
+                out[k] = bool(v)
+            elif k in ("threshold", "depth_levels"):
+                out[k] = int(v)
+            else:
+                out[k] = float(v)
+        return out
 
     def powers(self) -> list[float]:
         return _steps(self.power_min, self.power_max, self.columns)
@@ -195,6 +243,7 @@ class MaterialTestSpec:
                     raise ValueError("Eigenes Bild fehlt – bitte eine Bilddatei wählen")
                 if not self.image_png.startswith(b"\x89PNG"):
                     raise ValueError("Eigenes Bild muss ein PNG sein")
+            self._validate_image_options()
         if not 2 <= self.cell_mm <= 60 or not 0 <= self.gap_mm <= 30:
             raise ValueError("Zellgröße 2..60 mm, Abstand 0..30 mm")
         if self.line_interval_mm and not 0.05 <= self.line_interval_mm <= 2:
@@ -202,6 +251,29 @@ class MaterialTestSpec:
         w, h = self.size()
         if self.x < 0 or self.y < 0 or self.x + w > WORK_WIDTH_MM or self.y + h > WORK_HEIGHT_MM:
             raise ValueError("Testraster passt nicht auf die Arbeitsfläche")
+
+    def _validate_image_options(self) -> None:
+        opts = self.image_options or {}
+        if not isinstance(opts, dict):
+            raise ValueError("Bildoptionen müssen ein Wörterbuch sein")
+        for k, v in opts.items():
+            if k not in IMAGE_OPTION_KEYS:
+                raise ValueError(f"Unbekannte Bildoption: {k}")
+            if k == "negative":
+                continue
+            lo, hi = IMAGE_OPTION_RANGES[k]
+            try:
+                fv = float(v)
+            except (TypeError, ValueError):
+                raise ValueError(f"{IMAGE_OPTION_LABELS[k]}: keine Zahl") from None
+            if not lo <= fv <= hi:
+                raise ValueError(f"{IMAGE_OPTION_LABELS[k]} außerhalb {lo:g}..{hi:g}")
+        ov = self.image_overrides()
+        if self.image_mode == "depth3d":
+            drop = ov.get("z_step_mm", 0.0) * (ov.get("depth_levels", 8) - 1)
+            if drop > MAX_DEPTH_DROP_MM + 1e-9:
+                raise ValueError(f"Fokus-Absenkung {drop:.2f} mm > {MAX_DEPTH_DROP_MM:g} mm "
+                                 "(Z-Schritt × (Stufen − 1))")
 
 
 def _steps(lo: float, hi: float, n: int, digits: int = 1) -> list[float]:
@@ -296,7 +368,8 @@ def image_cell(spec: MaterialTestSpec, settings: dict, x: float, y: float,
     """Test-image object for one cell with the cell's laser settings."""
     st = ImageSettings(mode=spec.image_mode, line_interval_mm=settings["interval"],
                        power=settings["power"], min_power=spec.image_min_power,
-                       speed_mm_min=settings["speed"], passes=settings["passes"]).normalized()
+                       speed_mm_min=settings["speed"], passes=settings["passes"],
+                       **spec.image_overrides()).normalized()
     if png is None or px is None:
         png, w, h = cell_image_png(spec)
     else:
