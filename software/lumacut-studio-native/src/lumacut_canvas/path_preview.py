@@ -423,8 +423,10 @@ class PathPreviewBar(QWidget):
         self.setVisible(pv.visible)
         self.readout.setText(pv.readout())
         note = getattr(pv.estimate, "motion_note", None)
+        scope = getattr(pv.estimate, "scope_note", None)
         self.readout.setToolTip(
-            (note() + " – Zeit ohne Referenzfahrt/Fokus/Parken") if callable(note) and note() else "")
+            (note() + " – Zeit " + (scope() if callable(scope) else "ohne Referenzfahrt/Fokus/Parken"))
+            if callable(note) and note() else "")
         keys = [ALL] + [pv.key(s) for s in pv.toolpath.sources()]
         current = [self.filter.itemData(i) for i in range(self.filter.count())]
         if keys != current:

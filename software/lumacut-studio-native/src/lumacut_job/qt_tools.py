@@ -953,7 +953,7 @@ class JobTools(QObject):
             self._msg(f"Keine Schätzung: {exc}")
             return None
         est = estimate_gcode(g)
-        text = f"Auftrag {est.summary()} (ohne Referenzfahrt/Fokus/Parken)"
+        text = f"Auftrag {est.summary()} ({est.scope_note()})"
         if est.layer_summary():
             text += f" – {est.layer_summary()}"
         if est.motion_note():

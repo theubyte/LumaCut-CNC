@@ -11,8 +11,15 @@ per axis, 500 mm/s², Z 9 mm/s. Rapid F9000 when a G0 carries no F (set by
 the Pi). The feed limit is per axis like Marlin's ``M203 X Y``: a diagonal
 move whose F asks for more may run up to ``speed`` on each axis.
 
-Homing, probing/focus and parking run on the Pi before/after the job and
-are *not* included.
+The Pi runs every Studio job from its park corner and parks again after it
+(``park_safezone``: Z up to the travel height, ``G0 X0 Y0 F9000``, down to
+the park height). With ``park=True`` (default) the estimate adds both like
+LightBurn's travel back to the finish position: the *approach* – the head
+rises from the park height (1 mm) to the travel height (20 mm) and the
+job's first move runs from X0/Y0 – and the *return* – lift back to the
+travel height if the job lowered Z, rapid to X0/Y0, down to the park height
+(:class:`ParkRoutine`, mirrors of the Pi defaults). Homing (only when the
+Pi is not referenced) and probing of the automatic run are *not* included.
 
 :func:`frame_gcode` traces the job's bounding box (or its convex
 "rubber band" hull) with the laser off, like LightBurn's Frame buttons and
@@ -39,6 +46,31 @@ RAPID_FEED = 9000.0       # mm/min, Pi default for G0 without F
 JUNCTION_DEVIATION = 0.013  # mm (Marlin default)
 FRAME_FEED = 3000.0       # mm/min
 
+# Park routine of the Pi around every job (pi400/marlin/transport.py
+# park_safezone / _unpark_before_locked / _lower_to_park_locked; defaults of
+# web.py config). tests/test_estimate_park.py keeps the mirrors equal.
+PARK_Z_MM = 1.0           # transport.PARK_Z_MM, config park_z_mm
+TRAVEL_Z_MM = 20.0        # config z_clearance_mm (travel_z without material)
+PARK_FEED = 9000.0        # "G0 X0.000 Y0.000 F9000"
+Z_ACCEL = 100.0           # firmware DEFAULT_MAX_ACCELERATION Z (M201 Z, not changed by the Pi)
+
+
+@dataclass(frozen=True)
+class ParkRoutine:
+    """Moves the Pi adds around a job (machine mm, head parked at X0/Y0)."""
+    park_z: float = PARK_Z_MM
+    travel_z: float = TRAVEL_Z_MM
+    feed: float = PARK_FEED
+    z_accel: float = Z_ACCEL
+
+    @property
+    def lift_mm(self) -> float:
+        """Rise from the park height to the travel height (0 = parks at travel height)."""
+        return max(0.0, self.travel_z - self.park_z) if self.park_z > 0 else 0.0
+
+
+DEFAULT_PARK = ParkRoutine()
+
 # Erlaubter Bereich in Maschinen-mm (Nullpunkt oben rechts: to_machine(0, 0)
 # ist jetzt die *größte* X-Koordinate, darum feste Grenzen statt Ecken).
 _MIN_X, _MIN_Y, _MAX_X, _MAX_Y = MACHINE_X_MIN, MACHINE_Y_MIN, MACHINE_X_MAX, MACHINE_Y_MAX
@@ -59,18 +91,44 @@ class JobEstimate:
     layers: list[tuple[str, float]] = field(default_factory=list)
     # Bewegungsgrenzen, mit denen gerechnet wurde (Pi-Kalibrierung oder Firmware)
     motion: MotionProfile | None = None
+    # Ablauf des Pi um den Auftrag (park=True): Anfahrt aus der Park-Ecke
+    # (Z hoch + erste Fahrt ab X0/Y0) und Parken danach (Z hoch, X0/Y0, Z runter)
+    approach_time_s: float = 0.0
+    approach_length_mm: float = 0.0   # X/Y
+    park_time_s: float = 0.0
+    park_length_mm: float = 0.0       # X/Y
+    park_included: bool = False
 
     def motion_note(self) -> str:
         """``Bewegung: Pi-Kalibrierung 2100 mm/s², 200 mm/s`` (leer ohne Angabe)."""
         return f"Bewegung: {self.motion.label()}" if self.motion is not None else ""
 
     @property
-    def total_time_s(self) -> float:
+    def program_time_s(self) -> float:
+        """Time of the G-code lines alone (what :attr:`layers` adds up)."""
         return self.cut_time_s + self.travel_time_s + self.dwell_time_s
 
+    @property
+    def routine_time_s(self) -> float:
+        """Approach from the park corner plus parking after the job."""
+        return self.approach_time_s + self.park_time_s
+
+    @property
+    def total_time_s(self) -> float:
+        return self.program_time_s + self.routine_time_s
+
     def summary(self) -> str:
-        return (f"≈ {format_duration(self.total_time_s)} · Schnitt {self.cut_length_mm / 1000:.2f} m "
+        text = (f"≈ {format_duration(self.total_time_s)} · Schnitt {self.cut_length_mm / 1000:.2f} m "
                 f"· Leerfahrt {self.travel_length_mm / 1000:.2f} m")
+        if self.routine_time_s > 0:
+            text += f" · Anfahrt/Parken {format_duration(self.routine_time_s)}"
+        return text
+
+    def scope_note(self) -> str:
+        """What the time covers besides the G-code (for tooltips / messages)."""
+        if self.park_included:
+            return "mit Anfahrt aus der Park-Ecke und Parken, ohne Referenzfahrt/Abtasten"
+        return "ohne Referenzfahrt/Fokus/Parken"
 
     def layer_summary(self) -> str:
         """``Schneiden 1 min 20 s · Gravur 3 min 05 s`` (leer bei < 2 Ebenen)."""
@@ -125,14 +183,29 @@ def _seg_time(L: float, v0: float, v1: float, vmax: float, a: float) -> float:
     return (vmax - v0) / a + (vmax - v1) / a + (L - d_acc - d_dec) / vmax
 
 
+def _move_time(length: float, vmax: float, accel: float) -> float:
+    """One move from rest to rest (the Pi waits with M400 around park moves)."""
+    return _seg_time(length, 0.0, 0.0, vmax, accel) if length > 1e-9 else 0.0
+
+
+def _xy_speed(dx: float, dy: float, feed_mm_min: float, max_xy: float) -> float:
+    L = math.hypot(dx, dy)
+    v = feed_mm_min / 60.0
+    frac = max(abs(dx), abs(dy)) / L if L > 1e-12 else 0.0
+    return min(v, max_xy / frac) if frac > 1e-12 else v
+
+
 def estimate_gcode(gcode: str, accel: float | None = None, max_xy: float | None = None,
                    max_z: float | None = None, rapid_feed: float = RAPID_FEED,
                    junction_deviation: float = JUNCTION_DEVIATION,
-                   motion: MotionProfile | None = None) -> JobEstimate:
+                   motion: MotionProfile | None = None,
+                   park: bool | ParkRoutine = True) -> JobEstimate:
     """Estimate run time of Marlin laser G-code (G0/G1/G4, G90/G91, M3 I/M5 I).
 
     ``motion`` (default :func:`~lumacut_job.motion.active_motion`) supplies
-    every limit not given as ``accel`` / ``max_xy`` / ``max_z``.
+    every limit not given as ``accel`` / ``max_xy`` / ``max_z``. ``park``
+    (default the Pi's routine) adds the approach from the park corner and
+    the parking after the job; ``False`` = the G-code lines only.
     """
     base = motion if motion is not None else active_motion()
     if accel is None and max_xy is None and max_z is None:
@@ -153,6 +226,8 @@ def estimate_gcode(gcode: str, accel: float | None = None, max_xy: float | None 
     ys: list[float] = []
     section = ""
     dwell: dict[str, float] = {}
+    first_move = None     # (x, y, has_z, feed mm/min) of the move that leaves the park corner
+    abs_z = False         # an absolute Z word: pos[2] is machine Z
 
     for raw in gcode.splitlines():
         if raw.startswith("; LAYER "):
@@ -194,12 +269,17 @@ def estimate_gcode(gcode: str, accel: float | None = None, max_xy: float | None 
             if axis in words:
                 v = float(words[axis])
                 tgt[k] = v if absolute else pos[k] + v
+        if "Z" in words and absolute:
+            abs_z = True
         if "F" in words and g == 1:
             feed = float(words["F"])
         if not have_xy:
-            # First positioning move: start point unknown, count as 0 length.
+            # First positioning move: in the G-code lines its start point is
+            # unknown (0 length); the park routine plans it from X0/Y0.
             if "X" in words or "Y" in words:
                 have_xy = True
+                f0 = (float(words["F"]) if "F" in words else rapid_feed) if g == 0 else (feed or rapid_feed)
+                first_move = (tgt[0], tgt[1], "Z" in words, f0)
             pos = tgt
             continue
         d = [t - p for t, p in zip(tgt, pos)]
@@ -263,7 +343,30 @@ def estimate_gcode(gcode: str, accel: float | None = None, max_xy: float | None 
     est.layers = [(name or "Auftrag", t) for name, t in per.items()]
     if xs:
         est.bounds = (min(xs), min(ys), max(xs), max(ys))
+    routine = DEFAULT_PARK if park is True else (park or None)
+    if routine is not None and first_move is not None:
+        _add_park(est, routine, first_move, pos, abs_z, accel, max_xy, max_z)
     return est
+
+
+def _add_park(est: JobEstimate, routine: ParkRoutine, first_move, end, abs_z: bool,
+              accel: float, max_xy: float, max_z: float) -> None:
+    """Approach from X0/Y0 and parking after the job (rest to rest, like the Pi)."""
+    z_v = max_z   # the Pi asks for at least F600 on Z, M203 Z caps it at the Z limit
+    lift_t = _move_time(routine.lift_mm, z_v, routine.z_accel)
+    fx, fy, has_z, feed0 = first_move
+    est.approach_length_mm = math.hypot(fx, fy)
+    est.approach_time_s = (0.0 if has_z else lift_t) + _move_time(
+        est.approach_length_mm, _xy_speed(fx, fy, feed0, max_xy), accel)
+    # back to the travel height when the job went below it (relative Z from
+    # the travel height, absolute Z = machine Z)
+    up = max(0.0, routine.travel_z - end[2]) if abs_z else max(0.0, -end[2])
+    est.park_length_mm = math.hypot(end[0], end[1])
+    est.park_time_s = (_move_time(up, z_v, routine.z_accel)
+                       + _move_time(est.park_length_mm,
+                                    _xy_speed(end[0], end[1], routine.feed, max_xy), accel)
+                       + lift_t)
+    est.park_included = True
 
 
 # --- Framing -------------------------------------------------------------
