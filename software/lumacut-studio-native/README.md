@@ -368,6 +368,10 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   verwenden nur die ausgewählten Objekte (Ebenen-Einstellungen bleiben); ohne Auswahl gibt es
   eine Fehlermeldung statt eines Auftrags. Die Pfadvorschau zeigt weiter das ganze Design.
 - **Schätzung** (*Alt+P*): Zeit und Wege; bei mehreren Ebenen/Bildern zusätzlich die Zeit je Ebene.
+  Die Zeit enthält wie beim Pi-Ablauf die Anfahrt aus der Park-Ecke (Z von 1 auf 20 mm, erste
+  Fahrt ab X0/Y0) und das Parken danach (ggf. Z hoch, Eilgang nach X0/Y0, Z runter) –
+  „· Anfahrt/Parken 8 s“ in Schätzung, Start-Rückfrage, Sendemeldung, Verlauf und Pfadvorschau;
+  Referenzfahrt und Abtasten des automatischen Ablaufs zählen nicht mit.
 - **G-Code speichern…** (*Alt+G*): optimierter G-Code des Designs als Datei (ohne
   Scan-Fokuskorrektur, die nur beim Senden über das Scan-Panel dazukommt).
 - **Verlauf…** (*Strg+H*): die letzten 20 gesendeten Aufträge (alle Sendewege) mit Zeit und
@@ -589,9 +593,10 @@ G-Code.
 - Neu gerechnet wird erst 250 ms nach der letzten Änderung und nur, solange
   die Vorschau an ist.
 
-Bekannt: Die Startposition vor der ersten Fahrt ist unbekannt (der Pi
-referenziert/parkt selbst), die erste Positionierfahrt zählt wie in der
-Zeitschätzung mit 0 mm. Sehr große Rasterjobs werden vollständig gelesen;
+Bekannt: Die Bahn beginnt an der ersten Positionierfahrt (Länge 0 mm in der
+Leerfahrtlänge); die Zeit rechnet Anfahrt aus der Park-Ecke und Parken
+dazu (ohne Referenzfahrt/Abtasten, ohne Versatz bei „Aktuelle Position“ /
+„Benutzer-Ursprung“). Sehr große Rasterjobs werden vollständig gelesen;
 bei vielen tausend Zeilen kann das Neuberechnen spürbar dauern.
 
 ### Anordnen: Ausrichten, Verteilen, Arrays
