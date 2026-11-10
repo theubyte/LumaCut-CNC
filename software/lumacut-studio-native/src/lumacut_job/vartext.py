@@ -21,6 +21,9 @@ Placeholders (same syntax as the batch „Seriennummern…“ in :mod:`serial`):
 ``{row}``          number of the CSV data row (1 = first row after the header)
 ``{Name}``         CSV column by header name (``{csv:Name}`` if the name
                    collides with a placeholder above, ``{csv:2}`` = 2nd column)
+``{input:Name}``   typed in at send („Eingaben für den Auftrag“; also
+                   ``{eingabe:Name}``, ``{input:Name=Vorgabe}`` pre-fills
+                   „Vorgabe“ the first time) – like EzCad's keyboard text
 ``{{`` ``}}``      literal braces
 
 Format codes for date/time: ``%d %m %Y %y %H %M %S %j %V %%`` (implemented
@@ -31,6 +34,13 @@ series. With ``per_copy`` the copies in one job (reading order: top to
 bottom, then left to right) get consecutive values / rows and the counter
 advances by the number of copies; without it all copies show the same value
 and the counter advances by one ``step`` per job.
+
+Keyboard input: every ``{input:…}`` label of a job is asked once per send /
+start / „G-Code speichern“ (``JobTools.job_gcode``), all copies with that
+label get the typed value. The values are kept for the session
+(:func:`input_values`), so the canvas labels, frame and time estimate use the
+last typed value; before the first input they show the default or the
+stand-in ``‹Name›``.
 
 Pure Python, no Qt (the text width function is passed in).
 """
@@ -59,6 +69,9 @@ MAX_CSV_ROWS = 200_000
 DATE_DEFAULT = "%d.%m.%Y"
 TIME_DEFAULT = "%H:%M"
 RESERVED = ("n", "date", "time", "row", "csv")
+INPUT_NAMES = ("input", "eingabe")     # keyboard input at send
+MAX_INPUT_CHARS = 200
+MAX_INPUT_LABEL = 40
 
 _TOKEN = re.compile(r"\{\{|\}\}|\{([^{}]*)\}")
 _FMT_CODES = set("dmYyHMSjV%")
@@ -134,11 +147,96 @@ def has_placeholders(template: str) -> bool:
 
 
 def uses_csv(template: str) -> bool:
-    return any(name not in RESERVED[:4] for name, _ in placeholders(template))
+    return any(name not in RESERVED[:4] and name.casefold() not in INPUT_NAMES
+               for name, _ in placeholders(template))
 
 
 def uses_counter(template: str) -> bool:
     return any(name == "n" for name, _ in placeholders(template))
+
+
+# --- keyboard input ------------------------------------------------------------
+
+@dataclass(frozen=True)
+class InputField:
+    """One ``{input:Label}`` of a job: the label asked for and its default."""
+
+    label: str
+    default: str = ""
+
+
+def _input_field(tok: str, arg: str | None) -> InputField:
+    label, sep, default = (arg or "").partition("=")
+    label = label.strip()
+    if not label:
+        raise VarTextError(f"Platzhalter {tok}: Bezeichnung fehlt, z. B. {{input:Name}}")
+    if len(label) > MAX_INPUT_LABEL:
+        raise VarTextError(f"Platzhalter {tok}: Bezeichnung länger als {MAX_INPUT_LABEL} Zeichen")
+    return InputField(label, default if sep else "")
+
+
+def input_fields(template: str) -> list[InputField]:
+    """``{input:…}`` fields of ``template`` (first occurrence of each label,
+    labels compared case-insensitively). VarTextError for an empty label."""
+    out: list[InputField] = []
+    seen: set[str] = set()
+    for m in _TOKEN.finditer(template or ""):
+        if m.group(1) is None:
+            continue
+        name, arg = _split(m.group(1))
+        if name.casefold() not in INPUT_NAMES:
+            continue
+        f = _input_field(m.group(0), arg)
+        if f.label.casefold() not in seen:
+            seen.add(f.label.casefold())
+            out.append(f)
+    return out
+
+
+def uses_input(template: str) -> bool:
+    try:
+        return bool(input_fields(template))
+    except VarTextError:
+        return any(n.casefold() in INPUT_NAMES for n, _a in placeholders(template))
+
+
+def clean_input(value: str) -> str:
+    """Typed value as lasered: one line (line breaks → blanks), at most
+    :data:`MAX_INPUT_CHARS` characters, control characters removed."""
+    text = str(value or "").replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    text = "".join(ch for ch in text if ch == "\t" or ord(ch) >= 32).replace("\t", " ")
+    return text[:MAX_INPUT_CHARS]
+
+
+def stand_in(label: str) -> str:
+    """Shown for an input that was not typed yet (canvas label, frame, estimate)."""
+    return f"‹{label}›"
+
+
+# Values typed at the last send, per label (casefold). Session only: a typed
+# name is not stored in the project or in the settings.
+_INPUTS: dict[str, str] = {}
+
+
+def input_values() -> dict[str, str]:
+    """``{label (casefold): value}`` of the inputs typed in this session."""
+    return dict(_INPUTS)
+
+
+def set_input_values(values: dict[str, str]) -> None:
+    """Remember typed values (merged, keys compared case-insensitively)."""
+    for k, v in (values or {}).items():
+        _INPUTS[str(k).strip().casefold()] = clean_input(v)
+
+
+def clear_input_values() -> None:
+    _INPUTS.clear()
+
+
+def last_input(field: InputField, inputs: dict[str, str] | None = None) -> str | None:
+    """Value of ``field`` from ``inputs`` (or the session store), ``None`` if never typed."""
+    src = _INPUTS if inputs is None else {str(k).casefold(): v for k, v in inputs.items()}
+    return src.get(field.label.casefold())
 
 
 def format_datetime(fmt: str, now: _dt.datetime) -> str:
@@ -188,8 +286,13 @@ def _column(table: "CsvTable | None", key: str, explicit: bool) -> int:
 
 
 def evaluate(template: str, *, value: int = 1, pad: int = 0, table: "CsvTable | None" = None,
-             row: int = 1, now: _dt.datetime | None = None) -> str:
+             row: int = 1, now: _dt.datetime | None = None,
+             inputs: dict[str, str] | None = None) -> str:
     """Evaluated text of ``template``. ``row`` is the 1-based CSV data row.
+
+    ``{input:Label}`` takes ``inputs[label]`` (``None`` = the session store
+    :func:`input_values`); a label never typed gives its default, else the
+    stand-in ``‹Label›`` – the send path always asks first.
 
     Raises :class:`VarTextError` for unknown placeholders, a missing CSV
     file / column or a row past the end of the file.
@@ -226,6 +329,12 @@ def evaluate(template: str, *, value: int = 1, pad: int = 0, table: "CsvTable | 
             return format_datetime(TIME_DEFAULT if arg is None else arg, now)
         if name == "row" and arg is None:
             return str(row)
+        if name.casefold() in INPUT_NAMES:
+            f = _input_field(tok, arg)
+            typed = last_input(f, inputs)
+            if typed is not None:
+                return clean_input(typed)
+            return clean_input(f.default) if f.default else stand_in(f.label)
         if name == "csv":
             if not arg or not arg.strip():
                 raise VarTextError("Platzhalter {csv:…}: Spaltenname oder -nummer fehlt")
@@ -453,7 +562,7 @@ def _series_members(doc: Document) -> dict[str, list[Shape]]:
     return members
 
 
-def _series_texts(shapes: list[Shape], now: _dt.datetime):
+def _series_texts(shapes: list[Shape], now: _dt.datetime, inputs: dict[str, str] | None = None):
     """(spec, copies in reading order, evaluated texts) of one series."""
     spec = spec_of(shapes[0])
     table = None
@@ -466,7 +575,7 @@ def _series_texts(shapes: list[Shape], now: _dt.datetime):
     for i, s in enumerate(ordered):
         k = i if spec.per_copy else 0
         texts.append(evaluate(s.text, value=spec.current + k * spec.step, pad=spec.pad,
-                              table=table, row=spec.csv_row + k, now=now))
+                              table=table, row=spec.csv_row + k, now=now, inputs=inputs))
     return spec, ordered, texts
 
 
@@ -478,7 +587,8 @@ class PreviewValue:
     error: str = ""
 
 
-def preview_values(doc: Document, now: _dt.datetime | None = None) -> dict[str, PreviewValue]:
+def preview_values(doc: Document, now: _dt.datetime | None = None,
+                   inputs: dict[str, str] | None = None) -> dict[str, PreviewValue]:
     """``{shape_id: PreviewValue}`` for every variable text of the next job.
 
     Same evaluation as :func:`evaluate_document` (visible layers, series,
@@ -490,7 +600,7 @@ def preview_values(doc: Document, now: _dt.datetime | None = None) -> dict[str, 
     out: dict[str, PreviewValue] = {}
     for _key, shapes in _series_members(doc).items():
         try:
-            _spec, ordered, texts = _series_texts(shapes, now)
+            _spec, ordered, texts = _series_texts(shapes, now, inputs)
         except ValueError as exc:          # VarTextError and malformed specs
             for s in shapes:
                 out[s.id] = PreviewValue("", str(exc))
@@ -508,8 +618,29 @@ def uses_clock(template: str) -> bool:
         return False
 
 
+def document_inputs(doc: Document) -> list[InputField]:
+    """``{input:…}`` fields of the next job: variable texts on visible layers in
+    reading order, each label once (case-insensitive; the first default wins).
+    Templates with an invalid input placeholder are skipped – the job build
+    reports them."""
+    shapes = [s for members in _series_members(doc).values() for s in members]
+    out: list[InputField] = []
+    seen: set[str] = set()
+    for s in reading_order(shapes):
+        try:
+            fields_ = input_fields(s.text)
+        except VarTextError:
+            continue
+        for f in fields_:
+            if f.label.casefold() not in seen:
+                seen.add(f.label.casefold())
+                out.append(f)
+    return out
+
+
 def evaluate_document(doc: Document, aspect: Callable[..., float] | None = None,
-                      now: _dt.datetime | None = None) -> tuple[Document, JobUsage]:
+                      now: _dt.datetime | None = None,
+                      inputs: dict[str, str] | None = None) -> tuple[Document, JobUsage]:
     """Job document with evaluated variable texts, plus what was used.
 
     Returns ``(doc, empty usage)`` unchanged when the document has no variable
@@ -528,7 +659,7 @@ def evaluate_document(doc: Document, aspect: Callable[..., float] | None = None,
     replaced: dict[str, Shape | None] = {}
     usage = JobUsage()
     for key, shapes in members.items():
-        spec, ordered, texts = _series_texts(shapes, now)
+        spec, ordered, texts = _series_texts(shapes, now, inputs)
         for s, text in zip(ordered, texts):
             replaced[s.id] = refit_text(s, text, aspect) if text.strip() else None
         usage.series.append(SeriesUse(key, spec, [s.id for s in ordered], texts))
@@ -553,7 +684,10 @@ def new_epoch() -> str:
     return new_id()
 
 
-__all__ = ["CsvTable", "JobUsage", "KIND", "SeriesUse", "VarTextError", "VarTextSpec",
+__all__ = ["INPUT_NAMES", "InputField", "clean_input", "clear_input_values", "document_inputs",
+           "input_fields", "input_values", "last_input", "set_input_values", "stand_in",
+           "uses_input",
+           "CsvTable", "JobUsage", "KIND", "SeriesUse", "VarTextError", "VarTextSpec",
            "advanced_spec", "evaluate", "evaluate_document", "format_counter", "format_datetime",
            "has_placeholders", "is_variable", "load_csv", "make_meta", "new_epoch", "new_series",
            "parse_csv", "spec_dict",
