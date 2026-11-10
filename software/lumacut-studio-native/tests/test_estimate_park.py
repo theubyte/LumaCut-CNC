@@ -102,9 +102,10 @@ def test_lift_back_after_a_lowered_head():
     assert rel.park_time_s == pytest.approx(_move(5, 9, Z_ACCEL) + XY150 + LIFT, rel=1e-9)
     absz = estimate_gcode("M3 I\nG0 X150 Y0\nG0 Z3\nG1 X200 Y0 F3000 S10\nG0 X150 Y0\nM5 I\n")
     assert absz.park_time_s == pytest.approx(_move(17, 9, Z_ACCEL) + XY150 + LIFT, rel=1e-9)
-    # head above the travel height at the end: no extra lift
+    # head above the travel height at the end: no extra lift, the Pi lowers
+    # from there (park_safezone keeps the higher Z for the park move; round 53)
     high = estimate_gcode("M3 I\nG0 X150 Y0\nG0 Z30\nG1 X200 Y0 F3000 S10\nG0 X150 Y0\nM5 I\n")
-    assert high.park_time_s == pytest.approx(XY150 + LIFT, rel=1e-9)
+    assert high.park_time_s == pytest.approx(XY150 + _move(29, 9, Z_ACCEL), rel=1e-9)
 
 
 def test_motion_calibration_and_z_speed_apply():

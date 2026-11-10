@@ -46,13 +46,17 @@ def _collect_qt_garbage():
 @pytest.fixture(autouse=True)
 def _reset_estimate_motion():
     """Zeitschätzung jedes Tests mit den Firmware-Grenzen beginnen/enden lassen."""
-    mod = sys.modules.get("lumacut_job.motion")
-    if mod is not None:
-        mod.set_active_motion(None)
+    def reset():
+        mod = sys.modules.get("lumacut_job.motion")
+        if mod is not None:
+            mod.set_active_motion(None)
+        mod = sys.modules.get("lumacut_job.park_routine")
+        if mod is not None:          # Pi heights / head / origin of a test never leak
+            mod.set_active_park(None)
+            mod.set_active_start(None)
+    reset()
     yield
-    mod = sys.modules.get("lumacut_job.motion")
-    if mod is not None:
-        mod.set_active_motion(None)
+    reset()
 
 
 @pytest.fixture(autouse=True)
