@@ -111,6 +111,10 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   „Offene Formen auswählen“ markiert alle offenen Pfade/Linien. Ohne Auswahl gilt alles
   Bearbeitbare; erzeugte Objekte (Codes) und Bilder bleiben unberührt; je **ein**
   Rückgängig-Schritt. Nach einem Import nennt die Statusleiste offene und verbindbare Konturen.
+  Liegen offene Pfade/Linien auf einer Ebene mit Füllung, warnt der Hinweis beim Senden,
+  „Senden und starten“, Schätzen und Speichern („Achtung: N offene Konturen auf Füll-Ebene …
+  wird nur als Linie geschnitten, nicht gefüllt (M verbindbar) – Pfad › „Pfade verbinden“
+  (Alt+J) oder „Pfade schließen“ (Alt+Umschalt+J)“), wie LightBurns Warnung beim Start.
   Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathjoin_ui.py`.
 - **Gruppen:** Strg+G gruppiert, Strg+Umschalt+G löst eine Ebene der Gruppierung
   (verschachtelte Gruppen möglich). Ein Klick wählt immer die ganze Gruppe;
@@ -232,6 +236,18 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     wird abwechselnd geschnitten und mit Laser aus übersprungen (Reiß- und Falzlinien in Karton,
     Abreißkanten). Kurze Schnitte (0,1–0,3 mm) ergeben eine Punktlinie (statt LightBurns
     *Dot Mode*, der Marlin-Dwell bräuchte). An-/Abfahrten und Füllungen bleiben durchgehend.
+  - *Überlappende Linien entfernen* (`overlap_tol_mm`, 0–1 mm Toleranz, „aus“ = 0, z. B.
+    0,05 mm; wie LightBurns *Remove overlapping lines*): Linien, die in derselben Ebene schon
+    geschnitten wurden – die gemeinsame Kante zweier aneinander stoßender Teile, teilweise
+    übereinander liegende Strecken, doppelte Kreise mit anderem Startpunkt –, werden nur einmal
+    gelasert (nahezu parallel ≤ ~11°, Abstand ≤ Toleranz; Kreuzungen und Berührungen bleiben).
+    Die später geschnittene Linie verliert den Abschnitt, „innen zuerst“ bleibt; eine
+    geschlossene Kontur wird dabei zu einem offenen Linienzug. Wirkt nur auf Konturen/Linien,
+    nie auf Füllungen und Bilder, nicht über Ebenen hinweg und **nicht** auf Ebenen mit Kerf,
+    Haltestegen, An-/Abfahrt oder Überschnitt (die brauchen die ganze Kontur – der Dialog und
+    der Hinweis nach dem Senden sagen das); Perforation gilt danach für die Reststücke. Der
+    Hinweis nach Senden / Schätzung / Speichern nennt die eingesparte Länge. Code:
+    `src/lumacut_job/overlap.py`.
   Code: `src/lumacut_job/cutpath.py`; die Art jedes Teilpfads (`cut`, `lead_in`, `lead_out`,
   `tab`, `perf`) steht in `JobLayer.poly_kinds` (z. B. für eine Pfadvorschau).
 - **Seriennummern** („Seriennummern…“, *Alt+N*, Toolbar „Auftrag“; Stapel-Fall von LightBurns

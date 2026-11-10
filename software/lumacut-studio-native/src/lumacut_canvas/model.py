@@ -51,10 +51,15 @@ TAB_SPACING_RANGE = (0.0, 500.0)    # mm, 0 = feste Anzahl
 LEAD_RANGE = (0.0, 10.0)            # mm
 OVERCUT_RANGE = (0.0, 10.0)         # mm über den Startpunkt geschlossener Konturen hinaus
 PERF_RANGE = (0.0, 50.0)            # mm Schnitt- bzw. Lückenlänge der Perforation
+# Überlappende Linien entfernen (lumacut_job.overlap, LightBurn „Remove overlapping
+# lines“): Abstand, bis zu dem zwei Strecken als deckungsgleich gelten; 0 = aus.
+OVERLAP_RANGE = (0.0, 1.0)          # mm
+OVERLAP_DEFAULT_MM = 0.05           # Vorschlag im Dialog beim Einschalten
 CUT_LAYER_DEFAULTS = {
     "kerf_mm": 0.0, "tab_count": 0, "tab_width_mm": 1.0, "tab_spacing_mm": 0.0,
     "lead_in_mm": 0.0, "lead_in_arc": False, "lead_out_mm": 0.0,
     "overcut_mm": 0.0, "perf_cut_mm": 0.0, "perf_skip_mm": 1.0,
+    "overlap_tol_mm": 0.0,
 }
 CUT_LAYER_FIELDS = tuple(CUT_LAYER_DEFAULTS)
 # Vektor-Füllung je Ebene (hatch.py); nur gespeichert, wenn vom Standard abweichend.
@@ -264,6 +269,7 @@ class Layer:
     overcut_mm: float = 0.0         # Überschnitt geschlossener Konturen, 0 = aus
     perf_cut_mm: float = 0.0        # Perforation: Schnittlänge, 0 = aus
     perf_skip_mm: float = 1.0       # Perforation: Lücke (Laser aus)
+    overlap_tol_mm: float = 0.0     # Überlappende Linien nur einmal schneiden, 0 = aus
     # Vektor-Füllung (siehe hatch.py / FILL_LAYER_DEFAULTS)
     fill_mode: str = "none"          # "none" | "hatch" | "crosshatch" | "offset"
     line_interval_mm: float = _hatch.DEFAULT_INTERVAL_MM  # Linienabstand
@@ -300,6 +306,7 @@ class Layer:
             overcut_mm=round(_clamp(float(self.overcut_mm), *OVERCUT_RANGE), 3),
             perf_cut_mm=round(_clamp(float(self.perf_cut_mm), *PERF_RANGE), 3),
             perf_skip_mm=round(_clamp(float(self.perf_skip_mm), *PERF_RANGE), 3),
+            overlap_tol_mm=round(_clamp(float(self.overlap_tol_mm), *OVERLAP_RANGE), 3),
             fill_mode=self.fill_mode if self.fill_mode in _hatch.FILL_MODES else "none",
             line_interval_mm=round(_clamp(float(self.line_interval_mm), *_hatch.INTERVAL_RANGE), 3),
             hatch_angle=_hatch.normalize_angle_180(self.hatch_angle),

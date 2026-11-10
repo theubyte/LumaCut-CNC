@@ -84,6 +84,19 @@ class CutOptions:
     overcut_mm: float = 0.0
     perf_cut_mm: float = 0.0     # 0 = Perforation aus
     perf_skip_mm: float = 1.0
+    overlap_tol_mm: float = 0.0  # 0 = überlappende Linien nicht entfernen (lumacut_job.overlap)
+
+    @property
+    def shapes_contours(self) -> bool:
+        """Kerf, Stege, An-/Abfahrt oder Überschnitt: braucht ganze geschlossene Konturen."""
+        return bool(self.kerf_mm or self.lead_in_mm > 0 or self.lead_out_mm > 0
+                    or self.overcut_mm > 0
+                    or (self.tab_width_mm > 0 and (self.tab_count > 0 or self.tab_spacing_mm > 0)))
+
+    @property
+    def removes_overlaps(self) -> bool:
+        """Überlappende Linien entfernen – nur ohne Kerf/Stege/An-/Abfahrt/Überschnitt."""
+        return self.overlap_tol_mm > 0 and not self.shapes_contours
 
     @property
     def perforated(self) -> bool:

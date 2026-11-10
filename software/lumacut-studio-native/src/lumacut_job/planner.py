@@ -384,16 +384,49 @@ class PlanReport:
     moved_leads: int = 0
     layers_with_skipped: list[str] = field(default_factory=list)
     scan_offset: str = ""   # kurze Beschreibung des angewandten Scan-Versatzes
+    # Überlappende Linien (lumacut_job.overlap): entfernte Länge je Ebene und
+    # Ebenen, auf denen die Option wegen Kerf/Stegen/An-/Abfahrt nicht wirkt.
+    overlap_removed: dict = field(default_factory=dict)   # Ebenenname -> mm
+    overlap_skipped: list[str] = field(default_factory=list)
+    # Offene Pfade/Linien auf Füll-Ebenen (werden als Linie geschnitten, nicht gefüllt).
+    open_on_fill: dict = field(default_factory=dict)      # Ebenenname -> Anzahl
+    open_on_fill_joinable: int = 0
+
+    def overlap_message(self) -> str:
+        parts = []
+        if self.overlap_removed:
+            total = sum(self.overlap_removed.values())
+            where = ", ".join(self.overlap_removed)
+            parts.append(f"Überlappende Linien entfernt: {total:.1f} mm".replace(".", ",")
+                         + f" – Ebene {where}")
+        if self.overlap_skipped:
+            parts.append("Überlappungen nicht entfernt (Kerf / Stege / An-/Abfahrt / "
+                         "Überschnitt aktiv) – Ebene " + ", ".join(self.overlap_skipped))
+        return ". ".join(parts)
+
+    def open_fill_message(self) -> str:
+        if not self.open_on_fill:
+            return ""
+        n = sum(self.open_on_fill.values())
+        where = ", ".join(self.open_on_fill)
+        text = (f"Achtung: {n} offene Kontur{'en' if n != 1 else ''} auf Füll-Ebene {where} "
+                "wird nur als Linie geschnitten, nicht gefüllt")
+        if self.open_on_fill_joinable:
+            text += f" ({self.open_on_fill_joinable} verbindbar)"
+        return text + " – Pfad › „Pfade verbinden“ (Alt+J) oder „Pfade schließen“ (Alt+Shift+J)"
 
     def message(self) -> str:
         """Kurzer Hinweis (leer, wenn nichts zu melden ist)."""
-        if not self.skipped_leads:
-            return self.scan_offset
-        where = ", ".join(self.layers_with_skipped)
-        n = self.skipped_leads
-        text = (f"Anfahrt bei {n} Kontur{'en' if n != 1 else ''} weggelassen "
-                f"(kein Platz / Kollision mit anderen Teilen) – Ebene {where}")
-        return f"{text}. {self.scan_offset}" if self.scan_offset else text
+        parts = []
+        if self.skipped_leads:
+            where = ", ".join(self.layers_with_skipped)
+            n = self.skipped_leads
+            parts.append(f"Anfahrt bei {n} Kontur{'en' if n != 1 else ''} weggelassen "
+                         f"(kein Platz / Kollision mit anderen Teilen) – Ebene {where}")
+        for extra in (self.open_fill_message(), self.overlap_message(), self.scan_offset):
+            if extra:
+                parts.append(extra)
+        return ". ".join(parts)
 
 
 def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | None = None,
@@ -408,7 +441,12 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
     another part); what had to be dropped is counted in ``report``.
     ``should_stop``: optional callable polled during planning; raises
     :class:`PlanCancelled` when it returns true (background preview).
+    Overlapping lines (``overlap_tol_mm`` > 0, :mod:`.overlap`) are removed
+    after ordering – a later line loses what an earlier one already cut, so
+    inside-first is kept; never on layers with kerf / tabs / leads / overcut
+    (reported in ``report.overlap_skipped``), fills are never touched.
     """
+    from .overlap import remove_overlaps
     from .cutpath import (CutOptions, LeadObstacles, apply_cut_options, nesting_depth,
                           offset_closed)
     prepared = []
@@ -436,6 +474,16 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
         if fills:
             pos = fills[-1][-1][1]   # contours follow the fill in every pass
         ordered = order_polylines(polys, pos, should_stop=should_stop, **options)
+        if opts.overlap_tol_mm > 0 and ordered:
+            if opts.removes_overlaps:
+                dedup = remove_overlaps(ordered, opts.overlap_tol_mm)
+                ordered = dedup.polylines
+                if report is not None and dedup.removed_mm > 0:
+                    name = getattr(layer, "name", "?")
+                    report.overlap_removed[name] = (report.overlap_removed.get(name, 0.0)
+                                                    + dedup.removed_mm)
+            elif report is not None:
+                report.overlap_skipped.append(getattr(layer, "name", "?"))
         if opts.active and ordered:
             res = apply_cut_options(ordered, opts, nesting_depth(ordered), obstacles)
             if report is not None:
@@ -449,6 +497,33 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
         if new.polylines:
             pos = new.polylines[-1][-1]
         out.append(new)
+    return out
+
+
+def open_paths_on_fill_layers(doc, report: PlanReport | None = None) -> dict:
+    """Offene Pfade/Linien auf sichtbaren Füll-Ebenen: ``{Ebenenname: Anzahl}``.
+
+    Eine Füllung braucht geschlossene Formen – offene Pfade (DXF-Einzelstrecken,
+    fast geschlossene Konturen) werden dort nur als Linie geschnitten
+    (LightBurn warnt beim Start ebenso). Mit ``report`` werden Anzahl und die
+    mit „Pfade verbinden“ schließbaren Konturen eingetragen.
+    """
+    from lumacut_canvas.pathjoin import is_open, join_preview
+    out: dict = {}
+    joinable = 0
+    for layer in doc.layers:
+        if not layer.visible or getattr(layer, "fill_mode", "none") == "none":
+            continue
+        shapes = [s for s in doc.shapes_in_layer(layer.id) if is_open(s)]
+        if shapes:
+            out[layer.name] = len(shapes)
+            try:
+                joinable += join_preview(shapes)[1]
+            except Exception:   # Vorschau ist nur ein Zusatz zum Hinweis
+                pass
+    if report is not None:
+        report.open_on_fill = dict(out)
+        report.open_on_fill_joinable = joinable
     return out
 
 
@@ -476,6 +551,8 @@ def optimized_document_gcode(doc, scan_offsets=_ACTIVE, **options) -> str:
         table = None
     layers = apply_to_layers(optimize_layers(job_layers(doc), **options), table)
     report = options.get("report")
+    if report is not None:
+        open_paths_on_fill_layers(doc, report)
     has_images = any(s.kind == "image" for s in doc.shapes)
     if report is not None and table is not None and (
             has_images or any(getattr(l, "fill_scan_offset_mm", 0.0) for l in layers)):

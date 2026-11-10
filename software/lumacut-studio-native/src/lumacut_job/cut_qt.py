@@ -1,5 +1,5 @@
 """Dialog „Schnittoptionen der Ebene“: Kerf-Versatz, Haltestege, An-/Abfahrt,
-Überschnitt und Perforation.
+Überschnitt, Perforation und „Überlappende Linien entfernen“.
 
 Bearbeitet die Ebenen-Felder aus :data:`lumacut_canvas.model.CUT_LAYER_DEFAULTS`
 als *einen* Undo-Schritt (``SetLayerAttrsCommand``). Die Werte wirken im Planer
@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpin
 
 from lumacut_canvas.commands import SetLayerAttrsCommand
 from lumacut_canvas.model import (CUT_LAYER_DEFAULTS, CUT_LAYER_FIELDS, KERF_RANGE, LEAD_RANGE,
-                                  OVERCUT_RANGE, PERF_RANGE, TAB_COUNT_RANGE, TAB_SPACING_RANGE,
+                                  OVERCUT_RANGE, OVERLAP_DEFAULT_MM, OVERLAP_RANGE, PERF_RANGE, TAB_COUNT_RANGE, TAB_SPACING_RANGE,
                                   TAB_WIDTH_RANGE, Layer)
 
 
@@ -63,13 +63,28 @@ class CutOptionsDialog(QDialog):
                                  "überspringen (Reiß- und Falzlinien). 0,1–0,3 mm ergibt eine Punktlinie.")
         self.perf_skip = _dspin(PERF_RANGE, layer.perf_skip_mm, 0.1)
         self.perf_skip.setToolTip("Perforation: Länge der Lücke ohne Laser")
+        self.overlap = _dspin(OVERLAP_RANGE, layer.overlap_tol_mm, 0.01, special="aus",
+                              decimals=3)
+        self.overlap.setToolTip(
+            "Linien, die schon einmal geschnitten wurden (gemeinsame Kante zweier Teile, "
+            "teilweise übereinander liegende Strecken), nur einmal schneiden. Wert = "
+            f"Toleranz, z. B. {OVERLAP_DEFAULT_MM:g} mm. Nur Konturen/Linien – Füllungen und "
+            "Bilder bleiben; wirkt nicht zusammen mit Kerf, Stegen, An-/Abfahrt oder Überschnitt.")
+        self.overlap_hint = QLabel("")
+        self.overlap_hint.setWordWrap(True)
         self.perf_cut.valueChanged.connect(self._update_enabled)
+        for w in (self.overlap, self.kerf, self.lead_in, self.lead_out, self.overcut,
+                  self.tab_width, self.tab_spacing):
+            w.valueChanged.connect(self._update_enabled)
+        self.tab_count.valueChanged.connect(self._update_enabled)
         for label, w in (("Kerf-Versatz", self.kerf), ("Haltestege Anzahl", self.tab_count),
                          ("Haltesteg-Breite", self.tab_width), ("Haltesteg-Abstand", self.tab_spacing),
                          ("Anfahrt (Lead-in)", self.lead_in), ("", self.lead_arc),
                          ("Abfahrt (Lead-out)", self.lead_out), ("Überschnitt", self.overcut),
                          ("Perforation Schnitt", self.perf_cut),
-                         ("Perforation Lücke", self.perf_skip)):
+                         ("Perforation Lücke", self.perf_skip),
+                         ("Überlappende Linien entfernen", self.overlap),
+                         ("", self.overlap_hint)):
             f.addRow(label, w)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel
                               | QDialogButtonBox.RestoreDefaults)
@@ -80,8 +95,19 @@ class CutOptionsDialog(QDialog):
         f.addRow(bb)
         self._update_enabled()
 
+    def _contour_options_on(self) -> bool:
+        return bool(self.kerf.value() or self.lead_in.value() > 0 or self.lead_out.value() > 0
+                    or self.overcut.value() > 0
+                    or (self.tab_width.value() > 0
+                        and (self.tab_count.value() > 0 or self.tab_spacing.value() > 0)))
+
     def _update_enabled(self) -> None:
         self.perf_skip.setEnabled(self.perf_cut.value() > 0)
+        blocked = self.overlap.value() > 0 and self._contour_options_on()
+        self.overlap_hint.setText(
+            "Wirkt nicht: Kerf / Stege / An-/Abfahrt / Überschnitt brauchen ganze Konturen – "
+            "Überlappungen dieser Ebene werden nicht entfernt." if blocked else "")
+        self.overlap_hint.setVisible(blocked)
 
     def restore_defaults(self) -> None:
         d = CUT_LAYER_DEFAULTS
@@ -95,13 +121,15 @@ class CutOptionsDialog(QDialog):
         self.overcut.setValue(d["overcut_mm"])
         self.perf_cut.setValue(d["perf_cut_mm"])
         self.perf_skip.setValue(d["perf_skip_mm"])
+        self.overlap.setValue(d["overlap_tol_mm"])
 
     def values(self) -> dict:
         return {"kerf_mm": self.kerf.value(), "tab_count": self.tab_count.value(),
                 "tab_width_mm": self.tab_width.value(), "tab_spacing_mm": self.tab_spacing.value(),
                 "lead_in_mm": self.lead_in.value(), "lead_in_arc": self.lead_arc.isChecked(),
                 "lead_out_mm": self.lead_out.value(), "overcut_mm": self.overcut.value(),
-                "perf_cut_mm": self.perf_cut.value(), "perf_skip_mm": self.perf_skip.value()}
+                "perf_cut_mm": self.perf_cut.value(), "perf_skip_mm": self.perf_skip.value(),
+                "overlap_tol_mm": self.overlap.value()}
 
 
 def apply_cut_options(editor, layer_id: str, values: dict) -> bool:
@@ -133,4 +161,6 @@ def summary(layer: Layer) -> str:
         parts.append(f"Überschnitt {layer.overcut_mm:g} mm")
     if layer.perf_cut_mm > 0 and layer.perf_skip_mm > 0:
         parts.append(f"Perforation {layer.perf_cut_mm:g}/{layer.perf_skip_mm:g} mm")
+    if getattr(layer, "overlap_tol_mm", 0.0) > 0:
+        parts.append(f"Überlappungen entfernen ({layer.overlap_tol_mm:g} mm)")
     return ", ".join(parts)

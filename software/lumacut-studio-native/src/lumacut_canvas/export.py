@@ -46,6 +46,7 @@ class JobLayer:
     overcut_mm: float = 0.0
     perf_cut_mm: float = 0.0
     perf_skip_mm: float = 1.0
+    overlap_tol_mm: float = 0.0   # > 0: überlappende Linien nur einmal (lumacut_job.overlap)
     # Art je Polylinie nach der Planung ("cut", "lead_in", "lead_out", "tab" =
     # Schnittstück nach einer Steg-Lücke, "perf" = nach einer
     # Perforations-Lücke); leer = alles "cut".
