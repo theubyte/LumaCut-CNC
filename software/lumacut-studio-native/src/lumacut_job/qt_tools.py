@@ -834,6 +834,8 @@ class JobTools(QObject):
         text = f"Auftrag {est.summary()} (ohne Referenzfahrt/Fokus/Parken)"
         if est.layer_summary():
             text += f" – {est.layer_summary()}"
+        if est.motion_note():
+            text += f" – {est.motion_note()}"
         if note:
             text += f" – {note}"
         park = self.park_preflight(g)
@@ -1302,4 +1304,27 @@ def install_job_tools(window) -> JobTools:
     """Attach the job toolbar to ``LumaCutStudio`` (needs canvas, machine_panel)."""
     tools = JobTools(window, window.canvas, window.machine_panel, window.statusBar())
     window.job_tools = tools
+    install_motion_sync(window, tools)
     return tools
+
+
+def install_motion_sync(window, tools) -> None:
+    """Time estimates follow the Pi's motion calibration (``config.motion``).
+
+    The last one seen is stored (QSettings) and used offline; a change
+    re-estimates the open path preview without regenerating its G-code.
+    """
+    from .motion import MotionSync, add_motion_listener, remove_motion_listener
+    preview = getattr(getattr(window, "canvas", None), "path_preview", None)
+
+    def refresh(_profile) -> None:
+        try:
+            if preview is not None and hasattr(preview, "refresh_estimate"):
+                preview.refresh_estimate()
+        except RuntimeError:          # preview already deleted (window closed)
+            remove_motion_listener(refresh)
+
+    add_motion_listener(refresh)
+    tools.motion_sync = MotionSync(getattr(window, "machine_panel", None))
+    tools.motion_refresh = refresh
+    tools.destroyed.connect(lambda *_: remove_motion_listener(refresh))

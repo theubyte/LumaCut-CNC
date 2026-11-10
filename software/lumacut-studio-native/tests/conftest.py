@@ -11,6 +11,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import tempfile  # noqa: E402
 os.environ.setdefault("LUMACUT_AUTOSAVE_DIR", tempfile.mkdtemp(prefix="lumacut-autosave-"))
 os.environ.setdefault("LUMACUT_HISTORY_DIR", tempfile.mkdtemp(prefix="lumacut-history-"))
+# Zuletzt gesehene Pi-Bewegungsgrenzen (Zeitschätzung) nie in die echten QSettings
+os.environ.setdefault("LUMACUT_MOTION_SETTINGS", os.path.join(
+    tempfile.mkdtemp(prefix="lumacut-motion-"), "motion.ini"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest  # noqa: E402
@@ -38,6 +41,18 @@ def _collect_qt_garbage():
     yield
     import gc
     gc.collect()
+
+
+@pytest.fixture(autouse=True)
+def _reset_estimate_motion():
+    """Zeitschätzung jedes Tests mit den Firmware-Grenzen beginnen/enden lassen."""
+    mod = sys.modules.get("lumacut_job.motion")
+    if mod is not None:
+        mod.set_active_motion(None)
+    yield
+    mod = sys.modules.get("lumacut_job.motion")
+    if mod is not None:
+        mod.set_active_motion(None)
 
 
 _EXIT_STATUS = 0

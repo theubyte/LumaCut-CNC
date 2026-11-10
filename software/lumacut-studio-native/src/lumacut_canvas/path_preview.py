@@ -203,6 +203,14 @@ class PathPreview(QObject):
         self.limit = None
         self._update_view()
 
+    def refresh_estimate(self) -> None:
+        """Nur die Zeit neu schätzen (z. B. neue Bewegungsgrenzen vom Pi);
+        der G-Code bleibt, wie er ist."""
+        if not self.gcode:
+            return
+        self.estimate = _estimate(self.gcode)
+        self._update_view()
+
     @staticmethod
     def _to_work(tp: Toolpath) -> Toolpath:
         out = Toolpath(runs=list(tp.runs), cut_length_mm=tp.cut_length_mm,
@@ -414,6 +422,9 @@ class PathPreviewBar(QWidget):
         pv = self.preview
         self.setVisible(pv.visible)
         self.readout.setText(pv.readout())
+        note = getattr(pv.estimate, "motion_note", None)
+        self.readout.setToolTip(
+            (note() + " – Zeit ohne Referenzfahrt/Fokus/Parken") if callable(note) and note() else "")
         keys = [ALL] + [pv.key(s) for s in pv.toolpath.sources()]
         current = [self.filter.itemData(i) for i in range(self.filter.count())]
         if keys != current:
