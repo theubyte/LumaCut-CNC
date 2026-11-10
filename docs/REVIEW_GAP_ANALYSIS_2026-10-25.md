@@ -5986,3 +5986,229 @@ Still open:
   PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
   codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
   incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), rebuilt exe).
+
+## 62. Status update 2026-11-10 (review round 55)
+
+Done this round (path cleanup – auto-join, close with tolerance, delete duplicates; Machine /
+Scan Probe / Materials untouched, Canvas only gains two new modules and a menu hook):
+
+- Closed since §61 by others: none – main had no new commits since `21b1bf5`. The Canvas
+  worktree (`/workspace/wt-canvas`, `canvas-work`) has no commit since 2026-10-26 and no
+  uncommitted change; the Pi Web UI worktree touches only `pi400` – no overlap.
+- Gap picked outside the §61 list (sanity sweep of LightBurn's *Edit* menu): **no path
+  cleanup**. LightBurn has *Auto-Join Selected Shapes* (Alt+J, ends ≤ 0.05 mm), *Close
+  Selected Paths With Tolerance* (dialog with distance, „Move Ends Together“ / „Join With
+  Line“ and a found / closed / open readout), *Delete Duplicates* and *Select Open Shapes*.
+  LumaCut had none of them, only the node editor's
+  „Pfad schließen“ for one shape. CAD exports (DXF LINEs from Fusion / FreeCAD / LibreCAD,
+  SVG with one `<path>` per edge) import as loose open strokes: a layer in fill mode leaves
+  them unfilled, kerf / tabs / lead-in / overcut skip them (open paths stay unchanged in
+  `cutpath`) and the planner's inside-first order cannot see a hole – on a diode laser cutting
+  plywood a part may drop before its holes, and a doubled DXF burns every edge twice
+  (charred edges). This blocks the core cutting features of §3 #11 / #12 for imported CAD
+  files, so it was worth more than the remaining §61 candidates (MicroPDF417 / Macro PDF417 /
+  Data Matrix EDIFACT, oblique trace crossings, plain „Senden und starten“ estimate). No
+  hardware fact or user decision needed – it changes the document, not the G-code writer or
+  the Pi.
+- **Engine** (new `lumacut_canvas/pathjoin.py`, Qt only for curved paths): `auto_join`
+  chains the open paths / lines of each layer (never across layers) through a tolerance grid
+  index of their endpoints (nearest end first, either direction, a gap is closed in its
+  middle); a chain whose ends meet becomes a `polygon`, nested closed chains are combined into
+  one polygon with holes by even-odd depth (`nest_rings`, islands in holes become own parts)
+  so the fill leaves the hole free; groups keep the common prefix of their parts; a
+  multi-ring path keeps its unjoined rings as paths. `close_paths(tol, "move" | "line")`
+  closes single paths whose start / end gap ≤ tol (move = both ends meet in the middle, line
+  = a new straight closing segment; node-editor curve segments and rotation kept).
+  `find_duplicates` keys every object by layer, open / closed and its rings rounded to
+  0.01 mm, independent of start point, direction and kind (a rect equals the same polygon);
+  the lowest object stays. Generated objects (codes, arc text) and images are never touched.
+  5000 loose segments join in ≈ 0.1 s.
+- **UI** (new `pathjoin_ui.py`, hooked into the „Pfad“ menu of the bar and the context menu
+  via `pathops_ui`): „Pfade verbinden“ (Alt+J), „Pfade schließen (Toleranz) …“
+  (Alt+Shift+J, dialog 0.01–20 mm, default 0.5 mm like LightBurn's *Close Path*, mode combo,
+  live readout „Offene Formen: N · geschlossen: M · bleiben offen: K“, OK disabled when
+  nothing closes), „Duplikate löschen“ (Alt+Shift+D – Alt+D opens „&Datei“), „Offene Formen
+  auswählen“. Without a selection they act on every editable object (locked layers
+  skipped); each is one undo step, replaced objects stay at their stacking position. After
+  an import the status bar adds „· N offene Kontur(en), M davon verbindbar – Pfad › „Pfade
+  verbinden“ (Alt+J)“ (`lumacut_import.qt.open_shapes_hint`). README: „Pfade aufräumen“
+  bullet.
+
+Tests:
+
+- New `tests/test_pathjoin.py` (19 tests): segment-soup square (one segment reversed) → one
+  polygon; gap inside / beyond the tolerance and a larger tolerance; frame + hole + island
+  nesting (areas); fill leaves the joined hole free (no fill before the join); layers,
+  generated parts and closed shapes untouched, common group prefix; rotated line and curved
+  path endpoints; multi-ring path keeps the unjoined ring; close modes (midpoint, curve flags,
+  straight closing segment, readout text, bad mode); rotated path closes on its outline;
+  duplicates (direction / kind independent, other layer, 0.05 mm shift, open vs closed, code
+  part); editor: join as one undo step with and without selection, locked layer, close dialog
+  (readout, tolerance, OK state, mode) and action (position, undo, cancel), delete duplicates
+  in document / selection and select open, menu / context-menu entries; joined DXF part gets
+  tabs and kerf, its hole is cut first and the G-code passes the Pi guard; cut options see the
+  joined ring as closed; import hint for a DXF with loose LINEs; main window: SVG import
+  message and Alt+J turn three strokes into a triangle.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **2472 passed, 3 skipped**, 0 failed (12.8 min; 2453 + 19 new), first run green.
+
+Output change for old files: none – projects, G-code and the canvas are unchanged until a
+cleanup action is used; the import status message only gets the open-contour suffix when an
+import contains open paths.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Material test: several cells of an interval test share the same layer name (power / speed are
+  equal) – the canvas labels tell them apart. Image cells: the G-code follows each cell's image
+  settings, so editing a cell *layer's* power / speed in the layer panel does not change an image
+  cell (the image settings dialog does). Image-cell options cover every image setting
+  (mode parameters, adjustments, sharpen, levels, tone curve – presets, drawn curves and
+  the curves of the document's images –, dot width, scan angle / increment,
+  bidirectional, overscan); since round 43 threshold, halftone cells / angle, brightness,
+  contrast, gamma, sharpen and scan angle, since round 46 also black / white point, dot
+  width and overscan, since round 48 the angle increment and – as aus / an axes over
+  exactly two columns / rows – negative and bidirectional can be swept on an axis, since
+  round 51 (§58) also 3D levels / Z step and the tone curve, since round 54 (§61) with
+  curves drawn in the test dialog and the curves of the document's images. One shared test
+  image per grid (not an image of the document – the photo is loaded from a file); a curve
+  taken from a document image is labelled „Eigene N“ on the canvas / in the layer name, its
+  „Bild N“ name is a dialog label only.
+- Material library (Materials): `lumacut_materials.testgrid.TEST_CELL_RE` is anchored
+  (`…F<speed>$`), so cell layers of a grid with an image-option axis (`Test P50% F1200
+  Gamma 1.2`, `… Schwarzpunkt 32`, `… Punktbreitenkorrektur 0.05mm`, `… Bidirektional aus`,
+  `… Winkel-Schritt 45°`, since round 51 `… Kurve S`, `… 3D-Stufen 8`, `… Z-Schritt 0.1mm`)
+  are not offered by „Preset aus Testzelle“; relaxing it to accept a trailing
+  ` <Option> <Wert>` suffix (and keeping the swept image value in the preset notes) is up to
+  the Materials agent. Grids without an image axis keep the classic names.
+- Image: the preview shows one pixel per dot and does not model the material's real dot size /
+  beam spread (needs the material library – Materials); mode and adjustment presets (incl. the
+  curve presets) are not linked to the material library (Materials); no per-channel / colour
+  curves (images are grey only). Scan angle: the dialog previews each pass, all passes overlaid
+  (darkest dot per position) or, since round 47, their burn sum (power per dot added up and
+  divided by the passes – a linear model: real wood / card darkens non-linearly with the
+  absorbed energy, which needs the material library – Materials); the time estimate plans oblique rows like X
+  rows (acceleration and junction deviation per `G1`, collinear row segments keep their speed),
+  with the Pi's motion calibration and per-axis feed limits since round 49 (§56); the
+  park-corner live box keeps using the object box (the powered
+  extent of an angled image never leaves it).
+- Time estimate (§56, §59, §60): Cartesian model – a CoreXY frame (Gestell v1) limits the motor axes
+  (A = X+Y, B = X−Y), so diagonals would have to be planned per motor once that frame runs;
+  Grbl's own planner on the Atomstack board (dynamic laser mode) is planned like Marlin; one
+  stored calibration / park and travel height per Windows user (switching between two Pis
+  shows the other's values until the first status arrives). Since round 53 the approach /
+  parking uses the Pi's reported travel height (`travel_z_mm`, clearance or material + 20 mm),
+  park height and probe minimum, starts at the reported head position and follows the
+  placement at „Aktuelle Position“ / „Benutzer-Ursprung“. Still mirrored, not reported: the
+  Z acceleration (firmware `M201 Z` 100 mm/s²) and the park feed F9000; a plain „Senden und
+  starten“ (`start=True`, runs absolute) is estimated at the panel's origin like the later
+  „Start“; the Pi's job optimizer (`job_optimize`, automatic run only) may reorder the job
+  from the head position – not modelled. Not included: homing (only when the Pi is not
+  referenced – after connecting, a reset or an emergency stop) and the probing of the
+  automatic run (the Pi plans the probe grid, `heightmap.plan_probe` – Scan Probe),
+  `M400` / `M114` / `M119` round trips and the start / done melody.
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Path cleanup (§62): no LightBurn *Optimize Selected Shapes* (smoothing / fit to lines –
+  arcs are not an option, the Pi refuses G2/G3), no removal of *partly* overlapping segments
+  (a shared edge of two adjacent parts exported once per part is still cut twice – only whole
+  identical objects are found), no automatic join on import (the status bar only counts open /
+  joinable contours) and no warning at send for open paths on a fill layer (they are cut as
+  lines, not filled). Auto-join chains greedily (nearest endpoint first – at a T junction of
+  three ends the choice is arbitrary, like LightBurn); joined curved paths are flattened
+  (≤ 0.02 mm, curve flags of the node editor are lost – close keeps them); nesting uses one
+  probe point per ring, so two rings that share an edge segment may nest wrongly (then fill
+  shows it and the user can undo).
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  serial-port / barcode-scanner input placeholder (a USB scanner typing into the
+  „Eingaben“ dialog works like a keyboard). Keyboard input (§57) is one value per label and
+  send – copies cannot get different typed values in one job (use a CSV file), and typed
+  values are kept for the session only. The advanced counter / CSV row lives in memory
+  outside the undo history only until the history is cleared (new / opened project) – after
+  a reopen the saved project values apply, so an advanced but unsaved project still loses
+  its values when closed without saving (the close prompt asks, as before).
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  Micro QR has no Kanji mode (UTF-8 byte mode covers Japanese text at a higher bit cost).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine. Same for
+  `test_machine_origin.py::OriginPanelTests::test_user_origin_from_head_and_placed_start_and_frame`
+  (round 46: „ok start“ wait timed out once under load, green alone and in the rerun).
+- Windows hardware tests („Eingaben für den Auftrag“ at send / one-click start with a name
+  tag – umlauts, long names, a USB barcode scanner typing into the dialog –, material test grids interval × power and passes × speed on wood /
+  card incl. the labels, focus × power / focus × speed grids (relative Z) on wood / card with
+  motorized Z, image test cells (Floyd / Jarvis / greyscale / halftone ramps, step wedges and
+  user photos × power × speed and × line interval, incl. non-default threshold / halftone
+  cells and angle / 3D levels with Z step / brightness / contrast / gamma / negative, and with
+  the „Weitere Bildoptionen“ sharpen / black-white point / S-curve / dot width / scan angle
+  45° / unidirectional / reduced overscan, and image-option axes – threshold sweep
+  64..192, halftone angle 0..45° and cells 20..60 /Zoll, gamma 0.6..1.8 × contrast,
+  brightness × power and scan angle 0..90° × speed, black point 0..64 × white point,
+  dot width 0..0.1 mm × power and overscan 0..5 mm × speed – line ends –, bidirectional
+  aus / an × speed at 3000–6000 mm/min (line offset), negative aus / an on slate / anodised
+  aluminium and angle increment 0..90° × 2–3 passes, tone-curve axis (Linear / S / Tiefen+ /
+  Lichter- × power on a user photo, wood / card; since round 54 a drawn curve and the curve
+  of a photo in the document against the presets, the editor by touch on the Windows tablet) and 3D levels 4..16 × Z step 0..0.2 mm
+  (relief depth with motorized Z), incl. the labels
+  and layer names) on
+  wood / card against real photo engravings with the chosen setting, QR codes with umlauts (ECI 26) and Japanese Kanji text
+  with phone scanners (iOS / Android camera apps) and a handheld scanner, Micro QR M1–M4 on
+  small parts with phone / handheld scanners, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, the time estimate with
+  the SKR calibration (2100 mm/s², 200 mm/s) against the real run time of hatch / image /
+  cut jobs incl. 45° image rows and – since round 52 – a stopwatch from „Start“ to the head
+  lowered in the park corner (approach + parking, small and far jobs, plain start and
+  one-click start without homing; since round 53 with 6–20 mm material, a changed park
+  height, the head jogged away and a job at „Benutzer-Ursprung“ / „Aktuelle Position“) and the stored value offline after a restart, photos at scan angles 30° / 45° /
+  90° and with a 90° angle increment (cross raster, against the „Alle Durchgänge
+  übereinander“ and the „aufaddiert (Brennsumme)“ preview, incl. greyscale photos with 2–3
+  passes at 0° / 45° / 90°) on wood against the X-only raster (line
+  quality of oblique `G1` rows at 3000–6000 mm/min on the SKR), photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera (incl. short-name aliases `/gtin/`, `/lot/`, `?exp=`), plain-text QR codes
+  with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / Micro QR / barcode / Data Matrix / Aztec /
+  PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
+  codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
+  incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), DXF / SVG
+  exports of Fusion 360 / FreeCAD / LibreCAD / Inkscape as loose segments joined with „Pfade verbinden“
+  and cut with kerf / tabs / lead-in on plywood (inside first, hole filled free), „Duplikate
+  löschen“ against a doubled DXF (no second burn), rebuilt exe).
