@@ -36,7 +36,10 @@ def test_corners_slow_down_and_rapids_count_as_travel():
     e = estimate_gcode(g)
     assert e.travel_length_mm == pytest.approx(150)
     assert 1.0 < e.travel_time_s < 1.4  # 150 mm at 150 mm/s + accel
-    assert e.total_time_s == pytest.approx(e.cut_time_s + e.travel_time_s)
+    assert e.program_time_s == pytest.approx(e.cut_time_s + e.travel_time_s)
+    # the total adds the Pi's approach from / return to the park corner
+    assert e.total_time_s == pytest.approx(e.program_time_s + e.approach_time_s + e.park_time_s)
+    assert estimate_gcode(g, park=False).total_time_s == pytest.approx(e.program_time_s)
 
 
 def test_z_moves_and_dwell():

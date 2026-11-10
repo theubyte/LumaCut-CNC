@@ -23,7 +23,8 @@ def test_estimate_has_time_per_layer():
     est = estimate_gcode(optimized_document_gcode(doc))
     names = [n for n, _ in est.layers]
     assert sorted(names) == ["Gravur", "Schneiden"]
-    assert sum(t for _, t in est.layers) == pytest.approx(est.total_time_s, rel=1e-9)
+    # layers add up the G-code lines; approach / parking are not a layer
+    assert sum(t for _, t in est.layers) == pytest.approx(est.program_time_s, rel=1e-9)
     assert all(t > 0 for _, t in est.layers)
     # Gravur ist 5× schneller eingestellt und kleiner → kürzer als Schneiden
     t = dict(est.layers)
@@ -34,7 +35,7 @@ def test_estimate_has_time_per_layer():
 
 def test_estimate_without_layer_comments_and_single_layer():
     est = estimate_gcode("G21\nG90\nM3 I\nG0 X40 Y40\nG1 X80 Y40 S500 F600\nM5 I\n")
-    assert est.layers == [("Auftrag", pytest.approx(est.total_time_s))]
+    assert est.layers == [("Auftrag", pytest.approx(est.program_time_s))]
     assert est.layer_summary() == ""
 
 
