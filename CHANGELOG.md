@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-10
+
+- **Windows-App, Tempo der Ebene über 150 mm/min (Zweig `windows-native`):** Das Tempo-Feld einer Ebene im Motiv nahm die Höchstgeschwindigkeit des Pi (150 mm/s) als mm/min und ließ nicht mehr als 150 mm/min zu. Jetzt wird umgerechnet, die Obergrenze ist 9000 mm/min wie bei der Prüfung vor dem Start. Simulator kennt dafür `--motion 1050,150`, der Fenstertest prüft 6000 und die Kappung bei 9000.
+
 ## 2026-11-08
 
 - **Windows-App, Papier und Karton (Zweig `windows-native`):** Neuer Bereich „Papier“ mit 43 Vorlagen für eigene Verpackungen, Umschläge, Karten mit Pop-up, Deko und Körper. Schneiden, Falzen (geritzt, perforiert oder angezeichnet), Markieren und Gravieren auf eigenen Ebenen, Laschen automatisch, Verteilung auf Papierbögen. Laserwerte sind Vorschläge; noch nichts gelasert.

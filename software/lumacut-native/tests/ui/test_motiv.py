@@ -10,6 +10,7 @@ import zlib
 
 CTRL, SHIFT, ALT = 0x04000000, 0x02000000, 0x08000000
 K_DEL, K_ESC, K_RET, K_BACK = 0x01000007, 0x01000000, 0x01000004, 0x01000003
+SIM_ARGS = ["--motion", "1050,150"]   # like the real Pi: top speed 150 mm/s = 9000 mm/min
 K_LEFT, K_UP, K_RIGHT, K_DOWN = 0x01000012, 0x01000013, 0x01000014, 0x01000015
 K_PGUP, K_PGDN, K_SPACE = 0x01000016, 0x01000017, 0x20
 
@@ -319,6 +320,15 @@ def run(app):
     assert ed.inv("layerRow", gid)["power"] == 5
     app.key(0x5A, CTRL); ed.settle()
     assert ed.inv("layerRow", gid)["power"] == 25
+    # Speed: the Pi gives its top speed in mm/s (150 here), the field is mm/min: 9000 is allowed, more is capped.
+    speed0 = ed.inv("layerRow", gid)["speed"]
+    app.click("layer-speed-Gravieren-input"); app.key(0x41, CTRL); app.text("6000"); app.key(K_RET); ed.settle()
+    assert ed.inv("layerRow", gid)["speed"] == 6000, ed.inv("layerRow", gid)
+    app.click("layer-speed-Gravieren-input"); app.key(0x41, CTRL); app.text("20000"); app.key(K_RET); ed.settle()
+    assert ed.inv("layerRow", gid)["speed"] == 9000, ed.inv("layerRow", gid)
+    while ed.inv("layerRow", gid)["speed"] != speed0:
+        app.key(0x5A, CTRL); ed.settle()
+    app.click("layer-power-Gravieren-input"); ed.settle(0.1)   # the speed tip sits over the fold-out button
     # Folds out: passes, line interval, overscan, focus drop.
     app.click("layer-more-Gravieren"); ed.settle(0.1)
     app.click("layer-passes-Gravieren-input"); app.key(0x41, CTRL); app.text("3"); app.key(K_RET); ed.settle()

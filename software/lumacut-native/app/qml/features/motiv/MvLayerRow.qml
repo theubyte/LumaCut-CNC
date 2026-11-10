@@ -11,7 +11,8 @@ Rectangle {
     signal gripReleased()
     readonly property var r: Editor.layerRow(layerId, Editor.layersRev)
     readonly property string nameKey: r.name || ""
-    readonly property int maxFeed: { const m = Machine.status.config && Machine.status.config.motion ? Machine.status.config.motion.speed : 0; return m > 0 ? m : 30000 }
+    // The Pi reports the top speed in mm/s (motion.speed, e.g. 150); the field is in mm/min, so × 60 (as Motion::maxFeed).
+    readonly property int maxFeed: { const m = Machine.status.config && Machine.status.config.motion ? Machine.status.config.motion.speed : 0; return m > 0 ? Math.round(m * 60) : 30000 }
     property bool open: false
     objectName: "layer-" + nameKey
     implicitHeight: body.implicitHeight + Theme.sp2 + 6

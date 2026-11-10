@@ -152,6 +152,7 @@ def main():
     ap.add_argument("--port", type=int, default=8090)
     ap.add_argument("--slow", action="store_true", help="moves take time, so job progress is visible")
     ap.add_argument("--no-camera", action="store_true", help="behave like a Pi without head camera")
+    ap.add_argument("--motion", metavar="ACCEL,SPEED", help="saved motion limits like on the real Pi, e.g. 1050,150 (mm/s², mm/s)")
     args = ap.parse_args()
     sim = SimController(args.slow)
     web.machine = m = MarlinTransport("/dev/null", serial_factory=lambda *a, **k: sim)
@@ -160,6 +161,9 @@ def main():
     m.ensure_ready()
     web.config["validated"] = True
     web.config["probe_offset_x_mm"], web.config["probe_offset_y_mm"] = SimController.OFFSET
+    if args.motion:
+        accel, speed = (float(v) for v in args.motion.split(","))
+        web.config["motion"] = {"accel": accel, "speed": speed}
     if not args.no_camera:
         web.CAMERA = str(Path(DATA) / "video0")
         Path(web.CAMERA).touch()
