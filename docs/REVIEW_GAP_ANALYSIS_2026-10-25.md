@@ -4805,3 +4805,183 @@ Still open:
   PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
   codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
   incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), rebuilt exe).
+
+## 56. Status update 2026-11-10 (review round 49)
+
+Done this round (job time estimate – plans with the Pi's motion calibration and Marlin's
+per-axis feed limits; Canvas / Machine / Scan Probe / Materials untouched apart from a
+one-method hook in the path preview):
+
+- Closed since §55 by others: none – main had no new commits since `6d41569`.
+- Gap picked: the time estimate (#2, LightBurn Preview „Total estimated time“, xTool's job
+  time) always planned with the firmware defaults 500 mm/s² / 150 mm/s, while the Pi sends
+  its motion calibration (`config.motion`, `M201` / `M203` / `M204`, e.g. 2100 mm/s² /
+  200 mm/s on the SKR, capped on the Atomstack board) at every connection and jobs run with
+  it. So every estimate – path preview, „Zeit schätzen“, the one-click start prompt, the
+  send message and the job history – was too long on a calibrated machine (a 6000 mm/min
+  hatch job: 279 s estimated, 232 s with the calibration, −17 %), and the open §54 item
+  „one XY acceleration, Marlin's per-axis limits on diagonal moves not modelled“ stayed open.
+  LightBurn and xTool estimate with the device's configured acceleration. Chosen over the
+  remaining small material-test increments (tone curve / 3D-level axes) and the 2D-code
+  extras (MicroPDF417, Macro PDF417, structured append): it improves a number the user
+  sees for every job and needs no user decision; the SKR comparison stays a hardware test.
+- **Model** (new `lumacut_job/motion.py`): `MotionProfile(accel, speed, z_speed, source)`;
+  `motion_from_status(raw)` reads `config.motion` / `config.z_speed_mm_s` from
+  `/api/status` (ranges as `op=motion_limits`: 100..20000 mm/s², 10..500 mm/s; null,
+  incomplete or out-of-range motion = firmware values „Pi ohne Kalibrierung (Firmware)“;
+  Z capped at the firmware's 9 mm/s; no `config` = keep what is known). `active_motion()` /
+  `set_active_motion()` with change listeners; `load_saved` / `save` keep the last seen
+  calibration (QSettings `estimate/motion_*`, only non-default values are restored).
+- **Estimate** (`lumacut_job/estimate.py`): `estimate_gcode` takes its limits from the
+  active profile (explicit `accel` / `max_xy` / `max_z` or `motion=` still win);
+  `JobEstimate.motion` + `motion_note()` („Bewegung: Pi-Kalibrierung 2100 mm/s², 200 mm/s“).
+  The feed limit is per axis like `M203 X Y`: a move's path speed is capped at
+  `speed / max(|ux|, |uy|)`, so a 45° image row or diagonal cut at F12000 runs 200 mm/s
+  instead of being cut to 150 (≤ 212 mm/s). With the firmware defaults the old numbers stay:
+  axis-aligned moves and default rapids (F9000) are unchanged.
+- **App** (`qt_tools.install_motion_sync`): `MotionSync` follows the Machine panel's
+  `status_changed`; the first status of a session and any change set the profile and store
+  it (also the reset to firmware values, so a stale calibration never comes back); offline
+  the Windows app starts with the last seen one („Pi-Kalibrierung (zuletzt gesehen)“). A
+  change re-estimates the open path preview without regenerating its G-code
+  (`PathPreview.refresh_estimate`); the preview readout's tooltip and the „Zeit schätzen“
+  status message name the limits used. Tests write to a temporary ini
+  (`LUMACUT_MOTION_SETTINGS`, conftest) and reset the profile around every test.
+
+Tests:
+
+- New `tests/test_estimate_motion.py` (20 tests): firmware defaults and note; active profile
+  drives acceleration / speed (exact trapezoid times); explicit arguments win; per-axis feed
+  limit at 45° / 30° and unchanged axis-aligned / default rapid times; Z speed; status
+  parsing (calibrated, null, Atomstack-capped, Z cap / slow Z, 7 invalid forms → firmware,
+  no `config` keeps the limits, via `MachineStatus.from_json`); listeners only on a real
+  change; sync stores once per change, reduced answers keep the limits, restart uses the
+  stored calibration, reset to firmware clears it; garbage in the store; the env ini; main
+  window: a status re-estimates the preview (same G-code, shorter time, tooltip) and
+  „Zeit schätzen“ names the Pi calibration.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **2370 passed, 3 skipped**, 0 failed (13 min; 2350 + 20 new), first run green.
+
+Output change for old files: none – G-code is not touched. Estimates with the firmware
+defaults are identical to `6d41569` (checked on a hatch + cut job at 3000 and 6000 mm/min:
+440.25 s / 279.13 s both before and after); only diagonal moves whose F exceeds the axis
+limit and – once a Pi was seen – the calibrated limits change the times.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Material test: several cells of an interval test share the same layer name (power / speed are
+  equal) – the canvas labels tell them apart. Image cells: the G-code follows each cell's image
+  settings, so editing a cell *layer's* power / speed in the layer panel does not change an image
+  cell (the image settings dialog does). Image-cell options cover every image setting
+  (mode parameters, adjustments, sharpen, levels, tone curve – presets only in the test
+  dialog, a custom curve only via a reopened spec –, dot width, scan angle / increment,
+  bidirectional, overscan); since round 43 threshold, halftone cells / angle, brightness,
+  contrast, gamma, sharpen and scan angle, since round 46 also black / white point, dot
+  width and overscan, since round 48 the angle increment and – as aus / an axes over
+  exactly two columns / rows – negative and bidirectional can be swept on an axis. Not on
+  an axis: 3D levels / Z step and the tone curve; one shared test image per grid.
+- Material library (Materials): `lumacut_materials.testgrid.TEST_CELL_RE` is anchored
+  (`…F<speed>$`), so cell layers of a grid with an image-option axis (`Test P50% F1200
+  Gamma 1.2`, `… Schwarzpunkt 32`, `… Punktbreitenkorrektur 0.05mm`, `… Bidirektional aus`,
+  `… Winkel-Schritt 45°`) are not offered by „Preset aus Testzelle“; relaxing it to accept a trailing
+  ` <Option> <Wert>` suffix (and keeping the swept image value in the preset notes) is up to
+  the Materials agent. Grids without an image axis keep the classic names.
+- Image: the preview shows one pixel per dot and does not model the material's real dot size /
+  beam spread (needs the material library – Materials); mode and adjustment presets (incl. the
+  curve presets) are not linked to the material library (Materials); no per-channel / colour
+  curves (images are grey only). Scan angle: the dialog previews each pass, all passes overlaid
+  (darkest dot per position) or, since round 47, their burn sum (power per dot added up and
+  divided by the passes – a linear model: real wood / card darkens non-linearly with the
+  absorbed energy, which needs the material library – Materials); the time estimate plans oblique rows like X
+  rows (acceleration and junction deviation per `G1`, collinear row segments keep their speed),
+  with the Pi's motion calibration and per-axis feed limits since round 49 (§56); the
+  park-corner live box keeps using the object box (the powered
+  extent of an angled image never leaves it).
+- Time estimate (§56): Cartesian model – a CoreXY frame (Gestell v1) limits the motor axes
+  (A = X+Y, B = X−Y), so diagonals would have to be planned per motor once that frame runs;
+  Grbl's own planner on the Atomstack board (dynamic laser mode) is planned like Marlin; one
+  stored calibration per Windows user (switching between two Pis shows the other's values
+  until the first status arrives); jobs still do not include homing / probing / parking.
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  keyboard / serial-port input placeholder. The advanced counter / CSV row lives in memory
+  outside the undo history only until the history is cleared (new / opened project) – after
+  a reopen the saved project values apply, so an advanced but unsaved project still loses
+  its values when closed without saving (the close prompt asks, as before).
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  Micro QR has no Kanji mode (UTF-8 byte mode covers Japanese text at a higher bit cost).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine. Same for
+  `test_machine_origin.py::OriginPanelTests::test_user_origin_from_head_and_placed_start_and_frame`
+  (round 46: „ok start“ wait timed out once under load, green alone and in the rerun).
+- Windows hardware tests (material test grids interval × power and passes × speed on wood /
+  card incl. the labels, focus × power / focus × speed grids (relative Z) on wood / card with
+  motorized Z, image test cells (Floyd / Jarvis / greyscale / halftone ramps, step wedges and
+  user photos × power × speed and × line interval, incl. non-default threshold / halftone
+  cells and angle / 3D levels with Z step / brightness / contrast / gamma / negative, and with
+  the „Weitere Bildoptionen“ sharpen / black-white point / S-curve / dot width / scan angle
+  45° / unidirectional / reduced overscan, and image-option axes – threshold sweep
+  64..192, halftone angle 0..45° and cells 20..60 /Zoll, gamma 0.6..1.8 × contrast,
+  brightness × power and scan angle 0..90° × speed, black point 0..64 × white point,
+  dot width 0..0.1 mm × power and overscan 0..5 mm × speed – line ends –, bidirectional
+  aus / an × speed at 3000–6000 mm/min (line offset), negative aus / an on slate / anodised
+  aluminium and angle increment 0..90° × 2–3 passes, incl. the labels
+  and layer names) on
+  wood / card against real photo engravings with the chosen setting, QR codes with umlauts (ECI 26) and Japanese Kanji text
+  with phone scanners (iOS / Android camera apps) and a handheld scanner, Micro QR M1–M4 on
+  small parts with phone / handheld scanners, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, the time estimate with
+  the SKR calibration (2100 mm/s², 200 mm/s) against the real run time of hatch / image /
+  cut jobs incl. 45° image rows and the stored value offline after a restart, photos at scan angles 30° / 45° /
+  90° and with a 90° angle increment (cross raster, against the „Alle Durchgänge
+  übereinander“ and the „aufaddiert (Brennsumme)“ preview, incl. greyscale photos with 2–3
+  passes at 0° / 45° / 90°) on wood against the X-only raster (line
+  quality of oblique `G1` rows at 3000–6000 mm/min on the SKR), photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera (incl. short-name aliases `/gtin/`, `/lot/`, `?exp=`), plain-text QR codes
+  with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / Micro QR / barcode / Data Matrix / Aztec /
+  PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
+  codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
+  incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), rebuilt exe).
