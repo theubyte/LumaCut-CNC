@@ -239,7 +239,13 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Kante fest). Platzhalter: `{n}` / `{n:3}` Zähler (Start, Schritt, Stellen, „Nächster Wert“,
   „Auf Start“), `{date}` / `{date:%Y-%m-%d}`, `{time}` / `{time:%H:%M:%S}` (Codes
   `%d %m %Y %y %H %M %S %j %V %%`), CSV-Spalten `{Name}` bzw. `{csv:Name}` / `{csv:2}`,
-  `{row}` (Datenzeile), `{{`/`}}`. CSV-Serienbrief: Datei wählen (Trennzeichen `;` `,` Tab `|`
+  `{row}` (Datenzeile), **Tastatureingabe** `{input:Name}` / `{eingabe:Name}` (optional
+  `{input:Name=Vorgabe}`; wie EzCads Tastatur-Text: beim Senden, Senden & Starten,
+  Ein-Klick-Auftrag und „G-Code speichern“ fragt „Eingaben für den Auftrag“ jede Bezeichnung
+  einmal ab, vorbelegt mit dem zuletzt eingetippten Wert bzw. der Vorgabe; Abbrechen sendet
+  nicht; der Wert gilt nur für die Sitzung – Arbeitsflächen-Hinweis, Rahmen, Pfadvorschau und
+  Zeitschätzung nehmen den zuletzt eingetippten, davor die Vorgabe oder „‹Name›“),
+  `{{`/`}}`. CSV-Serienbrief: Datei wählen (Trennzeichen `;` `,` Tab `|`
   automatisch, UTF-8 oder Windows-1252), Tabellenvorschau mit Klick auf die nächste Zeile,
   „Nach jedem Senden nächste Zeile“. Mehrere Kopien einer Serie bekommen fortlaufende Werte /
   Zeilen in Leserichtung (abschaltbar). Nach einem **erfolgreich hochgeladenen** Auftrag

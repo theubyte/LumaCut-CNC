@@ -43,7 +43,7 @@ UPLOAD_LABELS = ("Senden", "Senden & Starten", "Auftrag starten")
 PREVIEW_ROWS = 500
 HELP = ("{n} Zähler · {n:3} dreistellig mit Nullen · {date} Datum · {date:%Y-%m-%d} · "
         "{time} Uhrzeit · {Spalte} CSV-Spalte · {csv:2} 2. Spalte · {row} CSV-Zeile · "
-        "{{ }} Klammern")
+        "{input:Name} beim Senden eintippen · {{ }} Klammern")
 
 
 # --- job marker ---------------------------------------------------------------
@@ -469,6 +469,63 @@ class VarTextDialog(QDialog):
         self.preview.setStyleSheet("")
 
 
-__all__ = ["HELP", "MARKER", "UPLOAD_LABELS", "VarTextDialog", "VarTextLedger", "VarTextTracker",
+class VarTextInputDialog(QDialog):
+    """„Eingaben für den Auftrag“: one line per ``{input:…}`` label, asked at
+    every send / start / „G-Code speichern“ (EzCad's keyboard text). Pre-filled
+    with the value typed last in this session, else the template's default."""
+
+    def __init__(self, fields: list[vt.InputField], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Eingaben für den Auftrag")
+        self.fields = list(fields)
+        lay = QVBoxLayout(self)
+        info = QLabel("Variabler Text mit Eingabe – diese Werte werden jetzt gelasert "
+                      "(alle Kopien mit derselben Bezeichnung bekommen denselben Wert):")
+        info.setWordWrap(True)
+        lay.addWidget(info)
+        form = QFormLayout()
+        self.edits: list[QLineEdit] = []
+        for f in self.fields:
+            last = vt.last_input(f)
+            edit = QLineEdit(last if last is not None else f.default)
+            edit.setMaxLength(vt.MAX_INPUT_CHARS)
+            edit.setPlaceholderText(vt.stand_in(f.label))
+            edit.textChanged.connect(self._update)
+            form.addRow(f.label, edit)
+            self.edits.append(edit)
+        lay.addLayout(form)
+        self.hint = QLabel()
+        self.hint.setWordWrap(True)
+        self.hint.setStyleSheet("color: #93a1b5;")
+        lay.addWidget(self.hint)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.button(QDialogButtonBox.Ok).setText("Übernehmen")
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        lay.addWidget(self.buttons)
+        if self.edits:
+            self.edits[0].setFocus()
+            self.edits[0].selectAll()
+        self._update()
+
+    def values(self) -> dict[str, str]:
+        return {f.label: vt.clean_input(e.text()) for f, e in zip(self.fields, self.edits)}
+
+    def _update(self) -> None:
+        empty = [f.label for f, e in zip(self.fields, self.edits) if not e.text().strip()]
+        self.hint.setText(("Leer: " + ", ".join(empty) + " – ein Text, der dadurch leer wird, "
+                           "wird nicht gelasert.") if empty else "")
+
+
+def ask_inputs(fields: list[vt.InputField], parent=None) -> dict[str, str] | None:
+    """Show :class:`VarTextInputDialog`; the typed values or ``None`` (cancelled)."""
+    dlg = VarTextInputDialog(fields, parent)
+    try:
+        return dlg.values() if dlg.exec() == QDialog.Accepted else None
+    finally:
+        dlg.deleteLater()
+
+
+__all__ = ["HELP", "MARKER", "UPLOAD_LABELS", "VarTextDialog", "VarTextInputDialog", "ask_inputs", "VarTextLedger", "VarTextTracker",
            "advance", "apply_vartext", "describe", "gcode_token", "ledger_of", "mark_gcode",
            "put_shapes", "series_members", "usage_token"]

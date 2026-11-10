@@ -790,14 +790,49 @@ class JobTools(QObject):
         Vorlage); ValueError, wenn ein Platzhalter nicht auswertbar ist."""
         return JobTools.job_document_and_usage(self)[0]
 
-    def job_gcode(self) -> tuple[str, str]:
+    def ask_vartext_inputs(self) -> None:
+        """Eingaben ``{input:…}`` des nächsten Auftrags abfragen (Dialog „Eingaben
+        für den Auftrag“) und für die Sitzung merken; ValueError bei Abbruch.
+
+        ``self.vartext_input_prompt`` (Tests) ersetzt den Dialog: bekommt die
+        Felder, liefert ``{Bezeichnung: Wert}`` oder ``None`` (= abgebrochen)."""
+        from . import vartext as vt
+        fields = vt.document_inputs(JobTools._job_source(self))
+        if not fields:
+            return
+        prompt = getattr(self, "vartext_input_prompt", None)
+        if prompt is None:
+            from .vartext_qt import ask_inputs
+            values = ask_inputs(fields, self.window)
+        else:
+            values = prompt(fields)
+        if values is None:
+            raise ValueError("Eingabe für den variablen Text abgebrochen")
+        before = vt.input_values()
+        vt.set_input_values(values)
+        if vt.input_values() == before:
+            return
+        values_overlay = getattr(self, "vartext_values", None)
+        if values_overlay is not None:
+            values_overlay.rebuild()
+        preview = getattr(self.editor, "path_preview", None)
+        if callable(getattr(preview, "schedule", None)):
+            preview.schedule()
+
+    def job_gcode(self, ask_inputs: bool = True) -> tuple[str, str]:
         """(optimierter G-Code, Hinweis des Planers) – wie beim Senden.
+
+        Hat der Auftrag variablen Text mit ``{input:…}``, fragt ``ask_inputs``
+        die Werte vorher ab (Senden, Starten, „G-Code speichern“); Schätzung
+        und Vorschau nehmen ``ask_inputs=False`` und die zuletzt eingetippten.
 
         Der Hinweis meldet z. B. weggelassene An-/Abfahrten (Kollision mit
         anderen Teilen) und ist leer, wenn nichts zu melden ist. Mit variablem
         Text trägt der G-Code eine Markierung, damit das Hochladen genau dieses
         Auftrags Zähler/CSV-Zeile weiterschaltet.
         """
+        if ask_inputs:
+            JobTools.ask_vartext_inputs(self)
         report = PlanReport()
         doc, usage = self.job_document_and_usage()
         g = optimized_document_gcode(doc, report=report)
@@ -812,7 +847,7 @@ class JobTools(QObject):
         return g, note
 
     def estimate(self):
-        return estimate_gcode(self.job_gcode()[0])
+        return estimate_gcode(self.job_gcode(ask_inputs=False)[0])
 
     def park_preflight(self, gcode: str, origin: str | None = None) -> str:
         """German refusal text if the Pi would refuse ``gcode`` because of the
@@ -826,7 +861,7 @@ class JobTools(QObject):
 
     def show_estimate(self):
         try:
-            g, note = self.job_gcode()
+            g, note = self.job_gcode(ask_inputs=False)
         except ValueError as exc:
             self._msg(f"Keine Schätzung: {exc}")
             return None
