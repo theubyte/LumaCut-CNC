@@ -54,6 +54,15 @@ Coupled options are checked per cell: black point < white point (axis value agai
 the grid-wide or the other axis's value) and dot width ≤ the cell's line interval.
 An angle-increment axis needs more than one pass in some cell (it only turns the
 second and later passes).
+
+Since round 51 the 3D-depth options (``depth_levels``, ``z_step_mm``; image mode
+``depth3d``) are numeric image axes as well (focus drop z_step × (levels − 1) is
+checked per cell), and the tone curve is a *choice* axis
+(``IMAGE_CHOICE_AXIS_PARAMS``): every column / row gets one curve of
+``image_axis_curves`` (``((in, out), ...)`` grey points, ``()`` = linear; ``None`` =
+the first n presets of ``CURVE_PRESETS``), the count must match the curves.
+Cells, layer names and labels carry the curve's short name (``CURVE_SHORT_LABELS``,
+``Eigene 1`` … for curves that are no preset).
 """
 
 from __future__ import annotations
@@ -67,6 +76,7 @@ from lumacut_canvas.model import (CURVE_MAX_POINTS, IMAGE_MODES, LAYER_COLORS, P
                                   ImageSettings, Layer, RasterImage, Shape, normalize_curve)
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
+from .raster import CURVE_PRESETS, CURVE_SHORT_LABELS
 from .raster import MAX_DEPTH_DROP_MM  # 3D depth: max. z_step × (levels − 1)
 
 
@@ -117,14 +127,19 @@ IMAGE_OPTION_LABELS = {"threshold": "Schwellwert", "halftone_cpi": "Halbton-Zell
 # Numeric image options that can be swept along a column / row axis (image cells only).
 IMAGE_AXIS_PARAMS = ("threshold", "halftone_cpi", "halftone_angle", "brightness",
                      "contrast", "gamma", "sharpen", "scan_angle", "black_point",
-                     "white_point", "dot_width_mm", "overscan_mm", "angle_increment")
+                     "white_point", "dot_width_mm", "overscan_mm", "angle_increment",
+                     "depth_levels", "z_step_mm")
 # On / off image options that can be put on an axis: exactly two columns / rows,
 # first off, then on (``IMAGE_BOOL_AXIS_VALUES``).
 IMAGE_BOOL_AXIS_PARAMS = ("negative", "bidirectional")
 IMAGE_BOOL_AXIS_VALUES = (False, True)
 IMAGE_BOOL_LABELS = {False: "aus", True: "an"}
-# Every image option that can be on an axis (numeric + on / off).
-IMAGE_ALL_AXIS_PARAMS = IMAGE_AXIS_PARAMS + IMAGE_BOOL_AXIS_PARAMS
+# Choice axes: one value of a list per column / row (tone curve: image_axis_curves).
+IMAGE_CHOICE_AXIS_PARAMS = ("curve",)
+# Every image option that can be on an axis (numeric + on / off + choice).
+IMAGE_ALL_AXIS_PARAMS = IMAGE_AXIS_PARAMS + IMAGE_BOOL_AXIS_PARAMS + IMAGE_CHOICE_AXIS_PARAMS
+# Curves of a curve axis without image_axis_curves: the first n presets.
+CURVE_AXIS_PRESETS = tuple(normalize_curve(pts) for pts in CURVE_PRESETS.values())
 # Default from/to of an image axis without an explicit range.
 IMAGE_AXIS_DEFAULT_RANGES = {"threshold": (64, 192), "halftone_cpi": (20.0, 60.0),
                              "halftone_angle": (0.0, 45.0), "brightness": (-40.0, 40.0),
@@ -132,18 +147,21 @@ IMAGE_AXIS_DEFAULT_RANGES = {"threshold": (64, 192), "halftone_cpi": (20.0, 60.0
                              "sharpen": (0.0, 200.0), "scan_angle": (0.0, 90.0),
                              "black_point": (0, 64), "white_point": (192, 255),
                              "dot_width_mm": (0.0, 0.1), "overscan_mm": (0.0, 5.0),
-                             "angle_increment": (0.0, 90.0)}
+                             "angle_increment": (0.0, 90.0), "depth_levels": (4, 16),
+                             "z_step_mm": (0.0, 0.2)}
 # Unit of an image axis value in layer names / the dialog.
 IMAGE_AXIS_UNITS = {"threshold": "", "halftone_cpi": "/Zoll", "halftone_angle": "°",
                     "brightness": "%", "contrast": "%", "gamma": "", "sharpen": "%",
                     "scan_angle": "°", "black_point": "", "white_point": "",
                     "dot_width_mm": "mm", "overscan_mm": "mm", "angle_increment": "°",
-                    "negative": "", "bidirectional": ""}
+                    "negative": "", "bidirectional": "", "depth_levels": "",
+                    "z_step_mm": "mm", "curve": ""}
 # Decimals of the swept values (threshold is an integer grey value).
 IMAGE_AXIS_DIGITS = {"threshold": 0, "gamma": 2, "black_point": 0, "white_point": 0,
-                     "dot_width_mm": 3}
+                     "dot_width_mm": 3, "depth_levels": 0, "z_step_mm": 2}
 # German names of the image modes a mode-specific axis needs (error messages).
-IMAGE_AXIS_MODE_LABELS = {"threshold": "Schwellwert", "halftone": "Halbton"}
+IMAGE_AXIS_MODE_LABELS = {"threshold": "Schwellwert", "halftone": "Halbton",
+                          "depth3d": "3D-Tiefe"}
 # Every axis parameter (vector + image) and its label.
 AXIS_PARAMS = TEST_PARAMS + IMAGE_ALL_AXIS_PARAMS
 AXIS_PARAM_LABELS = {**TEST_PARAM_LABELS,
@@ -156,6 +174,15 @@ def image_axis_mode(param: str) -> str:
         if param in keys:
             return mode
     return ""
+
+
+def curve_label(curve, custom_index: int = 1) -> str:
+    """Short label of a tone curve: preset short name or „Eigene N“."""
+    c = normalize_curve(curve)
+    for name, pts in CURVE_PRESETS.items():
+        if normalize_curve(pts) == c:
+            return CURVE_SHORT_LABELS.get(name, name)
+    return f"Eigene {custom_index}"
 
 
 # Pixel size of the embedded grey ramp / step wedge (white left -> black right).
@@ -206,6 +233,9 @@ class MaterialTestSpec:
     # From/to of an image-option axis (IMAGE_AXIS_PARAMS -> (from, to)); missing =
     # IMAGE_AXIS_DEFAULT_RANGES. Only used when that option is on an axis.
     image_axis_ranges: dict | None = None
+    # Curves of a tone-curve axis in column / row order (((in, out), ...), () = linear);
+    # None = the first n presets (CURVE_AXIS_PRESETS). Only used when "curve" is on an axis.
+    image_axis_curves: tuple | None = None
 
     def image_axes(self) -> tuple[str, ...]:
         """Image options on an axis (column first)."""
@@ -274,6 +304,11 @@ class MaterialTestSpec:
         if param in IMAGE_BOOL_AXIS_PARAMS:
             # off / on; validate() requires exactly two columns / rows.
             return [IMAGE_BOOL_AXIS_VALUES[i % 2] for i in range(n)]
+        if param in IMAGE_CHOICE_AXIS_PARAMS:
+            curves = (CURVE_AXIS_PRESETS if self.image_axis_curves is None
+                      else tuple(normalize_curve(c) for c in self.image_axis_curves))
+            # validate() requires exactly n curves (n presets at most without a list).
+            return [curves[i % len(curves)] for i in range(n)] if curves else [()] * n
         if param in IMAGE_AXIS_PARAMS:
             lo, hi = self.image_axis_range(param)
             digits = IMAGE_AXIS_DIGITS.get(param, 1)
@@ -311,13 +346,27 @@ class MaterialTestSpec:
         st = self.cell_settings(row, column)
         name = f"Test P{st['power']:g}% F{st['speed']:g}"
         for k, v in self.cell_image_values(row, column).items():
-            name += f" {IMAGE_OPTION_LABELS[k]} {_label_text(k, v)}{IMAGE_AXIS_UNITS[k]}"
+            index = column if k == self.column_param else row
+            name += (f" {IMAGE_OPTION_LABELS[k]} {self._value_label(k, index, v)}"
+                     f"{IMAGE_AXIS_UNITS[k]}")
         return name
+
+    def _value_label(self, param: str, index: int, value) -> str:
+        """Label of the ``index``-th value of an axis (curve: short name / „Eigene N“
+        numbered over the curves of the axis that are no preset)."""
+        if param in IMAGE_CHOICE_AXIS_PARAMS:
+            n = self.columns if param == self.column_param else self.rows
+            vals = self.param_values(param, n)
+            custom = sum(1 for c in vals[:index + 1] if c not in CURVE_AXIS_PRESETS)
+            return curve_label(value, max(1, custom))
+        return _label_text(param, value)
 
     def label_texts(self) -> tuple[list[str], list[str]]:
         """Column and row label texts."""
-        return ([_label_text(self.column_param, v) for v in self.column_values()],
-                [_label_text(self.row_param, v) for v in self.row_values()])
+        return ([self._value_label(self.column_param, i, v)
+                 for i, v in enumerate(self.column_values())],
+                [self._value_label(self.row_param, i, v)
+                 for i, v in enumerate(self.row_values())])
 
     def label_width(self) -> float:
         """Width of the row-label column left of the grid (0 without labels)."""
@@ -414,6 +463,9 @@ class MaterialTestSpec:
                     side = "Spalten" if k == self.column_param else "Zeilen"
                     raise ValueError(f"{label}-Achse braucht genau 2 {side} (aus / an)")
                 continue
+            if k in IMAGE_CHOICE_AXIS_PARAMS:
+                self._validate_curve_axis(k)
+                continue
             if k == "angle_increment" and self.max_passes() < 2:
                 raise ValueError("Winkel-Schritt-Achse braucht mehr als einen Durchgang "
                                  "(dreht erst den 2. und jeden weiteren Durchgang)")
@@ -428,12 +480,37 @@ class MaterialTestSpec:
         if problem:
             raise ValueError(problem)
 
+    def _validate_curve_axis(self, k: str) -> None:
+        """Tone-curve axis: 2.. curves, one per column / row, each valid, no duplicates."""
+        n = self.columns if k == self.column_param else self.rows
+        side = "Spalten" if k == self.column_param else "Zeilen"
+        if n < 2:
+            raise ValueError(f"Kurven-Achse braucht mindestens 2 {side}")
+        if self.image_axis_curves is None:
+            if n > len(CURVE_AXIS_PRESETS):
+                raise ValueError(f"Kurven-Achse: höchstens {len(CURVE_AXIS_PRESETS)} Vorlagen "
+                                 f"– {n} {side}")
+            return
+        try:
+            curves = list(self.image_axis_curves)
+        except TypeError:
+            raise ValueError("Kurven-Achse: Liste von Kurven erwartet") from None
+        for c in curves:
+            _validate_curve(c)
+        if len(curves) != n:
+            raise ValueError(f"Kurven-Achse: {len(curves)} Kurven für {n} {side}")
+        norm = [normalize_curve(c) for c in curves]
+        if len(set(norm)) < len(norm):
+            raise ValueError("Kurven-Achse: jede Kurve nur einmal")
+
     def image_cell_problem(self) -> str:
         """German error for coupled image options that a swept value breaks in some
-        cell (black point ≥ white point, dot width > the cell's line interval);
-        "" = every cell is fine or no coupled option is on an axis."""
+        cell (black point ≥ white point, dot width > the cell's line interval, 3D
+        focus drop z_step × (levels − 1) > MAX_DEPTH_DROP_MM); "" = every cell is fine
+        or no coupled option is on an axis."""
         swept = set(self.image_axes())
-        if not self.image_mode or not swept & {"black_point", "white_point", "dot_width_mm"}:
+        if not self.image_mode or not swept & {"black_point", "white_point", "dot_width_mm",
+                                               "depth_levels", "z_step_mm"}:
             return ""
         for r in range(self.rows):
             for c in range(self.columns):
@@ -447,6 +524,11 @@ class MaterialTestSpec:
                 if "dot_width_mm" in swept and dot > st["interval"] + 1e-9:
                     return (f"Punktbreitenkorrektur {dot:g} mm > Linienabstand "
                             f"{st['interval']:g} mm der Testzelle")
+                if swept & {"depth_levels", "z_step_mm"} and self.image_mode == "depth3d":
+                    drop = ov.get("z_step_mm", 0.0) * (ov.get("depth_levels", 8) - 1)
+                    if drop > MAX_DEPTH_DROP_MM + 1e-9:
+                        return (f"Fokus-Absenkung {drop:.2f} mm > {MAX_DEPTH_DROP_MM:g} mm "
+                                "(Z-Schritt × (Stufen − 1)) in einer Testzelle")
         return ""
 
     def _validate_image_options(self) -> None:
@@ -469,12 +551,12 @@ class MaterialTestSpec:
             if not lo <= fv <= hi:
                 raise ValueError(f"{IMAGE_OPTION_LABELS[k]} außerhalb {lo:g}..{hi:g}")
         ov = self.image_overrides()
-        if self.image_mode == "depth3d":
+        swept = set(self.image_axes())  # swept options: checked per cell instead
+        if self.image_mode == "depth3d" and not swept & {"depth_levels", "z_step_mm"}:
             drop = ov.get("z_step_mm", 0.0) * (ov.get("depth_levels", 8) - 1)
             if drop > MAX_DEPTH_DROP_MM + 1e-9:
                 raise ValueError(f"Fokus-Absenkung {drop:.2f} mm > {MAX_DEPTH_DROP_MM:g} mm "
                                  "(Z-Schritt × (Stufen − 1))")
-        swept = set(self.image_axes())  # swept options: checked per cell instead
         if (not swept & {"black_point", "white_point"}
                 and ov.get("black_point", 0) >= ov.get("white_point", 255)):
             raise ValueError("Schwarzpunkt muss kleiner als der Weißpunkt sein")
@@ -596,6 +678,7 @@ def _cell_overrides(spec: MaterialTestSpec, settings: dict) -> dict:
         if k in settings:
             v = settings[k]
             ov[k] = (bool(v) if k in IMAGE_BOOL_OPTIONS
+                     else normalize_curve(v) if k == "curve"
                      else int(v) if k in IMAGE_INT_OPTIONS else float(v))
     return ov
 

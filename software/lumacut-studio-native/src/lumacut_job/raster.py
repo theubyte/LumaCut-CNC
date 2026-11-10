@@ -417,6 +417,32 @@ def adjust_gray(gray: np.ndarray, s: RasterSettings) -> np.ndarray:
     return (v * 255.0).astype(np.float32)
 
 
+#: Tone-curve presets (name → (in, out) grey points); "Linear" = no curve. Shared by
+#: the image settings dialog (lumacut_import.curve_widget) and the material-test
+#: curve axis (lumacut_job.material_test) – kept free of Qt here.
+CURVE_PRESETS: dict[str, tuple] = {
+    "Linear": (),
+    "Kontrast verstärken (S-Kurve)": ((0, 0), (64, 44), (192, 212), (255, 255)),
+    "Kontrast stark verstärken": ((0, 0), (64, 28), (192, 228), (255, 255)),
+    "Kontrast verringern": ((0, 0), (64, 84), (192, 172), (255, 255)),
+    "Mitteltöne aufhellen": ((0, 0), (128, 168), (255, 255)),
+    "Mitteltöne abdunkeln": ((0, 0), (128, 88), (255, 255)),
+    "Schatten aufhellen (dunkle Holzstellen)": ((0, 0), (48, 88), (128, 150), (255, 255)),
+    "Lichter abdunkeln (helle Flächen gravieren)": ((0, 0), (128, 110), (208, 176), (255, 255)),
+}
+#: Short names of the presets for material-test labels and layer names (fit a cell).
+CURVE_SHORT_LABELS: dict[str, str] = {
+    "Linear": "Linear",
+    "Kontrast verstärken (S-Kurve)": "S",
+    "Kontrast stark verstärken": "S+",
+    "Kontrast verringern": "Flach",
+    "Mitteltöne aufhellen": "Mitte+",
+    "Mitteltöne abdunkeln": "Mitte-",
+    "Schatten aufhellen (dunkle Holzstellen)": "Tiefen+",
+    "Lichter abdunkeln (helle Flächen gravieren)": "Lichter-",
+}
+
+
 def curve_lut(points, n: int = 4096) -> np.ndarray:
     """Tone curve sampled at ``n`` evenly spaced inputs 0..1 (outputs 0..1).
 
