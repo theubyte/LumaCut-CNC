@@ -99,6 +99,19 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   über `shape_paths.shape_polygons` mit Sehnenfehler **≤ 0,02 mm** (Ellipse analytisch,
   ≥ 64 Segmente, Ø 360 mm ≈ 212). Nur G1-Geraden, kein G2/G3 (Höhenausgleich und Analyse auf
   dem Pi lehnen Bögen ab). Siehe Anforderungen §9.3.
+- **Pfade aufräumen** (Menü „Pfad“, wie LightBurn *Auto-Join*, *Close Selected Paths With
+  Tolerance*, *Delete Duplicates*): „Pfade verbinden“ (Alt+J) fügt offene Pfade/Linien einer
+  Ebene mit Endpunkten ≤ 0,05 mm Abstand zu Ketten zusammen – lose DXF-Strecken werden
+  geschlossene Polygone, ineinander liegende Ketten *ein* Polygon mit Löchern (Schraffur lässt
+  das Loch frei, Kerf / Stege / An-/Abfahrt und „innen zuerst“ greifen). „Pfade schließen
+  (Toleranz) …“ (Alt+Umschalt+J) schließt einzelne Pfade mit Endlücke ≤ 0,01–20 mm (Enden in der
+  Mitte zusammenführen oder Verbindungslinie, Zähler live, Kurvensegmente bleiben). „Duplikate
+  löschen“ (Alt+Umschalt+D; Alt+D öffnet „Datei“) entfernt deckungsgleiche Objekte derselben
+  Ebene (0,01 mm, egal welcher Startpunkt / welche Richtung) – sonst würden sie doppelt gelasert.
+  „Offene Formen auswählen“ markiert alle offenen Pfade/Linien. Ohne Auswahl gilt alles
+  Bearbeitbare; erzeugte Objekte (Codes) und Bilder bleiben unberührt; je **ein**
+  Rückgängig-Schritt. Nach einem Import nennt die Statusleiste offene und verbindbare Konturen.
+  Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathjoin_ui.py`.
 - **Gruppen:** Strg+G gruppiert, Strg+Umschalt+G löst eine Ebene der Gruppierung
   (verschachtelte Gruppen möglich). Ein Klick wählt immer die ganze Gruppe;
   Verschieben, Skalieren, Drehen, Löschen und Duplizieren wirken auf die Gruppe.

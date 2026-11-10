@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand, SetImageSettingsCommand
 from lumacut_canvas.document_io import FILE_SUFFIX
 from lumacut_canvas.model import ImageSettings
+from lumacut_canvas.pathjoin import join_preview
 from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 
 from .curve_widget import CURVE_PRESETS, CUSTOM_LABEL, CurveWidget, preset_name
@@ -737,7 +738,7 @@ class ImportTools(QObject):
         self.editor.undo_stack.push(AddShapesCommand(doc, res.shapes, "Importieren"))
         ids = [s.id for s in res.shapes]
         self.editor.set_selection(ids)
-        self.editor.notify(res.summary(Path(path).name))
+        self.editor.notify(res.summary(Path(path).name) + open_shapes_hint(res.shapes))
         return ids
 
     # ---------------------------------------------------------------- Drop
@@ -876,6 +877,18 @@ class ImportTools(QObject):
         self.editor.set_selection(ids)
         self.editor.notify(f"Nachgezeichnet: {len(ids)} Kontur(en) in Ebene „{layer.name}“")
         return ids
+
+
+def open_shapes_hint(shapes) -> str:
+    """Hinweis nach dem Import, wenn offene Konturen dabei sind (DXF-Einzelstrecken …):
+    offene Pfade werden weder gefüllt noch bekommen sie Kerf / Stege / An-Abfahrt."""
+    n_open, joinable = join_preview(shapes)
+    if not n_open:
+        return ""
+    text = f" · {n_open} offene Kontur(en)"
+    if joinable:
+        text += f", {joinable} davon verbindbar – Pfad › „Pfade verbinden“ (Alt+J)"
+    return text
 
 
 def install_import(window, interactive: bool = True) -> ImportTools:

@@ -1,4 +1,5 @@
-"""Menü „Pfad“ im Canvas: Boole-Operationen, Verschweißen, Versatz, Text in Pfade.
+"""Menü „Pfad“ im Canvas: Boole-Operationen, Verschweißen, Versatz, Text in Pfade,
+Aufräumen (verbinden, schließen, Duplikate – :mod:`pathjoin_ui`).
 
 Von :class:`CanvasEditor` über :func:`install` eingebunden (Aktionen + Knopf
 in der Aktionsleiste + Untermenü im Kontextmenü), wie :mod:`arrange_ui`.
@@ -11,12 +12,13 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QMenu, QToolButton)
 
-from . import icons, pathops
+from . import icons, pathjoin_ui, pathops
 from .edit_commands import ReplaceShapesCommand
 
 BOOL_SHORTCUTS = {"union": "Ctrl+Alt+U", "subtract": "Ctrl+Alt+S", "intersect": "Ctrl+Alt+I",
                   "weld": "Ctrl+Alt+W"}
-MENU_ACTIONS = [f"bool_{op}" for op in pathops.OPS] + [None, "path_offset", "text_to_path"]
+MENU_ACTIONS = ([f"bool_{op}" for op in pathops.OPS] + [None, "path_offset", "text_to_path", None]
+                + pathjoin_ui.MENU_ACTIONS)
 
 
 class OffsetDialog(QDialog):
@@ -125,6 +127,7 @@ def install(editor) -> PathOps:
                     QKeySequence(sc) if sc else None)
     editor._act("path_offset", "Versatz …", ops.offset, QKeySequence("Ctrl+Alt+O"))
     editor._act("text_to_path", "Text in Pfade umwandeln", ops.text_to_path, QKeySequence("Ctrl+Shift+O"))
+    ops.cleanup = pathjoin_ui.install(editor)   # verbinden / schließen / Duplikate / offene Formen
     return ops
 
 
@@ -141,7 +144,8 @@ def add_to_bar(editor, bar) -> QToolButton:
     btn = QToolButton(bar)
     btn.setObjectName("PathOpsButton")
     btn.setIcon(icons.icon("pathops"))
-    btn.setToolTip("Pfad: vereinigen, abziehen, schneiden, verschweißen, versetzen, Text in Pfade")
+    btn.setToolTip("Pfad: vereinigen, abziehen, schneiden, verschweißen, versetzen, Text in Pfade, "
+                   "Pfade verbinden / schließen, Duplikate löschen")
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setMenu(build_menu(editor, btn))
     bar.addWidget(btn)
