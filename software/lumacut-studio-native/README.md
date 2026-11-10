@@ -466,6 +466,16 @@ bisherige Raster, G-Code byte-gleich).
   Kontrast, Gamma und Negativ; sie gelten für alle Bild-Zellen. Unveränderte Werte
   = Vorgaben, G-Code byte-gleich zu früheren Rastern.
   Tests: `tests/test_material_test_image.py`, `tests/test_material_test_image_options.py`.
+- **Bildoptionen als Achse** („… (Bild)“ im Spalten-/Zeilen-Parameter, nur mit Art „Bild“):
+  Zahlenwerte von/bis (Schwellwert, Halbton, Helligkeit, Kontrast, Gamma, Schärfen,
+  Scan-Winkel, Winkel-Schritt, Schwarz-/Weißpunkt, Punktbreite, Overscan und – im Modus
+  3D-Tiefe – 3D-Stufen und Z-Schritt; die Fokus-Absenkung Z-Schritt × (Stufen − 1) wird je
+  Zelle geprüft), Negativ / Bidirektional als aus / an über genau 2 Spalten / Zeilen und
+  die **Gradationskurve**: in der Liste „Kurven“ die zu testenden Vorlagen anhaken (je eine
+  Spalte / Zeile, Reihenfolge per Ziehen, mindestens 2; eine eigene Kurve eines geöffneten
+  Rasters erscheint als „Benutzerdefiniert“). Beschriftung und Ebenenname tragen den
+  Kurznamen (`Test P50% F1200 Kurve S`; Linear, S, S+, Flach, Mitte+, Mitte-, Tiefen+,
+  Lichter-, Eigene N). Tests: `tests/test_material_test_curve_axis.py` u. a.
 
 ### Füllung: Schraffur, Kreuzschraffur und Offset-Füllung je Ebene
 

@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-                               QFileDialog, QFormLayout, QHBoxLayout, QLabel, QMessageBox,
-                               QPushButton, QSpinBox, QToolBar, QWidget)
+                               QAbstractItemView, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
+                               QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
+                               QToolBar, QWidget)
 
 from lumacut_canvas.commands import AddLayerCommand, AddShapesCommand
 from lumacut_canvas.export import job_layers
@@ -24,7 +25,8 @@ from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 from .estimate import estimate_gcode, frame_gcode
 from lumacut_canvas.model import Z_OFFSET_RANGE
 
-from .material_test import (AXIS_PARAM_LABELS, AXIS_PARAMS, IMAGE_ADJUST_OPTIONS,
+from .material_test import (AXIS_PARAM_LABELS, AXIS_PARAMS, CURVE_AXIS_PRESETS,
+                            IMAGE_ADJUST_OPTIONS, IMAGE_CHOICE_AXIS_PARAMS,
                             IMAGE_ALL_AXIS_PARAMS, IMAGE_BOOL_AXIS_PARAMS, IMAGE_AXIS_DIGITS, IMAGE_AXIS_MODE_LABELS, IMAGE_AXIS_PARAMS,
                             IMAGE_AXIS_UNITS, IMAGE_EXTRA_OPTIONS, IMAGE_MODE_OPTIONS,
                             IMAGE_OPTION_RANGES, image_axis_mode,
@@ -142,6 +144,7 @@ class MaterialTestDialog(QDialog):
                               ("rows", "Zeilen", self.rows),
                               ("r_from", "Zeilen von", self.axis_from[1]),
                               ("r_to", "Zeilen bis", self.axis_to[1]),
+                              ("axis_curves", "Kurven", self.axis_curves),
                               ("p_min", "Leistung von", self.p_min),
                               ("p_max", "Leistung bis", self.p_max),
                               ("s_min", "Geschw. von", self.s_min),
@@ -199,6 +202,8 @@ class MaterialTestDialog(QDialog):
                      *self.axis_from, *self.axis_to):
             spin.valueChanged.connect(self._update_fields)
         self.opt_more.toggled.connect(self._update_fields)
+        self.axis_curves.itemChanged.connect(self._curve_item_changed)
+        self.axis_curves.model().rowsMoved.connect(lambda *_: self._update_fields())
         self._update_fields()
 
     def _build_image_axes(self, s: MaterialTestSpec) -> None:
@@ -210,7 +215,63 @@ class MaterialTestDialog(QDialog):
         self.axis_to = (QDoubleSpinBox(), QDoubleSpinBox())
         for w in self.axis_from + self.axis_to:
             w.setKeyboardTracking(True)
+        self._build_curve_axis(s)
         self._configure_image_axes()
+
+    def _build_curve_axis(self, s: MaterialTestSpec) -> None:
+        """Tone-curve axis: checkable list of the curve presets (plus the curves of a
+        reopened spec that are no preset); checked = one column / row each, in list
+        order (drag to reorder)."""
+        from lumacut_canvas.model import normalize_curve
+        from lumacut_import.curve_widget import CUSTOM_LABEL, CURVE_PRESETS
+        names = dict(zip(CURVE_AXIS_PRESETS, CURVE_PRESETS))
+        given = ([normalize_curve(c) for c in s.image_axis_curves]
+                 if s.image_axis_curves is not None else None)
+        self._curves_touched = given is not None
+        if given is None:
+            n = s.columns if s.column_param == "curve" else s.rows if s.row_param == "curve" else 0
+            given = list(CURVE_AXIS_PRESETS[:min(n, len(CURVE_AXIS_PRESETS))])
+        order = list(dict.fromkeys(given)) + [c for c in CURVE_AXIS_PRESETS if c not in given]
+        self._curve_list = order
+        self.axis_curves = QListWidget()
+        self.axis_curves.setObjectName("material_test_axis_curves")
+        self.axis_curves.setDragDropMode(QAbstractItemView.InternalMove)
+        self.axis_curves.setToolTip("Gradationskurven der Achse: angehakte Kurven bekommen je "
+                                    "eine Spalte / Zeile, in dieser Reihenfolge (ziehen = "
+                                    "umsortieren). Mindestens 2.")
+        custom = 0
+        for i, curve in enumerate(order):
+            if curve in names:
+                text = names[curve]
+            else:
+                custom += 1
+                text = f"{CUSTOM_LABEL} {custom}"
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole, i)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
+            item.setCheckState(Qt.Checked if curve in given else Qt.Unchecked)
+            self.axis_curves.addItem(item)
+        self.axis_curves.setMaximumHeight(150)
+
+    def _curve_item_changed(self, _item) -> None:
+        self._curves_touched = True
+        self._update_fields()
+
+    def axis_curves_checked(self) -> tuple:
+        """Checked curves of the curve axis in list order."""
+        out = []
+        for row in range(self.axis_curves.count()):
+            item = self.axis_curves.item(row)
+            if item.checkState() == Qt.Checked:
+                out.append(self._curve_list[int(item.data(Qt.UserRole))])
+        return tuple(out)
+
+    def _check_first_curves(self, n: int) -> None:
+        """Untouched list: check the first ``n`` curves (the axis was just chosen)."""
+        self.axis_curves.blockSignals(True)
+        for row in range(self.axis_curves.count()):
+            self.axis_curves.item(row).setCheckState(Qt.Checked if row < n else Qt.Unchecked)
+        self.axis_curves.blockSignals(False)
 
     def _configure_image_axes(self) -> None:
         """Adapt the from/to spins to the image option on each axis."""
@@ -223,6 +284,9 @@ class MaterialTestDialog(QDialog):
             if old in IMAGE_AXIS_PARAMS:
                 self._axis_ranges[old] = (lo_w.value(), hi_w.value())
             self._axis_shown[i] = key
+            if key in IMAGE_CHOICE_AXIS_PARAMS and not self._curves_touched:
+                count = (self.cols, self.rows)[i].value()
+                self._check_first_curves(min(max(2, count), len(CURVE_AXIS_PRESETS)))
             if key not in IMAGE_AXIS_PARAMS:
                 continue
             digits = IMAGE_AXIS_DIGITS.get(key, 1)
@@ -230,7 +294,7 @@ class MaterialTestDialog(QDialog):
             unit = IMAGE_AXIS_UNITS[key]
             step = {"threshold": 16, "gamma": 0.1, "halftone_cpi": 5, "black_point": 16,
                     "white_point": 16, "dot_width_mm": 0.01, "overscan_mm": 0.5,
-                    "angle_increment": 15}.get(key, 5)
+                    "angle_increment": 15, "depth_levels": 2, "z_step_mm": 0.05}.get(key, 5)
             for w, v in zip((lo_w, hi_w), self._axis_ranges[key]):
                 w.blockSignals(True)
                 w.setDecimals(digits)
@@ -442,8 +506,22 @@ class MaterialTestDialog(QDialog):
                 count.blockSignals(True)
                 count.setValue(2)
                 count.blockSignals(False)
-            count.setEnabled(not on_off)
-            count.setToolTip("Aus / An – genau 2" if on_off else "")
+            choice = key in IMAGE_CHOICE_AXIS_PARAMS
+            if choice:
+                # Tone-curve axis: one column / row per checked curve.
+                n = len(self.axis_curves_checked())
+                if n and count.value() != n:
+                    count.blockSignals(True)
+                    count.setValue(n)
+                    count.blockSignals(False)
+            count.setEnabled(not on_off and not choice)
+            count.setToolTip("Aus / An – genau 2" if on_off
+                             else "Anzahl der angehakten Kurven" if choice else "")
+        curve_axis = image and any(k in IMAGE_CHOICE_AXIS_PARAMS for k in axes)
+        side = "Spalten" if axes[0] in IMAGE_CHOICE_AXIS_PARAMS else "Zeilen"
+        self._rows["axis_curves"].setText(f"Kurven ({side})")
+        self._rows["axis_curves"].setVisible(curve_axis)
+        self.axis_curves.setVisible(curve_axis)
         for i, key in enumerate(axes):
             on = key in IMAGE_AXIS_PARAMS
             name = AXIS_PARAM_LABELS[key]
@@ -493,6 +571,7 @@ class MaterialTestDialog(QDialog):
         elif photo and not self._photo_png:
             problem = "Eigenes Bild fehlt – bitte eine Bilddatei wählen."
         elif (image and self.image_mode.currentData() == "depth3d"
+              and not swept & {"depth_levels", "z_step_mm"}
               and self.opt_zstep.value() * (self.opt_levels.value() - 1)
               > MAX_DEPTH_DROP_MM + 1e-9):
             drop = self.opt_zstep.value() * (self.opt_levels.value() - 1)
@@ -507,7 +586,8 @@ class MaterialTestDialog(QDialog):
                        f"Linienabstand {self._min_interval():g} mm.")
         elif "focus" in axes and self.focus_min.value() == self.focus_max.value():
             problem = "Fokus von und bis müssen verschieden sein."
-        elif image and swept & {"black_point", "white_point", "dot_width_mm"}:
+        elif image and swept & {"black_point", "white_point", "dot_width_mm",
+                                "depth_levels", "z_step_mm"}:
             # Swept black / white point or dot width: check every cell (axis value
             # against the grid-wide or the other axis's value, the cell's interval).
             cell_problem = self.spec().image_cell_problem()
@@ -531,6 +611,10 @@ class MaterialTestDialog(QDialog):
                         f"„{IMAGE_AXIS_MODE_LABELS.get(need, need)}“.")
             if key in IMAGE_BOOL_AXIS_PARAMS:
                 continue                      # aus / an: no range
+            if key in IMAGE_CHOICE_AXIS_PARAMS:
+                if len(self.axis_curves_checked()) < 2:
+                    return "Kurven-Achse: mindestens 2 Kurven anhaken."
+                continue
             if key == "angle_increment":
                 passes = self.passes.value()
                 if "passes" in self._axes():
@@ -571,7 +655,10 @@ class MaterialTestDialog(QDialog):
             image_options=(self.image_options()
                            if self.mode.currentIndex() == CELL_IMAGE else None),
             image_axis_ranges=(self.image_axis_ranges()
-                               if self.mode.currentIndex() == CELL_IMAGE else None))
+                               if self.mode.currentIndex() == CELL_IMAGE else None),
+            image_axis_curves=(self.axis_curves_checked()
+                               if (self.mode.currentIndex() == CELL_IMAGE
+                                   and "curve" in self._axes()) else None))
 
 
     def _pick_photo(self) -> None:
