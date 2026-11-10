@@ -371,7 +371,11 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Die Zeit enthält wie beim Pi-Ablauf die Anfahrt aus der Park-Ecke (Z von 1 auf 20 mm, erste
   Fahrt ab X0/Y0) und das Parken danach (ggf. Z hoch, Eilgang nach X0/Y0, Z runter) –
   „· Anfahrt/Parken 8 s“ in Schätzung, Start-Rückfrage, Sendemeldung, Verlauf und Pfadvorschau;
-  Referenzfahrt und Abtasten des automatischen Ablaufs zählen nicht mit.
+  Referenzfahrt und Abtasten des automatischen Ablaufs zählen nicht mit. Mit verbundenem Pi
+  gelten dessen Fahrhöhe (Z-Rückzug bzw. Materialstärke + 20 mm, `travel_z_mm`) und Parkhöhe
+  (`config.park_z_mm`, zuletzt gesehene Werte auch offline); die Anfahrt beginnt an der
+  Kopfposition, und bei „Aktuelle Position“ / „Benutzer-Ursprung“ wird der Auftrag wie vom Pi
+  versetzt geplant („Zeit schätzen“ nennt Höhen und Versatz).
 - **G-Code speichern…** (*Alt+G*): optimierter G-Code des Designs als Datei (ohne
   Scan-Fokuskorrektur, die nur beim Senden über das Scan-Panel dazukommt).
 - **Verlauf…** (*Strg+H*): die letzten 20 gesendeten Aufträge (alle Sendewege) mit Zeit und
@@ -595,8 +599,8 @@ G-Code.
 
 Bekannt: Die Bahn beginnt an der ersten Positionierfahrt (Länge 0 mm in der
 Leerfahrtlänge); die Zeit rechnet Anfahrt aus der Park-Ecke und Parken
-dazu (ohne Referenzfahrt/Abtasten, ohne Versatz bei „Aktuelle Position“ /
-„Benutzer-Ursprung“). Sehr große Rasterjobs werden vollständig gelesen;
+dazu (ohne Referenzfahrt/Abtasten; Höhen, Kopfposition und Versatz am Ursprung
+aus dem Pi-Status, offline die Pi-Standardwerte ab X0/Y0). Sehr große Rasterjobs werden vollständig gelesen;
 bei vielen tausend Zeilen kann das Neuberechnen spürbar dauern.
 
 ### Anordnen: Ausrichten, Verteilen, Arrays

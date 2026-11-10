@@ -958,6 +958,8 @@ class JobTools(QObject):
             text += f" – {est.layer_summary()}"
         if est.motion_note():
             text += f" – {est.motion_note()}"
+        if est.routine_note():
+            text += f" – {est.routine_note()}"
         if note:
             text += f" – {note}"
         park = self.park_preflight(g)
@@ -1450,3 +1452,28 @@ def install_motion_sync(window, tools) -> None:
     tools.motion_sync = MotionSync(getattr(window, "machine_panel", None))
     tools.motion_refresh = refresh
     tools.destroyed.connect(lambda *_: remove_motion_listener(refresh))
+    install_park_sync(window, tools)
+
+
+def install_park_sync(window, tools) -> None:
+    """Approach / parking follow the Pi's heights, the head and the origin.
+
+    Travel / park height (``travel_z_mm``, ``config.park_z_mm``) are stored
+    like the motion calibration; head position and the placement at
+    „Aktuelle Position“ / „Benutzer-Ursprung“ follow the status polls and
+    the origin choice. A change re-estimates the open path preview.
+    """
+    from .park_routine import ParkSync, add_park_listener, remove_park_listener
+    preview = getattr(getattr(window, "canvas", None), "path_preview", None)
+
+    def refresh() -> None:
+        try:
+            if preview is not None and hasattr(preview, "refresh_estimate"):
+                preview.refresh_estimate()
+        except RuntimeError:          # preview already deleted (window closed)
+            remove_park_listener(refresh)
+
+    add_park_listener(refresh)
+    tools.park_sync = ParkSync(getattr(window, "machine_panel", None))
+    tools.park_refresh = refresh
+    tools.destroyed.connect(lambda *_: remove_park_listener(refresh))

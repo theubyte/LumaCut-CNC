@@ -18,8 +18,15 @@ LightBurn's travel back to the finish position: the *approach* – the head
 rises from the park height (1 mm) to the travel height (20 mm) and the
 job's first move runs from X0/Y0 – and the *return* – lift back to the
 travel height if the job lowered Z, rapid to X0/Y0, down to the park height
-(:class:`ParkRoutine`, mirrors of the Pi defaults). Homing (only when the
-Pi is not referenced) and probing of the automatic run are *not* included.
+(:class:`ParkRoutine`). The heights default to the connected Pi's
+(``travel_z_mm`` = clearance or material + 20 mm, ``config.park_z_mm``;
+:func:`~lumacut_job.park_routine.active_park`, stored for offline use), and
+the approach starts at the head position with the job moved like the Pi
+places it at „Aktuelle Position“ / „Benutzer-Ursprung“
+(:class:`~lumacut_job.park_routine.JobStart`, ``active_start``); offline
+the Pi defaults (park 1 mm, travel 20 mm) from X0/Y0, unshifted. Homing
+(only when the Pi is not referenced) and probing of the automatic run are
+*not* included.
 
 :func:`frame_gcode` traces the job's bounding box (or its convex
 "rubber band" hull) with the laser off, like LightBurn's Frame buttons and
@@ -48,28 +55,11 @@ FRAME_FEED = 3000.0       # mm/min
 
 # Park routine of the Pi around every job (pi400/marlin/transport.py
 # park_safezone / _unpark_before_locked / _lower_to_park_locked; defaults of
-# web.py config). tests/test_estimate_park.py keeps the mirrors equal.
-PARK_Z_MM = 1.0           # transport.PARK_Z_MM, config park_z_mm
-TRAVEL_Z_MM = 20.0        # config z_clearance_mm (travel_z without material)
-PARK_FEED = 9000.0        # "G0 X0.000 Y0.000 F9000"
-Z_ACCEL = 100.0           # firmware DEFAULT_MAX_ACCELERATION Z (M201 Z, not changed by the Pi)
-
-
-@dataclass(frozen=True)
-class ParkRoutine:
-    """Moves the Pi adds around a job (machine mm, head parked at X0/Y0)."""
-    park_z: float = PARK_Z_MM
-    travel_z: float = TRAVEL_Z_MM
-    feed: float = PARK_FEED
-    z_accel: float = Z_ACCEL
-
-    @property
-    def lift_mm(self) -> float:
-        """Rise from the park height to the travel height (0 = parks at travel height)."""
-        return max(0.0, self.travel_z - self.park_z) if self.park_z > 0 else 0.0
-
-
-DEFAULT_PARK = ParkRoutine()
+# web.py config) and the job start – lumacut_job.park_routine; the heights
+# follow the connected Pi's status. tests/test_estimate_park.py keeps the
+# mirrors equal.
+from .park_routine import (DEFAULT_PARK, PARK_FEED, PARK_Z_MM, TRAVEL_Z_MM,  # noqa: E402,F401
+                           Z_ACCEL, JobStart, ParkRoutine, active_park, active_start)
 
 # Erlaubter Bereich in Maschinen-mm (Nullpunkt oben rechts: to_machine(0, 0)
 # ist jetzt die *größte* X-Koordinate, darum feste Grenzen statt Ecken).
@@ -98,6 +88,27 @@ class JobEstimate:
     park_time_s: float = 0.0
     park_length_mm: float = 0.0       # X/Y
     park_included: bool = False
+    # Heights and start the routine was planned with
+    routine: ParkRoutine | None = None
+    placement_offset: tuple[float, float] = (0.0, 0.0)   # (dx, dy) the Pi adds
+    placement_origin: str = "absolute"
+    start_xy: tuple[float, float] = (0.0, 0.0)         # head X/Y where the job starts
+
+    def routine_note(self) -> str:
+        """Heights / start / placement of the routine when they differ from
+        the defaults (``Fahrhöhe 25 mm, Parkhöhe 1 mm (Pi) · am Ursprung
+        „Benutzer-Ursprung“ versetzt um X+12 / Y-3 mm``), else ""."""
+        if not self.park_included or self.routine is None:
+            return ""
+        parts = []
+        if not self.routine.is_default or self.routine.source != "default":
+            parts.append(self.routine.label())
+        if self.placement_origin != "absolute":
+            from .park_corner import ORIGIN_NAMES
+            dx, dy = self.placement_offset
+            parts.append("am Ursprung „%s“ versetzt um X%+.1f / Y%+.1f mm" % (
+                ORIGIN_NAMES.get(self.placement_origin, self.placement_origin), dx, dy))
+        return " · ".join(parts)
 
     def motion_note(self) -> str:
         """``Bewegung: Pi-Kalibrierung 2100 mm/s², 200 mm/s`` (leer ohne Angabe)."""
@@ -127,6 +138,8 @@ class JobEstimate:
     def scope_note(self) -> str:
         """What the time covers besides the G-code (for tooltips / messages)."""
         if self.park_included:
+            if self.start_xy != (0.0, 0.0):
+                return "mit Anfahrt von der Kopfposition und Parken, ohne Referenzfahrt/Abtasten"
             return "mit Anfahrt aus der Park-Ecke und Parken, ohne Referenzfahrt/Abtasten"
         return "ohne Referenzfahrt/Fokus/Parken"
 
@@ -199,13 +212,18 @@ def estimate_gcode(gcode: str, accel: float | None = None, max_xy: float | None 
                    max_z: float | None = None, rapid_feed: float = RAPID_FEED,
                    junction_deviation: float = JUNCTION_DEVIATION,
                    motion: MotionProfile | None = None,
-                   park: bool | ParkRoutine = True) -> JobEstimate:
+                   park: bool | ParkRoutine = True,
+                   start: JobStart | None = None) -> JobEstimate:
     """Estimate run time of Marlin laser G-code (G0/G1/G4, G90/G91, M3 I/M5 I).
 
     ``motion`` (default :func:`~lumacut_job.motion.active_motion`) supplies
     every limit not given as ``accel`` / ``max_xy`` / ``max_z``. ``park``
-    (default the Pi's routine) adds the approach from the park corner and
-    the parking after the job; ``False`` = the G-code lines only.
+    (default the connected / last seen Pi's heights, ``active_park``) adds
+    the approach and the parking after the job; ``False`` = the G-code lines
+    only. ``start`` (default ``active_start``: head position and the Pi's
+    placement at the chosen origin) sets where the approach begins and the
+    offset the Pi adds to the job's X/Y – it changes only the routine, the
+    G-code part is translation invariant.
     """
     base = motion if motion is not None else active_motion()
     if accel is None and max_xy is None and max_z is None:
@@ -343,33 +361,52 @@ def estimate_gcode(gcode: str, accel: float | None = None, max_xy: float | None 
     est.layers = [(name or "Auftrag", t) for name, t in per.items()]
     if xs:
         est.bounds = (min(xs), min(ys), max(xs), max(ys))
-    routine = DEFAULT_PARK if park is True else (park or None)
+    routine = active_park() if park is True else (park or None)
     if routine is not None and first_move is not None:
-        _add_park(est, routine, first_move, pos, abs_z, accel, max_xy, max_z)
+        st = active_start() if start is None else start
+        _add_park(est, routine, st, st.offset(gcode), first_move, pos, abs_z,
+                  accel, max_xy, max_z)
     return est
 
 
-def _add_park(est: JobEstimate, routine: ParkRoutine, first_move, end, abs_z: bool,
+def _add_park(est: JobEstimate, routine: ParkRoutine, start: JobStart,
+              offset: tuple[float, float], first_move, end, abs_z: bool,
               accel: float, max_xy: float, max_z: float) -> None:
-    """Approach from X0/Y0 and parking after the job (rest to rest, like the Pi)."""
+    """Approach from the head and parking after the job (rest to rest, like the Pi).
+
+    Parked low (at X0/Y0, park height) the head first rises to the travel
+    height; elsewhere it starts at its Z. After the job ``park_safezone``
+    lifts to max(Z, travel height, probe minimum), rapids to X0/Y0 and lowers
+    to the park height (none with park height 0).
+    """
     z_v = max_z   # the Pi asks for at least F600 on Z, M203 Z caps it at the Z limit
-    lift_t = _move_time(routine.lift_mm, z_v, routine.z_accel)
+    dx, dy = offset
+    sx, sy = start.start_xy()
+    parked = start.parked_low(routine)
     fx, fy, has_z, feed0 = first_move
-    est.approach_length_mm = math.hypot(fx, fy)
+    fx, fy = fx + dx, fy + dy
+    ex, ey = end[0] + dx, end[1] + dy
+    lift_t = _move_time(routine.lift_mm, z_v, routine.z_accel) if parked else 0.0
+    est.approach_length_mm = math.hypot(fx - sx, fy - sy)
     est.approach_time_s = (0.0 if has_z else lift_t) + _move_time(
-        est.approach_length_mm, _xy_speed(fx, fy, feed0, max_xy), accel)
-    # back to the travel height when the job went below it (relative Z from
-    # the travel height, absolute Z = machine Z)
-    up = max(0.0, routine.travel_z - end[2]) if abs_z else max(0.0, -end[2])
-    est.park_length_mm = math.hypot(end[0], end[1])
+        est.approach_length_mm, _xy_speed(fx - sx, fy - sy, feed0, max_xy), accel)
+    # Z where the program starts: travel height after the lift, else the head's
+    z0 = (routine.travel_z if parked or start.head is None else start.head[2])
+    end_z = end[2] if abs_z else z0 + end[2]
+    top = max(end_z, routine.travel_z, routine.min_park_lift_z)
+    up = max(0.0, top - end_z)
+    down = max(0.0, top - routine.park_z) if routine.park_z > 0 else 0.0
+    est.park_length_mm = math.hypot(ex, ey)
     est.park_time_s = (_move_time(up, z_v, routine.z_accel)
                        + _move_time(est.park_length_mm,
-                                    _xy_speed(end[0], end[1], routine.feed, max_xy), accel)
-                       + lift_t)
+                                    _xy_speed(ex, ey, routine.feed, max_xy), accel)
+                       + _move_time(down, z_v, routine.z_accel))
     est.park_included = True
+    est.routine = routine
+    est.placement_offset = (dx, dy)
+    est.placement_origin = start.origin if (dx, dy) != (0.0, 0.0) or start.target else "absolute"
+    est.start_xy = (sx, sy)
 
-
-# --- Framing -------------------------------------------------------------
 
 def job_bounds(layers) -> tuple[float, float, float, float] | None:
     """Bounding box (machine mm) of all polylines of the given ``JobLayer`` list."""
