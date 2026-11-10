@@ -3,9 +3,13 @@
 :func:`estimate_gcode` simulates Marlin's planner closely enough for a
 useful preview: per-segment trapezoid profiles with the machine's
 acceleration, junction-deviation corner speeds and forward/backward speed
-passes (like LightBurn's "Total estimated time" in Preview). Defaults are
-the LumaCut values from docs/MASCHINE.md: XY 150 mm/s max, 500 mm/s²,
-Z 9 mm/s, rapid F9000 when a G0 carries no F (set by the Pi).
+passes (like LightBurn's "Total estimated time" in Preview). Limits not
+passed explicitly come from :func:`lumacut_job.motion.active_motion`: the
+Pi's motion calibration once a Pi was seen (``config.motion``, also the last
+one stored), else the firmware values from docs/MASCHINE.md: XY 150 mm/s
+per axis, 500 mm/s², Z 9 mm/s. Rapid F9000 when a G0 carries no F (set by
+the Pi). The feed limit is per axis like Marlin's ``M203 X Y``: a diagonal
+move whose F asks for more may run up to ``speed`` on each axis.
 
 Homing, probing/focus and parking run on the Pi before/after the job and
 are *not* included.
@@ -21,14 +25,16 @@ import math
 import re
 from dataclasses import dataclass, field
 
+from .motion import (EXPLICIT, FIRMWARE_ACCEL, FIRMWARE_SPEED, FIRMWARE_Z_SPEED, MotionProfile,
+                     active_motion)
 from lumacut_canvas.workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine,
     MACHINE_X_MAX, MACHINE_X_MIN, MACHINE_Y_MAX, MACHINE_Y_MIN)
 
 _WORD = re.compile(r"([A-Z])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))")
 
-ACCEL_XY = 500.0          # mm/s²
-MAX_XY = 150.0            # mm/s
-MAX_Z = 9.0               # mm/s
+ACCEL_XY = FIRMWARE_ACCEL  # mm/s² (firmware default; see lumacut_job.motion)
+MAX_XY = FIRMWARE_SPEED    # mm/s per X/Y axis
+MAX_Z = FIRMWARE_Z_SPEED   # mm/s
 RAPID_FEED = 9000.0       # mm/min, Pi default for G0 without F
 JUNCTION_DEVIATION = 0.013  # mm (Marlin default)
 FRAME_FEED = 3000.0       # mm/min
@@ -51,6 +57,12 @@ class JobEstimate:
     # ``; LAYER <Name>`` bzw. ``; IMAGE <id> <MODUS>`` – wie LightBurns
     # Zeit pro Ebene in der Vorschau. Leer bei G-Code ohne solche Kommentare.
     layers: list[tuple[str, float]] = field(default_factory=list)
+    # Bewegungsgrenzen, mit denen gerechnet wurde (Pi-Kalibrierung oder Firmware)
+    motion: MotionProfile | None = None
+
+    def motion_note(self) -> str:
+        """``Bewegung: Pi-Kalibrierung 2100 mm/s², 200 mm/s`` (leer ohne Angabe)."""
+        return f"Bewegung: {self.motion.label()}" if self.motion is not None else ""
 
     @property
     def total_time_s(self) -> float:
@@ -113,11 +125,24 @@ def _seg_time(L: float, v0: float, v1: float, vmax: float, a: float) -> float:
     return (vmax - v0) / a + (vmax - v1) / a + (L - d_acc - d_dec) / vmax
 
 
-def estimate_gcode(gcode: str, accel: float = ACCEL_XY, max_xy: float = MAX_XY,
-                   max_z: float = MAX_Z, rapid_feed: float = RAPID_FEED,
-                   junction_deviation: float = JUNCTION_DEVIATION) -> JobEstimate:
-    """Estimate run time of Marlin laser G-code (G0/G1/G4, G90/G91, M3 I/M5 I)."""
-    est = JobEstimate()
+def estimate_gcode(gcode: str, accel: float | None = None, max_xy: float | None = None,
+                   max_z: float | None = None, rapid_feed: float = RAPID_FEED,
+                   junction_deviation: float = JUNCTION_DEVIATION,
+                   motion: MotionProfile | None = None) -> JobEstimate:
+    """Estimate run time of Marlin laser G-code (G0/G1/G4, G90/G91, M3 I/M5 I).
+
+    ``motion`` (default :func:`~lumacut_job.motion.active_motion`) supplies
+    every limit not given as ``accel`` / ``max_xy`` / ``max_z``.
+    """
+    base = motion if motion is not None else active_motion()
+    if accel is None and max_xy is None and max_z is None:
+        used = base
+    else:
+        used = MotionProfile(base.accel if accel is None else float(accel),
+                             base.speed if max_xy is None else float(max_xy),
+                             base.z_speed if max_z is None else float(max_z), EXPLICIT)
+    accel, max_xy, max_z = used.accel, used.speed, used.z_speed
+    est = JobEstimate(motion=used)
     pos = [0.0, 0.0, 0.0]
     have_xy = False
     absolute = True
@@ -183,7 +208,11 @@ def estimate_gcode(gcode: str, accel: float = ACCEL_XY, max_xy: float = MAX_XY,
         if L <= 1e-9:
             continue
         f = (float(words["F"]) if "F" in words else rapid_feed) if g == 0 else (feed or rapid_feed)
-        vmax = min(f / 60.0, max_xy)
+        vmax = f / 60.0
+        # per-axis feed limit (M203 X Y): the larger XY component reaches max_xy first
+        axis_frac = max(abs(d[0]), abs(d[1])) / L
+        if axis_frac > 1e-12:
+            vmax = min(vmax, max_xy / axis_frac)
         if abs(d[2]) > 1e-9:
             vmax = min(vmax, max_z * L / abs(d[2]))
         power = float(words.get("S", 0)) if g == 1 else 0.0
