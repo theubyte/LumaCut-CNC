@@ -53,10 +53,19 @@ CELL_FILL, CELL_OUTLINE, CELL_IMAGE = 0, 1, 2
 
 
 class MaterialTestDialog(QDialog):
-    def __init__(self, parent=None, spec: MaterialTestSpec | None = None):
+    def __init__(self, parent=None, spec: MaterialTestSpec | None = None,
+                 image_curves=None):
         super().__init__(parent)
         self.setWindowTitle("Materialtest-Raster")
         s = spec or MaterialTestSpec()
+        # Tone curves of the document's images ((label, curve), selected first): offered
+        # in the curve list / combo and as templates when drawing a curve (round 54).
+        from lumacut_canvas.model import normalize_curve as _norm
+        self._doc_curves: list[tuple[str, tuple]] = []
+        for label, curve in image_curves or ():
+            c = _norm(curve)
+            if c and c not in {d for _, d in self._doc_curves}:
+                self._doc_curves.append((str(label), c))
         f = QFormLayout(self)
         self.p_min = _spin(1, 100, s.power_min, suffix=" %")
         self.p_max = _spin(1, 100, s.power_max, suffix=" %")
@@ -145,6 +154,7 @@ class MaterialTestDialog(QDialog):
                               ("r_from", "Zeilen von", self.axis_from[1]),
                               ("r_to", "Zeilen bis", self.axis_to[1]),
                               ("axis_curves", "Kurven", self.axis_curves),
+                              ("axis_curve_btns", "", self.axis_curve_buttons),
                               ("p_min", "Leistung von", self.p_min),
                               ("p_max", "Leistung bis", self.p_max),
                               ("s_min", "Geschw. von", self.s_min),
@@ -172,6 +182,7 @@ class MaterialTestDialog(QDialog):
                               ("opt_black", "Schwarzpunkt", self.opt_black),
                               ("opt_white", "Weißpunkt", self.opt_white),
                               ("opt_curve", "Kurve", self.opt_curve),
+                              ("opt_curve_draw", "", self.opt_curve_draw),
                               ("opt_dot_width", "Punktbreitenkorrektur", self.opt_dot_width),
                               ("opt_scan_angle", "Scan-Winkel", self.opt_scan_angle),
                               ("opt_angle_increment", "Winkel-Schritt je Durchgang",
@@ -204,6 +215,9 @@ class MaterialTestDialog(QDialog):
         self.opt_more.toggled.connect(self._update_fields)
         self.axis_curves.itemChanged.connect(self._curve_item_changed)
         self.axis_curves.model().rowsMoved.connect(lambda *_: self._update_fields())
+        self.axis_curves.currentItemChanged.connect(lambda *_: self._sync_curve_buttons())
+        self.axis_curves.itemDoubleClicked.connect(lambda *_: self.edit_axis_curve())
+        self._sync_curve_buttons()
         self._update_fields()
 
     def _build_image_axes(self, s: MaterialTestSpec) -> None:
@@ -231,7 +245,9 @@ class MaterialTestDialog(QDialog):
         if given is None:
             n = s.columns if s.column_param == "curve" else s.rows if s.row_param == "curve" else 0
             given = list(CURVE_AXIS_PRESETS[:min(n, len(CURVE_AXIS_PRESETS))])
+        docs = dict((c, label) for label, c in reversed(self._doc_curves))
         order = list(dict.fromkeys(given)) + [c for c in CURVE_AXIS_PRESETS if c not in given]
+        order += [c for _, c in self._doc_curves if c not in order]
         self._curve_list = order
         self.axis_curves = QListWidget()
         self.axis_curves.setObjectName("material_test_axis_curves")
@@ -239,19 +255,170 @@ class MaterialTestDialog(QDialog):
         self.axis_curves.setToolTip("Gradationskurven der Achse: angehakte Kurven bekommen je "
                                     "eine Spalte / Zeile, in dieser Reihenfolge (ziehen = "
                                     "umsortieren). Mindestens 2.")
-        custom = 0
+        self._custom_curves = 0
         for i, curve in enumerate(order):
             if curve in names:
-                text = names[curve]
+                text, kind = names[curve], "preset"
+            elif curve in docs:
+                text, kind = docs[curve], "image"
             else:
-                custom += 1
-                text = f"{CUSTOM_LABEL} {custom}"
-            item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, i)
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
-            item.setCheckState(Qt.Checked if curve in given else Qt.Unchecked)
-            self.axis_curves.addItem(item)
+                self._custom_curves += 1
+                text, kind = f"{CUSTOM_LABEL} {self._custom_curves}", "custom"
+            self.axis_curves.addItem(self._curve_item(text, i, kind, curve in given))
         self.axis_curves.setMaximumHeight(150)
+        # Draw / edit / remove own curves (round 54; LightBurn tests drawn curves too).
+        self.axis_curve_buttons = QWidget()
+        btn_lay = QHBoxLayout(self.axis_curve_buttons)
+        btn_lay.setContentsMargins(0, 0, 0, 0)
+        self.axis_curve_new = QPushButton("Kurve zeichnen…")
+        self.axis_curve_new.setObjectName("material_test_axis_curve_new")
+        self.axis_curve_new.setToolTip("Eigene Gradationskurve zeichnen (ausgehend von der "
+                                       "gewählten Kurve) – sie wird angehakt.")
+        self.axis_curve_edit = QPushButton("Bearbeiten…")
+        self.axis_curve_edit.setObjectName("material_test_axis_curve_edit")
+        self.axis_curve_edit.setToolTip("Gewählte Kurve bearbeiten (Doppelklick). Eine "
+                                        "Vorlage oder Bildkurve bleibt erhalten – das "
+                                        "Ergebnis kommt als eigene Kurve dazu.")
+        self.axis_curve_remove = QPushButton("Entfernen")
+        self.axis_curve_remove.setObjectName("material_test_axis_curve_remove")
+        self.axis_curve_remove.setToolTip("Gewählte eigene Kurve aus der Liste entfernen "
+                                          "(Vorlagen bleiben).")
+        self.axis_curve_new.clicked.connect(lambda: self.new_axis_curve())
+        self.axis_curve_edit.clicked.connect(lambda: self.edit_axis_curve())
+        self.axis_curve_remove.clicked.connect(lambda: self.remove_axis_curve())
+        for b in (self.axis_curve_new, self.axis_curve_edit, self.axis_curve_remove):
+            btn_lay.addWidget(b)
+
+    @staticmethod
+    def _curve_item(text: str, index: int, kind: str, checked: bool) -> QListWidgetItem:
+        item = QListWidgetItem(text)
+        item.setData(Qt.UserRole, index)
+        item.setData(Qt.UserRole + 1, kind)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
+        item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        return item
+
+    # -- drawn curves (round 54) -------------------------------------------------
+    def _draw_curve(self, curve, title: str) -> tuple | None:
+        """Open the curve editor on ``curve``; drawn points or None (cancelled)."""
+        from .material_test_curve_qt import CurveDrawDialog, grid_image_histogram
+        try:
+            hist = grid_image_histogram(self.spec())
+        except Exception:  # noqa: BLE001 - histogram is only a background
+            hist = None
+        dlg = CurveDrawDialog(curve, self, templates=self._doc_curves, histogram=hist,
+                              title=title)
+        try:
+            if dlg.exec() != QDialog.Accepted:
+                return None
+            return dlg.curve()
+        finally:
+            dlg.deleteLater()
+
+    def _curve_row(self, curve) -> int:
+        """Row of ``curve`` in the axis list (-1 = not listed)."""
+        for row in range(self.axis_curves.count()):
+            if self._curve_list[int(self.axis_curves.item(row).data(Qt.UserRole))] == curve:
+                return row
+        return -1
+
+    def add_axis_curve(self, curve) -> int:
+        """Check ``curve`` on the curve axis: an equal listed curve is checked, a new one
+        is appended as „Benutzerdefiniert N“. Returns its row."""
+        from lumacut_canvas.model import normalize_curve
+        from lumacut_import.curve_widget import CUSTOM_LABEL
+        c = normalize_curve(curve)
+        row = self._curve_row(c)
+        self._curves_touched = True
+        if row < 0:
+            self._curve_list.append(c)
+            self._custom_curves += 1
+            self.axis_curves.blockSignals(True)
+            self.axis_curves.addItem(self._curve_item(
+                f"{CUSTOM_LABEL} {self._custom_curves}", len(self._curve_list) - 1,
+                "custom", True))
+            self.axis_curves.blockSignals(False)
+            row = self.axis_curves.count() - 1
+        else:
+            self.axis_curves.blockSignals(True)
+            self.axis_curves.item(row).setCheckState(Qt.Checked)
+            self.axis_curves.blockSignals(False)
+        self.axis_curves.setCurrentRow(row)
+        self._update_fields()
+        return row
+
+    def _current_curve(self) -> tuple:
+        item = self.axis_curves.currentItem()
+        return self._curve_list[int(item.data(Qt.UserRole))] if item is not None else ()
+
+    def new_axis_curve(self) -> int:
+        """„Kurve zeichnen…“: draw from the chosen curve and check the result (-1 =
+        cancelled)."""
+        drawn = self._draw_curve(self._current_curve(), "Kurve für die Achse zeichnen")
+        return -1 if drawn is None else self.add_axis_curve(drawn)
+
+    def edit_axis_curve(self) -> int:
+        """Edit the chosen curve: an own curve is replaced in place (same label, same
+        position), a preset / image curve stays and the result is added as an own
+        curve. Returns the row of the result (-1 = nothing chosen / cancelled)."""
+        item = self.axis_curves.currentItem()
+        if item is None:
+            return -1
+        idx = int(item.data(Qt.UserRole))
+        drawn = self._draw_curve(self._curve_list[idx], f"„{item.text()}“ bearbeiten")
+        if drawn is None:
+            return -1
+        if drawn == self._curve_list[idx]:
+            return self.axis_curves.row(item)
+        if item.data(Qt.UserRole + 1) != "custom":
+            return self.add_axis_curve(drawn)
+        other = self._curve_row(drawn)
+        if other >= 0:                         # same as another entry: use that one
+            self.axis_curves.takeItem(self.axis_curves.row(item))
+            return self.add_axis_curve(drawn)
+        self._curve_list[idx] = drawn
+        self._curves_touched = True
+        self.axis_curves.blockSignals(True)
+        item.setCheckState(Qt.Checked)
+        self.axis_curves.blockSignals(False)
+        self._update_fields()
+        return self.axis_curves.row(item)
+
+    def remove_axis_curve(self) -> bool:
+        """Remove the chosen own curve from the list (presets / image curves stay)."""
+        item = self.axis_curves.currentItem()
+        if item is None or item.data(Qt.UserRole + 1) != "custom":
+            return False
+        self.axis_curves.takeItem(self.axis_curves.row(item))
+        self._curves_touched = True
+        self._sync_curve_buttons()
+        self._update_fields()
+        return True
+
+    def _sync_curve_buttons(self) -> None:
+        item = self.axis_curves.currentItem()
+        self.axis_curve_edit.setEnabled(item is not None)
+        self.axis_curve_remove.setEnabled(item is not None
+                                          and item.data(Qt.UserRole + 1) == "custom")
+
+    def draw_option_curve(self) -> int:
+        """„Kurve zeichnen…“ next to the grid-wide curve: draw from the chosen curve;
+        an equal listed curve is chosen, a new one added. Returns its combo index
+        (-1 = cancelled)."""
+        from lumacut_import.curve_widget import CUSTOM_LABEL
+        cur = self._curve_choices[self.opt_curve.currentIndex()]
+        drawn = self._draw_curve(cur, "Kurve für alle Bild-Testzellen zeichnen")
+        if drawn is None:
+            return -1
+        if drawn not in self._curve_choices:
+            self._curve_choices.append(drawn)
+            n = sum(1 for i in range(self.opt_curve.count())
+                    if self.opt_curve.itemText(i).startswith(CUSTOM_LABEL))
+            self.opt_curve.addItem(CUSTOM_LABEL if n == 0 else f"{CUSTOM_LABEL} {n + 1}")
+        idx = self._curve_choices.index(drawn)
+        self.opt_curve.setCurrentIndex(idx)
+        self._update_fields()
+        return idx
 
     def _curve_item_changed(self, _item) -> None:
         self._curves_touched = True
@@ -416,11 +583,20 @@ class MaterialTestDialog(QDialog):
         self._curve_choices = [normalize_curve(pts) for pts in CURVE_PRESETS.values()]
         for name in CURVE_PRESETS:
             self.opt_curve.addItem(name)
+        for label, c in self._doc_curves:
+            if c not in self._curve_choices:
+                self._curve_choices.append(c)
+                self.opt_curve.addItem(label)
         cur = normalize_curve(val("curve"))
         if cur not in self._curve_choices:
             self._curve_choices.append(cur)
             self.opt_curve.addItem(CUSTOM_LABEL)
         self.opt_curve.setCurrentIndex(self._curve_choices.index(cur))
+        self.opt_curve_draw = QPushButton("Kurve zeichnen…")
+        self.opt_curve_draw.setObjectName("material_test_curve_draw")
+        self.opt_curve_draw.setToolTip("Eigene Gradationskurve für alle Bild-Testzellen "
+                                       "zeichnen (ausgehend von der gewählten Kurve).")
+        self.opt_curve_draw.clicked.connect(lambda: self.draw_option_curve())
         self.opt_curve.setToolTip("Gradationskurve für alle Bild-Testzellen (Vorlagen wie in "
                                   "den Bildeinstellungen).")
         self.opt_dot_width = _spin(*r["dot_width_mm"], float(val("dot_width_mm")),
@@ -522,6 +698,8 @@ class MaterialTestDialog(QDialog):
         self._rows["axis_curves"].setText(f"Kurven ({side})")
         self._rows["axis_curves"].setVisible(curve_axis)
         self.axis_curves.setVisible(curve_axis)
+        self._rows["axis_curve_btns"].setVisible(curve_axis)
+        self.axis_curve_buttons.setVisible(curve_axis)
         for i, key in enumerate(axes):
             on = key in IMAGE_AXIS_PARAMS
             name = AXIS_PARAM_LABELS[key]
@@ -534,6 +712,8 @@ class MaterialTestDialog(QDialog):
         for key, w in self._opt_widgets.items():
             self._rows[self._opt_rows[key]].setVisible(key in shown)
             w.setVisible(key in shown)
+        self._rows["opt_curve_draw"].setVisible("curve" in shown)
+        self.opt_curve_draw.setVisible("curve" in shown)
         self._rows["opt_more"].setVisible(image)
         self.opt_more.setVisible(image)
         self.opt_sharpen_radius.setEnabled(self.opt_sharpen.value() > 0)
@@ -612,8 +792,12 @@ class MaterialTestDialog(QDialog):
             if key in IMAGE_BOOL_AXIS_PARAMS:
                 continue                      # aus / an: no range
             if key in IMAGE_CHOICE_AXIS_PARAMS:
-                if len(self.axis_curves_checked()) < 2:
+                checked = len(self.axis_curves_checked())
+                if checked < 2:
                     return "Kurven-Achse: mindestens 2 Kurven anhaken."
+                limit = (self.cols, self.rows)[i].maximum()
+                if checked > limit:
+                    return f"Kurven-Achse: höchstens {limit} Kurven anhaken."
                 continue
             if key == "angle_increment":
                 passes = self.passes.value()
@@ -994,7 +1178,11 @@ class JobTools(QObject):
 
     def material_test(self, spec: MaterialTestSpec | None = None):
         if spec is None:
-            dlg = MaterialTestDialog(self.window)
+            from .material_test_curve_qt import document_image_curves
+            doc = getattr(self.editor, "document", None)
+            sel = list(getattr(self.editor, "selection", ()) or ())
+            dlg = MaterialTestDialog(self.window,
+                                     image_curves=document_image_curves(doc, sel))
             if dlg.exec() != QDialog.Accepted:
                 return 0
             spec = dlg.spec()

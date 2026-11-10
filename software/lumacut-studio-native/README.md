@@ -480,10 +480,18 @@ bisherige Raster, G-Code byte-gleich).
   3D-Tiefe – 3D-Stufen und Z-Schritt; die Fokus-Absenkung Z-Schritt × (Stufen − 1) wird je
   Zelle geprüft), Negativ / Bidirektional als aus / an über genau 2 Spalten / Zeilen und
   die **Gradationskurve**: in der Liste „Kurven“ die zu testenden Vorlagen anhaken (je eine
-  Spalte / Zeile, Reihenfolge per Ziehen, mindestens 2; eine eigene Kurve eines geöffneten
-  Rasters erscheint als „Benutzerdefiniert“). Beschriftung und Ebenenname tragen den
-  Kurznamen (`Test P50% F1200 Kurve S`; Linear, S, S+, Flach, Mitte+, Mitte-, Tiefen+,
-  Lichter-, Eigene N). Tests: `tests/test_material_test_curve_axis.py` u. a.
+  Spalte / Zeile, Reihenfolge per Ziehen, mindestens 2, höchstens 12; eine eigene Kurve eines
+  geöffneten Rasters erscheint als „Benutzerdefiniert“). **Kurve zeichnen…** öffnet den
+  Kurven-Editor der Bildeinstellungen über dem Histogramm des Testbilds (Vorlage: eine
+  Kurvenvorlage, die Kurve eines Bildes im Dokument oder die gewählte Kurve) und hakt die
+  gezeichnete Kurve an; *Bearbeiten…* (Doppelklick) ändert eine eigene Kurve an Ort und Stelle
+  (eine Vorlage bleibt, das Ergebnis kommt als eigene Kurve dazu), *Entfernen* nimmt eigene
+  Kurven heraus. Die Kurven der Bilder im Dokument (ausgewählte zuerst) stehen als „Bild N“ in
+  der Liste und in „Kurve“ der weiteren Bildoptionen (dort ebenfalls „Kurve zeichnen…“). So
+  lässt sich eine in den Bildeinstellungen gezeichnete Kurve gegen Vorlagen testen.
+  Beschriftung und Ebenenname tragen den Kurznamen (`Test P50% F1200 Kurve S`; Linear, S, S+,
+  Flach, Mitte+, Mitte-, Tiefen+, Lichter-, Eigene N – auch für Bildkurven). Tests:
+  `tests/test_material_test_curve_axis.py`, `tests/test_material_test_draw_curve.py` u. a.
 
 ### Füllung: Schraffur, Kreuzschraffur und Offset-Füllung je Ebene
 
