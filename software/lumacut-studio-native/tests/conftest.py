@@ -55,6 +55,18 @@ def _reset_estimate_motion():
         mod.set_active_motion(None)
 
 
+@pytest.fixture(autouse=True)
+def _reset_vartext_inputs():
+    """Eingetippte Werte für ``{input:…}`` (Sitzungsspeicher) nie über Tests hinweg."""
+    mod = sys.modules.get("lumacut_job.vartext")
+    if mod is not None:
+        mod.clear_input_values()
+    yield
+    mod = sys.modules.get("lumacut_job.vartext")
+    if mod is not None:
+        mod.clear_input_values()
+
+
 _EXIT_STATUS = 0
 
 
