@@ -26,7 +26,7 @@ SPLIT_ACTIONS = [
 ]
 MENU_ACTIONS = ([f"bool_{op}" for op in pathops.OPS] + [None, "path_offset", "text_to_path", None]
                 + [name for name, _t, _k in SPLIT_ACTIONS] + [None]
-                + pathjoin_ui.MENU_ACTIONS)
+                + pathjoin_ui.MENU_ACTIONS + [None, "tool_tabs", "tabs_clear"])
 
 
 class OffsetDialog(QDialog):
@@ -205,7 +205,8 @@ def add_to_bar(editor, bar) -> QToolButton:
     btn.setObjectName("PathOpsButton")
     btn.setIcon(icons.icon("pathops"))
     btn.setToolTip("Pfad: vereinigen, abziehen, schneiden, verschweißen, versetzen, Text in Pfade, "
-                   "zerlegen / kombinieren, Pfade verbinden / schließen / vereinfachen, Duplikate löschen")
+                   "zerlegen / kombinieren, Pfade verbinden / schließen / vereinfachen, Duplikate löschen, "
+                   "manuelle Stege")
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setMenu(build_menu(editor, btn))
     bar.addWidget(btn)

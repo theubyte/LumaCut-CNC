@@ -475,6 +475,9 @@ class PlanReport:
     # Offene Pfade/Linien auf Füll-Ebenen (werden als Linie geschnitten, nicht gefüllt).
     open_on_fill: dict = field(default_factory=dict)      # Ebenenname -> Anzahl
     open_on_fill_joinable: int = 0
+    # Manuelle Stege (Shape.tabs): gesetzt bzw. ohne passende Kontur weggelassen.
+    manual_tabs: int = 0
+    dropped_tabs: int = 0
 
     def overlap_message(self) -> str:
         parts = []
@@ -507,6 +510,10 @@ class PlanReport:
             n = self.skipped_leads
             parts.append(f"Anfahrt bei {n} Kontur{'en' if n != 1 else ''} weggelassen "
                          f"(kein Platz / Kollision mit anderen Teilen) – Ebene {where}")
+        if self.dropped_tabs:
+            n = self.dropped_tabs
+            parts.append(f"{n} manuelle{'r' if n == 1 else ''} Steg{'e' if n != 1 else ''} "
+                         "weggelassen (keine geschlossene Kontur in der Nähe oder Kontur zu kurz)")
         for extra in (self.open_fill_message(), self.overlap_message(), self.scan_offset):
             if extra:
                 parts.append(extra)
@@ -578,6 +585,8 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
             res = apply_cut_options(ordered, opts, nesting_depth(ordered), obstacles)
             if report is not None:
                 report.moved_leads += res.moved_leads
+                report.manual_tabs += res.manual_tabs
+                report.dropped_tabs += res.dropped_tabs
                 if res.skipped_leads:
                     report.skipped_leads += res.skipped_leads
                     report.layers_with_skipped.append(getattr(layer, "name", "?"))

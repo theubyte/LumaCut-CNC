@@ -1,5 +1,5 @@
 """Werkzeuge: Auswahl (Verschieben/Skalieren/Drehen/Rahmenauswahl), Rechteck,
-Ellipse, Linie, Polygon, Freihand, Text.
+Ellipse, Linie, Polygon, Freihand, Text, Stege (manuelle Haltestege, :mod:`tabs_ui`).
 
 Der :class:`ToolController` bekommt Mausereignisse in Szene-mm von der
 :class:`~canvas_view.CanvasView`. Während eines Zugs wird das Modell live
@@ -43,13 +43,14 @@ class Tool(str, Enum):
     POLYGON = "polygon"
     FREEHAND = "freehand"
     TEXT = "text"
+    TABS = "tabs"
 
 
 TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.NODE: "Knoten", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
                Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.FREEHAND: "Freihand",
-               Tool.TEXT: "Text"}
+               Tool.TEXT: "Text", Tool.TABS: "Stege"}
 TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.NODE: "N", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
-                  Tool.POLYGON: "P", Tool.FREEHAND: "F", Tool.TEXT: "T"}
+                  Tool.POLYGON: "P", Tool.FREEHAND: "F", Tool.TEXT: "T", Tool.TABS: "Alt+Shift+T"}
 CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
 # Freihand: Ramer-Douglas-Peucker-Toleranz in mm (Abweichung von der gezeichneten
 # Linie) und Mindestabstand roher Mauspunkte.
@@ -177,6 +178,9 @@ class ToolController:
         ne = getattr(self.ed, "node_editor", None)
         if ne is not None:
             ne.cancel()
+        tt = getattr(self.ed, "tab_tool", None)
+        if tt is not None:
+            tt.cancel()
         if self._mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if self._mode in ("draw", "poly", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -202,6 +206,8 @@ class ToolController:
             return
         if mode == "node":
             self.ed.node_editor.cancel()
+        if mode == "tabs":
+            self.ed.tab_tool.cancel()
         if mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if mode in ("draw", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -243,6 +249,9 @@ class ToolController:
         elif self.tool == Tool.NODE:
             self._mode = "node"
             self.ed.node_editor.press(pos)
+        elif self.tool == Tool.TABS:
+            self._mode = "tabs"
+            self.ed.tab_tool.press(pos)
         elif self.tool == Tool.TEXT:
             self._create_text(pos)
         elif self.tool == Tool.POLYGON:
@@ -298,6 +307,10 @@ class ToolController:
         if self._mode == "node":
             if dragging:
                 self.ed.node_editor.move(pos)
+            return
+        if self._mode == "tabs":
+            if dragging:
+                self.ed.tab_tool.move(pos)
             return
         if self._mode == "poly":
             self._hover = self._poly_point(pos, bool(mods & Qt.ShiftModifier))
@@ -538,6 +551,9 @@ class ToolController:
         mode, self._mode = self._mode, None
         if mode == "node":
             self.ed.node_editor.release()
+            return
+        if mode == "tabs":
+            self.ed.tab_tool.release()
             return
         if mode == "free":
             self.finish_freehand(pos)

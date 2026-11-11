@@ -237,6 +237,16 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     mit kurzen Pulsen quer angeschnitten (≈ alle 0,4 mm ein Puls mit der Leistung der Ebene,
     Länge = Prozent der Periode, dazwischen `G1 … S0` – der Kopf fährt ohne Halt weiter);
     höher = schwächerer Steg, leichter auszubrechen. Der Dialog nennt Pulszahl und -länge.
+  - *Manuelle Stege* (Werkzeug „Stege“, Alt+Umschalt+T, wie LightBurns *Tab tool*): Tippen auf
+    den Umriss einer geschlossenen Form setzt dort einen Steg, Tippen auf einen Steg entfernt
+    ihn, Ziehen schiebt ihn entlang des Umrisses; Pfad › „Manuelle Stege entfernen“ löscht die
+    Stege der Auswahl. Die Stege gehören zum Objekt (`Shape.tabs`, im Projekt gespeichert) und
+    folgen Verschieben / Skalieren / Drehen / Duplizieren, Knoten bearbeiten, Vereinfachen,
+    Zerlegen / Kombinieren und „Text in Pfade“. Beim Senden bekommt eine Kontur mit eigenen
+    Stegen genau diese (Stegbreite und Steg-Leistung der Ebene, auch ohne Anzahl / Abstand und
+    mit „Innere Formen ohne Stege“) statt der automatischen; Stegbreite 0 schaltet alle Stege
+    der Ebene ab. Die Arbeitsfläche markiert jeden Steg als orangen Balken in Stegbreite.
+    Code: `lumacut_canvas/tabs.py`, `tabs_ui.py`, `lumacut_job/cutpath.py`.
   - *Anfahrt/Abfahrt* (`lead_in_mm`, `lead_in_arc`, `lead_out_mm`, 0–10 mm): auf der
     Abfallseite (außen bei Teilen, innen bei Löchern), 45°-Gerade oder tangentialer Viertelkreis;
     der Konturstart wird dafür von einer Ecke in die Kantenmitte verlegt. Passt die Anfahrt nicht

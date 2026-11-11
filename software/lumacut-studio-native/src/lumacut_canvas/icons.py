@@ -234,6 +234,17 @@ def _node(p, c):
         p.drawRect(QRectF(x - 2, y - 2, 4, 4))
 
 
+def _tabs(p, c):
+    """Stege: Rechteck-Kontur mit zwei Lücken, die Stege als kurze Balken."""
+    _pen(p, c, 1.7)
+    for a, b in (((4, 6), (9, 6)), ((15, 6), (20, 6)), ((20, 6), (20, 18)), ((20, 18), (4, 18)),
+                 ((4, 18), (4, 6))):
+        p.drawLine(QPointF(*a), QPointF(*b))
+    _pen(p, c, 3.2)
+    p.drawLine(QPointF(11, 3.5), QPointF(11, 8.5))
+    p.drawLine(QPointF(13, 3.5), QPointF(13, 8.5))
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "polygon": _polygon, "freehand": _freehand,
@@ -247,7 +258,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "group": _group, "ungroup": lambda p, c: _group(p, c, True),
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
     "touch": _touch, "path": _path, "arrange": _arrange,
-    "pathops": _pathops, "node": _node,
+    "pathops": _pathops, "node": _node, "tabs": _tabs,
 }
 
 

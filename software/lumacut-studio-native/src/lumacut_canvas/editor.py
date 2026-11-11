@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import arrange_ui, icons, node_ui, pathops_ui, text_ui, theme, touch, units
+from . import arrange_ui, icons, node_ui, pathops_ui, tabs_ui, text_ui, theme, touch, units
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip
@@ -417,6 +417,7 @@ class CanvasEditor(QWidget):
         self.arranger = arrange_ui.install(self)  # Ausrichten/Verteilen/Array
         self.path_ops = pathops_ui.install(self)  # Boole/Verschweißen/Versatz/Text in Pfade
         self.node_editor = node_ui.install(self)  # Knotenwerkzeug (Tool.NODE)
+        self.tab_tool = tabs_ui.install(self)     # manuelle Stege (Tool.TABS)
         self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
                   lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
         # Anzeige-Einheit mm/Zoll; Text zeigt die aktuelle Einheit (kein Symbol).
@@ -521,7 +522,11 @@ class CanvasEditor(QWidget):
             ne.set_target(sel[0] if tool == Tool.NODE and len(sel) == 1 else None)
             self.refresh_selection_overlay()
             self.property_bar.refresh()
-        self.notify(f"Werkzeug: {TOOL_LABELS[tool]}")
+        if tool == Tool.TABS:
+            self.notify("Werkzeug: Stege – Umriss einer geschlossenen Form antippen setzt einen Steg, "
+                        "Steg antippen entfernt ihn, ziehen verschiebt ihn")
+        else:
+            self.notify(f"Werkzeug: {TOOL_LABELS[tool]}")
 
     # --- Kontextmenü (Rechtsklick / langes Drücken) -------------------------
     def build_context_menu(self, scene_pt: QPointF) -> QMenu:

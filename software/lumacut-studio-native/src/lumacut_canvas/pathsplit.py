@@ -62,6 +62,9 @@ def _world(pts: Iterable[Point], rot: float, center: Point) -> list[Point]:
     return [rotate_point(x, y, cx, cy, rot) for x, y in pts]
 
 
+CARRY_TAB_TOL_MM = 0.1   # manuelle Stege: Abstand zur Kontur beim Übertragen (abgeflachte Kurven)
+
+
 def shape_from_world(kind: str, pts: list[Point], layer_id: str, rings=(), curves=(),
                      rot: float = 0.0, groups: tuple[str, ...] = ()) -> Shape:
     """Objekt aus Punkten in Arbeitsflächen-mm, das mit Winkel ``rot`` genau diese
@@ -161,7 +164,13 @@ def break_shape(shape: Shape, keep_holes: bool = True) -> list[Shape] | None:
             continue
         out.append(shape_from_world(shape.kind, _world(pts, g.rot, center), shape.layer_id,
                                     starts, curves, g.rot, shape.groups))
-    return out if len(out) >= 2 else None
+    if len(out) < 2:
+        return None
+    if shape.tabs:   # manuelle Stege gehen mit ihrer Kontur in das jeweilige Teil
+        from .tabs import carry_tabs
+        world = shape.tab_points()
+        out = [carry_tabs(part, world, CARRY_TAB_TOL_MM) for part in out]
+    return out
 
 
 def break_apart(shapes: Iterable[Shape], keep_holes: bool = True) -> BreakResult:
@@ -286,6 +295,10 @@ def combine(shapes: Iterable[Shape]) -> CombineResult:
         pts, starts, curves = _assemble(rings)
         new = shape_from_world("polygon" if closed else "path", pts, layer_id, starts, curves, rot,
                                _common_groups(members))
+        world_tabs = [t for s in members for t in s.tab_points()]
+        if closed and world_tabs:   # manuelle Stege aller Teile bleiben erhalten
+            from .tabs import carry_tabs
+            new = carry_tabs(new, world_tabs, CARRY_TAB_TOL_MM)
         res.groups.append(([s.id for s in members], new))
         res.text_converted += texts
         if closed:

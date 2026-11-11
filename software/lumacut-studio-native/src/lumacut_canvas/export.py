@@ -50,6 +50,10 @@ class JobLayer:
     tab_skip_inner: bool = False  # keine Stege an innen liegenden Konturen
     tab_max: int = 0              # Abstands-Modus: höchstens so viele Stege (0 = unbegrenzt)
     tab_cut_power: float = 0.0    # Steg-Leistung % (gepulst: "tab_pulse" / "tab_off")
+    # Manuelle Stege der Objekte dieser Ebene (Shape.tabs, lumacut_canvas.tabs) als
+    # Punkte in Maschinen-mm; der Planer setzt sie auf die nächste Kontur (statt der
+    # automatischen Stege dieser Kontur). Leer = nur automatische Stege.
+    tab_points: tuple[tuple[float, float], ...] = ()
     # Art je Polylinie nach der Planung ("cut", "lead_in", "lead_out", "tab" =
     # Schnittstück nach einer Steg-Lücke, "perf" = nach einer
     # Perforations-Lücke, "tab_pulse" / "tab_off" = Puls mit Laser an / Stück
@@ -149,6 +153,7 @@ def job_layers(doc: Document) -> list[JobLayer]:
         if not layer.visible:
             continue
         polys: list[list[tuple[float, float]]] = []
+        tab_points: list[tuple[float, float]] = []
         fills = []
         for _ids, segs in layer_fill_blocks(doc, layer):
             fills.append([(to_machine(*a), to_machine(*b)) for a, b in segs])
@@ -164,6 +169,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
                 continue
             for poly in shape_polygons(s):
                 polys.append([to_machine(x, y) for x, y in poly])
+            if s.tabs:
+                tab_points.extend(to_machine(x, y) for x, y in s.tab_points())
         if polys or fills:
             plan = layer_pass_plan(layer)
             result.append(JobLayer(layer.id, layer.name, layer.power, layer.speed,
@@ -176,7 +183,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
                                    fill_overscan_mm=(getattr(layer, "fill_overscan_mm", 0.0)
                                                      if layer.fill_mode in LINE_FILL_MODES
                                                      else 0.0),
-                                   cut_order=getattr(doc, "cut_order", None)))
+                                   cut_order=getattr(doc, "cut_order", None),
+                                   tab_points=tuple(tab_points)))
     return result
 
 

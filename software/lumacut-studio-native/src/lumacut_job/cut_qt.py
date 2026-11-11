@@ -49,6 +49,8 @@ class CutOptionsDialog(QDialog):
         self.tab_count.setSpecialValueText("aus")
         self.tab_count.setValue(layer.tab_count)
         self.tab_width = _dspin(TAB_WIDTH_RANGE, layer.tab_width_mm, 0.1)
+        self.tab_width.setToolTip("Breite jedes Stegs – auch der manuellen Stege (Werkzeug „Stege“, "
+                                  "Alt+Umschalt+T); 0 = keine Stege auf dieser Ebene")
         self.tab_spacing = _dspin(TAB_SPACING_RANGE, layer.tab_spacing_mm, 5.0,
                                   special="feste Anzahl")
         self.tab_spacing.setToolTip("> 0: ein Steg je Abstand entlang des Umfangs "

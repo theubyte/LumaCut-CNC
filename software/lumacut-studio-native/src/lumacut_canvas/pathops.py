@@ -195,6 +195,9 @@ def text_to_outline(shape: Shape) -> Shape | None:
         return None
     out = Shape.from_points("polygon", pts, shape.layer_id, rings=starts)
     out.groups = shape.groups
+    if shape.tabs:   # manuelle Stege bleiben auf den Buchstaben-Umrissen
+        from .tabs import carry_tabs
+        out = carry_tabs(out, shape.tab_points(), 0.1)
     return out
 
 

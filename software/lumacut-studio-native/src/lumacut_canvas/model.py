@@ -573,9 +573,20 @@ class Shape:
     # JSON-fähiges dict, auf allen Teilen der Erzeuger-Gruppe gleich. Damit lässt sich das
     # Objekt später mit dem Dialog neu erzeugen. Wird nie verändert, nur ersetzt.
     generator: dict | None = None
+    # Manuelle Haltestege (LightBurn *Tab tool*, :mod:`tabs`): Steg-Mitten auf dem
+    # Umriss, normiert auf die ungedrehte Objektbox wie ``points`` – Verschieben,
+    # Skalieren und Drehen nehmen sie mit. Leer = automatische Stege der Ebene.
+    tabs: tuple[tuple[float, float], ...] = ()
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
+
+    def tab_points(self) -> list[tuple[float, float]]:
+        """Manuelle Steg-Mitten in Arbeitsflächen-mm (inkl. Drehung)."""
+        g = self.geom
+        cx, cy = g.center()
+        return [rotate_point(g.x + u * g.w, g.y + v * g.h, cx, cy, g.rot) if g.rot
+                else (g.x + u * g.w, g.y + v * g.h) for u, v in self.tabs]
 
     def abs_points(self) -> list[tuple[float, float]]:
         """Stützpunkte in mm im ungedrehten Objektrahmen."""
@@ -629,6 +640,8 @@ class Shape:
             d["image"] = self.image.to_dict()
         if self.generator:
             d["generator"] = self.generator
+        if self.tabs:
+            d["tabs"] = [[round(u, 6), round(v, 6)] for u, v in self.tabs]
         return d
 
     @staticmethod
@@ -649,7 +662,32 @@ class Shape:
                      rings=clean_rings(len(points), d.get("rings", ())),
                      curves=clean_curves(len(points), d.get("curves", ())),
                      font_bold=bool(d.get("bold", False)), font_italic=bool(d.get("italic", False)),
-                     generator=dict(d["generator"]) if isinstance(d.get("generator"), dict) else None)
+                     generator=dict(d["generator"]) if isinstance(d.get("generator"), dict) else None,
+                     tabs=_read_tabs(d.get("tabs")))
+
+
+def tabs_from_world(geom: Geometry, pts: Iterable[tuple[float, float]]) -> tuple[tuple[float, float], ...]:
+    """Steg-Punkte in Arbeitsflächen-mm → normiert auf die ungedrehte Box von ``geom``."""
+    cx, cy = geom.center()
+    out = []
+    for px, py in pts:
+        lx, ly = rotate_point(px, py, cx, cy, -geom.rot) if geom.rot else (px, py)
+        out.append(((lx - geom.x) / geom.w if geom.w else 0.0,
+                    (ly - geom.y) / geom.h if geom.h else 0.0))
+    return tuple(out)
+
+
+def _read_tabs(raw) -> tuple[tuple[float, float], ...]:
+    """``tabs`` aus einer Datei: Liste von [u, v]; Unlesbares wird übergangen."""
+    out = []
+    for item in raw or ():
+        try:
+            u, v = float(item[0]), float(item[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if math.isfinite(u) and math.isfinite(v):
+            out.append((u, v))
+    return tuple(out)
 
 
 def clean_rings(n_points: int, rings: Iterable[int]) -> tuple[int, ...]:

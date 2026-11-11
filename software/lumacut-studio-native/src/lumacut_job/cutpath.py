@@ -21,6 +21,14 @@ Wie LightBurn *Kerf Offset*, *Tabs/Bridges* und *Lead-In/Lead-Out*
   *Tab Cut Power* (``tab_cut_power`` > 0 %: statt der Lücke gepulste Schnitte
   quer über den Steg – :func:`tab_pulses`; der Kopf fährt mit Schnitttempo
   weiter, ``G1 … S0`` zwischen den Pulsen, der Steg wird schwächer).
+* :func:`manual_tab_intervals` – manuelle Stege (LightBurn *Tab tool*,
+  ``tab_points`` = Steg-Mitten der Objekte in Maschinen-mm, siehe
+  :mod:`lumacut_canvas.tabs`): jeder Punkt gehört zur nächsten geschlossenen
+  Kontur der Ebene (höchstens ``MANUAL_TAB_SNAP_MM`` + |Kerf| entfernt) und
+  wird auf sie projiziert; eine Kontur mit eigenen Stegen bekommt dort Stege
+  der Ebenen-Stegbreite *statt* der automatischen (auch ohne Anzahl/Abstand
+  und auch mit „Innere Formen ohne Stege“). Abstand zum Konturstart wie bei
+  den automatischen Stegen, zu nahe Stege verschmelzen.
 * :func:`lead_in` / :func:`lead_out` – Gerade (45°) oder Viertelkreis auf der
   Abfallseite (außen bei Außenkonturen, innen bei Löchern). Liegt die
   An-/Abfahrt außerhalb der Arbeitsfläche oder auf der falschen Seite, wird
@@ -82,6 +90,7 @@ TAB_PULSE_PERIOD_MM = 0.4     # Ziel-Abstand der Pulse über die Steg-Breite
 MIN_TAB_PULSE_MM = 0.01       # kürzere Pulse entfallen (Steg bleibt dort aus)
 MIN_PERF_PIECE_MM = 0.01  # kürzere Reststücke einer Perforation fallen weg
 OVERCUT_TAB_CLEAR_MM = 0.5  # Abstand des Überschnitt-Endes zum ersten Steg
+MANUAL_TAB_SNAP_MM = 1.5    # manueller Steg gehört zu einer Kontur höchstens so weit entfernt (+ |Kerf|)
 
 
 @dataclass
@@ -100,13 +109,21 @@ class CutOptions:
     tab_skip_inner: bool = False  # keine Stege an Konturen innerhalb einer anderen Kontur
     tab_max: int = 0              # Abstands-Modus: höchstens so viele Stege je Kontur (0 = unbegrenzt)
     tab_cut_power: float = 0.0    # % Puls-Anteil über den Steg (0 = Lücke mit Laser aus)
+    tab_points: tuple = ()        # manuelle Steg-Mitten (Maschinen-mm) der Objekte der Ebene
+
+    @property
+    def auto_tabs(self) -> bool:
+        return self.tab_width_mm > 0 and (self.tab_count > 0 or self.tab_spacing_mm > 0)
+
+    @property
+    def manual_tabs(self) -> bool:
+        return self.tab_width_mm > 0 and bool(self.tab_points)
 
     @property
     def shapes_contours(self) -> bool:
         """Kerf, Stege, An-/Abfahrt oder Überschnitt: braucht ganze geschlossene Konturen."""
         return bool(self.kerf_mm or self.lead_in_mm > 0 or self.lead_out_mm > 0
-                    or self.overcut_mm > 0
-                    or (self.tab_width_mm > 0 and (self.tab_count > 0 or self.tab_spacing_mm > 0)))
+                    or self.overcut_mm > 0 or self.auto_tabs or self.manual_tabs)
 
     @property
     def removes_overlaps(self) -> bool:
@@ -120,8 +137,7 @@ class CutOptions:
     @property
     def active(self) -> bool:
         return bool(self.kerf_mm or self.lead_in_mm or self.lead_out_mm or self.overcut_mm > 0
-                    or self.perforated
-                    or (self.tab_width_mm > 0 and (self.tab_count > 0 or self.tab_spacing_mm > 0)))
+                    or self.perforated or self.auto_tabs or self.manual_tabs)
 
     @staticmethod
     def of(obj) -> "CutOptions":
@@ -135,6 +151,8 @@ class CutResult:
     kinds: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     skipped_leads: int = 0   # Konturen, deren Anfahrt wegfiel
+    manual_tabs: int = 0     # gesetzte manuelle Stege (nach dem Verschmelzen)
+    dropped_tabs: int = 0    # manuelle Steg-Punkte ohne Kontur in der Nähe / Kontur zu kurz
     moved_leads: int = 0     # Konturen mit verlegtem Startpunkt wegen Kollision
 
 
@@ -326,10 +344,76 @@ def tab_intervals(poly: Poly, count: int, width: float, spacing: float = 0.0,
     return [(max(0.0, c - width / 2), min(L, c + width / 2)) for c in centers]
 
 
-def split_tabs_with_gaps(poly: Poly, count: int, width: float, spacing: float = 0.0,
-                         max_count: int = 0) -> list[tuple[Poly, bool]]:
-    """Kontur der Reihe nach in ``(Stück, ist_Steg)``: Schnittstücke und die Steg-Abschnitte."""
-    spans = tab_intervals(poly, count, width, spacing, max_count)
+def project_on_poly(poly: Poly, p: Point, cum: list[float] | None = None) -> tuple[float, float]:
+    """``(Abstand, Bogenlänge)`` des nächsten Punkts der Polylinie zu ``p``."""
+    cum = cum or _cum_lengths(poly)
+    best = (math.inf, 0.0)
+    for i in range(len(poly) - 1):
+        a, b = poly[i], poly[i + 1]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        ll = dx * dx + dy * dy
+        t = 0.0 if ll <= 1e-18 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ll))
+        d = math.dist(p, (a[0] + dx * t, a[1] + dy * t))
+        if d < best[0]:
+            best = (d, cum[i] + t * (cum[i + 1] - cum[i]))
+    return best
+
+
+def assign_tab_points(polys: list[Poly], points, max_dist: float) -> tuple[dict[int, list[Point]], int]:
+    """Manuelle Steg-Punkte der jeweils nächsten geschlossenen Kontur zuordnen.
+
+    Liefert ``({Index der Kontur: [Punkte]}, verworfen)`` – verworfen sind
+    Punkte, die weiter als ``max_dist`` von jeder geschlossenen Kontur liegen.
+    """
+    closed = [(i, p, _cum_lengths(p)) for i, p in enumerate(polys) if is_closed(p) and len(p) >= 4]
+    out: dict[int, list[Point]] = {}
+    dropped = 0
+    for pt in points or ():
+        pt = (float(pt[0]), float(pt[1]))
+        best_i, best_d = None, max_dist
+        for i, p, cum in closed:
+            xs, ys = [q[0] for q in p], [q[1] for q in p]
+            if (pt[0] < min(xs) - best_d or pt[0] > max(xs) + best_d
+                    or pt[1] < min(ys) - best_d or pt[1] > max(ys) + best_d):
+                continue
+            d, _s = project_on_poly(p, pt, cum)
+            if d <= best_d:
+                best_i, best_d = i, d
+        if best_i is None:
+            dropped += 1
+        else:
+            out.setdefault(best_i, []).append(pt)
+    return out, dropped
+
+
+def manual_tab_intervals(poly: Poly, points, width: float) -> list[tuple[float, float]]:
+    """Steg-Abschnitte ``(von, bis)`` für manuelle Steg-Mitten ``points`` (mm).
+
+    Jeder Punkt wird auf die Kontur projiziert; die Mitte hält ``width/2 + 0,5``
+    mm Abstand zum Konturstart (dort beginnt der Schnitt bzw. die Anfahrt –
+    wie bei den automatischen Stegen), Stege, die sich berühren, verschmelzen
+    zu einem. Kontur kürzer als ``2 · width + 1`` mm: keine Stege.
+    """
+    if not is_closed(poly) or width <= 0 or not points:
+        return []
+    cum = _cum_lengths(poly)
+    L = cum[-1]
+    clear = width / 2 + 0.5
+    if L < 2 * width + 1.0:
+        return []
+    centers = sorted(min(L - clear, max(clear, project_on_poly(poly, p, cum)[1])) for p in points)
+    spans: list[list[float]] = []
+    for c in centers:
+        a, b = c - width / 2, c + width / 2
+        if spans and a <= spans[-1][1] + 1e-6:
+            spans[-1][1] = max(spans[-1][1], b)
+        else:
+            spans.append([a, b])
+    return [(max(0.0, a), min(L, b)) for a, b in spans]
+
+
+def split_spans(poly: Poly, spans: list[tuple[float, float]]) -> list[tuple[Poly, bool]]:
+    """Kontur entlang der Steg-Abschnitte ``spans`` in ``(Stück, ist_Steg)`` zerlegen."""
     if not spans:
         return [(poly, False)]
     cum = _cum_lengths(poly)
@@ -344,6 +428,12 @@ def split_tabs_with_gaps(poly: Poly, count: int, width: float, spacing: float = 
     if L > s + 1e-6:
         out.append((_sub_path(poly, cum, s, L), False))
     return [(p, gap) for p, gap in out if len(p) >= 2]
+
+
+def split_tabs_with_gaps(poly: Poly, count: int, width: float, spacing: float = 0.0,
+                         max_count: int = 0) -> list[tuple[Poly, bool]]:
+    """Kontur der Reihe nach in ``(Stück, ist_Steg)``: Schnittstücke und die Steg-Abschnitte."""
+    return split_spans(poly, tab_intervals(poly, count, width, spacing, max_count))
 
 
 def split_tabs(poly: Poly, count: int, width: float, spacing: float = 0.0,
@@ -676,7 +766,11 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
     res = CutResult()
     if depth is None:
         depth = nesting_depth(polys)
-    tabs_on = opts.tab_width_mm > 0 and (opts.tab_count > 0 or opts.tab_spacing_mm > 0)
+    tabs_on = opts.auto_tabs
+    manual: dict[int, list[Point]] = {}
+    if opts.manual_tabs:
+        manual, res.dropped_tabs = assign_tab_points(polys, opts.tab_points,
+                                                     MANUAL_TAB_SNAP_MM + abs(opts.kerf_mm))
 
     def emit(piece: Poly, kind: str) -> None:
         """Schnittstück ausgeben, bei Perforation in Stücke mit Lücken zerlegt."""
@@ -685,7 +779,7 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
             res.polylines.append(part)
             res.kinds.append(kind if j == 0 else KIND_PERF)
 
-    for p, d in zip(polys, depth):
+    for idx, (p, d) in enumerate(zip(polys, depth)):
         if not is_closed(p):
             emit(p, KIND_CUT)
             continue
@@ -705,9 +799,17 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
         elif opts.lead_in_mm > 0:
             res.skipped_leads += 1
             res.warnings.append("Anfahrt weggelassen (kein Platz)")
-        tabbed = tabs_on and not (opts.tab_skip_inner and d > 0)
-        parts = (split_tabs_with_gaps(p, opts.tab_count, opts.tab_width_mm, opts.tab_spacing_mm,
-                                      opts.tab_max) if tabbed else [(p, False)])
+        own = manual.get(idx)
+        if own:     # eigene Stege der Kontur statt der automatischen
+            spans = manual_tab_intervals(p, own, opts.tab_width_mm)
+            if not spans:
+                res.dropped_tabs += len(own)
+            res.manual_tabs += len(spans)
+            parts = split_spans(p, spans)
+        else:
+            tabbed = tabs_on and not (opts.tab_skip_inner and d > 0)
+            parts = (split_tabs_with_gaps(p, opts.tab_count, opts.tab_width_mm, opts.tab_spacing_mm,
+                                          opts.tab_max) if tabbed else [(p, False)])
         cut_idx = [i for i, (_q, gap) in enumerate(parts) if not gap]
         last = cut_idx[-1] if cut_idx else None
         ends_at_start = last is not None and math.dist(parts[last][0][-1], p[-1]) < 1e-6

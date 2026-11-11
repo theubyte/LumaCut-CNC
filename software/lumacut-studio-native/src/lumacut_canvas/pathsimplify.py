@@ -138,7 +138,11 @@ def simplify_shape(shape: Shape, tolerance_mm: float = SIMPLIFY_TOLERANCE_MM,
         return None
     if not shape.curves and len(new_pts) == len(shape.points):
         return None                                   # nichts entfernt
-    return _rebuild(shape, new_pts, starts, rot=rot)
+    out = _rebuild(shape, new_pts, starts, rot=rot)
+    if shape.tabs:   # manuelle Stege auf den vereinfachten Umriss übertragen
+        from .tabs import carry_tabs
+        out = carry_tabs(out, shape.tab_points(), 1.5 + tol)
+    return out
 
 
 @dataclass

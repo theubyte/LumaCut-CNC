@@ -103,9 +103,13 @@ def from_rings(shape: Shape, rings: list[Ring], kind: str | None = None) -> Shap
         local = [QPointF(p.x() + dx, p.y() + dy) for p in local]
     w, h = x1 - x0, y1 - y0
     norm = tuple(((p.x() - x0) / w if w > 0 else 0.0, (p.y() - y0) / h if h > 0 else 0.0) for p in local)
-    return replace(shape, kind=kind, geom=Geometry(x0, y0, w, h, rot), points=norm,
-                   rings=clean_rings(len(norm), starts), curves=clean_curves(len(norm), curves),
-                   text="", image=None)
+    out = replace(shape, kind=kind, geom=Geometry(x0, y0, w, h, rot), points=norm,
+                  rings=clean_rings(len(norm), starts), curves=clean_curves(len(norm), curves),
+                  text="", image=None)
+    if shape.tabs:   # manuelle Stege bleiben an ihrer Stelle auf dem (geänderten) Umriss
+        from .tabs import carry_tabs
+        out = carry_tabs(out, shape.tab_points())
+    return out
 
 
 def locate(shape: Shape, index: int) -> tuple[int, int]:
