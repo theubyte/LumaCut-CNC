@@ -14,6 +14,13 @@ Wie LightBurn *Kerf Offset*, *Tabs/Bridges* und *Lead-In/Lead-Out*
 * :func:`split_tabs` – lässt gleichmäßig verteilte, ungeschnittene Stege
   (Laser aus, G0 über die Lücke) in geschlossenen Konturen stehen, schiebt
   Stege von Ecken weg und lässt sie bei zu kurzen Konturen weg.
+  Wie LightBurn: *Skip Inner Shapes* (``tab_skip_inner`` – keine Stege an
+  Konturen, die in einer anderen geschlossenen Kontur derselben Ebene liegen:
+  Löcher, Buchstaben-Innenformen, Teile in einem Rahmen), *Limit Max Tabs*
+  (``tab_max`` – höchstens so viele Stege je Kontur im Abstands-Modus) und
+  *Tab Cut Power* (``tab_cut_power`` > 0 %: statt der Lücke gepulste Schnitte
+  quer über den Steg – :func:`tab_pulses`; der Kopf fährt mit Schnitttempo
+  weiter, ``G1 … S0`` zwischen den Pulsen, der Steg wird schwächer).
 * :func:`lead_in` / :func:`lead_out` – Gerade (45°) oder Viertelkreis auf der
   Abfallseite (außen bei Außenkonturen, innen bei Löchern). Liegt die
   An-/Abfahrt außerhalb der Arbeitsfläche oder auf der falschen Seite, wird
@@ -68,6 +75,11 @@ KIND_LEAD_IN = "lead_in"
 KIND_LEAD_OUT = "lead_out"
 KIND_TAB = "tab"          # Schnittstück, vor dem eine Steg-Lücke (Laser aus) liegt
 KIND_PERF = "perf"        # Schnittstück, vor dem eine Perforations-Lücke liegt
+KIND_TAB_PULSE = "tab_pulse"  # Puls (Laser an) innerhalb eines Stegs mit Steg-Leistung
+KIND_TAB_OFF = "tab_off"      # Stück mit Laser aus (G1 … S0) innerhalb eines solchen Stegs
+TAB_PULSE_KINDS = (KIND_TAB_PULSE, KIND_TAB_OFF)
+TAB_PULSE_PERIOD_MM = 0.4     # Ziel-Abstand der Pulse über die Steg-Breite
+MIN_TAB_PULSE_MM = 0.01       # kürzere Pulse entfallen (Steg bleibt dort aus)
 MIN_PERF_PIECE_MM = 0.01  # kürzere Reststücke einer Perforation fallen weg
 OVERCUT_TAB_CLEAR_MM = 0.5  # Abstand des Überschnitt-Endes zum ersten Steg
 
@@ -85,6 +97,9 @@ class CutOptions:
     perf_cut_mm: float = 0.0     # 0 = Perforation aus
     perf_skip_mm: float = 1.0
     overlap_tol_mm: float = 0.0  # 0 = überlappende Linien nicht entfernen (lumacut_job.overlap)
+    tab_skip_inner: bool = False  # keine Stege an Konturen innerhalb einer anderen Kontur
+    tab_max: int = 0              # Abstands-Modus: höchstens so viele Stege je Kontur (0 = unbegrenzt)
+    tab_cut_power: float = 0.0    # % Puls-Anteil über den Steg (0 = Lücke mit Laser aus)
 
     @property
     def shapes_contours(self) -> bool:
@@ -285,35 +300,103 @@ def tab_centers(perimeter: float, count: int, width: float, corners: list[float]
     return out
 
 
-def split_tabs(poly: Poly, count: int, width: float, spacing: float = 0.0) -> list[Poly]:
-    """Geschlossene Kontur in Schnittstücke mit ``count`` Lücken der Breite ``width``.
+def tab_intervals(poly: Poly, count: int, width: float, spacing: float = 0.0,
+                  max_count: int = 0) -> list[tuple[float, float]]:
+    """Steg-Abschnitte ``(von, bis)`` in mm Bogenlänge ab dem Konturstart.
 
-    ``spacing > 0`` → ein Steg je ``spacing`` mm Umfang (mindestens 1).
+    ``spacing > 0`` → ein Steg je ``spacing`` mm Umfang (mindestens 1), mit
+    ``max_count > 0`` höchstens so viele (LightBurn *Limit Max Tabs*).
     Mindestregel: Umfang ≥ ``MIN_TAB_PERIMETER`` und jedes Schnittstück
     mindestens so lang wie ein Steg – sonst weniger Stege (bis keiner).
     """
     if not is_closed(poly) or width <= 0:
-        return [poly]
+        return []
     cum = _cum_lengths(poly)
     L = cum[-1]
     if spacing > 0:
         count = max(1, int(L // spacing))
+        if max_count > 0:
+            count = min(count, int(max_count))
     if L < MIN_TAB_PERIMETER:
-        return [poly]
+        return []
     count = min(count, int(L // (2 * width)))
     if count <= 0:
-        return [poly]
+        return []
     centers = tab_centers(L, count, width, corner_positions(poly, cum))
-    pieces = []
+    return [(max(0.0, c - width / 2), min(L, c + width / 2)) for c in centers]
+
+
+def split_tabs_with_gaps(poly: Poly, count: int, width: float, spacing: float = 0.0,
+                         max_count: int = 0) -> list[tuple[Poly, bool]]:
+    """Kontur der Reihe nach in ``(Stück, ist_Steg)``: Schnittstücke und die Steg-Abschnitte."""
+    spans = tab_intervals(poly, count, width, spacing, max_count)
+    if not spans:
+        return [(poly, False)]
+    cum = _cum_lengths(poly)
+    L = cum[-1]
+    out: list[tuple[Poly, bool]] = []
     s = 0.0
-    for c in centers:
-        a, b = c - width / 2, c + width / 2
+    for a, b in spans:
         if a > s + 1e-6:
-            pieces.append(_sub_path(poly, cum, s, a))
+            out.append((_sub_path(poly, cum, s, a), False))
+        out.append((_sub_path(poly, cum, max(a, s), b), True))
         s = b
     if L > s + 1e-6:
-        pieces.append(_sub_path(poly, cum, s, L))
-    return [p for p in pieces if len(p) >= 2]
+        out.append((_sub_path(poly, cum, s, L), False))
+    return [(p, gap) for p, gap in out if len(p) >= 2]
+
+
+def split_tabs(poly: Poly, count: int, width: float, spacing: float = 0.0,
+               max_count: int = 0) -> list[Poly]:
+    """Geschlossene Kontur in Schnittstücke mit ``count`` Lücken der Breite ``width``.
+
+    ``spacing > 0`` → ein Steg je ``spacing`` mm Umfang (mindestens 1, mit
+    ``max_count`` > 0 höchstens so viele). Mindestregel: Umfang ≥
+    ``MIN_TAB_PERIMETER`` und jedes Schnittstück mindestens so lang wie ein
+    Steg – sonst weniger Stege (bis keiner).
+    """
+    return [p for p, gap in split_tabs_with_gaps(poly, count, width, spacing, max_count)
+            if not gap]
+
+
+def tab_pulses(gap: Poly, power_percent: float,
+               period_mm: float = TAB_PULSE_PERIOD_MM) -> list[tuple[Poly, str]]:
+    """Steg-Abschnitt als Folge ``(Stück, Art)`` für LightBurns *Tab Cut Power*.
+
+    Der Steg wird in gleich lange Perioden (≈ ``period_mm``) geteilt; in der
+    Mitte jeder Periode liegt ein Puls mit Laser an (Länge = ``power_percent``
+    % der Periode, :data:`KIND_TAB_PULSE`), davor und dahinter Laser aus
+    (:data:`KIND_TAB_OFF`, im G-Code ``G1 … S0`` – der Kopf fährt ohne Halt
+    weiter). Die Stücke schließen lückenlos aneinander, Anfang und Ende des
+    Stegs bleiben aus. ``power_percent`` ≤ 0 → ``[]`` (Lücke wie bisher).
+    """
+    frac = max(0.0, min(1.0, float(power_percent) / 100.0))
+    cum = _cum_lengths(gap)
+    L = cum[-1] if cum else 0.0
+    if frac <= 0 or L <= 1e-9:
+        return []
+    n = max(1, int(round(L / max(1e-6, period_mm))))
+    period = L / n
+    on = frac * period
+    if on < MIN_TAB_PULSE_MM:
+        return [(gap, KIND_TAB_OFF)]
+    marks: list[tuple[float, float, str]] = []
+    s = 0.0
+    for k in range(n):
+        a = k * period + (period - on) / 2
+        b = a + on
+        if a > s + 1e-9:
+            marks.append((s, a, KIND_TAB_OFF))
+        marks.append((a, b, KIND_TAB_PULSE))
+        s = b
+    if L > s + 1e-9:
+        marks.append((s, L, KIND_TAB_OFF))
+    out = []
+    for a, b, kind in marks:
+        piece = _sub_path(gap, cum, a, b)
+        if len(piece) >= 2:
+            out.append((piece, kind))
+    return out
 
 
 # --- An-/Abfahrt -------------------------------------------------------------
@@ -586,7 +669,9 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
     ``depth`` = Verschachtelungstiefe je Polylinie (gerade = Außenkontur);
     ohne Angabe wird sie berechnet. ``obstacles`` (alle Konturen des Jobs)
     schaltet die Kollisionsprüfung der An-/Abfahrten ein. Liefert Polylinien plus Art je Polylinie
-    (``cut``/``lead_in``/``lead_out``/``tab``) in Schnittreihenfolge.
+    (``cut``/``lead_in``/``lead_out``/``tab``/``perf`` sowie ``tab_pulse``/``tab_off``
+    bei Steg-Leistung) in Schnittreihenfolge. ``tab_skip_inner``: Konturen mit
+    Tiefe > 0 (in einer anderen geschlossenen Kontur der Ebene) bekommen keine Stege.
     """
     res = CutResult()
     if depth is None:
@@ -620,20 +705,31 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
         elif opts.lead_in_mm > 0:
             res.skipped_leads += 1
             res.warnings.append("Anfahrt weggelassen (kein Platz)")
-        pieces = split_tabs(p, opts.tab_count, opts.tab_width_mm, opts.tab_spacing_mm) if tabs_on else [p]
-        ends_at_start = math.dist(pieces[-1][-1], p[-1]) < 1e-6
+        tabbed = tabs_on and not (opts.tab_skip_inner and d > 0)
+        parts = (split_tabs_with_gaps(p, opts.tab_count, opts.tab_width_mm, opts.tab_spacing_mm,
+                                      opts.tab_max) if tabbed else [(p, False)])
+        cut_idx = [i for i, (_q, gap) in enumerate(parts) if not gap]
+        last = cut_idx[-1] if cut_idx else None
+        ends_at_start = last is not None and math.dist(parts[last][0][-1], p[-1]) < 1e-6
         over = 0.0
         if opts.overcut_mm > 0 and ends_at_start:
             over = min(opts.overcut_mm, path_length(p))
-            if len(pieces) > 1:  # Überschnitt endet vor dem ersten Steg
-                over = min(over, path_length(pieces[0]) - OVERCUT_TAB_CLEAR_MM)
+            if len(cut_idx) > 1:  # Überschnitt endet vor dem ersten Steg
+                over = min(over, path_length(parts[cut_idx[0]][0]) - OVERCUT_TAB_CLEAR_MM)
             ext = overcut_path(p, over) if over > 1e-6 else []
             if len(ext) >= 2:
-                pieces = pieces[:-1] + [pieces[-1] + ext[1:]]
+                parts[last] = (parts[last][0] + ext[1:], False)
             else:
                 over = 0.0
-        for k, piece in enumerate(pieces):
-            emit(piece, KIND_TAB if k else KIND_CUT)
+        after_tab = False
+        for piece, gap in parts:
+            if gap:
+                after_tab = True
+                for q, kind in tab_pulses(piece, opts.tab_cut_power):
+                    res.polylines.append(q)
+                    res.kinds.append(kind)
+                continue
+            emit(piece, KIND_TAB if after_tab else KIND_CUT)
         if not ends_at_start or opts.lead_out_mm <= 0:
             continue
         # Abfahrt am Ende des Überschnitts (Kontur bis dorthin gedreht). Endet

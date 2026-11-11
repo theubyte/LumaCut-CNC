@@ -228,7 +228,15 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     Außenkonturen wachsen, Löcher schrumpfen (Polygon-Versatz mit `shapely`, spitze Ecken).
   - *Haltestege* (`tab_count` 0–24 bzw. `tab_spacing_mm` = ein Steg je … mm Umfang,
     `tab_width_mm`): Lücken mit Laser aus, gleichmäßig verteilt und nicht in Ecken;
-    Konturen unter 10 mm Umfang bekommen keine Stege.
+    Konturen unter 10 mm Umfang bekommen keine Stege. Wie LightBurn außerdem:
+    *Höchstens Stege je Kontur* (`tab_max`, nur mit Steg-Abstand, „unbegrenzt“ = 0 – lange
+    Konturen bekommen sonst sehr viele Stege), *Innere Formen ohne Stege* (`tab_skip_inner`,
+    *Skip Inner Shapes*: Konturen, die ganz in einer anderen Kontur derselben Ebene liegen –
+    Löcher, Buchstaben-Innenformen, Teile in einem Rahmen – bleiben ohne Stege) und
+    *Steg-Leistung* (`tab_cut_power`, 0–95 %, *Tab Cut Power*): statt einer Lücke wird der Steg
+    mit kurzen Pulsen quer angeschnitten (≈ alle 0,4 mm ein Puls mit der Leistung der Ebene,
+    Länge = Prozent der Periode, dazwischen `G1 … S0` – der Kopf fährt ohne Halt weiter);
+    höher = schwächerer Steg, leichter auszubrechen. Der Dialog nennt Pulszahl und -länge.
   - *Anfahrt/Abfahrt* (`lead_in_mm`, `lead_in_arc`, `lead_out_mm`, 0–10 mm): auf der
     Abfallseite (außen bei Teilen, innen bei Löchern), 45°-Gerade oder tangentialer Viertelkreis;
     der Konturstart wird dafür von einer Ecke in die Kantenmitte verlegt. Passt die Anfahrt nicht
@@ -257,7 +265,8 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     Hinweis nach Senden / Schätzung / Speichern nennt die eingesparte Länge. Code:
     `src/lumacut_job/overlap.py`.
   Code: `src/lumacut_job/cutpath.py`; die Art jedes Teilpfads (`cut`, `lead_in`, `lead_out`,
-  `tab`, `perf`) steht in `JobLayer.poly_kinds` (z. B. für eine Pfadvorschau).
+  `tab`, `perf`, bei Steg-Leistung `tab_pulse` / `tab_off`) steht in `JobLayer.poly_kinds`
+  (z. B. für eine Pfadvorschau).
 - **Seriennummern** („Seriennummern…“, *Alt+N*, Toolbar „Auftrag“; Stapel-Fall von LightBurns
   „Variable Text“): ersetzt das ausgewählte Textobjekt durch ein Raster nummerierter Kopien.
   Vorlage mit Platzhaltern `{n}` (Nummer), `{n:3}` (mit Nullen, `007`), `{date}` (TT.MM.JJJJ),

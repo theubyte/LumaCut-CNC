@@ -52,6 +52,11 @@ verschoben (:func:`scan_offset_segment`), damit hin- und rücklaufende Linien
 trotz Laser-Verzögerung auf einer Kante enden; danach folgt der Überlauf.
 Bei 0 bleibt die Ausgabe Byte für Byte gleich.
 
+Haltestege mit Steg-Leistung (``JobLayer.poly_kinds`` ``tab_pulse`` / ``tab_off``,
+LightBurn „Tab Cut Power“): die Pulse schließen ohne ``G0`` an das Schnittstück
+davor und danach an; ``tab_off``-Stücke fahren als ``G1 … S0`` mit Schnitttempo
+(Laser aus, keine Bremsung), ``tab_pulse``-Stücke mit der Leistung der Ebene.
+
 Die Funktion erzeugt nur Text; sie startet nie eine Maschine.
 """
 
@@ -70,6 +75,9 @@ from .workarea import (WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine,
 
 #: ``(layer, pass_index, depth_mm, cumulative_mm) -> Zeilen``
 PassHook = Callable[[JobLayer, int, float, float], Iterable[str]]
+
+# Arten aus lumacut_job.cutpath (KIND_TAB_PULSE / KIND_TAB_OFF), hier ohne Import.
+_TAB_PULSE_KINDS = ("tab_pulse", "tab_off")
 
 PWM_MAX = 255
 # Erlaubter Bereich in Maschinen-mm (Nullpunkt oben rechts: to_machine(0, 0)
@@ -276,19 +284,26 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
                     out.append(f"G1 {_xy(*b2)} F{f} S0")
                 pos = b2
             kinds = getattr(layer, "poly_kinds", ()) or ()
+            if len(kinds) != len(layer.polylines):
+                kinds = ()
             prev_end = None
             for i, line in enumerate(layer.polylines):
                 if len(line) < 2:
                     continue
-                # An-/Abfahrt schließt direkt an die Kontur an: kein G0 dazwischen.
-                joined = (len(kinds) == len(layer.polylines) and i > 0 and prev_end is not None
-                          and (kinds[i] == "lead_out" or kinds[i - 1] == "lead_in")
+                # An-/Abfahrt schließt direkt an die Kontur an, ebenso die Pulse eines
+                # Stegs mit Steg-Leistung und das folgende Schnittstück: kein G0 dazwischen.
+                kind = kinds[i] if kinds else "cut"
+                prev = kinds[i - 1] if kinds and i > 0 else ""
+                joined = (i > 0 and prev_end is not None
+                          and (kind == "lead_out" or prev == "lead_in"
+                               or kind in _TAB_PULSE_KINDS or prev in _TAB_PULSE_KINDS)
                           and abs(prev_end[0] - line[0][0]) < 1e-6
                           and abs(prev_end[1] - line[0][1]) < 1e-6)
                 prev_end = line[-1]
                 if not joined:
                     out.append(f"G0 {_xy(*line[0])}")
-                out.extend(f"G1 {_xy(*pt)} F{f} S{s}" for pt in line[1:])
+                power = 0 if kind == "tab_off" else s   # Steg: Laser aus, Kopf fährt weiter
+                out.extend(f"G1 {_xy(*pt)} F{f} S{power}" for pt in line[1:])
                 pos = line[-1]
         if z_step > 0 and drop > 0:
             out += ["G91", f"G0 Z{drop:.3f} F600", "G90"]  # zurück auf Fokushöhe

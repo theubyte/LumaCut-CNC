@@ -47,9 +47,13 @@ class JobLayer:
     perf_cut_mm: float = 0.0
     perf_skip_mm: float = 1.0
     overlap_tol_mm: float = 0.0   # > 0: überlappende Linien nur einmal (lumacut_job.overlap)
+    tab_skip_inner: bool = False  # keine Stege an innen liegenden Konturen
+    tab_max: int = 0              # Abstands-Modus: höchstens so viele Stege (0 = unbegrenzt)
+    tab_cut_power: float = 0.0    # Steg-Leistung % (gepulst: "tab_pulse" / "tab_off")
     # Art je Polylinie nach der Planung ("cut", "lead_in", "lead_out", "tab" =
     # Schnittstück nach einer Steg-Lücke, "perf" = nach einer
-    # Perforations-Lücke); leer = alles "cut".
+    # Perforations-Lücke, "tab_pulse" / "tab_off" = Puls mit Laser an / Stück
+    # mit Laser aus innerhalb eines Stegs mit Steg-Leistung); leer = alles "cut".
     poly_kinds: tuple[str, ...] = ()
     # Vektor-Füllung: je Füllgruppe (Objekt, Gruppe oder ganze Ebene, siehe
     # Layer.fill_grouping) ein Block Schraffurstrecken ((x0, y0), (x1, y1)) in
