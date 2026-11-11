@@ -6689,3 +6689,274 @@ Still open:
   dense curve nodes – engraved and cut result against the original (no visible facets at 0.05 mm,
   facets at 0.5 mm), the real run time against the original (fewer `G1` moves, fewer planner
   slow-downs on the SKR) and the dialog with Alt+O on the Windows app, rebuilt exe).
+
+## 65. Status update 2026-11-11 (review round 58)
+
+Done this round (automatic tab options – LightBurn *Skip Inner Shapes*, *Limit Max Tabs* and
+*Tab Cut Power*; Machine / Scan Probe / Materials untouched, Canvas only gains three layer
+fields in the model and a two-kind join rule in the G-code writer):
+
+- Closed since §64 by others: none – main had no new commits since `03ccec7`; the Canvas
+  worktree (`canvas-work`) still has no commit since 2026-10-26, the Pi Web UI worktree
+  (`pi-ui-redesign`) none since its last push.
+- Gap picked (user priority 1, kerf / tabs / lead-in): LightBurn's tab block (Cut Settings
+  Editor › Tabs / Bridges) has *Skip Inner Shapes*, *Limit Max Tabs* and *Tab Cut Power*;
+  LumaCut had count / spacing / width only. So every hole, every inner form of a letter
+  and every part inside a frame got tabs too (holes are waste – a tab there only makes the
+  user break out scrap, and letter counters stay hanging), a long outline in spacing mode
+  got dozens of tabs, and a tab was always a full laser-off gap (on thin card / veneer a
+  full-strength tab is often too strong, the part tears when broken out). Checked against
+  the LightBurn docs (*Add Tabs* reference, `TAB_PARAMS` of the `.clb` format:
+  `skipInnerTabs`, `tabCountMax` / `limitMaxTabs`, `tabCutPower`). Chosen over the
+  auto-join on import (opt-in duplicate of Alt+J, which the import hint already offers) and
+  over marking removed overlaps on the canvas (the path preview already shows the remaining
+  pieces). Manual tab placement (*Add Tabs* tool) is the bigger remaining tab gap but needs
+  a canvas tool with per-shape tab positions (Canvas). No hardware fact or user decision
+  needed – all three default off, so old projects and G-code are unchanged.
+- **Engine** (`lumacut_job/cutpath.py`, Qt-free): `tab_intervals(poly, count, width,
+  spacing, max_count)` returns the tab spans in arc length (same placement as before –
+  evenly spread, pushed off corners and the start); `max_count > 0` caps the count of the
+  spacing mode (fixed count ignores it, like LightBurn). `split_tabs_with_gaps` returns the
+  contour as alternating cut pieces and tab spans; `split_tabs` (old signature) is the
+  cut-piece view of it, so all existing callers / results are unchanged. `tab_pulses(gap,
+  power)` splits a tab span into periods of ≈ `TAB_PULSE_PERIOD_MM` (0.4 mm, fitted evenly to
+  the tab width) with a centred laser-on pulse of `power` % of the period (`tab_pulse`) and
+  laser-off pieces in between (`tab_off`); both tab ends stay off, pulses below 0.01 mm are
+  dropped (the tab stays whole). `apply_cut_options`: with `tab_skip_inner` contours of
+  nesting depth > 0 (inside another closed contour of the same layer – holes, islands in
+  holes, parts in a frame) get no tabs; with `tab_cut_power > 0` the tab spans are emitted
+  as pulse / off pieces between the cut pieces (not perforated; overcut still stops 0.5 mm
+  before the first tab, leads unchanged). New kinds `tab_pulse` / `tab_off` in
+  `JobLayer.poly_kinds`.
+- **G-code** (`lumacut_canvas/gcode.py`): pulse and off pieces join the cut pieces before
+  and after them without `G0` (endpoints must coincide, so a perforated piece that ends
+  earlier still gets its `G0`); `tab_off` is written as `G1 … F<speed> S0` – the head keeps
+  cut speed through the tab (no rapid / brake per tab, unlike a gap), `tab_pulse` with the
+  layer power. Passes the Pi guard; the path preview / estimate read it back as travel at
+  feed and short cuts. Without the new options the output is byte-identical.
+- **Model / file** (`lumacut_canvas/model.py`, `export.py`): `Layer.tab_skip_inner`
+  (bool), `tab_max` (0–100, 0 = unlimited) and `tab_cut_power` (0–95 %) in
+  `CUT_LAYER_DEFAULTS` – written only when set, clamped on load / `update_layer`, carried
+  into `JobLayer` and `CutOptions`.
+- **UI** (`lumacut_job/cut_qt.py`, „Schnittoptionen…“ Alt+K): „Höchstens Stege je Kontur“
+  („unbegrenzt“, enabled only with a tab spacing), „Steg-Leistung“ („aus (Lücke)“, 0–95 %)
+  and „Innere Formen ohne Stege“ – all greyed out without tabs; a hint names the pulses („Je
+  Steg 5 Pulse à 0,10 mm mit der Leistung der Ebene, dazwischen Laser aus.“ or „Steg-Leistung
+  zu klein …“); „Zurücksetzen“ restores them; one undo step as before. Summary / status bar:
+  „höchstens 6 Stege“, „Steg-Leistung 25 %“, „innere Formen ohne Stege“ (only when tabs are
+  on). README: „Haltestege“ bullet and the `poly_kinds` list.
+
+Tests:
+
+- New `tests/test_tab_options.py` (27 tests): max tabs caps the spacing mode (evenly spread,
+  off corners, 0 / large = unchanged, fixed count ignores it); `split_tabs` equals the cut
+  pieces of `split_tabs_with_gaps`, pieces and tabs chain without gaps over the whole
+  perimeter; planner options with max tabs; skip inner on a frame / part / hole / island /
+  free part (only depth-0 contours keep 4 tabs, untabbed contours stay whole), with leads
+  (hole first, untabbed), without tabs / on open paths no change; pulse pattern (off at both
+  ends, alternating, contiguous, equal pulses, on share 25 % of 2 mm), on share for 5–95 %,
+  0 % / tiny pulse / corner; contour continuity with tab power (total length, pulse share,
+  0 % identical to no field); not perforated, overcut 0.5 mm before the first tab; G-code
+  with one `G0` per contour and pass, `G1 … S0` at cut speed, burned length = perimeter −
+  tabs + pulse share over 2 passes, Pi guard; output unchanged without the new options,
+  skip inner burns more; path preview / estimate lengths; document through the planner
+  (hole untabbed, kinds with leads); layer round trip / defaults / clamping /
+  `update_layer`; `CutOptions.of`; dialog (labels, enabled states, hint, values, reset,
+  loading a layer); hint and summary texts; one undo step; main window „Schnittoptionen“
+  with tab power and skip inner (G-code, status bar).
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **2537 passed, 3 skipped**, 0 failed (14.1 min; 2510 + 27 new), first run green.
+
+Output change for old files: none – projects, G-code and the canvas are unchanged until one
+of the three tab options is set.
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Material test: several cells of an interval test share the same layer name (power / speed are
+  equal) – the canvas labels tell them apart. Image cells: the G-code follows each cell's image
+  settings, so editing a cell *layer's* power / speed in the layer panel does not change an image
+  cell (the image settings dialog does). Image-cell options cover every image setting
+  (mode parameters, adjustments, sharpen, levels, tone curve – presets, drawn curves and
+  the curves of the document's images –, dot width, scan angle / increment,
+  bidirectional, overscan); since round 43 threshold, halftone cells / angle, brightness,
+  contrast, gamma, sharpen and scan angle, since round 46 also black / white point, dot
+  width and overscan, since round 48 the angle increment and – as aus / an axes over
+  exactly two columns / rows – negative and bidirectional can be swept on an axis, since
+  round 51 (§58) also 3D levels / Z step and the tone curve, since round 54 (§61) with
+  curves drawn in the test dialog and the curves of the document's images. One shared test
+  image per grid (not an image of the document – the photo is loaded from a file); a curve
+  taken from a document image is labelled „Eigene N“ on the canvas / in the layer name, its
+  „Bild N“ name is a dialog label only.
+- Material library (Materials): `lumacut_materials.testgrid.TEST_CELL_RE` is anchored
+  (`…F<speed>$`), so cell layers of a grid with an image-option axis (`Test P50% F1200
+  Gamma 1.2`, `… Schwarzpunkt 32`, `… Punktbreitenkorrektur 0.05mm`, `… Bidirektional aus`,
+  `… Winkel-Schritt 45°`, since round 51 `… Kurve S`, `… 3D-Stufen 8`, `… Z-Schritt 0.1mm`)
+  are not offered by „Preset aus Testzelle“; relaxing it to accept a trailing
+  ` <Option> <Wert>` suffix (and keeping the swept image value in the preset notes) is up to
+  the Materials agent. Grids without an image axis keep the classic names.
+- Image: the preview shows one pixel per dot and does not model the material's real dot size /
+  beam spread (needs the material library – Materials); mode and adjustment presets (incl. the
+  curve presets) are not linked to the material library (Materials); no per-channel / colour
+  curves (images are grey only). Scan angle: the dialog previews each pass, all passes overlaid
+  (darkest dot per position) or, since round 47, their burn sum (power per dot added up and
+  divided by the passes – a linear model: real wood / card darkens non-linearly with the
+  absorbed energy, which needs the material library – Materials); the time estimate plans oblique rows like X
+  rows (acceleration and junction deviation per `G1`, collinear row segments keep their speed),
+  with the Pi's motion calibration and per-axis feed limits since round 49 (§56); the
+  park-corner live box keeps using the object box (the powered
+  extent of an angled image never leaves it).
+- Time estimate (§56, §59, §60): Cartesian model – a CoreXY frame (Gestell v1) limits the motor axes
+  (A = X+Y, B = X−Y), so diagonals would have to be planned per motor once that frame runs;
+  Grbl's own planner on the Atomstack board (dynamic laser mode) is planned like Marlin; one
+  stored calibration / park and travel height per Windows user (switching between two Pis
+  shows the other's values until the first status arrives). Since round 53 the approach /
+  parking uses the Pi's reported travel height (`travel_z_mm`, clearance or material + 20 mm),
+  park height and probe minimum, starts at the reported head position and follows the
+  placement at „Aktuelle Position“ / „Benutzer-Ursprung“. Still mirrored, not reported: the
+  Z acceleration (firmware `M201 Z` 100 mm/s²) and the park feed F9000; a plain „Senden und
+  starten“ (`start=True`, runs absolute) is estimated at the panel's origin like the later
+  „Start“; the Pi's job optimizer (`job_optimize`, automatic run only) may reorder the job
+  from the head position – not modelled. Not included: homing (only when the Pi is not
+  referenced – after connecting, a reset or an emergency stop) and the probing of the
+  automatic run (the Pi plans the probe grid, `heightmap.plan_probe` – Scan Probe),
+  `M400` / `M114` / `M119` round trips and the start / done melody.
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Path cleanup (§62, §63, §64): no automatic join on import (the status bar only counts open /
+  joinable contours). „Pfade vereinfachen“ (§64) reduces nodes and fits node-editor curves to
+  lines but does not *smooth* (LightBurn's *Optimize › Smooth* / curve fitting into Bézier
+  objects would need true Bézier objects in the document – Canvas; arcs are not an option, the
+  Pi refuses G2/G3); rect / ellipse / text / line objects are not simplified (they have few
+  nodes or are analytic); Douglas-Peucker can, at a coarse tolerance on a thin sliver, let a
+  ring touch itself or a neighbouring ring (the deviation stays within the tolerance – fill
+  shows it and the user can undo). Auto-join chains greedily (nearest endpoint first – at
+  a T junction of three ends the choice is arbitrary, like LightBurn); joined curved paths are
+  flattened (≤ 0.02 mm, curve flags of the node editor are lost – close keeps them); nesting
+  uses one probe point per ring, so two rings that share an edge segment may nest wrongly
+  (then fill shows it and the user can undo).
+- Tabs (§65): no manual tab placement (LightBurn's *Add Tabs* tool – click on a contour to
+  place a tab, stored per shape; needs a canvas tool and per-shape tab positions that follow
+  move / scale / rotate / node edits – Canvas); automatic tabs only. The pulse period of
+  „Steg-Leistung“ is fixed (≈ 0.4 mm, evenly fitted to the tab width – LightBurn exposes
+  only the percentage, too); the path preview shows every pulse as its own run (start
+  marker, numbers thinned) and the laser-off pieces as travel. „Innere Formen ohne Stege“
+  uses the planner's nesting (one probe point per ring, like the cut order): two parts that
+  share an edge are not „inside“ each other.
+- Overlapping lines (§63): removal is a G-code / planner step only – no canvas action
+  („Überlappende Linien entfernen“ would have to turn closed parts into open paths, losing
+  their fill, kerf and tabs); it works per layer, never across layers (other settings), and is
+  skipped on layers with kerf / tabs / lead-in / lead-out / overcut (those need the whole
+  closed contour – combining would mean offsetting first and then splitting shared, offset
+  edges, which no longer coincide). Near-parallel ≤ ~11.5° within the tolerance counts as
+  overlap, so a hairpin of one path narrower than the tolerance loses its tip, and a shallow
+  crossing loses ≈ 2 × tol / sin(angle) around the crossing point. The path preview shows the
+  remaining pieces (it plans like the send), the canvas does not mark the removed edges. The
+  open-path warning is a note in the send / start / estimate / save message, not a blocking
+  dialog.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  serial-port / barcode-scanner input placeholder (a USB scanner typing into the
+  „Eingaben“ dialog works like a keyboard). Keyboard input (§57) is one value per label and
+  send – copies cannot get different typed values in one job (use a CSV file), and typed
+  values are kept for the session only. The advanced counter / CSV row lives in memory
+  outside the undo history only until the history is cleared (new / opened project) – after
+  a reopen the saved project values apply, so an advanced but unsaved project still loses
+  its values when closed without saving (the close prompt asks, as before).
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  Micro QR has no Kanji mode (UTF-8 byte mode covers Japanese text at a higher bit cost).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine. Same for
+  `test_machine_origin.py::OriginPanelTests::test_user_origin_from_head_and_placed_start_and_frame`
+  (round 46: „ok start“ wait timed out once under load, green alone and in the rerun).
+- Windows hardware tests („Eingaben für den Auftrag“ at send / one-click start with a name
+  tag – umlauts, long names, a USB barcode scanner typing into the dialog –, material test grids interval × power and passes × speed on wood /
+  card incl. the labels, focus × power / focus × speed grids (relative Z) on wood / card with
+  motorized Z, image test cells (Floyd / Jarvis / greyscale / halftone ramps, step wedges and
+  user photos × power × speed and × line interval, incl. non-default threshold / halftone
+  cells and angle / 3D levels with Z step / brightness / contrast / gamma / negative, and with
+  the „Weitere Bildoptionen“ sharpen / black-white point / S-curve / dot width / scan angle
+  45° / unidirectional / reduced overscan, and image-option axes – threshold sweep
+  64..192, halftone angle 0..45° and cells 20..60 /Zoll, gamma 0.6..1.8 × contrast,
+  brightness × power and scan angle 0..90° × speed, black point 0..64 × white point,
+  dot width 0..0.1 mm × power and overscan 0..5 mm × speed – line ends –, bidirectional
+  aus / an × speed at 3000–6000 mm/min (line offset), negative aus / an on slate / anodised
+  aluminium and angle increment 0..90° × 2–3 passes, tone-curve axis (Linear / S / Tiefen+ /
+  Lichter- × power on a user photo, wood / card; since round 54 a drawn curve and the curve
+  of a photo in the document against the presets, the editor by touch on the Windows tablet) and 3D levels 4..16 × Z step 0..0.2 mm
+  (relief depth with motorized Z), incl. the labels
+  and layer names) on
+  wood / card against real photo engravings with the chosen setting, QR codes with umlauts (ECI 26) and Japanese Kanji text
+  with phone scanners (iOS / Android camera apps) and a handheld scanner, Micro QR M1–M4 on
+  small parts with phone / handheld scanners, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, the time estimate with
+  the SKR calibration (2100 mm/s², 200 mm/s) against the real run time of hatch / image /
+  cut jobs incl. 45° image rows and – since round 52 – a stopwatch from „Start“ to the head
+  lowered in the park corner (approach + parking, small and far jobs, plain start and
+  one-click start without homing; since round 53 with 6–20 mm material, a changed park
+  height, the head jogged away and a job at „Benutzer-Ursprung“ / „Aktuelle Position“) and the stored value offline after a restart, photos at scan angles 30° / 45° /
+  90° and with a 90° angle increment (cross raster, against the „Alle Durchgänge
+  übereinander“ and the „aufaddiert (Brennsumme)“ preview, incl. greyscale photos with 2–3
+  passes at 0° / 45° / 90°) on wood against the X-only raster (line
+  quality of oblique `G1` rows at 3000–6000 mm/min on the SKR), photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera (incl. short-name aliases `/gtin/`, `/lot/`, `?exp=`), plain-text QR codes
+  with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / Micro QR / barcode / Data Matrix / Aztec /
+  PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
+  codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
+  incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), DXF / SVG
+  exports of Fusion 360 / FreeCAD / LibreCAD / Inkscape as loose segments joined with „Pfade verbinden“
+  and cut with kerf / tabs / lead-in on plywood (inside first, hole filled free), „Duplikate
+  löschen“ against a doubled DXF (no second burn), since round 56 „Überlappende Linien
+  entfernen“ (0.05 mm) on a nested sheet of adjacent rectangles / a puzzle with shared edges
+  on plywood and card – each shared edge burned once, no fragment left standing, inside-first
+  holes, the remaining open chains with perforation, the saved cut time against the
+  estimate – and the open-path warning at send / one-click start for a DXF on a fill layer,
+  since round 57 „Pfade vereinfachen“ (0.05 mm) on an imported SVG logo / a trace / a PDF with
+  dense curve nodes – engraved and cut result against the original (no visible facets at 0.05 mm,
+  facets at 0.5 mm), the real run time against the original (fewer `G1` moves, fewer planner
+  slow-downs on the SKR) and the dialog with Alt+O on the Windows app, since round 58
+  „Steg-Leistung“ 25 / 50 / 75 % on 3 mm plywood and card (multi-pass) – how firmly the
+  part holds, how cleanly it breaks out, whether the pulses at 1500–3000 mm/min mark the
+  tab edge evenly (`G1 … S0` gaps at cut speed in inline mode on the SKR) –, „Innere
+  Formen ohne Stege“ on a sheet with letters / holes and a frame on a separate layer, and
+  „Höchstens Stege je Kontur“ on a long outline with spacing mode, rebuilt exe).
