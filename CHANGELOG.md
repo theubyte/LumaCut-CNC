@@ -2,6 +2,10 @@
 
 Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
+## 2026-11-11
+
+- **Gestell v2 konstruiert:** Referenz ohne Schalter über Anschläge und Encoder der Closed-Loop-Motoren, Bett auf vier Wägezellen (die Laserdüse tastet das Material direkt unter dem Strahl an), Kopfkamera mit Schutzglas und neue Übersichtskamera im Deckel. Druckteile, Bauplan und Teileliste auf dem NAS (`gestell_v2`), noch nicht gebaut.
+
 ## 2026-11-09
 
 - **Gestell v1 konstruiert (neue Maschine):** Eigenbau-Gestell mit CoreXY auf Linearschienen, fahrendem Bett mit 200 mm Z und Rollen-Drehachse für Becher. Nutzt die Teile des Anet-A8-Satzes (Motoren, Stangen, LM8UU, T8-Spindeln). 3D-Modell, Druckteile, Bauplan und Teileliste auf dem NAS (`gestell_v1`), noch nicht gebaut.
