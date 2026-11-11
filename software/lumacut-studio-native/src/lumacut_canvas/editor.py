@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
 from . import arrange_ui, icons, node_ui, pathops_ui, tabs_ui, text_ui, theme, touch, units
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
-from .fit import HScrollStrip
+from .fit import HScrollStrip, VScrollStrip
 from .canvas_view import PX_PER_MM_100, CanvasScene, CanvasView, Ruler
 from .commands import (AddShapesCommand, DeleteShapesCommand, SetGeometryCommand, SetGroupsCommand,
                        SetLayerAttrsCommand, SetShapeLayerCommand, SetTextCommand)
@@ -491,7 +491,10 @@ class CanvasEditor(QWidget):
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
-        body.addWidget(strip)
+        # Senkrecht scrollbar: auch mit 48-px-Touch-Knöpfen auf 1280 × 720 (und
+        # kleiner) bleibt jedes Werkzeug ein eigener Knopf statt im Überlaufmenü.
+        self.tool_strip_scroll = VScrollStrip(strip)
+        body.addWidget(self.tool_strip_scroll)
         body.addWidget(canvas, 1)
 
         root = QVBoxLayout(self)

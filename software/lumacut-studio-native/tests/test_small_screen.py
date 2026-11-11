@@ -228,6 +228,35 @@ def test_tool_strip_buttons_at_least_44px(make_win, touch_on):
     assert min(b - a for a, b in zip(ys, ys[1:])) >= 44 + 4  # Abstand zwischen Knöpfen
 
 
+@pytest.mark.parametrize("size", [(1280, 720), (1024, 600)])
+def test_tool_strip_scrolls_instead_of_hiding_tools(make_win, qapp, size):
+    """Alle Werkzeuge bleiben eigene ≥ 44-px-Knöpfe (kein QToolBar-Überlaufmenü);
+    reicht die Höhe nicht, scrollt die Leiste senkrecht."""
+    win = make_win(*size)
+    ed = win.canvas
+    ed.set_touch_mode(True, persist=False)
+    settle(qapp)
+    strip, scroll = ed.tool_strip, ed.tool_strip_scroll
+    buttons = [b for b in strip.findChildren(QToolButton) if b.defaultAction()]
+    assert len(buttons) == len(strip.actions())
+    assert all(b.isVisible() and b.height() >= 44 for b in buttons)
+    ext = [b for b in strip.findChildren(QToolButton) if b.objectName() == "qt_toolbar_ext_button"]
+    assert not any(b.isVisible() for b in ext)
+    last = max(buttons, key=lambda b: b.y())
+    if strip.height() > scroll.viewport().height():
+        assert scroll.verticalScrollBar().isVisible()
+        scroll.ensureWidgetVisible(last)
+        settle(qapp)
+    pos = last.mapTo(scroll.viewport(), last.rect().bottomLeft())
+    assert 0 <= pos.y() <= scroll.viewport().height()
+    # Leiste nicht breiter als Inhalt + Bildlaufleiste, Zeichenfläche bleibt rechts daneben
+    assert scroll.width() <= strip.width() + scroll.verticalScrollBar().sizeHint().width() + 1
+    assert ed.view.mapTo(ed, ed.view.rect().topLeft()).x() >= scroll.geometry().right()
+    ed.set_touch_mode(False, persist=False)
+    settle(qapp)
+    assert all(b.isVisible() and b.height() >= 44 for b in buttons)
+
+
 def test_small_screen_defaults_to_touch_mode(make_win, monkeypatch):
     monkeypatch.setattr(fit, "is_small_screen", lambda screen=None: True)
     win = make_win(1024, 600)

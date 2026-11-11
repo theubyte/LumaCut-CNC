@@ -2,6 +2,9 @@
 
 * :class:`HScrollStrip` – waagerecht scrollbare Leiste (z. B. Eigenschaftsleiste),
   deren Höhe dem Inhalt folgt; nichts wird abgeschnitten.
+* :class:`VScrollStrip` – senkrecht scrollbare Werkzeugleiste: alle Werkzeuge
+  bleiben als ≥ 44-px-Knöpfe erreichbar statt im Überlaufmenü der QToolBar zu
+  verschwinden (Touch-Modus bei 1280 × 720 und kleiner).
 * :func:`enable_touch_scroll` – Finger-Scrollen (kinetisch) in einer QScrollArea.
 * :func:`install_screen_fit` – vom Hauptfenster aufgerufen (main.py, markierter
   Canvas-Block): Standardgröße aus der verfügbaren Bildschirmfläche, rechte
@@ -103,6 +106,71 @@ class HScrollStrip(QScrollArea):
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
         if obj is self.widget() and event.type() == QEvent.LayoutRequest:
+            QTimer.singleShot(0, self._sync)
+        return super().eventFilter(obj, event)
+
+
+class VScrollStrip(QScrollArea):
+    """Senkrecht scrollbare Leiste (z. B. Werkzeugleiste): der Inhalt behält
+    immer seine volle Höhe – eine QToolBar würde sonst Werkzeuge in ihr
+    Überlaufmenü schieben –, die Breite folgt dem Inhalt (plus Bildlaufleiste,
+    falls der Inhalt höher ist als der Platz)."""
+
+    def __init__(self, content: QWidget, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName(f"{content.objectName() or 'Strip'}Scroll")
+        self.setFrameShape(QFrame.NoFrame)
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setWidget(content)
+        content.installEventFilter(self)
+        self._overflow = False
+        self._sync_content()
+        enable_touch_scroll(self)
+
+    def _content_height(self) -> int:
+        w = self.widget()
+        return w.sizeHint().height() if w else 0
+
+    def _needs_scroll(self) -> bool:
+        return bool(self.widget()) and self._content_height() > self.viewport().height()
+
+    def _width(self) -> int:
+        w = self.widget()
+        width = w.sizeHint().width() if w else 0
+        if self._overflow:
+            width += self.verticalScrollBar().sizeHint().width()
+        return width
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        return QSize(self._width(), self._content_height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        return QSize(self._width(), 80)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync()
+
+    def _sync_content(self) -> None:
+        """Inhalt nie niedriger als seine Wunschhöhe (kein Überlaufmenü)."""
+        w = self.widget()
+        if w is not None:
+            h = self._content_height()
+            if w.minimumHeight() != h:
+                w.setMinimumHeight(h)
+
+    def _sync(self) -> None:
+        self._sync_content()
+        over = self._needs_scroll()
+        if over != self._overflow:
+            self._overflow = over
+            self.updateGeometry()
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
+        if obj is self.widget() and event.type() in (QEvent.LayoutRequest, QEvent.StyleChange):
             QTimer.singleShot(0, self._sync)
         return super().eventFilter(obj, event)
 
