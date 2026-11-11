@@ -4,6 +4,7 @@ Details und Begründungen stehen in den jeweiligen Commit-Messages.
 
 ## 2026-11-11
 
+- **Gestell v3 konstruiert:** Der Unterbau ist jetzt ein geschweißter Stahlrahmen aus Vierkantrohr. Die Alu-Profile bleiben nur dort, wo die Schienen sitzen. Mit Schweißplan und Zuschnittliste auf dem NAS (`gestell_v3`).
 - **Gestell v2 konstruiert:** Referenz ohne Schalter über Anschläge und Encoder der Closed-Loop-Motoren, Bett auf vier Wägezellen (die Laserdüse tastet das Material direkt unter dem Strahl an), Kopfkamera mit Schutzglas und neue Übersichtskamera im Deckel. Druckteile, Bauplan und Teileliste auf dem NAS (`gestell_v2`), noch nicht gebaut.
 
 ## 2026-11-09
