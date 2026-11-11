@@ -1,4 +1,6 @@
 """Menü „Pfad“ im Canvas: Boole-Operationen, Verschweißen, Versatz, Text in Pfade,
+Zerlegen / Kombinieren (:mod:`pathsplit`, LightBurn *Break Apart* / *Combine* – deren
+Alt+B / Alt+C belegen hier Bogentext und Barcode, darum Strg+Alt+B / Strg+Alt+C),
 Aufräumen (verbinden, schließen, vereinfachen, Duplikate – :mod:`pathjoin_ui`).
 
 Von :class:`CanvasEditor` über :func:`install` eingebunden (Aktionen + Knopf
@@ -12,12 +14,18 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QMenu, QToolButton)
 
-from . import icons, pathjoin_ui, pathops
+from . import icons, pathjoin_ui, pathops, pathsplit
 from .edit_commands import ReplaceShapesCommand
 
 BOOL_SHORTCUTS = {"union": "Ctrl+Alt+U", "subtract": "Ctrl+Alt+S", "intersect": "Ctrl+Alt+I",
                   "weld": "Ctrl+Alt+W"}
+SPLIT_ACTIONS = [
+    ("path_break", "Zerlegen", "Ctrl+Alt+B"),
+    ("path_break_all", "Zerlegen (jeder Teilpfad einzeln)", None),
+    ("path_combine", "Kombinieren", "Ctrl+Alt+C"),
+]
 MENU_ACTIONS = ([f"bool_{op}" for op in pathops.OPS] + [None, "path_offset", "text_to_path", None]
+                + [name for name, _t, _k in SPLIT_ACTIONS] + [None]
                 + pathjoin_ui.MENU_ACTIONS)
 
 
@@ -118,6 +126,54 @@ class PathOps:
         ed.set_selection(keep + new_ids)
         ed.notify(f"Text in Pfade: {len(new_ids)} Objekt(e) – unabhängig von installierten Schriften")
 
+    def break_apart(self, keep_holes: bool = True) -> None:
+        """LightBurn *Break Apart*: Teilpfade der Auswahl werden eigene Objekte; je Objekt
+        an seiner Stelle im Stapel, alles ein Undo-Schritt."""
+        ed = self.editor
+        shapes = self._sel_shapes()
+        if not shapes:
+            ed.notify("Zerlegen: Objekte mit mehreren Teilen auswählen "
+                      "(z. B. importiertes Logo, Text in Pfade).")
+            return
+        res = pathsplit.break_apart(shapes, keep_holes)
+        if not res.changed:
+            ed.notify(res.summary() + ("" if not keep_holes else
+                                       " (Löcher bleiben bei ihrer Außenkontur)"))
+            return
+        ed.undo_stack.beginMacro("Zerlegen")
+        try:
+            for old, parts in res.pairs:
+                ed.undo_stack.push(ReplaceShapesCommand(ed.document, [old], parts, "Zerlegen"))
+        finally:
+            ed.undo_stack.endMacro()
+        keep = [i for i in ed.selection if ed.document.has_shape(i)]
+        ed.set_selection(keep + [s.id for s in res.add])
+        text = res.summary()
+        if keep_holes:
+            text += " – Löcher bleiben bei ihrer Außenkontur"
+        else:
+            text += (" – Löcher sind jetzt eigene Objekte: eine Füllung füllt sie mit, "
+                     "„Kombinieren“ (Strg+Alt+C) fasst sie wieder zusammen")
+        ed.notify(text)
+
+    def combine(self) -> None:
+        """LightBurn *Combine*: Auswahl je Ebene zu einem Objekt mit mehreren Ringen."""
+        ed = self.editor
+        shapes = self._sel_shapes()
+        res = pathsplit.combine(shapes)
+        if not res.changed:
+            ed.notify(res.summary())
+            return
+        ed.undo_stack.beginMacro("Kombinieren")
+        try:      # je Ebene an der Stelle des untersten Objekts
+            for ids, new in res.groups:
+                ed.undo_stack.push(ReplaceShapesCommand(ed.document, ids, [new], "Kombinieren"))
+        finally:
+            ed.undo_stack.endMacro()
+        keep = [i for i in ed.selection if ed.document.has_shape(i)]
+        ed.set_selection(keep + [s.id for s in res.add])
+        ed.notify(res.summary())
+
 
 def install(editor) -> PathOps:
     ops = PathOps(editor)
@@ -127,6 +183,10 @@ def install(editor) -> PathOps:
                     QKeySequence(sc) if sc else None)
     editor._act("path_offset", "Versatz …", ops.offset, QKeySequence("Ctrl+Alt+O"))
     editor._act("text_to_path", "Text in Pfade umwandeln", ops.text_to_path, QKeySequence("Ctrl+Shift+O"))
+    split_slots = {"path_break": lambda: ops.break_apart(True),
+                   "path_break_all": lambda: ops.break_apart(False), "path_combine": ops.combine}
+    for name, text, key in SPLIT_ACTIONS:
+        editor._act(name, text, lambda _=False, f=split_slots[name]: f(), QKeySequence(key) if key else None)
     ops.cleanup = pathjoin_ui.install(editor)   # verbinden / schließen / vereinfachen / Duplikate / offene Formen
     return ops
 
@@ -145,7 +205,7 @@ def add_to_bar(editor, bar) -> QToolButton:
     btn.setObjectName("PathOpsButton")
     btn.setIcon(icons.icon("pathops"))
     btn.setToolTip("Pfad: vereinigen, abziehen, schneiden, verschweißen, versetzen, Text in Pfade, "
-                   "Pfade verbinden / schließen / vereinfachen, Duplikate löschen")
+                   "zerlegen / kombinieren, Pfade verbinden / schließen / vereinfachen, Duplikate löschen")
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setMenu(build_menu(editor, btn))
     bar.addWidget(btn)

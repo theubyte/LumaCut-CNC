@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDia
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand, SetImageSettingsCommand
 from lumacut_canvas.document_io import FILE_SUFFIX
 from lumacut_canvas.model import ImageSettings
-from lumacut_canvas.pathjoin import join_preview
+from lumacut_canvas.pathjoin import join_preview, nest_rings
+from lumacut_canvas.pathsplit import break_apart
 from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 
 from .curve_widget import CURVE_PRESETS, CUSTOM_LABEL, CurveWidget, preset_name
@@ -738,7 +739,8 @@ class ImportTools(QObject):
         self.editor.undo_stack.push(AddShapesCommand(doc, res.shapes, "Importieren"))
         ids = [s.id for s in res.shapes]
         self.editor.set_selection(ids)
-        self.editor.notify(res.summary(Path(path).name) + open_shapes_hint(res.shapes))
+        self.editor.notify(res.summary(Path(path).name) + open_shapes_hint(res.shapes)
+                           + multipart_hint(res.shapes) + holes_hint(res.shapes))
         return ids
 
     # ---------------------------------------------------------------- Drop
@@ -889,6 +891,45 @@ def open_shapes_hint(shapes) -> str:
     if joinable:
         text += f", {joinable} davon verbindbar – Pfad › „Pfade verbinden“ (Alt+J)"
     return text
+
+
+def multipart_hint(shapes) -> str:
+    """Hinweis nach dem Import, wenn Objekte aus mehreren getrennten Teilen bestehen
+    (ein SVG-Pfad mit vielen Buchstaben, ein PDF-Logo …): einzeln verschieben / löschen /
+    auf eine andere Ebene legen geht erst nach „Zerlegen“. Löcher zählen nicht als Teil."""
+    res = break_apart(shapes, keep_holes=True)
+    if not res.changed:
+        return ""
+    return (f" · {len(res.pairs)} Objekt(e) aus mehreren Teilen ({len(res.add)} Teile) – "
+            "Pfad › „Zerlegen“ (Strg+Alt+B)")
+
+
+HOLES_HINT_MAX = 2000      # mehr geschlossene Konturen: Hinweis überspringen (Verschachtelung O(n²))
+
+
+def holes_hint(shapes) -> str:
+    """Hinweis nach dem Import, wenn Löcher eigene Objekte sind (SVG / PDF / DXF legen jeden
+    Teilpfad als eigenes Objekt an): mit „Füllen: Jedes Objekt einzeln“ (Standard) würde das
+    Loch eines „O“ oder eines Logos mitgefüllt. „Kombinieren“ macht daraus ein Objekt mit Loch."""
+    by_layer: dict[str, list] = {}
+    for s in shapes:
+        if s.kind == "polygon" and not s.generator and len(s.points) >= 3:
+            by_layer.setdefault(s.layer_id, []).append(s)
+    if sum(len(v) for v in by_layer.values()) > HOLES_HINT_MAX:
+        return ""
+    holes = 0
+    for layer_shapes in by_layer.values():
+        if len(layer_shapes) < 2:
+            continue
+        rings = []
+        for s in layer_shapes:
+            a, b = s.ring_ranges()[0]
+            rings.append(s.abs_points()[a:b])
+        holes += sum(len(g) - 1 for g in nest_rings(rings))
+    if not holes:
+        return ""
+    return (f" · {holes} Loch-Kontur(en) als eigene Objekte – „Jedes Objekt einzeln“ füllt sie mit; "
+            "zum Füllen mit Loch Pfad › „Kombinieren“ (Strg+Alt+C)")
 
 
 def install_import(window, interactive: bool = True) -> ImportTools:

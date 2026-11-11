@@ -703,7 +703,7 @@ Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
   und gehen wie alles andere über `shape_path` in Schraffur, Export und G-Code.
   „In Pfad“ macht aus einer Ellipse 16–32 Kurvenknoten (Abweichung ≤ 0,02 mm).
 
-### Pfad: Boole-Operationen, Verschweißen, Versatz, Text in Pfade
+### Pfad: Boole-Operationen, Verschweißen, Versatz, Text in Pfade, Zerlegen / Kombinieren
 
 Knopf „Pfad“ in der Aktionsleiste (und Untermenü im Kontextmenü), Rechnen in
 `lumacut_canvas/pathops.py` (shapely), Oberfläche in `pathops_ui.py`. Jede Aktion ist ein
@@ -720,6 +720,22 @@ Drehung, Ellipsen und Text werden berücksichtigt.
 - **Text in Pfade umwandeln** (Strg+Umschalt+O): Text wird ein Polygon mit allen
   Buchstaben-Ringen – Füllung und G-Code bleiben gleich, die Datei hängt nicht mehr von
   installierten Schriften ab.
+- **Zerlegen** (Strg+Alt+B, wie LightBurn *Break Apart* – dessen Alt+B ist hier
+  „Bogentext“): Objekte mit mehreren Teilpfaden (Text in Pfade, xTool-Import, Boole-Ergebnis,
+  kombinierte Objekte) werden einzelne Objekte – Löcher bleiben bei ihrer Außenkontur (das
+  „O“ bleibt ein Ring mit Loch, Inseln in Löchern werden eigene Teile), damit Füllung, Kerf und
+  „innen zuerst“ gleich bleiben. „Zerlegen (jeder Teilpfad einzeln)“ trennt auch die Löcher ab;
+  offene Pfade zerfallen in ihre Teilpfade. Drehung, Ebene, Gruppen und Kurvensegmente bleiben,
+  jedes Teil liegt an der Stelle des Objekts im Stapel.
+- **Kombinieren** (Strg+Alt+C, wie LightBurn *Combine* – Alt+C ist „Barcode“): die Auswahl wird
+  je Ebene *ein* Objekt mit mehreren Ringen, geschlossene Formen (Rechteck, Ellipse, Polygon,
+  Text) ein Polygon, offene (Pfad, Linie) ein Pfad. Anders als „Vereinigen“ bleiben alle
+  Konturen erhalten; innen liegende werden Löcher (Gerade-Ungerade) – so lässt eine Füllung
+  mit „Jedes Objekt einzeln“ das Loch eines importierten Logos frei. Überlappen sich Konturen,
+  nennt die Statusleiste die Zahl („Achtung: … Überlappung(en) … „Vereinigen““). SVG / PDF /
+  DXF legen jeden Teilpfad als eigenes Objekt an; nach dem Import nennt die Statusleiste
+  „N Loch-Kontur(en) als eigene Objekte … „Kombinieren““ bzw. Objekte aus mehreren Teilen
+  („Zerlegen“). Code: `lumacut_canvas/pathsplit.py`.
 - **Schrift** (PropertyBar, sobald nur Text ausgewählt ist): Schriftart, Größe in pt
   (Geviert; skaliert die Box gleichmäßig), **F**ett, *K*ursiv und „In Pfade“. Schriftart
   und Schnitt behalten die Höhe und passen die Breite an; die letzte Wahl gilt für neue
