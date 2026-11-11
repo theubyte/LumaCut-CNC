@@ -73,6 +73,10 @@ class JobLayer:
     # vier Ecken beginnen – Zeilen rückwärts und/oder jede Zeile umgedreht
     # (hatch.fill_block_entries); Planer und G-Code wählen den nächsten Einstieg.
     fill_free_corner: bool = False
+    # Schnittreihenfolge des Projekts (model.CutOrder, „Optimierung…“); None =
+    # Planer-Standard. Jede Ebene trägt sie, damit alle Aufrufer des Planers
+    # (Senden, Vorschau, Schätzung, Rahmen, Park-Ecke) gleich planen.
+    cut_order: object = None
 
 
 def shape_fill_segments(shape: Shape, layer: Layer):
@@ -171,7 +175,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
                                    fill_free_corner=layer.fill_mode in LINE_FILL_MODES,
                                    fill_overscan_mm=(getattr(layer, "fill_overscan_mm", 0.0)
                                                      if layer.fill_mode in LINE_FILL_MODES
-                                                     else 0.0)))
+                                                     else 0.0),
+                                   cut_order=getattr(doc, "cut_order", None)))
     return result
 
 

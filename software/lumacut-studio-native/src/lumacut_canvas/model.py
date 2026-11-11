@@ -81,6 +81,66 @@ FILLABLE_KINDS = ("rect", "ellipse", "polygon", "text")
 # Bibliothek (Dicke ändern plant Leistung/Geschwindigkeit/Durchgänge neu).
 LINK_LAYER_FIELDS = ("material_ref", "material_link")
 
+# Schnittreihenfolge des Projekts (lumacut_job.planner, LightBurn „Optimization
+# Settings“): gilt für alle Ebenen, Ebenen-Reihenfolge bleibt (unterste zuerst).
+# Richtungen der Option „In Richtung schneiden“ (Bildschirm-Sicht).
+CUT_ORDER_DIRECTIONS = ("", "top_bottom", "bottom_top", "left_right", "right_left")
+
+
+@dataclass(frozen=True)
+class CutOrder:
+    """Optimierungseinstellungen des Projekts (wie LightBurn „Optimization Settings“).
+
+    ``enabled`` aus = Konturen in Zeichenreihenfolge, Startpunkt und Richtung
+    wie gezeichnet (Füllblöcke in Objekt-Reihenfolge). Sonst: ``inside_first``
+    (innere Formen zuerst), ``reduce_travel`` (nächste Kontur zuerst),
+    ``best_start`` (Startpunkt an der nächsten Ecke/dem nächsten Punkt einer
+    geschlossenen Kontur), ``corners`` (dabei möglichst eine Ecke ≥ 40°
+    Richtungsänderung), ``best_direction`` (offene Pfade dürfen rückwärts
+    laufen), ``direction`` (Reihenfolge in Bildschirmrichtung, Zeile für
+    Zeile; "" = aus). Gespeichert wird nur, was vom Standard abweicht.
+    """
+
+    enabled: bool = True
+    inside_first: bool = True
+    reduce_travel: bool = True
+    best_start: bool = True
+    corners: bool = False
+    best_direction: bool = True
+    direction: str = ""
+
+    @property
+    def is_default(self) -> bool:
+        return self == CutOrder()
+
+    def to_dict(self) -> dict:
+        base = CutOrder()
+        return {f.name: getattr(self, f.name) for f in fields(self)
+                if getattr(self, f.name) != getattr(base, f.name)}
+
+    @classmethod
+    def from_dict(cls, d) -> "CutOrder":
+        if not isinstance(d, dict):
+            return cls()
+        base = cls()
+        vals = {}
+        for f in fields(cls):
+            v = d.get(f.name, getattr(base, f.name))
+            if f.name == "direction":
+                vals[f.name] = v if v in CUT_ORDER_DIRECTIONS else ""
+            else:
+                vals[f.name] = bool(v)
+        return cls(**vals)
+
+    def planner_options(self) -> dict:
+        """Schlüsselwörter für ``lumacut_job.planner.order_polylines``."""
+        if not self.enabled:
+            return {"inside_first": False, "reduce_travel": False, "best_start": False,
+                    "best_direction": False, "corners": False, "direction": ""}
+        return {"inside_first": self.inside_first, "reduce_travel": self.reduce_travel,
+                "best_start": self.best_start, "corners": self.best_start and self.corners,
+                "best_direction": self.best_direction, "direction": self.direction}
+
 SHAPE_KINDS = ("rect", "ellipse", "line", "text", "polygon", "path", "image")
 # Objekte mit Stützpunkten: "polygon" geschlossen, "path" (Freihand) offen.
 POINT_KINDS = {"polygon": 3, "path": 2}  # Art -> Mindestanzahl Punkte
@@ -702,6 +762,8 @@ class Document:
         self.layers: list[Layer] = []
         self.shapes: list[Shape] = []
         self.active_layer_id: str | None = None
+        # Schnittreihenfolge (Optimierungseinstellungen) des ganzen Projekts.
+        self.cut_order = CutOrder()
         self._listeners: list[Listener] = []
         self._batch = 0
         self._dirty = False
@@ -914,7 +976,13 @@ class Document:
             "active_layer": self.active_layer_id,
             "layers": [l.to_dict() for l in self.layers],
             "objects": [s.to_dict() for s in self.shapes],
-        }
+        } | ({"cut_order": self.cut_order.to_dict()} if not self.cut_order.is_default else {})
+
+    def set_cut_order(self, order: "CutOrder") -> None:
+        """Optimierungseinstellungen ersetzen (Undo: ``SetCutOrderCommand``)."""
+        if order != self.cut_order:
+            self.cut_order = order
+            self.changed()
 
     def load_dict(self, d: dict) -> None:
         """Ersetzt den Inhalt. Ungültige Objekte werden still korrigiert."""
@@ -937,6 +1005,7 @@ class Document:
             s.geom = constrain_geometry(s.geom)
             shapes.append(s)
         self.layers, self.shapes = layers, shapes
+        self.cut_order = CutOrder.from_dict(d.get("cut_order") or {})
         active = d.get("active_layer")
         self.active_layer_id = active if active in ids else layers[0].id
         self.changed()

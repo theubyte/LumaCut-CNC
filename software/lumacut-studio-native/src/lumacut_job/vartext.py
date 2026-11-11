@@ -666,6 +666,7 @@ def evaluate_document(doc: Document, aspect: Callable[..., float] | None = None,
     out = Document(with_default_layer=False)
     out.layers = list(doc.layers)
     out.active_layer_id = doc.active_layer_id
+    out.cut_order = getattr(doc, "cut_order", out.cut_order)
     out.shapes = []
     for s in doc.shapes:
         if s.id in replaced:

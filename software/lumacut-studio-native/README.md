@@ -267,6 +267,20 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Code: `src/lumacut_job/cutpath.py`; die Art jedes Teilpfads (`cut`, `lead_in`, `lead_out`,
   `tab`, `perf`, bei Steg-Leistung `tab_pulse` / `tab_off`) steht in `JobLayer.poly_kinds`
   (z. B. für eine Pfadvorschau).
+- **Optimierungseinstellungen** („Optimierung…“, *Alt+Umschalt+K*, Toolbar „Auftrag“; wie
+  LightBurns *Optimization Settings*, gilt für das ganze Projekt, ein Undo-Schritt, in der
+  Projektdatei als `cut_order` – nur gespeichert, wenn vom Standard abweichend): *Optimierung und
+  Umsortierung aktiv* (aus = Konturen und Füllblöcke in Zeichenreihenfolge, mit gezeichnetem
+  Startpunkt und gezeichneter Richtung), *Innere Formen zuerst*, *Leerfahrten verkürzen*
+  (nächste Kontur zuerst), *Besten Startpunkt wählen*, *Möglichst an Ecken beginnen*
+  (*Choose corners*: Start geschlossener Konturen an der nächsten Ecke mit ≥ 40° Knick, die
+  Einstichstelle fällt dort kaum auf; Kreise beginnen am nächsten Punkt), *Beste Richtung
+  wählen* (offene Pfade vom näheren Ende) und *In Richtung schneiden* (*Cut in direction
+  order*: von oben nach unten / unten nach oben / links nach rechts / rechts nach links, Zeile
+  für Zeile – eine Zeile = Konturen, deren Vorderkante innerhalb der halben Höhe der vordersten
+  liegt; in der Zeile die nächste). Die Ebenen laufen weiter von unten nach oben. Senden,
+  Pfadvorschau, Zeitschätzung, Rahmen und „G-Code speichern“ planen gleich (`JobLayer.cut_order`).
+  Code: `src/lumacut_job/planner.py`, Dialog `src/lumacut_job/optimize_qt.py`.
 - **Seriennummern** („Seriennummern…“, *Alt+N*, Toolbar „Auftrag“; Stapel-Fall von LightBurns
   „Variable Text“): ersetzt das ausgewählte Textobjekt durch ein Raster nummerierter Kopien.
   Vorlage mit Platzhaltern `{n}` (Nummer), `{n:3}` (mit Nullen, `007`), `{date}` (TT.MM.JJJJ),

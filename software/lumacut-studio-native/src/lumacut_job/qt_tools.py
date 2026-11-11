@@ -955,6 +955,12 @@ class JobTools(QObject):
         editor.generated_edit_handler = self.edit_generated_at
         self.cut_action = self._add("Schnittoptionen…", self.cut_options, "Alt+K",
                                     "Kerf-Versatz, Haltestege und An-/Abfahrt der aktiven Ebene")
+        self.optimize_action = self._add(
+            "Optimierung…", self.optimize_settings, "Alt+Shift+K",
+            "Schnittreihenfolge des Projekts: innere Formen zuerst, Leerfahrten verkürzen, "
+            "Startpunkt (auch an Ecken), Richtung, In Richtung schneiden – wie LightBurn "
+            "„Optimization Settings“")
+        self.optimize_action.setObjectName("optimize_settings_action")
         self.scan_offset_action = self._add(
             "Scan-Versatz…", self.scan_offset, None,
             "Versatz hin-/rücklaufender Linien je Geschwindigkeit ausgleichen (Bilder und "
@@ -1477,6 +1483,20 @@ class JobTools(QObject):
         self._msg(f"{unit.label} neu erzeugt ({len(ids)} Flächen, Ebene "
                   f"„{doc.layer(unit.layer_id).name}“)")
         return ids
+
+    def optimize_settings(self, order=None) -> bool:
+        """Optimierungseinstellungen (Schnittreihenfolge) des Projekts bearbeiten."""
+        from .optimize_qt import OptimizeDialog, apply_cut_order, summary
+        doc = self.editor.document
+        if order is None:
+            dlg = OptimizeDialog(doc.cut_order, self.window)
+            if dlg.exec() != QDialog.Accepted:
+                return False
+            order = dlg.value()
+        changed = apply_cut_order(self.editor, order)
+        self._msg(f"Optimierung: {summary(doc.cut_order)}" if changed
+                  else "Optimierung unverändert")
+        return changed
 
     def cut_options(self, values: dict | None = None) -> bool:
         """Schnittoptionen der aktiven Ebene bearbeiten (ein Undo-Schritt)."""

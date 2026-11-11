@@ -1,8 +1,12 @@
 """Cut planner: inner shapes first, reduced travel, best start point.
 
 Mirrors LightBurn's Cut Planner defaults ("Cut inner shapes first",
-"Reduce travel moves", "Choose best starting point") for one layer at a
-time; layer order (bottom layer first) is left unchanged.
+"Reduce travel moves", "Choose best starting point", "Choose best
+direction") for one layer at a time; layer order (bottom layer first) is
+left unchanged. The project's „Optimierung…“ settings
+(:class:`lumacut_canvas.model.CutOrder`, carried in ``JobLayer.cut_order``)
+switch each of them off, add "Choose corners, if possible" and "Cut in
+direction order", or turn the re-ordering off entirely (drawing order).
 
 Fill blocks (``JobLayer.fills``, one per object / group / layer) are put
 in nearest-neighbour order too when ``reduce_travel`` is on (the default),
@@ -103,57 +107,137 @@ def containment(polys: list[Poly]) -> list[set[int]]:
     return parents
 
 
-def _best_entry(poly: Poly, pos: Point, best_start: bool) -> tuple[float, Poly]:
-    """Distance from ``pos`` and the polyline oriented/rotated for that entry."""
+#: „Ecken bevorzugen“: ein Punkt gilt als Ecke ab dieser Richtungsänderung.
+CORNER_MIN_TURN_DEG = 40.0
+#: „In Richtung schneiden“: Mindesthöhe einer Zeile (mm); sonst die halbe Ausdehnung
+#: der vordersten Kontur in Schnittrichtung.
+DIRECTION_ROW_MM = 0.5
+DIRECTIONS = ("top_bottom", "bottom_top", "left_right", "right_left")
+
+
+def corner_indices(ring: Poly, min_turn_deg: float = CORNER_MIN_TURN_DEG) -> list[int]:
+    """Indizes der Ecken eines Rings (ohne doppelten Endpunkt).
+
+    Ecke = Richtungsänderung ≥ ``min_turn_deg`` zwischen dem vorigen und dem
+    nächsten *verschiedenen* Punkt. Fein zerlegte Bögen (Kreise, runde Ecken)
+    haben keine Ecken."""
+    n = len(ring)
+    if n < 3:
+        return []
+    out = []
+    limit = math.radians(min_turn_deg)
+    for i in range(n):
+        p = ring[i]
+        a = next((ring[(i - k) % n] for k in range(1, n) if math.dist(ring[(i - k) % n], p) > 1e-6),
+                 None)
+        b = next((ring[(i + k) % n] for k in range(1, n) if math.dist(ring[(i + k) % n], p) > 1e-6),
+                 None)
+        if a is None or b is None:
+            continue
+        ux, uy = p[0] - a[0], p[1] - a[1]
+        vx, vy = b[0] - p[0], b[1] - p[1]
+        turn = abs(math.atan2(ux * vy - uy * vx, ux * vx + uy * vy))
+        if turn >= limit - 1e-9:
+            out.append(i)
+    return out
+
+
+def _best_entry(poly: Poly, pos: Point, best_start: bool, best_direction: bool = True,
+                corners: bool = False) -> tuple[float, Poly]:
+    """Distance from ``pos`` and the polyline oriented/rotated for that entry.
+
+    ``corners``: closed shapes start at the nearest corner
+    (:func:`corner_indices`) when they have one, else at the nearest point.
+    ``best_direction`` off: open paths keep their drawn direction."""
     if is_closed(poly):
         if not best_start:
             return math.dist(pos, poly[0]), poly
         ring = poly[:-1]
-        k = min(range(len(ring)), key=lambda i: math.dist(pos, ring[i]))
+        cand = corner_indices(ring) if corners else []
+        k = min(cand or range(len(ring)), key=lambda i: math.dist(pos, ring[i]))
         rotated = ring[k:] + ring[:k]
         return math.dist(pos, ring[k]), rotated + [rotated[0]]
     d0 = math.dist(pos, poly[0])
     d1 = math.dist(pos, poly[-1])
-    if d1 < d0:
+    if best_direction and d1 < d0:
         return d1, list(reversed(poly))
     return d0, poly
 
 
+def _direction_span(poly: Poly, direction: str) -> tuple[float, float]:
+    """Vorderkante und Hinterkante der Kontur in Schnittrichtung (kleiner = früher).
+
+    Maschinen-mm: Y wächst nach unten (Bildschirm oben = kleines Y), X wächst
+    nach links (Nullpunkt oben rechts, :mod:`lumacut_canvas.workarea`)."""
+    x0, y0, x1, y1 = _bbox(poly)
+    if direction == "top_bottom":
+        return y0, y1
+    if direction == "bottom_top":
+        return -y1, -y0
+    if direction == "left_right":
+        return -x1, -x0
+    return x0, x1   # right_left
+
+
 def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first: bool = True,
                     reduce_travel: bool = True, best_start: bool = True,
-                    should_stop=None) -> list[Poly]:
+                    should_stop=None, best_direction: bool = True, corners: bool = False,
+                    direction: str = "") -> list[Poly]:
     """Return the polylines in cutting order (each possibly reversed/rotated).
 
     Greedy nearest-neighbour over the shapes that are *ready*: with
     ``inside_first`` a closed shape becomes ready only after every shape it
     contains has been cut, so parts never drop out before their holes and
     engravings are done.
+
+    ``direction`` (LightBurn „Cut in direction order“, one of
+    :data:`DIRECTIONS`): among the ready shapes only the front *row* is
+    eligible – shapes whose front edge lies within half the extent (at least
+    :data:`DIRECTION_ROW_MM`) of the frontmost one; inside the row the
+    nearest one (``reduce_travel``) or the frontmost one is cut next.
+    ``best_start`` / ``best_direction`` / ``corners`` choose the entry of the
+    chosen shape whenever ``reduce_travel`` or ``direction`` is on;
+    with neither, shapes keep their drawn start and direction.
     """
     polys = [list(p) for p in polys if len(p) >= 2]
     n = len(polys)
     if n == 0:
         return []
-    if not inside_first and not reduce_travel:
+    if direction not in DIRECTIONS:
+        direction = ""
+    if not inside_first and not reduce_travel and not direction:
         return polys
     waiting: list[int] = [0] * n  # number of uncut children per shape
     parents_of = containment(polys) if inside_first else [set() for _ in polys]
     for parents in parents_of:
         for j in parents:
             waiting[j] += 1
+    spans = [_direction_span(p, direction) for p in polys] if direction else []
+    orient = reduce_travel or bool(direction)
     done = [False] * n
     out: list[Poly] = []
     pos = start
+
+    def entry(i):
+        return _best_entry(polys[i], pos, best_start, best_direction, corners)
+
     for _ in range(n):
         _check(should_stop)
         ready = [i for i in range(n) if not done[i] and waiting[i] == 0]
         if not ready:  # cyclic containment (degenerate geometry): fall back
             ready = [i for i in range(n) if not done[i]]
+        if direction:
+            front = min(ready, key=lambda i: (spans[i][0], i))
+            f0, f1 = spans[front]
+            limit = f0 + max(DIRECTION_ROW_MM, 0.5 * (f1 - f0))
+            ready = [i for i in ready if spans[i][0] <= limit + 1e-9]
         if reduce_travel:
-            best = min(ready, key=lambda i: _best_entry(polys[i], pos, best_start)[0])
-            _, oriented = _best_entry(polys[best], pos, best_start)
+            best = min(ready, key=lambda i: entry(i)[0])
+        elif direction:
+            best = min(ready, key=lambda i: (spans[i][0], i))
         else:
             best = ready[0]
-            oriented = polys[best]
+        oriented = entry(best)[1] if orient else polys[best]
         done[best] = True
         for j in parents_of[best]:
             waiting[j] -= 1
@@ -439,6 +523,10 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
     after ordering (they depend on the chosen start point). Leads are
     checked against the contours of *all* layers (no lead may cut into
     another part); what had to be dropped is counted in ``report``.
+    The order options (``inside_first``, ``reduce_travel``, ``best_start``,
+    ``best_direction``, ``corners``, ``direction``) come from each layer's
+    ``cut_order`` (the project's „Optimierung…“ settings,
+    :class:`lumacut_canvas.model.CutOrder`); keywords in ``options`` override them.
     ``should_stop``: optional callable polled during planning; raises
     :class:`PlanCancelled` when it returns true (background preview).
     Overlapping lines (``overlap_tol_mm`` > 0, :mod:`.overlap`) are removed
@@ -463,8 +551,10 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
     pos = start
     for layer, opts, polys in prepared:
         _check(should_stop)
+        order = getattr(layer, "cut_order", None)
+        layer_options = {**(order.planner_options() if order is not None else {}), **options}
         fills = getattr(layer, "fills", None) or []
-        if fills and options.get("reduce_travel", True):
+        if fills and layer_options.get("reduce_travel", True):
             reversible = not getattr(layer, "fill_fixed_order", False)
             corners = reversible and getattr(layer, "fill_free_corner", False)
             fills = improve_fill_block_order(
@@ -473,7 +563,7 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
             layer = replace(layer, fills=fills)
         if fills:
             pos = fills[-1][-1][1]   # contours follow the fill in every pass
-        ordered = order_polylines(polys, pos, should_stop=should_stop, **options)
+        ordered = order_polylines(polys, pos, should_stop=should_stop, **layer_options)
         if opts.overlap_tol_mm > 0 and ordered:
             if opts.removes_overlaps:
                 dedup = remove_overlaps(ordered, opts.overlap_tol_mm)
