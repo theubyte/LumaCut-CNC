@@ -1,24 +1,27 @@
-"""Pfad-Menü, Teil „Aufräumen“: verbinden, schließen, Duplikate, offene Formen.
+"""Pfad-Menü, Teil „Aufräumen“: verbinden, schließen, vereinfachen, Duplikate,
+offene Formen.
 
 Von :func:`pathops_ui.install` eingebunden (gleiches „Pfad“-Menü in der
 Aktionsleiste und im Kontextmenü). Rechnen in :mod:`pathjoin`; jede Aktion ist
 genau ein Undo-Schritt. Kürzel wie LightBurn: Alt+J verbinden; „Duplikate
-löschen“ liegt auf Alt+Umschalt+D, weil Alt+D das Menü „Datei“ öffnet.
+löschen“ liegt auf Alt+Umschalt+D, weil Alt+D das Menü „Datei“ öffnet;
+„Pfade vereinfachen“ (LightBurn *Optimize Selected Shapes*) auf Alt+O.
 """
 
 from __future__ import annotations
 
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-                               QLabel)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+                               QFormLayout, QLabel)
 
-from . import pathjoin
+from . import pathjoin, pathsimplify
 from .commands import DeleteShapesCommand
 from .edit_commands import ReplaceShapesCommand
 
 ACTIONS = [
     ("path_join", "Pfade verbinden", "Alt+J"),
     ("path_close", "Pfade schließen (Toleranz) …", "Alt+Shift+J"),
+    ("path_simplify", "Pfade vereinfachen …", "Alt+O"),
     ("delete_duplicates", "Duplikate löschen", "Alt+Shift+D"),
     ("select_open", "Offene Formen auswählen", None),
 ]
@@ -71,10 +74,58 @@ class ClosePathsDialog(QDialog):
         return {"tolerance_mm": self.tolerance.value(), "mode": self.mode.currentData()}
 
 
+class SimplifyDialog(QDialog):
+    """LightBurn „Optimize Selected Shapes“: Toleranz, Kurven in Linien, Knoten vorher/nachher live."""
+
+    def __init__(self, shapes, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Pfade vereinfachen")
+        self.shapes = list(shapes)
+        form = QFormLayout(self)
+        self.tolerance = QDoubleSpinBox()
+        self.tolerance.setRange(*pathsimplify.SIMPLIFY_TOLERANCE_RANGE)
+        self.tolerance.setDecimals(3)
+        self.tolerance.setSingleStep(0.01)
+        self.tolerance.setValue(pathsimplify.SIMPLIFY_TOLERANCE_MM)
+        self.tolerance.setSuffix(" mm")
+        self.tolerance.setToolTip("Größte erlaubte Abweichung von der ursprünglichen Kontur – "
+                                  "0,05 mm liegt unter der Strahlbreite eines Diodenlasers")
+        self.fit_lines = QCheckBox("Kurven in Linien umwandeln")
+        self.fit_lines.setToolTip("Pfade mit Kurvensegmenten (Knotenbearbeitung) abflachen und als "
+                                  "gerade Strecken vereinfachen – ohne Häkchen bleiben sie unverändert. "
+                                  "Bögen (G2/G3) gibt es nicht: der Pi lehnt sie ab.")
+        self.readout = QLabel()
+        self.readout.setObjectName("SimplifyReadout")
+        self.readout.setWordWrap(True)
+        form.addRow("Abweichung höchstens", self.tolerance)
+        form.addRow("", self.fit_lines)
+        form.addRow(self.readout)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        form.addRow(self.buttons)
+        self.tolerance.valueChanged.connect(self.update_readout)
+        self.fit_lines.toggled.connect(self.update_readout)
+        self.update_readout()
+
+    def result_preview(self) -> pathsimplify.SimplifyResult:
+        v = self.values()
+        return pathsimplify.simplify_shapes(self.shapes, v["tolerance_mm"], v["fit_lines"])
+
+    def update_readout(self) -> None:
+        res = self.result_preview()
+        self.readout.setText(res.readout())
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(res.changed > 0)
+
+    def values(self) -> dict:
+        return {"tolerance_mm": self.tolerance.value(), "fit_lines": self.fit_lines.isChecked()}
+
+
 class PathCleanup:
     def __init__(self, editor) -> None:
         self.editor = editor
         self.ask_close = self._ask_close     # für Tests austauschbar
+        self.ask_simplify = self._ask_simplify
 
     def _editable(self, ids):
         doc = self.editor.document
@@ -127,6 +178,33 @@ class PathCleanup:
             ed.set_selection(keep + [s.id for s in res.add])
         ed.notify("Pfade schließen: " + res.summary())
 
+    def _ask_simplify(self, shapes):
+        dlg = SimplifyDialog(shapes, self.editor)
+        return dlg.values() if dlg.exec() == QDialog.Accepted else None
+
+    def simplify(self) -> None:
+        ed = self.editor
+        shapes = [s for s in self._scope()[0] if pathsimplify.can_simplify(s)]
+        if not shapes:
+            ed.notify("Pfade vereinfachen: keine Pfade oder Polygone "
+                      + ("in der Auswahl" if ed.selection else "im Dokument"))
+            return
+        v = self.ask_simplify(shapes)
+        if not v:
+            return
+        res = pathsimplify.simplify_shapes(shapes, v["tolerance_mm"], v.get("fit_lines", False))
+        if res.changed:
+            ed.undo_stack.beginMacro("Pfade vereinfachen")
+            try:       # einzeln ersetzen: jede Form bleibt an ihrer Stelle im Stapel
+                for old, new in zip(res.remove, res.add):
+                    ed.undo_stack.push(ReplaceShapesCommand(ed.document, [old], [new], "Pfad vereinfachen"))
+            finally:
+                ed.undo_stack.endMacro()
+            if ed.selection:     # Auswahl bleibt (ersetzte Formen durch ihre Nachfolger)
+                keep = [i for i in ed.selection if ed.document.has_shape(i)]
+                ed.set_selection(keep + [s.id for s in res.add])
+        ed.notify("Pfade vereinfachen: " + res.readout())
+
     def delete_duplicates(self) -> None:
         ed = self.editor
         shapes, sel = self._scope()
@@ -152,6 +230,7 @@ class PathCleanup:
 def install(editor) -> PathCleanup:
     tools = PathCleanup(editor)
     slots = {"path_join": tools.join, "path_close": tools.close,
+             "path_simplify": tools.simplify,
              "delete_duplicates": tools.delete_duplicates, "select_open": tools.select_open}
     for name, text, key in ACTIONS:
         editor._act(name, text, lambda _=False, f=slots[name]: f(), QKeySequence(key) if key else None)

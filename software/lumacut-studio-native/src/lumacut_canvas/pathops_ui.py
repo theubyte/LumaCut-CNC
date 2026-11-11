@@ -1,5 +1,5 @@
 """Menü „Pfad“ im Canvas: Boole-Operationen, Verschweißen, Versatz, Text in Pfade,
-Aufräumen (verbinden, schließen, Duplikate – :mod:`pathjoin_ui`).
+Aufräumen (verbinden, schließen, vereinfachen, Duplikate – :mod:`pathjoin_ui`).
 
 Von :class:`CanvasEditor` über :func:`install` eingebunden (Aktionen + Knopf
 in der Aktionsleiste + Untermenü im Kontextmenü), wie :mod:`arrange_ui`.
@@ -127,7 +127,7 @@ def install(editor) -> PathOps:
                     QKeySequence(sc) if sc else None)
     editor._act("path_offset", "Versatz …", ops.offset, QKeySequence("Ctrl+Alt+O"))
     editor._act("text_to_path", "Text in Pfade umwandeln", ops.text_to_path, QKeySequence("Ctrl+Shift+O"))
-    ops.cleanup = pathjoin_ui.install(editor)   # verbinden / schließen / Duplikate / offene Formen
+    ops.cleanup = pathjoin_ui.install(editor)   # verbinden / schließen / vereinfachen / Duplikate / offene Formen
     return ops
 
 
@@ -145,7 +145,7 @@ def add_to_bar(editor, bar) -> QToolButton:
     btn.setObjectName("PathOpsButton")
     btn.setIcon(icons.icon("pathops"))
     btn.setToolTip("Pfad: vereinigen, abziehen, schneiden, verschweißen, versetzen, Text in Pfade, "
-                   "Pfade verbinden / schließen, Duplikate löschen")
+                   "Pfade verbinden / schließen / vereinfachen, Duplikate löschen")
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setMenu(build_menu(editor, btn))
     bar.addWidget(btn)

@@ -100,7 +100,7 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   ≥ 64 Segmente, Ø 360 mm ≈ 212). Nur G1-Geraden, kein G2/G3 (Höhenausgleich und Analyse auf
   dem Pi lehnen Bögen ab). Siehe Anforderungen §9.3.
 - **Pfade aufräumen** (Menü „Pfad“, wie LightBurn *Auto-Join*, *Close Selected Paths With
-  Tolerance*, *Delete Duplicates*): „Pfade verbinden“ (Alt+J) fügt offene Pfade/Linien einer
+  Tolerance*, *Delete Duplicates*, *Optimize Selected Shapes*): „Pfade verbinden“ (Alt+J) fügt offene Pfade/Linien einer
   Ebene mit Endpunkten ≤ 0,05 mm Abstand zu Ketten zusammen – lose DXF-Strecken werden
   geschlossene Polygone, ineinander liegende Ketten *ein* Polygon mit Löchern (Schraffur lässt
   das Loch frei, Kerf / Stege / An-/Abfahrt und „innen zuerst“ greifen). „Pfade schließen
@@ -115,7 +115,15 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   „Senden und starten“, Schätzen und Speichern („Achtung: N offene Konturen auf Füll-Ebene …
   wird nur als Linie geschnitten, nicht gefüllt (M verbindbar) – Pfad › „Pfade verbinden“
   (Alt+J) oder „Pfade schließen“ (Alt+Umschalt+J)“), wie LightBurns Warnung beim Start.
-  Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathjoin_ui.py`.
+  „Pfade vereinfachen …“ (Alt+O, wie LightBurn *Optimize Selected Shapes*) entfernt Knoten,
+  die höchstens die eingestellte Abweichung (Standard 0,05 mm, 0,005–5 mm) von der Kontur
+  abweichen (Douglas-Peucker) – importierte Kurven, Nachzeichnungen und Freihandstriche mit
+  Tausenden Mini-Strecken werden zu wenigen `G1`-Zügen; der Dialog zeigt live „Knoten: vorher →
+  nachher (−N %)“. Geschlossene Formen bleiben geschlossen, offene behalten ihre Enden, Ebene,
+  Gruppen, Drehung und Stapelplatz bleiben, kleine Löcher gehen nie verloren. Pfade mit
+  Kurvensegmenten bleiben unverändert, außer mit „Kurven in Linien umwandeln“ (keine Bögen –
+  der Pi lehnt G2/G3 ab).
+  Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathsimplify.py`, `pathjoin_ui.py`.
 - **Gruppen:** Strg+G gruppiert, Strg+Umschalt+G löst eine Ebene der Gruppierung
   (verschachtelte Gruppen möglich). Ein Klick wählt immer die ganze Gruppe;
   Verschieben, Skalieren, Drehen, Löschen und Duplizieren wirken auf die Gruppe.
