@@ -1,7 +1,8 @@
 """Menü „Pfad“ im Canvas: Boole-Operationen, Verschweißen, Versatz, Text in Pfade,
 Zerlegen / Kombinieren (:mod:`pathsplit`, LightBurn *Break Apart* / *Combine* – deren
 Alt+B / Alt+C belegen hier Bogentext und Barcode, darum Strg+Alt+B / Strg+Alt+C),
-Aufräumen (verbinden, schließen, vereinfachen, Duplikate – :mod:`pathjoin_ui`).
+Aufräumen (verbinden, schließen, vereinfachen, Duplikate – :mod:`pathjoin_ui`), Ecken
+abrunden / abschrägen (:mod:`pathfillet_ui`, LightBurn *Radius tool*).
 
 Von :class:`CanvasEditor` über :func:`install` eingebunden (Aktionen + Knopf
 in der Aktionsleiste + Untermenü im Kontextmenü), wie :mod:`arrange_ui`.
@@ -14,7 +15,7 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QMenu, QToolButton)
 
-from . import icons, pathjoin_ui, pathops, pathsplit
+from . import icons, pathfillet_ui, pathjoin_ui, pathops, pathsplit
 from .edit_commands import ReplaceShapesCommand
 
 BOOL_SHORTCUTS = {"union": "Ctrl+Alt+U", "subtract": "Ctrl+Alt+S", "intersect": "Ctrl+Alt+I",
@@ -24,7 +25,7 @@ SPLIT_ACTIONS = [
     ("path_break_all", "Zerlegen (jeder Teilpfad einzeln)", None),
     ("path_combine", "Kombinieren", "Ctrl+Alt+C"),
 ]
-MENU_ACTIONS = ([f"bool_{op}" for op in pathops.OPS] + [None, "path_offset", "text_to_path", None]
+MENU_ACTIONS = ([f"bool_{op}" for op in pathops.OPS] + [None, "path_offset"] + pathfillet_ui.MENU_ACTIONS + ["text_to_path", None]
                 + [name for name, _t, _k in SPLIT_ACTIONS] + [None]
                 + pathjoin_ui.MENU_ACTIONS + [None, "tool_tabs", "tabs_clear"])
 
@@ -188,6 +189,7 @@ def install(editor) -> PathOps:
     for name, text, key in SPLIT_ACTIONS:
         editor._act(name, text, lambda _=False, f=split_slots[name]: f(), QKeySequence(key) if key else None)
     ops.cleanup = pathjoin_ui.install(editor)   # verbinden / schließen / vereinfachen / Duplikate / offene Formen
+    ops.fillet = pathfillet_ui.install(editor)  # Ecken abrunden / abschrägen
     return ops
 
 
@@ -204,7 +206,7 @@ def add_to_bar(editor, bar) -> QToolButton:
     btn = QToolButton(bar)
     btn.setObjectName("PathOpsButton")
     btn.setIcon(icons.icon("pathops"))
-    btn.setToolTip("Pfad: vereinigen, abziehen, schneiden, verschweißen, versetzen, Text in Pfade, "
+    btn.setToolTip("Pfad: vereinigen, abziehen, schneiden, verschweißen, versetzen, Ecken abrunden, Text in Pfade, "
                    "zerlegen / kombinieren, Pfade verbinden / schließen / vereinfachen, Duplikate löschen, "
                    "manuelle Stege")
     btn.setPopupMode(QToolButton.InstantPopup)

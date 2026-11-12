@@ -145,6 +145,16 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Kurvensegmenten bleiben unverändert, außer mit „Kurven in Linien umwandeln“ (keine Bögen –
   der Pi lehnt G2/G3 ab).
   Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathsimplify.py`, `pathjoin_ui.py`.
+- **Ecken abrunden …** (Pfad-Menü, Alt+Umschalt+R, wie LightBurns *Radius*-Werkzeug / xTool
+  „Eckenradius“ für Polygone und Sterne): „Abrunden“ ersetzt jede Ecke durch einen Bogen mit dem
+  eingestellten Radius (abgeflacht auf ≤ 0,02 mm, nur `G1`), „Abschrägen“ durch eine gerade Fase.
+  „Alle Ecken“, „Nur Außenecken (Spitzen)“ – z. B. die Zacken eines Sterns – oder „Nur
+  Innenecken“; „Knick ab“ (Standard 10°) lässt flache Knicke abgeflachter Kreise unverändert. Ist
+  eine Kante zu kurz, wird der Radius dort kleiner (der Dialog zählt es live). Gilt für Polygone,
+  Vielecke / Sterne (werden gewöhnliche Polygone), Pfade (Enden bleiben) und alle Löcher; Rechtecke
+  bekommen beim Abrunden ihren Eckenradius (Feld „Ecken“ bleibt editierbar). Auswahl, sonst alles
+  Bearbeitbare; Drehung, Ebene, Gruppen, Stapelplatz und manuelle Stege bleiben; ein
+  Rückgängig-Schritt. Code: `lumacut_canvas/pathfillet.py` (Qt-frei), `pathfillet_ui.py`.
 - **Gruppen:** Strg+G gruppiert, Strg+Umschalt+G löst eine Ebene der Gruppierung
   (verschachtelte Gruppen möglich). Ein Klick wählt immer die ganze Gruppe;
   Verschieben, Skalieren, Drehen, Löschen und Duplizieren wirken auf die Gruppe.
