@@ -36,7 +36,7 @@ große Knöpfe (≥ 48 px, touchtauglich) – das reicht für den normalen Auftr
    Die Ebenenliste zeigt nur das Ergebnis; Materialwerte bearbeiten
    (Bibliotheksdialog, Testzelle, Pi-Abgleich) liegt unter „Mehr“
    (Anforderungen §9.1, `lumacut_canvas/material_picker.py`).
-2. **Design** – Menü: Importieren …, Text, Rechteck, Ellipse, Polygon, Freihand, Linie.
+2. **Design** – Menü: Importieren …, Text, Rechteck, Ellipse, Polygon, Vieleck / Stern, Freihand, Linie.
 3. **Start** – Ein-Klick-Auftrag: baut den G-Code wie „Design senden“
    (inkl. „Nur Auswahl“ und Fokuskorrektur), lädt ihn hoch und startet den
    automatischen Ablauf der Maschine (Pi `op=autorun`: Referenzfahrt → Abtasten
@@ -81,7 +81,8 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
 - Dateien speichern Bildschirm-mm und das Feld `"coords": "screen-tl/machine-tr-v2"`. Alte Dateien ohne Feld
   liegen an derselben sichtbaren Stelle; unbekannte Werte werden abgelehnt.
 
-- **Werkzeuge:** Auswahl (V), Rechteck (R), Ellipse (E), Linie (L), Polygon (P), Freihand (F), Text (T).
+- **Werkzeuge:** Auswahl (V), Rechteck (R), Ellipse (E), Linie (L), Polygon (P), Vieleck / Stern (S),
+  Freihand (F), Text (T).
   *Umschalt* beim Zeichnen = Quadrat/Kreis/45°-Linie; Klick ohne Ziehen legt
   ein 20-mm-Objekt an. Doppelklick auf Text = Text ändern. Polygon: Klick = Punkt,
   Doppelklick/Enter oder Klick auf den ersten Punkt = schließen, Rücktaste = Punkt weg.
@@ -97,6 +98,16 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   (Sehnenfehler ≤ 0,02 mm, nur G1); manuelle Stege rutschen beim Ändern auf den Bogen,
   „Knoten“ / „Kombinieren“ übernehmen die Bögen als Punkte. Datei: `"radius"` (mm), nur wenn
   gesetzt. xTool-Rechtecke mit Eckenradius werden als solche Rechtecke importiert.
+- **Vieleck / Stern** (Werkzeug S, wie LightBurns *Polygon*-Werkzeug / xTool „Polygon“ und
+  „Stern“): vom Mittelpunkt aus ziehen – der Abstand ist der Außenradius, die erste Spitze zeigt
+  nach oben, *Umschalt* dreht sie in 15°-Schritten zur Maus; Tippen legt 20 mm Durchmesser an.
+  Felder in der Eigenschaftsleiste (sichtbar mit dem Werkzeug oder wenn nur Vielecke / Sterne
+  ausgewählt sind): „Seiten“ (3–100, Standard 6), „Stern“ und „Innen“ (Innenradius 5–95 % des
+  Außenradius); eine Änderung ist ein Undo-Schritt für die Auswahl und zugleich die Vorgabe für
+  das nächste Objekt; Mittelpunkt, Größe und Drehung bleiben. Das Objekt ist ein gewöhnliches
+  Polygon (G-Code / Füllung / Kerf / Stege / Boole / Knoten wie jedes Polygon, nur G1) mit
+  `"regular": {"sides", "inner"}` in der Datei; nach „Knoten“, „Vereinfachen“ oder Boole ist es
+  ein normales Polygon (Felder verschwinden), Verschieben / Skalieren / Drehen behalten es.
 - **Bearbeiten:** Verschieben (Maus oder Pfeiltasten 1 mm, *Umschalt* 10 mm),
   Skalieren über 8 Griffe (*Umschalt* = Seitenverhältnis halten), Entf,
   Strg+D duplizieren, Strg+C/V, Strg+Z/Strg+Y, X/Y/B/H in mm in der Eigenschaftsleiste.

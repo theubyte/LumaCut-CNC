@@ -308,7 +308,7 @@ class MainView(QObject):
             menu.addSeparator()
         ed = self.window.canvas
         from .tools import Tool
-        for t in (Tool.TEXT, Tool.RECT, Tool.ELLIPSE, Tool.POLYGON, Tool.FREEHAND, Tool.LINE):
+        for t in (Tool.TEXT, Tool.RECT, Tool.ELLIPSE, Tool.POLYGON, Tool.NGON, Tool.FREEHAND, Tool.LINE):
             a = ed.actions_by_name.get(f"tool_{t.value}")
             if a is not None:
                 menu.addAction(a)

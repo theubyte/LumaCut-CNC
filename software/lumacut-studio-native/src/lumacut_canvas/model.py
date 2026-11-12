@@ -582,6 +582,12 @@ class Shape:
     # Skalieren in mm gleich und wird beim Zeichnen auf die halbe kürzere Seite
     # begrenzt. 0 = scharfe Ecken (bisheriges Verhalten).
     corner_radius: float = 0.0
+    # Regelmäßiges Vieleck / Stern für kind == "polygon" (LightBurn *Polygon*, xTool
+    # „Polygon“ / „Stern“, :mod:`ngon`): (Seiten, Innenradius) – Innenradius 0 = Vieleck,
+    # 0 < r < 1 = Stern mit Innenradius r × Außenradius. Die Punkte bleiben maßgeblich;
+    # das Feld „Seiten“ wird nur angeboten, solange die Punkte noch dazu passen
+    # (:func:`ngon.spec_of`). Leer = gewöhnliches Polygon (bisheriges Verhalten).
+    regular: tuple = ()
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -649,6 +655,8 @@ class Shape:
             d["tabs"] = [[round(u, 6), round(v, 6)] for u, v in self.tabs]
         if self.kind == "rect" and self.corner_radius:
             d["radius"] = round(self.corner_radius, 6)
+        if self.kind == "polygon" and self.regular:
+            d["regular"] = {"sides": int(self.regular[0]), "inner": round(float(self.regular[1]), 6)}
         return d
 
     @staticmethod
@@ -671,7 +679,24 @@ class Shape:
                      font_bold=bool(d.get("bold", False)), font_italic=bool(d.get("italic", False)),
                      generator=dict(d["generator"]) if isinstance(d.get("generator"), dict) else None,
                      tabs=_read_tabs(d.get("tabs")),
-                     corner_radius=_read_radius(d.get("radius")) if kind == "rect" else 0.0)
+                     corner_radius=_read_radius(d.get("radius")) if kind == "rect" else 0.0,
+                     regular=_read_regular(d.get("regular")) if kind == "polygon" else ())
+
+
+def _read_regular(raw) -> tuple:
+    """``regular`` eines Polygons aus einer Datei; Unlesbares = gewöhnliches Polygon."""
+    if not isinstance(raw, dict):
+        return ()
+    try:
+        sides, inner = int(raw.get("sides", 0)), float(raw.get("inner", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return ()
+    if not 3 <= sides <= REGULAR_MAX_SIDES or not math.isfinite(inner) or not 0.0 <= inner < 1.0:
+        return ()
+    return (sides, inner)
+
+
+REGULAR_MAX_SIDES = 100
 
 
 def _read_radius(raw) -> float:

@@ -30,7 +30,8 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import arrange_ui, corners_ui, icons, node_ui, pathops_ui, tabs_ui, text_ui, theme, touch, units
+from . import (arrange_ui, corners_ui, icons, ngon, ngon_ui, node_ui, pathops_ui, tabs_ui, text_ui, theme,
+               touch, units)
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip, VScrollStrip
@@ -129,6 +130,8 @@ class PropertyBar(QWidget):
         lay.addWidget(self.text_style)
         self.corner_controls = corners_ui.CornerRadiusControls(editor)  # Eckenradius (nur Rechtecke)
         lay.addWidget(self.corner_controls)
+        self.ngon_controls = ngon_ui.NgonControls(editor)  # Vieleck / Stern (Seiten, Stern, Innen)
+        lay.addWidget(self.ngon_controls)
         self.node_controls = node_ui.NodeControls(editor)  # Knotenwerkzeug: einfügen/löschen/Kurve/…
         lay.addWidget(self.node_controls)
         lay.addStretch()
@@ -161,7 +164,9 @@ class PropertyBar(QWidget):
                      "polygon": "Polygon", "path": "Freihand", "image": "Bild"}
             tops = {doc.shape(i).groups[0] if doc.shape(i).groups else i for i in sel}
             if len(sel) == 1:
-                self.title.setText(names.get(kinds.pop(), "Objekt"))
+                spec = ngon.spec_of(doc.shape(sel[0]))
+                self.title.setText(("Stern" if ngon.is_star(spec) else "Vieleck") if spec
+                                   else names.get(kinds.pop(), "Objekt"))
             elif len(tops) == 1:
                 self.title.setText(f"Gruppe ({len(sel)})")
             else:
@@ -188,6 +193,7 @@ class PropertyBar(QWidget):
             self.text.setText(doc.shape(sel[0]).text)
         self.text_style.refresh()
         self.corner_controls.refresh()
+        self.ngon_controls.refresh()
         self.node_controls.refresh()
         self._updating = False
 
@@ -531,6 +537,9 @@ class CanvasEditor(QWidget):
         if tool == Tool.TABS:
             self.notify("Werkzeug: Stege – Umriss einer geschlossenen Form antippen setzt einen Steg, "
                         "Steg antippen entfernt ihn, ziehen verschiebt ihn")
+        elif tool == Tool.NGON:
+            self.notify("Werkzeug: Vieleck / Stern – vom Mittelpunkt aus ziehen (Umschalt dreht in "
+                        "15°-Schritten), Tippen legt 20 mm an; Seiten / Stern in der Eigenschaftsleiste")
         else:
             self.notify(f"Werkzeug: {TOOL_LABELS[tool]}")
 

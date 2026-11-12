@@ -1,5 +1,5 @@
 """Werkzeuge: Auswahl (Verschieben/Skalieren/Drehen/Rahmenauswahl), Rechteck,
-Ellipse, Linie, Polygon, Freihand, Text, Stege (manuelle Haltestege, :mod:`tabs_ui`).
+Ellipse, Linie, Polygon, Vieleck / Stern (:mod:`ngon`), Freihand, Text, Stege (manuelle Haltestege, :mod:`tabs_ui`).
 
 Der :class:`ToolController` bekommt Mausereignisse in Szene-mm von der
 :class:`~canvas_view.CanvasView`. Während eines Zugs wird das Modell live
@@ -17,11 +17,11 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QPen
 from PySide6.QtWidgets import QGraphicsRectItem, QInputDialog
 
-from . import theme
+from . import ngon, theme
 from .commands import AddShapesCommand, SetGeometryCommand, SetTextCommand
 from .items import ROTATE_HANDLE
-from .model import (Geometry, Shape, keep_inside_together, normalize_angle, rotate_point,
-                    simplify_polyline)
+from .model import (Geometry, Shape, constrain_geometry, keep_inside_together, normalize_angle,
+                    rotate_point, simplify_polyline)
 from .shape_paths import text_aspect
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, clamp_offset
 
@@ -41,16 +41,17 @@ class Tool(str, Enum):
     ELLIPSE = "ellipse"
     LINE = "line"
     POLYGON = "polygon"
+    NGON = "ngon"
     FREEHAND = "freehand"
     TEXT = "text"
     TABS = "tabs"
 
 
 TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.NODE: "Knoten", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
-               Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.FREEHAND: "Freihand",
-               Tool.TEXT: "Text", Tool.TABS: "Stege"}
+               Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.NGON: "Vieleck / Stern",
+               Tool.FREEHAND: "Freihand", Tool.TEXT: "Text", Tool.TABS: "Stege"}
 TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.NODE: "N", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
-                  Tool.POLYGON: "P", Tool.FREEHAND: "F", Tool.TEXT: "T", Tool.TABS: "Alt+Shift+T"}
+                  Tool.POLYGON: "P", Tool.NGON: "S", Tool.FREEHAND: "F", Tool.TEXT: "T", Tool.TABS: "Alt+Shift+T"}
 CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
 # Freihand: Ramer-Douglas-Peucker-Toleranz in mm (Abweichung von der gezeichneten
 # Linie) und Mindestabstand roher Mauspunkte.
@@ -137,6 +138,9 @@ class ToolController:
         self._poly: list[tuple[float, float]] = []  # gesetzte Polygonpunkte (mm)
         self._hover: tuple[float, float] | None = None
         self._free: list[tuple[float, float]] = []  # rohe Freihand-Punkte (mm)
+        # Vorgabe des Werkzeugs „Vieleck / Stern“: (Seiten, Innenradius; 0 = Vieleck).
+        # Die Felder der Eigenschaftsleiste (ngon_ui) ändern sie mit.
+        self.ngon_spec: tuple[int, float] = (ngon.DEFAULT_SIDES, 0.0)
         self._rubber = QGraphicsRectItem()
         pen = QPen(QColor(theme.ACCENT), 1, Qt.DashLine)
         pen.setCosmetic(True)
@@ -419,10 +423,33 @@ class ToolController:
             self.ed.refresh_selection_overlay()
         self.ed.notify(f"Drehung: {normalize_angle(self._frame_angle + delta):.1f}°")
 
+    def _ngon_shape(self, centre: QPointF, radius: float, rot: float = 0.0) -> Shape:
+        """Vieleck / Stern der Werkzeug-Vorgabe, innerhalb der Arbeitsfläche."""
+        sh = ngon.make_shape(self.doc.active_layer_id, centre.x(), centre.y(), radius,
+                             *self.ngon_spec, rot=rot)
+        sh.geom = constrain_geometry(sh.geom)
+        return sh
+
     def _drag_draw(self, pos: QPointF, constrain: bool) -> None:
         a = _clamp_point(self.snap_point(self._start))
         b = _clamp_point(self.snap_point(pos))
         w, h = b.x() - a.x(), b.y() - a.y()
+        if self.tool == Tool.NGON:
+            # Wie LightBurn vom Mittelpunkt aus: Abstand = Außenradius, aufrecht;
+            # Umschalt dreht die erste Spitze zur Maus (15°-Schritte).
+            rot = 0.0
+            if constrain and (w or h):
+                rot = math.degrees(math.atan2(w, -h))
+                rot = normalize_angle(round(rot / ROTATE_SNAP_DEG) * ROTATE_SNAP_DEG)
+            shape = self._ngon_shape(a, math.hypot(w, h), rot)
+            if self._preview_id is None:
+                self.doc.add_shape(shape)
+                self._preview_id = shape.id
+            else:
+                self.doc.set_geometry(self._preview_id, shape.geom)
+            self.ed.notify(f"{ngon.label(self.ngon_spec)} · Radius {math.hypot(w, h):.1f} mm"
+                           + (f" · {rot:.0f}°" if rot else ""))
+            return
         if self.tool == Tool.LINE:
             if constrain:  # auf 45°-Schritte einrasten
                 ang = round(math.atan2(h, w) / (math.pi / 4)) * (math.pi / 4)
@@ -600,6 +627,11 @@ class ToolController:
             # Einfacher Klick: Objekt in Standardgröße anlegen.
             p = _clamp_point(self.snap_point(pos))
             d = DEFAULT_SIZE_MM
+            if self.tool == Tool.NGON:  # Klick = Mittelpunkt, 20 mm Durchmesser
+                new = self._ngon_shape(p, d / 2)
+                self.ed.undo_stack.push(AddShapesCommand(self.doc, [new], f"{TOOL_LABELS[self.tool]} zeichnen"))
+                self.ed.set_selection([new.id])
+                return
             geom = Geometry(p.x(), p.y(), d, 0.0) if self.tool == Tool.LINE else Geometry(p.x(), p.y(), d, d)
             shape = Shape(self.tool.value, geom, self.doc.active_layer_id)  # type: ignore[arg-type]
         new = shape.copy()

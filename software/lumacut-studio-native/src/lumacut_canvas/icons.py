@@ -53,6 +53,16 @@ def _polygon(p, c):
         p.drawEllipse(q, 1.4, 1.4)
 
 
+def _ngon(p, c):
+    import math
+    pts = []
+    for i in range(10):
+        r = 8.5 if i % 2 == 0 else 3.8
+        a = math.pi * i / 5
+        pts.append(QPointF(12 + r * math.sin(a), 12.8 - r * math.cos(a)))
+    _pen(p, c); p.drawPolygon(QPolygonF(pts))
+
+
 def _freehand(p, c):
     _pen(p, c, 2.0); path = QPainterPath(); path.moveTo(4, 17)
     path.cubicTo(7, 6, 10, 6, 11.5, 12); path.cubicTo(13, 18, 17, 18, 20, 7); p.drawPath(path)
@@ -247,7 +257,7 @@ def _tabs(p, c):
 
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
-    "polygon": _polygon, "freehand": _freehand,
+    "polygon": _polygon, "ngon": _ngon, "freehand": _freehand,
     "undo": _undo, "redo": _redo, "delete": _delete, "fit": _fit,
     "zoom_in": lambda p, c: _zoom(p, c, True), "zoom_out": lambda p, c: _zoom(p, c, False),
     "grid": _grid, "snap": _snap, "open": _open, "save": _save, "export": _export,

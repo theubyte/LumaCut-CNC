@@ -136,7 +136,8 @@ CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
 #CanvasEditor[touch="true"] #ToolStripScroll QScrollBar:vertical {{ width: 16px; }}
 #LayersPanel[touch="true"] #LayersScroll QScrollBar:vertical {{ width: 16px; }}
 #LayersPanel[touch="true"] #LayersScroll QScrollBar:horizontal {{ height: 16px; }}
-#CanvasEditor[touch="true"] QDoubleSpinBox, #CanvasEditor[touch="true"] QLineEdit,
+#CanvasEditor[touch="true"] QDoubleSpinBox, #CanvasEditor[touch="true"] QSpinBox,
+#CanvasEditor[touch="true"] QLineEdit,
 #CanvasEditor[touch="true"] QComboBox {{ min-height: 34px; }}
 #LayersPanel[touch="true"] QToolButton {{ min-width: 36px; min-height: 36px; padding: 4px; }}
 #LayersPanel[touch="true"] QDoubleSpinBox, #LayersPanel[touch="true"] QSpinBox,
