@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import (arrange_ui, corners_ui, icons, ngon, ngon_ui, node_ui, objsnap_ui, pathops_ui, tabs_ui,
+from . import (arrange_ui, corners_ui, icons, measure_ui, ngon, ngon_ui, node_ui, objsnap_ui, pathops_ui, tabs_ui,
                text_ui, theme, touch, units)
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
@@ -429,6 +429,7 @@ class CanvasEditor(QWidget):
         self.path_ops = pathops_ui.install(self)  # Boole/Verschweißen/Versatz/Text in Pfade
         self.node_editor = node_ui.install(self)  # Knotenwerkzeug (Tool.NODE)
         self.tab_tool = tabs_ui.install(self)     # manuelle Stege (Tool.TABS)
+        self.measure_tool = measure_ui.install(self)  # Messen (Tool.MEASURE)
         self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
                   lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
         # Anzeige-Einheit mm/Zoll; Text zeigt die aktuelle Einheit (kein Symbol).
@@ -539,6 +540,9 @@ class CanvasEditor(QWidget):
         if tool == Tool.TABS:
             self.notify("Werkzeug: Stege – Umriss einer geschlossenen Form antippen setzt einen Steg, "
                         "Steg antippen entfernt ihn, ziehen verschiebt ihn")
+        elif tool == Tool.MEASURE:
+            self.notify("Werkzeug: Messen – von Punkt zu Punkt ziehen oder zwei Punkte antippen "
+                        "(fängt an Objekten / Raster, Umschalt = 15°-Schritte, Alt = frei, Esc löscht)")
         elif tool == Tool.NGON:
             self.notify("Werkzeug: Vieleck / Stern – vom Mittelpunkt aus ziehen (Umschalt dreht in "
                         "15°-Schritten), Tippen legt 20 mm an; Seiten / Stern in der Eigenschaftsleiste")
@@ -563,6 +567,8 @@ class CanvasEditor(QWidget):
         groups: list[tuple[str, ...]] = []
         if node_mode:
             node_ui.add_to_menu(self, menu)
+        if self.tools.tool == Tool.MEASURE:
+            measure_ui.add_to_menu(self, menu)
         if self.selection:
             groups.append(("copy", "duplicate", "delete"))
             groups.append(("rotate_ccw", "rotate_cw", "group", "ungroup"))
@@ -616,6 +622,9 @@ class CanvasEditor(QWidget):
         self.touch_mode = on
         self.view.set_touch_mode(on)
         self._apply_touch_style()
+        mt = getattr(self, "measure_tool", None)
+        if mt is not None:
+            mt.refresh()  # größere Marken / Schrift im Touch-Modus
         self.touchModeChanged.emit(on)
 
     def _apply_touch_style(self) -> None:
@@ -643,6 +652,9 @@ class CanvasEditor(QWidget):
         corner = getattr(self, "ruler_corner", None)
         if corner is not None:
             corner.setText(unit)
+        mt = getattr(self, "measure_tool", None)
+        if mt is not None:
+            mt.refresh()  # Messung in der neuen Einheit beschriften
 
     def set_display_unit(self, unit: str) -> None:
         """Anzeige-Einheit für Lineale, Statusleiste und Maßfelder ("mm"/"in")."""
@@ -884,6 +896,10 @@ class CanvasEditor(QWidget):
         self.set_selection(keep)
 
     def copy_selection(self) -> None:
+        # Im Werkzeug „Messen“ kopiert Strg+C den gemessenen Abstand.
+        mt = getattr(self, "measure_tool", None)
+        if self.tools.tool == Tool.MEASURE and mt is not None and mt.copy():
+            return
         self._clipboard = [self.document.shape(i).copy() for i in self.selection]
         self._paste_count = 0
 
@@ -959,6 +975,9 @@ class CanvasEditor(QWidget):
     def _reset_history(self) -> None:
         self.undo_stack.clear()
         self.set_selection([])
+        mt = getattr(self, "measure_tool", None)
+        if mt is not None:
+            mt.clear()  # eine Messung gehört zum vorigen Dokument
         self.view.fit_work_area()
         self.fileChanged.emit(self.title())
 

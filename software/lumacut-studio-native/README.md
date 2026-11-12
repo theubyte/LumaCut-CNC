@@ -36,7 +36,8 @@ große Knöpfe (≥ 48 px, touchtauglich) – das reicht für den normalen Auftr
    Die Ebenenliste zeigt nur das Ergebnis; Materialwerte bearbeiten
    (Bibliotheksdialog, Testzelle, Pi-Abgleich) liegt unter „Mehr“
    (Anforderungen §9.1, `lumacut_canvas/material_picker.py`).
-2. **Design** – Menü: Importieren …, Text, Rechteck, Ellipse, Polygon, Vieleck / Stern, Freihand, Linie.
+2. **Design** – Menü: Importieren …, Text, Rechteck, Ellipse, Polygon, Vieleck / Stern, Freihand, Linie
+   (… Codes / Bogentext / Text auf Pfad …) und zuletzt das Werkzeug „Messen“.
 3. **Start** – Ein-Klick-Auftrag: baut den G-Code wie „Design senden“
    (inkl. „Nur Auswahl“ und Fokuskorrektur), lädt ihn hoch und startet den
    automatischen Ablauf der Maschine (Pi `op=autorun`: Referenzfahrt → Abtasten
@@ -82,7 +83,7 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   liegen an derselben sichtbaren Stelle; unbekannte Werte werden abgelehnt.
 
 - **Werkzeuge:** Auswahl (V), Rechteck (R), Ellipse (E), Linie (L), Polygon (P), Vieleck / Stern (S),
-  Freihand (F), Text (T).
+  Freihand (F), Text (T), Messen (M, siehe unten).
   *Umschalt* beim Zeichnen = Quadrat/Kreis/45°-Linie; Klick ohne Ziehen legt
   ein 20-mm-Objekt an. Doppelklick auf Text = Text ändern. Polygon: Klick = Punkt,
   Doppelklick/Enter oder Klick auf den ersten Punkt = schließen, Rücktaste = Punkt weg.
@@ -175,6 +176,19 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   („Fang: Kantenmitte“). Alt beim Ziehen setzt ihn aus; ausgeblendete Ebenen fangen nicht,
   gesperrte schon. Die Wahl wird in QSettings (`canvas/object_snap`) gespeichert. Code:
   `lumacut_canvas/objsnap.py` (Qt-frei), `objsnap_ui.py`.
+- **Messen** (Werkzeug M, letzter Knopf der Werkzeugleiste und im Menü „Design“ – wie
+  LightBurns *Measure*-Werkzeug): von Punkt zu Punkt ziehen oder zwei Punkte antippen (nach dem
+  ersten Tipp folgt das Ende der Maus). Beide Punkte fangen wie die Zeichenwerkzeuge an Knoten,
+  Ecken, Kantenmitten, Mittelpunkten, Quadranten und Linien-Enden („An Objekten fangen“, 7 px /
+  Touch-Modus 14 px), sonst am 1-mm-Raster; Alt setzt den Objektfang aus, Umschalt rastet die
+  Richtung in 15°-Schritten ein. Auf der Zeichenfläche erscheinen Strecke, Endmarken und ein
+  Schild mit Abstand, ΔX / ΔY (angezeigte Koordinaten, Nullpunkt oben rechts – X zählt nach
+  links) und Winkel (0° = nach rechts, gegen den Uhrzeigersinn positiv), in der Anzeige-Einheit
+  mm / Zoll; die Statusleiste zeigt dasselbe. Die Messung bleibt stehen, bis neu gemessen, Esc
+  gedrückt oder das Werkzeug gewechselt wird; Strg+C (im Werkzeug) oder „Messung kopieren“ im
+  Kontextmenü kopiert den Abstand („42.43 mm“ – passt in jedes Längenfeld). Eine Messung ist
+  kein Objekt: kein Undo-Schritt, wird nicht gespeichert, ändert keinen G-Code. Code:
+  `lumacut_canvas/measure.py` (Qt-frei), `measure_ui.py`.
 - **Touch (z. B. Surface Pro):** „Touch-Modus“ in der Canvas-Aktionsleiste. Er schaltet
   sich bei einem Touchscreen, auf kleinen Bildschirmen (< 1500 × 950 logische px, z. B.
   Surface Pro mit 150–200 % Skalierung) oder beim ersten Fingertipp selbst ein; eine manuelle Wahl wird in QSettings (`canvas/touch_mode`) gespeichert und

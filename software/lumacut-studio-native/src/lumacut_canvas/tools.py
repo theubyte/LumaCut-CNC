@@ -1,5 +1,6 @@
 """Werkzeuge: Auswahl (Verschieben/Skalieren/Drehen/Rahmenauswahl), Rechteck,
-Ellipse, Linie, Polygon, Vieleck / Stern (:mod:`ngon`), Freihand, Text, Stege (manuelle Haltestege, :mod:`tabs_ui`).
+Ellipse, Linie, Polygon, Vieleck / Stern (:mod:`ngon`), Freihand, Text, Stege (manuelle Haltestege, :mod:`tabs_ui`),
+Messen (Abstand / Winkel, :mod:`measure_ui`).
 
 Der :class:`ToolController` bekommt Mausereignisse in Szene-mm von der
 :class:`~canvas_view.CanvasView`. Während eines Zugs wird das Modell live
@@ -45,13 +46,16 @@ class Tool(str, Enum):
     FREEHAND = "freehand"
     TEXT = "text"
     TABS = "tabs"
+    MEASURE = "measure"
 
 
 TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.NODE: "Knoten", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
                Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.NGON: "Vieleck / Stern",
-               Tool.FREEHAND: "Freihand", Tool.TEXT: "Text", Tool.TABS: "Stege"}
+               Tool.FREEHAND: "Freihand", Tool.TEXT: "Text", Tool.TABS: "Stege",
+               Tool.MEASURE: "Messen"}
 TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.NODE: "N", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
-                  Tool.POLYGON: "P", Tool.NGON: "S", Tool.FREEHAND: "F", Tool.TEXT: "T", Tool.TABS: "Alt+Shift+T"}
+                  Tool.POLYGON: "P", Tool.NGON: "S", Tool.FREEHAND: "F", Tool.TEXT: "T", Tool.TABS: "Alt+Shift+T",
+                  Tool.MEASURE: "M"}
 CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
 # Freihand: Ramer-Douglas-Peucker-Toleranz in mm (Abweichung von der gezeichneten
 # Linie) und Mindestabstand roher Mauspunkte.
@@ -213,6 +217,9 @@ class ToolController:
         tt = getattr(self.ed, "tab_tool", None)
         if tt is not None:
             tt.cancel()
+        mt = getattr(self.ed, "measure_tool", None)
+        if mt is not None:
+            mt.cancel()
         if self._mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if self._mode in ("draw", "poly", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -241,6 +248,8 @@ class ToolController:
             self.ed.node_editor.cancel()
         if mode == "tabs":
             self.ed.tab_tool.cancel()
+        if mode == "measure":
+            self.ed.measure_tool.abort()
         if mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if mode in ("draw", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -286,6 +295,9 @@ class ToolController:
         elif self.tool == Tool.TABS:
             self._mode = "tabs"
             self.ed.tab_tool.press(pos)
+        elif self.tool == Tool.MEASURE:
+            self._mode = "measure"
+            self.ed.measure_tool.press(pos, mods)
         elif self.tool == Tool.TEXT:
             self._osnap_begin((), mods)
             try:
@@ -357,6 +369,11 @@ class ToolController:
         if self._mode == "tabs":
             if dragging:
                 self.ed.tab_tool.move(pos)
+            return
+        if self._mode == "measure" or (self._mode is None and self.tool == Tool.MEASURE
+                                       and not self.roi_pending):
+            # Ziehen bewegt den Endpunkt; nach einem Tipp folgt er auch ohne Taste der Maus.
+            self.ed.measure_tool.move(pos, mods, dragging and self._mode == "measure")
             return
         if self._mode == "poly":
             self._hover = self._poly_point(pos, bool(mods & Qt.ShiftModifier))
@@ -641,6 +658,9 @@ class ToolController:
         if mode == "tabs":
             self.ed.tab_tool.release()
             return
+        if mode == "measure":
+            self.ed.measure_tool.release(pos, mods)
+            return
         if mode == "free":
             self.finish_freehand(pos)
             return
@@ -724,6 +744,11 @@ class ToolController:
         if self.tool == Tool.NODE:
             self.ed.node_editor.double_click(pos)
             return
+        if self.tool == Tool.MEASURE:
+            self.ed.measure_tool.double_click(pos)
+            if self.ed.measure_tool.active:
+                self._mode = "measure"  # das folgende Loslassen setzt den Endpunkt
+            return
         if self.tool != Tool.SELECT:
             return
         hit = self.ed.scene.editable_shape_at(pos)
@@ -756,6 +781,8 @@ class ToolController:
                 return True
         if self.tool == Tool.NODE and not self.roi_pending and self.ed.node_editor.key_press(event):
             return True
+        if self.tool == Tool.MEASURE and not self.roi_pending and self.ed.measure_tool.key_press(event):
+            return True  # Esc löscht zuerst die Messung (Auswahl bleibt)
         if event.key() == Qt.Key_Escape and self.roi_pending:
             self.cancel()  # nur die Bereichsauswahl abbrechen, Auswahl bleibt
             return True

@@ -263,6 +263,16 @@ def _tabs(p, c):
     p.drawLine(QPointF(13, 3.5), QPointF(13, 8.5))
 
 
+def _measure(p, c):
+    """Messen: Lineal schräg mit Teilstrichen, Endmarken als Punkte."""
+    p.save()
+    p.translate(12, 12); p.rotate(-35)
+    _pen(p, c, 1.6); p.drawRoundedRect(QRectF(-10, -3.5, 20, 7), 1.2, 1.2)
+    for i, x in enumerate(range(-7, 8, 2)):
+        p.drawLine(QPointF(x, -3.5), QPointF(x, -0.5 if i % 2 else 1.0))
+    p.restore()
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "polygon": _polygon, "ngon": _ngon, "freehand": _freehand,
@@ -276,7 +286,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "group": _group, "ungroup": lambda p, c: _group(p, c, True),
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
     "touch": _touch, "path": _path, "arrange": _arrange,
-    "pathops": _pathops, "node": _node, "tabs": _tabs,
+    "pathops": _pathops, "node": _node, "tabs": _tabs, "measure": _measure,
 }
 
 

@@ -324,6 +324,11 @@ class MainView(QObject):
             for a in extra:
                 if a is not None:
                     menu.addAction(a)
+        # Messen (M): Abstand / Winkel zwischen zwei Punkten, ändert das Design nicht.
+        measure = ed.actions_by_name.get(f"tool_{Tool.MEASURE.value}")
+        if measure is not None:
+            menu.addSeparator()
+            menu.addAction(measure)
         return menu
 
     def _show_design_menu(self) -> None:

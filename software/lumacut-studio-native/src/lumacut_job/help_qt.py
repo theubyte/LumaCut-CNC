@@ -17,6 +17,8 @@ FIXED_ENTRIES = (
     ("Ansicht verschieben", "Mittlere Maustaste / Leertaste + Ziehen", "Canvas"),
     ("Auswahl verschieben (1 mm)", "Pfeiltasten (mit Umschalt 10 mm)", "Canvas"),
     ("Polygon abschließen / letzten Punkt / abbrechen", "Eingabe / Rücktaste / Esc", "Canvas"),
+    ("Messen: Richtung in 15°-Schritten / ohne Objektfang", "Umschalt / Alt beim Ziehen", "Canvas"),
+    ("Messen: Abstand kopieren / Messung löschen", "Strg+C / Esc (im Werkzeug Messen)", "Canvas"),
 )
 
 
