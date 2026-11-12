@@ -8546,3 +8546,360 @@ Still open:
   plywood and card (sharp star points at 1500–3000 mm/min on the SKR without burning the
   tips, kerf 0.1 mm and tabs on the star, hatch fill of a star badge), drawing from the centre
   and changing „Seiten“ / „Stern“ by finger in touch mode on the Windows tablet, rebuilt exe).
+
+## 71. Status update 2026-11-12 (review round 64)
+
+Done this round (corner rounding / chamfer – LightBurn *Radius* tool, xTool Creative Space
+corner radius for polygons / stars; Machine / Scan Probe / Materials untouched, Canvas gains a
+module pair and one entry in the „Pfad“ menu):
+
+- Closed since §70 by others: none – main had no new commits since `76208a7`; the Canvas
+  worktree (`canvas-work`) still has no commit since 2026-10-26, the Pi Web UI worktree
+  (`pi-ui-redesign`) none since its last push.
+- Gap picked: rounded corners on anything but rectangles were missing (named in §69 – „LightBurn's
+  separate *Radius* tool that fillets single corner nodes of any path is not done“ – and in §70
+  – „no rounded corners on polygons / stars“). On a diode laser sharp corners are a real
+  problem: the head slows down at every corner while the power stays the same (no corner power,
+  see §14), so star points, zig-zags and stencil tips burn darker, char or break off; rounded
+  points look better on coasters, badges, plaques and stencils too. LightBurn rounds corners
+  with its *Radius* tool (any path), xTool offers a corner radius for stars / polygons.
+  Chosen over LightBurn *Order by Priority* (planner change across layers, little everyday
+  value on a single-head diode laser), a per-corner rectangle radius (less common) and the
+  remaining `Still open` items (user decisions, other agents, or hardware). No hardware fact or
+  user decision needed; old projects and their G-code are unchanged.
+- **Engine** (`lumacut_canvas/pathfillet.py`, Qt-free): `fillet_points` replaces every
+  qualifying corner by a tangent arc of the given radius (set-back `t = r / tan(φ / 2)`, φ =
+  interior angle, centre on the bisector) flattened to ≤ 0.02 mm like the G-code (`G1` only –
+  the Pi refuses G2/G3), or by a straight chamfer between the same tangent points. Options:
+  „Alle Ecken“ / „Nur Außenecken (Spitzen)“ / „Nur Innenecken“ (convex / concave relative to the
+  ring's orientation, so a star's points or its notches, holes included; open paths have no
+  inside – every corner counts), „Knick ab“ (minimum change of direction, default 10°, so the
+  0.5° bends of a flattened imported circle stay). When an edge is too short the radius is
+  reduced at that corner (at most half the edge when the neighbouring corner is rounded too,
+  otherwise the whole edge – LightBurn distributes the same way) and counted as „begrenzt“.
+  `fillet_shape` handles every ring (holes) of polygons and paths (open paths keep their ends,
+  a path whose end meets its start is rounded at the start too), keeps rotation, layer, groups
+  and the stacking slot (rebuilt via `pathsimplify._rebuild`) and carries manual tabs onto the
+  new outline (`tabs.carry_tabs`). Polygons / stars become plain polygons (the „Seiten“ /
+  „Stern“ fields disappear, like LightBurn's *Convert to Path*). Rectangles stay rectangles:
+  „Abrunden“ sets their corner radius (§69, same id, the field „Ecken“ stays editable and the
+  radius stays in mm when scaling; clamped to half the short side and counted), „Abschrägen“
+  turns a sharp rectangle into an 8-point polygon; already rounded rectangles are not chamfered.
+  Paths with node-editor curve segments are skipped and counted; ellipses, text, lines, images
+  and generated objects (codes, arc text) are never touched. `fillet_shapes` collects the
+  result with the readout „N Ecke(n) abgerundet in M von K Form(en) · B mit kleinerem Radius
+  (Kante zu kurz) · C mit Kurven übersprungen“.
+- **UI** (`lumacut_canvas/pathfillet_ui.py`): Pfad › „Ecken abrunden …“ (Alt+Umschalt+R –
+  unique in the main window; the Pfad menu of the action bar and the canvas context menu, right
+  after „Versatz …“). Dialog „Ecken abrunden“: „Art“ (Abrunden / Abschrägen), „Radius“
+  (0.05–100 mm, default 2 mm), „Ecken“, „Knick ab“ (1–170°) and a live readout; OK is disabled
+  while nothing would change. The last values are kept for the session (like LightBurn).
+  Scope like „Pfade vereinfachen“: the selection, otherwise every editable object (locked /
+  hidden layers refuse with a status message). One undo step („Ecken abrunden“ / „Ecken
+  abschrägen“, each object replaced in place), the selection follows the replaced objects.
+  README: „Ecken abrunden …“ in the path tools.
+- **Downstream**: the result is a plain polygon / path (or a rectangle with corner radius) –
+  G-code, planner, kerf / lead-in / automatic and manual tabs, hatch / crosshatch / offset fill,
+  Boole / offset, node edit, path preview, time estimate, SVG / PNG export and the file format
+  are unchanged code paths.
+
+Tests:
+
+- New `tests/test_pathfillet.py` (22 tests): tangent points and arc points on the circle, chord
+  deviation ≤ 0.02 mm, perimeter / area of a rounded square; chamfer area / perimeter; clamping
+  on short edges (a square becomes a circle) and the whole edge when the neighbour stays sharp;
+  „Knick ab“ on a 720-point circle and an octagon; star outer / inner / all corners in both ring
+  orientations (tips pulled in, notches pushed out) and the star becoming a plain polygon; open
+  path ends and a closed-loop path; holes; rotation / layer / groups / centre and the rounded
+  outline inside the original; rectangles (radius, same id, clamping, inner = nothing,
+  chamfer polygon with rotation, rounded rectangle not chamfered); skipped curves / codes /
+  ellipses / lines, radius 0, unknown mode; readout texts; manual tabs kept on the edges; arc
+  segment count; G-code burned length = rounded perimeter, G1 only, Pi guard; kerf + 4 tabs and
+  hatch fill area on a rounded plate; file round trip; dialog defaults / readout / OK state /
+  preset values; editor: one undo step, stacking and selection kept, scope without selection,
+  chamfer, remembered values, rectangle keeps id and radius; cancel, locked layer, nothing to
+  do; Pfad menu (after „Versatz …“) and context menu; Alt+Umschalt+R unique in the main window
+  and an imported SVG star rounded at its points.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): ****2700 passed, 3 skipped**, 0 failed (16.4 min; 2678 + 22
+new corner rounding tests). First run green.**
+
+Output change for old files: none – nothing changes until „Ecken abrunden …“ is used; the
+result is stored as an ordinary polygon / path (or a rectangle's existing `"radius"`).
+
+Still open:
+
+- Job placement on the camera image (rest of #16) – Machine / Scan Probe.
+- Print-and-cut (registration marks via the camera) – Machine / Scan Probe, not started.
+- Rotary (cylinder engraving) – needs a rotary attachment and firmware axis mapping; user decision
+  whether LumaCut hardware gets one.
+- Min/max corner power – user decision on `LASER_POWER_TRAP` (see §14).
+- LightBurn *Dot Mode* with a real dwell per dot – only via perforation with short cuts (needs a
+  laser-on dwell on the SKR / Pi guard; not planned).
+- Material test: several cells of an interval test share the same layer name (power / speed are
+  equal) – the canvas labels tell them apart. Image cells: the G-code follows each cell's image
+  settings, so editing a cell *layer's* power / speed in the layer panel does not change an image
+  cell (the image settings dialog does). Image-cell options cover every image setting
+  (mode parameters, adjustments, sharpen, levels, tone curve – presets, drawn curves and
+  the curves of the document's images –, dot width, scan angle / increment,
+  bidirectional, overscan); since round 43 threshold, halftone cells / angle, brightness,
+  contrast, gamma, sharpen and scan angle, since round 46 also black / white point, dot
+  width and overscan, since round 48 the angle increment and – as aus / an axes over
+  exactly two columns / rows – negative and bidirectional can be swept on an axis, since
+  round 51 (§58) also 3D levels / Z step and the tone curve, since round 54 (§61) with
+  curves drawn in the test dialog and the curves of the document's images. One shared test
+  image per grid (not an image of the document – the photo is loaded from a file); a curve
+  taken from a document image is labelled „Eigene N“ on the canvas / in the layer name, its
+  „Bild N“ name is a dialog label only.
+- Material library (Materials): `lumacut_materials.testgrid.TEST_CELL_RE` is anchored
+  (`…F<speed>$`), so cell layers of a grid with an image-option axis (`Test P50% F1200
+  Gamma 1.2`, `… Schwarzpunkt 32`, `… Punktbreitenkorrektur 0.05mm`, `… Bidirektional aus`,
+  `… Winkel-Schritt 45°`, since round 51 `… Kurve S`, `… 3D-Stufen 8`, `… Z-Schritt 0.1mm`)
+  are not offered by „Preset aus Testzelle“; relaxing it to accept a trailing
+  ` <Option> <Wert>` suffix (and keeping the swept image value in the preset notes) is up to
+  the Materials agent. Grids without an image axis keep the classic names.
+- Image: the preview shows one pixel per dot and does not model the material's real dot size /
+  beam spread (needs the material library – Materials); mode and adjustment presets (incl. the
+  curve presets) are not linked to the material library (Materials); no per-channel / colour
+  curves (images are grey only). Scan angle: the dialog previews each pass, all passes overlaid
+  (darkest dot per position) or, since round 47, their burn sum (power per dot added up and
+  divided by the passes – a linear model: real wood / card darkens non-linearly with the
+  absorbed energy, which needs the material library – Materials); the time estimate plans oblique rows like X
+  rows (acceleration and junction deviation per `G1`, collinear row segments keep their speed),
+  with the Pi's motion calibration and per-axis feed limits since round 49 (§56); the
+  park-corner live box keeps using the object box (the powered
+  extent of an angled image never leaves it).
+- Time estimate (§56, §59, §60): Cartesian model – a CoreXY frame (Gestell v1) limits the motor axes
+  (A = X+Y, B = X−Y), so diagonals would have to be planned per motor once that frame runs;
+  Grbl's own planner on the Atomstack board (dynamic laser mode) is planned like Marlin; one
+  stored calibration / park and travel height per Windows user (switching between two Pis
+  shows the other's values until the first status arrives). Since round 53 the approach /
+  parking uses the Pi's reported travel height (`travel_z_mm`, clearance or material + 20 mm),
+  park height and probe minimum, starts at the reported head position and follows the
+  placement at „Aktuelle Position“ / „Benutzer-Ursprung“. Still mirrored, not reported: the
+  Z acceleration (firmware `M201 Z` 100 mm/s²) and the park feed F9000; a plain „Senden und
+  starten“ (`start=True`, runs absolute) is estimated at the panel's origin like the later
+  „Start“; the Pi's job optimizer (`job_optimize`, automatic run only) may reorder the job
+  from the head position – not modelled. Not included: homing (only when the Pi is not
+  referenced – after connecting, a reset or an emergency stop) and the probing of the
+  automatic run (the Pi plans the probe grid, `heightmap.plan_probe` – Scan Probe),
+  `M400` / `M114` / `M119` round trips and the start / done melody.
+- Speed unit: material preset labels in the material library (Materials, `presets.py`) and
+  error messages still print mm/min; in/min is not offered for speeds.
+- Park corner: the live check uses object boxes as the base (slightly stricter than the powered
+  G-code extent at send, e.g. text with small glyphs or images with white margins; image scan
+  offset is not added); with „Aktuelle Position“ the zone follows the head only as often as the
+  Pi status updates; near the corner a large hatched job is planned synchronously on a change
+  (≈ 1 s at ~1500 hatched objects, cached afterwards).
+- Fill: fill grouping does not cross layers; overscan is clamped to the cutting area, not to the
+  real machine travel (user decision, see §31); the free start corner is not yet checked on the
+  Windows app with real hardware.
+- Scan offset: one table for the machine (no per-layer / per-material override, no link to the
+  material library – Materials); the fill preview shows pass 1 only (shifted lines appear
+  ≈ 1.5 s after a change at ~1500 hatched objects, the canvas stays usable meanwhile); the test
+  pattern is not yet automatically evaluated via the camera.
+- Trace: true Bézier objects in the document (Canvas); oblique thick crossings still split into two
+  nearby junctions.
+- Path cleanup (§62, §63, §64): no automatic join on import (the status bar only counts open /
+  joinable contours and, since §67, holes imported as separate objects). „Pfade vereinfachen“ (§64) reduces nodes and fits node-editor curves to
+  lines but does not *smooth* (LightBurn's *Optimize › Smooth* / curve fitting into Bézier
+  objects would need true Bézier objects in the document – Canvas; arcs are not an option, the
+  Pi refuses G2/G3); rect / ellipse / text / line objects are not simplified (they have few
+  nodes or are analytic); Douglas-Peucker can, at a coarse tolerance on a thin sliver, let a
+  ring touch itself or a neighbouring ring (the deviation stays within the tolerance – fill
+  shows it and the user can undo). Auto-join chains greedily (nearest endpoint first – at
+  a T junction of three ends the choice is arbitrary, like LightBurn); joined curved paths are
+  flattened (≤ 0.02 mm, curve flags of the node editor are lost – close keeps them); nesting
+  uses one probe point per ring, so two rings that share an edge segment may nest wrongly
+  (then fill shows it and the user can undo).
+- Tabs (§65, §68): manual tabs (tool „Stege“) are stored per shape and follow move / scale /
+  rotate, node edits, simplify, break apart / combine and „Text in Pfade“; Boole operations,
+  „Versatz“, „Pfade verbinden“ and a code re-edit create new objects *without* manual tabs
+  (the contours change – LightBurn drops them too). All
+  manual tabs of a layer share the layer's tab width (no per-tab width) and are assigned to
+  the nearest closed contour of the layer (≤ 1.5 mm + |kerf|), so a tab on an edge shared by
+  two parts goes to one of them; a tab within width/2 + 0.5 mm of the contour start is moved
+  off the start (the planner keeps its start / lead-in choice), merged when two touch. No
+  „Stege gleichmäßig setzen…“ dialog (place N tabs at once – the automatic tabs cover it).
+  The pulse period of „Steg-Leistung“ is fixed (≈ 0.4 mm, evenly fitted to the tab width –
+  LightBurn exposes only the percentage, too); the path preview shows every pulse as its own
+  run (start marker, numbers thinned) and the laser-off pieces as travel. „Innere Formen ohne
+  Stege“ uses the planner's nesting (one probe point per ring, like the cut order): two parts
+  that share an edge are not „inside“ each other; it does not apply to manual tabs.
+- Rectangles / primitives (§69): one corner radius for all four corners (no per-corner radius –
+  since §71 „Ecken abrunden …“ rounds or chamfers the corners of any polygon / path, but a
+  rectangle stays a rectangle only with all four corners rounded), no on-canvas radius handle (LightBurn: Ctrl + drag a blue handle – a touch-friendly
+  handle would need its own gesture, the field „Ecken“ works by finger), the radius is lost
+  when a rectangle becomes another object (node edit, Boole / weld / offset, combine – the
+  arcs stay as points, like LightBurn's *Convert to Path*). SVG / PDF / DXF imports still
+  turn `<rect rx>` and rounded outlines into polygons (keeping SVG `<rect rx=ry>` as a
+  rectangle with radius would change the import result of existing files – possible later
+  together with the opt-in import settings, see §67). Polygon / star (§70): rounded corners
+  only destructively via „Ecken abrunden …“ (§71 – the result is a plain polygon; xTool keeps the
+  star's corner radius editable), no on-canvas handle for the inner
+  radius (the field „Innen“ works by finger), a vertical flip or any point edit makes it a
+  plain polygon, changing the sides drops manual tabs; xTool `.xcs` POLYGON / STAR objects
+  and SVG `<polygon>` imports stay plain polygons (the xTool side / star parameters are not
+  read – no sample file with them; changing the import result of existing files would need
+  the opt-in import settings, see §67).
+- Corner rounding (§71): applies to every qualifying corner of the selection (or of all
+  editable objects) – LightBurn's *Radius* tool can also round single nodes picked on the
+  canvas; picking corners in the node editor is not done (the filter „Nur Außenecken“ /
+  „Nur Innenecken“ / „Knick ab“ covers stars, plaques and imported logos). Destructive: the
+  arcs become points (≤ 0.02 mm, G1 only) and polygons / stars lose their „Seiten“ / „Stern“
+  fields (like LightBurn's *Convert to Path*); only rectangles keep an editable radius. Inverted
+  („bite“) corners exist for rectangles only (field „Ecken“ < 0). Paths with node-editor curve
+  segments, ellipses, text and codes are skipped (convert / „Kurven in Linien“ first). The
+  radius is reduced per corner when an edge is too short (half the edge when the neighbour is
+  rounded as well – LightBurn distributes the same way); it does not look across several short
+  edges, so a densely noded import (e.g. a traced bitmap) with a coarse „Knick ab“ rounds many
+  small bends a little instead of the visual corner – „Pfade vereinfachen“ first helps.
+- Cut order (§66): „Optimierung…“ orders by layer only – no LightBurn *Order by Group* /
+  *Order by Priority* (needs a per-shape cut priority in the shape properties and an order across
+  layers – Canvas), no *Reduce direction changes* and no *Hide backlash* (needs a backlash
+  model of the frame); no „Als Standard“ for new projects (each new project starts with the
+  LightBurn defaults – a per-user default would need a decision where it is stored next to
+  the material library); „Möglichst an Ecken beginnen“ uses a fixed 40° turn (a hexagon's
+  60° counts, a 12-gon's 30° does not); „In Richtung schneiden“ forms rows from the bounding
+  boxes (half the front shape's extent), so a very tall shape spans several rows of small
+  ones; fills keep the nearest-block order (direction applies to contours), the Pi's job
+  optimizer (`job_optimize`, automatic run only) may still reorder the job.
+- Break apart / combine (§67): the importers still create one object per subpath (SVG / PDF /
+  DXF – LightBurn keeps an SVG path with its holes as one shape); the import only *hints* at
+  holes imported as separate objects. Keeping compound paths together on import (or
+  combining nested holes automatically) would change the import result of every existing
+  file – an opt-in import setting is possible later, together with an auto-join setting.
+  „Kombinieren“ works per layer (objects of several layers give one object per layer – LightBurn
+  moves everything to one layer) and never crosses closed / open (a polygon and a line give
+  two objects); rectangles become polygons, ellipses and text are flattened (≤ 0.02 mm /
+  0.01 mm, text no longer depends on the font – like „Text in Pfade“). Overlaps are counted
+  on the node polylines (curve segments of the node editor are not flattened for the
+  check) and become holes (even-odd, like LightBurn) – „Vereinigen“ merges instead.
+  „Zerlegen“ nests with one probe point per ring (like auto-join / the cut order), so two
+  rings that share an edge segment may be grouped wrongly (fill shows it, undo); codes
+  and images are never split or combined.
+- Overlapping lines (§63): removal is a G-code / planner step only – no canvas action
+  („Überlappende Linien entfernen“ would have to turn closed parts into open paths, losing
+  their fill, kerf and tabs); it works per layer, never across layers (other settings), and is
+  skipped on layers with kerf / tabs / lead-in / lead-out / overcut (those need the whole
+  closed contour – combining would mean offsetting first and then splitting shared, offset
+  edges, which no longer coincide). Near-parallel ≤ ~11.5° within the tolerance counts as
+  overlap, so a hairpin of one path narrower than the tolerance loses its tip, and a shallow
+  crossing loses ≈ 2 × tol / sin(angle) around the crossing point. The path preview shows the
+  remaining pieces (it plans like the send), the canvas does not mark the removed edges. The
+  open-path warning is a note in the send / start / estimate / save message, not a blocking
+  dialog.
+- Variable text: „Text in Pfade“ converts the template literally (Canvas, `pathops_ui.py`); the
+  canvas label is a hint under the object, the object itself still shows the template; no
+  serial-port / barcode-scanner input placeholder (a USB scanner typing into the
+  „Eingaben“ dialog works like a keyboard). Keyboard input (§57) is one value per label and
+  send – copies cannot get different typed values in one job (use a CSV file), and typed
+  values are kept for the session only. The advanced counter / CSV row lives in memory
+  outside the undo history only until the history is cleared (new / opened project) – after
+  a reopen the saved project values apply, so an advanced but unsaved project still loses
+  its values when closed without saving (the close prompt asks, as before).
+- Generated objects:
+  - No canvas context-menu entry for „Code bearbeiten“ (Canvas).
+  - Node edits on a code part are discarded when it is re-edited.
+  - A font not installed on the machine falls back in the dialog.
+- 2D codes: Aztec has no rune symbols and no structured append; Data Matrix EDIFACT mode not
+  supported; PDF417 has no Macro PDF417 (structured append) and no MicroPDF417. GS1 Digital
+  Link: no compressed form (DL compression); QR: no ECI for
+  other character sets than UTF-8 (not needed – UTF-8 covers everything), no structured append;
+  Micro QR has no Kanji mode (UTF-8 byte mode covers Japanese text at a higher bit cost).
+- Studio `PROBE_HEAD_MAX` vs. configured travel (Machine / Scan Probe).
+- Flaky timing test `test_machine_reliability.py::EmergencyStopClientTests::test_retries_stop_at_the_deadline`
+  failed once in a full run under load (passes alone) – Machine. Same for
+  `test_machine_origin.py::OriginPanelTests::test_user_origin_from_head_and_placed_start_and_frame`
+  (round 46: „ok start“ wait timed out once under load, green alone and in the rerun).
+- Windows hardware tests („Eingaben für den Auftrag“ at send / one-click start with a name
+  tag – umlauts, long names, a USB barcode scanner typing into the dialog –, material test grids interval × power and passes × speed on wood /
+  card incl. the labels, focus × power / focus × speed grids (relative Z) on wood / card with
+  motorized Z, image test cells (Floyd / Jarvis / greyscale / halftone ramps, step wedges and
+  user photos × power × speed and × line interval, incl. non-default threshold / halftone
+  cells and angle / 3D levels with Z step / brightness / contrast / gamma / negative, and with
+  the „Weitere Bildoptionen“ sharpen / black-white point / S-curve / dot width / scan angle
+  45° / unidirectional / reduced overscan, and image-option axes – threshold sweep
+  64..192, halftone angle 0..45° and cells 20..60 /Zoll, gamma 0.6..1.8 × contrast,
+  brightness × power and scan angle 0..90° × speed, black point 0..64 × white point,
+  dot width 0..0.1 mm × power and overscan 0..5 mm × speed – line ends –, bidirectional
+  aus / an × speed at 3000–6000 mm/min (line offset), negative aus / an on slate / anodised
+  aluminium and angle increment 0..90° × 2–3 passes, tone-curve axis (Linear / S / Tiefen+ /
+  Lichter- × power on a user photo, wood / card; since round 54 a drawn curve and the curve
+  of a photo in the document against the presets, the editor by touch on the Windows tablet) and 3D levels 4..16 × Z step 0..0.2 mm
+  (relief depth with motorized Z), incl. the labels
+  and layer names) on
+  wood / card against real photo engravings with the chosen setting, QR codes with umlauts (ECI 26) and Japanese Kanji text
+  with phone scanners (iOS / Android camera apps) and a handheld scanner, Micro QR M1–M4 on
+  small parts with phone / handheld scanners, the live park-corner warning with
+  lead-ins / kerf against a real refusal, speeds typed in mm/s on the layer panel and dialogs
+  against the sent G-code, the park-corner zone against a real refusal incl. the live warning and
+  the placed zone at „Aktuelle Position“ / „Benutzer-Ursprung“, the time estimate with
+  the SKR calibration (2100 mm/s², 200 mm/s) against the real run time of hatch / image /
+  cut jobs incl. 45° image rows and – since round 52 – a stopwatch from „Start“ to the head
+  lowered in the park corner (approach + parking, small and far jobs, plain start and
+  one-click start without homing; since round 53 with 6–20 mm material, a changed park
+  height, the head jogged away and a job at „Benutzer-Ursprung“ / „Aktuelle Position“) and the stored value offline after a restart, photos at scan angles 30° / 45° /
+  90° and with a 90° angle increment (cross raster, against the „Alle Durchgänge
+  übereinander“ and the „aufaddiert (Brennsumme)“ preview, incl. greyscale photos with 2–3
+  passes at 0° / 45° / 90°) on wood against the X-only raster (line
+  quality of oblique `G1` rows at 3000–6000 mm/min on the SKR), photos with tone curves (S-curve,
+  shadows lifted) against the real engraving, auto-levelled photos with the new black /
+  white point, photos with black / white point and the rotated dialog preview against the real
+  engraving, photos with brightness / contrast / gamma / sharpen and Sketch engravings
+  on wood / card incl. the dialog preview, Jarvis / Stucki / Sierra / halftone / newsprint photos
+  and dot width correction at 3000–6000 mm/min, GS1 QR / Digital Link codes with a GS1 scanner
+  and a phone camera (incl. short-name aliases `/gtin/`, `/lot/`, `?exp=`), plain-text QR codes
+  with mixed segments, scan offset test pattern and
+  compensated bidirectional hatch / image incl. the shifted fill preview and its background
+  planning on the Windows app, fill overscan – line ends even at 2–5 mm on wood / card – and
+  2-opt block order, fill grouping and inside-out offset fill, offset fill, cut options incl.
+  overcut and perforation, PDF import, trace, QR / Micro QR / barcode / Data Matrix / Aztec /
+  PDF417 readability incl. edited, rectangular, DMRE, compact 15 × 15, GS1 and (compact) PDF417
+  codes with a real scanner, park-corner refusal, variable text / CSV merge over several sends
+  incl. the canvas value labels and Ctrl+Z / Strg+Y between sends (no repeated serial number), DXF / SVG
+  exports of Fusion 360 / FreeCAD / LibreCAD / Inkscape as loose segments joined with „Pfade verbinden“
+  and cut with kerf / tabs / lead-in on plywood (inside first, hole filled free), „Duplikate
+  löschen“ against a doubled DXF (no second burn), since round 56 „Überlappende Linien
+  entfernen“ (0.05 mm) on a nested sheet of adjacent rectangles / a puzzle with shared edges
+  on plywood and card – each shared edge burned once, no fragment left standing, inside-first
+  holes, the remaining open chains with perforation, the saved cut time against the
+  estimate – and the open-path warning at send / one-click start for a DXF on a fill layer,
+  since round 57 „Pfade vereinfachen“ (0.05 mm) on an imported SVG logo / a trace / a PDF with
+  dense curve nodes – engraved and cut result against the original (no visible facets at 0.05 mm,
+  facets at 0.5 mm), the real run time against the original (fewer `G1` moves, fewer planner
+  slow-downs on the SKR) and the dialog with Alt+O on the Windows app, since round 58
+  „Steg-Leistung“ 25 / 50 / 75 % on 3 mm plywood and card (multi-pass) – how firmly the
+  part holds, how cleanly it breaks out, whether the pulses at 1500–3000 mm/min mark the
+  tab edge evenly (`G1 … S0` gaps at cut speed in inline mode on the SKR) –, „Innere
+  Formen ohne Stege“ on a sheet with letters / holes and a frame on a separate layer, and
+  „Höchstens Stege je Kontur“ on a long outline with spacing mode, since round 59
+  „Optimierung…“ – „Möglichst an Ecken beginnen“ on plywood / card (start mark hidden in a
+  corner, with kerf and lead-in), „In Richtung schneiden“ von oben nach unten on a nested
+  sheet with the exhaust at the back (smoke not drawn over finished parts) against the run
+  time, „Optimierung … aus“ on a DXF in drawing order, since round 60 „Kombinieren“
+  (Strg+Alt+C) on an imported SVG / PDF logo with holes and a layer filled „Jedes Objekt
+  einzeln“ (holes stay free, kerf / inside-first on plywood), „Zerlegen“ (Strg+Alt+B) of a text
+  outline / an xTool import and moving single letters onto another layer, both shortcuts on a
+  German keyboard (Strg+Alt = AltGr: AltGr+B / AltGr+C type no character, so the action must
+  fire), since round 61 manual tabs (tool „Stege“, Alt+Umschalt+T) on 3 mm plywood / card –
+  tabs placed on straight edges away from visible faces, a heavy part held by 2 manual tabs
+  instead of 4 automatic ones, tabs with „Steg-Leistung“ 50 %, with kerf 0.1 mm and lead-in,
+  placing / dragging / removing tabs by finger on the Windows tablet and the orange markers
+  against the burned gaps, since round 62 the corner radius (field „Ecken“) – an 80 × 50 mm
+  coaster / key tag with 5 mm radius on 3 mm plywood and card (arcs smooth without facets at
+  1500–3000 mm/min on the SKR, kerf 0.1 mm, inside-first hole, a manual tab on a corner arc),
+  inverted corners (−6 mm), a hatched rounded name plate (fill lines end on the arcs), an
+  xTool `.xcs` with rounded rectangles resized after import (corners keep their radius) and
+  the field by finger in touch mode on the Windows tablet, since round 63 „Vieleck / Stern“
+  (S) – a hexagon coaster / honeycomb tiles and a five-pointed star (Innen 38 %) on 3 mm
+  plywood and card (sharp star points at 1500–3000 mm/min on the SKR without burning the
+  tips, kerf 0.1 mm and tabs on the star, hatch fill of a star badge), drawing from the centre
+  and changing „Seiten“ / „Stern“ by finger in touch mode on the Windows tablet, since round 64
+  „Ecken abrunden …“ (Alt+Umschalt+R) – a five-pointed star with rounded points (1–2 mm) and a
+  chamfered plaque on 3 mm plywood and card (no burned / broken tips at 1500–3000 mm/min on the
+  SKR compared with the sharp star, arcs without visible facets, kerf 0.1 mm and tabs on the
+  rounded outline, hatch fill of a rounded star badge), an imported SVG / xTool logo with sharp
+  corners rounded „Nur Außenecken“ while its flattened curves stay (Knick ab 10°), and the
+  dialog by finger in touch mode on the Windows tablet, rebuilt exe).
