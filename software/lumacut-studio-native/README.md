@@ -470,6 +470,21 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Bezugspunkt Mitte/Anfang/Ende, Zeichenabstand, Schrift/Fett/Kursiv. Ist genau ein Textobjekt
   ausgewählt, wird es übernommen und kann ersetzt werden. Code: `src/lumacut_job/arctext.py`,
   `arctext_qt.py`.
+- **Text auf Pfad** („Text auf Pfad…“, *Alt+Umschalt+P*, wie LightBurns *Text on Path*):
+  Text an eine ausgewählte Linie, einen (offenen) Pfad, ein Polygon / einen Stern, ein Rechteck
+  oder eine Ellipse hängen – ein Polygon je Buchstabe, gruppiert, wie „Text in Pfade“ unabhängig
+  von installierten Schriften und für Füllen / Schneiden / Kerf / Stege nutzbar. Jeder Buchstabe
+  wird starr gesetzt und nach der Sehne seines Vorschubs auf dem Pfad gedreht (Knicke und enge
+  Kurven bleiben ruhig; „Buchstaben mit dem Pfad drehen“ aus = alle aufrecht). Einstellungen:
+  „Lage“ in % der Pfadlänge (geschlossene Umrisse beginnen oben in der Mitte und laufen im
+  Uhrzeigersinn: 0 % = oben, 50 % = unten; offene am Anfang der Linie), „Bezugspunkt“
+  Mitte / Anfang / Ende, „Seite“ (Oberseite oder andere Seite gegen die Pfadrichtung – z. B.
+  unten auf einem Kreis von links nach rechts lesbar), „Abstand vom Pfad“ (± mm, −Höhe/2 =
+  mittig auf dem Pfad), Zeichenabstand, Schrift / Fett / Kursiv; Info mit Text- und Pfadlänge
+  (auf offenen Pfaden wird über das Ende hinaus verlängert und gemeldet). Ein mit ausgewählter
+  Text wird übernommen und kann ersetzt werden, der Pfad optional gelöscht (nur Hilfslinie);
+  ein Rückgängig-Schritt. Code: `src/lumacut_job/pathtext.py`, `pathtext_qt.py`, Pfad-Kurve in
+  `lumacut_canvas/alongpath.py`.
 - **Code bearbeiten** („Code bearbeiten…“, *Alt+E*, oder Doppelklick auf einen Code): QR-Code,
   Barcode, Data Matrix, Aztec-, PDF417-Code und Bogentext bleiben nach dem Einfügen bearbeitbar. Der Dialog öffnet mit
   den gespeicherten Einstellungen (die Größe folgt einer seither geänderten Skalierung); „Übernehmen“
@@ -724,7 +739,7 @@ dazu (ohne Referenzfahrt/Abtasten; Höhen, Kopfposition und Versatz am Ursprung
 aus dem Pi-Status, offline die Pi-Standardwerte ab X0/Y0). Sehr große Rasterjobs werden vollständig gelesen;
 bei vielen tausend Zeilen kann das Neuberechnen spürbar dauern.
 
-### Anordnen: Ausrichten, Verteilen, Arrays, Verschachteln
+### Anordnen: Ausrichten, Verteilen, Arrays, Entlang Pfad kopieren, Verschachteln
 
 Knopf „Anordnen“ in der Aktionsleiste (und Untermenü im Kontextmenü), Rechnen in
 `lumacut_canvas/arrange.py` (Qt-frei), Oberfläche in `arrange_ui.py`. Jede Aktion ist ein
@@ -739,6 +754,14 @@ Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
   Bogen mit Anfang und Ende), „Kopien mitdrehen“ an/aus.
 - Kopien bekommen neue IDs und eigene Gruppen; läge eine Kopie außerhalb der
   Arbeitsfläche oder wären es mehr als 500, passiert nichts (Meldung in der Statuszeile).
+- **Entlang Pfad kopieren …** (Alt+Umschalt+C, wie LightBurns *Copy Along Path*,
+  `alongpath.py` / `alongpath_ui.py`): Objekte und einen Pfad (Linie, Pfad, Polygon, Rechteck,
+  Ellipse; bei mehreren gewinnt eine offene Linie, sonst der größte) auswählen – „Anzahl“
+  Kopien (2–500) der übrigen Auswahl als eine Einheit gleichmäßig auf dem Pfad, offen vom
+  Anfang bis zum Ende, geschlossen mit gleichen Abständen ab „Start“ (% der Länge, 0 % = oben
+  Mitte); „Mit dem Pfad drehen“ (die Auswahl gilt als nach rechts zeigend) oder aufrecht. Das
+  Original bleibt, die Kopien werden ausgewählt; läge eine außerhalb der Arbeitsfläche,
+  passiert nichts. Ein Undo-Schritt, Meldung mit Abstand und Pfadlänge.
 - **Verschachteln …** (Alt+Umschalt+N, wie LightBurns *Nesting* / xTools „Intelligentes
   Verschachteln“, `nesting.py` / `nesting_ui.py`): legt die ausgewählten Teile platzsparend
   auf das Material – größte zuerst, ab der gewählten Ecke („Oben rechts (Nullpunkt)“,

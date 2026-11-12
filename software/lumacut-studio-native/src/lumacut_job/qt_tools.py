@@ -945,6 +945,12 @@ class JobTools(QObject):
                                     "Text entlang eines Kreisbogens als Vektorpfade einfügen "
                                     "(ausgewählter Text wird übernommen)")
         self.arc_action.setObjectName("arc_text_action")
+        self.path_text_action = self._add(
+            "Text auf Pfad…", self.path_text, "Alt+Shift+P",
+            "Text an eine ausgewählte Linie, einen Pfad, ein Polygon, Rechteck oder eine Ellipse "
+            "hängen – Lage, Abstand, Seite, Bezugspunkt; ein mit ausgewählter Text wird übernommen "
+            "(wie LightBurn „Text on Path“)")
+        self.path_text_action.setObjectName("path_text_action")
         self.edit_generated_action = self._add(
             "Code bearbeiten…", self.edit_generated, "Alt+E",
             "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-, PDF417-Code oder Bogentext mit seinen "
@@ -1421,6 +1427,43 @@ class JobTools(QObject):
             return []
         self._msg(f"Bogentext eingefügt ({len(ids)} Zeichen, gruppiert)"
                   + (" – Text ersetzt" if replace_id else ""))
+        return ids
+
+    def path_text(self, spec=None, replace: bool | None = None,
+                  remove_path: bool = False) -> list[str]:
+        """Text auf Pfad (ein Undo-Schritt): Auswahl = ein Pfad, optional ein Text."""
+        from lumacut_canvas.alongpath import shape_curve
+
+        from .pathtext_qt import (TITLE, PathTextDialog, insert_path_text, spec_from_text_shape,
+                                  split_selection)
+        doc = self.editor.document
+        path_id, text_id = split_selection(doc, self.editor.selection or ())
+        if path_id is None:
+            self._msg(f"{TITLE}: bitte einen Pfad auswählen (Linie, Pfad, Polygon, Rechteck oder "
+                      "Ellipse), optional zusätzlich einen Text")
+            return []
+        if spec is None:
+            try:
+                curve = shape_curve(doc.shape(path_id))
+            except ValueError as exc:
+                self._msg(f"{TITLE}: {exc}")
+                return []
+            dlg = PathTextDialog(curve, self.window,
+                                 spec_from_text_shape(doc.shape(text_id)) if text_id else None,
+                                 can_replace=text_id is not None)
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, replace, remove_path = dlg.spec(), dlg.replace_source(), dlg.remove_path()
+        replace_id = text_id if (text_id is not None and replace) else None
+        try:
+            ids, res = insert_path_text(self.editor, spec, path_id, replace_id, remove_path)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, TITLE, str(exc))
+            self._msg(f"{TITLE}: {exc}")
+            return []
+        self._msg(f"{TITLE}: {len(ids)} Zeichen gruppiert – {res.readout()}"
+                  + (" – Text ersetzt" if replace_id else "")
+                  + (" – Pfad gelöscht" if remove_path else ""))
         return ids
 
     def set_vartext_values_shown(self, on: bool) -> None:
