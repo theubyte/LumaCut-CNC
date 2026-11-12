@@ -712,7 +712,7 @@ dazu (ohne Referenzfahrt/Abtasten; Höhen, Kopfposition und Versatz am Ursprung
 aus dem Pi-Status, offline die Pi-Standardwerte ab X0/Y0). Sehr große Rasterjobs werden vollständig gelesen;
 bei vielen tausend Zeilen kann das Neuberechnen spürbar dauern.
 
-### Anordnen: Ausrichten, Verteilen, Arrays
+### Anordnen: Ausrichten, Verteilen, Arrays, Verschachteln
 
 Knopf „Anordnen“ in der Aktionsleiste (und Untermenü im Kontextmenü), Rechnen in
 `lumacut_canvas/arrange.py` (Qt-frei), Oberfläche in `arrange_ui.py`. Jede Aktion ist ein
@@ -727,6 +727,18 @@ Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
   Bogen mit Anfang und Ende), „Kopien mitdrehen“ an/aus.
 - Kopien bekommen neue IDs und eigene Gruppen; läge eine Kopie außerhalb der
   Arbeitsfläche oder wären es mehr als 500, passiert nichts (Meldung in der Statuszeile).
+- **Verschachteln …** (Alt+Umschalt+N, wie LightBurns *Nesting* / xTools „Intelligentes
+  Verschachteln“, `nesting.py` / `nesting_ui.py`): legt die ausgewählten Teile platzsparend
+  auf das Material – größte zuerst, ab der gewählten Ecke („Oben rechts (Nullpunkt)“,
+  oben links, unten rechts/links). Bereich: das größte ausgewählte Rechteck (Material,
+  bleibt stehen) oder die Arbeitsfläche; „Abstand“ zwischen den Teilen und „Randabstand“
+  (je 2 mm), „Drehen“ (nicht / 90° / 45°), „Form“ (echte Form – Teile greifen ineinander –
+  oder Hüllbox), „Enthaltene Objekte zusammenhalten“ (Gravur / Löcher innerhalb eines Teils
+  wandern mit) und „Andere Objekte aussparen“ (nicht ausgewählte sichtbare Objekte bleiben
+  frei). Rasterverfahren, Abstände garantiert (konservativ gerastert, je nach Bereich
+  0,25–0,3 mm Raster); Teile, die nicht passen, bleiben stehen. Ein Undo-Schritt, Meldung mit
+  belegter Fläche und Materialnutzung. Formen, Ebenen und Stege bleiben unverändert – die
+  Teile werden nur verschoben / gedreht.
 
 ### Knoten bearbeiten (Werkzeug „Knoten“, Taste N)
 

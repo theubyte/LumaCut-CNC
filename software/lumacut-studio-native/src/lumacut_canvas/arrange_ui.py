@@ -1,4 +1,4 @@
-"""Menü „Anordnen“ im Canvas: Ausrichten, Verteilen, Raster- und Kreis-Array.
+"""Menü „Anordnen“ im Canvas: Ausrichten, Verteilen, Raster- und Kreis-Array, Verschachteln.
 
 Von :class:`CanvasEditor` über :func:`install` eingebunden (Aktionen +
 Knopf in der Aktionsleiste + Untermenü im Kontextmenü). Rechnen in
@@ -11,7 +11,7 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
                                QMenu, QSpinBox, QToolButton)
 
-from . import arrange, icons
+from . import arrange, icons, nesting_ui
 from .commands import AddShapesCommand, SetGeometryCommand
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
@@ -21,7 +21,8 @@ ALIGN_SHORTCUTS = {  # wie in gängigen Laserprogrammen: Strg+Umschalt+Pfeil/Buc
     "hcenter": "Ctrl+Shift+H", "vcenter": "Ctrl+Shift+V",
 }
 MENU_ACTIONS = ([f"align_{m}" for m in arrange.ALIGN_MODES]
-                + [None, "distribute_h", "distribute_v", None, "array_grid", "array_circular"])
+                + [None, "distribute_h", "distribute_v", None, "array_grid", "array_circular"]
+                + [None] + nesting_ui.MENU_ACTIONS)
 
 
 def _spin(lo, hi, val, step=1.0, suffix=" mm", decimals=1):
@@ -184,6 +185,7 @@ def install(editor) -> Arranger:
     editor._act("distribute_v", "Senkrecht verteilen", lambda: arr.distribute("v"))
     editor._act("array_grid", "Raster-Array …", arr.grid)
     editor._act("array_circular", "Kreis-Array …", arr.circular)
+    arr.nester = nesting_ui.install(editor)     # Verschachteln (Nesting)
     return arr
 
 
@@ -201,7 +203,7 @@ def add_to_bar(editor, bar) -> QToolButton:
     btn = QToolButton(bar)
     btn.setObjectName("ArrangeButton")
     btn.setIcon(icons.icon("arrange"))
-    btn.setToolTip("Anordnen: ausrichten, verteilen, Array")
+    btn.setToolTip("Anordnen: ausrichten, verteilen, Array, verschachteln")
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setMenu(build_menu(editor, btn))
     bar.addWidget(btn)
