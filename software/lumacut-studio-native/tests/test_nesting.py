@@ -420,7 +420,8 @@ def test_nest_in_arrange_menu_and_context_menu(ed):
     from PySide6.QtCore import QPointF
     _add(ed, [Shape("rect", Geometry(10, 10, 20, 10), ed.document.active_layer_id)])
     texts = [a.text() for a in ed.arrange_button.menu().actions() if a.text()]
-    assert texts[-1] == "Verschachteln …" and texts[-2] == "Kreis-Array …"
+    assert texts[-1] == "Verschachteln …" and texts[-2] == "Entlang Pfad kopieren …"
+    assert texts[-3] == "Kreis-Array …"
     menu = ed.build_context_menu(QPointF(20, 15))
     sub = next(a.menu() for a in menu.actions() if a.menu() is not None
                and a.menu().objectName() == "ArrangeMenu")
