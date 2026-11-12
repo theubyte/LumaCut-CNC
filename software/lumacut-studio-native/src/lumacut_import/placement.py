@@ -101,6 +101,8 @@ def place_shapes(shapes: list[Shape], drop=None) -> tuple[list[Shape], float]:
         g = sh.geom
         # Drehung um die Boxmitte bleibt erhalten: Mitte wandert mit, Box skaliert.
         g.x, g.y, g.w, g.h = g.x * s + dx, g.y * s + dy, g.w * s, g.h * s
+        if sh.corner_radius:   # Eckenradius verkleinert sich beim Einpassen mit
+            sh.corner_radius *= s
         if gid:
             sh.groups = (gid,) + tuple(sh.groups)
     return shapes, s

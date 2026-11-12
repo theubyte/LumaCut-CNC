@@ -270,6 +270,24 @@ def set_closed(shape: Shape, closed: bool, at: int | None = None) -> tuple[Shape
     return from_rings(shape, rings, "path"), new_at
 
 
+def rounded_rect_points(shape: Shape) -> tuple[tuple[float, float], ...]:
+    """Umriss eines Rechtecks mit Eckenradius als Stützpunkte, normiert auf die
+    ungedrehte Box (Bögen mit Sehnenfehler ≤ 0,02 mm wie im G-Code)."""
+    from .shape_paths import FLATTEN_TOL_MM, _QT_FLATTEN_UNITS, local_path
+    from PySide6.QtGui import QTransform
+    b = shape.geom.local_bounds()
+    k = max(1.0, _QT_FLATTEN_UNITS / FLATTEN_TOL_MM)
+    poly = local_path(shape).toSubpathPolygons(QTransform.fromScale(k, k))[0]
+    pts: list[tuple[float, float]] = []
+    for p in poly:
+        q = ((p.x() / k - b.x) / b.w if b.w else 0.0, (p.y() / k - b.y) / b.h if b.h else 0.0)
+        if not pts or math.dist(q, pts[-1]) > 1e-9:
+            pts.append(q)
+    if len(pts) > 1 and math.dist(pts[0], pts[-1]) <= 1e-9:
+        pts.pop()
+    return tuple(pts)
+
+
 def to_editable(shape: Shape) -> Shape:
     """Rechteck, Ellipse, Linie → Polygon/Pfad mit gleicher Form und Drehung."""
     if is_editable(shape):
@@ -283,8 +301,13 @@ def to_editable(shape: Shape) -> Shape:
         return replace(shape, kind="path", geom=Geometry(b.x, b.y, b.w, b.h, g.rot), points=pts,
                        rings=(), curves=())
     if shape.kind == "rect":
+        from .corners import is_rounded
+        if is_rounded(shape):
+            return replace(shape, kind="polygon", geom=g.copy(), points=rounded_rect_points(shape),
+                           rings=(), curves=(), corner_radius=0.0)
         return replace(shape, kind="polygon", geom=g.copy(),
-                       points=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), rings=(), curves=())
+                       points=((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)), rings=(), curves=(),
+                       corner_radius=0.0)
     if shape.kind == "ellipse":
         n = ellipse_node_count(g.w, g.h)
         pts = tuple((0.5 + 0.5 * math.cos(2 * math.pi * i / n), 0.5 + 0.5 * math.sin(2 * math.pi * i / n))

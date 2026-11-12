@@ -577,6 +577,11 @@ class Shape:
     # Umriss, normiert auf die ungedrehte Objektbox wie ``points`` – Verschieben,
     # Skalieren und Drehen nehmen sie mit. Leer = automatische Stege der Ebene.
     tabs: tuple[tuple[float, float], ...] = ()
+    # Eckenradius für kind == "rect" in mm (LightBurn *Corner Radius*, :mod:`corners`):
+    # > 0 abgerundete Ecken, < 0 nach innen gewölbte Ecken („Biss“). Bleibt beim
+    # Skalieren in mm gleich und wird beim Zeichnen auf die halbe kürzere Seite
+    # begrenzt. 0 = scharfe Ecken (bisheriges Verhalten).
+    corner_radius: float = 0.0
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -642,6 +647,8 @@ class Shape:
             d["generator"] = self.generator
         if self.tabs:
             d["tabs"] = [[round(u, 6), round(v, 6)] for u, v in self.tabs]
+        if self.kind == "rect" and self.corner_radius:
+            d["radius"] = round(self.corner_radius, 6)
         return d
 
     @staticmethod
@@ -663,7 +670,17 @@ class Shape:
                      curves=clean_curves(len(points), d.get("curves", ())),
                      font_bold=bool(d.get("bold", False)), font_italic=bool(d.get("italic", False)),
                      generator=dict(d["generator"]) if isinstance(d.get("generator"), dict) else None,
-                     tabs=_read_tabs(d.get("tabs")))
+                     tabs=_read_tabs(d.get("tabs")),
+                     corner_radius=_read_radius(d.get("radius")) if kind == "rect" else 0.0)
+
+
+def _read_radius(raw) -> float:
+    """``radius`` eines Rechtecks aus einer Datei; Unlesbares = scharfe Ecken."""
+    try:
+        r = float(raw or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return r if math.isfinite(r) else 0.0
 
 
 def tabs_from_world(geom: Geometry, pts: Iterable[tuple[float, float]]) -> tuple[tuple[float, float], ...]:

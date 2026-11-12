@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import arrange_ui, icons, node_ui, pathops_ui, tabs_ui, text_ui, theme, touch, units
+from . import arrange_ui, corners_ui, icons, node_ui, pathops_ui, tabs_ui, text_ui, theme, touch, units
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip, VScrollStrip
@@ -127,6 +127,8 @@ class PropertyBar(QWidget):
         lay.addWidget(self.text)
         self.text_style = text_ui.TextStyleControls(editor)  # Schriftart/Größe/Fett/Kursiv
         lay.addWidget(self.text_style)
+        self.corner_controls = corners_ui.CornerRadiusControls(editor)  # Eckenradius (nur Rechtecke)
+        lay.addWidget(self.corner_controls)
         self.node_controls = node_ui.NodeControls(editor)  # Knotenwerkzeug: einfügen/löschen/Kurve/…
         lay.addWidget(self.node_controls)
         lay.addStretch()
@@ -185,6 +187,7 @@ class PropertyBar(QWidget):
         if single_text and not self.text.hasFocus():
             self.text.setText(doc.shape(sel[0]).text)
         self.text_style.refresh()
+        self.corner_controls.refresh()
         self.node_controls.refresh()
         self._updating = False
 

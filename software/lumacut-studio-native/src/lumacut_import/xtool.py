@@ -260,21 +260,6 @@ def _shapes_from_rings(rings, layer_id: str) -> list[Shape]:
     return shapes
 
 
-def _rounded_rect(d: dict, r: float, layer_id: str) -> list[Shape]:
-    w, h = _f(d, "width"), _f(d, "height")
-    r = min(r, w / 2, h / 2)
-    x, y = _f(d, "x"), _f(d, "y")
-    n = max(4, math.ceil((math.pi / 2) / (2 * math.acos(max(-1.0, 1 - ARC_TOLERANCE_MM / r)))))
-    pts = []
-    for cx, cy, a0 in ((x + w - r, y + r, -90.0), (x + w - r, y + h - r, 0.0),
-                       (x + r, y + h - r, 90.0), (x + r, y + r, 180.0)):
-        for i in range(n + 1):
-            a = math.radians(a0 + 90.0 * i / n)
-            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
-    rot = _rotator(d)
-    return [Shape.from_points("polygon", [rot(p) for p in pts], layer_id)]
-
-
 def _bitmap(d: dict, layer_id: str) -> Shape | None:
     from PySide6.QtGui import QImage
     from PySide6.QtCore import Qt
@@ -315,10 +300,13 @@ def _display_shapes(d: dict, layer_id: str, res: XToolImport, tol: float) -> lis
     kind = str(d.get("type", "")).upper()
     if kind in ("RECT", "SQUARE"):
         r = _f(d, "radius")
-        if r > 1e-6:
-            return _rounded_rect(d, r, layer_id)
         g = _box_geom(d)
-        return [Shape("rect", g, layer_id)] if g else []
+        if g is None:
+            return []
+        # Abgerundetes Rechteck bleibt ein Rechteck mit Eckenradius (wie in XCS
+        # weiter änderbar, lumacut_canvas.corners), begrenzt auf die halbe kürzere Seite.
+        r = min(r, g.w / 2, g.h / 2) if r > 1e-6 else 0.0
+        return [Shape("rect", g, layer_id, corner_radius=round(r, 6))]
     if kind in ("CIRCLE", "ELLIPSE"):
         g = _box_geom(d)
         return [Shape("ellipse", g, layer_id)] if g else []

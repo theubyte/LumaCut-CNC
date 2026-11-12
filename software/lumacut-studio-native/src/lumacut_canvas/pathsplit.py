@@ -233,6 +233,11 @@ def _world_rings(shape: Shape) -> tuple[list[tuple[list[Point], list[int]]], boo
     g = shape.geom
     if shape.kind == "line":
         return [(_world([(g.x, g.y), (g.x + g.w, g.y + g.h)], g.rot, g.center()), [])], False
+    if shape.kind == "rect" and shape.corner_radius:
+        from .corners import is_rounded
+        if is_rounded(shape):
+            from .shape_paths import shape_polygons
+            return [(shape_polygons(shape)[0][:-1], [])], False
     if shape.kind == "rect":
         pts = [(g.x, g.y), (g.x + g.w, g.y), (g.x + g.w, g.y + g.h), (g.x, g.y + g.h)]
         return [(_world(pts, g.rot, g.center()), [])], False

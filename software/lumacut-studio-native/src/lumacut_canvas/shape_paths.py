@@ -111,7 +111,14 @@ def local_path(shape: Shape) -> QPainterPath:
         return path
     b = g.local_bounds()
     box = QRectF(b.x, b.y, b.w, b.h)
-    if shape.kind in ("rect", "image"):  # Bild: Umriss = Bildrahmen
+    if shape.kind == "rect" and shape.corner_radius:
+        from .corners import effective_radius
+        r = effective_radius(shape)
+        if r:
+            add_rounded_rect(path, box, r)
+        else:
+            path.addRect(box)
+    elif shape.kind in ("rect", "image"):  # Bild: Umriss = Bildrahmen
         path.addRect(box)
     elif shape.kind == "ellipse":
         add_ellipse(path, box)
@@ -125,6 +132,33 @@ def local_path(shape: Shape) -> QPainterPath:
             t.translate(-r.x(), -r.y())
             path = t.map(src)
     return path
+
+
+def add_rounded_rect(path: QPainterPath, box: QRectF, r: float) -> None:
+    """Rechteck mit Eckenradius ``r`` (mm, wirksam; < 0 = nach innen gewölbt):
+    Start auf der Oberkante bei (x + |r|, y), im Uhrzeigersinn wie ``addRect``;
+    jede Ecke aus zwei kubischen 45°-Bögen (Formfehler ≈ 4·10⁻⁶·|r| wie bei
+    der Ellipse)."""
+    from .corners import arc_sweep, corner_geometry
+    corners = corner_geometry(box.x(), box.y(), box.width(), box.height(), r)
+    a = abs(r)
+    path.moveTo(corners[-1][1][0], corners[-1][1][1])
+    for entry, exit_, centre in corners:
+        cur = path.currentPosition()
+        if math.dist((cur.x(), cur.y()), entry) > 1e-9:
+            path.lineTo(*entry)
+        a0, sweep = arc_sweep(entry, exit_, centre)
+        n = 2
+        d = sweep / n
+        k = 4.0 / 3.0 * math.tan(d / 4.0)
+        for i in range(n):
+            t0, t1 = a0 + i * d, a0 + (i + 1) * d
+            c0, s0, c1, s1 = math.cos(t0), math.sin(t0), math.cos(t1), math.sin(t1)
+            end = exit_ if i == n - 1 else (centre[0] + a * c1, centre[1] + a * s1)
+            path.cubicTo(QPointF(centre[0] + a * (c0 - k * s0), centre[1] + a * (s0 + k * c0)),
+                         QPointF(centre[0] + a * (c1 + k * s1), centre[1] + a * (s1 - k * c1)),
+                         QPointF(*end))
+    path.closeSubpath()
 
 
 def add_ellipse(path: QPainterPath, box: QRectF, arcs: int = _ELLIPSE_BEZIER_ARCS) -> None:

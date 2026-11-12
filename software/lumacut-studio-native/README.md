@@ -87,6 +87,16 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Doppelklick/Enter oder Klick auf den ersten Punkt = schließen, Rücktaste = Punkt weg.
   Freihand: ziehen zeichnet einen offenen Pfad (ohne Raster); beim Loslassen wird er mit
   Ramer-Douglas-Peucker vereinfacht (Toleranz 0,2 mm, `tools.FREEHAND_TOLERANCE_MM`), Esc bricht ab.
+- **Eckenradius** (Rechtecke, wie LightBurn *Shape Properties › Corner Radius* / xTool
+  „Eckenradius“): Feld „Ecken“ in der Eigenschaftsleiste, sobald nur Rechtecke ausgewählt
+  sind – positiv = abgerundete Ecken, negativ = nach innen gewölbte Ecken (Viertelkreis um
+  die Ecke), 0 = scharf; ein Undo-Schritt für die ganze Auswahl. Der Radius bleibt beim
+  Skalieren in mm gleich und wird auf die halbe kürzere Seite begrenzt (Statuszeile meldet
+  es); das Rechteck bleibt ein Rechteck (Box = Umrissbox). Anzeige und SVG-Export mit echten
+  Bögen, G-Code / Füllung / Kerf / Stege / Boole / Versatz über `shape_polygons`
+  (Sehnenfehler ≤ 0,02 mm, nur G1); manuelle Stege rutschen beim Ändern auf den Bogen,
+  „Knoten“ / „Kombinieren“ übernehmen die Bögen als Punkte. Datei: `"radius"` (mm), nur wenn
+  gesetzt. xTool-Rechtecke mit Eckenradius werden als solche Rechtecke importiert.
 - **Bearbeiten:** Verschieben (Maus oder Pfeiltasten 1 mm, *Umschalt* 10 mm),
   Skalieren über 8 Griffe (*Umschalt* = Seitenverhältnis halten), Entf,
   Strg+D duplizieren, Strg+C/V, Strg+Z/Strg+Y, X/Y/B/H in mm in der Eigenschaftsleiste.
@@ -876,7 +886,7 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   Alte AI (≤ 8, reines PostScript) nur mit Ghostscript.
 - **EPS**: über Ghostscript, falls installiert (PATH, `C:\Program Files\gs\…` oder
   `LUMACUT_GHOSTSCRIPT`); sonst klarer Hinweis „als SVG/PDF exportieren“. Nicht mitgeliefert.
-- **xTool `.xcs` / `.xs`**: Pfade, Rechtecke (mit Eckenradius), Kreise/Ellipsen, Linien,
+- **xTool `.xcs` / `.xs`**: Pfade, Rechtecke (mit Eckenradius – bleibt änderbar), Kreise/Ellipsen, Linien,
   Polygone, Text (als Glyphenkonturen, sonst Textobjekt) und Bitmaps der ersten Arbeitsfläche;
   Laserwerte werden nicht übernommen, unbekannte/ausgeblendete Objekte gezählt und übersprungen.
   Tabelle und Grenzen: [Anforderungen §9.2](../../docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md).
