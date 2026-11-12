@@ -163,6 +163,18 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Auswahlmitte zu – sie bleibt stehen bzw. wird zentriert; 0,4–60 px/mm), mittlere Maustaste oder Leertaste+Ziehen = Verschieben,
   Strg+0 = Fläche einpassen, Raster und Fangen (1 mm) umschaltbar, Lineale in mm,
   Cursorposition in mm in der Statusleiste.
+- **An Objekten fangen** (Alt+Umschalt+S, Schalter neben „Am Raster fangen“, Vorgabe an –
+  wie LightBurns *Snap to Objects* und xTools Ausrichtungslinien): beim Zeichnen (Rechteck,
+  Ellipse, Linie, Polygon, Vieleck / Stern, Text), beim Ziehen eines Skalier-Griffs und beim
+  Verschieben von Knoten rastet der Punkt auf Knoten, Ecken, Kantenmitten, Mittelpunkte,
+  Ellipsen-Quadranten und Linien-Enden anderer Objekte (und Ecken / Mitte der Arbeitsfläche)
+  ein, sonst je Achse auf deren Box-Kanten und -Mitten; beim Verschieben der Auswahl rasten
+  ihre Kanten / Mitte an den Kanten und Mitten anderer Objekte ein. Fangabstand 7 px
+  (Touch-Modus 14 px), unabhängig vom Zoom; der Objektfang hat Vorrang vor dem 1-mm-Raster.
+  Magentafarbene Hilfslinien und eine Marke zeigen das Ziel, die Statusleiste die Art
+  („Fang: Kantenmitte“). Alt beim Ziehen setzt ihn aus; ausgeblendete Ebenen fangen nicht,
+  gesperrte schon. Die Wahl wird in QSettings (`canvas/object_snap`) gespeichert. Code:
+  `lumacut_canvas/objsnap.py` (Qt-frei), `objsnap_ui.py`.
 - **Touch (z. B. Surface Pro):** „Touch-Modus“ in der Canvas-Aktionsleiste. Er schaltet
   sich bei einem Touchscreen, auf kleinen Bildschirmen (< 1500 × 950 logische px, z. B.
   Surface Pro mit 150–200 % Skalierung) oder beim ersten Fingertipp selbst ein; eine manuelle Wahl wird in QSettings (`canvas/touch_mode`) gespeichert und

@@ -259,6 +259,7 @@ class NodeEditor:
                 self.node = i
                 self._drag_orig = s.copy()
                 self._moved = False
+                self.ed.tools._osnap_begin([s.id])  # Objektfang an anderen Objekten
                 self.refresh()
                 return
             if nodes.segment_at(s, p, self.seg_tol_mm()) is not None:

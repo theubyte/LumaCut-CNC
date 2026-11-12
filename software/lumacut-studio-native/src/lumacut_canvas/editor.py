@@ -30,8 +30,8 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import (arrange_ui, corners_ui, icons, ngon, ngon_ui, node_ui, pathops_ui, tabs_ui, text_ui, theme,
-               touch, units)
+from . import (arrange_ui, corners_ui, icons, ngon, ngon_ui, node_ui, objsnap_ui, pathops_ui, tabs_ui,
+               text_ui, theme, touch, units)
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip, VScrollStrip
@@ -349,6 +349,7 @@ class CanvasEditor(QWidget):
         # Touch-Modus: gespeicherte Wahl, sonst automatisch (Touchscreen vorhanden).
         self.touch_mode = False
         self._settings = settings if settings is not None else touch.default_settings()
+        self.object_snap.apply_saved(self._settings)
         saved = touch.load_setting(self._settings)
         self.set_touch_mode(touch.has_touchscreen() if saved is None else saved, persist=False)
         self.view.touchDetected.connect(self._on_touch_detected)
@@ -421,6 +422,7 @@ class CanvasEditor(QWidget):
         g.setChecked(True)
         s = self._act("snap", "Am Raster fangen (1 mm)", self._set_snap, "Ctrl+Shift+'", "snap", checkable=True)
         s.setChecked(True)
+        self.object_snap = objsnap_ui.install(self)  # An Objekten fangen (Alt+Umschalt+S)
         self._act("path_preview", "Pfadvorschau (Laserbahn, Reihenfolge, Zeit)",
                   lambda on: self.set_path_preview(on), "Ctrl+Shift+P", "path", checkable=True)
         self.arranger = arrange_ui.install(self)  # Ausrichten/Verteilen/Array
@@ -450,7 +452,7 @@ class CanvasEditor(QWidget):
         self.action_bar = bar
         for name in ("open", "save", "export", None, "undo", "redo", None, "duplicate", "delete",
                      "rotate_ccw", "rotate_cw", "group", "ungroup", None,
-                     "zoom_out", "zoom_in", "fit", "zoom_100", None, "grid", "snap", "path_preview",
+                     "zoom_out", "zoom_in", "fit", "zoom_100", None, "grid", "snap", "object_snap", "path_preview",
                      "touch_mode", "unit_toggle"):
             bar.addSeparator() if name is None else bar.addAction(a[name])
             if name == "ungroup":

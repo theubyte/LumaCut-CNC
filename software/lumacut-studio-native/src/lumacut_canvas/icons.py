@@ -117,6 +117,14 @@ def _snap(p, c):
     _pen(p, theme.ACCENT, 2.6); p.drawLine(QPointF(6, 4), QPointF(6, 7)); p.drawLine(QPointF(18, 4), QPointF(18, 7))
 
 
+def _objsnap(p, c):
+    # Zwei Kanten, die sich an einem Knoten treffen, darüber die Fangmarke.
+    _pen(p, c, 1.8); p.drawPolyline(QPolygonF([QPointF(3.5, 20), QPointF(12, 12), QPointF(20.5, 20)]))
+    _pen(p, theme.ACCENT, 1.8); p.drawRect(QRectF(9, 9, 6, 6))
+    p.drawLine(QPointF(12, 2.5), QPointF(12, 6.5)); p.drawLine(QPointF(17.5, 12), QPointF(21.5, 12))
+    p.drawLine(QPointF(2.5, 12), QPointF(6.5, 12))
+
+
 def _open(p, c):
     _pen(p, c); path = QPainterPath(); path.moveTo(3.5, 18.5); path.lineTo(3.5, 6); path.lineTo(9, 6)
     path.lineTo(11, 8); path.lineTo(18.5, 8); path.lineTo(18.5, 11); p.drawPath(path)
@@ -260,7 +268,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "polygon": _polygon, "ngon": _ngon, "freehand": _freehand,
     "undo": _undo, "redo": _redo, "delete": _delete, "fit": _fit,
     "zoom_in": lambda p, c: _zoom(p, c, True), "zoom_out": lambda p, c: _zoom(p, c, False),
-    "grid": _grid, "snap": _snap, "open": _open, "save": _save, "export": _export,
+    "grid": _grid, "snap": _snap, "objsnap": _objsnap, "open": _open, "save": _save, "export": _export,
     "eye": _eye, "eye_off": lambda p, c: _eye(p, c, True),
     "lock": _lock, "unlock": lambda p, c: _lock(p, c, True),
     "plus": _plus, "up": lambda p, c: _arrow(p, c, True), "down": lambda p, c: _arrow(p, c, False),

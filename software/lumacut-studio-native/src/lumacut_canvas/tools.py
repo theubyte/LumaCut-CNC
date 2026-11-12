@@ -134,6 +134,7 @@ class ToolController:
         self._rot_start = 0.0
         self._moved = False
         self._preview_id: str | None = None
+        self._draw_start = QPointF()  # gefangener Startpunkt des Zeichenzugs
         self.roi_pending = False  # Editor.request_roi(): nächster Zug zieht einen Bereich auf
         self._poly: list[tuple[float, float]] = []  # gesetzte Polygonpunkte (mm)
         self._hover: tuple[float, float] | None = None
@@ -162,7 +163,34 @@ class ToolController:
         return round(v / step) * step if self.ed.snap_enabled and step > 0 else v
 
     def snap_point(self, p: QPointF) -> QPointF:
-        return QPointF(self.snap(p.x()), self.snap(p.y()))
+        """Raster- und – während eines Zugs mit Objektfang – Objektfang:
+        eingerastete Achsen kommen vom Objekt, die übrigen vom Raster."""
+        osnap = self.object_snap
+        s = osnap.point(p.x(), p.y()) if osnap is not None and osnap.targets is not None else None
+        x = s.x if s is not None and s.snapped_x else self.snap(p.x())
+        y = s.y if s is not None and s.snapped_y else self.snap(p.y())
+        return QPointF(x, y)
+
+    # --- Objektfang (:mod:`objsnap_ui`) ---------------------------------------
+    @property
+    def object_snap(self):
+        return getattr(self.ed, "object_snap", None)
+
+    def _osnap_begin(self, exclude=(), mods: Qt.KeyboardModifier | None = None) -> None:
+        osnap = self.object_snap
+        if osnap is not None:
+            osnap.begin(exclude)
+            self._osnap_mods(mods)
+
+    def _osnap_mods(self, mods: Qt.KeyboardModifier | None) -> None:
+        osnap = self.object_snap
+        if osnap is not None and mods is not None:
+            osnap.suspended = bool(mods & Qt.AltModifier)  # Alt setzt den Objektfang aus
+
+    def _osnap_end(self) -> None:
+        osnap = self.object_snap
+        if osnap is not None:
+            osnap.end()
 
     def set_tool(self, tool: Tool) -> None:
         self.cancel()
@@ -195,6 +223,7 @@ class ToolController:
         self._rubber.setVisible(False)
         self._mode = None
         self._preview_id = None
+        self._osnap_end()
         if self.roi_pending:
             self.roi_pending = False
             self.update_cursor()
@@ -222,6 +251,7 @@ class ToolController:
         self._mode = None
         self._preview_id = None
         self._moved = False
+        self._osnap_end()
 
     def _apply(self, geoms: dict[str, Geometry]) -> None:
         self.doc.begin_batch()
@@ -257,7 +287,11 @@ class ToolController:
             self._mode = "tabs"
             self.ed.tab_tool.press(pos)
         elif self.tool == Tool.TEXT:
-            self._create_text(pos)
+            self._osnap_begin((), mods)
+            try:
+                self._create_text(pos)
+            finally:
+                self._osnap_end()
         elif self.tool == Tool.POLYGON:
             self._press_polygon(pos, mods)
         elif self.tool == Tool.FREEHAND:
@@ -267,6 +301,11 @@ class ToolController:
                 self._free = [(p.x(), p.y())]
         elif self._active_layer_ok():
             self._mode = "draw"
+            self._osnap_begin((), mods)
+            # Startpunkt einmal fangen; seine Hilfslinie / Marke bleibt beim Ziehen sichtbar.
+            self._draw_start = self.snap_point(pos)
+            if self.object_snap is not None:
+                self.object_snap.keep_anchor()
 
     def _press_select(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
         handle = self.ed.scene.overlay.handle_at(pos) if self.ed.selection else None
@@ -283,6 +322,7 @@ class ToolController:
                 self._rot_start = self._angle_to(pos)
             else:
                 self._mode = "resize"
+                self._osnap_begin(self._orig, mods)
             return
         hit = self.ed.scene.editable_shape_at(pos)
         shift = bool(mods & Qt.ShiftModifier)
@@ -300,6 +340,7 @@ class ToolController:
                 self._mode = "move"
                 self._orig = {i: self.doc.shape(i).geom.copy() for i in sel}
                 self._orig_bounds = self.doc.selection_bounds(sel)
+                self._osnap_begin(sel, mods)
             return
         self._mode = "rubber"
         if not shift:
@@ -308,6 +349,7 @@ class ToolController:
         self._rubber.setVisible(True)
 
     def move(self, pos: QPointF, mods: Qt.KeyboardModifier, dragging: bool) -> None:
+        self._osnap_mods(mods)
         if self._mode == "node":
             if dragging:
                 self.ed.node_editor.move(pos)
@@ -361,9 +403,17 @@ class ToolController:
                 dy = 0.0
             else:
                 dx = 0.0
-        # Linke obere Ecke der Auswahl am Raster ausrichten.
-        dx = self.snap(ob.x + dx) - ob.x
-        dy = self.snap(ob.y + dy) - ob.y
+        # Objektfang: Kanten / Mitten der Auswahlbox an anderen Objekten ausrichten;
+        # sonst (je Achse) linke obere Ecke der Auswahl am Raster ausrichten.
+        osnap = self.object_snap
+        # Mit Umschalt bleibt die gesperrte Achse gesperrt (kein Fang quer dazu).
+        axes = (not axis_lock or dx != 0.0, not axis_lock or dy != 0.0)
+        hit = (osnap.box(Rect(ob.x + dx, ob.y + dy, ob.w, ob.h), axes)
+               if osnap is not None and osnap.targets is not None else None)
+        sx = hit is not None and hit[2].snapped_x
+        sy = hit is not None and hit[2].snapped_y
+        dx = dx + hit[0] if sx else self.snap(ob.x + dx) - ob.x
+        dy = dy + hit[1] if sy else self.snap(ob.y + dy) - ob.y
         # Ganze Auswahl gemeinsam in der Fläche halten (Anordnung bleibt erhalten).
         cx, cy = clamp_offset(Rect(ob.x + dx, ob.y + dy, ob.w, ob.h))
         dx, dy = dx + cx, dy + cy
@@ -431,7 +481,7 @@ class ToolController:
         return sh
 
     def _drag_draw(self, pos: QPointF, constrain: bool) -> None:
-        a = _clamp_point(self.snap_point(self._start))
+        a = _clamp_point(self._draw_start)
         b = _clamp_point(self.snap_point(pos))
         w, h = b.x() - a.x(), b.y() - a.y()
         if self.tool == Tool.NGON:
@@ -483,6 +533,7 @@ class ToolController:
         if not self._poly and not self._active_layer_ok():
             return
         self._mode = "poly"
+        self._osnap_begin([self._preview_id] if self._preview_id else (), mods)
         if len(self._poly) >= 3:
             fx, fy = self._poly[0]
             if math.hypot(pos.x() - fx, pos.y() - fy) * self.ed.view.px_per_mm <= CLOSE_SNAP_PX:
@@ -575,6 +626,14 @@ class ToolController:
         return shape
 
     def release(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
+        mode = self._mode
+        try:
+            self._release(pos, mods)
+        finally:
+            if mode != "poly" or self._mode != "poly":
+                self._osnap_end()  # das Polygon behält seine Ziele bis zum nächsten Punkt
+
+    def _release(self, pos: QPointF, mods: Qt.KeyboardModifier) -> None:
         mode, self._mode = self._mode, None
         if mode == "node":
             self.ed.node_editor.release()
