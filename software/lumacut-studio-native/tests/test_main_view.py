@@ -126,7 +126,7 @@ def test_design_menu_offers_import_text_shapes(make_win):
     win = make_win()
     texts = [a.text() for a in win.main_view.design_menu.actions() if a.text()]
     assert texts[0].startswith("Importieren")
-    for t in ("Text", "Rechteck", "Ellipse"):
+    for t in ("Text", "Rechteck", "Ellipse", "Vieleck / Stern"):
         assert t in texts
     rect = next(a for a in win.main_view.design_menu.actions() if a.text() == "Rechteck")
     rect.trigger()
