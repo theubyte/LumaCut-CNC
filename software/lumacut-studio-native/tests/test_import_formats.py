@@ -37,12 +37,14 @@ def _raw(path, qapp):
 def test_xcs_all_object_types_in_xtool_coordinates(qapp):
     res = _raw(XCS, qapp)
     k = _by_kind(res.shapes)
-    rect = k["rect"][0]
+    rect = [s for s in k["rect"] if not s.corner_radius][0]
     assert rect.geom.as_tuple() == pytest.approx((10, 20, 30, 15)) and rect.geom.rot == 0
-    # abgerundetes Rechteck → Polygon mit echten Bögen (Sehnenfehler ≤ 0,02 mm)
-    rounded = [s for s in k["polygon"] if s.bounds().w == pytest.approx(20, abs=1e-6)
-               and s.bounds().x == pytest.approx(50, abs=1e-6)][0]
-    pts = rounded.abs_points()
+    # abgerundetes Rechteck → Rechteck mit Eckenradius (änderbar wie in XCS); der
+    # Umriss hat echte Bögen (Sehnenfehler ≤ 0,02 mm)
+    from lumacut_canvas.shape_paths import shape_polygons
+    rounded = [s for s in k["rect"] if s.corner_radius][0]
+    assert rounded.geom.as_tuple() == pytest.approx((50, 20, 20, 20)) and rounded.corner_radius == 5
+    pts = shape_polygons(rounded)[0]
     corner = (50 + 5, 20 + 5)
     near = [p for p in pts if p[0] < corner[0] and p[1] < corner[1]]
     assert len(near) >= 4
