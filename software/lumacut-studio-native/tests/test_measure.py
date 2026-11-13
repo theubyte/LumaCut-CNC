@@ -126,7 +126,8 @@ def test_tool_label_shortcut_icon_and_strip_position(ed):
     assert a.shortcut().toString() == "M" and a.isCheckable() and not a.icon().isNull()
     assert "measure" in icons.available()
     strip = ed.tool_strip.actions()
-    assert strip[-1] is a and strip.index(a) == strip.index(ed.actions_by_name["tool_tabs"]) + 1
+    assert strip[-1] is a and strip.index(a) == strip.index(ed.actions_by_name["tool_start"]) + 1
+    assert strip.index(ed.actions_by_name["tool_start"]) == strip.index(ed.actions_by_name["tool_tabs"]) + 1
     a.trigger()
     assert ed.tools.tool == Tool.MEASURE and a.isChecked()
     assert ed.msgs[-1].startswith("Werkzeug: Messen") and "Umschalt = 15°" in ed.msgs[-1]
