@@ -75,7 +75,8 @@ class OptimizeDialog(QDialog):
         self.reduce_travel.setToolTip("Als Nächstes immer die nächstgelegene Kontur schneiden.")
         self.best_start = QCheckBox("Besten Startpunkt wählen")
         self.best_start.setToolTip("Geschlossene Konturen am Punkt beginnen, der der "
-                                   "Kopfposition am nächsten liegt.")
+                                   "Kopfposition am nächsten liegt. Ein mit dem Werkzeug "
+                                   "„Startpunkt“ (Alt+Umschalt+A) gesetzter Start bleibt.")
         self.corners = QCheckBox("Möglichst an Ecken beginnen")
         self.corners.setToolTip("Startpunkt geschlossener Konturen an eine Ecke legen (Knick ab "
                                 "40°) – die Einstichstelle fällt dort kaum auf. Konturen ohne "

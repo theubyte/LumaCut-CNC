@@ -143,14 +143,15 @@ def corner_indices(ring: Poly, min_turn_deg: float = CORNER_MIN_TURN_DEG) -> lis
 
 
 def _best_entry(poly: Poly, pos: Point, best_start: bool, best_direction: bool = True,
-                corners: bool = False) -> tuple[float, Poly]:
+                corners: bool = False, fixed: bool = False) -> tuple[float, Poly]:
     """Distance from ``pos`` and the polyline oriented/rotated for that entry.
 
     ``corners``: closed shapes start at the nearest corner
     (:func:`corner_indices`) when they have one, else at the nearest point.
-    ``best_direction`` off: open paths keep their drawn direction."""
+    ``best_direction`` off: open paths keep their drawn direction.
+    ``fixed``: a closed shape with a manual start point keeps its start."""
     if is_closed(poly):
-        if not best_start:
+        if not best_start or fixed:
             return math.dist(pos, poly[0]), poly
         ring = poly[:-1]
         cand = corner_indices(ring) if corners else []
@@ -182,7 +183,7 @@ def _direction_span(poly: Poly, direction: str) -> tuple[float, float]:
 def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first: bool = True,
                     reduce_travel: bool = True, best_start: bool = True,
                     should_stop=None, best_direction: bool = True, corners: bool = False,
-                    direction: str = "") -> list[Poly]:
+                    direction: str = "", fixed_starts=None) -> list[Poly]:
     """Return the polylines in cutting order (each possibly reversed/rotated).
 
     Greedy nearest-neighbour over the shapes that are *ready*: with
@@ -198,6 +199,9 @@ def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first
     ``best_start`` / ``best_direction`` / ``corners`` choose the entry of the
     chosen shape whenever ``reduce_travel`` or ``direction`` is on;
     with neither, shapes keep their drawn start and direction.
+    ``fixed_starts``: start keys (:func:`lumacut_canvas.startpoint.start_key`) of
+    manual start points – a closed shape that begins at one of them keeps its
+    start (LightBurn *Set Start Point*); its place in the order is still planned.
     """
     polys = [list(p) for p in polys if len(p) >= 2]
     n = len(polys)
@@ -218,8 +222,13 @@ def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first
     out: list[Poly] = []
     pos = start
 
+    fixed = [False] * n
+    if fixed_starts:
+        from lumacut_canvas.startpoint import start_key
+        fixed = [is_closed(p) and start_key(p[0]) in fixed_starts for p in polys]
+
     def entry(i):
-        return _best_entry(polys[i], pos, best_start, best_direction, corners)
+        return _best_entry(polys[i], pos, best_start, best_direction, corners, fixed[i])
 
     for _ in range(n):
         _check(should_stop)
@@ -478,6 +487,9 @@ class PlanReport:
     # Manuelle Stege (Shape.tabs): gesetzt bzw. ohne passende Kontur weggelassen.
     manual_tabs: int = 0
     dropped_tabs: int = 0
+    # Manuelle Startpunkte (Shape.start): gesetzt bzw. ohne passende Kontur weggelassen.
+    manual_starts: int = 0
+    dropped_starts: int = 0
 
     def overlap_message(self) -> str:
         parts = []
@@ -514,6 +526,10 @@ class PlanReport:
             n = self.dropped_tabs
             parts.append(f"{n} manuelle{'r' if n == 1 else ''} Steg{'e' if n != 1 else ''} "
                          "weggelassen (keine geschlossene Kontur in der Nähe oder Kontur zu kurz)")
+        if self.dropped_starts:
+            n = self.dropped_starts
+            parts.append(f"{n} Startpunkt{'e' if n != 1 else ''} weggelassen (keine geschlossene "
+                         "Kontur in der Nähe oder zwei Startpunkte auf einer Kontur)")
         for extra in (self.open_fill_message(), self.overlap_message(), self.scan_offset):
             if extra:
                 parts.append(extra)
@@ -550,6 +566,17 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
         polys = layer.polylines
         if opts.kerf_mm:
             polys, _ = offset_closed(polys, opts.kerf_mm)
+        starts = getattr(layer, "start_points", None) or ()
+        if starts:
+            # Manuelle Startpunkte (LightBurn *Set Start Point*): die (versetzte) Kontur
+            # beginnt am projizierten Punkt; ihren Start verlegt danach niemand mehr.
+            from lumacut_canvas.startpoint import START_SNAP_MM, apply_start_points
+            polys, placed, dropped = apply_start_points(polys, starts,
+                                                        START_SNAP_MM + abs(opts.kerf_mm), is_closed)
+            opts = replace(opts, start_points=tuple(placed))
+            if report is not None:
+                report.manual_starts += len(placed)
+                report.dropped_starts += dropped
         prepared.append((layer, opts, polys))
     obstacles = None
     if any(o.lead_in_mm > 0 or o.lead_out_mm > 0 for _, o, _ in prepared):
@@ -576,7 +603,12 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
             pass_fills[0] = fills
         if fills:
             pos = fills[-1][-1][1]   # contours follow the fill in every pass
-        ordered = order_polylines(polys, pos, should_stop=should_stop, **layer_options)
+        fixed = None
+        if opts.start_points:
+            from lumacut_canvas.startpoint import start_key
+            fixed = {start_key(p) for p in opts.start_points}
+        ordered = order_polylines(polys, pos, should_stop=should_stop, fixed_starts=fixed,
+                                  **layer_options)
         if opts.overlap_tol_mm > 0 and ordered:
             if opts.removes_overlaps:
                 dedup = remove_overlaps(ordered, opts.overlap_tol_mm)

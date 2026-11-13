@@ -154,7 +154,8 @@ def with_spec(shape: Shape, sides=None, inner=None) -> Shape:
     sx, sy = g.w / w0, g.h / h0
     cx, cy = centre_of(shape)
     geom = _place(cx, cy, sx, sy, g.rot, n, r)
-    return replace(shape, geom=geom, points=normalized_points(n, r), regular=(n, r), tabs=())
+    return replace(shape, geom=geom, points=normalized_points(n, r), regular=(n, r), tabs=(),
+                   start=())
 
 
 def outer_radius(shape: Shape) -> float:

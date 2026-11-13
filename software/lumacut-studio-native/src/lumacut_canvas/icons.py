@@ -263,6 +263,18 @@ def _tabs(p, c):
     p.drawLine(QPointF(13, 3.5), QPointF(13, 8.5))
 
 
+def _start(p, c):
+    """Startpunkt: Rechteck-Kontur, gefüllter Punkt an einer Kante mit Pfeil in Laufrichtung."""
+    _pen(p, c, 1.7)
+    p.drawRect(QRectF(4, 6, 16, 12))
+    p.setBrush(QColor(c))
+    p.drawEllipse(QPointF(9, 6), 2.6, 2.6)
+    _pen(p, c, 1.7)
+    p.drawLine(QPointF(12.5, 3), QPointF(17.5, 3))
+    p.drawLine(QPointF(17.5, 3), QPointF(15.5, 1.5))
+    p.drawLine(QPointF(17.5, 3), QPointF(15.5, 4.5))
+
+
 def _measure(p, c):
     """Messen: Lineal schräg mit Teilstrichen, Endmarken als Punkte."""
     p.save()
@@ -286,7 +298,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "group": _group, "ungroup": lambda p, c: _group(p, c, True),
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
     "touch": _touch, "path": _path, "arrange": _arrange,
-    "pathops": _pathops, "node": _node, "tabs": _tabs, "measure": _measure,
+    "pathops": _pathops, "node": _node, "tabs": _tabs, "start": _start, "measure": _measure,
 }
 
 

@@ -109,6 +109,9 @@ def from_rings(shape: Shape, rings: list[Ring], kind: str | None = None) -> Shap
     if shape.tabs:   # manuelle Stege bleiben an ihrer Stelle auf dem (geänderten) Umriss
         from .tabs import carry_tabs
         out = carry_tabs(out, shape.tab_points())
+    if shape.start:  # der Startpunkt bleibt an seiner Stelle auf dem Umriss
+        from .startpoint import carry_start
+        out = carry_start(out, shape.start_point())
     return out
 
 

@@ -273,6 +273,9 @@ def _rebuild(shape: Shape, local: list[Point], starts: list[int], kind: str) -> 
     if shape.tabs:          # manuelle Stege auf den neuen Umriss übertragen
         from .tabs import carry_tabs
         out = carry_tabs(out, shape.tab_points(), 1.5 + _tab_slack(shape))
+    if shape.start:         # Startpunkt auf den neuen Umriss übertragen
+        from .startpoint import carry_start
+        out = carry_start(out, shape.start_point(), 1.5 + _tab_slack(shape))
     return out
 
 

@@ -313,6 +313,20 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     und „Vorhandene manuelle Stege ersetzen“; Zähler live im Dialog, ein Undo-Schritt, danach
     lässt sich jeder Steg einzeln verschieben oder entfernen.
     Code: `lumacut_canvas/tabs.py`, `tabs_ui.py`, `lumacut_job/cutpath.py`.
+  - *Startpunkt* (Werkzeug „Startpunkt“, Alt+Umschalt+A, wie LightBurns *Set Start Point*):
+    Tippen auf den Umriss einer geschlossenen Form legt dort fest, wo ihre Kontur beginnt
+    (ein vorhandener Startpunkt der Form wird ersetzt), Tippen auf den Startpunkt entfernt ihn,
+    Ziehen schiebt ihn entlang des Umrisses; Pfad › „Startpunkte entfernen“ löscht die
+    Startpunkte der Auswahl. Ein Startpunkt je Objekt (`Shape.start`, im Projekt gespeichert),
+    er folgt Verschieben / Skalieren / Drehen / Duplizieren, Knoten bearbeiten, Vereinfachen,
+    Ecken abrunden, Zerlegen / Kombinieren und „Text in Pfade“. Beim Senden beginnt die Kontur
+    genau dort – auch mit „Besten Startpunkt wählen“ / „Möglichst an Ecken beginnen“ und mit
+    Kerf (der Punkt wird auf die versetzte Kontur gelegt); die Reihenfolge plant der Planer
+    weiter. Anfahrt, Überschnitt, Abfahrt, Stege und Perforation setzen am Startpunkt an (eine
+    blockierte Anfahrt darf nur die Laufrichtung wechseln oder kürzer werden, der Start wird
+    nicht verlegt). Die Arbeitsfläche markiert jeden Startpunkt als grünen Punkt mit einem
+    Pfeil in Laufrichtung. Ohne Startpunkt ändert sich nichts.
+    Code: `lumacut_canvas/startpoint.py`, `startpoint_ui.py`, `lumacut_job/planner.py`.
   - *Anfahrt/Abfahrt* (`lead_in_mm`, `lead_in_arc`, `lead_out_mm`, 0–10 mm): auf der
     Abfallseite (außen bei Teilen, innen bei Löchern), 45°-Gerade oder tangentialer Viertelkreis;
     der Konturstart wird dafür von einer Ecke in die Kantenmitte verlegt. Passt die Anfahrt nicht

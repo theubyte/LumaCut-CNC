@@ -1,5 +1,6 @@
 """Werkzeuge: Auswahl (Verschieben/Skalieren/Drehen/Rahmenauswahl), Rechteck,
 Ellipse, Linie, Polygon, Vieleck / Stern (:mod:`ngon`), Freihand, Text, Stege (manuelle Haltestege, :mod:`tabs_ui`),
+Startpunkt (manueller Konturstart, :mod:`startpoint_ui`),
 Messen (Abstand / Winkel, :mod:`measure_ui`).
 
 Der :class:`ToolController` bekommt Mausereignisse in Szene-mm von der
@@ -46,16 +47,17 @@ class Tool(str, Enum):
     FREEHAND = "freehand"
     TEXT = "text"
     TABS = "tabs"
+    START = "start"
     MEASURE = "measure"
 
 
 TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.NODE: "Knoten", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
                Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.NGON: "Vieleck / Stern",
                Tool.FREEHAND: "Freihand", Tool.TEXT: "Text", Tool.TABS: "Stege",
-               Tool.MEASURE: "Messen"}
+               Tool.START: "Startpunkt", Tool.MEASURE: "Messen"}
 TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.NODE: "N", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
                   Tool.POLYGON: "P", Tool.NGON: "S", Tool.FREEHAND: "F", Tool.TEXT: "T", Tool.TABS: "Alt+Shift+T",
-                  Tool.MEASURE: "M"}
+                  Tool.START: "Alt+Shift+A", Tool.MEASURE: "M"}
 CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
 # Freihand: Ramer-Douglas-Peucker-Toleranz in mm (Abweichung von der gezeichneten
 # Linie) und Mindestabstand roher Mauspunkte.
@@ -217,6 +219,9 @@ class ToolController:
         tt = getattr(self.ed, "tab_tool", None)
         if tt is not None:
             tt.cancel()
+        st = getattr(self.ed, "start_tool", None)
+        if st is not None:
+            st.cancel()
         mt = getattr(self.ed, "measure_tool", None)
         if mt is not None:
             mt.cancel()
@@ -248,6 +253,8 @@ class ToolController:
             self.ed.node_editor.cancel()
         if mode == "tabs":
             self.ed.tab_tool.cancel()
+        if mode == "start":
+            self.ed.start_tool.cancel()
         if mode == "measure":
             self.ed.measure_tool.abort()
         if mode in ("move", "resize", "rotate") and self._orig:
@@ -295,6 +302,9 @@ class ToolController:
         elif self.tool == Tool.TABS:
             self._mode = "tabs"
             self.ed.tab_tool.press(pos)
+        elif self.tool == Tool.START:
+            self._mode = "start"
+            self.ed.start_tool.press(pos)
         elif self.tool == Tool.MEASURE:
             self._mode = "measure"
             self.ed.measure_tool.press(pos, mods)
@@ -369,6 +379,10 @@ class ToolController:
         if self._mode == "tabs":
             if dragging:
                 self.ed.tab_tool.move(pos)
+            return
+        if self._mode == "start":
+            if dragging:
+                self.ed.start_tool.move(pos)
             return
         if self._mode == "measure" or (self._mode is None and self.tool == Tool.MEASURE
                                        and not self.roi_pending):
@@ -657,6 +671,9 @@ class ToolController:
             return
         if mode == "tabs":
             self.ed.tab_tool.release()
+            return
+        if mode == "start":
+            self.ed.start_tool.release()
             return
         if mode == "measure":
             self.ed.measure_tool.release(pos, mods)

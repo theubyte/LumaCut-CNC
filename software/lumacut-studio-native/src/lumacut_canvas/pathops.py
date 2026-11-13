@@ -200,6 +200,9 @@ def text_to_outline(shape: Shape) -> Shape | None:
     if shape.tabs:   # manuelle Stege bleiben auf den Buchstaben-Umrissen
         from .tabs import carry_tabs
         out = carry_tabs(out, shape.tab_points(), 0.1)
+    if shape.start:  # Startpunkt bleibt auf seinem Buchstaben-Umriss
+        from .startpoint import carry_start
+        out = carry_start(out, shape.start_point(), 0.1)
     return out
 
 

@@ -631,6 +631,11 @@ class Shape:
     # wirkt nur mit „Nach Priorität“ (``CutOrder.order_by == "priority"``) – kleinere
     # Werte werden mit allen ihren Ebenen zuerst gelasert. 0 = Standard.
     priority: int = 0
+    # Manueller Startpunkt (LightBurn *Set Start Point*, :mod:`startpoint`): ein Punkt auf
+    # dem Umriss einer geschlossenen Kontur, normiert auf die ungedrehte Objektbox wie
+    # ``tabs``. Die Kontur, auf der er liegt, beginnt dort – der Planer verlegt ihren
+    # Start nicht mehr. Leer = Startpunkt wie bisher (Planer / Zeichnung).
+    start: tuple[float, float] | tuple = ()
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -641,6 +646,18 @@ class Shape:
         cx, cy = g.center()
         return [rotate_point(g.x + u * g.w, g.y + v * g.h, cx, cy, g.rot) if g.rot
                 else (g.x + u * g.w, g.y + v * g.h) for u, v in self.tabs]
+
+    def start_point(self) -> tuple[float, float] | None:
+        """Manueller Startpunkt in Arbeitsflächen-mm (inkl. Drehung), ``None`` ohne."""
+        if not self.start:
+            return None
+        g = self.geom
+        u, v = self.start
+        x, y = g.x + u * g.w, g.y + v * g.h
+        if g.rot:
+            cx, cy = g.center()
+            return rotate_point(x, y, cx, cy, g.rot)
+        return (x, y)
 
     def abs_points(self) -> list[tuple[float, float]]:
         """Stützpunkte in mm im ungedrehten Objektrahmen."""
@@ -702,6 +719,8 @@ class Shape:
             d["regular"] = {"sides": int(self.regular[0]), "inner": round(float(self.regular[1]), 6)}
         if self.priority:
             d["priority"] = int(self.priority)
+        if self.start:
+            d["start"] = [round(self.start[0], 6), round(self.start[1], 6)]
         return d
 
     @staticmethod
@@ -726,7 +745,23 @@ class Shape:
                      tabs=_read_tabs(d.get("tabs")),
                      corner_radius=_read_radius(d.get("radius")) if kind == "rect" else 0.0,
                      regular=_read_regular(d.get("regular")) if kind == "polygon" else (),
-                     priority=read_priority(d.get("priority")))
+                     priority=read_priority(d.get("priority")),
+                     start=read_start(d.get("start")) if kind in START_POINT_KINDS else ())
+
+
+#: Objektarten, die einen manuellen Startpunkt tragen können (wie manuelle Stege).
+START_POINT_KINDS = ("rect", "ellipse", "polygon", "path", "text")
+
+
+def read_start(raw) -> tuple:
+    """``start`` eines Objekts aus einer Datei: [u, v]; Unlesbares = kein Startpunkt."""
+    try:
+        u, v = float(raw[0]), float(raw[1])
+    except (TypeError, ValueError, IndexError, KeyError):
+        return ()
+    if isinstance(raw, (str, bytes, dict)) or not (math.isfinite(u) and math.isfinite(v)):
+        return ()
+    return (u, v)
 
 
 def read_priority(raw) -> int:

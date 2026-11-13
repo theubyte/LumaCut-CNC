@@ -110,6 +110,10 @@ class CutOptions:
     tab_max: int = 0              # Abstands-Modus: höchstens so viele Stege je Kontur (0 = unbegrenzt)
     tab_cut_power: float = 0.0    # % Puls-Anteil über den Steg (0 = Lücke mit Laser aus)
     tab_points: tuple = ()        # manuelle Steg-Mitten (Maschinen-mm) der Objekte der Ebene
+    # Manuelle Startpunkte (Maschinen-mm, lumacut_canvas.startpoint): eine geschlossene
+    # Kontur, die genau an einem davon beginnt, behält ihren Start – die An-/Abfahrt
+    # darf nur ihre Laufrichtung wechseln, nicht auf eine Kantenmitte / andere Stelle.
+    start_points: tuple = ()
 
     @property
     def auto_tabs(self) -> bool:
@@ -154,6 +158,10 @@ class CutResult:
     manual_tabs: int = 0     # gesetzte manuelle Stege (nach dem Verschmelzen)
     dropped_tabs: int = 0    # manuelle Steg-Punkte ohne Kontur in der Nähe / Kontur zu kurz
     moved_leads: int = 0     # Konturen mit verlegtem Startpunkt wegen Kollision
+
+
+def _start_key(p: Point) -> tuple[float, float]:
+    return (round(p[0], 6), round(p[1], 6))
 
 
 def in_work_area(p: Point, eps: float = 1e-6) -> bool:
@@ -674,18 +682,22 @@ def start_candidates(poly: Poly) -> list[Poly]:
     return out
 
 
-def _with_leads(p: Poly, outer: bool, opts: CutOptions, blocked) -> tuple[Poly, Poly | None, bool]:
+def _with_leads(p: Poly, outer: bool, opts: CutOptions, blocked,
+                fixed: bool = False) -> tuple[Poly, Poly | None, bool]:
     """(Kontur, Anfahrt, verlegt?).
 
     Ohne Hindernisse wie bisher (Kantenmitte, notfalls kürzer). Mit
     Hindernissen zuerst volle Länge an allen Kandidaten (umgekehrt, andere
     Startpunkte), erst danach kürzere Anfahrten – lieber verlegen als stummeln.
+    ``fixed`` (manueller Startpunkt): der Start bleibt, versucht werden nur die
+    eigene und die umgekehrte Laufrichtung, dann kürzer – sonst ohne Anfahrt.
     """
-    first = start_mid_edge(p)
+    first = p if fixed else start_mid_edge(p)
     if blocked is None or opts.lead_in_mm <= 0:
         return first, make_lead(first, outer, opts.lead_in_mm, opts.lead_in_arc, True), False
-    cands = [first, list(reversed(first))] + [c for base in start_candidates(p)
-                                              for c in (base, list(reversed(base)))]
+    cands = [first, list(reversed(first))]
+    if not fixed:
+        cands += [c for base in start_candidates(p) for c in (base, list(reversed(base)))]
     for tries in (1, 4):
         for k, cand in enumerate(cands):
             lead = make_lead(cand, outer, opts.lead_in_mm, opts.lead_in_arc, True, blocked, tries)
@@ -772,6 +784,8 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
         manual, res.dropped_tabs = assign_tab_points(polys, opts.tab_points,
                                                      MANUAL_TAB_SNAP_MM + abs(opts.kerf_mm))
 
+    fixed_starts = {_start_key(q) for q in opts.start_points or ()}
+
     def emit(piece: Poly, kind: str) -> None:
         """Schnittstück ausgeben, bei Perforation in Stücke mit Lücken zerlegt."""
         parts = perforate(piece, opts.perf_cut_mm, opts.perf_skip_mm) if opts.perforated else [piece]
@@ -786,12 +800,13 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
         outer = d % 2 == 0
         blocked = obstacles.blocker(p) if obstacles is not None and (
             opts.lead_in_mm > 0 or opts.lead_out_mm > 0) else None
+        fixed = bool(fixed_starts) and _start_key(p[0]) in fixed_starts
         if opts.lead_in_mm > 0:
-            p, lead, moved = _with_leads(p, outer, opts, blocked)
+            p, lead, moved = _with_leads(p, outer, opts, blocked, fixed)
             res.moved_leads += moved
         else:
             lead = None
-            if opts.lead_out_mm > 0:
+            if opts.lead_out_mm > 0 and not fixed:
                 p = start_mid_edge(p)
         if lead:
             res.polylines.append(lead)

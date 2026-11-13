@@ -68,6 +68,10 @@ def with_corner_radius(shape: Shape, r: float) -> Shape:
         from .tabs import carry_tabs
         delta = abs(effective_radius(new) - effective_radius(shape))
         new = carry_tabs(new, shape.tab_points(), tol_mm=1.5 + delta)
+    if shape.start:
+        from .startpoint import carry_start
+        delta = abs(effective_radius(new) - effective_radius(shape))
+        new = carry_start(new, shape.start_point(), tol_mm=1.5 + delta)
     return new
 
 

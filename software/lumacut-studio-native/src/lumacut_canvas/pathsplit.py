@@ -172,6 +172,10 @@ def break_shape(shape: Shape, keep_holes: bool = True) -> list[Shape] | None:
         from .tabs import carry_tabs
         world = shape.tab_points()
         out = [carry_tabs(part, world, CARRY_TAB_TOL_MM) for part in out]
+    if shape.start:  # der Startpunkt geht mit seiner Kontur in das eine Teil
+        from .startpoint import carry_start
+        sp = shape.start_point()
+        out = [carry_start(part, sp, CARRY_TAB_TOL_MM) for part in out]
     return out
 
 
@@ -307,6 +311,10 @@ def combine(shapes: Iterable[Shape]) -> CombineResult:
         if closed and world_tabs:   # manuelle Stege aller Teile bleiben erhalten
             from .tabs import carry_tabs
             new = carry_tabs(new, world_tabs, CARRY_TAB_TOL_MM)
+        first_start = next((s.start_point() for s in members if s.start), None)
+        if closed and first_start is not None:   # der erste Startpunkt der Teile bleibt
+            from .startpoint import carry_start
+            new = carry_start(new, first_start, CARRY_TAB_TOL_MM)
         res.groups.append(([s.id for s in members], new))
         res.text_converted += texts
         if closed:

@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QWidget)
 
 from . import (arrange_ui, corners_ui, icons, measure_ui, ngon, ngon_ui, node_ui, objsnap_ui, pathops_ui,
-               priority_ui, tabs_ui, text_ui, theme, touch, units)
+               priority_ui, startpoint_ui, tabs_ui, text_ui, theme, touch, units)
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip, VScrollStrip
@@ -432,6 +432,7 @@ class CanvasEditor(QWidget):
         self.path_ops = pathops_ui.install(self)  # Boole/Verschweißen/Versatz/Text in Pfade
         self.node_editor = node_ui.install(self)  # Knotenwerkzeug (Tool.NODE)
         self.tab_tool = tabs_ui.install(self)     # manuelle Stege (Tool.TABS)
+        self.start_tool = startpoint_ui.install(self)  # manueller Startpunkt (Tool.START)
         self.measure_tool = measure_ui.install(self)  # Messen (Tool.MEASURE)
         self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
                   lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
@@ -543,6 +544,10 @@ class CanvasEditor(QWidget):
         if tool == Tool.TABS:
             self.notify("Werkzeug: Stege – Umriss einer geschlossenen Form antippen setzt einen Steg, "
                         "Steg antippen entfernt ihn, ziehen verschiebt ihn")
+        elif tool == Tool.START:
+            self.notify("Werkzeug: Startpunkt – Umriss einer geschlossenen Form antippen legt dort "
+                        "den Start der Kontur fest, Startpunkt antippen entfernt ihn, ziehen "
+                        "verschiebt ihn (Pfeil = Laufrichtung)")
         elif tool == Tool.MEASURE:
             self.notify("Werkzeug: Messen – von Punkt zu Punkt ziehen oder zwei Punkte antippen "
                         "(fängt an Objekten / Raster, Umschalt = 15°-Schritte, Alt = frei, Esc löscht)")
