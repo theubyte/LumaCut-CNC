@@ -1,6 +1,8 @@
 """Qt-Anbindung: Menü „Datei“, Importieren (Strg+I), Drag & Drop, Bildeinstellungen.
 
-Außerdem „Bild nachzeichnen …“ (Alt+T, :mod:`.trace` / :mod:`.trace_qt`).
+Außerdem „Bild nachzeichnen …“ (Alt+T, :mod:`.trace` / :mod:`.trace_qt`) und
+„Import-Einstellungen …“ (Konturen beim Import verbinden / Löcher kombinieren /
+Duplikate löschen, :mod:`.cleanup` / :mod:`.cleanup_qt`, standardmäßig aus).
 
 ``install_import(window)`` erwartet ein Hauptfenster mit ``window.canvas``
 (:class:`lumacut_canvas.editor.CanvasEditor`). Alle Importe laufen über einen
@@ -26,6 +28,7 @@ from lumacut_canvas.pathjoin import join_preview, nest_rings
 from lumacut_canvas.pathsplit import break_apart
 from lumacut_canvas.unit_ui import SpeedSpin, SpeedUnitCombo
 
+from .cleanup import ImportOptions, clean_import, load_options, save_options
 from .curve_widget import CURVE_PRESETS, CUSTOM_LABEL, CurveWidget, preset_name
 from .placement import ALL_SUFFIXES, IMAGE_SUFFIXES, PDF_LIKE_SUFFIXES, import_file
 
@@ -644,6 +647,14 @@ class ImportTools(QObject):
         self.trace_action.setToolTip("Ausgewähltes Bild in Vektorkonturen umwandeln  (Alt+T)")
         self.trace_action.triggered.connect(lambda _=False: self.trace_image())
         self.trace_action.setEnabled(False)
+        # Import-Einstellungen (LightBurn „Auto-close tolerance“ u. a.), gespeichert in QSettings
+        self.settings = getattr(ed, "_settings", None)
+        self.options: ImportOptions = load_options(self.settings)
+        self.ask_options = self._ask_options          # für Tests austauschbar
+        self.options_action = QAction("Import-Einstellungen …", window)
+        self.options_action.setObjectName("import_settings_action")
+        self.options_action.triggered.connect(lambda _=False: self.edit_options())
+        self._update_options_tooltip()
         ed.selectionChanged.connect(lambda _ids: self._update_image_action())
         ed.documentChanged.connect(self._update_image_action)
         ed.image_settings_handler = self.edit_image_settings
@@ -660,6 +671,7 @@ class ImportTools(QObject):
                 menu.addAction(by[name])
         menu.addSeparator()
         menu.addAction(self.import_action)
+        menu.addAction(self.options_action)
         menu.addAction(self.image_action)
         menu.addAction(self.trace_action)
         if "export" in by:
@@ -681,6 +693,32 @@ class ImportTools(QObject):
         ed.view.setAcceptDrops(True)
         vp.setAcceptDrops(True)
         vp.installEventFilter(self)
+
+    # ---------------------------------------------------------------- Import-Einstellungen
+    def _update_options_tooltip(self) -> None:
+        self.options_action.setToolTip("Konturen beim Import aufräumen (verbinden, Löcher kombinieren, "
+                                       f"Duplikate löschen) – derzeit: {self.options.describe()}")
+        self.options_action.setStatusTip(self.options_action.toolTip())
+
+    def _ask_options(self, options: ImportOptions) -> ImportOptions | None:
+        from .cleanup_qt import ImportSettingsDialog
+        dlg = ImportSettingsDialog(options, self.window)
+        return dlg.options() if dlg.exec() == QDialog.Accepted else None
+
+    def set_options(self, options: ImportOptions) -> None:
+        """Import-Einstellungen setzen und speichern (gelten ab dem nächsten Import)."""
+        self.options = options.normalized()
+        save_options(self.settings, self.options)
+        self._update_options_tooltip()
+
+    def edit_options(self) -> bool:
+        """Dialog „Import-Einstellungen“; True, wenn übernommen."""
+        new = self.ask_options(self.options)
+        if new is None:
+            return False
+        self.set_options(new)
+        self.editor.notify(f"Import-Einstellungen: {self.options.describe()} – gilt ab dem nächsten Import")
+        return True
 
     # ---------------------------------------------------------------- Import
     def _error(self, title: str, text: str) -> None:
@@ -736,10 +774,16 @@ class ImportTools(QObject):
             self._error("Import fehlgeschlagen", str(exc))
             return []
         self.last_error = None
+        cleanup_note = ""
+        if res.kind == "vector" and self.options.active:
+            cleaned = clean_import(res.shapes, self.options)
+            if cleaned.changed:
+                res.shapes = cleaned.shapes
+            cleanup_note = cleaned.note()
         self.editor.undo_stack.push(AddShapesCommand(doc, res.shapes, "Importieren"))
         ids = [s.id for s in res.shapes]
         self.editor.set_selection(ids)
-        self.editor.notify(res.summary(Path(path).name) + open_shapes_hint(res.shapes)
+        self.editor.notify(res.summary(Path(path).name) + cleanup_note + open_shapes_hint(res.shapes)
                            + multipart_hint(res.shapes) + holes_hint(res.shapes))
         return ids
 

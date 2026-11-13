@@ -132,7 +132,9 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Ebene (0,01 mm, egal welcher Startpunkt / welche Richtung) – sonst würden sie doppelt gelasert.
   „Offene Formen auswählen“ markiert alle offenen Pfade/Linien. Ohne Auswahl gilt alles
   Bearbeitbare; erzeugte Objekte (Codes) und Bilder bleiben unberührt; je **ein**
-  Rückgängig-Schritt. Nach einem Import nennt die Statusleiste offene und verbindbare Konturen.
+  Rückgängig-Schritt. Nach einem Import nennt die Statusleiste offene und verbindbare Konturen;
+  *Datei › Import-Einstellungen …* erledigt Verbinden / Löcher kombinieren / Duplikate löschen auf
+  Wunsch gleich beim Import (siehe „Import“).
   Liegen offene Pfade/Linien auf einer Ebene mit Füllung, warnt der Hinweis beim Senden,
   „Senden und starten“, Schätzen und Speichern („Achtung: N offene Konturen auf Füll-Ebene …
   wird nur als Linie geschnitten, nicht gefüllt (M verbindbar) – Pfad › „Pfade verbinden“
@@ -972,6 +974,22 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   Polygone, Text (als Glyphenkonturen, sonst Textobjekt) und Bitmaps der ersten Arbeitsfläche;
   Laserwerte werden nicht übernommen, unbekannte/ausgeblendete Objekte gezählt und übersprungen.
   Tabelle und Grenzen: [Anforderungen §9.2](../../docs/ANFORDERUNGEN_VEREINFACHUNG_2026-10-26.md).
+- **Import-Einstellungen** (*Datei › Import-Einstellungen …*, wie LightBurns *Auto-close
+  tolerance* der DXF-Import-Einstellungen und dessen Import eines SVG-Pfads mit Löchern als
+  *eine* Form): drei Schalter, **standardmäßig aus** (ohne Häkchen bleibt jeder Import wie
+  bisher – jede Teilkontur ein eigenes Objekt, gleicher G-Code). „Doppelte Konturen löschen“
+  übernimmt übereinanderliegende gleiche Konturen der Datei nur einmal (wie „Duplikate
+  löschen“), „Offene Pfade verbinden“ fügt lose Strecken mit Enden ≤ Toleranz (Standard
+  0,05 mm, 0,001–2 mm) zu Pfaden zusammen – geschlossene werden Polygone, ineinanderliegende
+  ein Polygon mit Loch (wie „Pfade verbinden“) –, „Löcher mit Außenkontur kombinieren“ fasst
+  geschlossene Konturen, die in einer anderen liegen, mit ihr zu *einem* Objekt mit Loch
+  zusammen (Inseln in Löchern bleiben eigene Objekte; wie „Kombinieren“), damit „Jedes Objekt
+  einzeln“ das Innere eines „O“ nicht mitfüllt. Reihenfolge: Duplikate, Verbinden, Löcher. Gilt
+  für SVG / DXF / PDF / AI / EPS / xTool (Strg+I und Drag & Drop), nur für die Objekte der
+  Datei, nie für Bilder oder Codes; Ebene und Import-Gruppe bleiben, ein Rückgängig-Schritt
+  „Importieren“. Die Statusleiste nennt, was geändert wurde („beim Import: 1 Duplikat(e)
+  gelöscht, 8 offene Form(en) verbunden → 1 geschlossen …“). Die Wahl wird gespeichert
+  (QSettings `import/…`); *Alles aus* stellt den Standard wieder her.
 - **PNG/JPG/BMP**: wird als **Bildobjekt** eingefügt (Größe aus der DPI-Angabe, sonst 96 dpi).
   *Datei › Bildeinstellungen…* (Strg+Umschalt+I) öffnet den Dialog (Modus Schwellwert / Floyd-Steinberg /
   Atkinson / **Jarvis / Stucki / Sierra** / Bayer / **Halbton** (Rasterzellen je Zoll + Winkel) /
