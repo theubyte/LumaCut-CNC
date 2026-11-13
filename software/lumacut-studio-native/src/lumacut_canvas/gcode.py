@@ -52,6 +52,12 @@ verschoben (:func:`scan_offset_segment`), damit hin- und rücklaufende Linien
 trotz Laser-Verzögerung auf einer Kante enden; danach folgt der Überlauf.
 Bei 0 bleibt die Ausgabe Byte für Byte gleich.
 
+Winkel-Schritt je Durchgang (``JobLayer.pass_fills``, LightBurn Fill „Angle
+Increment“): Durchgang p lasert die Schraffur ``pass_fills[p]`` (unter
+``hatch_angle + p · Schritt``) statt ``fills`` und schreibt nach ``; PASS i OF n``
+einen Kommentar ``; FILL ANGLE a``. Ohne Schritt (Standard) bleibt die Ausgabe Byte
+für Byte gleich.
+
 Haltestege mit Steg-Leistung (``JobLayer.poly_kinds`` ``tab_pulse`` / ``tab_off``,
 LightBurn „Tab Cut Power“): die Pulse schließen ohne ``G0`` an das Schnittstück
 davor und danach an; ``tab_off``-Stücke fahren als ``G1 … S0`` mit Schnitttempo
@@ -118,8 +124,22 @@ def _hook_lines(hook: PassHook, layer: JobLayer, p: int, acc: float) -> list[str
     return lines
 
 
+def _pass_fills_active(layer: JobLayer) -> bool:
+    """True, wenn die Ebene je Durchgang eigene Schraffurblöcke hat (Winkel-Schritt)."""
+    pf = getattr(layer, "pass_fills", None) or ()
+    return len(pf) == int(layer.passes) and len(pf) > 1
+
+
+def pass_fill_blocks(layer: JobLayer, p: int):
+    """Schraffurblöcke für Durchgang ``p`` (ab 0): ``pass_fills[p]`` oder ``fills``."""
+    if _pass_fills_active(layer):
+        return layer.pass_fills[p]
+    return getattr(layer, "fills", None) or ()
+
+
 def _has_moves(layer: JobLayer) -> bool:
-    return bool(layer.polylines or getattr(layer, "fills", None))
+    return bool(layer.polylines or getattr(layer, "fills", None)
+                or (_pass_fills_active(layer) and any(layer.pass_fills)))
 
 
 def order_fill_blocks(blocks, pos=None, reversible=True, corners=False):
@@ -194,8 +214,8 @@ def scan_offset_segment(a, b, offset_mm: float):
     return ((a[0] + u[0] * t, a[1] + u[1] * t), (b[0] + u[0] * t, b[1] + u[1] * t))
 
 
-def _fill_moves(layer: JobLayer, pos):
-    """Füllstrecken eines Durchgangs wie im G-Code: ``[(a, b, a2, b2)]``.
+def _fill_moves(layer: JobLayer, pos, p: int = 0):
+    """Füllstrecken des Durchgangs ``p`` wie im G-Code: ``[(a, b, a2, b2)]``.
 
     ``a → b`` wird mit Laser an gefahren (Blockreihenfolge/-variante ab ``pos``,
     Scan-Versatz bereits angewandt), ``a2``/``b2`` sind die Überlauf-Enden.
@@ -203,7 +223,7 @@ def _fill_moves(layer: JobLayer, pos):
     overscan = float(getattr(layer, "fill_overscan_mm", 0.0) or 0.0)
     scan_off = float(getattr(layer, "fill_scan_offset_mm", 0.0) or 0.0)
     moves = []
-    for block in order_fill_blocks(getattr(layer, "fills", None) or (), pos,
+    for block in order_fill_blocks(pass_fill_blocks(layer, p), pos,
                                    not getattr(layer, "fill_fixed_order", False),
                                    getattr(layer, "fill_free_corner", False)):
         for a, b in block:
@@ -228,7 +248,7 @@ def fill_burn_segments(layers: list[JobLayer]) -> list[list]:
         burns = []
         if _has_moves(layer):
             for p in range(max(1, int(layer.passes))):
-                moves = _fill_moves(layer, pos)
+                moves = _fill_moves(layer, pos, p)
                 if p == 0:
                     burns = [(a, b) for a, b, _a2, _b2 in moves]
                 if moves:
@@ -285,7 +305,11 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
             if use_hook:
                 acc += depths[p]
                 out += _hook_lines(pass_hook, layer, p, round(acc, 6))
-            for a, b, a2, b2 in _fill_moves(layer, pos):
+            moves = _fill_moves(layer, pos, p)
+            angles = getattr(layer, "pass_fill_angles", ()) or ()
+            if moves and _pass_fills_active(layer) and len(angles) == layer.passes:
+                out.append(f"; FILL ANGLE {angles[p]:g}")   # Winkel-Schritt (Kommentar)
+            for a, b, a2, b2 in moves:
                 if pos is None or abs(pos[0] - a2[0]) > 1e-6 or abs(pos[1] - a2[1]) > 1e-6:
                     out.append(f"G0 {_xy(*a2)}")
                 if a2 != a:   # Anlauf mit Laser aus

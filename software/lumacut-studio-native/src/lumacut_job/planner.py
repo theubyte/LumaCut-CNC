@@ -561,13 +561,19 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
         order = getattr(layer, "cut_order", None)
         layer_options = {**(order.planner_options() if order is not None else {}), **options}
         fills = getattr(layer, "fills", None) or []
-        if fills and layer_options.get("reduce_travel", True):
-            reversible = not getattr(layer, "fill_fixed_order", False)
-            corners = reversible and getattr(layer, "fill_free_corner", False)
+        reversible = not getattr(layer, "fill_fixed_order", False)
+        corners = reversible and getattr(layer, "fill_free_corner", False)
+        reorder = layer_options.get("reduce_travel", True)
+        pass_fills = list(getattr(layer, "pass_fills", None) or [])
+        if len(pass_fills) != int(layer.passes) or len(pass_fills) < 2:
+            pass_fills = []
+        if fills and reorder:
             fills = improve_fill_block_order(
                 order_fill_blocks_nearest(fills, pos, reversible, corners, should_stop),
                 pos, reversible, corners=corners, should_stop=should_stop)
             layer = replace(layer, fills=fills)
+        if pass_fills:
+            pass_fills[0] = fills
         if fills:
             pos = fills[-1][-1][1]   # contours follow the fill in every pass
         ordered = order_polylines(polys, pos, should_stop=should_stop, **layer_options)
@@ -593,6 +599,24 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
             new = replace(layer, polylines=res.polylines, poly_kinds=tuple(res.kinds))
         else:
             new = replace(layer, polylines=ordered)
+        if pass_fills:
+            # Winkel-Schritt: jeder weitere Durchgang hat eigene Schraffurblöcke – jeweils
+            # ab dem Ende des vorigen Durchgangs (Konturen bzw. dessen Füllung) ordnen.
+            end = pos
+            for p in range(1, len(pass_fills)):
+                end = new.polylines[-1][-1] if new.polylines else end
+                blocks = pass_fills[p]
+                if blocks and reorder:
+                    blocks = improve_fill_block_order(
+                        order_fill_blocks_nearest(blocks, end, reversible, corners,
+                                                  should_stop),
+                        end, reversible, corners=corners, should_stop=should_stop)
+                    pass_fills[p] = blocks
+                if blocks:
+                    end = blocks[-1][-1][1]
+            new = replace(new, pass_fills=pass_fills)
+            if not new.polylines:
+                pos = end
         if new.polylines:
             pos = new.polylines[-1][-1]
         out.append(new)

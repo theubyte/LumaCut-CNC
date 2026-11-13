@@ -42,7 +42,8 @@ from .model import FILL_LAYER_FIELDS, MATERIAL_LAYER_FIELDS, PASSES_RANGE, POWER
 
 # Undo-Beschriftungen der Füll-Felder (ohne commands.py anzufassen).
 for _k, _v in {"line_interval_mm": "Linienabstand", "hatch_angle": "Schraffurwinkel",
-               "fill_mode": "Füllmodus", "fill_overscan_mm": "Überlauf"}.items():
+               "fill_mode": "Füllmodus", "fill_overscan_mm": "Überlauf",
+               "fill_angle_increment": "Winkel-Schritt"}.items():
     SetLayerAttrCommand.LABELS.setdefault(_k, _v)
 
 class _FillParamCommand(SetLayerAttrCommand):
@@ -73,11 +74,18 @@ def layer_summary(layer: Layer, speed_unit: str | None = None) -> str:
                              else "Gruppen zusammen")
         if layer.fill_mode in _hatch.LINE_FILL_MODES and layer.fill_overscan_mm > 0:
             text += f" · Überlauf {_mm(layer.fill_overscan_mm)} mm"
+        if layer.fill_mode in _hatch.LINE_FILL_MODES and layer.fill_angle_increment:
+            text += f" · Winkel-Schritt {_deg(layer.fill_angle_increment)}°"
     return f"{text} · {layer.material}" if layer.material else text
 
 
 def _mm(v: float) -> str:
     return f"{v:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def _deg(v: float) -> str:
+    """Winkel mit Vorzeichen, deutsch (``+45``, ``-22,5``)."""
+    return ("+" if v > 0 else "") + _mm(v)
 
 
 def passes_are_auto(layer: Any) -> bool | None:
@@ -406,6 +414,21 @@ class LayersPanel(QWidget):
             spin.setKeyboardTracking(False)
             spin.setAlignment(Qt.AlignRight)
             spin.valueChanged.connect(lambda v, a=attr: self._param_edited(a, v))
+        self.fill_angle_step = QDoubleSpinBox()
+        self.fill_angle_step.setRange(*_hatch.ANGLE_INCREMENT_RANGE)
+        self.fill_angle_step.setDecimals(0)
+        self.fill_angle_step.setSingleStep(15)
+        self.fill_angle_step.setSuffix(" °")
+        self.fill_angle_step.setKeyboardTracking(False)
+        self.fill_angle_step.setAlignment(Qt.AlignRight)
+        self.fill_angle_step.setToolTip(
+            "Winkel-Schritt je Durchgang (Angle Increment): jeder weitere Durchgang "
+            "schraffiert um diesen Winkel gedreht (z. B. 45° bei 4 Durchgängen: 0°, 45°, "
+            "90°, 135°) – die Linien liegen nicht genau übereinander, die Gravur wird "
+            "gleichmäßiger und ohne Rillen. Wirkt erst ab 2 Durchgängen; 0° = aus. "
+            "Nur Schraffur und Kreuzschraffur")
+        self.fill_angle_step.valueChanged.connect(
+            lambda v: self._param_edited("fill_angle_increment", v))
         self.fill_overscan = self._mm_spin(_hatch.OVERSCAN_RANGE, 0.5, "Aus")
         self.fill_overscan.setDecimals(1)
         self.fill_overscan.setToolTip(
@@ -437,6 +460,7 @@ class LayersPanel(QWidget):
         form.addRow("Füllmodus", self.fill_mode)
         form.addRow("Linienabstand", self.fill_interval)
         form.addRow("Winkel", self.fill_angle)
+        form.addRow("Winkel-Schritt", self.fill_angle_step)
         form.addRow("Überlauf", self.fill_overscan)
         form.addRow("Füllen", self.fill_grouping)
         form.addRow(self.fill_outline)    # untereinander: passt auch in schmale Seitenleisten
@@ -453,11 +477,12 @@ class LayersPanel(QWidget):
         self.fill_grouping.setCurrentIndex(max(0, self.fill_grouping.findData(layer.fill_grouping)))
         self.fill_inside_out.setChecked(layer.offset_inside_out)
         self.fill_overscan.setValue(layer.fill_overscan_mm)
+        self.fill_angle_step.setValue(layer.fill_angle_increment)
         on = layer.fill_mode != "none"
         lines = layer.fill_mode in _hatch.LINE_FILL_MODES   # Offset-Füllung: kein Winkel
         for w in (self.fill_interval, self.fill_outline, self.fill_grouping):
             w.setEnabled(on)
-        for w in (self.fill_angle, self.fill_bidir, self.fill_overscan):
+        for w in (self.fill_angle, self.fill_angle_step, self.fill_bidir, self.fill_overscan):
             w.setEnabled(lines)
         self.fill_inside_out.setEnabled(layer.fill_mode == "offset")
 

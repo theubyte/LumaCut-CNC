@@ -674,8 +674,8 @@ Im Ebenen-Panel unter **Füllung der Ebene**: *Füllmodus* (Keine / Schraffur /
 Kreuzschraffur / Offset-Füllung), *Linienabstand* in mm (0,05–20), *Winkel* in ° (0 = waagerecht,
 gegen den Uhrzeigersinn; Kreuzschraffur fügt +90° hinzu, beim Einschalten
 mit 0° wird 45° vorgeschlagen), *Kontur mitlasern* und *Bidirektional*
-(abwechselnde Zeilenrichtung, kürzere Leerfahrten), *Überlauf* (nur Schraffur /
-Kreuzschraffur), *Füllen* (welche Objekte gemeinsam gefüllt werden) und – nur bei
+(abwechselnde Zeilenrichtung, kürzere Leerfahrten), *Winkel-Schritt* und *Überlauf* (nur
+Schraffur / Kreuzschraffur), *Füllen* (welche Objekte gemeinsam gefüllt werden) und – nur bei
 Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt.
 
 - Gefüllt werden geschlossene Objekte: Rechteck, Ellipse, Polygon, Text
@@ -711,6 +711,15 @@ Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt
   Ränder verbrennen nicht stärker. Am Rand der Arbeitsfläche wird der Überlauf
   gekürzt; Zeitschätzung und Pfadvorschau zeigen ihn als Leerfahrt. Offset-Füllung
   braucht keinen (Ringe ohne Absetzen), das Feld ist dort ausgegraut.
+- **Winkel-Schritt** (wie LightBurn Fill „Angle Increment“, −90…90°, Standard 0° = aus):
+  bei mehreren Durchgängen schraffiert jeder weitere Durchgang um diesen Winkel gedreht –
+  z. B. *Winkel* 0° und Schritt 45° bei 4 Durchgängen: 0°, 45°, 90°, 135°. Die Linien liegen
+  nicht genau übereinander, tiefe Gravuren (Stempel, Schiefer, Acryl) werden gleichmäßiger
+  und ohne Rillen. Kreuzschraffur dreht beide Richtungen mit. Wirkt erst ab 2 Durchgängen
+  (Durchgänge der Ebene); Konturen bleiben in jedem Durchgang gleich. Im G-Code steht je
+  Durchgang `; FILL ANGLE a`; Zeitschätzung und Pfadvorschau zeigen jeden Durchgang mit
+  seinem Winkel, die Schraffur auf der Arbeitsfläche den ersten Durchgang. Offset-Füllung
+  hat keinen Winkel, das Feld ist dort ausgegraut.
 - **Scan-Versatz** („Scan-Versatz…“, Menü „Auftrag“; wie LightBurn „Scanning Offset
   Adjustment“): bei schneller, bidirektionaler Gravur brennt der Laser in Fahrtrichtung
   etwas zu spät, hin- und rücklaufende Linien liegen versetzt und senkrechte Kanten werden

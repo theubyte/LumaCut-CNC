@@ -72,7 +72,7 @@ CUT_LAYER_FIELDS = tuple(CUT_LAYER_DEFAULTS)
 FILL_LAYER_DEFAULTS = {"fill_mode": "none", "line_interval_mm": _hatch.DEFAULT_INTERVAL_MM,
                        "hatch_angle": 0.0, "hatch_bidirectional": True, "hatch_outline": True,
                        "fill_grouping": "individual", "offset_inside_out": False,
-                       "fill_overscan_mm": 0.0}
+                       "fill_overscan_mm": 0.0, "fill_angle_increment": 0.0}
 FILL_LAYER_FIELDS = tuple(FILL_LAYER_DEFAULTS)
 # Geschlossene Objektarten, die gefüllt werden (Linie/Freihand/Bild nicht).
 FILLABLE_KINDS = ("rect", "ellipse", "polygon", "text")
@@ -373,6 +373,7 @@ class Layer:
     fill_grouping: str = "individual"  # hatch.FILL_GROUPINGS: einzeln / Gruppen / alle zusammen
     offset_inside_out: bool = False  # Offset-Füllung: Ringe von innen nach außen
     fill_overscan_mm: float = 0.0    # Schraffur: Überlauf je Linienende (Laser aus), 0 = aus
+    fill_angle_increment: float = 0.0  # Schraffur: Winkel-Schritt je weiterem Durchgang, 0 = aus
     material_ref: str = ""          # Bibliotheksbezug, s. LINK_LAYER_FIELDS
     material_link: bool = False     # True: Dicke ändern wendet die Bibliothek neu an
 
@@ -414,6 +415,7 @@ class Layer:
             offset_inside_out=bool(self.offset_inside_out),
             fill_overscan_mm=round(_clamp(float(self.fill_overscan_mm),
                                           *_hatch.OVERSCAN_RANGE), 3),
+            fill_angle_increment=_clean_increment(self.fill_angle_increment),
             material_ref=str(self.material_ref or "").strip()[:120],
             material_link=bool(self.material_link and self.material_ref),
         )
@@ -450,6 +452,18 @@ class Layer:
             material_ref=str(d.get("material_ref", "")),
             material_link=bool(d.get("material_link", False)),
         ).normalized()
+
+
+def _clean_increment(value) -> float:
+    """Winkel-Schritt der Schraffur im Bereich ±90° (kaputte Werte = 0, -0 = 0)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(v):
+        return 0.0
+    v = round(_clamp(v, *_hatch.ANGLE_INCREMENT_RANGE), 3)
+    return 0.0 if v == 0 else v
 
 
 def normalize_angle(deg: float) -> float:

@@ -51,6 +51,11 @@ MAX_OFFSET_RINGS = 5000         # Schutz wie MAX_LINES_PER_PASS
 OFFSET_SIMPLIFY_MM = 0.005      # Ringe vereinfachen (weit unter der Strahlbreite)
 OFFSET_ARC_TOL_MM = 0.02        # Sehnenfehler gerundeter Ecken (wie shape_paths)
 INTERVAL_RANGE = (0.05, 20.0)   # mm
+#: Winkel-Schritt je Durchgang der Schraffur (LightBurn Fill „Angle Increment“):
+#: Durchgang k (ab 0) schraffiert unter ``hatch_angle + k · Schritt`` – mehrere
+#: Durchgänge legen ihre Linien kreuz und quer statt genau übereinander (gleichmäßigere
+#: Tiefe, keine Rillen). Gilt nur für LINE_FILL_MODES; 0 = aus (Ausgabe unverändert).
+ANGLE_INCREMENT_RANGE = (-90.0, 90.0)   # Grad
 DEFAULT_INTERVAL_MM = 0.2
 MAX_LINES_PER_PASS = 20000      # Schutz vor versehentlich winzigen Abständen
 _MIN_SEG = 1e-6
@@ -62,6 +67,18 @@ def normalize_angle_180(deg: float) -> float:
     if a < 0:
         a += 180.0
     return 0.0 if abs(a - 180.0) < 1e-9 else round(a, 3)
+
+
+def pass_angles(angle_deg: float, increment_deg: float, passes: int) -> list[float]:
+    """Schraffurwinkel je Durchgang: ``normalize_angle_180(angle + k · increment)``.
+
+    Durchgang 1 behält immer ``angle_deg`` (normalisiert); bei Schritt 0 oder
+    einem Durchgang sind alle Winkel gleich.
+    """
+    inc = float(increment_deg or 0.0)
+    # + 0.0: −0° (z. B. 0° − 180°) wird 0°, sonst schreibt der G-Code „-0“.
+    return [normalize_angle_180(float(angle_deg) + k * inc) + 0.0
+            for k in range(max(1, int(passes)))]
 
 
 def _rot(p: Point, c: float, s: float) -> Point:

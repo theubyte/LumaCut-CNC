@@ -19,7 +19,7 @@ from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen
 from PySide6.QtSvg import QSvgGenerator
 
-from .hatch import LINE_FILL_MODES, fill_segments
+from .hatch import LINE_FILL_MODES, fill_segments, pass_angles
 from .material import layer_pass_plan
 from .model import CUT_LAYER_FIELDS, FILLABLE_KINDS, Document, Layer, Shape
 from .shape_paths import shape_path, shape_polygons
@@ -82,6 +82,12 @@ class JobLayer:
     # vier Ecken beginnen – Zeilen rückwärts und/oder jede Zeile umgedreht
     # (hatch.fill_block_entries); Planer und G-Code wählen den nächsten Einstieg.
     fill_free_corner: bool = False
+    # Winkel-Schritt je Durchgang (Layer.fill_angle_increment, LightBurn „Angle
+    # Increment“): je Durchgang eigene Schraffurblöcke (``pass_fills[p]``, Eintrag 0 =
+    # ``fills``) und ihr Winkel (``pass_fill_angles[p]``). Leer = jeder Durchgang
+    # lasert ``fills`` (ohne Schritt, ein Durchgang oder Offset-Füllung).
+    pass_fills: list = field(default_factory=list)
+    pass_fill_angles: tuple[float, ...] = ()
     # Schnittreihenfolge des Projekts (model.CutOrder, „Optimierung…“); None =
     # Planer-Standard. Jede Ebene trägt sie, damit alle Aufrufer des Planers
     # (Senden, Vorschau, Schätzung, Rahmen, Park-Ecke) gleich planen.
@@ -143,26 +149,63 @@ def _fill_shape_groups(doc: Document, layer: Layer) -> list[list[Shape]]:
     return out
 
 
-def layer_fill_blocks(doc: Document, layer: Layer) -> list[tuple[list[str], list]]:
+def layer_fill_blocks(doc: Document, layer: Layer,
+                      angle: float | None = None) -> list[tuple[list[str], list]]:
     """Füllung einer Ebene als Blöcke ``(objekt_ids, strecken)`` (Arbeitsflächen-mm).
 
     Je nach ``layer.fill_grouping`` ein Block je Objekt, je oberster Gruppe
     (ungruppierte Objekte einzeln) oder einer für alle Objekte der Ebene.
     Gemeinsam gefüllte Objekte bilden eine Fläche nach der
     Gerade-Ungerade-Regel: überlappende Teile und ineinander liegende Objekte
-    bleiben frei (wie LightBurn). Leere Blöcke entfallen.
+    bleiben frei (wie LightBurn). Leere Blöcke entfallen. ``angle`` ersetzt den
+    Schraffurwinkel der Ebene (Winkel-Schritt je Durchgang, :func:`layer_pass_fill_blocks`).
     """
     if layer.fill_mode == "none":
         return []
+    hatch_angle = layer.hatch_angle if angle is None else angle
     blocks = []
     for group in _fill_shape_groups(doc, layer):
         polys = [poly for s in group for poly in shape_polygons(s)]
-        segs = fill_segments(polys, layer.fill_mode, layer.line_interval_mm, layer.hatch_angle,
+        segs = fill_segments(polys, layer.fill_mode, layer.line_interval_mm, hatch_angle,
                              layer.hatch_bidirectional,
                              getattr(layer, "offset_inside_out", False))
         if segs:
             blocks.append(([s.id for s in group], segs))
     return blocks
+
+
+def layer_fill_pass_angles(layer: Layer) -> tuple[float, ...]:
+    """Schraffurwinkel je Durchgang, wenn der Winkel-Schritt wirkt, sonst ``()``.
+
+    Wirkt nur bei Schraffur / Kreuzschraffur, mehr als einem Durchgang und einem
+    Schritt, der wirklich einen anderen Winkel ergibt (180° = dieselben Linien).
+    """
+    inc = float(getattr(layer, "fill_angle_increment", 0.0) or 0.0)
+    if layer.fill_mode not in LINE_FILL_MODES or int(layer.passes) < 2 or not inc:
+        return ()
+    angles = pass_angles(layer.hatch_angle, inc, layer.passes)
+    return tuple(angles) if len(set(angles)) > 1 else ()
+
+
+def layer_pass_fill_blocks(doc: Document, layer: Layer, first=None):
+    """Füllblöcke je Durchgang (LightBurn „Angle Increment“) oder ``None`` ohne Schritt.
+
+    Liste mit einem Eintrag je Durchgang (wie :func:`layer_fill_blocks`, unter dem
+    Winkel des Durchgangs); gleiche Winkel teilen sich dieselbe Liste. ``first`` =
+    bereits berechnete Blöcke unter dem Ebenenwinkel (Durchgang 1).
+    """
+    angles = layer_fill_pass_angles(layer)
+    if not angles:
+        return None
+    cache: dict[float, list] = {}
+    if first is not None:
+        cache[angles[0]] = first
+    out = []
+    for a in angles:
+        if a not in cache:
+            cache[a] = layer_fill_blocks(doc, layer, a)
+        out.append(cache[a])
+    return out
 
 
 def _unit_mode(doc: Document) -> str:
@@ -288,15 +331,29 @@ def priority_units(doc: Document) -> list[tuple[int, list[Shape]]]:
     return sorted(by_prio.items())
 
 
+def _machine_fills(fill_blocks, ids: set[str] | None) -> list:
+    return [[(to_machine(*a), to_machine(*b)) for a, b in segs]
+            for bids, segs in fill_blocks if ids is None or (bids and bids[0] in ids)]
+
+
 def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = None,
-               unit: str = "") -> JobLayer | None:
-    """Eine Ebene als :class:`JobLayer` (nur Objekte aus ``ids``, None = alle)."""
+               unit: str = "", pass_blocks=None) -> JobLayer | None:
+    """Eine Ebene als :class:`JobLayer` (nur Objekte aus ``ids``, None = alle).
+
+    ``pass_blocks``: Füllblöcke je Durchgang (:func:`layer_pass_fill_blocks`) oder None.
+    """
     polys: list[list[tuple[float, float]]] = []
     tab_points: list[tuple[float, float]] = []
-    fills = []
-    for bids, segs in fill_blocks:
-        if ids is None or (bids and bids[0] in ids):
-            fills.append([(to_machine(*a), to_machine(*b)) for a, b in segs])
+    fills = _machine_fills(fill_blocks, ids)
+    pass_fills: list = []
+    if pass_blocks:
+        converted: dict[int, list] = {id(fill_blocks): fills}
+        for blocks in pass_blocks:
+            if id(blocks) not in converted:
+                converted[id(blocks)] = _machine_fills(blocks, ids)
+            pass_fills.append(converted[id(blocks)])
+        if not any(pass_fills):
+            pass_fills = []
     for s in doc.shapes_in_layer(layer.id):
         if ids is not None and s.id not in ids:
             continue
@@ -313,7 +370,7 @@ def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = 
             polys.append([to_machine(x, y) for x, y in poly])
         if s.tabs:
             tab_points.extend(to_machine(x, y) for x, y in s.tab_points())
-    if not (polys or fills):
+    if not (polys or fills or pass_fills):
         return None
     plan = layer_pass_plan(layer)
     return JobLayer(layer.id, layer.name, layer.power, layer.speed,
@@ -327,7 +384,8 @@ def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = 
                                       if layer.fill_mode in LINE_FILL_MODES
                                       else 0.0),
                     cut_order=getattr(doc, "cut_order", None),
-                    tab_points=tuple(tab_points), unit=unit)
+                    tab_points=tuple(tab_points), unit=unit, pass_fills=pass_fills,
+                    pass_fill_angles=layer_fill_pass_angles(layer) if pass_fills else ())
 
 
 def job_layers(doc: Document) -> list[JobLayer]:
@@ -347,6 +405,7 @@ def job_layers(doc: Document) -> list[JobLayer]:
     """
     layers = [l for l in reversed(doc.layers) if l.visible]
     blocks = {l.id: layer_fill_blocks(doc, l) for l in layers}
+    passes = {l.id: layer_pass_fill_blocks(doc, l, blocks[l.id]) for l in layers}
     mode = _unit_mode(doc)
     if mode != "layer":
         units = (list(priority_units(doc)) if mode == "priority"
@@ -356,7 +415,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
             for key, shapes in units:
                 ids = {s.id for s in shapes}
                 part = [jl for l in layers
-                        if (jl := _job_layer(doc, l, blocks[l.id], ids)) is not None]
+                        if (jl := _job_layer(doc, l, blocks[l.id], ids,
+                                             pass_blocks=passes[l.id])) is not None]
                 if part:
                     parts.append((key, part))
             if len(parts) > 1:
@@ -367,7 +427,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
                 return [replace(jl, unit=f"{i} OF {n}")
                         for i, (_key, part) in enumerate(parts, 1) for jl in part]
             return [jl for _key, part in parts for jl in part]
-    return [jl for l in layers if (jl := _job_layer(doc, l, blocks[l.id])) is not None]
+    return [jl for l in layers
+            if (jl := _job_layer(doc, l, blocks[l.id], pass_blocks=passes[l.id])) is not None]
 
 
 def _paint(doc: Document, p: QPainter, line_width_mm: float, show_fill: bool = False) -> None:
