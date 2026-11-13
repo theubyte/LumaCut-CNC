@@ -57,6 +57,10 @@ LightBurn „Tab Cut Power“): die Pulse schließen ohne ``G0`` an das Schnitts
 davor und danach an; ``tab_off``-Stücke fahren als ``G1 … S0`` mit Schnitttempo
 (Laser aus, keine Bremsung), ``tab_pulse``-Stücke mit der Leistung der Ebene.
 
+„Nach Gruppen“ (LightBurn *Order by Group*, ``JobLayer.unit``): vor den Ebenen
+jeder Gruppe steht einmal ``; GROUP i OF n`` – ein reiner Kommentar; ohne
+(Standard „Nach Ebenen“) bleibt die Ausgabe Byte für Byte gleich.
+
 Die Funktion erzeugt nur Text; sie startet nie eine Maschine.
 """
 
@@ -240,6 +244,7 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
     out = ["; LUMACUT STUDIO NATIVE CANVAS JOB (homing, focus and park run on the Pi)",
            "G21", "G90", "M5 I", "M3 I"]
     pos = None
+    unit = ""
     for layer in layers:
         if not _has_moves(layer):
             continue
@@ -260,6 +265,9 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
                              f"{MAX_FOCUS_DROP_MM:g} mm): {layer.name}")
         s = round(layer.power_percent / 100 * PWM_MAX)
         f = f"{layer.speed_mm_min:g}"
+        if getattr(layer, "unit", "") and layer.unit != unit:
+            unit = layer.unit
+            out.append("; GROUP " + _comment(unit))   # „Nach Gruppen“ (nur Kommentar)
         out.append("; LAYER " + _comment(layer.name))
         if abs(z_offset) > _EPS:
             # Relative only (Pi-guard); negative = closer to the material.

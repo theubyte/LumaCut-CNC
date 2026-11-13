@@ -14,12 +14,14 @@ from PySide6.QtGui import QUndoCommand
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QLabel)
 
-from lumacut_canvas.model import CUT_ORDER_DIRECTIONS, CutOrder, Document
+from lumacut_canvas.model import CUT_ORDER_DIRECTIONS, CUT_ORDER_UNITS, CutOrder, Document
 
 #: Anzeigetexte der Richtungen (Reihenfolge wie :data:`CUT_ORDER_DIRECTIONS`).
 DIRECTION_LABELS = {"": "aus", "top_bottom": "von oben nach unten",
                     "bottom_top": "von unten nach oben", "left_right": "von links nach rechts",
                     "right_left": "von rechts nach links"}
+#: Anzeigetexte der Reihenfolge über Ebenen (wie :data:`CUT_ORDER_UNITS`).
+UNIT_LABELS = {"layer": "Nach Ebenen", "group": "Nach Gruppen"}
 
 
 class SetCutOrderCommand(QUndoCommand):
@@ -46,10 +48,20 @@ class OptimizeDialog(QDialog):
         self.setWindowTitle("Optimierungseinstellungen")
         f = QFormLayout(self)
         info = QLabel("Reihenfolge, Startpunkt und Richtung der Konturen beim Senden, in der "
-                      "Pfadvorschau und der Zeitschätzung. Die Ebenen laufen weiter von unten "
-                      "nach oben; gilt für das ganze Projekt.")
+                      "Pfadvorschau und der Zeitschätzung. Die Ebenen laufen von unten nach "
+                      "oben – „Nach Gruppen“ arbeitet jede Gruppe mit allen ihren Ebenen ab; "
+                      "gilt für das ganze Projekt.")
         info.setWordWrap(True)
         f.addRow(info)
+        self.order_by = QComboBox()
+        for key in CUT_ORDER_UNITS:
+            self.order_by.addItem(UNIT_LABELS[key], key)
+        self.order_by.setToolTip(
+            "Nach Ebenen: erst alle Objekte der untersten Ebene, dann die nächste Ebene "
+            "(Standard).\nNach Gruppen: jede Gruppe (Strg+G) wird mit allen ihren Ebenen fertig "
+            "graviert und geschnitten, bevor die nächste beginnt – wie LightBurn „Order by "
+            "Group“, z. B. ein Namensschild nach dem anderen. Objekte ohne Gruppe kommen "
+            "zusammen zum Schluss.")
         self.enabled = QCheckBox("Optimierung und Umsortierung aktiv")
         self.enabled.setToolTip("Aus: Konturen in der Reihenfolge, in der sie gezeichnet wurden, "
                                 "mit ihrem gezeichneten Startpunkt und ihrer Richtung.")
@@ -77,7 +89,7 @@ class OptimizeDialog(QDialog):
                                   "„Leerfahrten verkürzen“.")
         self.hint = QLabel("")
         self.hint.setWordWrap(True)
-        for label, w in (("", self.enabled), ("", self.inside_first), ("", self.reduce_travel),
+        for label, w in (("Reihenfolge", self.order_by), ("", self.enabled), ("", self.inside_first), ("", self.reduce_travel),
                          ("", self.best_start), ("", self.corners), ("", self.best_direction),
                          ("In Richtung schneiden", self.direction), ("", self.hint)):
             f.addRow(label, w)
@@ -92,6 +104,7 @@ class OptimizeDialog(QDialog):
                     self.inside_first, self.corners):
             box.toggled.connect(self._update_enabled)
         self.direction.currentIndexChanged.connect(self._update_enabled)
+        self.order_by.currentIndexChanged.connect(self._update_enabled)
         self.set_value(order)
 
     def set_value(self, order: CutOrder) -> None:
@@ -102,6 +115,7 @@ class OptimizeDialog(QDialog):
         self.corners.setChecked(order.corners)
         self.best_direction.setChecked(order.best_direction)
         self.direction.setCurrentIndex(max(0, self.direction.findData(order.direction)))
+        self.order_by.setCurrentIndex(max(0, self.order_by.findData(order.order_by)))
         self._update_enabled()
 
     def restore_defaults(self) -> None:
@@ -126,7 +140,8 @@ class OptimizeDialog(QDialog):
                         best_start=self.best_start.isChecked(),
                         corners=self.corners.isChecked(),
                         best_direction=self.best_direction.isChecked(),
-                        direction=self.direction.currentData() or "")
+                        direction=self.direction.currentData() or "",
+                        order_by=self.order_by.currentData() or "layer")
 
 
 def order_hint(order: CutOrder) -> str:
@@ -139,7 +154,22 @@ def order_hint(order: CutOrder) -> str:
                 "herausfallen oder verrutschen.")
     if not order.reduce_travel and not order.direction:
         return "Konturen laufen in Zeichenreihenfolge (nur innere Formen werden vorgezogen)."
+    if order.by_group:
+        return ("Nach Gruppen: Löcher und Gravuren eines Teils gehören in dieselbe Gruppe – "
+                "„Innere Formen zuerst“ wirkt innerhalb jeder Gruppe; Objekte ohne Gruppe "
+                "kommen zum Schluss.")
     return ""
+
+
+def group_count_note(doc: Document) -> str:
+    """Hinweis zu „Nach Gruppen“ für die Statusleiste („“ = nach Ebenen)."""
+    if not doc.cut_order.by_group:
+        return ""
+    from lumacut_canvas.export import cut_units
+    groups = sum(1 for gid, _shapes in cut_units(doc) if gid)
+    if not groups:
+        return " (keine Gruppen im Projekt – läuft wie nach Ebenen)"
+    return f" ({groups} Gruppe(n))"
 
 
 def apply_cut_order(editor, order: CutOrder) -> bool:
@@ -153,9 +183,10 @@ def apply_cut_order(editor, order: CutOrder) -> bool:
 
 def summary(order: CutOrder) -> str:
     """Kurztext der Abweichungen vom Standard („Standard“, wenn keine)."""
+    unit = ["nach Gruppen"] if order.by_group else []
     if not order.enabled:
-        return "Optimierung aus (Zeichenreihenfolge)"
-    parts = []
+        return ", ".join(["Optimierung aus (Zeichenreihenfolge)"] + unit)
+    parts = list(unit)
     if not order.inside_first:
         parts.append("innere Formen nicht zuerst")
     if not order.reduce_travel:

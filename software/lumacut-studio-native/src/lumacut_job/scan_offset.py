@@ -213,8 +213,9 @@ class FillPreviewJob:
                                  self.table)
         out: dict[str, list] = {}
         for layer, burns in zip(layers, fill_burn_segments(layers)):
-            out[layer.layer_id] = [(machine_to_screen(*a), machine_to_screen(*b))
-                                   for a, b in burns]
+            # „Nach Gruppen“: eine Ebene kommt je Gruppe einmal vor – Strecken sammeln.
+            out.setdefault(layer.layer_id, []).extend(
+                (machine_to_screen(*a), machine_to_screen(*b)) for a, b in burns)
         with _CACHE_LOCK:
             _PREVIEW_CACHE.clear()
             _PREVIEW_CACHE.update(key=self.key, value=out)

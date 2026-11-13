@@ -347,9 +347,20 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   wählen* (offene Pfade vom näheren Ende) und *In Richtung schneiden* (*Cut in direction
   order*: von oben nach unten / unten nach oben / links nach rechts / rechts nach links, Zeile
   für Zeile – eine Zeile = Konturen, deren Vorderkante innerhalb der halben Höhe der vordersten
-  liegt; in der Zeile die nächste). Die Ebenen laufen weiter von unten nach oben. Senden,
-  Pfadvorschau, Zeitschätzung, Rahmen und „G-Code speichern“ planen gleich (`JobLayer.cut_order`).
-  Code: `src/lumacut_job/planner.py`, Dialog `src/lumacut_job/optimize_qt.py`.
+  liegt; in der Zeile die nächste). Die Ebenen laufen von unten nach oben. *Reihenfolge*
+  (wie LightBurns *Order by Layer* / *Order by Group*): **Nach Ebenen** (Standard – erst alle
+  Objekte der untersten Ebene, dann die nächste) oder **Nach Gruppen** – jede oberste Gruppe
+  (Strg+G) wird mit allen ihren Ebenen fertig graviert und geschnitten, bevor die nächste
+  beginnt (z. B. ein Namensschild nach dem anderen: verrutscht ein ausgeschnittenes Teil,
+  ist die Gravur der anderen schon fertig bzw. noch unberührt); Objekte ohne Gruppe laufen
+  zusammen zum Schluss (z. B. der Plattenrand). Die Gruppen folgen den Einstellungen oben
+  (aus = Zeichenreihenfolge; „Innere Formen zuerst“: eine Gruppe, die ganz in einer anderen
+  liegt, zuerst; „In Richtung schneiden“ zeilenweise; sonst die nächste Gruppe ab dem
+  Maschinen-Nullpunkt), innerhalb einer Gruppe planen die Ebenen wie gewohnt. Im G-Code steht
+  vor jeder Gruppe ein Kommentar `; GROUP i OF n`; ohne Gruppen bleibt der Auftrag gleich.
+  Senden, Pfadvorschau, Zeitschätzung, Rahmen und „G-Code speichern“ planen gleich
+  (`JobLayer.cut_order`, `export.cut_units`). Code: `src/lumacut_job/planner.py`, Dialog
+  `src/lumacut_job/optimize_qt.py`.
 - **Seriennummern** („Seriennummern…“, *Alt+N*, Toolbar „Auftrag“; Stapel-Fall von LightBurns
   „Variable Text“): ersetzt das ausgewählte Textobjekt durch ein Raster nummerierter Kopien.
   Vorlage mit Platzhaltern `{n}` (Nummer), `{n:3}` (mit Nullen, `007`), `{date}` (TT.MM.JJJJ),

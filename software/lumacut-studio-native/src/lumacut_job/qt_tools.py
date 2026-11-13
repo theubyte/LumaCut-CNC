@@ -1529,7 +1529,7 @@ class JobTools(QObject):
 
     def optimize_settings(self, order=None) -> bool:
         """Optimierungseinstellungen (Schnittreihenfolge) des Projekts bearbeiten."""
-        from .optimize_qt import OptimizeDialog, apply_cut_order, summary
+        from .optimize_qt import OptimizeDialog, apply_cut_order, group_count_note, summary
         doc = self.editor.document
         if order is None:
             dlg = OptimizeDialog(doc.cut_order, self.window)
@@ -1537,7 +1537,7 @@ class JobTools(QObject):
                 return False
             order = dlg.value()
         changed = apply_cut_order(self.editor, order)
-        self._msg(f"Optimierung: {summary(doc.cut_order)}" if changed
+        self._msg(f"Optimierung: {summary(doc.cut_order)}{group_count_note(doc)}" if changed
                   else "Optimierung unverändert")
         return changed
 

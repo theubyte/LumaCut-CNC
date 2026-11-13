@@ -85,6 +85,10 @@ LINK_LAYER_FIELDS = ("material_ref", "material_link")
 # Settings“): gilt für alle Ebenen, Ebenen-Reihenfolge bleibt (unterste zuerst).
 # Richtungen der Option „In Richtung schneiden“ (Bildschirm-Sicht).
 CUT_ORDER_DIRECTIONS = ("", "top_bottom", "bottom_top", "left_right", "right_left")
+# Reihenfolge über Ebenen hinweg (LightBurn „Order by Layer“ / „Order by Group“):
+# "layer" = Ebene für Ebene (Standard), "group" = jede oberste Gruppe mit allen
+# ihren Ebenen fertig, bevor die nächste beginnt (lumacut_canvas.export.job_units).
+CUT_ORDER_UNITS = ("layer", "group")
 
 
 @dataclass(frozen=True)
@@ -98,7 +102,9 @@ class CutOrder:
     geschlossenen Kontur), ``corners`` (dabei möglichst eine Ecke ≥ 40°
     Richtungsänderung), ``best_direction`` (offene Pfade dürfen rückwärts
     laufen), ``direction`` (Reihenfolge in Bildschirmrichtung, Zeile für
-    Zeile; "" = aus). Gespeichert wird nur, was vom Standard abweicht.
+    Zeile; "" = aus), ``order_by`` ("layer" = Ebene für Ebene, "group" =
+    Gruppe für Gruppe mit allen Ebenen, :data:`CUT_ORDER_UNITS`). Gespeichert
+    wird nur, was vom Standard abweicht.
     """
 
     enabled: bool = True
@@ -108,6 +114,12 @@ class CutOrder:
     corners: bool = False
     best_direction: bool = True
     direction: str = ""
+    order_by: str = "layer"
+
+    @property
+    def by_group(self) -> bool:
+        """Gruppe für Gruppe schneiden (LightBurn „Order by Group“)."""
+        return self.order_by == "group"
 
     @property
     def is_default(self) -> bool:
@@ -128,6 +140,8 @@ class CutOrder:
             v = d.get(f.name, getattr(base, f.name))
             if f.name == "direction":
                 vals[f.name] = v if v in CUT_ORDER_DIRECTIONS else ""
+            elif f.name == "order_by":
+                vals[f.name] = v if v in CUT_ORDER_UNITS else "layer"
             else:
                 vals[f.name] = bool(v)
         return cls(**vals)

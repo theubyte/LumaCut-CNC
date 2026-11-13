@@ -2,13 +2,16 @@
 
 :func:`job_layers` ist die Schnittstelle für den Job-/Maschinenteil: pro
 sichtbarer Ebene die Laserparameter und alle Konturen als Polylinien in
-**Maschinen**-mm (Safezone-Versatz bereits eingerechnet).
+**Maschinen**-mm (Safezone-Versatz bereits eingerechnet). Mit „Nach Gruppen“
+(``Document.cut_order.order_by == "group"``, LightBurn *Order by Group*) kommt
+stattdessen je oberster Gruppe ein Satz Ebenen (:func:`cut_units`) – jede Gruppe
+wird mit allen ihren Ebenen fertig, bevor die nächste beginnt.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen
@@ -18,7 +21,7 @@ from .hatch import LINE_FILL_MODES, fill_segments
 from .material import layer_pass_plan
 from .model import CUT_LAYER_FIELDS, FILLABLE_KINDS, Document, Layer, Shape
 from .shape_paths import shape_path, shape_polygons
-from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, to_machine
+from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, machine_to_screen, to_machine
 
 
 @dataclass
@@ -81,6 +84,9 @@ class JobLayer:
     # Planer-Standard. Jede Ebene trägt sie, damit alle Aufrufer des Planers
     # (Senden, Vorschau, Schätzung, Rahmen, Park-Ecke) gleich planen.
     cut_order: object = None
+    # „Nach Gruppen“ (CutOrder.order_by == "group"): Nummer der Gruppe im Auftrag als
+    # "i OF n" – der G-Code schreibt davor einmal ``; GROUP i OF n``. "" = nach Ebenen.
+    unit: str = ""
 
 
 def shape_fill_segments(shape: Shape, layer: Layer):
@@ -102,7 +108,16 @@ def _fill_shape_groups(doc: Document, layer: Layer) -> list[list[Shape]]:
     shapes = [s for s in doc.shapes_in_layer(layer.id) if s.kind in FILLABLE_KINDS]
     grouping = getattr(layer, "fill_grouping", "individual")
     if grouping == "together":
-        return [shapes] if shapes else []
+        if not shapes:
+            return []
+        if not _by_group(doc):
+            return [shapes]
+        # Nach Gruppen: „alle zusammen“ je oberster Gruppe (ohne Gruppe: zusammen),
+        # weil jede Gruppe für sich gelasert wird.
+        parts: dict[str, list[Shape]] = {}
+        for s in shapes:
+            parts.setdefault(s.groups[0] if s.groups else "", []).append(s)
+        return list(parts.values())
     if grouping != "groups":
         return [[s] for s in shapes]
     out: list[list[Shape]] = []
@@ -141,51 +156,177 @@ def layer_fill_blocks(doc: Document, layer: Layer) -> list[tuple[list[str], list
     return blocks
 
 
+def _by_group(doc: Document) -> bool:
+    return bool(getattr(getattr(doc, "cut_order", None), "by_group", False))
+
+
+#: Kopfposition, ab der der Planer plant (``lumacut_job.planner.optimize_layers``).
+PLAN_START_MACHINE = (30.0, 30.0)
+
+
+def _unit_box(shapes: list[Shape]) -> Rect:
+    box = shapes[0].bounds()
+    for s in shapes[1:]:
+        box = box.united(s.bounds())
+    return box
+
+
+def _box_contains(outer: Rect, inner: Rect, eps: float = 1e-6) -> bool:
+    """``inner`` liegt ganz in ``outer`` und ist kleiner (gleiche Boxen: nein)."""
+    return (outer.x <= inner.x + eps and outer.y <= inner.y + eps
+            and inner.right <= outer.right + eps and inner.bottom <= outer.bottom + eps
+            and outer.w * outer.h > inner.w * inner.h + eps)
+
+
+def _lead(box: Rect, direction: str) -> tuple[float, float]:
+    """(Vorderkante, Ausdehnung) einer Box in Schnittrichtung (Bildschirm-Sicht)."""
+    if direction == "top_bottom":
+        return box.y, box.h
+    if direction == "bottom_top":
+        return -box.bottom, box.h
+    if direction == "left_right":
+        return box.x, box.w
+    return -box.right, box.w
+
+
+def _box_distance(box: Rect, pt: tuple[float, float]) -> float:
+    dx = max(box.x - pt[0], 0.0, pt[0] - box.right)
+    dy = max(box.y - pt[1], 0.0, pt[1] - box.bottom)
+    return dx * dx + dy * dy
+
+
+def _order_groups(units: list[tuple[str, list[Shape]]], order) -> list[tuple[str, list[Shape]]]:
+    """Reihenfolge der Gruppen nach den Optimierungseinstellungen.
+
+    Optimierung aus: Reihenfolge der Objekte (erstes Objekt jeder Gruppe).
+    Sonst „Innere Formen zuerst“: eine Gruppe, deren Box ganz in der Box einer
+    anderen liegt, kommt vor ihr; „In Richtung schneiden“: Zeile für Zeile in
+    Schnittrichtung (Zeilenhöhe = halbe Ausdehnung der vordersten Gruppe), in der
+    Zeile die nächste; sonst „Leerfahrten verkürzen“: die zur vorigen Gruppe
+    nächstgelegene (ab der Startposition des Planers).
+    """
+    if len(units) < 2 or order is None or not order.enabled:
+        return list(units)
+    boxes = [_unit_box(shapes) for _gid, shapes in units]
+    pos = machine_to_screen(*PLAN_START_MACHINE)
+    remaining = list(range(len(units)))
+    out: list[int] = []
+    while remaining:
+        cands = remaining
+        if order.inside_first:
+            cands = [i for i in remaining
+                     if not any(j != i and _box_contains(boxes[i], boxes[j]) for j in remaining)]
+            cands = cands or remaining
+        if order.direction:
+            leads = {i: _lead(boxes[i], order.direction) for i in cands}
+            front = min(cands, key=lambda i: (leads[i][0], i))
+            limit = leads[front][0] + leads[front][1] / 2 + 1e-6
+            cands = [i for i in cands if leads[i][0] <= limit]
+        if order.reduce_travel or order.direction:
+            pick = min(cands, key=lambda i: (_box_distance(boxes[i], pos), i))
+        else:
+            pick = min(cands)
+        b = boxes[pick]
+        pos = (b.x + b.w / 2, b.y + b.h / 2)
+        out.append(pick)
+        remaining.remove(pick)
+    return [units[i] for i in out]
+
+
+def cut_units(doc: Document) -> list[tuple[str, list[Shape]]]:
+    """Gruppen für „Nach Gruppen“: ``[(oberste_gruppen_id, objekte)]`` in Schnittfolge.
+
+    Zählt nur Vektor-Objekte sichtbarer Ebenen (Bilder werden ohnehin vorab
+    graviert). Gruppen in der Reihenfolge von :func:`_order_groups`; alle Objekte
+    ohne Gruppe bilden zusammen die letzte Einheit (id ""), z. B. ein Rahmen oder
+    eine Platte um gruppierte Teile.
+    """
+    visible = {l.id for l in doc.layers if l.visible}
+    by_id: dict[str, list[Shape]] = {}
+    for s in doc.shapes:
+        if s.kind == "image" or s.layer_id not in visible:
+            continue
+        by_id.setdefault(s.groups[0] if s.groups else "", []).append(s)
+    loose = by_id.pop("", None)
+    units = _order_groups(list(by_id.items()), getattr(doc, "cut_order", None))
+    if loose:
+        units.append(("", loose))
+    return units
+
+
+def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = None,
+               unit: str = "") -> JobLayer | None:
+    """Eine Ebene als :class:`JobLayer` (nur Objekte aus ``ids``, None = alle)."""
+    polys: list[list[tuple[float, float]]] = []
+    tab_points: list[tuple[float, float]] = []
+    fills = []
+    for bids, segs in fill_blocks:
+        if ids is None or (bids and bids[0] in ids):
+            fills.append([(to_machine(*a), to_machine(*b)) for a, b in segs])
+    for s in doc.shapes_in_layer(layer.id):
+        if ids is not None and s.id not in ids:
+            continue
+        if s.kind == "image":
+            continue  # Bilder werden gerastert (lumacut_job.images), nicht umfahren
+        if s.kind in FILLABLE_KINDS and layer.fill_mode != "none" and not layer.hatch_outline:
+            continue  # nur Füllung, keine Kontur
+        if s.kind == "line":
+            path = shape_path(s)
+            a, b = path.elementAt(0), path.elementAt(1)
+            polys.append([to_machine(a.x, a.y), to_machine(b.x, b.y)])
+            continue
+        for poly in shape_polygons(s):
+            polys.append([to_machine(x, y) for x, y in poly])
+        if s.tabs:
+            tab_points.extend(to_machine(x, y) for x, y in s.tab_points())
+    if not (polys or fills):
+        return None
+    plan = layer_pass_plan(layer)
+    return JobLayer(layer.id, layer.name, layer.power, layer.speed,
+                    layer.passes, polys, layer.z_step,
+                    z_offset_mm=float(getattr(layer, "z_offset", 0.0) or 0.0),
+                    pass_depths_mm=plan.pass_depths if plan else (),
+                    **{k: getattr(layer, k) for k in CUT_LAYER_FIELDS}, fills=fills,
+                    fill_fixed_order=layer.fill_mode == "offset",
+                    fill_free_corner=layer.fill_mode in LINE_FILL_MODES,
+                    fill_overscan_mm=(getattr(layer, "fill_overscan_mm", 0.0)
+                                      if layer.fill_mode in LINE_FILL_MODES
+                                      else 0.0),
+                    cut_order=getattr(doc, "cut_order", None),
+                    tab_points=tuple(tab_points), unit=unit)
+
+
 def job_layers(doc: Document) -> list[JobLayer]:
     """Ebenen in Ausführungsreihenfolge (unterste Ebene zuerst).
 
     Ellipsen, Kurven und Text werden in Polylinien zerlegt
     (:func:`shape_paths.shape_polygons`, Sehnenfehler ≤ 0,02 mm).
     Ausgeblendete Ebenen werden nicht gelasert.
+
+    „Nach Gruppen“ (LightBurn *Order by Group*): für jede Einheit aus
+    :func:`cut_units` die Ebenen (unterste zuerst) mit nur ihren Objekten –
+    eine Ebene kann so mehrmals vorkommen, jeweils mit ``unit`` = "i OF n".
+    Gibt es nur eine Einheit (keine Gruppen), ist das Ergebnis dasselbe wie
+    nach Ebenen.
     """
-    result: list[JobLayer] = []
-    for layer in reversed(doc.layers):
-        if not layer.visible:
-            continue
-        polys: list[list[tuple[float, float]]] = []
-        tab_points: list[tuple[float, float]] = []
-        fills = []
-        for _ids, segs in layer_fill_blocks(doc, layer):
-            fills.append([(to_machine(*a), to_machine(*b)) for a, b in segs])
-        for s in doc.shapes_in_layer(layer.id):
-            if s.kind == "image":
-                continue  # Bilder werden gerastert (lumacut_job.images), nicht umfahren
-            if s.kind in FILLABLE_KINDS and layer.fill_mode != "none" and not layer.hatch_outline:
-                continue  # nur Füllung, keine Kontur
-            if s.kind == "line":
-                path = shape_path(s)
-                a, b = path.elementAt(0), path.elementAt(1)
-                polys.append([to_machine(a.x, a.y), to_machine(b.x, b.y)])
-                continue
-            for poly in shape_polygons(s):
-                polys.append([to_machine(x, y) for x, y in poly])
-            if s.tabs:
-                tab_points.extend(to_machine(x, y) for x, y in s.tab_points())
-        if polys or fills:
-            plan = layer_pass_plan(layer)
-            result.append(JobLayer(layer.id, layer.name, layer.power, layer.speed,
-                                   layer.passes, polys, layer.z_step,
-                                   z_offset_mm=float(getattr(layer, "z_offset", 0.0) or 0.0),
-                                   pass_depths_mm=plan.pass_depths if plan else (),
-                                   **{k: getattr(layer, k) for k in CUT_LAYER_FIELDS}, fills=fills,
-                                   fill_fixed_order=layer.fill_mode == "offset",
-                                   fill_free_corner=layer.fill_mode in LINE_FILL_MODES,
-                                   fill_overscan_mm=(getattr(layer, "fill_overscan_mm", 0.0)
-                                                     if layer.fill_mode in LINE_FILL_MODES
-                                                     else 0.0),
-                                   cut_order=getattr(doc, "cut_order", None),
-                                   tab_points=tuple(tab_points)))
-    return result
+    layers = [l for l in reversed(doc.layers) if l.visible]
+    blocks = {l.id: layer_fill_blocks(doc, l) for l in layers}
+    if _by_group(doc):
+        units = cut_units(doc)
+        if len(units) > 1:
+            parts = []
+            for _gid, shapes in units:
+                ids = {s.id for s in shapes}
+                part = [jl for l in layers
+                        if (jl := _job_layer(doc, l, blocks[l.id], ids)) is not None]
+                if part:
+                    parts.append(part)
+            if len(parts) > 1:
+                n = len(parts)
+                return [replace(jl, unit=f"{i} OF {n}")
+                        for i, part in enumerate(parts, 1) for jl in part]
+            return [jl for part in parts for jl in part]
+    return [jl for l in layers if (jl := _job_layer(doc, l, blocks[l.id])) is not None]
 
 
 def _paint(doc: Document, p: QPainter, line_width_mm: float, show_fill: bool = False) -> None:
