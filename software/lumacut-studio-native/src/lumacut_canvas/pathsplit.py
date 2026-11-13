@@ -162,8 +162,10 @@ def break_shape(shape: Shape, keep_holes: bool = True) -> list[Shape] | None:
         pts, starts, curves = _assemble(sub)
         if len(pts) < (3 if shape.kind == "polygon" else 2):
             continue
-        out.append(shape_from_world(shape.kind, _world(pts, g.rot, center), shape.layer_id,
-                                    starts, curves, g.rot, shape.groups))
+        part = shape_from_world(shape.kind, _world(pts, g.rot, center), shape.layer_id,
+                                starts, curves, g.rot, shape.groups)
+        part.priority = shape.priority   # Schnitt-Priorität („Nach Priorität“) bleibt
+        out.append(part)
     if len(out) < 2:
         return None
     if shape.tabs:   # manuelle Stege gehen mit ihrer Kontur in das jeweilige Teil
@@ -300,6 +302,7 @@ def combine(shapes: Iterable[Shape]) -> CombineResult:
         pts, starts, curves = _assemble(rings)
         new = shape_from_world("polygon" if closed else "path", pts, layer_id, starts, curves, rot,
                                _common_groups(members))
+        new.priority = min(s.priority for s in members)   # die früheste Priorität
         world_tabs = [t for s in members for t in s.tab_points()]
         if closed and world_tabs:   # manuelle Stege aller Teile bleiben erhalten
             from .tabs import carry_tabs

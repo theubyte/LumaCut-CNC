@@ -348,7 +348,7 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   order*: von oben nach unten / unten nach oben / links nach rechts / rechts nach links, Zeile
   für Zeile – eine Zeile = Konturen, deren Vorderkante innerhalb der halben Höhe der vordersten
   liegt; in der Zeile die nächste). Die Ebenen laufen von unten nach oben. *Reihenfolge*
-  (wie LightBurns *Order by Layer* / *Order by Group*): **Nach Ebenen** (Standard – erst alle
+  (wie LightBurns *Order by Layer* / *Order by Group* / *Order by Priority*): **Nach Ebenen** (Standard – erst alle
   Objekte der untersten Ebene, dann die nächste) oder **Nach Gruppen** – jede oberste Gruppe
   (Strg+G) wird mit allen ihren Ebenen fertig graviert und geschnitten, bevor die nächste
   beginnt (z. B. ein Namensschild nach dem anderen: verrutscht ein ausgeschnittenes Teil,
@@ -358,6 +358,19 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   liegt, zuerst; „In Richtung schneiden“ zeilenweise; sonst die nächste Gruppe ab dem
   Maschinen-Nullpunkt), innerhalb einer Gruppe planen die Ebenen wie gewohnt. Im G-Code steht
   vor jeder Gruppe ein Kommentar `; GROUP i OF n`; ohne Gruppen bleibt der Auftrag gleich.
+  **Nach Priorität** (wie LightBurns *Order by Priority*): jedes Objekt hat eine
+  Schnitt-Priorität (Feld **„Priorität“** in der Eigenschaftsleiste, 0–999, erscheint bei
+  Auswahl, sobald „Nach Priorität“ gewählt ist oder ein Objekt schon eine Priorität hat; ein
+  Rückgängig-Schritt für die ganze Auswahl). Zuerst laufen alle Objekte der kleinsten
+  Priorität mit allen ihren Ebenen, dann die nächste – unabhängig von Ebenen- und
+  Gruppenreihenfolge (z. B. Ausrichtmarken / ein Teststück zuerst, eine Ebene „Schneiden“
+  vor einer Gravur, die erst auf dem fertigen Teil kommen soll). Bilder werden weiter vorab
+  graviert. Im G-Code steht vor jeder Priorität `; PRIORITY p (i OF n)`; haben alle Objekte
+  dieselbe Priorität, bleibt der Auftrag gleich. Die Statusmeldung nennt die Prioritäten und
+  warnt, wenn eine innere Form (Loch, Gravur) eine höhere Priorität als ihre Außenform hat
+  und darum erst nach dem Ausschneiden käme. Zerlegen, Kombinieren (kleinste Priorität),
+  Boole, Versatz, Text in Pfade, Vereinfachen und Schließen behalten die Priorität
+  (`Shape.priority`, `export.priority_units`, `src/lumacut_canvas/priority_ui.py`).
   Senden, Pfadvorschau, Zeitschätzung, Rahmen und „G-Code speichern“ planen gleich
   (`JobLayer.cut_order`, `export.cut_units`). Code: `src/lumacut_job/planner.py`, Dialog
   `src/lumacut_job/optimize_qt.py`.

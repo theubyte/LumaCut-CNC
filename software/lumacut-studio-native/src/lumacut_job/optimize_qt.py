@@ -21,7 +21,7 @@ DIRECTION_LABELS = {"": "aus", "top_bottom": "von oben nach unten",
                     "bottom_top": "von unten nach oben", "left_right": "von links nach rechts",
                     "right_left": "von rechts nach links"}
 #: Anzeigetexte der Reihenfolge über Ebenen (wie :data:`CUT_ORDER_UNITS`).
-UNIT_LABELS = {"layer": "Nach Ebenen", "group": "Nach Gruppen"}
+UNIT_LABELS = {"layer": "Nach Ebenen", "group": "Nach Gruppen", "priority": "Nach Priorität"}
 
 
 class SetCutOrderCommand(QUndoCommand):
@@ -49,8 +49,8 @@ class OptimizeDialog(QDialog):
         f = QFormLayout(self)
         info = QLabel("Reihenfolge, Startpunkt und Richtung der Konturen beim Senden, in der "
                       "Pfadvorschau und der Zeitschätzung. Die Ebenen laufen von unten nach "
-                      "oben – „Nach Gruppen“ arbeitet jede Gruppe mit allen ihren Ebenen ab; "
-                      "gilt für das ganze Projekt.")
+                      "oben – „Nach Gruppen“ arbeitet jede Gruppe, „Nach Priorität“ jede "
+                      "Priorität mit allen ihren Ebenen ab; gilt für das ganze Projekt.")
         info.setWordWrap(True)
         f.addRow(info)
         self.order_by = QComboBox()
@@ -61,7 +61,10 @@ class OptimizeDialog(QDialog):
             "(Standard).\nNach Gruppen: jede Gruppe (Strg+G) wird mit allen ihren Ebenen fertig "
             "graviert und geschnitten, bevor die nächste beginnt – wie LightBurn „Order by "
             "Group“, z. B. ein Namensschild nach dem anderen. Objekte ohne Gruppe kommen "
-            "zusammen zum Schluss.")
+            "zusammen zum Schluss.\nNach Priorität: zuerst alle Objekte mit der kleinsten "
+            "Priorität (Feld „Priorität“ in der Eigenschaftsleiste) mit allen ihren Ebenen, dann "
+            "die nächste – wie LightBurn „Order by Priority“, z. B. Markierungen vor dem "
+            "Ausschnitt oder ein bestimmtes Teil zuerst.")
         self.enabled = QCheckBox("Optimierung und Umsortierung aktiv")
         self.enabled.setToolTip("Aus: Konturen in der Reihenfolge, in der sie gezeichnet wurden, "
                                 "mit ihrem gezeichneten Startpunkt und ihrer Richtung.")
@@ -154,6 +157,10 @@ def order_hint(order: CutOrder) -> str:
                 "herausfallen oder verrutschen.")
     if not order.reduce_travel and not order.direction:
         return "Konturen laufen in Zeichenreihenfolge (nur innere Formen werden vorgezogen)."
+    if order.by_priority:
+        return ("Nach Priorität: kleinere Werte zuerst, jede Priorität mit allen ihren Ebenen "
+                "(Feld „Priorität“ in der Eigenschaftsleiste) – „Innere Formen zuerst“ wirkt nur "
+                "innerhalb einer Priorität: ein Loch braucht höchstens die Priorität seines Teils.")
     if order.by_group:
         return ("Nach Gruppen: Löcher und Gravuren eines Teils gehören in dieselbe Gruppe – "
                 "„Innere Formen zuerst“ wirkt innerhalb jeder Gruppe; Objekte ohne Gruppe "
@@ -162,7 +169,9 @@ def order_hint(order: CutOrder) -> str:
 
 
 def group_count_note(doc: Document) -> str:
-    """Hinweis zu „Nach Gruppen“ für die Statusleiste („“ = nach Ebenen)."""
+    """Hinweis zu „Nach Gruppen“ / „Nach Priorität“ für die Statusleiste („“ = nach Ebenen)."""
+    if doc.cut_order.by_priority:
+        return priority_count_note(doc)
     if not doc.cut_order.by_group:
         return ""
     from lumacut_canvas.export import cut_units
@@ -170,6 +179,52 @@ def group_count_note(doc: Document) -> str:
     if not groups:
         return " (keine Gruppen im Projekt – läuft wie nach Ebenen)"
     return f" ({groups} Gruppe(n))"
+
+
+def priority_count_note(doc: Document) -> str:
+    """Hinweis zu „Nach Priorität“: verwendete Prioritäten und Konflikte mit inneren Formen."""
+    from lumacut_canvas.export import priority_units
+    prios = [p for p, _shapes in priority_units(doc)]
+    if len(prios) < 2:
+        return (" (alle Objekte haben dieselbe Priorität – läuft wie nach Ebenen; Feld "
+                "„Priorität“ in der Eigenschaftsleiste)")
+    shown = ", ".join(str(p) for p in prios[:8]) + (" …" if len(prios) > 8 else "")
+    text = f" ({len(prios)} Prioritäten: {shown})"
+    late = priority_conflicts(doc)
+    if late:
+        text += (f" · Achtung: {late} innere Form(en) mit höherer Priorität als ihre "
+                 "Außenform – sie werden erst nach dem Ausschneiden gelasert")
+    return text
+
+
+#: Objektarten, die als Außenform eines Teils gelten (geschlossene Umrisse, kein Text).
+OUTER_KINDS = ("rect", "ellipse", "polygon")
+#: Höchstens so viele Box-Vergleiche für :func:`priority_conflicts` (große Importe).
+CONFLICT_CHECK_LIMIT = 400_000
+
+
+def priority_conflicts(doc: Document) -> int:
+    """Objekte, deren Box in der Box eines geschlossenen Objekts mit *kleinerer*
+    Priorität liegt (Loch / Gravur nach dem Ausschnitt seines Teils). 0 bei mehr
+    als :data:`CONFLICT_CHECK_LIMIT` Vergleichen."""
+    from lumacut_canvas.export import priority_units
+    units = priority_units(doc)
+    if len(units) < 2:
+        return 0
+    outers: list = []   # (box) der geschlossenen Objekte kleinerer Priorität
+    count = 0
+    checks = 0
+    for _p, shapes in units:
+        boxes = [s.bounds() for s in shapes]
+        checks += len(boxes) * len(outers)
+        if checks > CONFLICT_CHECK_LIMIT:
+            return 0
+        for b in boxes:
+            if any(o.x <= b.x and o.y <= b.y and b.right <= o.right and b.bottom <= o.bottom
+                   and o.w * o.h > b.w * b.h + 1e-6 for o in outers):
+                count += 1
+        outers.extend(s.bounds() for s in shapes if s.kind in OUTER_KINDS)
+    return count
 
 
 def apply_cut_order(editor, order: CutOrder) -> bool:
@@ -183,7 +238,8 @@ def apply_cut_order(editor, order: CutOrder) -> bool:
 
 def summary(order: CutOrder) -> str:
     """Kurztext der Abweichungen vom Standard („Standard“, wenn keine)."""
-    unit = ["nach Gruppen"] if order.by_group else []
+    unit = (["nach Gruppen"] if order.by_group
+            else ["nach Priorität"] if order.by_priority else [])
     if not order.enabled:
         return ", ".join(["Optimierung aus (Zeichenreihenfolge)"] + unit)
     parts = list(unit)

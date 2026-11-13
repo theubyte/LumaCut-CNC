@@ -394,6 +394,7 @@ def _close_one(shape: Shape, tol: float, mode: str) -> Shape | None:
         new_pts = _world(shape, new_pts)
     out = Shape.from_points("polygon", new_pts, shape.layer_id, rings=new_rings, curves=new_curves)
     out.groups = shape.groups
+    out.priority = shape.priority   # Schnitt-Priorität („Nach Priorität“) bleibt
     return out
 
 

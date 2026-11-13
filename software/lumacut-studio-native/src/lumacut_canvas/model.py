@@ -85,10 +85,15 @@ LINK_LAYER_FIELDS = ("material_ref", "material_link")
 # Settings“): gilt für alle Ebenen, Ebenen-Reihenfolge bleibt (unterste zuerst).
 # Richtungen der Option „In Richtung schneiden“ (Bildschirm-Sicht).
 CUT_ORDER_DIRECTIONS = ("", "top_bottom", "bottom_top", "left_right", "right_left")
-# Reihenfolge über Ebenen hinweg (LightBurn „Order by Layer“ / „Order by Group“):
-# "layer" = Ebene für Ebene (Standard), "group" = jede oberste Gruppe mit allen
-# ihren Ebenen fertig, bevor die nächste beginnt (lumacut_canvas.export.job_units).
-CUT_ORDER_UNITS = ("layer", "group")
+# Reihenfolge über Ebenen hinweg (LightBurn „Order by Layer“ / „Order by Group“ /
+# „Order by Priority“): "layer" = Ebene für Ebene (Standard), "group" = jede oberste
+# Gruppe mit allen ihren Ebenen fertig, bevor die nächste beginnt, "priority" = alle
+# Objekte gleicher Priorität (``Shape.priority``, kleinste zuerst) mit allen ihren
+# Ebenen, dann die nächste Priorität (lumacut_canvas.export.cut_units /
+# priority_units).
+CUT_ORDER_UNITS = ("layer", "group", "priority")
+# Schnitt-Priorität je Objekt (LightBurn *Shape Properties › Priority*): 0 = Standard.
+PRIORITY_RANGE = (0, 999)
 
 
 @dataclass(frozen=True)
@@ -103,7 +108,8 @@ class CutOrder:
     Richtungsänderung), ``best_direction`` (offene Pfade dürfen rückwärts
     laufen), ``direction`` (Reihenfolge in Bildschirmrichtung, Zeile für
     Zeile; "" = aus), ``order_by`` ("layer" = Ebene für Ebene, "group" =
-    Gruppe für Gruppe mit allen Ebenen, :data:`CUT_ORDER_UNITS`). Gespeichert
+    Gruppe für Gruppe mit allen Ebenen, "priority" = Priorität für Priorität mit
+    allen Ebenen, :data:`CUT_ORDER_UNITS`). Gespeichert
     wird nur, was vom Standard abweicht.
     """
 
@@ -120,6 +126,11 @@ class CutOrder:
     def by_group(self) -> bool:
         """Gruppe für Gruppe schneiden (LightBurn „Order by Group“)."""
         return self.order_by == "group"
+
+    @property
+    def by_priority(self) -> bool:
+        """Priorität für Priorität schneiden (LightBurn „Order by Priority“)."""
+        return self.order_by == "priority"
 
     @property
     def is_default(self) -> bool:
@@ -602,6 +613,10 @@ class Shape:
     # das Feld „Seiten“ wird nur angeboten, solange die Punkte noch dazu passen
     # (:func:`ngon.spec_of`). Leer = gewöhnliches Polygon (bisheriges Verhalten).
     regular: tuple = ()
+    # Schnitt-Priorität (LightBurn *Shape Properties › Priority*, :data:`PRIORITY_RANGE`):
+    # wirkt nur mit „Nach Priorität“ (``CutOrder.order_by == "priority"``) – kleinere
+    # Werte werden mit allen ihren Ebenen zuerst gelasert. 0 = Standard.
+    priority: int = 0
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -671,6 +686,8 @@ class Shape:
             d["radius"] = round(self.corner_radius, 6)
         if self.kind == "polygon" and self.regular:
             d["regular"] = {"sides": int(self.regular[0]), "inner": round(float(self.regular[1]), 6)}
+        if self.priority:
+            d["priority"] = int(self.priority)
         return d
 
     @staticmethod
@@ -694,7 +711,21 @@ class Shape:
                      generator=dict(d["generator"]) if isinstance(d.get("generator"), dict) else None,
                      tabs=_read_tabs(d.get("tabs")),
                      corner_radius=_read_radius(d.get("radius")) if kind == "rect" else 0.0,
-                     regular=_read_regular(d.get("regular")) if kind == "polygon" else ())
+                     regular=_read_regular(d.get("regular")) if kind == "polygon" else (),
+                     priority=read_priority(d.get("priority")))
+
+
+def read_priority(raw) -> int:
+    """``priority`` eines Objekts (Datei / Eingabe) im :data:`PRIORITY_RANGE`; Unlesbares = 0."""
+    if isinstance(raw, bool):
+        return 0
+    try:
+        v = float(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(v):
+        return 0
+    return int(_clamp(round(v), *PRIORITY_RANGE))
 
 
 def _read_regular(raw) -> tuple:

@@ -97,6 +97,7 @@ def _rebuild(shape: Shape, local: list[Point], rings: list[int], kind: str | Non
         wcx, wcy = rotate_point(g.x + g.w / 2, g.y + g.h / 2, cx, cy, rot)
         out.geom = Geometry(wcx - g.w / 2, wcy - g.h / 2, g.w, g.h, rot)
     out.groups = tuple(shape.groups)
+    out.priority = shape.priority   # Schnitt-Priorität („Nach Priorität“) bleibt
     return out
 
 

@@ -58,8 +58,10 @@ davor und danach an; ``tab_off``-Stücke fahren als ``G1 … S0`` mit Schnitttem
 (Laser aus, keine Bremsung), ``tab_pulse``-Stücke mit der Leistung der Ebene.
 
 „Nach Gruppen“ (LightBurn *Order by Group*, ``JobLayer.unit``): vor den Ebenen
-jeder Gruppe steht einmal ``; GROUP i OF n`` – ein reiner Kommentar; ohne
-(Standard „Nach Ebenen“) bleibt die Ausgabe Byte für Byte gleich.
+jeder Gruppe steht einmal ``; GROUP i OF n`` – ein reiner Kommentar; „Nach
+Priorität“ (*Order by Priority*, ``JobLayer.unit_kind`` "PRIORITY") schreibt ebenso
+``; PRIORITY p (i OF n)``; ohne (Standard „Nach Ebenen“) bleibt die Ausgabe Byte
+für Byte gleich.
 
 Die Funktion erzeugt nur Text; sie startet nie eine Maschine.
 """
@@ -267,7 +269,8 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
         f = f"{layer.speed_mm_min:g}"
         if getattr(layer, "unit", "") and layer.unit != unit:
             unit = layer.unit
-            out.append("; GROUP " + _comment(unit))   # „Nach Gruppen“ (nur Kommentar)
+            # „Nach Gruppen“ / „Nach Priorität“ (nur Kommentar)
+            out.append(f"; {getattr(layer, 'unit_kind', '') or 'GROUP'} " + _comment(unit))
         out.append("; LAYER " + _comment(layer.name))
         if abs(z_offset) > _EPS:
             # Relative only (Pi-guard); negative = closer to the material.

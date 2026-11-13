@@ -5,7 +5,9 @@ sichtbarer Ebene die Laserparameter und alle Konturen als Polylinien in
 **Maschinen**-mm (Safezone-Versatz bereits eingerechnet). Mit „Nach Gruppen“
 (``Document.cut_order.order_by == "group"``, LightBurn *Order by Group*) kommt
 stattdessen je oberster Gruppe ein Satz Ebenen (:func:`cut_units`) – jede Gruppe
-wird mit allen ihren Ebenen fertig, bevor die nächste beginnt.
+wird mit allen ihren Ebenen fertig, bevor die nächste beginnt. „Nach Priorität“
+(``order_by == "priority"``, LightBurn *Order by Priority*) macht dasselbe je
+Objekt-Priorität (``Shape.priority``, kleinste zuerst, :func:`priority_units`).
 """
 
 from __future__ import annotations
@@ -86,7 +88,10 @@ class JobLayer:
     cut_order: object = None
     # „Nach Gruppen“ (CutOrder.order_by == "group"): Nummer der Gruppe im Auftrag als
     # "i OF n" – der G-Code schreibt davor einmal ``; GROUP i OF n``. "" = nach Ebenen.
+    # „Nach Priorität“: ``unit_kind`` "PRIORITY", ``unit`` "p (i OF n)" →
+    # ``; PRIORITY p (i OF n)``.
     unit: str = ""
+    unit_kind: str = "GROUP"
 
 
 def shape_fill_segments(shape: Shape, layer: Layer):
@@ -107,30 +112,34 @@ def _fill_shape_groups(doc: Document, layer: Layer) -> list[list[Shape]]:
     """Objekte der Ebene, die jeweils gemeinsam gefüllt werden (Objekt-Reihenfolge)."""
     shapes = [s for s in doc.shapes_in_layer(layer.id) if s.kind in FILLABLE_KINDS]
     grouping = getattr(layer, "fill_grouping", "individual")
+    mode = _unit_mode(doc)
     if grouping == "together":
         if not shapes:
             return []
-        if not _by_group(doc):
+        if mode == "layer":
             return [shapes]
-        # Nach Gruppen: „alle zusammen“ je oberster Gruppe (ohne Gruppe: zusammen),
-        # weil jede Gruppe für sich gelasert wird.
-        parts: dict[str, list[Shape]] = {}
+        # Nach Gruppen / Priorität: „alle zusammen“ je Einheit (oberste Gruppe bzw.
+        # Priorität; ohne Gruppe: zusammen), weil jede Einheit für sich gelasert wird.
+        parts: dict[object, list[Shape]] = {}
         for s in shapes:
-            parts.setdefault(s.groups[0] if s.groups else "", []).append(s)
+            parts.setdefault(_unit_key(mode, s), []).append(s)
         return list(parts.values())
     if grouping != "groups":
         return [[s] for s in shapes]
     out: list[list[Shape]] = []
-    by_group: dict[str, list[Shape]] = {}
+    by_group: dict[object, list[Shape]] = {}
     for s in shapes:
         top = s.groups[0] if s.groups else None
         if top is None:
             out.append([s])
-        elif top in by_group:
-            by_group[top].append(s)
+            continue
+        # Nach Priorität: eine Gruppe mit verschiedenen Prioritäten füllt je Priorität.
+        key = (top, s.priority) if mode == "priority" else top
+        if key in by_group:
+            by_group[key].append(s)
         else:
-            by_group[top] = [s]
-            out.append(by_group[top])
+            by_group[key] = [s]
+            out.append(by_group[key])
     return out
 
 
@@ -156,8 +165,17 @@ def layer_fill_blocks(doc: Document, layer: Layer) -> list[tuple[list[str], list
     return blocks
 
 
-def _by_group(doc: Document) -> bool:
-    return bool(getattr(getattr(doc, "cut_order", None), "by_group", False))
+def _unit_mode(doc: Document) -> str:
+    """"layer" (Standard), "group" oder "priority" (``CutOrder.order_by``)."""
+    mode = getattr(getattr(doc, "cut_order", None), "order_by", "layer")
+    return mode if mode in ("group", "priority") else "layer"
+
+
+def _unit_key(mode: str, s: Shape):
+    """Einheit eines Objekts: oberste Gruppe ("" = ohne) bzw. Priorität."""
+    if mode == "priority":
+        return s.priority
+    return s.groups[0] if s.groups else ""
 
 
 #: Kopfposition, ab der der Planer plant (``lumacut_job.planner.optimize_layers``).
@@ -254,6 +272,22 @@ def cut_units(doc: Document) -> list[tuple[str, list[Shape]]]:
     return units
 
 
+def priority_units(doc: Document) -> list[tuple[int, list[Shape]]]:
+    """Einheiten für „Nach Priorität“: ``[(priorität, objekte)]``, kleinste zuerst.
+
+    Wie :func:`cut_units` nur Vektor-Objekte sichtbarer Ebenen (Bilder werden
+    ohnehin vorab graviert); innerhalb einer Priorität die Objekt-Reihenfolge –
+    die Reihenfolge der Konturen plant der Planer je Ebene wie immer.
+    """
+    visible = {l.id for l in doc.layers if l.visible}
+    by_prio: dict[int, list[Shape]] = {}
+    for s in doc.shapes:
+        if s.kind == "image" or s.layer_id not in visible:
+            continue
+        by_prio.setdefault(int(s.priority), []).append(s)
+    return sorted(by_prio.items())
+
+
 def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = None,
                unit: str = "") -> JobLayer | None:
     """Eine Ebene als :class:`JobLayer` (nur Objekte aus ``ids``, None = alle)."""
@@ -306,26 +340,33 @@ def job_layers(doc: Document) -> list[JobLayer]:
     „Nach Gruppen“ (LightBurn *Order by Group*): für jede Einheit aus
     :func:`cut_units` die Ebenen (unterste zuerst) mit nur ihren Objekten –
     eine Ebene kann so mehrmals vorkommen, jeweils mit ``unit`` = "i OF n".
-    Gibt es nur eine Einheit (keine Gruppen), ist das Ergebnis dasselbe wie
-    nach Ebenen.
+    „Nach Priorität“ (LightBurn *Order by Priority*) ebenso je Einheit aus
+    :func:`priority_units` mit ``unit_kind`` "PRIORITY" und ``unit`` = "p (i OF n)".
+    Gibt es nur eine Einheit (keine Gruppen / eine einzige Priorität), ist das
+    Ergebnis dasselbe wie nach Ebenen.
     """
     layers = [l for l in reversed(doc.layers) if l.visible]
     blocks = {l.id: layer_fill_blocks(doc, l) for l in layers}
-    if _by_group(doc):
-        units = cut_units(doc)
+    mode = _unit_mode(doc)
+    if mode != "layer":
+        units = (list(priority_units(doc)) if mode == "priority"
+                 else [(None, shapes) for _gid, shapes in cut_units(doc)])
         if len(units) > 1:
             parts = []
-            for _gid, shapes in units:
+            for key, shapes in units:
                 ids = {s.id for s in shapes}
                 part = [jl for l in layers
                         if (jl := _job_layer(doc, l, blocks[l.id], ids)) is not None]
                 if part:
-                    parts.append(part)
+                    parts.append((key, part))
             if len(parts) > 1:
                 n = len(parts)
+                if mode == "priority":
+                    return [replace(jl, unit=f"{key} ({i} OF {n})", unit_kind="PRIORITY")
+                            for i, (key, part) in enumerate(parts, 1) for jl in part]
                 return [replace(jl, unit=f"{i} OF {n}")
-                        for i, part in enumerate(parts, 1) for jl in part]
-            return [jl for part in parts for jl in part]
+                        for i, (_key, part) in enumerate(parts, 1) for jl in part]
+            return [jl for _key, part in parts for jl in part]
     return [jl for l in layers if (jl := _job_layer(doc, l, blocks[l.id])) is not None]
 
 
