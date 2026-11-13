@@ -202,13 +202,18 @@ def carry_start(new: Shape, p: Point | None, tol_mm: float = START_SNAP_MM) -> S
 
 
 def start_direction(shape: Shape) -> Point | None:
-    """Einheitsvektor der Laufrichtung am Startpunkt (Arbeitsflächen-mm), ``None`` ohne."""
+    """Einheitsvektor der Laufrichtung am Startpunkt (Arbeitsflächen-mm), ``None`` ohne.
+
+    Mit umgekehrter Laufrichtung (``Shape.reverse``, :mod:`direction`) zeigt er in
+    die Gegenrichtung (zum vorigen Knoten)."""
     p = shape.start_point()
     if p is None:
         return None
     best = (math.inf, None)
     for ring in closed_rings(shape):
         r = rotate_ring_to(ring, p)
+        if shape.reverse:
+            r = r[::-1]
         d = math.dist(r[0], p)
         if d < best[0]:
             nxt = next((q for q in r[1:] if math.dist(q, r[0]) > 1e-9), None)

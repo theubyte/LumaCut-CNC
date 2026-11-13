@@ -304,7 +304,7 @@ class ToolController:
             self.ed.tab_tool.press(pos)
         elif self.tool == Tool.START:
             self._mode = "start"
-            self.ed.start_tool.press(pos)
+            self.ed.start_tool.press(pos, mods)
         elif self.tool == Tool.MEASURE:
             self._mode = "measure"
             self.ed.measure_tool.press(pos, mods)

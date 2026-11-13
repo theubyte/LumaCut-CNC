@@ -98,6 +98,7 @@ def _rebuild(shape: Shape, local: list[Point], rings: list[int], kind: str | Non
         out.geom = Geometry(wcx - g.w / 2, wcy - g.h / 2, g.w, g.h, rot)
     out.groups = tuple(shape.groups)
     out.priority = shape.priority   # Schnitt-Priorität („Nach Priorität“) bleibt
+    out.reverse = shape.reverse     # umgekehrte Laufrichtung bleibt
     return out
 
 

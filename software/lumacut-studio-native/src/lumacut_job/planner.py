@@ -149,7 +149,8 @@ def _best_entry(poly: Poly, pos: Point, best_start: bool, best_direction: bool =
     ``corners``: closed shapes start at the nearest corner
     (:func:`corner_indices`) when they have one, else at the nearest point.
     ``best_direction`` off: open paths keep their drawn direction.
-    ``fixed``: a closed shape with a manual start point keeps its start."""
+    ``fixed``: a closed shape with a manual start point keeps its start, an open
+    path of a reversed shape (``Shape.reverse``) keeps its direction."""
     if is_closed(poly):
         if not best_start or fixed:
             return math.dist(pos, poly[0]), poly
@@ -160,7 +161,7 @@ def _best_entry(poly: Poly, pos: Point, best_start: bool, best_direction: bool =
         return math.dist(pos, ring[k]), rotated + [rotated[0]]
     d0 = math.dist(pos, poly[0])
     d1 = math.dist(pos, poly[-1])
-    if best_direction and d1 < d0:
+    if best_direction and d1 < d0 and not fixed:
         return d1, list(reversed(poly))
     return d0, poly
 
@@ -183,7 +184,7 @@ def _direction_span(poly: Poly, direction: str) -> tuple[float, float]:
 def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first: bool = True,
                     reduce_travel: bool = True, best_start: bool = True,
                     should_stop=None, best_direction: bool = True, corners: bool = False,
-                    direction: str = "", fixed_starts=None) -> list[Poly]:
+                    direction: str = "", fixed_starts=None, kept_directions=None) -> list[Poly]:
     """Return the polylines in cutting order (each possibly reversed/rotated).
 
     Greedy nearest-neighbour over the shapes that are *ready*: with
@@ -202,6 +203,9 @@ def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first
     ``fixed_starts``: start keys (:func:`lumacut_canvas.startpoint.start_key`) of
     manual start points – a closed shape that begins at one of them keeps its
     start (LightBurn *Set Start Point*); its place in the order is still planned.
+    ``kept_directions``: start keys of open paths of reversed shapes
+    (``JobLayer.kept_directions``, LightBurn *Reverse Shape Direction*) – such a path
+    always starts at that end, even with ``best_direction``.
     """
     polys = [list(p) for p in polys if len(p) >= 2]
     n = len(polys)
@@ -226,6 +230,10 @@ def order_polylines(polys: list[Poly], start: Point = (30.0, 30.0), inside_first
     if fixed_starts:
         from lumacut_canvas.startpoint import start_key
         fixed = [is_closed(p) and start_key(p[0]) in fixed_starts for p in polys]
+    if kept_directions:
+        from lumacut_canvas.startpoint import start_key
+        fixed = [f or (not is_closed(p) and start_key(p[0]) in kept_directions)
+                 for f, p in zip(fixed, polys)]
 
     def entry(i):
         return _best_entry(polys[i], pos, best_start, best_direction, corners, fixed[i])
@@ -607,8 +615,14 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
         if opts.start_points:
             from lumacut_canvas.startpoint import start_key
             fixed = {start_key(p) for p in opts.start_points}
+        kept = None
+        if getattr(layer, "kept_directions", None):
+            # Umgekehrte Laufrichtung (LightBurn *Reverse Shape Direction*): offene Pfade
+            # beginnen an ihrem neuen Anfang, der Planer wählt nicht das nähere Ende.
+            from lumacut_canvas.startpoint import start_key
+            kept = {start_key(p) for p in layer.kept_directions}
         ordered = order_polylines(polys, pos, should_stop=should_stop, fixed_starts=fixed,
-                                  **layer_options)
+                                  kept_directions=kept, **layer_options)
         if opts.overlap_tol_mm > 0 and ordered:
             if opts.removes_overlaps:
                 dedup = remove_overlaps(ordered, opts.overlap_tol_mm)

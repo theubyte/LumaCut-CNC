@@ -12,6 +12,7 @@ Objekt-Priorität (``Shape.priority``, kleinste zuerst, :func:`priority_units`).
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field, replace
 
@@ -64,6 +65,10 @@ class JobLayer:
     # schon, der Planer nach dem Kerf-Versatz erneut) und der Planer verlegt ihren Start
     # nicht. Leer = Startpunkte wie bisher.
     start_points: tuple[tuple[float, float], ...] = ()
+    # Anfangspunkte (Maschinen-mm) der offenen Polylinien von Objekten mit umgekehrter
+    # Laufrichtung (Shape.reverse, lumacut_canvas.direction): der Planer behält ihre
+    # Richtung (wählt nicht das nähere Ende). Leer = wie bisher.
+    kept_directions: tuple[tuple[float, float], ...] = ()
     # Art je Polylinie nach der Planung ("cut", "lead_in", "lead_out", "tab" =
     # Schnittstück nach einer Steg-Lücke, "perf" = nach einer
     # Perforations-Lücke, "tab_pulse" / "tab_off" = Puls mit Laser an / Stück
@@ -350,6 +355,7 @@ def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = 
     polys: list[list[tuple[float, float]]] = []
     tab_points: list[tuple[float, float]] = []
     start_points: list[tuple[float, float]] = []
+    kept_directions: list[tuple[float, float]] = []
     fills = _machine_fills(fill_blocks, ids)
     pass_fills: list = []
     if pass_blocks:
@@ -370,7 +376,11 @@ def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = 
         if s.kind == "line":
             path = shape_path(s)
             a, b = path.elementAt(0), path.elementAt(1)
-            polys.append([to_machine(a.x, a.y), to_machine(b.x, b.y)])
+            line = [to_machine(a.x, a.y), to_machine(b.x, b.y)]
+            if s.reverse:       # Laufrichtung umgekehrt: vom anderen Ende
+                line.reverse()
+                kept_directions.append(line[0])
+            polys.append(line)
             continue
         shape_polys = shape_polygons(s)
         start = s.start_point() if s.start else None
@@ -379,7 +389,12 @@ def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = 
             shape_polys, placed, _dropped = apply_start_points(shape_polys, [start], START_SNAP_MM)
             start_points.extend(to_machine(x, y) for x, y in placed)
         for poly in shape_polys:
-            polys.append([to_machine(x, y) for x, y in poly])
+            machine = [to_machine(x, y) for x, y in poly]
+            if s.reverse:       # Laufrichtung umgekehrt (geschlossen: gleicher Startpunkt)
+                machine.reverse()
+                if len(machine) >= 2 and math.dist(machine[0], machine[-1]) > 0.01:
+                    kept_directions.append(machine[0])
+            polys.append(machine)
         if s.tabs:
             tab_points.extend(to_machine(x, y) for x, y in s.tab_points())
     if not (polys or fills or pass_fills):
@@ -396,7 +411,8 @@ def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = 
                                       if layer.fill_mode in LINE_FILL_MODES
                                       else 0.0),
                     cut_order=getattr(doc, "cut_order", None),
-                    tab_points=tuple(tab_points), start_points=tuple(start_points), unit=unit, pass_fills=pass_fills,
+                    tab_points=tuple(tab_points), start_points=tuple(start_points),
+                    kept_directions=tuple(kept_directions), unit=unit, pass_fills=pass_fills,
                     pass_fill_angles=layer_fill_pass_angles(layer) if pass_fills else ())
 
 

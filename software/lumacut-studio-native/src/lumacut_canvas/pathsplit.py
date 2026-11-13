@@ -165,6 +165,7 @@ def break_shape(shape: Shape, keep_holes: bool = True) -> list[Shape] | None:
         part = shape_from_world(shape.kind, _world(pts, g.rot, center), shape.layer_id,
                                 starts, curves, g.rot, shape.groups)
         part.priority = shape.priority   # Schnitt-Priorität („Nach Priorität“) bleibt
+        part.reverse = shape.reverse     # umgekehrte Laufrichtung gilt für jedes Teil
         out.append(part)
     if len(out) < 2:
         return None
@@ -307,6 +308,8 @@ def combine(shapes: Iterable[Shape]) -> CombineResult:
         new = shape_from_world("polygon" if closed else "path", pts, layer_id, starts, curves, rot,
                                _common_groups(members))
         new.priority = min(s.priority for s in members)   # die früheste Priorität
+        # Umgekehrte Laufrichtung nur, wenn alle Teile umgekehrt waren (eine Richtung je Objekt)
+        new.reverse = all(s.reverse for s in members)
         world_tabs = [t for s in members for t in s.tab_points()]
         if closed and world_tabs:   # manuelle Stege aller Teile bleiben erhalten
             from .tabs import carry_tabs

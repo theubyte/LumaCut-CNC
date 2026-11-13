@@ -395,6 +395,7 @@ def _close_one(shape: Shape, tol: float, mode: str) -> Shape | None:
     out = Shape.from_points("polygon", new_pts, shape.layer_id, rings=new_rings, curves=new_curves)
     out.groups = shape.groups
     out.priority = shape.priority   # Schnitt-Priorität („Nach Priorität“) bleibt
+    out.reverse = shape.reverse     # umgekehrte Laufrichtung bleibt
     return out
 
 

@@ -636,6 +636,11 @@ class Shape:
     # ``tabs``. Die Kontur, auf der er liegt, beginnt dort – der Planer verlegt ihren
     # Start nicht mehr. Leer = Startpunkt wie bisher (Planer / Zeichnung).
     start: tuple[float, float] | tuple = ()
+    # Laufrichtung umgekehrt (LightBurn *Edit › Reverse Shape Direction*, :mod:`direction`):
+    # jede Kontur des Objekts wird beim Senden in umgekehrter Richtung geschnitten (ein
+    # Startpunkt bleibt, wo er ist); offene Pfade behält der Planer dann in dieser
+    # Richtung. False = gezeichnete Richtung (bisheriges Verhalten).
+    reverse: bool = False
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -721,6 +726,8 @@ class Shape:
             d["priority"] = int(self.priority)
         if self.start:
             d["start"] = [round(self.start[0], 6), round(self.start[1], 6)]
+        if self.reverse and self.kind in REVERSE_KINDS:
+            d["reverse"] = True
         return d
 
     @staticmethod
@@ -746,11 +753,15 @@ class Shape:
                      corner_radius=_read_radius(d.get("radius")) if kind == "rect" else 0.0,
                      regular=_read_regular(d.get("regular")) if kind == "polygon" else (),
                      priority=read_priority(d.get("priority")),
-                     start=read_start(d.get("start")) if kind in START_POINT_KINDS else ())
+                     start=read_start(d.get("start")) if kind in START_POINT_KINDS else (),
+                     reverse=d.get("reverse") is True and kind in REVERSE_KINDS)
 
 
 #: Objektarten, die einen manuellen Startpunkt tragen können (wie manuelle Stege).
 START_POINT_KINDS = ("rect", "ellipse", "polygon", "path", "text")
+#: Objektarten, deren Laufrichtung sich umkehren lässt (alle Vektorobjekte, auch Linien
+#: und offene Pfade – nicht Bilder).
+REVERSE_KINDS = ("rect", "ellipse", "polygon", "path", "text", "line")
 
 
 def read_start(raw) -> tuple:

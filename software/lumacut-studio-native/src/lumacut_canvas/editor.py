@@ -547,7 +547,7 @@ class CanvasEditor(QWidget):
         elif tool == Tool.START:
             self.notify("Werkzeug: Startpunkt – Umriss einer geschlossenen Form antippen legt dort "
                         "den Start der Kontur fest, Startpunkt antippen entfernt ihn, ziehen "
-                        "verschiebt ihn (Pfeil = Laufrichtung)")
+                        "verschiebt ihn (Pfeil = Laufrichtung), Umschalt+Tippen kehrt die Richtung um")
         elif tool == Tool.MEASURE:
             self.notify("Werkzeug: Messen – von Punkt zu Punkt ziehen oder zwei Punkte antippen "
                         "(fängt an Objekten / Raster, Umschalt = 15°-Schritte, Alt = frei, Esc löscht)")

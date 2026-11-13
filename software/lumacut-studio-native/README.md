@@ -327,6 +327,20 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     nicht verlegt). Die Arbeitsfläche markiert jeden Startpunkt als grünen Punkt mit einem
     Pfeil in Laufrichtung. Ohne Startpunkt ändert sich nichts.
     Code: `lumacut_canvas/startpoint.py`, `startpoint_ui.py`, `lumacut_job/planner.py`.
+  - *Richtung umkehren* (Pfad › „Richtung umkehren“, Alt+Umschalt+U, wie LightBurns
+    *Edit › Reverse Shape Direction*): kehrt die Laufrichtung der gewählten Objekte um (ein
+    Undo-Schritt, zweimal = wie gezeichnet; alle Vektorobjekte inkl. Linien und offener Pfade,
+    `Shape.reverse`, im Projekt gespeichert). Im Werkzeug „Startpunkt“ kehrt Umschalt+Tippen
+    auf einen Startpunkt die Richtung um, Umschalt+Tippen auf den Umriss setzt dort den
+    Startpunkt und kehrt die Richtung um (wie LightBurns Umschalt-Klick), bei offenen Pfaden /
+    Linien nur die Richtung. Geschlossene Konturen laufen beim Senden in der Gegenrichtung ab
+    demselben Startpunkt (auch mit Kerf, Anfahrt, Überschnitt, Stegen), offene Pfade beginnen
+    am anderen Ende – der Planer behält diese Richtung auch mit „Beste Richtung wählen“.
+    Umgekehrte Objekte ohne Startpunkt zeigen einen hohlen grünen Kreis mit Pfeil in
+    Laufrichtung. Bleibt erhalten bei Knoten bearbeiten, Vereinfachen, Ecken abrunden,
+    Schließen, Zerlegen, „Text in Pfade“ und Kombinieren (nur wenn alle Teile umgekehrt
+    waren). Ohne Umkehr ändert sich nichts.
+    Code: `lumacut_canvas/direction.py`, `startpoint_ui.py`, `export.py`, `lumacut_job/planner.py`.
   - *Anfahrt/Abfahrt* (`lead_in_mm`, `lead_in_arc`, `lead_out_mm`, 0–10 mm): auf der
     Abfallseite (außen bei Teilen, innen bei Löchern), 45°-Gerade oder tangentialer Viertelkreis;
     der Konturstart wird dafür von einer Ecke in die Kantenmitte verlegt. Passt die Anfahrt nicht
