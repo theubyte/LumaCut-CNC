@@ -65,12 +65,12 @@ def editor(qapp):
 
 def test_model_default_round_trip_and_broken_values():
     assert CutOrder().order_by == "layer" and not CutOrder().by_group
-    assert CUT_ORDER_UNITS == ("layer", "group")
+    assert CUT_ORDER_UNITS == ("layer", "group", "priority")
     assert BY_GROUP.by_group and not BY_GROUP.is_default
     assert "order_by" not in CutOrder().to_dict()
     assert BY_GROUP.to_dict() == {"order_by": "group"}
     assert CutOrder.from_dict({"order_by": "group"}) == BY_GROUP
-    for bad in ("priority", "", None, 3, ["group"]):
+    for bad in ("Priority", "", None, 3, ["group"]):
         assert CutOrder.from_dict({"order_by": bad}).order_by == "layer"
     # the planner keywords stay the same (order_by is not a planner option)
     assert BY_GROUP.planner_options() == CutOrder().planner_options()
@@ -387,8 +387,9 @@ def test_frame_and_park_box_cover_all_groups(qapp):
 def test_dialog_combo_values_and_reset(qapp):
     dlg = OptimizeDialog(CutOrder())
     assert [dlg.order_by.itemText(i) for i in range(dlg.order_by.count())] == [
-        "Nach Ebenen", "Nach Gruppen"]
-    assert [UNIT_LABELS[k] for k in CUT_ORDER_UNITS] == ["Nach Ebenen", "Nach Gruppen"]
+        "Nach Ebenen", "Nach Gruppen", "Nach Priorität"]
+    assert [UNIT_LABELS[k] for k in CUT_ORDER_UNITS] == ["Nach Ebenen", "Nach Gruppen",
+                                                         "Nach Priorität"]
     assert dlg.order_by.currentText() == "Nach Ebenen" and dlg.value() == CutOrder()
     assert "Order by" in dlg.order_by.toolTip() and "Gruppe" in dlg.order_by.toolTip()
     dlg.order_by.setCurrentIndex(dlg.order_by.findData("group"))
