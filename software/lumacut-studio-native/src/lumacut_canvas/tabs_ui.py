@@ -4,6 +4,10 @@
   (ein Undo-Schritt); die Form wird gewählt.
 * Tippen auf einen vorhandenen Steg entfernt ihn, Ziehen schiebt ihn entlang
   des Umrisses (ein Undo-Schritt je Zug).
+* Pfad › „Stege gleichmäßig setzen …“ (Alt+Umschalt+G, LightBurn *Auto-place
+  tabs*) verteilt manuelle Stege auf einmal auf die Auswahl (ohne Auswahl auf
+  alle bearbeitbaren Objekte): Anzahl je Kontur oder Abstand, Ecken meiden,
+  innere Konturen auslassen – ein Undo-Schritt; danach einzeln verschiebbar.
 * Pfad › „Manuelle Stege entfernen“ löscht die Stege der Auswahl.
 * Alle manuellen Stege sind auf der Arbeitsfläche als kurze orange Balken in
   Stegbreite der Ebene markiert (immer, nicht nur im Werkzeug); die
@@ -19,8 +23,9 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+                               QFormLayout, QGraphicsItem, QLabel, QSpinBox)
 
 from . import tabs
 from .edit_commands import ReplaceShapeCommand
@@ -31,6 +36,7 @@ TAB_COLOR = "#ff8a3d"
 MARKER_PX = 4.0            # Strichstärke der Markierung (Bildschirm-Pixel)
 MIN_MARKER_MM = 0.6        # Markierung mindestens so lang (Stegbreite 0 / sehr klein)
 ACTIONS = (("tabs_clear", "Manuelle Stege entfernen"),)
+EVEN_ACTION = ("tabs_even", "Stege gleichmäßig setzen …", "Alt+Shift+G")
 
 
 def _fmt(v: float) -> str:
@@ -271,10 +277,154 @@ def _tangent(ring, q) -> tuple[float, float]:
     return best[1]
 
 
+class EvenTabsDialog(QDialog):
+    """„Stege gleichmäßig setzen“: Verteilung, Anzahl / Abstand, Optionen; Zähler live."""
+
+    def __init__(self, doc, shapes, parent=None, values: dict | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Stege gleichmäßig setzen")
+        self.setObjectName("EvenTabsDialog")
+        self.doc = doc
+        self.shapes = list(shapes)
+        v = tabs._clean_even(values)
+        form = QFormLayout(self)
+        self.mode = QComboBox()
+        for key in tabs.EVEN_MODES:
+            self.mode.addItem(tabs.EVEN_MODE_LABELS[key], key)
+        self.mode.setCurrentIndex(max(0, self.mode.findData(v["mode"])))
+        self.mode.setToolTip("Anzahl je Kontur: jede Kontur bekommt gleich viele Stege · Abstand: "
+                             "ein Steg je … mm Umfang (große Teile mehr, kleine weniger) – "
+                             "wie LightBurn „Auto-place tabs“")
+        self.count = QSpinBox()
+        self.count.setRange(*tabs.EVEN_COUNT_RANGE)
+        self.count.setValue(v["count"])
+        self.count.setToolTip("Stege je geschlossener Kontur (zu kurze Konturen bekommen weniger: "
+                              "jedes Schnittstück bleibt mindestens so lang wie ein Steg)")
+        self.spacing = QDoubleSpinBox()
+        self.spacing.setRange(*tabs.EVEN_SPACING_RANGE)
+        self.spacing.setDecimals(1)
+        self.spacing.setSingleStep(5.0)
+        self.spacing.setSuffix(" mm")
+        self.spacing.setValue(v["spacing_mm"])
+        self.spacing.setToolTip("Ein Steg je so viel Umfang, mindestens einer je Kontur")
+        self.max_count = QSpinBox()
+        self.max_count.setRange(*tabs.EVEN_MAX_RANGE)
+        self.max_count.setSpecialValueText("ohne Grenze")
+        self.max_count.setValue(v["max_count"])
+        self.max_count.setToolTip("Höchstens so viele Stege je Kontur (LightBurn „Limit Max Tabs“)")
+        self.min_perimeter = QDoubleSpinBox()
+        self.min_perimeter.setRange(*tabs.EVEN_MIN_PERIMETER_RANGE)
+        self.min_perimeter.setDecimals(1)
+        self.min_perimeter.setSingleStep(5.0)
+        self.min_perimeter.setSuffix(" mm")
+        self.min_perimeter.setValue(v["min_perimeter_mm"])
+        self.min_perimeter.setToolTip("Konturen mit weniger Umfang bleiben ohne Stege "
+                                      "(kleine Buchstaben, Bohrungen)")
+        self.avoid_corners = QCheckBox("Ecken meiden")
+        self.avoid_corners.setChecked(v["avoid_corners"])
+        self.avoid_corners.setToolTip("Stege um halbe Stegbreite + 0,5 mm von Ecken (ab 30°) und vom "
+                                      "Konturstart wegschieben – höchstens um ein Viertel des Abstands")
+        self.skip_inner = QCheckBox("Innere Konturen auslassen")
+        self.skip_inner.setChecked(v["skip_inner"])
+        self.skip_inner.setToolTip("Keine Stege an Konturen, die in einer anderen Kontur derselben Ebene "
+                                   "liegen (Löcher fallen heraus und brauchen keinen Steg)")
+        self.replace = QCheckBox("Vorhandene manuelle Stege ersetzen")
+        self.replace.setChecked(v["replace"])
+        self.replace.setToolTip("Aus: neue Stege kommen zu den vorhandenen hinzu")
+        self.readout = QLabel()
+        self.readout.setObjectName("EvenTabsReadout")
+        self.readout.setWordWrap(True)
+        form.addRow("Verteilung", self.mode)
+        form.addRow("Anzahl", self.count)
+        form.addRow("Abstand", self.spacing)
+        form.addRow("Höchstens", self.max_count)
+        form.addRow("Mindestumfang", self.min_perimeter)
+        form.addRow("", self.avoid_corners)
+        form.addRow("", self.skip_inner)
+        form.addRow("", self.replace)
+        form.addRow(self.readout)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        form.addRow(self.buttons)
+        for w in (self.mode,):
+            w.currentIndexChanged.connect(self.update_readout)
+        for w in (self.count, self.spacing, self.max_count, self.min_perimeter):
+            w.valueChanged.connect(self.update_readout)
+        for w in (self.avoid_corners, self.skip_inner, self.replace):
+            w.toggled.connect(self.update_readout)
+        self.update_readout()
+
+    def result_preview(self) -> tabs.EvenTabsResult:
+        return tabs.place_even_tabs(self.doc, self.shapes, self.values())
+
+    def update_readout(self) -> None:
+        spacing = self.mode.currentData() == "spacing"
+        self.count.setEnabled(not spacing)
+        self.spacing.setEnabled(spacing)
+        self.max_count.setEnabled(spacing)
+        res = self.result_preview()
+        self.readout.setText(res.readout())
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(res.changed > 0)
+
+    def values(self) -> dict:
+        return {"mode": self.mode.currentData(), "count": self.count.value(),
+                "spacing_mm": self.spacing.value(), "max_count": self.max_count.value(),
+                "avoid_corners": self.avoid_corners.isChecked(),
+                "skip_inner": self.skip_inner.isChecked(),
+                "min_perimeter_mm": self.min_perimeter.value(), "replace": self.replace.isChecked()}
+
+
+class EvenTabs:
+    """Aktion „Stege gleichmäßig setzen …“ (ein Undo-Schritt, letzte Eingabe je Sitzung)."""
+
+    def __init__(self, editor) -> None:
+        self.ed = editor
+        self.last = tabs.even_defaults()
+        self.ask = self._ask                 # für Tests austauschbar
+
+    def _ask(self, shapes):
+        dlg = EvenTabsDialog(self.ed.document, shapes, self.ed, self.last)
+        return dlg.values() if dlg.exec() == QDialog.Accepted else None
+
+    def scope(self) -> list[Shape]:
+        doc = self.ed.document
+        ids = self.ed.selection if self.ed.selection else [s.id for s in doc.shapes]
+        want = {i for i in ids if doc.has_shape(i) and doc.is_editable(i)}
+        return [s for s in doc.shapes if s.id in want and tabs.can_have_tabs(s)]
+
+    def run(self) -> tabs.EvenTabsResult | None:
+        ed = self.ed
+        shapes = self.scope()
+        if not shapes:
+            ed.notify("Stege gleichmäßig setzen: keine geschlossenen Formen "
+                      + ("in der Auswahl" if ed.selection else "im Dokument")
+                      + " (Rechteck, Ellipse, Polygon, Pfad, Text)")
+            return None
+        v = self.ask(shapes)
+        if not v:
+            return None
+        self.last = tabs._clean_even(v)
+        res = tabs.place_even_tabs(ed.document, shapes, self.last)
+        title = "Stege gleichmäßig setzen"
+        if res.changed:
+            ed.undo_stack.beginMacro(title)
+            try:
+                for new in res.add:
+                    ed.undo_stack.push(ReplaceShapeCommand(ed.document, new, title))
+            finally:
+                ed.undo_stack.endMacro()
+        ed.notify(f"{title}: " + res.readout())
+        return res
+
+
 def install(editor) -> TabTool:
     tool = TabTool(editor)
     editor._act("tabs_clear", ACTIONS[0][1], lambda _=False: tool.clear_selection())
+    tool.even = EvenTabs(editor)
+    name, text, key = EVEN_ACTION
+    editor._act(name, text, lambda _=False: tool.even.run(), QKeySequence(key))
     return tool
 
 
-__all__ = ["TabTool", "TabMarkers", "install", "tabs_from_world"]
+__all__ = ["TabTool", "TabMarkers", "EvenTabs", "EvenTabsDialog", "install", "tabs_from_world"]

@@ -305,6 +305,13 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     Stegen genau diese (Stegbreite und Steg-Leistung der Ebene, auch ohne Anzahl / Abstand und
     mit „Innere Formen ohne Stege“) statt der automatischen; Stegbreite 0 schaltet alle Stege
     der Ebene ab. Die Arbeitsfläche markiert jeden Steg als orangen Balken in Stegbreite.
+    Pfad › „Stege gleichmäßig setzen …“ (Alt+Umschalt+G, wie LightBurns *Auto-place tabs*)
+    verteilt manuelle Stege auf einmal auf die Auswahl (ohne Auswahl auf alle bearbeitbaren
+    Objekte): „Anzahl je Kontur“ oder „Abstand“ (ein Steg je … mm Umfang, „Höchstens“),
+    „Mindestumfang“, „Ecken meiden“ (wie die automatischen Stege von Ecken und Konturstart
+    weggeschoben), „Innere Konturen auslassen“ (Löcher – auch eigene Objekte derselben Ebene)
+    und „Vorhandene manuelle Stege ersetzen“; Zähler live im Dialog, ein Undo-Schritt, danach
+    lässt sich jeder Steg einzeln verschieben oder entfernen.
     Code: `lumacut_canvas/tabs.py`, `tabs_ui.py`, `lumacut_job/cutpath.py`.
   - *Anfahrt/Abfahrt* (`lead_in_mm`, `lead_in_arc`, `lead_out_mm`, 0–10 mm): auf der
     Abfallseite (außen bei Teilen, innen bei Löchern), 45°-Gerade oder tangentialer Viertelkreis;

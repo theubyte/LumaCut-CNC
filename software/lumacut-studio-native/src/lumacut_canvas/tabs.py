@@ -9,6 +9,12 @@ automatischen Stege der Ebene (wie LightBurn: eine Form mit eigenen Stegen
 bekommt keine automatischen). Konturen ohne eigene Stege behalten die
 automatischen Stege der Ebene; Stegbreite 0 schaltet alle Stege der Ebene ab.
 
+„Stege gleichmäßig setzen …“ (:func:`place_even_tabs`, LightBurn *Auto-place
+tabs* im Steg-Werkzeug) verteilt manuelle Stege auf einmal: eine feste Anzahl
+je Kontur oder einer je … mm Umfang, wie die automatischen Stege der Ebene von
+Konturstart und Ecken weggeschoben – danach lassen sie sich einzeln
+verschieben oder entfernen.
+
 Hier nur die Rechnung (Qt nur über :func:`shape_paths.shape_polygons`); die
 Bedienung (Werkzeug „Stege“, Markierungen, Menü) liegt in :mod:`tabs_ui`.
 """
@@ -16,7 +22,7 @@ Bedienung (Werkzeug „Stege“, Markierungen, Menü) liegt in :mod:`tabs_ui`.
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import Iterable
 
 from .model import Shape, tabs_from_world
@@ -132,3 +138,216 @@ def carry_tabs(new: Shape, pts: Iterable[Point], tol_mm: float = 1.5) -> Shape:
 
 def tab_count(shapes: Iterable[Shape]) -> int:
     return sum(len(s.tabs) for s in shapes)
+
+
+# --- Stege gleichmäßig setzen ---------------------------------------------------------
+
+#: Verteilung: feste Anzahl je Kontur oder ein Steg je … mm Umfang.
+EVEN_MODES = ("count", "spacing")
+EVEN_MODE_LABELS = {"count": "Anzahl je Kontur", "spacing": "Abstand"}
+EVEN_COUNT_RANGE = (1, 24)            # wie „Stege“ der Schnitt-Optionen
+EVEN_SPACING_RANGE = (1.0, 500.0)     # mm
+EVEN_MAX_RANGE = (0, 100)             # 0 = ohne Grenze
+EVEN_MIN_PERIMETER_RANGE = (0.0, 1000.0)
+#: Konturen mit weniger Umfang (mm) bleiben ohne Stege (wie die automatischen Stege).
+EVEN_MIN_PERIMETER_MM = 10.0
+#: Rechenbreite, wenn die Stegbreite der Ebene 0 ist (Stege werden dann nicht geschnitten).
+FALLBACK_WIDTH_MM = 1.0
+
+
+def even_defaults() -> dict:
+    return {"mode": "count", "count": 4, "spacing_mm": 50.0, "max_count": 0,
+            "avoid_corners": True, "skip_inner": True, "min_perimeter_mm": EVEN_MIN_PERIMETER_MM,
+            "replace": True}
+
+
+def _clean_even(values: dict | None) -> dict:
+    v = {**even_defaults(), **(values or {})}
+    mode = v["mode"] if v["mode"] in EVEN_MODES else "count"
+
+    def num(key, lo, hi, cast):
+        try:
+            x = float(v[key])
+        except (TypeError, ValueError):
+            x = float(even_defaults()[key])
+        if not math.isfinite(x):
+            x = float(even_defaults()[key])
+        return cast(min(hi, max(lo, x)))
+
+    return {"mode": mode, "count": num("count", *EVEN_COUNT_RANGE, lambda x: int(round(x))),
+            "spacing_mm": num("spacing_mm", *EVEN_SPACING_RANGE, float),
+            "max_count": num("max_count", *EVEN_MAX_RANGE, lambda x: int(round(x))),
+            "avoid_corners": bool(v["avoid_corners"]), "skip_inner": bool(v["skip_inner"]),
+            "min_perimeter_mm": num("min_perimeter_mm", *EVEN_MIN_PERIMETER_RANGE, float),
+            "replace": bool(v["replace"])}
+
+
+def ring_length(ring: list[Point]) -> float:
+    return sum(math.dist(a, b) for a, b in zip(ring, ring[1:]))
+
+
+def even_count(perimeter: float, width: float, mode: str, count: int, spacing_mm: float,
+               max_count: int = 0) -> int:
+    """Steg-Anzahl für eine Kontur – Regeln wie :func:`lumacut_job.cutpath.tab_intervals`:
+    ``spacing`` → ein Steg je ``spacing_mm`` (mindestens 1, mit ``max_count`` > 0
+    höchstens so viele); jedes Schnittstück mindestens so lang wie ein Steg."""
+    if mode == "spacing":
+        n = max(1, int((perimeter + 1e-6) // max(spacing_mm, 1e-9)))   # 120 mm / 30 mm = 4
+        if max_count > 0:
+            n = min(n, int(max_count))
+    else:
+        n = int(count)
+    return max(0, min(n, int((perimeter + 1e-6) // (2 * max(width, 1e-9)))))
+
+
+def even_points_on_ring(ring: list[Point], n: int, width: float,
+                        avoid_corners: bool = True) -> list[Point]:
+    """``n`` Steg-Mitten gleichmäßig auf dem geschlossenen Ring (bei ``(i + ½) · L / n``),
+    von Start und – mit ``avoid_corners`` – Ecken (≥ 30°) um ``width/2 + 0,5`` mm
+    weggeschoben, höchstens um ein Viertel des Abschnitts (wie die automatischen Stege)."""
+    from lumacut_job.cutpath import _cum_lengths, _point_at, corner_positions, tab_centers
+    if n <= 0 or len(ring) < 4:
+        return []
+    cum = _cum_lengths(ring)
+    corners = corner_positions(ring, cum) if avoid_corners else []
+    return [_point_at(ring, cum, c)[0]
+            for c in tab_centers(cum[-1], n, max(width, 1e-9), corners)]
+
+
+def _inner_flags(rings: list[list[Point]], others: list[list[Point]]) -> list[bool]:
+    """Liegt der Ring in einem anderen (größeren) Ring – eigenem Loch-Umriss oder
+    einem anderen Objekt derselben Ebene? Ein Prüfpunkt je Ring wie beim Planer."""
+    from .pathjoin import _inside, _signed_area
+    out = []
+    for ring in rings:
+        area = abs(_signed_area(ring[:-1]))
+        xs, ys = [p[0] for p in ring], [p[1] for p in ring]
+        probe = ring[0]
+        inner = False
+        for other in others:
+            if other is ring:
+                continue
+            oxs, oys = [p[0] for p in other], [p[1] for p in other]
+            if (min(oxs) > min(xs) + 1e-9 or max(oxs) < max(xs) - 1e-9
+                    or min(oys) > min(ys) + 1e-9 or max(oys) < max(ys) - 1e-9):
+                continue        # Box umschließt nicht: kann nicht außen liegen
+            if abs(_signed_area(other[:-1])) <= area + 1e-9:
+                continue
+            if _inside(probe, other[:-1]):
+                inner = True
+                break
+        out.append(inner)
+    return out
+
+
+@dataclass
+class EvenTabsResult:
+    """Ergebnis von :func:`place_even_tabs` (``add[i]`` ersetzt ``remove[i]``)."""
+    remove: list[Shape] = field(default_factory=list)
+    add: list[Shape] = field(default_factory=list)
+    tabs: int = 0              # neu gesetzte Stege
+    contours: int = 0          # Konturen mit neuen Stegen
+    skipped_inner: int = 0     # innere Konturen ausgelassen
+    too_short: int = 0         # Konturen unter dem Mindestumfang / zu kurz für einen Steg
+    removed: int = 0           # ersetzte (alte) manuelle Stege
+    zero_width_layers: list[str] = field(default_factory=list)
+    auto_layers: list[str] = field(default_factory=list)
+
+    @property
+    def changed(self) -> int:
+        return len(self.add)
+
+    def readout(self) -> str:
+        if not self.tabs:
+            text = "keine Stege gesetzt"
+            if self.removed:
+                text = f"{self.removed} manuelle(r) Steg(e) entfernt, keine neuen gesetzt"
+        else:
+            text = (f"{self.tabs} Steg{'e' if self.tabs != 1 else ''} an {self.contours} "
+                    f"Kontur{'en' if self.contours != 1 else ''} ({self.changed} Objekt(e))")
+            if self.removed:
+                text += f" · {self.removed} alte(r) manuelle(r) Steg(e) ersetzt"
+        if self.skipped_inner:
+            text += f" · {self.skipped_inner} innere Kontur(en) ausgelassen"
+        if self.too_short:
+            text += f" · {self.too_short} Kontur(en) zu kurz"
+        if self.zero_width_layers:
+            names = ", ".join(f"„{n}“" for n in self.zero_width_layers)
+            text += (f" · Achtung: Stegbreite 0 auf Ebene {names} – dort wird kein Steg geschnitten "
+                     "(Schnitt-Optionen)")
+        if self.auto_layers and self.tabs:
+            text += " · ersetzen an diesen Konturen die automatischen Stege der Ebene"
+        return text
+
+
+def place_even_tabs(doc, shapes: Iterable[Shape], values: dict | None = None) -> EvenTabsResult:
+    """Manuelle Stege gleichmäßig auf die geschlossenen Konturen von ``shapes`` setzen.
+
+    Stegbreite je Objekt aus seiner Ebene (``tab_width_mm``; bei 0 wird mit
+    :data:`FALLBACK_WIDTH_MM` verteilt und gewarnt). ``skip_inner`` lässt
+    Konturen aus, die in einer anderen geschlossenen Kontur derselben Ebene
+    liegen (Löcher fallen heraus und brauchen keinen Steg). Mit ``replace``
+    ersetzen die neuen Stege die manuellen Stege des Objekts, sonst kommen sie
+    hinzu (zu nahe an einem vorhandenen entfallen). Objekte, an denen kein
+    neuer Steg entsteht, bleiben unverändert (auch ihre alten Stege) und
+    erscheinen nicht im Ergebnis.
+    """
+    v = _clean_even(values)
+    res = EvenTabsResult()
+    shapes = [s for s in shapes if s is not None and s.kind in TAB_KINDS]
+    layer_rings: dict[str, list[list[Point]]] = {}
+    if v["skip_inner"]:
+        lids = {s.layer_id for s in shapes}
+        for s in doc.shapes:
+            if s.layer_id in lids and s.kind in TAB_KINDS:
+                layer_rings.setdefault(s.layer_id, []).extend(closed_rings(s))
+    zero, auto = [], []
+    for s in shapes:
+        rings = closed_rings(s)
+        if not rings:
+            continue
+        layer = doc.layer(s.layer_id) if hasattr(doc, "layer") else None
+        width = float(getattr(layer, "tab_width_mm", FALLBACK_WIDTH_MM) or 0.0)
+        name = getattr(layer, "name", "")
+        if width <= 0:
+            width = FALLBACK_WIDTH_MM
+            if name not in zero:
+                zero.append(name)
+        elif layer is not None and (layer.tab_count > 0 or layer.tab_spacing_mm > 0) and name not in auto:
+            auto.append(name)
+        flags = (_inner_flags(rings, layer_rings.get(s.layer_id, rings)) if v["skip_inner"]
+                 else [False] * len(rings))
+        pts: list[Point] = []
+        contours = 0
+        for ring, inner in zip(rings, flags):
+            if inner:
+                res.skipped_inner += 1
+                continue
+            L = ring_length(ring)
+            n = even_count(L, width, v["mode"], v["count"], v["spacing_mm"], v["max_count"])
+            if L < v["min_perimeter_mm"] or L < 2 * width + 1.0 or n <= 0:
+                res.too_short += 1
+                continue
+            new = even_points_on_ring(ring, n, width, v["avoid_corners"])
+            if new:
+                pts.extend(new)
+                contours += 1
+        old = s.tab_points()
+        keep = [] if v["replace"] else list(old)
+        if keep:
+            pts = [p for p in pts if all(math.dist(p, q) >= MIN_TAB_DISTANCE_MM for q in keep)]
+        if not pts:
+            continue            # nichts zu setzen: vorhandene Stege bleiben unangetastet
+        new_shape = with_tab_points(s, keep + pts)
+        if new_shape.tabs == s.tabs:
+            continue
+        res.remove.append(s)
+        res.add.append(new_shape)
+        res.tabs += len(pts)
+        res.contours += contours
+        res.removed += len(old) if v["replace"] else 0
+    # Warnungen nur für Ebenen, auf denen wirklich etwas gesetzt wird
+    used = {getattr(doc.layer(s.layer_id), "name", "") for s in res.add} if hasattr(doc, "layer") else set()
+    res.zero_width_layers = [n for n in zero if n in used]
+    res.auto_layers = [n for n in auto if n in used]
+    return res
