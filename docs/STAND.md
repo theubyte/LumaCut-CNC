@@ -5,7 +5,7 @@ ein Mensch oder ein neuer Claude-Chat – liest zuerst diese Datei. Sie
 erklärt, was das Projekt ist, wo alles liegt, welche Regeln gelten, was
 schon passiert ist, was gerade läuft und was als Nächstes kommt.
 
-Stand: **31.10.2026**. Wird mit jeder Änderung im selben Commit nachgezogen
+Stand: **15.11.2026**. Wird mit jeder Änderung im selben Commit nachgezogen
 (siehe [Pflege dieser Datei](#14-pflege-dieser-datei)).
 
 Inhalt:
@@ -86,6 +86,13 @@ Nicht ins Repo: die `.xs`-Datei des Besitzers; das Bild `61h3r1EOoeL._SL1500_.jp
 - **Mehrere Sitzungen arbeiten parallel** auf `main` (andere Claude-Chats,
   früher Grok). Deshalb **vor jeder Änderung `git fetch` + `pull`**, fremde
   Änderungen nicht zurückdrehen.
+- **Claude-Fabrik (seit 15.11.2026):** Claude läuft auch dauerhaft auf dem Unraid-NAS
+  im Container `claude-fabrik` (Remote Control, Sitzung „Fabrik“). Dieses Repo liegt dort
+  unter `/work/LumaCut/LumaCut-CNC-android`, der Zweig `windows-native` unter
+  `/work/LumaCut/wt-native`. Gradle 9.5, Android-SDK, Emulator, Qt 6.10.3 (Linux),
+  PlatformIO sind da; die MSI baut weiter GitHub Actions. Anleitung: `/work/FABRIK.md`,
+  Zuschauen: Fabrik-Monitor `http://192.168.2.5:7680`. PC und Fabrik teilen sich `main`
+  wie zwei Sitzungen – also auch hier vorher `pull`.
 - **Tests:** Pi `python3 -m pytest tests` (unter Windows `PYTHONUTF8=1`);
   Android-Kern `gradle :core:test` im Ordner `android`. Vorbekannte
   Windows-Fehlschläge: `camera_calibration` Speicherort (2×), `marlin_gateway` (2×).
