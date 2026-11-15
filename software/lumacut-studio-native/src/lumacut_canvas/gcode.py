@@ -63,6 +63,11 @@ LightBurn „Tab Cut Power“): die Pulse schließen ohne ``G0`` an das Schnitts
 davor und danach an; ``tab_off``-Stücke fahren als ``G1 … S0`` mit Schnitttempo
 (Laser aus, keine Bremsung), ``tab_pulse``-Stücke mit der Leistung der Ebene.
 
+Rampe (``JobLayer.poly_power_scale``, LightBurn „Ramp Length“): jede Polylinie
+lasert mit ``S`` = Ebenen-``S`` × Faktor; weitere Stufen (Art ``ramp``) schließen
+ohne ``G0`` an das vorige Stück an. Ohne Faktoren (Standard) bleibt die Ausgabe
+Byte für Byte gleich.
+
 „Nach Gruppen“ (LightBurn *Order by Group*, ``JobLayer.unit``): vor den Ebenen
 jeder Gruppe steht einmal ``; GROUP i OF n`` – ein reiner Kommentar; „Nach
 Priorität“ (*Order by Priority*, ``JobLayer.unit_kind`` "PRIORITY") schreibt ebenso
@@ -321,6 +326,9 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
             kinds = getattr(layer, "poly_kinds", ()) or ()
             if len(kinds) != len(layer.polylines):
                 kinds = ()
+            scales = getattr(layer, "poly_power_scale", ()) or ()
+            if len(scales) != len(layer.polylines):
+                scales = ()
             prev_end = None
             for i, line in enumerate(layer.polylines):
                 if len(line) < 2:
@@ -331,13 +339,16 @@ def layers_to_gcode(layers: list[JobLayer], pass_hook: PassHook | None = None) -
                 prev = kinds[i - 1] if kinds and i > 0 else ""
                 joined = (i > 0 and prev_end is not None
                           and (kind == "lead_out" or prev == "lead_in"
-                               or kind in _TAB_PULSE_KINDS or prev in _TAB_PULSE_KINDS)
+                               or kind in _TAB_PULSE_KINDS or prev in _TAB_PULSE_KINDS
+                               or kind == "ramp")
                           and abs(prev_end[0] - line[0][0]) < 1e-6
                           and abs(prev_end[1] - line[0][1]) < 1e-6)
                 prev_end = line[-1]
                 if not joined:
                     out.append(f"G0 {_xy(*line[0])}")
                 power = 0 if kind == "tab_off" else s   # Steg: Laser aus, Kopf fährt weiter
+                if scales and power and scales[i] < 1.0:   # Rampe: anteilige Leistung
+                    power = max(0, min(PWM_MAX, round(s * max(0.0, scales[i]))))
                 out.extend(f"G1 {_xy(*pt)} F{f} S{power}" for pt in line[1:])
                 pos = line[-1]
         if z_step > 0 and drop > 0:

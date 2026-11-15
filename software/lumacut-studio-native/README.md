@@ -51,7 +51,7 @@ nicht) und **Verbinden** (nur sichtbar, solange keine Verbindung besteht).
 **Mehr ▸** (standardmäßig zu) blendet alles Erweiterte ein: Ablauf, Scan &
 Probe, Maschine (Adresse, Joggen, Homing, Abtasten, Fokus, Rahmen …),
 „Manuell senden“ (Design senden / hochgeladenen Auftrag starten), die
-Werkzeugleiste „Auftrag“ (Schnittoptionen mit Kerf, Haltestege, Anfahrt, Überschnitt, Perforation;
+Werkzeugleiste „Auftrag“ (Schnittoptionen mit Kerf, Haltestege, Anfahrt, Überschnitt, Rampe, Perforation;
 Rahmen, Zeit, Materialtest …) sowie in der Ebenenliste Leistung/Tempo/Durchgänge
 und Füllung. Die Auftrags-Aktionen sind zusätzlich im Menü **Auftrag** und über
 ihre Tastenkürzel erreichbar, auch wenn „Mehr“ zu ist. NOT-AUS bleibt immer
@@ -351,6 +351,14 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   - *Überschnitt* (`overcut_mm`, 0–10 mm, wie LightBurns *Overcut*): die Kontur wird über den
     Startpunkt hinaus weiter geschnitten, damit kein Faden stehen bleibt; mit Haltestegen endet
     der Überschnitt 0,5 mm vor dem ersten Steg, eine Abfahrt beginnt an seinem Ende.
+  - *Rampe* (`ramp_mm`, 0–20 mm, „aus“ = 0; `ramp_start_power` 0–95 %; `ramp_outer_only`; wie
+    LightBurns *Ramp Length* / *Ramp Outer Only*): die Leistung steigt am Anfang jeder
+    Schnittlinie (Kontur samt Überschnitt, offener Pfad) in Stufen von ≈ 0,5 mm (höchstens 20)
+    von der Startleistung auf die Ebenen-Leistung und fällt am Ende ebenso ab – kein
+    Einbrandloch am Start-/Endpunkt; mit Überschnitt überlappen sich Anfang und Ende voll.
+    An-/Abfahrt, Steg-Pulse und Füllungen bleiben bei voller Leistung, perforierte Ebenen ohne
+    Rampe; „Rampe nur an Außenkonturen“ schneidet Löcher mit voller Leistung. Die Stufen sind
+    eigene `G1 … S…` ohne zusätzliches `G0` (kein `G2`/`G3`).
   - *Perforation* (`perf_cut_mm` Schnitt / `perf_skip_mm` Lücke, je 0–50 mm, wie LightBurns
     *Perforation Mode*): jede Linie der Ebene – auch offene Pfade, Steg-Stücke und Überschnitt –
     wird abwechselnd geschnitten und mit Laser aus übersprungen (Reiß- und Falzlinien in Karton,

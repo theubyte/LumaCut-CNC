@@ -60,14 +60,21 @@ OVERLAP_DEFAULT_MM = 0.05           # Vorschlag im Dialog beim Einschalten
 # in % (0 = Lücke mit Laser aus; > 0 = gepulste Schnitte quer über den Steg).
 TAB_MAX_RANGE = (0, 100)
 TAB_CUT_POWER_RANGE = (0.0, 95.0)   # % der Ebenen-Leistung als Puls-Anteil
+# Rampe wie LightBurn „Ramp Length“ / „Ramp Outer Only“: Leistung steigt am Anfang jeder
+# Schnittlinie über ramp_mm von ramp_start_power % auf die Ebenen-Leistung und fällt am
+# Ende wieder ab (kein Einbrandloch am Start-/Endpunkt); 0 mm = aus.
+RAMP_RANGE = (0.0, 20.0)            # mm
+RAMP_START_POWER_RANGE = (0.0, 95.0)  # % der Ebenen-Leistung zu Beginn der Rampe
 CUT_LAYER_DEFAULTS = {
     "kerf_mm": 0.0, "tab_count": 0, "tab_width_mm": 1.0, "tab_spacing_mm": 0.0,
     "lead_in_mm": 0.0, "lead_in_arc": False, "lead_out_mm": 0.0,
     "overcut_mm": 0.0, "perf_cut_mm": 0.0, "perf_skip_mm": 1.0,
     "overlap_tol_mm": 0.0,
     "tab_skip_inner": False, "tab_max": 0, "tab_cut_power": 0.0,
+    "ramp_mm": 0.0, "ramp_start_power": 0.0, "ramp_outer_only": False,
 }
 CUT_LAYER_FIELDS = tuple(CUT_LAYER_DEFAULTS)
+_RAMP_FIELDS = ("ramp_mm", "ramp_start_power", "ramp_outer_only")
 # Vektor-Füllung je Ebene (hatch.py); nur gespeichert, wenn vom Standard abweichend.
 FILL_LAYER_DEFAULTS = {"fill_mode": "none", "line_interval_mm": _hatch.DEFAULT_INTERVAL_MM,
                        "hatch_angle": 0.0, "hatch_bidirectional": True, "hatch_outline": True,
@@ -364,6 +371,9 @@ class Layer:
     tab_skip_inner: bool = False    # keine Stege an Konturen, die in einer anderen liegen
     tab_max: int = 0                # Abstands-Modus: höchstens so viele Stege, 0 = unbegrenzt
     tab_cut_power: float = 0.0      # Steg-Leistung in % (gepulst), 0 = Lücke mit Laser aus
+    ramp_mm: float = 0.0            # Rampe an Anfang / Ende jeder Schnittlinie, 0 = aus
+    ramp_start_power: float = 0.0   # Rampe beginnt bei … % der Ebenen-Leistung
+    ramp_outer_only: bool = False   # Rampe nur an Außenkonturen (Löcher ohne)
     # Vektor-Füllung (siehe hatch.py / FILL_LAYER_DEFAULTS)
     fill_mode: str = "none"          # "none" | "hatch" | "crosshatch" | "offset"
     line_interval_mm: float = _hatch.DEFAULT_INTERVAL_MM  # Linienabstand
@@ -405,6 +415,9 @@ class Layer:
             tab_skip_inner=bool(self.tab_skip_inner),
             tab_max=int(_clamp(int(self.tab_max), *TAB_MAX_RANGE)),
             tab_cut_power=round(_clamp(float(self.tab_cut_power), *TAB_CUT_POWER_RANGE), 1),
+            ramp_mm=_clean_range(self.ramp_mm, RAMP_RANGE, 3),
+            ramp_start_power=_clean_range(self.ramp_start_power, RAMP_START_POWER_RANGE, 1),
+            ramp_outer_only=bool(self.ramp_outer_only),
             fill_mode=self.fill_mode if self.fill_mode in _hatch.FILL_MODES else "none",
             line_interval_mm=round(_clamp(float(self.line_interval_mm), *_hatch.INTERVAL_RANGE), 3),
             hatch_angle=_hatch.normalize_angle_180(self.hatch_angle),
@@ -447,11 +460,26 @@ class Layer:
             thickness_mm=float(d.get("thickness_mm", 0.0)),
             target_depth_mm=float(d.get("target_depth_mm", 0.0)),
             depth_per_pass_mm=float(d.get("depth_per_pass_mm", 0.0)),
-            **{k: type(v)(d[k]) for k, v in CUT_LAYER_DEFAULTS.items() if k in d},
+            **{k: type(v)(d[k]) for k, v in CUT_LAYER_DEFAULTS.items()
+               if k in d and k not in _RAMP_FIELDS},
+            # Rampe: kaputte Werte → aus (normalized), nur JSON true schaltet „nur außen“ ein
+            **{k: (d[k] is True if k == "ramp_outer_only" else d[k])
+               for k in _RAMP_FIELDS if k in d},
             **{k: type(v)(d[k]) for k, v in FILL_LAYER_DEFAULTS.items() if k in d},
             material_ref=str(d.get("material_ref", "")),
             material_link=bool(d.get("material_link", False)),
         ).normalized()
+
+
+def _clean_range(value, rng, digits: int) -> float:
+    """Zahl im Bereich ``rng`` gerundet; kaputte Werte (Text, NaN, ±inf) = untere Grenze."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return float(rng[0])
+    if not math.isfinite(v):
+        return float(rng[0])
+    return round(_clamp(v, *rng), digits) + 0.0
 
 
 def _clean_increment(value) -> float:

@@ -1,6 +1,7 @@
 """Dialog „Schnittoptionen der Ebene“: Kerf-Versatz, Haltestege (inkl. höchstens N
 Stege, Steg-Leistung und „Innere Formen ohne Stege“), An-/Abfahrt, Überschnitt,
-Perforation und „Überlappende Linien entfernen“.
+Rampe (LightBurn *Ramp Length* / *Ramp Outer Only*), Perforation und „Überlappende
+Linien entfernen“.
 
 Bearbeitet die Ebenen-Felder aus :data:`lumacut_canvas.model.CUT_LAYER_DEFAULTS`
 als *einen* Undo-Schritt (``SetLayerAttrsCommand``). Die Werte wirken im Planer
@@ -14,7 +15,8 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpin
 
 from lumacut_canvas.commands import SetLayerAttrsCommand
 from lumacut_canvas.model import (CUT_LAYER_DEFAULTS, CUT_LAYER_FIELDS, KERF_RANGE, LEAD_RANGE,
-                                  OVERCUT_RANGE, OVERLAP_DEFAULT_MM, OVERLAP_RANGE, PERF_RANGE, TAB_COUNT_RANGE,
+                                  OVERCUT_RANGE, OVERLAP_DEFAULT_MM, OVERLAP_RANGE, PERF_RANGE,
+                                  RAMP_RANGE, RAMP_START_POWER_RANGE, TAB_COUNT_RANGE,
                                   TAB_CUT_POWER_RANGE, TAB_MAX_RANGE, TAB_SPACING_RANGE,
                                   TAB_WIDTH_RANGE, Layer)
 
@@ -81,6 +83,22 @@ class CutOptionsDialog(QDialog):
         self.overcut = _dspin(OVERCUT_RANGE, layer.overcut_mm, 0.1, special="aus")
         self.overcut.setToolTip("Geschlossene Konturen über den Startpunkt hinaus weiter schneiden, "
                                 "damit kein Faden stehen bleibt (z. B. 0,5–1 mm)")
+        self.ramp = _dspin(RAMP_RANGE, layer.ramp_mm, 0.5, special="aus")
+        self.ramp.setToolTip(
+            "Rampe wie LightBurn „Ramp Length“: die Leistung steigt am Anfang jeder "
+            "Schnittlinie über diese Länge stufenweise auf die Leistung der Ebene und fällt am "
+            "Ende ebenso wieder ab – kein Einbrandloch am Start- und Endpunkt (z. B. 1–3 mm). "
+            "Gut zusammen mit „Überschnitt“, damit sich Anfang und Ende voll überlappen.")
+        self.ramp_start = _dspin(RAMP_START_POWER_RANGE, layer.ramp_start_power, 5.0,
+                                 suffix=" %", decimals=0)
+        self.ramp_start.setToolTip("Leistung zu Beginn der Rampe in % der Ebenen-Leistung "
+                                   "(0 % = von ganz unten, LightBurn: Min. Leistung)")
+        self.ramp_outer = QCheckBox("Rampe nur an Außenkonturen")
+        self.ramp_outer.setChecked(layer.ramp_outer_only)
+        self.ramp_outer.setToolTip("Wie LightBurn „Ramp Outer Only“: Löcher und Innenformen "
+                                   "werden mit voller Leistung geschnitten (fallen sicher heraus).")
+        self.ramp_hint = QLabel("")
+        self.ramp_hint.setWordWrap(True)
         self.perf_cut = _dspin(PERF_RANGE, layer.perf_cut_mm, 0.1, special="aus")
         self.perf_cut.setToolTip("Perforation: so viel schneiden, dann die Lücke mit Laser aus "
                                  "überspringen (Reiß- und Falzlinien). 0,1–0,3 mm ergibt eine Punktlinie.")
@@ -96,8 +114,10 @@ class CutOptionsDialog(QDialog):
         self.overlap_hint = QLabel("")
         self.overlap_hint.setWordWrap(True)
         self.perf_cut.valueChanged.connect(self._update_enabled)
+        self.perf_skip.valueChanged.connect(self._update_enabled)
+        self.ramp_outer.toggled.connect(self._update_enabled)
         for w in (self.overlap, self.kerf, self.lead_in, self.lead_out, self.overcut,
-                  self.tab_width, self.tab_spacing):
+                  self.tab_width, self.tab_spacing, self.ramp, self.ramp_start):
             w.valueChanged.connect(self._update_enabled)
         self.tab_count.valueChanged.connect(self._update_enabled)
         self.tab_power.valueChanged.connect(self._update_enabled)
@@ -108,6 +128,8 @@ class CutOptionsDialog(QDialog):
                          ("", self.tabs_hint),
                          ("Anfahrt (Lead-in)", self.lead_in), ("", self.lead_arc),
                          ("Abfahrt (Lead-out)", self.lead_out), ("Überschnitt", self.overcut),
+                         ("Rampe (Länge)", self.ramp), ("Rampe ab Leistung", self.ramp_start),
+                         ("", self.ramp_outer), ("", self.ramp_hint),
                          ("Perforation Schnitt", self.perf_cut),
                          ("Perforation Lücke", self.perf_skip),
                          ("Überlappende Linien entfernen", self.overlap),
@@ -141,6 +163,12 @@ class CutOptionsDialog(QDialog):
         self.tabs_hint.setText(tab_power_hint(self.tab_width.value(), self.tab_power.value())
                                if tabs else "")
         self.tabs_hint.setVisible(bool(self.tabs_hint.text()))
+        ramp = self.ramp.value() > 0
+        self.ramp_start.setEnabled(ramp)
+        self.ramp_outer.setEnabled(ramp)
+        self.ramp_hint.setText(ramp_hint(self.ramp.value(), self.ramp_start.value(),
+                                         self.perf_cut.value() > 0 and self.perf_skip.value() > 0))
+        self.ramp_hint.setVisible(bool(self.ramp_hint.text()))
         blocked = self.overlap.value() > 0 and self._contour_options_on()
         self.overlap_hint.setText(
             "Wirkt nicht: Kerf / Stege / An-/Abfahrt / Überschnitt brauchen ganze Konturen – "
@@ -160,6 +188,9 @@ class CutOptionsDialog(QDialog):
         self.lead_arc.setChecked(d["lead_in_arc"])
         self.lead_out.setValue(d["lead_out_mm"])
         self.overcut.setValue(d["overcut_mm"])
+        self.ramp.setValue(d["ramp_mm"])
+        self.ramp_start.setValue(d["ramp_start_power"])
+        self.ramp_outer.setChecked(d["ramp_outer_only"])
         self.perf_cut.setValue(d["perf_cut_mm"])
         self.perf_skip.setValue(d["perf_skip_mm"])
         self.overlap.setValue(d["overlap_tol_mm"])
@@ -172,7 +203,21 @@ class CutOptionsDialog(QDialog):
                 "perf_cut_mm": self.perf_cut.value(), "perf_skip_mm": self.perf_skip.value(),
                 "overlap_tol_mm": self.overlap.value(),
                 "tab_skip_inner": self.tab_skip_inner.isChecked(),
-                "tab_max": self.tab_max.value(), "tab_cut_power": self.tab_power.value()}
+                "tab_max": self.tab_max.value(), "tab_cut_power": self.tab_power.value(),
+                "ramp_mm": self.ramp.value(), "ramp_start_power": self.ramp_start.value(),
+                "ramp_outer_only": self.ramp_outer.isChecked()}
+
+
+def ramp_hint(ramp_mm: float, start_power: float, perforated: bool = False) -> str:
+    """Kurztext, wie die Rampe geschnitten wird (leer, wenn aus)."""
+    from .cutpath import _ramp_steps
+    if ramp_mm <= 0:
+        return ""
+    if perforated:
+        return "Rampe wirkt nicht zusammen mit Perforation – die Stücke sind zu kurz."
+    n = _ramp_steps(ramp_mm)
+    return (f"{n} Stufe{'n' if n != 1 else ''} von {start_power:.0f} % bis 100 % "
+            f"der Ebenen-Leistung am Anfang, am Ende wieder abfallend.")
 
 
 def tab_power_hint(width_mm: float, power: float) -> str:
@@ -224,6 +269,13 @@ def summary(layer: Layer) -> str:
         parts.append(f"Abfahrt {layer.lead_out_mm:g} mm")
     if layer.overcut_mm:
         parts.append(f"Überschnitt {layer.overcut_mm:g} mm")
+    if getattr(layer, "ramp_mm", 0.0) > 0:
+        text = f"Rampe {layer.ramp_mm:g} mm"
+        if layer.ramp_start_power > 0:
+            text += f" ab {layer.ramp_start_power:g} %"
+        if layer.ramp_outer_only:
+            text += " nur außen"
+        parts.append(text)
     if layer.perf_cut_mm > 0 and layer.perf_skip_mm > 0:
         parts.append(f"Perforation {layer.perf_cut_mm:g}/{layer.perf_skip_mm:g} mm")
     if getattr(layer, "overlap_tol_mm", 0.0) > 0:

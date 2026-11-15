@@ -56,6 +56,9 @@ class JobLayer:
     tab_skip_inner: bool = False  # keine Stege an innen liegenden Konturen
     tab_max: int = 0              # Abstands-Modus: höchstens so viele Stege (0 = unbegrenzt)
     tab_cut_power: float = 0.0    # Steg-Leistung % (gepulst: "tab_pulse" / "tab_off")
+    ramp_mm: float = 0.0          # Rampe am Anfang / Ende jeder Schnittlinie, 0 = aus
+    ramp_start_power: float = 0.0  # Rampe beginnt bei … % der Ebenen-Leistung
+    ramp_outer_only: bool = False  # Rampe nur an Außenkonturen / offenen Pfaden
     # Manuelle Stege der Objekte dieser Ebene (Shape.tabs, lumacut_canvas.tabs) als
     # Punkte in Maschinen-mm; der Planer setzt sie auf die nächste Kontur (statt der
     # automatischen Stege dieser Kontur). Leer = nur automatische Stege.
@@ -74,6 +77,10 @@ class JobLayer:
     # Perforations-Lücke, "tab_pulse" / "tab_off" = Puls mit Laser an / Stück
     # mit Laser aus innerhalb eines Stegs mit Steg-Leistung); leer = alles "cut".
     poly_kinds: tuple[str, ...] = ()
+    # Leistungs-Faktor je Polylinie (0..1) nach der Planung – Rampe am Anfang / Ende der
+    # Schnittlinien (Layer.ramp_mm, LightBurn *Ramp Length*; Art "ramp" = weitere Stufe,
+    # schließt ohne G0 an). Leer = jede Polylinie mit der vollen Ebenen-Leistung.
+    poly_power_scale: tuple[float, ...] = ()
     # Vektor-Füllung: je Füllgruppe (Objekt, Gruppe oder ganze Ebene, siehe
     # Layer.fill_grouping) ein Block Schraffurstrecken ((x0, y0), (x1, y1)) in
     # Maschinen-mm, bereits in Fahr-Reihenfolge.

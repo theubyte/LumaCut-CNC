@@ -52,6 +52,15 @@ Wie LightBurn *Kerf Offset*, *Tabs/Bridges* und *Lead-In/Lead-Out*
   Konturen, Steg-Stücke, Überschnitt und offene Pfade; An-/Abfahrten und
   Füllungen bleiben durchgehend. Sehr kurze Schnittlängen (0,1–0,3 mm)
   ergeben eine Punktlinie (Ersatz für LightBurns *Dot Mode*).
+* :func:`ramp_pieces` – LightBurn *Ramp Length* / *Ramp Outer Only*: am Anfang
+  jeder Schnittlinie steigt die Leistung über ``ramp_mm`` in Stufen von
+  ``ramp_start_power`` % auf die volle Ebenen-Leistung, am Ende fällt sie
+  ebenso wieder ab (kein Einbrandloch am Start-/Endpunkt). Gilt für die
+  eigentliche Kontur bzw. den offenen Pfad samt Überschnitt; An-/Abfahrt und
+  Steg-Pulse bleiben bei voller Leistung, perforierte Ebenen ohne Rampe.
+  ``ramp_outer_only``: Löcher (ungerade Verschachtelungstiefe) ohne Rampe.
+  Die Stufen sind eigene ``G1`` mit kleinerem ``S`` (:data:`KIND_RAMP`,
+  Faktor in :attr:`CutResult.power_scale`) – nur ``G1``, kein ``G2``/``G3``.
 
 Alle Koordinaten sind Maschinen-mm; geschlossene Polylinien haben gleichen
 Anfangs- und Endpunkt (siehe :mod:`.planner`).
@@ -86,6 +95,9 @@ KIND_PERF = "perf"        # Schnittstück, vor dem eine Perforations-Lücke lieg
 KIND_TAB_PULSE = "tab_pulse"  # Puls (Laser an) innerhalb eines Stegs mit Steg-Leistung
 KIND_TAB_OFF = "tab_off"      # Stück mit Laser aus (G1 … S0) innerhalb eines solchen Stegs
 TAB_PULSE_KINDS = (KIND_TAB_PULSE, KIND_TAB_OFF)
+KIND_RAMP = "ramp"            # Fortsetzung des vorigen Stücks mit anderer Leistung (Rampe)
+RAMP_STEP_MM = 0.5            # Ziel-Länge einer Rampen-Stufe
+RAMP_MAX_STEPS = 20           # höchstens so viele Stufen je Rampe (Zeilen über die serielle Leitung)
 TAB_PULSE_PERIOD_MM = 0.4     # Ziel-Abstand der Pulse über die Steg-Breite
 MIN_TAB_PULSE_MM = 0.01       # kürzere Pulse entfallen (Steg bleibt dort aus)
 MIN_PERF_PIECE_MM = 0.01  # kürzere Reststücke einer Perforation fallen weg
@@ -114,6 +126,16 @@ class CutOptions:
     # Kontur, die genau an einem davon beginnt, behält ihren Start – die An-/Abfahrt
     # darf nur ihre Laufrichtung wechseln, nicht auf eine Kantenmitte / andere Stelle.
     start_points: tuple = ()
+    # Rampe (LightBurn *Ramp Length*): Leistung steigt am Anfang jeder Schnittlinie über
+    # ramp_mm von ramp_start_power % auf 100 % und fällt am Ende wieder ab; 0 = aus.
+    ramp_mm: float = 0.0
+    ramp_start_power: float = 0.0
+    ramp_outer_only: bool = False
+
+    @property
+    def ramped(self) -> bool:
+        """Rampe aktiv (nicht auf perforierten Ebenen – dort sind alle Stücke kurz)."""
+        return self.ramp_mm > 0 and not self.perforated
 
     @property
     def auto_tabs(self) -> bool:
@@ -141,7 +163,7 @@ class CutOptions:
     @property
     def active(self) -> bool:
         return bool(self.kerf_mm or self.lead_in_mm or self.lead_out_mm or self.overcut_mm > 0
-                    or self.perforated or self.auto_tabs or self.manual_tabs)
+                    or self.perforated or self.auto_tabs or self.manual_tabs or self.ramped)
 
     @staticmethod
     def of(obj) -> "CutOptions":
@@ -158,6 +180,9 @@ class CutResult:
     manual_tabs: int = 0     # gesetzte manuelle Stege (nach dem Verschmelzen)
     dropped_tabs: int = 0    # manuelle Steg-Punkte ohne Kontur in der Nähe / Kontur zu kurz
     moved_leads: int = 0     # Konturen mit verlegtem Startpunkt wegen Kollision
+    # Leistungs-Faktor je Polylinie (0..1, Rampe); leer = überall volle Leistung.
+    power_scale: list[float] = field(default_factory=list)
+    ramps: int = 0           # Schnittlinien mit Rampe
 
 
 def _start_key(p: Point) -> tuple[float, float]:
@@ -762,6 +787,108 @@ def perforate(poly: Poly, cut_mm: float, skip_mm: float) -> list[Poly]:
     return pieces or [poly]
 
 
+def ramp_scale(k: int, n: int, start_power: float) -> float:
+    """Leistungs-Faktor der Stufe ``k`` (0 = erste) von ``n`` einer steigenden Rampe.
+
+    Stufenmitte linear von ``start_power`` % bis 100 %: ``a + (1 − a)·(k + ½)/n``.
+    """
+    a = max(0.0, min(1.0, float(start_power) / 100.0))
+    return round(a + (1.0 - a) * (k + 0.5) / max(1, n), 4)
+
+
+def _ramp_steps(length: float) -> int:
+    return max(1, min(RAMP_MAX_STEPS, math.ceil(length / RAMP_STEP_MM - 1e-9)))
+
+
+def ramp_pieces(poly: Poly, up_mm: float, down_mm: float,
+                start_power: float) -> list[tuple[Poly, float]]:
+    """Polylinie in Stufen mit Leistungs-Faktor zerlegen (LightBurn *Ramp Length*).
+
+    Die ersten ``up_mm`` steigen von ``start_power`` % auf 100 %, die letzten
+    ``down_mm`` fallen spiegelbildlich ab, dazwischen ein Stück mit Faktor 1.
+    Ist die Linie kürzer als beide Rampen, bekommt jede die Hälfte. Stufen
+    ≈ :data:`RAMP_STEP_MM` lang, höchstens :data:`RAMP_MAX_STEPS` je Rampe.
+    Die Stücke schließen lückenlos aneinander an (gleiche Punkte, gleiche
+    Richtung). Ohne Rampe oder bei Länge 0 → ``[(poly, 1.0)]``.
+    """
+    if len(poly) < 2:
+        return [(poly, 1.0)]
+    cum = _cum_lengths(poly)
+    total = cum[-1]
+    up = max(0.0, float(up_mm))
+    down = max(0.0, float(down_mm))
+    if total <= 1e-9 or up + down <= 1e-9:
+        return [(poly, 1.0)]
+    if up + down > total:
+        scale = total / (up + down)
+        up, down = up * scale, down * scale
+    marks: list[tuple[float, float, float]] = []   # (s0, s1, Faktor)
+    if up > 1e-6:
+        n = _ramp_steps(up)
+        marks += [(up * k / n, up * (k + 1) / n, ramp_scale(k, n, start_power)) for k in range(n)]
+    mid0, mid1 = up, total - down
+    if mid1 - mid0 > 1e-6:
+        marks.append((mid0, mid1, 1.0))
+    if down > 1e-6:
+        n = _ramp_steps(down)
+        marks += [(mid1 + down * k / n, mid1 + down * (k + 1) / n,
+                   ramp_scale(n - 1 - k, n, start_power)) for k in range(n)]
+    out: list[tuple[Poly, float]] = []
+    for s0, s1, f in marks:
+        piece = _sub_path(poly, cum, s0, min(s1, total))
+        if len(piece) < 2:
+            continue
+        if out and out[-1][1] == f:   # gleiche Leistung: zusammenfassen
+            out[-1] = (out[-1][0] + piece[1:], f)
+        else:
+            out.append((piece, f))
+    # Anfang und Ende exakt wie die Original-Linie (keine Rundungsfehler)
+    if out:
+        out[0] = ([poly[0]] + out[0][0][1:], out[0][1])
+        out[-1] = (out[-1][0][:-1] + [poly[-1]], out[-1][1])
+    return out or [(poly, 1.0)]
+
+
+_RAMP_TARGET_KINDS = (KIND_CUT, KIND_TAB)
+
+
+def _apply_ramp(res: CutResult, i0: int, ramp_mm: float, start_power: float) -> None:
+    """Rampe auf die ab Index ``i0`` ausgegebenen Stücke einer Kontur anwenden.
+
+    Steigt am Anfang des ersten Schnittstücks (``cut`` / ``tab``) und fällt am Ende
+    des letzten; An-/Abfahrt und Steg-Pulse bleiben bei voller Leistung. Die
+    zusätzlichen Stufen bekommen :data:`KIND_RAMP` (der G-Code hängt sie ohne
+    ``G0`` an), die erste Stufe behält die Art des Stücks.
+    """
+    polys = res.polylines[i0:]
+    kinds = res.kinds[i0:]
+    cut = [j for j, k in enumerate(kinds) if k in _RAMP_TARGET_KINDS and len(polys[j]) >= 2]
+    if not cut:
+        return
+    first, last = cut[0], cut[-1]
+    new_p: list[Poly] = []
+    new_k: list[str] = []
+    new_f: list[float] = []
+    for j, (q, k) in enumerate(zip(polys, kinds)):
+        if j not in (first, last):
+            new_p.append(q)
+            new_k.append(k)
+            new_f.append(1.0)
+            continue
+        up = ramp_mm if j == first else 0.0
+        down = ramp_mm if j == last else 0.0
+        for n, (piece, f) in enumerate(ramp_pieces(q, up, down, start_power)):
+            new_p.append(piece)
+            new_k.append(k if n == 0 else KIND_RAMP)
+            new_f.append(f)
+    if len(res.power_scale) < i0:
+        res.power_scale += [1.0] * (i0 - len(res.power_scale))
+    res.polylines[i0:] = new_p
+    res.kinds[i0:] = new_k
+    res.power_scale[i0:] = new_f
+    res.ramps += 1
+
+
 # --- Ebene ------------------------------------------------------------------
 
 def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | None = None,
@@ -772,7 +899,8 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
     ohne Angabe wird sie berechnet. ``obstacles`` (alle Konturen des Jobs)
     schaltet die Kollisionsprüfung der An-/Abfahrten ein. Liefert Polylinien plus Art je Polylinie
     (``cut``/``lead_in``/``lead_out``/``tab``/``perf`` sowie ``tab_pulse``/``tab_off``
-    bei Steg-Leistung) in Schnittreihenfolge. ``tab_skip_inner``: Konturen mit
+    bei Steg-Leistung und ``ramp`` für weitere Rampen-Stufen) in Schnittreihenfolge;
+    mit Rampe zusätzlich ``power_scale`` (Leistungs-Faktor je Polylinie). ``tab_skip_inner``: Konturen mit
     Tiefe > 0 (in einer anderen geschlossenen Kontur der Ebene) bekommen keine Stege.
     """
     res = CutResult()
@@ -793,67 +921,79 @@ def apply_cut_options(polys: list[Poly], opts: CutOptions, depth: list[int] | No
             res.polylines.append(part)
             res.kinds.append(kind if j == 0 else KIND_PERF)
 
+    ramp_on = opts.ramped
     for idx, (p, d) in enumerate(zip(polys, depth)):
-        if not is_closed(p):
-            emit(p, KIND_CUT)
-            continue
-        outer = d % 2 == 0
-        blocked = obstacles.blocker(p) if obstacles is not None and (
-            opts.lead_in_mm > 0 or opts.lead_out_mm > 0) else None
-        fixed = bool(fixed_starts) and _start_key(p[0]) in fixed_starts
-        if opts.lead_in_mm > 0:
-            p, lead, moved = _with_leads(p, outer, opts, blocked, fixed)
-            res.moved_leads += moved
-        else:
-            lead = None
-            if opts.lead_out_mm > 0 and not fixed:
-                p = start_mid_edge(p)
-        if lead:
-            res.polylines.append(lead)
-            res.kinds.append(KIND_LEAD_IN)
-        elif opts.lead_in_mm > 0:
-            res.skipped_leads += 1
-            res.warnings.append("Anfahrt weggelassen (kein Platz)")
-        own = manual.get(idx)
-        if own:     # eigene Stege der Kontur statt der automatischen
-            spans = manual_tab_intervals(p, own, opts.tab_width_mm)
-            if not spans:
-                res.dropped_tabs += len(own)
-            res.manual_tabs += len(spans)
-            parts = split_spans(p, spans)
-        else:
-            tabbed = tabs_on and not (opts.tab_skip_inner and d > 0)
-            parts = (split_tabs_with_gaps(p, opts.tab_count, opts.tab_width_mm, opts.tab_spacing_mm,
-                                          opts.tab_max) if tabbed else [(p, False)])
-        cut_idx = [i for i, (_q, gap) in enumerate(parts) if not gap]
-        last = cut_idx[-1] if cut_idx else None
-        ends_at_start = last is not None and math.dist(parts[last][0][-1], p[-1]) < 1e-6
-        over = 0.0
-        if opts.overcut_mm > 0 and ends_at_start:
-            over = min(opts.overcut_mm, path_length(p))
-            if len(cut_idx) > 1:  # Überschnitt endet vor dem ersten Steg
-                over = min(over, path_length(parts[cut_idx[0]][0]) - OVERCUT_TAB_CLEAR_MM)
-            ext = overcut_path(p, over) if over > 1e-6 else []
-            if len(ext) >= 2:
-                parts[last] = (parts[last][0] + ext[1:], False)
-            else:
-                over = 0.0
-        after_tab = False
-        for piece, gap in parts:
-            if gap:
-                after_tab = True
-                for q, kind in tab_pulses(piece, opts.tab_cut_power):
-                    res.polylines.append(q)
-                    res.kinds.append(kind)
-                continue
-            emit(piece, KIND_TAB if after_tab else KIND_CUT)
-        if not ends_at_start or opts.lead_out_mm <= 0:
-            continue
-        # Abfahrt am Ende des Überschnitts (Kontur bis dorthin gedreht). Endet
-        # die Perforation in einer Lücke, fährt der G-Code die Abfahrt mit G0 an.
-        base = rotate_start(p, over) if over > 0 else p
-        out = make_lead(base, outer, opts.lead_out_mm, opts.lead_in_arc, False, blocked)
-        if out:
-            res.polylines.append(out)
-            res.kinds.append(KIND_LEAD_OUT)
+        i0 = len(res.polylines)
+        _contour(res, idx, p, d, opts, emit, manual, fixed_starts, obstacles, tabs_on)
+        if ramp_on and not (opts.ramp_outer_only and is_closed(p) and d % 2 == 1):
+            _apply_ramp(res, i0, opts.ramp_mm, opts.ramp_start_power)
+    if res.power_scale:
+        res.power_scale += [1.0] * (len(res.polylines) - len(res.power_scale))
     return res
+
+
+def _contour(res: CutResult, idx: int, p: Poly, d: int, opts: CutOptions, emit, manual,
+             fixed_starts, obstacles, tabs_on) -> None:
+    """Eine (geordnete) Polylinie mit An-/Abfahrt, Stegen und Überschnitt ausgeben."""
+    if not is_closed(p):
+        emit(p, KIND_CUT)
+        return
+    outer = d % 2 == 0
+    blocked = obstacles.blocker(p) if obstacles is not None and (
+        opts.lead_in_mm > 0 or opts.lead_out_mm > 0) else None
+    fixed = bool(fixed_starts) and _start_key(p[0]) in fixed_starts
+    if opts.lead_in_mm > 0:
+        p, lead, moved = _with_leads(p, outer, opts, blocked, fixed)
+        res.moved_leads += moved
+    else:
+        lead = None
+        if opts.lead_out_mm > 0 and not fixed:
+            p = start_mid_edge(p)
+    if lead:
+        res.polylines.append(lead)
+        res.kinds.append(KIND_LEAD_IN)
+    elif opts.lead_in_mm > 0:
+        res.skipped_leads += 1
+        res.warnings.append("Anfahrt weggelassen (kein Platz)")
+    own = manual.get(idx)
+    if own:     # eigene Stege der Kontur statt der automatischen
+        spans = manual_tab_intervals(p, own, opts.tab_width_mm)
+        if not spans:
+            res.dropped_tabs += len(own)
+        res.manual_tabs += len(spans)
+        parts = split_spans(p, spans)
+    else:
+        tabbed = tabs_on and not (opts.tab_skip_inner and d > 0)
+        parts = (split_tabs_with_gaps(p, opts.tab_count, opts.tab_width_mm, opts.tab_spacing_mm,
+                                      opts.tab_max) if tabbed else [(p, False)])
+    cut_idx = [i for i, (_q, gap) in enumerate(parts) if not gap]
+    last = cut_idx[-1] if cut_idx else None
+    ends_at_start = last is not None and math.dist(parts[last][0][-1], p[-1]) < 1e-6
+    over = 0.0
+    if opts.overcut_mm > 0 and ends_at_start:
+        over = min(opts.overcut_mm, path_length(p))
+        if len(cut_idx) > 1:  # Überschnitt endet vor dem ersten Steg
+            over = min(over, path_length(parts[cut_idx[0]][0]) - OVERCUT_TAB_CLEAR_MM)
+        ext = overcut_path(p, over) if over > 1e-6 else []
+        if len(ext) >= 2:
+            parts[last] = (parts[last][0] + ext[1:], False)
+        else:
+            over = 0.0
+    after_tab = False
+    for piece, gap in parts:
+        if gap:
+            after_tab = True
+            for q, kind in tab_pulses(piece, opts.tab_cut_power):
+                res.polylines.append(q)
+                res.kinds.append(kind)
+            continue
+        emit(piece, KIND_TAB if after_tab else KIND_CUT)
+    if not ends_at_start or opts.lead_out_mm <= 0:
+        return
+    # Abfahrt am Ende des Überschnitts (Kontur bis dorthin gedreht). Endet
+    # die Perforation in einer Lücke, fährt der G-Code die Abfahrt mit G0 an.
+    base = rotate_start(p, over) if over > 0 else p
+    out = make_lead(base, outer, opts.lead_out_mm, opts.lead_in_arc, False, blocked)
+    if out:
+        res.polylines.append(out)
+        res.kinds.append(KIND_LEAD_OUT)

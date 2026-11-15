@@ -498,6 +498,8 @@ class PlanReport:
     # Manuelle Startpunkte (Shape.start): gesetzt bzw. ohne passende Kontur weggelassen.
     manual_starts: int = 0
     dropped_starts: int = 0
+    # Rampe (Layer.ramp_mm): Schnittlinien, deren Leistung an Anfang / Ende steigt / fällt.
+    ramps: int = 0
 
     def overlap_message(self) -> str:
         parts = []
@@ -643,6 +645,11 @@ def optimize_layers(layers, start: Point = (30.0, 30.0), report: PlanReport | No
                     report.skipped_leads += res.skipped_leads
                     report.layers_with_skipped.append(getattr(layer, "name", "?"))
             new = replace(layer, polylines=res.polylines, poly_kinds=tuple(res.kinds))
+            if res.power_scale:
+                # Rampe (LightBurn *Ramp Length*): Leistungs-Faktor je Polylinie
+                new = replace(new, poly_power_scale=tuple(res.power_scale))
+                if report is not None:
+                    report.ramps += res.ramps
         else:
             new = replace(layer, polylines=ordered)
         if pass_fills:
