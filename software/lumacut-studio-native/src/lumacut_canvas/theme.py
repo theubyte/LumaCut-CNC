@@ -144,4 +144,12 @@ CanvasView {{ border: none; background: {CANVAS_OUTSIDE}; }}
 #LayersPanel[touch="true"] QLineEdit, #LayersPanel[touch="true"] QComboBox {{ min-height: 34px; }}
 #LayersPanel[touch="true"] QPushButton#ColorButton {{ min-height: 34px; max-height: 34px; }}
 #LayersPanel[touch="true"] QPushButton#AutoPasses {{ min-height: 34px; padding: 2px 12px; }}
+/* Pfadvorschau-Regler: fingergroßer Griff (28 px) auf einer gut sichtbaren Bahn */
+#CanvasEditor[touch="true"] QSlider#PathScrub {{ min-height: 40px; }}
+#CanvasEditor[touch="true"] QSlider#PathScrub::groove:horizontal {{
+    height: 6px; background: {BORDER}; border-radius: 3px;
+}}
+#CanvasEditor[touch="true"] QSlider#PathScrub::handle:horizontal {{
+    width: 28px; margin: -11px 0; border-radius: 14px; background: {ACCENT};
+}}
 """

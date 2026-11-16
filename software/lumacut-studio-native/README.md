@@ -837,7 +837,19 @@ G-Code.
   die Richtung (Nummern ausgedünnt, wenn sie sich überdecken).
 - Leiste: Schnitt- und Leerfahrtlänge, Zeit (`lumacut_job.estimate`), Zahl der
   Läufe; Ebenenfilter; Schieberegler zum Abspielen (erste *n* Bewegungen,
-  Spitze markiert, Teillängen in der Anzeige).
+  Spitze markiert, Teillängen und „nach ca. …“ – die geschätzte Zeit bis dorthin –
+  in der Anzeige).
+- Wie LightBurns Vorschau: **„▶ Abspielen“** lässt die Bahn in Sendereihenfolge
+  ablaufen (ab der Reglerstellung, am Ende von vorn; „❚❚ Pause“ hält an, Ziehen am
+  Regler ebenso), Tempo 1× / 10× / 50× (Standard) / 200× / 1000× der geschätzten
+  Echtzeit – die Zeitachse verteilt die G-Code-Zeit der Schätzung (mit Beschleunigung,
+  ohne Anfahrt / Parken) nach Länge / Vorschub auf die Bewegungen.
+  **„Leerfahrten“** (an) blendet die grauen Leerfahrten aus („Show traversal moves“),
+  Längen und Zeit bleiben. **„Leistung“** (aus) schattiert jeden Schnitt nach seinem
+  `S`-Wert („Shade according to power“: 16 Stufen von blass bis kräftig) – so sieht man
+  Rampe, Steg-Pulse, eigene Kontur-Leistung, schwache Gravur-Ebenen und Bild-Graustufen
+  vor dem Senden. Alles nur Ansicht für die Sitzung (nicht im Projekt gespeichert);
+  im Touch-Modus sind Knöpfe ≥ 40 px und der Reglergriff 28 px groß.
 - Neu gerechnet wird erst 250 ms nach der letzten Änderung und nur, solange
   die Vorschau an ist.
 

@@ -13,7 +13,13 @@ Darstellung (über den Objekten, Vordergrund-Hook der View):
 * Start jedes Laufs als Punkt mit Reihenfolgenummer, Pfeil für die Richtung
 * Leiste mit Schnitt-/Leerfahrtlänge und Zeit (``lumacut_job.estimate``),
   Ebenenfilter und Schieberegler zum Abspielen (zeigt die ersten *n*
-  Bewegungen; die Spitze ist markiert)
+  Bewegungen; die Spitze ist markiert, dazu die Zeit bis dorthin)
+* wie LightBurns Vorschau: „Abspielen“ lässt die Bahn in Sendereihenfolge
+  ablaufen (Tempo als Vielfaches der geschätzten Echtzeit, Pause / Weiter,
+  Ziehen am Regler hält an), „Leerfahrten“ blendet die grauen Leerfahrten aus
+  („Show traversal moves“) und „Leistung“ schattiert jeden Schnitt nach seinem
+  ``S``-Wert („Shade according to power“: schwach = blass, voll = kräftig).
+  Alles nur Ansicht – Dokument und G-Code bleiben unverändert.
 
 Neu gerechnet wird gebündelt nach kurzer Ruhe (``DEBOUNCE_MS``) und nur,
 solange die Vorschau eingeschaltet ist.
@@ -27,11 +33,11 @@ from typing import Callable
 
 from PySide6.QtCore import QLineF, QObject, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QPolygonF
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSlider, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSlider, QToolButton, QWidget
 
 from . import theme
-from .gcode import _comment
-from .toolpath import CUT, Move, Toolpath, parse_gcode
+from .gcode import PWM_MAX, _comment
+from .toolpath import CUT, Move, Toolpath, count_until, parse_gcode
 from .workarea import from_machine
 
 _log = logging.getLogger(__name__)
@@ -44,6 +50,25 @@ ARROW_MIN_PX = 16         # Pfeil nur auf Segmenten, die so lang dargestellt wer
 RAPID_COLOR = "#8a94a3"
 IMAGE_COLOR = "#e0b354"   # Bild-Gravur ohne bekannte Ebenenfarbe
 ALL = ""                  # Filter: alle Quellen
+# Abspielen: Takt und Tempo als Vielfaches der geschätzten Echtzeit.
+PLAY_TICK_MS = 40
+PLAY_SPEEDS = (1, 10, 50, 200, 1000)
+DEFAULT_PLAY_SPEED = 50
+# Leistungs-Schattierung: Deckkraft von SHADE_MIN_ALPHA (kaum Leistung) bis 1 (S = PWM_MAX)
+# in SHADE_LEVELS Stufen (wenige Stifte auch bei Bild-Gravuren mit vielen S-Werten).
+SHADE_LEVELS = 16
+SHADE_MIN_ALPHA = 0.15
+
+
+def shade_level(power: float) -> int:
+    """Stufe 1..SHADE_LEVELS für einen ``S``-Wert (0..PWM_MAX); jeder Schnitt bleibt sichtbar."""
+    frac = max(0.0, min(1.0, float(power) / PWM_MAX))
+    return max(1, min(SHADE_LEVELS, math.ceil(frac * SHADE_LEVELS - 1e-9)))
+
+
+def shade_alpha(power: float) -> float:
+    """Deckkraft eines Schnitts mit ``S`` = ``power`` bei „Leistung“ (Schattierung)."""
+    return SHADE_MIN_ALPHA + (1.0 - SHADE_MIN_ALPHA) * shade_level(power) / SHADE_LEVELS
 
 Generator = Callable[[object], str]
 
@@ -98,6 +123,16 @@ class PathPreview(QObject):
         self.estimate = None
         self.source_filter = ALL
         self.limit: int | None = None      # Schieberegler: erste n Bewegungen
+        # Ansicht wie LightBurns Vorschau (nur Darstellung, nicht gespeichert):
+        self.show_rapids = True            # „Leerfahrten“ (Show traversal moves)
+        self.shade_power = False           # „Leistung“ (Shade according to power)
+        self.play_speed = DEFAULT_PLAY_SPEED
+        self.playing = False
+        self._play_t = 0.0                 # abgespielte Auftragszeit in s
+        self._cum: list[float] = []        # Zeit am Ende jeder Bewegung (s)
+        self._play_timer = QTimer(self)
+        self._play_timer.setInterval(PLAY_TICK_MS)
+        self._play_timer.timeout.connect(self._tick)
         self._colors: dict[tuple[str, str], QColor] = {}
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -161,6 +196,7 @@ class PathPreview(QObject):
                 self.rebuild()
         else:
             self._timer.stop()
+            self._stop_play()
             view.remove_foreground(FOREGROUND_KEY)
         self.changed.emit()
 
@@ -177,13 +213,91 @@ class PathPreview(QObject):
         self._update_view()
 
     def set_limit(self, n: int | None) -> None:
+        """Erste ``n`` Bewegungen zeigen (``None`` = alle). Hält ein Abspielen an
+        (Ziehen am Regler, wie in LightBurn)."""
+        self._stop_play()
+        self._set_limit(n)
+        self._update_view()
+
+    def _set_limit(self, n: int | None) -> None:
         total = len(self.toolpath.moves)
         self.limit = None if n is None or n >= total else max(0, int(n))
+
+    def set_show_rapids(self, on: bool) -> None:
+        """Leerfahrten zeigen (Standard) oder ausblenden – Längen / Zeit bleiben."""
+        self.show_rapids = bool(on)
         self._update_view()
+
+    def set_shade_power(self, on: bool) -> None:
+        """Schnitte nach ihrer Leistung (``S``) schattieren."""
+        self.shade_power = bool(on)
+        self._update_view()
+
+    # --- Abspielen -------------------------------------------------------
+    def set_play_speed(self, factor: float) -> None:
+        """Tempo als Vielfaches der geschätzten Echtzeit (z. B. 50 = 50× so schnell)."""
+        self.play_speed = max(0.1, float(factor))
+        self.changed.emit()
+
+    def time_until(self, n: int) -> float:
+        """Geschätzte Zeit (s) bis zum Ende der ersten ``n`` Bewegungen."""
+        if n <= 0 or not self._cum:
+            return 0.0
+        return self._cum[min(n, len(self._cum)) - 1]
+
+    @property
+    def total_time_s(self) -> float:
+        """Zeit der ganzen Bahn (die G-Code-Zeilen der Schätzung, ohne Anfahrt / Parken)."""
+        return self._cum[-1] if self._cum else 0.0
+
+    def play(self) -> None:
+        """Abspielen ab der Reglerstellung; steht der Regler am Ende, von vorn."""
+        total = len(self.toolpath.moves)
+        if not total:
+            return
+        if self.limit is None or self.limit >= total:
+            self._play_t = 0.0
+            self._set_limit(0)
+        else:
+            self._play_t = self.time_until(self.limit)
+        self.playing = True
+        self._play_timer.start()
+        self._update_view()
+
+    def pause(self) -> None:
+        if self.playing:
+            self._stop_play()
+            self._update_view()
+
+    def toggle_play(self) -> None:
+        self.pause() if self.playing else self.play()
+
+    def _stop_play(self) -> None:
+        self._play_timer.stop()
+        self.playing = False
+
+    def advance(self, seconds: float) -> None:
+        """Abspielen um ``seconds`` Wanduhrzeit weiterführen (× Tempo); am Ende
+        steht die ganze Bahn da und das Abspielen hält an."""
+        if not self.playing:
+            return
+        self._play_t += max(0.0, seconds) * self.play_speed
+        total = len(self.toolpath.moves)
+        n = count_until(self._cum, self._play_t)
+        if n >= total:
+            self._stop_play()
+            self._set_limit(None)
+        else:
+            self._set_limit(max(n, self.limit or 0))
+        self._update_view()
+
+    def _tick(self) -> None:
+        self.advance(PLAY_TICK_MS / 1000.0)
 
     # --- Rechnen ---------------------------------------------------------
     def rebuild(self) -> None:
         self._timer.stop()
+        self._stop_play()
         self._dirty = False
         self.error = ""
         try:
@@ -197,6 +311,7 @@ class PathPreview(QObject):
             self.gcode, self.error = "", f"Vorschau nicht möglich: {exc}"
         self.toolpath = self._to_work(parse_gcode(self.gcode)) if self.gcode else Toolpath()
         self.estimate = _estimate(self.gcode) if self.gcode else None
+        self._cum = self._cumulative()
         self._colors = self._source_colors()
         if self.source_filter not in {self.key(s) for s in self.toolpath.sources()}:
             self.source_filter = ALL
@@ -209,7 +324,20 @@ class PathPreview(QObject):
         if not self.gcode:
             return
         self.estimate = _estimate(self.gcode)
+        self._cum = self._cumulative()
         self._update_view()
+
+    def _cumulative(self) -> list[float]:
+        """Zeitachse fürs Abspielen: Anteile wie Länge / Vorschub, Summe wie die
+        G-Code-Zeit der Schätzung (mit Beschleunigung, ohne Anfahrt / Parken)."""
+        total = getattr(self.estimate, "program_time_s", None)
+        motion = getattr(self.estimate, "motion", None)
+        speed = getattr(motion, "speed", None)
+        try:
+            return self.toolpath.cumulative_times(total, max_speed=speed)
+        except Exception:                      # Vorschau darf den Editor nie stören
+            _log.exception("Pfadvorschau: Zeitachse nicht berechenbar")
+            return []
 
     @staticmethod
     def _to_work(tp: Toolpath) -> Toolpath:
@@ -295,6 +423,8 @@ class PathPreview(QObject):
         if self.limit is not None:
             c, r = tp.lengths_until(self.limit)
             text += f"  |  bis Schritt {self.limit}: {format_mm(c)} / {format_mm(r)}"
+            if self._cum:
+                text += f" · nach ca. {format_time(self.time_until(self.limit))}"
         return text
 
     def _update_view(self) -> None:
@@ -308,21 +438,42 @@ class PathPreview(QObject):
         if not moves:
             return
         p.setRenderHint(QPainter.Antialiasing, True)
+        rapid, cuts = self.paint_lines(moves)
+        if rapid:
+            p.setPen(QPen(QColor(RAPID_COLOR), 0, Qt.DashLine))
+            p.drawLines(rapid)
+        for (src, level), lines in cuts.items():
+            color = QColor(self.color(src))
+            if level:
+                color.setAlphaF(SHADE_MIN_ALPHA + (1.0 - SHADE_MIN_ALPHA) * level / SHADE_LEVELS)
+            p.setPen(QPen(color, 0))
+            p.drawLines(lines)
+        self._paint_markers(p)
+
+    def paint_lines(self, moves=None):
+        """(Leerfahrt-Linien, {(Quelle, Schattierungsstufe): Schnitt-Linien}) wie gezeichnet;
+        Stufe 0 = ohne Schattierung."""
+        moves = self.visible_moves() if moves is None else moves
         rapid: list[QLineF] = []
-        cuts: dict[tuple[str, str], list[QLineF]] = {}
+        cuts: dict[tuple[tuple[str, str], int], list[QLineF]] = {}
+        shade = self.shade_power
         for _, m in moves:
             line = QLineF(m.x0, m.y0, m.x1, m.y1)
             if m.kind == CUT:
-                cuts.setdefault(m.source, []).append(line)
-            elif m.source[0] != "image":     # Raster-Zeilenwechsel nicht als Gewirr zeigen
+                level = shade_level(m.power) if shade else 0
+                cuts.setdefault((m.source, level), []).append(line)
+            elif self.show_rapids and m.source[0] != "image":   # Raster-Zeilenwechsel nicht als Gewirr
                 rapid.append(line)
-        pen = QPen(QColor(RAPID_COLOR), 0, Qt.DashLine)
-        p.setPen(pen)
-        p.drawLines(rapid)
-        for src, lines in cuts.items():
-            p.setPen(QPen(self.color(src), 0))
-            p.drawLines(lines)
-        self._paint_markers(p)
+        return rapid, cuts
+
+    def cut_pens(self) -> dict[tuple[str, str], list[float]]:
+        """Deckkräfte der Schnitt-Stifte je Quelle, wie :meth:`paint` sie wählt (Tests / Hilfe)."""
+        out: dict[tuple[str, str], set[float]] = {}
+        for _, m in self.visible_moves():
+            if m.kind == CUT:
+                a = shade_alpha(m.power) if self.shade_power else self.color(m.source).alphaF()
+                out.setdefault(m.source, set()).add(round(a, 4))
+        return {k: sorted(v) for k, v in out.items()}
 
     def _paint_markers(self, p: QPainter) -> None:
         t = p.transform()
@@ -410,9 +561,41 @@ class PathPreviewBar(QWidget):
         self.slider.setToolTip("Abspielen: zeigt die ersten n Bewegungen in Sendereihenfolge")
         self.slider.setMinimumWidth(120)
         self.slider.valueChanged.connect(self._scrub)
+        # Wie LightBurns Vorschau: Abspielen mit Tempo, Leerfahrten, Leistungs-Schattierung.
+        self.play = QToolButton()
+        self.play.setObjectName("PathPlay")
+        self.play.setCheckable(True)
+        self.play.clicked.connect(self._play_clicked)
+        self.speed = QComboBox()
+        self.speed.setObjectName("PathSpeed")
+        self.speed.setToolTip("Abspieltempo als Vielfaches der geschätzten Echtzeit")
+        for f in PLAY_SPEEDS:
+            self.speed.addItem(f"{f}×", f)
+        self.speed.setCurrentIndex(PLAY_SPEEDS.index(DEFAULT_PLAY_SPEED))
+        self.speed.currentIndexChanged.connect(self._speed_changed)
+        self.rapids = QToolButton()
+        self.rapids.setObjectName("PathRapids")
+        self.rapids.setText("Leerfahrten")
+        self.rapids.setCheckable(True)
+        self.rapids.setChecked(True)
+        self.rapids.setToolTip("Leerfahrten (grau gestrichelt) zeigen oder ausblenden – "
+                               "wie LightBurns „Show traversal moves“; Längen und Zeit bleiben")
+        self.rapids.toggled.connect(preview.set_show_rapids)
+        self.shade = QToolButton()
+        self.shade.setObjectName("PathShade")
+        self.shade.setText("Leistung")
+        self.shade.setCheckable(True)
+        self.shade.setToolTip("Schnitte nach ihrer Leistung schattieren: schwach = blass, "
+                              "100 % = kräftig – wie LightBurns „Shade according to power“ "
+                              "(zeigt Rampe, Steg-Pulse, Kontur-Leistung, Bild-Graustufen)")
+        self.shade.toggled.connect(preview.set_shade_power)
         lay.addWidget(title)
         lay.addWidget(self.readout, 1)
         lay.addWidget(self.filter)
+        lay.addWidget(self.rapids)
+        lay.addWidget(self.shade)
+        lay.addWidget(self.play)
+        lay.addWidget(self.speed)
         lay.addWidget(self.slider, 1)
         preview.changed.connect(self.sync)
         self.setVisible(preview.visible)
@@ -447,9 +630,35 @@ class PathPreviewBar(QWidget):
         self.slider.setValue(pv.shown_count())
         self.slider.setEnabled(total > 0)
         self.slider.blockSignals(False)
+        self.play.blockSignals(True)
+        self.play.setChecked(pv.playing)
+        self.play.blockSignals(False)
+        self.play.setEnabled(total > 0)
+        self.play.setText("❚❚ Pause" if pv.playing else "▶ Abspielen")
+        self.play.setToolTip("Anhalten (Regler bleibt stehen)" if pv.playing else
+                             "Laserbahn in Sendereihenfolge ablaufen lassen (vom Regler aus; "
+                             "am Ende von vorn) – Ziehen am Regler hält an")
+        for button, on in ((self.rapids, pv.show_rapids), (self.shade, pv.shade_power)):
+            if button.isChecked() != on:
+                button.blockSignals(True)
+                button.setChecked(on)
+                button.blockSignals(False)
+        idx = self.speed.findData(pv.play_speed)
+        if idx >= 0 and idx != self.speed.currentIndex():
+            self.speed.blockSignals(True)
+            self.speed.setCurrentIndex(idx)
+            self.speed.blockSignals(False)
 
     def _filter_changed(self, _i: int) -> None:
         self.preview.set_filter(self.filter.currentData() or ALL)
 
     def _scrub(self, value: int) -> None:
         self.preview.set_limit(value)
+
+    def _play_clicked(self, _checked: bool = False) -> None:
+        self.preview.toggle_play()
+
+    def _speed_changed(self, _i: int) -> None:
+        f = self.speed.currentData()
+        if f:
+            self.preview.set_play_speed(f)

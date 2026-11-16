@@ -18,6 +18,7 @@ und parkt selbst); die erste Positionierfahrt zählt daher – wie in
 
 from __future__ import annotations
 
+import bisect
 import math
 import re
 from dataclasses import dataclass, field
@@ -26,6 +27,8 @@ _WORD = re.compile(r"([A-Z])\s*(-?\d+(?:\.\d*)?|-?\.\d+)")
 
 CUT = "cut"
 RAPID = "rapid"
+# Eilgang ohne F im G-Code (der Pi setzt F9000, wie lumacut_job.estimate.RAPID_FEED).
+RAPID_FEED = 9000.0
 
 
 @dataclass(frozen=True)
@@ -65,11 +68,44 @@ class Toolpath:
         """Wie viele Läufe bis Bewegung ``n`` begonnen haben."""
         return sum(1 for s, _ in self.runs if s < n)
 
+    def move_times(self, rapid_feed: float = RAPID_FEED,
+                   max_speed: float | None = None) -> list[float]:
+        """Einfache Zeit jeder Bewegung in s: Länge / Vorschub (Eilgang ``rapid_feed``),
+        ohne Beschleunigung; ``max_speed`` (mm/s) begrenzt wie die Achsgrenze."""
+        out = []
+        for m in self.moves:
+            feed = m.feed if m.feed > 0 else rapid_feed
+            v = feed / 60.0
+            if max_speed:
+                v = min(v, max_speed)
+            out.append(m.length / v if v > 0 else 0.0)
+        return out
+
+    def cumulative_times(self, total_s: float | None = None, rapid_feed: float = RAPID_FEED,
+                         max_speed: float | None = None) -> list[float]:
+        """Zeit am *Ende* jeder Bewegung (aufsteigend). Mit ``total_s`` (z. B. die
+        Zeit der G-Code-Zeilen aus ``lumacut_job.estimate``) werden die einfachen
+        Zeiten so skaliert, dass die letzte Bewegung genau dort endet – Anteile wie
+        Länge / Vorschub, Summe wie die Schätzung mit Beschleunigung."""
+        times = self.move_times(rapid_feed, max_speed)
+        raw = sum(times)
+        scale = (total_s / raw) if (total_s is not None and total_s > 0 and raw > 0) else 1.0
+        out, acc = [], 0.0
+        for t in times:
+            acc += t * scale
+            out.append(acc)
+        return out
+
     def sources(self) -> list[tuple[str, str]]:
         seen: dict[tuple[str, str], None] = {}
         for m in self.moves:
             seen.setdefault(m.source, None)
         return list(seen)
+
+
+def count_until(cumulative: list[float], t: float) -> int:
+    """Wie viele Bewegungen bis zur Zeit ``t`` fertig sind (für das Abspielen)."""
+    return bisect.bisect_right(cumulative, t + 1e-9)
 
 
 def parse_gcode(gcode: str) -> Toolpath:
