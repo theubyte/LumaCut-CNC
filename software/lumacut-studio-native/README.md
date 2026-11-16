@@ -963,6 +963,16 @@ Drehung, Ellipsen und Text werden berücksichtigt.
   als `"letter_spacing"` / `"line_spacing"` / `"align"` nur, wenn gesetzt – Texte ohne diese
   Felder geben denselben Umriss und denselben G-Code wie bisher. Code:
   `lumacut_canvas/text_ui.py`, `shape_paths.text_path`.
+- **Text verschweißen** (PropertyBar-Knopf mit zwei verbundenen Kreisen neben „Zeilen“, wie
+  LightBurns *Text › Weld*): überlappende Buchstaben eines Textobjekts – Schreibschrift,
+  negativer Zeichenabstand, enge Zeilen – werden zu einem Umriss vereinigt
+  (Nicht-Null-Regel, Kurven auf ≈ 0,01 mm abgeflacht). Kein Schnitt quer durch die
+  Buchstaben, ein ausgeschnittener Name bleibt ein Teil, Überlappungen werden mitgefüllt
+  statt ausgespart; Innenräume („o“, „A“) bleiben Löcher, solange kein anderer Buchstabe sie
+  überdeckt. Der Text bleibt bearbeitbar (Schrift, Größe, Satz), die Box ändert sich nicht.
+  Ein Undo-Schritt für die ganze Auswahl. Wirkt auf Anzeige, Füllung, G-Code, SVG/PNG-Export,
+  „In Pfade“ und Seriennummern. Gespeichert als `"weld": true` nur, wenn gesetzt. Code:
+  `shape_paths.weld_path`, `lumacut_canvas/text_ui.py`.
 - Polygone können dafür mehrere Ringe haben (`"rings"` in der Datei, nur wenn vorhanden).
 
 ### Schnittstellen für andere Module (Scan & Probe)

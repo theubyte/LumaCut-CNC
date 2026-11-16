@@ -1,6 +1,7 @@
 """Schrift-Steuerung für Textobjekte in der PropertyBar: Schriftart, Größe,
 Fett, Kursiv, Text-Satz (Ausrichtung, Zeichen- und Zeilenabstand, mehrzeilig
-bearbeiten – wie LightBurns *Align X / H-Space / V-Space*) und Knopf „In Pfade“.
+bearbeiten – wie LightBurns *Align X / H-Space / V-Space*), Verschweißen (LightBurns
+*Weld*) und Knopf „In Pfade“.
 
 Die Objektbox bleibt die maßgebliche Größe in mm (siehe :mod:`shape_paths`).
 „Größe“ in pt rechnet nur um: Geviert (em) = pt · 25,4/72 mm, die Box wird
@@ -76,6 +77,10 @@ TIP_LETTER = ("Zeichenabstand (wie LightBurn „H-Space“ / xTool „Zeichenabs
 TIP_LINE = ("Zeilenabstand mehrzeiliger Texte (wie LightBurn „V-Space“ / xTool „Zeilenabstand“) "
             "in % des Standardabstands (100 % = 1,25 × Schriftgröße). Die Buchstaben behalten "
             "ihre Größe, die Box wird höher oder niedriger.")
+TIP_WELD = ("Buchstaben verschweißen (wie LightBurn „Weld“): überlappende Buchstaben – "
+            "Schreibschrift, negativer Zeichenabstand, enge Zeilen – werden zu einem Umriss "
+            "vereinigt. Kein Schnitt quer durch die Buchstaben, ausgeschnittene Namen bleiben "
+            "ein Teil, Überlappungen werden mitgefüllt. Der Text bleibt bearbeitbar.")
 TIP_MULTILINE = "Text mehrzeilig bearbeiten … (eine Zeile je Absatz; die Buchstaben behalten ihre Größe)"
 
 
@@ -114,6 +119,14 @@ def with_layout(s: Shape, *, letter_spacing: float | None = None, line_spacing: 
     elif fx:
         out.geom.x = g.x + fx * (g.w - w)
     out.geom.w, out.geom.h = w, h
+    return out
+
+
+def with_weld(s: Shape, on: bool) -> Shape:
+    """Kopie von ``s`` mit verschweißten (``on``) oder einzelnen Buchstaben – Box,
+    Schrift und Satz bleiben gleich (die Vereinigung ändert die Umriss-Box nicht)."""
+    out = s.copy()
+    out.text_weld = bool(on)
     return out
 
 
@@ -172,6 +185,12 @@ class TextStyleControls(QWidget):
             "line_spacing", v, "Zeilenabstand", merge="text_line_spacing"))
         self.line_label = QLabel("Zeilen")
         self.line_label.setToolTip(TIP_LINE)
+        self.weld = QToolButton()
+        self.weld.setObjectName("TextWeld")
+        self.weld.setCheckable(True)
+        self.weld.setIcon(icons.icon("text_weld"))
+        self.weld.setToolTip(TIP_WELD)
+        self.weld.toggled.connect(self._weld_toggled)
         self.multiline = QToolButton()
         self.multiline.setObjectName("TextMultiline")
         self.multiline.setText("¶")
@@ -194,6 +213,7 @@ class TextStyleControls(QWidget):
         lay.addWidget(self.letter)
         lay.addWidget(self.line_label)
         lay.addWidget(self.line)
+        lay.addWidget(self.weld)
         lay.addWidget(self.multiline)
         lay.addWidget(self.outline)
         self._updating = False
@@ -258,6 +278,7 @@ class TextStyleControls(QWidget):
                 self.letter.setValue(s.letter_spacing)
             if not self.line.hasFocus():
                 self.line.setValue(s.line_spacing)
+            self.weld.setChecked(all(t.text_weld for t in texts))
             self.multiline.setEnabled(len(texts) == 1)
         finally:
             self._updating = False
@@ -307,6 +328,14 @@ class TextStyleControls(QWidget):
         new = [with_layout(t, **{field: value}) for t in texts if getattr(t, key) != value]
         if new:
             self._push(new, label, merge)
+
+    def _weld_toggled(self, on: bool) -> None:
+        """Verschweißen für alle ausgewählten Texte ein / aus (ein Undo-Schritt)."""
+        if self._updating:
+            return
+        new = [with_weld(t, on) for t in self._texts() if t.text_weld != on]
+        if new:
+            self._push(new, "Verschweißen" if on else "Verschweißen aus")
 
     def edit_multiline(self) -> bool:
         """Text des ausgewählten Textobjekts mehrzeilig bearbeiten (Box folgt, Buchstaben

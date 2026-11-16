@@ -293,6 +293,14 @@ def _align(p, c, where: str):
         p.drawLine(QPointF(x0, y), QPointF(x0 + w, y))
 
 
+def _text_weld(p, c):
+    """Text verschweißen: zwei überlappende Kreise als ein gemeinsamer Umriss (ohne innere Kante)."""
+    a = QPainterPath(); a.addEllipse(QRectF(3, 6, 11, 11))
+    b = QPainterPath(); b.addEllipse(QRectF(10, 6, 11, 11))
+    fill = QColor(c); fill.setAlpha(110)
+    _pen(p, c, 1.7); p.setBrush(fill); p.drawPath(a.united(b))
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "polygon": _polygon, "ngon": _ngon, "freehand": _freehand,
@@ -308,7 +316,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "touch": _touch, "path": _path, "arrange": _arrange,
     "pathops": _pathops, "node": _node, "tabs": _tabs, "start": _start, "measure": _measure,
     "align_left": lambda p, c: _align(p, c, "left"), "align_center": lambda p, c: _align(p, c, "center"),
-    "align_right": lambda p, c: _align(p, c, "right"),
+    "align_right": lambda p, c: _align(p, c, "right"), "text_weld": _text_weld,
 }
 
 

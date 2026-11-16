@@ -728,6 +728,11 @@ class Shape:
     letter_spacing: float = 0.0
     line_spacing: float = 100.0
     text_align: str = "left"
+    # Buchstaben verschweißen für kind == "text" (LightBurn *Text › Weld*): überlappende
+    # Buchstaben (Schreibschrift, negativer Zeichenabstand, enge Zeilen) werden zu einem
+    # Umriss vereinigt – keine Schnitte quer durch die Buchstaben, Überlappungen werden
+    # mitgefüllt. Der Text bleibt bearbeitbar. False = Buchstaben einzeln (bisheriges Verhalten).
+    text_weld: bool = False
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -799,6 +804,8 @@ class Shape:
                 d["line_spacing"] = round(self.line_spacing, 3)
             if self.text_align != "left":
                 d["align"] = self.text_align
+            if self.text_weld:
+                d["weld"] = True
         if self.kind in POINT_KINDS:
             d["points"] = [[round(u, 6), round(v, 6)] for u, v in self.points]
             if self.rings:
@@ -848,6 +855,7 @@ class Shape:
                      priority=read_priority(d.get("priority")),
                      start=read_start(d.get("start")) if kind in START_POINT_KINDS else (),
                      reverse=d.get("reverse") is True and kind in REVERSE_KINDS,
+                     text_weld=d.get("weld") is True and kind == "text",
                      **(read_text_layout(d) if kind == "text" else {}))
 
 

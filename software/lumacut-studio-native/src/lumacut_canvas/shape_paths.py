@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QFont, QFontInfo, QFontMetricsF, QPainterPath, QTransform
 
 from .model import Geometry, Shape, text_layout
@@ -28,6 +28,14 @@ _QT_FLATTEN_UNITS = 0.5
 # Formfehler 4·10⁻⁶·r statt 2,7·10⁻⁴·r (Ø 360 mm: 0,001 statt 0,05 mm) –
 # gilt für Anzeige, SVG-Export (echte Kurven „C“) und Kurven-Abflachung.
 _ELLIPSE_BEZIER_ARCS = 8
+# Verschweißter Text (LightBurn *Weld*): Qt vereinigt die Buchstaben über
+# ``QPainterPath.simplified`` und flacht dabei die Kurven sehr dicht ab. Vergrößert
+# um k = _WELD_SCALE / tol (gemessen ≈ 0,0015 mm bei tol 0,01 mm), danach
+# Douglas-Peucker mit 0,4 · tol gegen die Punktflut (≈ 1,5 × so viele Punkte wie
+# der unverschweißte Umriss statt ≈ 8 ×) – zusammen unter ``WELD_TOL_MM``.
+WELD_TOL_MM = 0.01
+_WELD_SCALE = 0.1
+_WELD_THIN = 0.4
 
 
 def text_font(family: str, bold: bool = False, italic: bool = False) -> QFont:
@@ -80,6 +88,37 @@ def shape_text_path(shape: Shape) -> QPainterPath:
     """Textumriss eines Textobjekts mit Schrift und Satz (Aufbau-Einheiten)."""
     return text_path(shape.text, shape.font_family, shape.font_bold, shape.font_italic,
                      **text_layout(shape))
+
+
+def weld_path(path: QPainterPath, tol: float = WELD_TOL_MM) -> QPainterPath:
+    """Alle Teilpfade von ``path`` (mm) nach der Nicht-Null-Regel vereinigen.
+
+    Überlappende Buchstaben werden ein Umriss ohne innere Kanten, Löcher (Innenräume
+    von „o“, „A“ …) bleiben Löcher, sofern kein anderer Buchstabe sie überdeckt. Das
+    Ergebnis besteht nur aus geraden Strecken (Kurven mit Fehler ≈ ``tol`` abgeflacht),
+    überschneidet sich nicht und wird nach der Gerade-Ungerade-Regel wie bisher gefüllt.
+    """
+    if path.isEmpty():
+        return QPainterPath(path)
+    from shapely.geometry import LineString
+    k = max(1.0, _WELD_SCALE / tol)
+    big = QTransform.fromScale(k, k).map(path)
+    big.setFillRule(Qt.WindingFill)
+    out = QPainterPath()
+    for poly in big.simplified().toSubpathPolygons():
+        pts = [(p.x() / k, p.y() / k) for p in poly]
+        if len(pts) > 1 and pts[0] != pts[-1]:
+            pts.append(pts[0])
+        if len(pts) < 4:
+            continue
+        thin = list(LineString(pts).simplify(_WELD_THIN * tol, preserve_topology=False).coords)
+        if len(thin) < 4:      # winziger Splitter: ungekürzt behalten
+            thin = pts
+        out.moveTo(*thin[0])
+        for x, y in thin[1:-1]:
+            out.lineTo(x, y)
+        out.closeSubpath()
+    return out
 
 
 def text_aspect(text: str, family: str, bold: bool = False, italic: bool = False,
@@ -169,6 +208,8 @@ def local_path(shape: Shape) -> QPainterPath:
             t.scale(box.width() / r.width(), box.height() / r.height())
             t.translate(-r.x(), -r.y())
             path = t.map(src)
+            if shape.text_weld:
+                path = weld_path(path)
     return path
 
 
