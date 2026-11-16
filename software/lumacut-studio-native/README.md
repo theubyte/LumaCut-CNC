@@ -1173,6 +1173,19 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   Ebene; **ein** Rückgängig-Schritt, auf Wunsch inkl. Löschen des Bildes. Sehr verrauschte Bilder
   werden mit Hinweis abgelehnt (Glättung/Mindestfläche erhöhen). Code:
   `src/lumacut_import/trace.py` (Qt-frei, OpenCV + shapely), Dialog `trace_qt.py`.
+- **Bild mit Form zuschneiden** (*Pfad › Bild mit Form zuschneiden*, auch *Datei* und
+  Kontextmenü „Pfad“ – im Touch-Modus lange drücken; *Strg+Alt+M*; wie LightBurns *Tools › Crop
+  Image* / xTool „Zuschneiden“): ein Bild und darüber eine oder mehrere geschlossene Formen
+  auswählen (Rechteck, Ellipse, Vieleck / Stern, Text, geschlossener Pfad). Außerhalb der Form
+  wird das Bild **durchsichtig und nie gelasert** (auch mit *Negativ*, Bildanpassung, Skizze,
+  Scan-Winkel und 3D), das Bild schrumpft auf den Rest – gleiche Auflösung und Drehung, Rahmen,
+  Zeitschätzung und Auftrag nur über den sichtbaren Teil. Mehrere Formen und Löcher gelten wie
+  eine Füllung (Gerade-Ungerade): Kreis im Rechteck = Ring, Text behält seine Innenräume
+  („o“, „A“). Die Formen bleiben erhalten (z. B. um das Foto-Untersetzer-Rund danach
+  auszuschneiden; *Entf* löscht sie), **ein** Rückgängig-Schritt stellt das Originalbild wieder
+  her. Zweimal zuschneiden schneidet weiter. Gespeichert wird das zugeschnittene Bild als
+  PNG mit Alphakanal – keine neuen Datei-Schlüssel; Bilder ohne Zuschnitt bleiben bytegleich.
+  Code: `src/lumacut_canvas/imagecrop.py`, `imagecrop_ui.py`.
 - Jeder Import ist **ein** Rückgängig-Schritt und wird in die Arbeitsfläche (360×340 mm) eingepasst.
 - Code: `src/lumacut_import/` (Qt-frei) und `src/lumacut_import/qt.py` (Menü, Drop).
 

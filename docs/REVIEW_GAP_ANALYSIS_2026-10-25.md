@@ -15541,3 +15541,91 @@ is not remembered like font / bold / italic); the xTool import does not read a w
 sample file with one); a very long welded text plans ≈ 3 × slower than unwelded (≈ 0.2 s for
 190 letters). Hardware check still needed: a welded script name (e.g. 4 mm plywood) cut out on
 the Windows app staying one part, and the button by finger on the Windows tablet.
+
+## 88. Status update 2026-11-16 (review round 81)
+
+Done this round (image crop with vector shapes – LightBurn's *Tools › Crop Image*, xTool's
+„Zuschneiden“; Machine / Scan Probe / Materials untouched, no Canvas drawing tool changed –
+new `imagecrop.py` / `imagecrop_ui.py`, `lumacut_job/images.py` follows an alpha channel,
+one entry each in the Pfad and Datei menus; model, planner and G-code writer unchanged):
+
+- Closed since §87 by others: none – main had no commit since `7de735d` (round 80); the Canvas
+  worktree (`canvas-work`) has no commit since 2026-10-26 (only Windows sidebar / font fixes).
+- Gap picked (not in the §84 / §87 lists): an image could only be engraved as its whole
+  rectangle. LightBurn (*Crop Image* / *Apply Mask to Image*) and xTool („Zuschneiden“ with a
+  shape) clip a photo to a circle, heart, rounded plate or lettering – photo coasters, slate
+  and wood photo plates, pet portraits without the background, ornaments: some of the most
+  common diode-laser jobs. Before, the only way was editing the photo in another program. The
+  remaining text items of §86 / §87 (justified lines, kerning, vertical text, upper-case
+  switch, inline editing, xTool text style import, remembering weld) were weighed but matter
+  less for real jobs; no user decision needed, not owned by another agent (image objects were
+  last changed by review rounds), nothing changes for existing images.
+- **Crop** (`lumacut_canvas/imagecrop.py`): `crop_image(image, shapes)` – the closed selected
+  shapes (`MASK_KINDS` = rect, ellipse, polygon / star, text; lines and open paths are ignored)
+  form one even-odd path in canvas mm (with rotation, text with its layout / weld), mapped
+  into the image's pixel grid (`canvas_to_pixels`, also for rotated images) and filled without
+  antialiasing (pixel centre inside). Pixels outside become alpha 0 with grey 255, the image
+  is cut to the box of the visible pixels; the new box keeps the mm per pixel (dpi) and the
+  rotation (centre rotated about the old centre), id, layer, groups and engraving settings.
+  Several shapes and holes combine like a fill (circle inside a rectangle = ring, like a
+  LightBurn group mask; a text keeps its counters). A second crop multiplies with the first
+  alpha. The PNG is written as 8-bit grey + alpha (own encoder, colour type 4) or plain grey
+  when nothing became transparent (a rectangle on the pixel grid). Clear German errors: no
+  closed shape, no overlap, the shape covering the whole (visible) image.
+- **Job / preview** (`lumacut_job/images.py`): `render_gray` / `render_gray_frame` already
+  paint the image over the do-not-burn value (white, black with *Negativ*), so transparent
+  pixels never burn in any mode; `render_inside` / `render_inside_frame` now follow the alpha
+  (`alpha_qimage`, ≥ 50 %) so brightness / contrast / sharpen / sketch cannot burn the cut-away
+  part either (used only with adjustments / sketch as before). Scan angle, angle step,
+  rotation, 3D, the dialog preview, histograms, frame, estimate, SVG / PNG export and the
+  canvas follow. Images without alpha – every existing image, imports flatten transparency
+  to white – take the unchanged paths (`render_inside` still `None` for unrotated ones).
+- **UI** (`lumacut_canvas/imagecrop_ui.py`): „Bild mit Form zuschneiden“ (Ctrl+Alt+M) in the
+  Pfad menu after „Text in Pfade umwandeln“ (so also in the canvas context menu – long press,
+  44 px rows in touch mode) and in the Datei menu after „Bild nachzeichnen …“; one undo step
+  (`ReplaceShapeCommand`, same id and stacking place), the image stays selected, the shapes
+  stay for cutting out (status line: pixel size, kept share, „Entf löscht sie“); wrong
+  selections and a locked image layer only notify; a mask on a locked layer still works.
+- README section „Bild mit Form zuschneiden“ added under „Bild nachzeichnen“.
+
+Tests:
+
+- New `tests/test_image_crop.py` (51 tests): grey / grey-alpha PNG round trip (Qt and OpenCV),
+  imports without alpha; a rectangle on the pixel grid giving the exact pixel slice without
+  alpha and the same dpi, an ellipse making the outside transparent and white with the kept
+  share ≈ π/4, id / layer / groups / settings kept, a mask larger than the image clipped, an
+  even-odd ring, the counter of an „O“, a rotated image cropped by an aligned rotated rectangle
+  (corner points equal), a rotated mask, a second crop combining with the first, errors; no
+  burn outside the circle (within one source pixel / half a halftone cell) in threshold,
+  Floyd, grayscale, negative threshold / grayscale, adjusted Jarvis, sketch, halftone, scan
+  angle 45° with adjustments, a rotated image and 3D; Pi-safe document G-code, inside mask from
+  the alpha and `None` for plain images, a shorter estimated job, the frame box; dialog
+  preview, PNG export, save / load without new keys, trace decoding; action with undo / redo
+  and unchanged stacking, wrong selections, locked image layer, mask on a locked layer, canvas
+  item, Pfad / context menu, tooltip / shortcut, touch menu rows, save / load, main window
+  (Datei menu, Ctrl+Alt+M unique).
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **3244 passed, 3 skipped** (17.4 min; 3193 + 51 new image crop tests), no failure – the two
+warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – images without an alpha channel (all existing ones) take
+the unchanged code paths, so G-code, previews, export and project files stay byte-identical;
+a cropped image is stored in the existing `"png"` / `"px"` keys (no new key).
+
+Still open: unchanged from §84 (job placement on the camera image, print-and-cut, rotary,
+min/max corner power, Dot Mode dwell, material-test / Materials items, image dot-size model,
+CoreXY time model) and the text items of §86 / §87 (justified lines, kerning, vertical text,
+upper-case switch, inline editing, xTool text style import, remembering weld). For the crop:
+it is destructive like LightBurn's *Crop Image* (undo restores) – LightBurn's non-destructive
+*Apply Mask to Image* (a live mask that can be moved / edited later, *Remove Mask*) is not
+there; the edge is pixel-exact (pixel centre inside the shape, no feathering), so a coarse
+image (e.g. 0.4 mm pixels) gets a stepped rim of up to one pixel and the smooth resampling of
+the job may blend about one source pixel at the rim (halftone dots may sit up to half a cell
+outside, as at any image edge); open paths and lines are not masks (close them first);
+„Bild nachzeichnen“ with *Invertieren* sees the transparent part as white and traces it;
+the xTool import does not read xTool's own crop (no sample file with one). Hardware check
+still needed: a photo cropped to a circle engraved (Jarvis and grayscale, with and without
+*Negativ*) on 4 mm plywood or slate and the circle cut out around it on the Windows app –
+no burn outside the circle, engraving and cut line in register – and the menu entry by
+finger (long press) on the Windows tablet.
