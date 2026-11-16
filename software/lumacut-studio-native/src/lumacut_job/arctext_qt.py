@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QFontComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QWidget)
 
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand
-from lumacut_canvas.shape_paths import FLATTEN_TOL_MM, text_font, text_path
+from lumacut_canvas.shape_paths import FLATTEN_TOL_MM, shape_text_path, text_font
 
 from . import arctext
 from .arctext import ArcSpec, Glyph
@@ -64,7 +64,7 @@ def spec_from_text(shape) -> ArcSpec:
     """Vorbelegung aus einem Textobjekt: Text, Schrift und Großbuchstabenhöhe."""
     text = " ".join((shape.text or "").split("\n"))
     font = text_font(shape.font_family, shape.font_bold, shape.font_italic)
-    r = text_path(shape.text, shape.font_family, shape.font_bold, shape.font_italic).boundingRect()
+    r = shape_text_path(shape).boundingRect()
     cap = abs(shape.geom.h) / r.height() * cap_height_pt(font) if r.height() > 0 else 8.0
     width = abs(shape.geom.w)
     return ArcSpec(text=text, height_mm=round(cap, 1), radius_mm=round(max(10.0, width / 2.0), 1),

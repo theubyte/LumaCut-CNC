@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Callable
 
-from lumacut_canvas.model import Shape, new_id
+from lumacut_canvas.model import Shape, new_id, text_layout
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
 MAX_COUNT = 500
@@ -126,9 +126,11 @@ def serial_shapes(src: Shape, spec: SerialSpec, aspect: Callable[..., float],
     h = abs(g.h)
     if h <= 0:
         raise ValueError("Das Textobjekt hat keine Höhe")
-    base = aspect(src.text, src.font_family, src.font_bold, src.font_italic)
+    lay = text_layout(src)      # Zeichen-/Zeilenabstand, Ausrichtung (nur abweichende Werte)
+    base = aspect(src.text, src.font_family, src.font_bold, src.font_italic, **lay)
     stretch = abs(g.w) / (h * base) if base > 0 else 1.0
-    widths = [h * aspect(t, src.font_family, src.font_bold, src.font_italic) * stretch for t in texts]
+    widths = [h * aspect(t, src.font_family, src.font_bold, src.font_italic, **lay) * stretch
+              for t in texts]
     cell_w = max(widths)
     cols = min(s.columns, len(texts))
     rows = (len(texts) + cols - 1) // cols
@@ -139,7 +141,7 @@ def serial_shapes(src: Shape, spec: SerialSpec, aspect: Callable[..., float],
         base_spec = vt.spec_of(src) if vt.is_variable(src) else vt.VarTextSpec()
         meta = vt.make_meta(replace(base_spec, series=vt.new_series(), start=s.start,
                                     step=s.step, current=s.start, per_copy=True))
-        tw = h * aspect(s.template, src.font_family, src.font_bold, src.font_italic) * stretch
+        tw = h * aspect(s.template, src.font_family, src.font_bold, src.font_italic, **lay) * stretch
     out: list[Shape] = []
     for i, (text, w) in enumerate(zip(texts, widths)):
         r, c = divmod(i, cols)

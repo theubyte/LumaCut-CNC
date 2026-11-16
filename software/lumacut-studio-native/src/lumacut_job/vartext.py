@@ -56,7 +56,7 @@ import re
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Callable
 
-from lumacut_canvas.model import Document, Shape, new_id, rotate_point
+from lumacut_canvas.model import Document, Shape, new_id, rotate_point, text_layout
 
 KIND = "vartext"
 VERSION = 1
@@ -497,8 +497,9 @@ def refit_text(shape: Shape, text: str, aspect: Callable[..., float]) -> Shape:
     h = abs(g.h)
     if h <= 0:
         return out
-    old = aspect(shape.text, shape.font_family, shape.font_bold, shape.font_italic)
-    new = aspect(text, shape.font_family, shape.font_bold, shape.font_italic)
+    lay = text_layout(shape)    # Zeichen-/Zeilenabstand, Ausrichtung (nur abweichende Werte)
+    old = aspect(shape.text, shape.font_family, shape.font_bold, shape.font_italic, **lay)
+    new = aspect(text, shape.font_family, shape.font_bold, shape.font_italic, **lay)
     stretch = abs(g.w) / (h * old) if old > 0 else 1.0
     w_new = h * new * stretch
     if not math.isfinite(w_new) or w_new <= 0:

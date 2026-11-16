@@ -107,6 +107,15 @@ CUT_ORDER_UNITS = ("layer", "group", "priority")
 # Schnitt-Priorität je Objekt (LightBurn *Shape Properties › Priority*): 0 = Standard.
 PRIORITY_RANGE = (0, 999)
 
+# Text-Satz (LightBurn *Text › H-Space / V-Space / Align X*, xTool „Zeichenabstand“ /
+# „Zeilenabstand“ / „Ausrichtung“): Zeichenabstand in % der Schriftgröße (Geviert,
+# 0 = Schrift-Standard), Zeilenabstand in % des bisherigen Zeilenabstands (100 % =
+# 1,25 × Schriftgröße), Ausrichtung mehrzeiliger Texte.
+LETTER_SPACING_RANGE = (-50.0, 200.0)
+LINE_SPACING_RANGE = (50.0, 400.0)
+TEXT_ALIGNS = ("left", "center", "right")
+TEXT_ALIGN_LABELS = {"left": "Linksbündig", "center": "Zentriert", "right": "Rechtsbündig"}
+
 
 @dataclass(frozen=True)
 class CutOrder:
@@ -713,6 +722,12 @@ class Shape:
     # Startpunkt bleibt, wo er ist); offene Pfade behält der Planer dann in dieser
     # Richtung. False = gezeichnete Richtung (bisheriges Verhalten).
     reverse: bool = False
+    # Text-Satz für kind == "text" (:data:`LETTER_SPACING_RANGE`, :data:`LINE_SPACING_RANGE`,
+    # :data:`TEXT_ALIGNS`): Zeichenabstand in % der Schriftgröße, Zeilenabstand in % des
+    # Standard-Zeilenabstands, Ausrichtung der Zeilen. Standard = bisheriger Satz.
+    letter_spacing: float = 0.0
+    line_spacing: float = 100.0
+    text_align: str = "left"
 
     def bounds(self) -> Rect:
         return self.geom.bounds()
@@ -778,6 +793,12 @@ class Shape:
                 d["bold"] = True
             if self.font_italic:
                 d["italic"] = True
+            if self.letter_spacing:
+                d["letter_spacing"] = round(self.letter_spacing, 3)
+            if self.line_spacing != 100.0:
+                d["line_spacing"] = round(self.line_spacing, 3)
+            if self.text_align != "left":
+                d["align"] = self.text_align
         if self.kind in POINT_KINDS:
             d["points"] = [[round(u, 6), round(v, 6)] for u, v in self.points]
             if self.rings:
@@ -826,7 +847,8 @@ class Shape:
                      regular=_read_regular(d.get("regular")) if kind == "polygon" else (),
                      priority=read_priority(d.get("priority")),
                      start=read_start(d.get("start")) if kind in START_POINT_KINDS else (),
-                     reverse=d.get("reverse") is True and kind in REVERSE_KINDS)
+                     reverse=d.get("reverse") is True and kind in REVERSE_KINDS,
+                     **(read_text_layout(d) if kind == "text" else {}))
 
 
 #: Objektarten, die einen manuellen Startpunkt tragen können (wie manuelle Stege).
@@ -845,6 +867,57 @@ def read_start(raw) -> tuple:
     if isinstance(raw, (str, bytes, dict)) or not (math.isfinite(u) and math.isfinite(v)):
         return ()
     return (u, v)
+
+
+def read_letter_spacing(raw) -> float:
+    """Zeichenabstand in % (Datei / Eingabe) im :data:`LETTER_SPACING_RANGE`; Unlesbares = 0."""
+    if isinstance(raw, bool):
+        return 0.0
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(v):
+        return 0.0
+    return round(_clamp(v, *LETTER_SPACING_RANGE), 3) + 0.0
+
+
+def read_line_spacing(raw) -> float:
+    """Zeilenabstand in % (Datei / Eingabe) im :data:`LINE_SPACING_RANGE`; Unlesbares = 100."""
+    if isinstance(raw, bool):
+        return 100.0
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 100.0
+    if not math.isfinite(v):
+        return 100.0
+    return round(_clamp(v, *LINE_SPACING_RANGE), 3) + 0.0
+
+
+def read_text_align(raw) -> str:
+    """Ausrichtung (Datei / Eingabe) aus :data:`TEXT_ALIGNS`; Unbekanntes = linksbündig."""
+    return raw if isinstance(raw, str) and raw in TEXT_ALIGNS else "left"
+
+
+def text_layout(shape) -> dict:
+    """Text-Satz von ``shape`` als Schlüsselwörter für ``shape_paths.text_path`` /
+    ``text_aspect`` – nur abweichende Werte (leer = Standard-Satz)."""
+    out: dict = {}
+    if getattr(shape, "letter_spacing", 0.0):
+        out["letter_spacing"] = float(shape.letter_spacing)
+    if getattr(shape, "line_spacing", 100.0) != 100.0:
+        out["line_spacing"] = float(shape.line_spacing)
+    if getattr(shape, "text_align", "left") != "left":
+        out["align"] = shape.text_align
+    return out
+
+
+def read_text_layout(d: dict) -> dict:
+    """Text-Satz eines Objekts aus einer Datei als Shape-Felder (fehlend = Standard)."""
+    return {"letter_spacing": read_letter_spacing(d.get("letter_spacing", 0.0)),
+            "line_spacing": read_line_spacing(d.get("line_spacing", 100.0)),
+            "text_align": read_text_align(d.get("align", "left"))}
 
 
 def read_priority(raw) -> int:

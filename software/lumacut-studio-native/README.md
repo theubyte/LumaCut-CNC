@@ -948,6 +948,21 @@ Drehung, Ellipsen und Text werden berücksichtigt.
   (Geviert; skaliert die Box gleichmäßig), **F**ett, *K*ursiv und „In Pfade“. Schriftart
   und Schnitt behalten die Höhe und passen die Breite an; die letzte Wahl gilt für neue
   Texte. Gespeichert als `"bold"`/`"italic"` (nur wenn gesetzt).
+- **Text-Satz** (PropertyBar neben Fett / Kursiv, wie LightBurns *Text › Align X / H-Space /
+  V-Space* und xTools „Ausrichtung“ / „Zeichenabstand“ / „Zeilenabstand“): drei Knöpfe
+  **links / zentriert / rechtsbündig** richten die Zeilen eines mehrzeiligen Texts nach ihrer
+  Laufweite aus; **„Abstand“** (−50 … 200 % der Schriftgröße, 0 = Abstand der Schrift) fügt
+  nach jedem Zeichen Platz ein bzw. rückt die Buchstaben zusammen; **„Zeilen“** (50 … 400 %,
+  100 % = bisheriger Zeilenabstand 1,25 × Schriftgröße) ändert den Zeilenabstand. **¶** öffnet
+  den Text mehrzeilig (eine Zeile je Absatz; Doppelklick auf einen mehrzeiligen Text öffnet
+  denselben Dialog). Die Buchstaben behalten ihre Größe in mm, die Box folgt dem Umriss; fest
+  bleibt die obere Kante links, mittig oder rechts je nach Ausrichtung (auch gedreht).
+  Ausrichtung und Zeilenabstand sind erst ab zwei Zeilen aktiv. Ein Undo-Schritt für die
+  ganze Auswahl, Pfeilschritte im selben Feld werden zusammengefasst. Wirkt auf Anzeige,
+  Füllung, G-Code, SVG/PNG-Export, „In Pfade“, Seriennummern und variablen Text. Gespeichert
+  als `"letter_spacing"` / `"line_spacing"` / `"align"` nur, wenn gesetzt – Texte ohne diese
+  Felder geben denselben Umriss und denselben G-Code wie bisher. Code:
+  `lumacut_canvas/text_ui.py`, `shape_paths.text_path`.
 - Polygone können dafür mehrere Ringe haben (`"rings"` in der Datei, nur wenn vorhanden).
 
 ### Schnittstellen für andere Module (Scan & Probe)

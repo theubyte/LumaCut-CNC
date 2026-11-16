@@ -285,6 +285,14 @@ def _measure(p, c):
     p.restore()
 
 
+def _align(p, c, where: str):
+    """Textausrichtung: vier Zeilen unterschiedlicher Länge, links / mittig / rechts bündig."""
+    _pen(p, c, 2.0)
+    for y, w in ((6, 16), (10, 10), (14, 16), (18, 8)):
+        x0 = {"left": 4.0, "center": 12.0 - w / 2.0, "right": 20.0 - w}[where]
+        p.drawLine(QPointF(x0, y), QPointF(x0 + w, y))
+
+
 _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "select": _select, "rect": _rect, "ellipse": _ellipse, "line": _line, "text": _text,
     "polygon": _polygon, "ngon": _ngon, "freehand": _freehand,
@@ -299,6 +307,8 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
     "touch": _touch, "path": _path, "arrange": _arrange,
     "pathops": _pathops, "node": _node, "tabs": _tabs, "start": _start, "measure": _measure,
+    "align_left": lambda p, c: _align(p, c, "left"), "align_center": lambda p, c: _align(p, c, "center"),
+    "align_right": lambda p, c: _align(p, c, "right"),
 }
 
 

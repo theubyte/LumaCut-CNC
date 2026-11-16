@@ -779,6 +779,10 @@ class ToolController:
             return
         if hit and self.doc.shape(hit).kind == "text":
             old = self.doc.shape(hit).text
+            if "\n" in old:    # mehrzeiliger Text: mehrzeiliger Dialog (text_ui)
+                from .text_ui import edit_multiline
+                edit_multiline(self.ed, hit)
+                return
             text, ok = QInputDialog.getText(self.ed, "Text bearbeiten", "Text:", text=old)
             if ok and text.strip() and text != old:
                 self.ed.undo_stack.push(SetTextCommand(self.doc, hit, text))

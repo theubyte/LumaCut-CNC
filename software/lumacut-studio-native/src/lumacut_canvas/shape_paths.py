@@ -8,9 +8,9 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF, QRectF
-from PySide6.QtGui import QFont, QPainterPath, QTransform
+from PySide6.QtGui import QFont, QFontInfo, QFontMetricsF, QPainterPath, QTransform
 
-from .model import Geometry, Shape
+from .model import Geometry, Shape, text_layout
 
 # Text wird in dieser Größe aufgebaut und dann exakt in die Objektbox skaliert,
 # dadurch ist die Box (und nicht die Punktgröße) die maßgebliche Größe in mm.
@@ -38,17 +38,55 @@ def text_font(family: str, bold: bool = False, italic: bool = False) -> QFont:
     return font
 
 
-def text_path(text: str, family: str, bold: bool = False, italic: bool = False) -> QPainterPath:
+def em_units(font: QFont) -> float:
+    """Geviert (Schriftgröße) von ``font`` in Umriss-Einheiten."""
+    em = QFontInfo(font).pixelSize()
+    if em <= 0:  # ohne Schriftdatenbank (z. B. Windows offscreen) meldet Qt -1
+        em = font.pointSizeF() * 96.0 / 72.0
+    return float(em)
+
+
+def text_path(text: str, family: str, bold: bool = False, italic: bool = False, *,
+              letter_spacing: float = 0.0, line_spacing: float = 100.0,
+              align: str = "left") -> QPainterPath:
+    """Textumriss in Aufbau-Einheiten (eine Zeile je ``\\n``).
+
+    Text-Satz wie LightBurns *H-Space / V-Space / Align X*: ``letter_spacing`` in %
+    der Schriftgröße zusätzlich nach jedem Zeichen, ``line_spacing`` in % des
+    Standard-Zeilenabstands (1,25 × Schriftgröße), ``align`` richtet die Zeilen nach
+    ihrer Laufweite links / mittig / rechts aus. Standardwerte = bisheriger Umriss.
+    """
     path = QPainterPath()
     font = text_font(family, bold, italic)
-    for i, line in enumerate((text or " ").split("\n")):
-        path.addText(QPointF(0, i * _TEXT_BUILD_PT * 1.25), font, line or " ")
+    if letter_spacing:
+        font.setLetterSpacing(QFont.AbsoluteSpacing, letter_spacing / 100.0 * em_units(font))
+    lines = [line or " " for line in (text or " ").split("\n")]
+    pitch = _TEXT_BUILD_PT * 1.25
+    if line_spacing != 100.0:
+        pitch *= line_spacing / 100.0
+    offsets = [0.0] * len(lines)
+    if align in ("center", "right") and len(lines) > 1:
+        fm = QFontMetricsF(font)
+        adv = [fm.horizontalAdvance(line) for line in lines]
+        widest = max(adv)
+        share = 0.5 if align == "center" else 1.0
+        offsets = [(widest - a) * share for a in adv]
+    for i, line in enumerate(lines):
+        path.addText(QPointF(offsets[i], i * pitch), font, line)
     return path
 
 
-def text_aspect(text: str, family: str, bold: bool = False, italic: bool = False) -> float:
-    """Breite/Höhe des Textumrisses, um neue Textobjekte maßstäblich anzulegen."""
-    r = text_path(text, family, bold, italic).boundingRect()
+def shape_text_path(shape: Shape) -> QPainterPath:
+    """Textumriss eines Textobjekts mit Schrift und Satz (Aufbau-Einheiten)."""
+    return text_path(shape.text, shape.font_family, shape.font_bold, shape.font_italic,
+                     **text_layout(shape))
+
+
+def text_aspect(text: str, family: str, bold: bool = False, italic: bool = False,
+                **layout) -> float:
+    """Breite/Höhe des Textumrisses, um neue Textobjekte maßstäblich anzulegen
+    (``layout``: Text-Satz wie :func:`text_path`)."""
+    r = text_path(text, family, bold, italic, **layout).boundingRect()
     return r.width() / r.height() if r.height() > 0 else 1.0
 
 
@@ -123,7 +161,7 @@ def local_path(shape: Shape) -> QPainterPath:
     elif shape.kind == "ellipse":
         add_ellipse(path, box)
     elif shape.kind == "text":
-        src = text_path(shape.text, shape.font_family, shape.font_bold, shape.font_italic)
+        src = shape_text_path(shape)
         r = src.boundingRect()
         if r.width() > 0 and r.height() > 0:
             t = QTransform()
