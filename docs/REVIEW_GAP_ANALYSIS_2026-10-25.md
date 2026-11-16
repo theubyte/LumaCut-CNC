@@ -15464,3 +15464,80 @@ fitting the glyph box (no sample file with them); alignment uses the typographic
 glyphs with large side bearings may look a little off-centre (like LightBurn). Hardware check
 still needed: a centred two-line name plate and a 30 % spaced text engraved and cut on the
 Windows app, and the new buttons / fields by finger on the Windows tablet.
+
+## 87. Status update 2026-11-16 (review round 80)
+
+Done this round (text weld – LightBurn's *Text* option „Weld“; Machine / Scan Probe / Materials
+untouched, no Canvas drawing tool changed – `shape_paths.py` gains `weld_path`, `text_ui.py` a
+button, `model.py` one text field, `icons.py` one icon; planner, export and G-code writer
+unchanged):
+
+- Closed since §86 by others: none – main had no commit since `22a1474` (round 79); the Canvas
+  worktree (`canvas-work`) still has no commit since 2026-10-26.
+- Gap picked: the letters of a text object were separate outlines filled by the even-odd rule.
+  With a script font, a negative „Abstand“ (§86) or tight „Zeilen“ the letters overlap, so a
+  cut-out name was cut *across* every overlap and fell apart into letters, and a fill left the
+  overlaps unburnt (even-odd holes). LightBurn's text toolbar has „Weld“ for exactly this
+  (cut-out names, signs, cake toppers – very common diode-laser jobs). Before, the only way was „In Pfade“ + „Verschweißen“, which loses the editable
+  text. Not in any §84 list, not owned by another agent, no user decision needed, off by
+  default so every existing text stays byte-identical. Smaller text items from §86 (justified
+  lines, upper-case switch, xTool text style import) were weighed but give less value for
+  cutting and engraving.
+- **Model** (`lumacut_canvas/model.py`): `Shape.text_weld` (default `False`), saved as
+  `"weld": true` only for text and only when set; anything but JSON `true` (strings, 1, `null`,
+  lists) loads as off, other kinds ignore the key. Copies (serial numbers, variable text,
+  duplicate) keep it.
+- **Outline** (`lumacut_canvas/shape_paths.py`): `weld_path(path, tol=WELD_TOL_MM)` unites all
+  subpaths of the text outline in mm by the non-zero rule (`QPainterPath.simplified` with
+  `Qt.WindingFill` at 10 × scale, then Douglas-Peucker at 0.4 × tol per ring): one outline
+  without inner edges, counters („o“, „A“) stay holes unless another letter covers them,
+  separate letters stay separate, only straight segments, no self-intersection, filled
+  even-odd like before. Measured: outline within 0.0043 mm of the letters where nothing
+  overlaps (tested ≤ `WELD_TOL_MM` = 0.01 mm), ≈ 1.5 × the points of the plain outline (Qt's
+  own flattening alone gave ≈ 8 ×). `local_path` applies it after scaling the text into its
+  box, so the box (from the plain outline) and the letter size never change; display, hit
+  test, fill, kerf / tabs / start point / direction, G-code, SVG / PNG export, „In Pfade“ and
+  nesting all follow. Rotated and mirrored texts weld the same.
+- **PropertyBar** (`lumacut_canvas/text_ui.py`, after „Zeilen“): checkable button
+  **„Verschweißen“** (drawn icon `text_weld`, two joined circles; tooltip explains LightBurn's
+  „Weld“), checked when all selected texts are welded; `with_weld()` changes only the flag –
+  box, font and layout stay. One undo step for the whole selection („Verschweißen“ /
+  „Verschweißen aus“), unchanged texts and locked layers are left alone, refresh pushes
+  nothing. Touch mode: button ≥ 40 px (existing touch QSS).
+- README section „Text verschweißen“ added under „Text-Satz“.
+
+Tests:
+
+- New `tests/test_text_weld.py` (43 tests): default off and not saved, round trip, old files
+  saving identically, broken values, other kinds, copies; outline without weld equal to the
+  scaled text path element by element; `weld_path` on overlapping squares (one ring, union
+  area), a square with a counter-wound hole plus a separate part, the empty path; two
+  overlapping „o“ (−20 % spacing) becoming one polygon with both counters and the union area of
+  the single letters (more area than even-odd), exact outline where nothing overlaps, no point
+  flood, box kept, rotated / mirrored, overlapping lines, blank text; job polylines one contour
+  fewer, document G-code unchanged after a round trip without weld and changed with it, hatch
+  covering the overlap, „In Pfade“ keeping the welded rings, serial numbers keeping the flag,
+  SVG export; `with_weld`, button undo / whole selection / mixed state / refresh / locked
+  layer, canvas item showing the welded outline, touch size, icon and tooltip, save / load,
+  main window.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **3193 passed, 3 skipped** (19.2 min; 3150 + 43 new text
+weld tests), no failure – the two warnings are the known deprecated `QDragEnterEvent`
+constructor in `test_import_qt.py`.
+
+Output change for old files: none – texts without `"weld"` take the unchanged code path, so
+outline, fill, G-code, export and project files stay byte-identical (no new key unless set).
+
+Still open: unchanged from §84 (job placement on the camera image, print-and-cut, rotary,
+min/max corner power, Dot Mode dwell, material-test / Materials items, image dot-size model,
+CoreXY time model) and the text items of §86 (justified lines, kerning, vertical text,
+upper-case switch, inline editing, xTool text style import). For weld: it relies on the font's
+contour direction (outer and inner contours wound oppositely, as in TrueType / OpenType) – a
+broken font with equally wound counters would fill them when welded (LightBurn has the same
+limitation); „Bogentext…“ / „Text auf Pfad…“ objects are generated polygons without the
+option (weld them with „Verschweißen“ in the Pfad menu); new texts start unwelded (the switch
+is not remembered like font / bold / italic); the xTool import does not read a weld flag (no
+sample file with one); a very long welded text plans ≈ 3 × slower than unwelded (≈ 0.2 s for
+190 letters). Hardware check still needed: a welded script name (e.g. 4 mm plywood) cut out on
+the Windows app staying one part, and the button by finger on the Windows tablet.
