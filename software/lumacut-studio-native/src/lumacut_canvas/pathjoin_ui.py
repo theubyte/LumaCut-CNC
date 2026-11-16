@@ -14,7 +14,7 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QLabel)
 
-from . import pathjoin, pathsimplify
+from . import pathjoin, pathsimplify, pathtrim
 from .commands import DeleteShapesCommand
 from .edit_commands import ReplaceShapesCommand
 
@@ -22,6 +22,7 @@ ACTIONS = [
     ("path_join", "Pfade verbinden", "Alt+J"),
     ("path_close", "Pfade schließen (Toleranz) …", "Alt+Shift+J"),
     ("path_simplify", "Pfade vereinfachen …", "Alt+O"),
+    ("path_trim", "Überstände abschneiden …", "Alt+Shift+O"),
     ("delete_duplicates", "Duplikate löschen", "Alt+Shift+D"),
     ("select_open", "Offene Formen auswählen", None),
 ]
@@ -121,11 +122,52 @@ class SimplifyDialog(QDialog):
         return {"tolerance_mm": self.tolerance.value(), "fit_lines": self.fit_lines.isChecked()}
 
 
+class TrimDialog(QDialog):
+    """Überstände an Kreuzungen abschneiden: längster Überstand, Anzahl live."""
+
+    def __init__(self, shapes, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Überstände abschneiden")
+        self.shapes = list(shapes)
+        form = QFormLayout(self)
+        self.max_mm = QDoubleSpinBox()
+        self.max_mm.setRange(*pathtrim.TRIM_RANGE_MM)
+        self.max_mm.setDecimals(1)
+        self.max_mm.setSingleStep(0.5)
+        self.max_mm.setValue(pathtrim.TRIM_MAX_MM)
+        self.max_mm.setSuffix(" mm")
+        self.max_mm.setToolTip("Längster Überstand hinter einer Kreuzung, der abgeschnitten wird – "
+                               "längere Enden bleiben")
+        self.readout = QLabel()
+        self.readout.setObjectName("TrimReadout")
+        self.readout.setWordWrap(True)
+        form.addRow("Überstand höchstens", self.max_mm)
+        form.addRow(self.readout)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        form.addRow(self.buttons)
+        self.max_mm.valueChanged.connect(self.update_readout)
+        self.update_readout()
+
+    def result_preview(self) -> pathtrim.TrimResult:
+        return pathtrim.trim_stubs(self.shapes, self.max_mm.value())
+
+    def update_readout(self) -> None:
+        res = self.result_preview()
+        self.readout.setText(res.summary())
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(res.changed)
+
+    def values(self) -> dict:
+        return {"max_mm": self.max_mm.value()}
+
+
 class PathCleanup:
     def __init__(self, editor) -> None:
         self.editor = editor
         self.ask_close = self._ask_close     # für Tests austauschbar
         self.ask_simplify = self._ask_simplify
+        self.ask_trim = self._ask_trim
 
     def _editable(self, ids):
         doc = self.editor.document
@@ -205,6 +247,34 @@ class PathCleanup:
                 ed.set_selection(keep + [s.id for s in res.add])
         ed.notify("Pfade vereinfachen: " + res.readout())
 
+    def _ask_trim(self, shapes):
+        dlg = TrimDialog(shapes, self.editor)
+        return dlg.values() if dlg.exec() == QDialog.Accepted else None
+
+    def trim(self) -> None:
+        ed = self.editor
+        shapes, _sel = self._scope()
+        if not any(pathjoin.is_open(s) for s in shapes):
+            ed.notify("Überstände abschneiden: keine offenen Pfade oder Linien "
+                      + ("in der Auswahl" if ed.selection else "im Dokument"))
+            return
+        v = self.ask_trim(shapes)
+        if not v:
+            return
+        res = pathtrim.trim_stubs(shapes, v.get("max_mm", pathtrim.TRIM_MAX_MM))
+        if res.changed:
+            had_selection = bool(ed.selection)
+            ed.undo_stack.beginMacro("Überstände abschneiden")
+            try:
+                for old, new in zip(res.remove, res.add):
+                    ed.undo_stack.push(ReplaceShapesCommand(ed.document, [old], [new], "Überstand abschneiden"))
+            finally:
+                ed.undo_stack.endMacro()
+            if had_selection:
+                keep = [i for i in ed.selection if ed.document.has_shape(i)]
+                ed.set_selection(keep + [s.id for s in res.add])
+        ed.notify("Überstände abschneiden: " + res.summary())
+
     def delete_duplicates(self) -> None:
         ed = self.editor
         shapes, sel = self._scope()
@@ -230,7 +300,7 @@ class PathCleanup:
 def install(editor) -> PathCleanup:
     tools = PathCleanup(editor)
     slots = {"path_join": tools.join, "path_close": tools.close,
-             "path_simplify": tools.simplify,
+             "path_simplify": tools.simplify, "path_trim": tools.trim,
              "delete_duplicates": tools.delete_duplicates, "select_open": tools.select_open}
     for name, text, key in ACTIONS:
         editor._act(name, text, lambda _=False, f=slots[name]: f(), QKeySequence(key) if key else None)

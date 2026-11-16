@@ -147,7 +147,16 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Gruppen, Drehung und Stapelplatz bleiben, kleine Löcher gehen nie verloren. Pfade mit
   Kurvensegmenten bleiben unverändert, außer mit „Kurven in Linien umwandeln“ (keine Bögen –
   der Pi lehnt G2/G3 ab).
-  Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathsimplify.py`, `pathjoin_ui.py`.
+  „Überstände abschneiden …“ (Alt+Umschalt+O, wie LightBurns *Trim Shapes*, ohne Klickwerkzeug und
+  damit per Finger bedienbar) entfernt die kleinen Überstände, die Linien an Kreuzungen haben
+  (Raster, Rahmen, CAD-Import): das freie Ende eines offenen Pfads hinter einer Kreuzung mit einem
+  anderen offenen Pfad oder der Kontur einer markierten geschlossenen Form, höchstens „Überstand
+  höchstens“ lang (Standard 3 mm, 0,1–50 mm; der Dialog zeigt live Anzahl und Länge). Es fällt nur
+  weg, was kürzer ist als der Rest des Pfads – gleich lange Kreuzarme, Ecken und T-Stöße bleiben.
+  Danach lassen sich die Ecken mit „Pfade verbinden“ (Alt+J) zu geschlossenen Konturen verbinden.
+  Ebene, Gruppen, Priorität und Laufrichtung bleiben, ein Undo-Schritt; Formen ohne Überstand
+  bleiben unverändert.
+  Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathsimplify.py`, `pathtrim.py`, `pathjoin_ui.py`.
 - **Ecken abrunden …** (Pfad-Menü, Alt+Umschalt+R, wie LightBurns *Radius*-Werkzeug / xTool
   „Eckenradius“ für Polygone und Sterne): „Abrunden“ ersetzt jede Ecke durch einen Bogen mit dem
   eingestellten Radius (abgeflacht auf ≤ 0,02 mm, nur `G1`), „Abschrägen“ durch eine gerade Fase.
