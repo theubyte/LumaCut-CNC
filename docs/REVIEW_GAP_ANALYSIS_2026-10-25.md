@@ -15629,3 +15629,47 @@ still needed: a photo cropped to a circle engraved (Jarvis and grayscale, with a
 *Negativ*) on 4 mm plywood or slate and the circle cut out around it on the Windows app –
 no burn outside the circle, engraving and cut line in register – and the menu entry by
 finger (long press) on the Windows tablet.
+
+## 89. Status update 2026-11-16 (review round 82)
+
+Done this round (stub trimming at crossings – LightBurn's *Trim Shapes*; Machine / Scan Probe /
+Materials untouched, no canvas drawing tool changed – new `pathtrim.py`, one dialog and one
+action in `pathjoin_ui.py`; model, planner and G-code writer unchanged):
+
+- Closed since §88 by others: none – main had no commit since `2a09e45` (round 81).
+- Gap picked (not in §84 / §88 and in no earlier round): lines from grids, frames, label lines
+  and CAD / SVG imports overshoot at every crossing; on a diode laser each overshoot burns
+  visibly, and four overshooting lines never close to a shape that could be filled, kerf-offset
+  or tabbed. The only fixes were editing nodes by hand or another program. LightBurn solves this
+  with *Trim Shapes* (click each segment); a click tool would touch the Canvas agent's area and
+  is awkward on a tablet, so the cleanup is automatic with a length limit. No user decision
+  needed; weighed against the remaining text items (less relevant for real jobs).
+- **Trim** (`lumacut_canvas/pathtrim.py`): `trim_stubs(shapes, max_mm)` – open paths / lines
+  (not generated objects) are cut where a free end lies behind a crossing with another open path
+  or the outline of a closed shape of the same scope, if the stub is ≤ `max_mm` (default 3 mm,
+  0.1–50 mm) and shorter than the rest of the path (equal cross arms are not guessed). Ends
+  within 0.05 mm of another contour (corners, T-joints) are never stubs. Result shapes are
+  `path` objects with layer, groups, priority and reverse kept; shapes without stub are not
+  replaced (same objects); curves of changed paths are flattened.
+- **UI** (`pathjoin_ui.py`): „Überstände abschneiden …“ (Alt+Umschalt+O) in the Pfad menu (also
+  context menu, touch rows) after „Pfade vereinfachen …“; dialog with „Überstand höchstens“ and a
+  live readout (count, length), OK only with something to cut; selection or whole document like
+  the other cleanup actions; one undo step; README paragraph under „Pfade vereinfachen“.
+
+Tests: new `tests/test_path_trim.py` (17 tests): # grid cut to the crossings, limit, corners /
+T-joints / equal arms kept, closed outline as cutter, attributes kept, rotation, generated
+objects, range clamp, trim + join giving a closed polygon, G-code shorter by exactly the stubs
+and Pi-safe, dialog readout / OK state, editor action with undo / selection / cancel / locked
+layer, Pfad and context menu, unique Alt+Shift+O in the main window.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3261 passed, 3 skipped** (18.0 min; 3244 + 17 new trim tests), no failure.
+
+Output change for old files: none – the action is only run by the user; no new project key.
+
+Still open: unchanged from §88 (camera placement, print-and-cut, rotary, min/max corner power,
+Dot Mode dwell, Materials items, image dot-size model, CoreXY time model, text items, live
+image mask). For trim: no click-per-segment mode (LightBurn lets you also cut inner pieces
+between two crossings), closed shapes are only cutters, never trimmed, and overlapping
+collinear lines are not merged. Hardware check: a drawn # grid with overshoots trimmed and
+joined, cut on 3 mm plywood – clean corners, no burnt stubs – and the dialog by finger on the
+Windows tablet.
