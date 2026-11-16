@@ -15372,3 +15372,95 @@ move order (an image is many short `G1` moves, played like any other), and the t
 spreads the estimate by length / feed rather than replaying the planner's per-move
 acceleration. Hardware check still needed: playback time vs. a real run on the Pi, and the
 slider / buttons by finger on the Windows tablet.
+
+## 86. Status update 2026-11-16 (review round 79)
+
+Done this round (text spacing and alignment – LightBurn's *Text* options „Align X“ /
+„H-Space“ / „V-Space“, xTool's „Ausrichtung“ / „Zeichenabstand“ / „Zeilenabstand“; Machine /
+Scan Probe / Materials untouched, no Canvas drawing tool changed – `shape_paths.py` builds the
+text outline with the layout, `text_ui.py` gains the controls, `model.py` three text fields;
+planner, export and G-code writer unchanged):
+
+- Closed since §85 by others: none – main had no commit since `7505d12` (round 78); the Canvas
+  worktree (`canvas-work`) still has no commit since 2026-10-26.
+- Gap picked: text objects had only font, size, bold and italic. Every line started at the
+  left with a fixed pitch of 1.25 × the font size, there was no letter spacing, and a text
+  could not even be typed on several lines (the text dialogs are single-line, only imports
+  brought `\n`). Name plates, signs, labels and gift tags – the most common diode-laser jobs –
+  need centred lines, a line pitch that fits the plate and wider / tighter letters (wider
+  spacing also keeps thin letters from merging on wood with a wide diode spot). LightBurn and
+  xTool both offer these in the text toolbar. Not in any §84 list, not owned by another agent,
+  no user decision needed, and the default keeps every existing text byte-identical.
+- **Model** (`lumacut_canvas/model.py`): `Shape.letter_spacing` (% of the font size,
+  −50 … 200, default 0), `Shape.line_spacing` (% of the old pitch, 50 … 400, default 100),
+  `Shape.text_align` (`left` / `center` / `right`); saved as `"letter_spacing"` /
+  `"line_spacing"` / `"align"` only for text and only when set; `read_letter_spacing` /
+  `read_line_spacing` / `read_text_align` turn broken values (text, NaN, ±inf, booleans,
+  unknown alignments) into the defaults and clamp; `text_layout(shape)` gives only the
+  non-default values as keywords (Qt-free, used by serial numbers / variable text).
+- **Outline** (`lumacut_canvas/shape_paths.py`): `text_path(…, letter_spacing, line_spacing,
+  align)` – letter spacing as Qt absolute spacing of the em (`em_units`), pitch scaled, lines
+  shifted by their advance (`QFontMetricsF.horizontalAdvance`, incl. the letter spacing) to the
+  widest line for centre / right; `shape_text_path(shape)` is used by `local_path`, so display,
+  hit test, fill, kerf / tabs / start point, G-code, SVG / PNG export and „In Pfade“ all follow.
+  With the defaults the code path is the old one (identical path elements, tested against a
+  copy of the old builder).
+- **PropertyBar** (`lumacut_canvas/text_ui.py`, next to Fett / Kursiv): three checkable
+  buttons with drawn icons (`align_left` / `align_center` / `align_right`) –
+  „Linksbündig“ / „Zentriert“ / „Rechtsbündig“, enabled from two lines –, „Abstand“ and
+  „Zeilen“ (% spin boxes, „Zeilen“ from two lines), **„¶“** opens
+  `QInputDialog.getMultiLineText` (CR / CRLF become `\n`, cancel / blank change nothing); a
+  double-click on a text that already has several lines opens the same dialog, single-line
+  texts keep the quick one-line dialog. `with_layout()` keeps the letters' size in mm (scale
+  per axis from the old box) and refits the box anchored at the top left / centre / right by
+  the alignment, in the rotated frame, keeping mirroring. One undo step for the whole
+  selection, consecutive spin steps of one text merge („Zeichenabstand“ / „Zeilenabstand“),
+  unchanged values push nothing, locked layers are left alone. Font / bold / italic keep the
+  layout. Touch mode: buttons ≥ 40 px, spin boxes ≥ 34 px (existing touch QSS).
+- **Users of the text outline**: `serial.serial_shapes` and `vartext.refit_text` measure the
+  copies with the source's layout (widths match the spaced text), the arc-text / text-on-path
+  prefill (`arctext_qt.spec_from_text`) measures the cap height on the layout outline.
+- README section „Text-Satz“ added under „Schrift“.
+
+Tests:
+
+- New `tests/test_text_layout.py` (57 tests): defaults / file keys only when set / JSON round
+  trip / old files saving identically / broken values per field / keys ignored on non-text
+  kinds; default outline identical to the old builder (single / multi-line / empty / blank
+  lines / bold-italic); letter spacing per gap (positive / negative), line pitch (200 % / 50 %),
+  single line unaffected by pitch and alignment, alignment by advance (right edges equal,
+  centre shift = half the advance difference, widest line fixed) also with letter spacing,
+  outline filling the box; box refit keeping the letter size, left / centre / right anchors,
+  rotated anchor, mirrored width and clamping, multi-line text growing the box; job polylines
+  and „In Pfade“ following the layout, document G-code unchanged after a round trip without
+  layout and changed with it; serial numbers / variable text widths, arc-text spec height;
+  panel values, enable state, mixed selection, merged undo and undo back, one-step alignment of
+  two texts and no step for an equal value, locked layer, multi-line dialog (CRLF, cancel,
+  blank), double-click choosing the multi-line dialog only for multi-line texts, touch sizes,
+  icons, save / load, main window.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **3150 passed, 3 skipped** (16.7 min; 3093 + 57 new text
+layout tests), no failure – the two warnings are the known deprecated `QDragEnterEvent`
+constructor in `test_import_qt.py`.
+
+Output change for old files: none – text objects without `letter_spacing` / `line_spacing` /
+`align` build the same outline element by element, so G-code, fill, export and project files
+stay byte-identical (no new keys unless set). The only behaviour change without new values:
+a double-click on a text that already contains line breaks (e.g. from an xTool import) now
+opens the multi-line dialog instead of the one-line one (which showed the breaks as spaces).
+
+Still open: unchanged from §84 (job placement on the camera image, print-and-cut, rotary,
+min/max corner power, Dot Mode dwell, material-test / Materials items, image dot-size model,
+CoreXY time model). For text layout: letter spacing is a share of the font size (LightBurn's
+H-Space is in mm – the % keeps the look when the box is scaled; the tooltip explains); no
+justified / „Blocksatz“ lines, no per-pair kerning edit, no vertical text, no upper-case
+switch and no on-canvas inline editing (the property-bar line edit still shows line breaks
+as spaces and keeps them); new texts start with the default layout (font / bold / italic are
+remembered, the layout is not); „Bogentext…“ / „Text auf Pfad…“ take text, font and height
+from a selected text but not its layout (they have their own „Zeichenabstand“); xTool `.xcs`
+text style values (letter spacing / line height / alignment) are not read – the import keeps
+fitting the glyph box (no sample file with them); alignment uses the typographic advance, so
+glyphs with large side bearings may look a little off-centre (like LightBurn). Hardware check
+still needed: a centred two-line name plate and a 30 % spaced text engraved and cut on the
+Windows app, and the new buttons / fields by finger on the Windows tablet.
