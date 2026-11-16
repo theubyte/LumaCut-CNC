@@ -674,6 +674,8 @@ class ImportTools(QObject):
         menu.addAction(self.options_action)
         menu.addAction(self.image_action)
         menu.addAction(self.trace_action)
+        if "image_crop" in by:      # Bild mit Form zuschneiden (lumacut_canvas.imagecrop_ui)
+            menu.addAction(by["image_crop"])
         if "export" in by:
             menu.addAction(by["export"])
         menu.addSeparator()

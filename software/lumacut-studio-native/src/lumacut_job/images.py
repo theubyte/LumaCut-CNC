@@ -16,6 +16,9 @@ Bildanpassung (Helligkeit, Kontrast, Gamma, Schärfen) rechnet
 :func:`raster.power_map` bzw. :func:`raster.sliced_depth_gcode` vor dem Modus;
 bei gedrehten Bildern verhindert eine Innen-Maske (:func:`render_inside`), dass
 die Ecken der Hüllbox durch Anpassung oder Skizzen-Kanten gelasert werden.
+Zugeschnittene Bilder (:mod:`lumacut_canvas.imagecrop`, PNG mit Alpha) werden über
+den Nicht-lasern-Wert gemalt – transparente Pixel lasern nie –, und die Innen-Maske
+folgt dem Alpha-Kanal.
 
 Scan-Versatz (:mod:`.scan_offset`, Tabelle nach Geschwindigkeit): jede
 Rasterzeile wandert um den halben Versatz entgegen ihrer Fahrtrichtung –
@@ -116,12 +119,34 @@ def render_gray(shape: Shape, interval_mm: float) -> tuple[np.ndarray, tuple[flo
     return arr.reshape(rows, stride)[:, :cols].copy(), (b.x, b.y)
 
 
+def alpha_qimage(shape: Shape):
+    """Alpha channel of the image's PNG as a Grayscale8 QImage, ``None`` without alpha.
+
+    Only cropped images (:mod:`lumacut_canvas.imagecrop`) carry alpha – imports flatten
+    transparency to white – so every older image keeps the unchanged code paths.
+    """
+    from PySide6.QtGui import QImage
+
+    from lumacut_canvas.image_cache import qimage_for
+
+    src = qimage_for(shape.image.png)
+    if src.isNull() or not src.hasAlphaChannel():
+        return None
+    a = src.convertToFormat(QImage.Format_Alpha8)
+    w, h = a.width(), a.height()
+    arr = np.frombuffer(a.constBits(), dtype=np.uint8, count=a.bytesPerLine() * h)
+    arr = np.ascontiguousarray(arr.reshape(h, a.bytesPerLine())[:, :w])
+    return QImage(arr.data, w, h, w, QImage.Format_Grayscale8).copy()
+
+
 def render_inside(shape: Shape, interval_mm: float) -> np.ndarray | None:
     """Bool-Maske „Pixel liegt im (gedrehten) Bild“ im Raster von :func:`render_gray`.
 
-    ``None`` bei ungedrehten Bildern (Hüllbox = Bild, alles innen).
+    ``None`` bei ungedrehten Bildern ohne Alpha (Hüllbox = Bild, alles innen).
+    Zugeschnittene Bilder (Alpha): innen = sichtbarer Teil (Alpha ≥ 50 %).
     """
-    if not shape.geom.rot:
+    alpha = alpha_qimage(shape)
+    if not shape.geom.rot and alpha is None:
         return None
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QColor, QImage, QPainter
@@ -136,9 +161,14 @@ def render_inside(shape: Shape, interval_mm: float) -> np.ndarray | None:
     p = QPainter(canvas)
     p.scale(cols / b.w if b.w else 1.0, rows / b.h if b.h else 1.0)
     p.translate(-b.x, -b.y)
-    p.setTransform(geometry_transform(shape.geom), True)
+    if shape.geom.rot:
+        p.setTransform(geometry_transform(shape.geom), True)
     lb = shape.geom.local_bounds()
-    p.fillRect(QRectF(lb.x, lb.y, lb.w, lb.h), QColor(255, 255, 255))
+    if alpha is None:
+        p.fillRect(QRectF(lb.x, lb.y, lb.w, lb.h), QColor(255, 255, 255))
+    else:
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.drawImage(QRectF(lb.x, lb.y, lb.w, lb.h), alpha)
     p.end()
     stride = canvas.bytesPerLine()
     arr = np.frombuffer(canvas.constBits(), dtype=np.uint8, count=stride * rows)
@@ -326,6 +356,11 @@ def render_inside_frame(shape: Shape, geo: ScanGeometry) -> np.ndarray:
     from PySide6.QtGui import QColor
 
     lb = shape.geom.local_bounds()
+    alpha = alpha_qimage(shape)
+    if alpha is not None:   # zugeschnittenes Bild: sichtbarer Teil
+        arr = _paint_frame(shape, geo, QColor(0, 0, 0),
+                           lambda p: p.drawImage(QRectF(lb.x, lb.y, lb.w, lb.h), alpha))
+        return arr >= 128
     arr = _paint_frame(shape, geo, QColor(0, 0, 0),
                        lambda p: p.fillRect(QRectF(lb.x, lb.y, lb.w, lb.h), QColor(255, 255, 255)))
     return arr >= 128
