@@ -68,6 +68,12 @@ lasert mit ``S`` = Ebenen-``S`` × Faktor; weitere Stufen (Art ``ramp``) schlie�
 ohne ``G0`` an das vorige Stück an. Ohne Faktoren (Standard) bleibt die Ausgabe
 Byte für Byte gleich.
 
+Eigene Kontur-Einstellung einer Füll-Ebene (``Layer.outline_*``, LightBurn
+Unterebene „Line“): :func:`export.split_outline` liefert die Ebene als zwei
+Einträge – ``; LAYER Name`` nur mit der Füllung, danach ``; LAYER Name (Kontur)``
+nur mit den Linien und eigenem ``S`` / ``F`` / Durchgängen; ein einziges ``M3 I``
+bleibt für den ganzen Auftrag. Ohne eigene Werte bleibt die Ausgabe Byte für Byte gleich.
+
 „Nach Gruppen“ (LightBurn *Order by Group*, ``JobLayer.unit``): vor den Ebenen
 jeder Gruppe steht einmal ``; GROUP i OF n`` – ein reiner Kommentar; „Nach
 Priorität“ (*Order by Priority*, ``JobLayer.unit_kind`` "PRIORITY") schreibt ebenso

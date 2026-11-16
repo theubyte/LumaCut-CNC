@@ -43,7 +43,8 @@ from .model import FILL_LAYER_FIELDS, MATERIAL_LAYER_FIELDS, PASSES_RANGE, POWER
 # Undo-Beschriftungen der Füll-Felder (ohne commands.py anzufassen).
 for _k, _v in {"line_interval_mm": "Linienabstand", "hatch_angle": "Schraffurwinkel",
                "fill_mode": "Füllmodus", "fill_overscan_mm": "Überlauf",
-               "fill_angle_increment": "Winkel-Schritt"}.items():
+               "fill_angle_increment": "Winkel-Schritt", "outline_power": "Kontur-Leistung",
+               "outline_speed": "Kontur-Tempo", "outline_passes": "Kontur-Durchgänge"}.items():
     SetLayerAttrCommand.LABELS.setdefault(_k, _v)
 
 class _FillParamCommand(SetLayerAttrCommand):
@@ -76,7 +77,29 @@ def layer_summary(layer: Layer, speed_unit: str | None = None) -> str:
             text += f" · Überlauf {_mm(layer.fill_overscan_mm)} mm"
         if layer.fill_mode in _hatch.LINE_FILL_MODES and layer.fill_angle_increment:
             text += f" · Winkel-Schritt {_deg(layer.fill_angle_increment)}°"
+        own = layer.outline_settings()
+        if own is not None:
+            text += f" · Kontur {_outline_values(own, unit)}"
     return f"{text} · {layer.material}" if layer.material else text
+
+
+def _outline_values(own: tuple[float, float, int], unit: str) -> str:
+    power, speed, passes = own
+    return f"{power:g} % · {format_speed(speed, unit)} · {passes}×"
+
+
+def outline_hint(layer: Layer, speed_unit: str | None = None) -> str:
+    """Live-Hinweis zur Kontur einer Füll-Ebene ("" ohne Füllung)."""
+    if layer.fill_mode == "none":
+        return ""
+    if not layer.hatch_outline:
+        return "Nur die Füllung wird gelasert – keine Kontur."
+    own = layer.outline_settings()
+    if own is None:
+        return "Kontur mit der Einstellung der Ebene, in jedem Durchgang nach der Füllung."
+    unit = speed_unit or display_speed_units().unit
+    return (f"Kontur nach der ganzen Füllung mit eigener Einstellung: "
+            f"{_outline_values(own, unit)} (wie LightBurns Unterebene „Line“).")
 
 
 def _mm(v: float) -> str:
@@ -464,9 +487,43 @@ class LayersPanel(QWidget):
         form.addRow("Überlauf", self.fill_overscan)
         form.addRow("Füllen", self.fill_grouping)
         form.addRow(self.fill_outline)    # untereinander: passt auch in schmale Seitenleisten
+        self._build_outline_fields(form)
         form.addRow(self.fill_bidir)
         form.addRow(self.fill_inside_out)
         return box
+
+    def _build_outline_fields(self, form: QFormLayout) -> None:
+        """Eigene Kontur-Einstellung (LightBurn Sub-Layer „Line“), 0 = „wie Ebene“."""
+        tip = ("Eigene {what} für die Kontur (wie LightBurns Unterebene „Line“ unter einer "
+               "Füll-Ebene): die Füllung wird mit allen Durchgängen der Ebene gelasert, danach "
+               "die Kontur mit eigener Einstellung – z. B. Schild schnell und schwach "
+               "gravieren, Umriss langsam mit voller Leistung ausschneiden. "
+               "„wie Ebene“ = Wert der Ebene")
+        self.outline_power = QDoubleSpinBox()
+        self.outline_power.setRange(0.0, POWER_RANGE[1])
+        self.outline_power.setDecimals(0)
+        self.outline_power.setSuffix(" %")
+        self.outline_power.setToolTip(tip.format(what="Leistung"))
+        self.outline_speed = SpeedSpin(0.0, SPEED_RANGE[1])
+        self.outline_speed.setToolTip(tip.format(what="Geschwindigkeit"))
+        self.outline_passes = QSpinBox()
+        self.outline_passes.setRange(0, PASSES_RANGE[1])
+        self.outline_passes.setSuffix(" ×")
+        self.outline_passes.setToolTip(tip.format(what="Anzahl Durchgänge"))
+        for spin, attr in ((self.outline_power, "outline_power"),
+                           (self.outline_speed, "outline_speed"),
+                           (self.outline_passes, "outline_passes")):
+            spin.setSpecialValueText("wie Ebene")
+            spin.setKeyboardTracking(False)
+            spin.setAlignment(Qt.AlignRight)
+            spin.valueChanged.connect(lambda v, a=attr: self._param_edited(a, v))
+        self.outline_hint = QLabel()
+        self.outline_hint.setObjectName("Hint")
+        self.outline_hint.setWordWrap(True)
+        form.addRow("Kontur-Leistung", self.outline_power)
+        form.addRow("Kontur-Tempo", self.outline_speed)
+        form.addRow("Kontur-Durchg.", self.outline_passes)
+        form.addRow(self.outline_hint)
 
     def _show_fill(self, layer: Layer) -> None:
         self.fill_mode.setCurrentIndex(max(0, self.fill_mode.findData(layer.fill_mode)))
@@ -485,6 +542,14 @@ class LayersPanel(QWidget):
         for w in (self.fill_angle, self.fill_angle_step, self.fill_bidir, self.fill_overscan):
             w.setEnabled(lines)
         self.fill_inside_out.setEnabled(layer.fill_mode == "offset")
+        self.outline_power.setValue(layer.outline_power)
+        self.outline_speed.setValue(layer.outline_speed)
+        self.outline_passes.setValue(layer.outline_passes)
+        for w in (self.outline_power, self.outline_speed, self.outline_passes):
+            w.setEnabled(on and layer.hatch_outline)
+        hint = outline_hint(layer)
+        self.outline_hint.setText(hint)
+        self.outline_hint.setVisible(bool(hint))
 
     def _fill_mode_chosen(self, index: int) -> None:
         layer = self.doc.active_layer
@@ -708,7 +773,7 @@ class LayersPanel(QWidget):
         if self._updating or self.doc.active_layer is None:
             return
         layer = self.doc.active_layer
-        value = int(value) if attr == "passes" else float(value)
+        value = int(value) if attr in ("passes", "outline_passes") else float(value)
         if getattr(layer, attr) != value:
             cls = _FillParamCommand if attr in FILL_LAYER_FIELDS else SetLayerAttrCommand
             self.stack.push(cls(self.doc, layer.id, attr, value))

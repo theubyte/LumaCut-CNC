@@ -712,7 +712,9 @@ gegen den Uhrzeigersinn; Kreuzschraffur fügt +90° hinzu, beim Einschalten
 mit 0° wird 45° vorgeschlagen), *Kontur mitlasern* und *Bidirektional*
 (abwechselnde Zeilenrichtung, kürzere Leerfahrten), *Winkel-Schritt* und *Überlauf* (nur
 Schraffur / Kreuzschraffur), *Füllen* (welche Objekte gemeinsam gefüllt werden) und – nur bei
-Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt.
+Offset-Füllung – *Von innen nach außen*, unter *Kontur mitlasern* die eigene
+Kontur-Einstellung (*Kontur-Leistung*, *Kontur-Tempo*, *Kontur-Durchg.*). Jede Änderung ist ein
+Undo-Schritt.
 
 - Gefüllt werden geschlossene Objekte: Rechteck, Ellipse, Polygon, Text
   (auch gedreht und gruppiert). Löcher (Buchstaben, Ringe) bleiben frei
@@ -781,6 +783,20 @@ Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt
   Leistung/Geschwindigkeit der Ebene), danach die Kontur; Durchgangs-Hook
   (Tiefe je Durchgang) gilt auch für reine Füll-Ebenen. Ohne Füllung ist der
   G-Code unverändert.
+- **Eigene Kontur-Einstellung** (wie LightBurns Unterebene *Line* unter einer *Fill*-Ebene;
+  `outline_power` 1–100 %, `outline_speed` 1–6000 mm/min, `outline_passes` 1–30, je „wie
+  Ebene“ = 0, Standard): mit *Kontur mitlasern* lasert die Ebene zuerst die ganze Füllung mit
+  allen ihren Durchgängen und danach alle Linien der Ebene (Konturen und offene Pfade) als
+  eigener Block `; LAYER Name (Kontur)` mit eigenem `S` / `F` / Durchgängen – z. B. ein
+  Namensschild schnell mit 20 % schraffieren und den Umriss mit 100 % bei 300 mm/min in
+  2 Durchgängen ausschneiden, in einer Ebene. Kerf, An-/Abfahrt, Überschnitt, Haltestege,
+  Rampe, Perforation und manuelle Startpunkte gelten weiter für die Kontur; ein Fokus-Schritt
+  je Durchgang wird bei mehr Kontur-Durchgängen so verkleinert, dass die Absenkung in 3 mm
+  bleibt. Die Felder sind nur mit Füllung und *Kontur mitlasern* bedienbar; Ebenenzeile
+  („· Kontur 100 % · 300 mm/min · 2×“) und ein Live-Hinweis zeigen die Einstellung. Planer,
+  Zeitschätzung und Pfadvorschau folgen dem G-Code; ein einziges `M3 I` für den Auftrag.
+  Gespeichert nur, wenn gesetzt; kaputte Werte laden als „wie Ebene“; ohne eigene Werte (oder
+  alle gleich der Ebene) bleiben Projekte und G-Code Byte für Byte gleich.
 - Reihenfolge: Beim Senden (Planer, „Leerfahrten reduzieren“) werden die
   Füllblöcke einer Ebene (je Objekt, Gruppe oder Ebene) nach dem nächsten
   Nachbarn sortiert statt in Objekt-Reihenfolge – Offset-Blöcke nur vorwärts
@@ -801,7 +817,7 @@ Offset-Füllung – *Von innen nach außen*. Jede Änderung ist ein Undo-Schritt
   `export_png` zeichnen sie mit `show_fill=True`.
 - Datei: neue Felder (`fill_mode`, `line_interval_mm`, `hatch_angle`,
   `hatch_bidirectional`, `hatch_outline`, `fill_grouping`, `offset_inside_out`,
-  `fill_overscan_mm`) werden nur geschrieben, wenn sie vom
+  `fill_overscan_mm`, `outline_power`, `outline_speed`, `outline_passes`) werden nur geschrieben, wenn sie vom
   Standard abweichen; alte Dateien laden unverändert.
 - Grenzen: Füllgruppen gelten nur innerhalb einer Ebene; Schnittfuge (Kerf) wirkt nur auf Konturen; mehr als
   20 000 Linien je Richtung werden abgelehnt (Linienabstand vergrößern).

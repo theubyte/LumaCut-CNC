@@ -22,7 +22,7 @@ from PySide6.QtSvg import QSvgGenerator
 
 from .hatch import LINE_FILL_MODES, fill_segments, pass_angles
 from .material import layer_pass_plan
-from .model import CUT_LAYER_FIELDS, FILLABLE_KINDS, Document, Layer, Shape
+from .model import CUT_LAYER_FIELDS, FILLABLE_KINDS, MAX_FOCUS_DROP_MM, Document, Layer, Shape
 from .shape_paths import shape_path, shape_polygons
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, machine_to_screen, to_machine
 
@@ -115,6 +115,10 @@ class JobLayer:
     # ``; PRIORITY p (i OF n)``.
     unit: str = ""
     unit_kind: str = "GROUP"
+    # Eigene Kontur-Einstellung der Füll-Ebene (Layer.outline_settings, LightBurn Sub-Layer
+    # „Line“): "outline" = die Konturen der Ebene als eigener Block nach der Füllung mit
+    # eigener Leistung / eigenem Tempo / eigenen Durchgängen. "" = normale Ebene.
+    sublayer: str = ""
 
 
 def shape_fill_segments(shape: Shape, layer: Layer):
@@ -423,6 +427,43 @@ def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = 
                     pass_fill_angles=layer_fill_pass_angles(layer) if pass_fills else ())
 
 
+OUTLINE_SUFFIX = " (Kontur)"   # Name des Kontur-Blocks im G-Code („; LAYER … (Kontur)“)
+
+
+def split_outline(jl: JobLayer | None, layer: Layer) -> list[JobLayer]:
+    """Füll-Ebene mit eigener Kontur-Einstellung in zwei Blöcke teilen.
+
+    Wie LightBurns Unterebene „Line“ unter einer „Fill“-Ebene: zuerst die Füllung mit allen
+    Durchgängen der Ebene, danach alle Linien der Ebene (Konturen und offene Pfade) mit
+    eigener Leistung / eigenem Tempo / eigenen Durchgängen (:meth:`Layer.outline_settings`).
+    Die Schnittoptionen (Kerf, An-/Abfahrt, Stege, Rampe, Startpunkte …) bleiben am
+    Kontur-Block, die Füllung hat keine Linien. Fokus-Schritt je Durchgang wird für mehr
+    Kontur-Durchgänge so verkleinert, dass die Absenkung in ``MAX_FOCUS_DROP_MM`` bleibt.
+    Ohne eigene Einstellung (Standard) bleibt die Ebene ein Block – Ausgabe wie bisher.
+    """
+    if jl is None:
+        return []
+    own = layer.outline_settings() if hasattr(layer, "outline_settings") else None
+    if own is None or not jl.polylines:
+        return [jl]
+    power, speed, passes = own
+    parts = []
+    if jl.fills or jl.pass_fills:
+        parts.append(replace(jl, polylines=[], tab_points=(), start_points=(),
+                             kept_directions=()))
+    z_step = float(jl.z_step_mm or 0.0)
+    if passes > 1 and z_step > 0:
+        room = max(0.0, MAX_FOCUS_DROP_MM - max(0.0, -float(jl.z_offset_mm or 0.0)))
+        if z_step * (passes - 1) > room + 1e-9:
+            z_step = math.floor(room / (passes - 1) * 1000) / 1000
+    depths = jl.pass_depths_mm if len(jl.pass_depths_mm) == passes else ()
+    parts.append(replace(jl, name=jl.name + OUTLINE_SUFFIX, power_percent=power,
+                         speed_mm_min=speed, passes=passes, z_step_mm=z_step,
+                         pass_depths_mm=depths, fills=[], pass_fills=[], pass_fill_angles=(),
+                         fill_overscan_mm=0.0, fill_scan_offset_mm=0.0, sublayer="outline"))
+    return parts
+
+
 def job_layers(doc: Document) -> list[JobLayer]:
     """Ebenen in Ausführungsreihenfolge (unterste Ebene zuerst).
 
@@ -437,6 +478,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
     :func:`priority_units` mit ``unit_kind`` "PRIORITY" und ``unit`` = "p (i OF n)".
     Gibt es nur eine Einheit (keine Gruppen / eine einzige Priorität), ist das
     Ergebnis dasselbe wie nach Ebenen.
+    Eine Füll-Ebene mit eigener Kontur-Einstellung (LightBurn Sub-Layer „Line“) kommt als
+    zwei Einträge: erst die Füllung, dann die Konturen (:func:`split_outline`).
     """
     layers = [l for l in reversed(doc.layers) if l.visible]
     blocks = {l.id: layer_fill_blocks(doc, l) for l in layers}
@@ -450,8 +493,8 @@ def job_layers(doc: Document) -> list[JobLayer]:
             for key, shapes in units:
                 ids = {s.id for s in shapes}
                 part = [jl for l in layers
-                        if (jl := _job_layer(doc, l, blocks[l.id], ids,
-                                             pass_blocks=passes[l.id])) is not None]
+                        for jl in split_outline(_job_layer(doc, l, blocks[l.id], ids,
+                                                           pass_blocks=passes[l.id]), l)]
                 if part:
                     parts.append((key, part))
             if len(parts) > 1:
@@ -463,7 +506,7 @@ def job_layers(doc: Document) -> list[JobLayer]:
                         for i, (_key, part) in enumerate(parts, 1) for jl in part]
             return [jl for _key, part in parts for jl in part]
     return [jl for l in layers
-            if (jl := _job_layer(doc, l, blocks[l.id], pass_blocks=passes[l.id])) is not None]
+            for jl in split_outline(_job_layer(doc, l, blocks[l.id], pass_blocks=passes[l.id]), l)]
 
 
 def _paint(doc: Document, p: QPainter, line_width_mm: float, show_fill: bool = False) -> None:

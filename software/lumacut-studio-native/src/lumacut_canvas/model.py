@@ -79,8 +79,13 @@ _RAMP_FIELDS = ("ramp_mm", "ramp_start_power", "ramp_outer_only")
 FILL_LAYER_DEFAULTS = {"fill_mode": "none", "line_interval_mm": _hatch.DEFAULT_INTERVAL_MM,
                        "hatch_angle": 0.0, "hatch_bidirectional": True, "hatch_outline": True,
                        "fill_grouping": "individual", "offset_inside_out": False,
-                       "fill_overscan_mm": 0.0, "fill_angle_increment": 0.0}
+                       "fill_overscan_mm": 0.0, "fill_angle_increment": 0.0,
+                       "outline_power": 0.0, "outline_speed": 0.0, "outline_passes": 0}
 FILL_LAYER_FIELDS = tuple(FILL_LAYER_DEFAULTS)
+# Eigene Kontur-Einstellung einer Füll-Ebene wie LightBurns Unterebene (Sub-Layer) „Line“
+# unter einer „Fill“-Ebene: mit „Kontur mitlasern“ lasert die Kontur nach der Füllung mit
+# eigener Leistung / eigenem Tempo / eigenen Durchgängen; 0 = wie die Ebene (Standard).
+OUTLINE_FIELDS = ("outline_power", "outline_speed", "outline_passes")
 # Geschlossene Objektarten, die gefüllt werden (Linie/Freihand/Bild nicht).
 FILLABLE_KINDS = ("rect", "ellipse", "polygon", "text")
 # Verknüpfung mit der Materialbibliothek (lumacut_materials): ``material_ref``
@@ -384,6 +389,10 @@ class Layer:
     offset_inside_out: bool = False  # Offset-Füllung: Ringe von innen nach außen
     fill_overscan_mm: float = 0.0    # Schraffur: Überlauf je Linienende (Laser aus), 0 = aus
     fill_angle_increment: float = 0.0  # Schraffur: Winkel-Schritt je weiterem Durchgang, 0 = aus
+    # Eigene Kontur-Einstellung (OUTLINE_FIELDS, LightBurn Sub-Layer „Line“); 0 = wie die Ebene
+    outline_power: float = 0.0       # Kontur-Leistung in %
+    outline_speed: float = 0.0       # Kontur-Tempo in mm/min
+    outline_passes: int = 0          # Kontur-Durchgänge
     material_ref: str = ""          # Bibliotheksbezug, s. LINK_LAYER_FIELDS
     material_link: bool = False     # True: Dicke ändern wendet die Bibliothek neu an
 
@@ -429,9 +438,27 @@ class Layer:
             fill_overscan_mm=round(_clamp(float(self.fill_overscan_mm),
                                           *_hatch.OVERSCAN_RANGE), 3),
             fill_angle_increment=_clean_increment(self.fill_angle_increment),
+            outline_power=_clean_optional(self.outline_power, POWER_RANGE, 1),
+            outline_speed=_clean_optional(self.outline_speed, SPEED_RANGE, 1),
+            outline_passes=int(_clean_optional(self.outline_passes, PASSES_RANGE, 0)),
             material_ref=str(self.material_ref or "").strip()[:120],
             material_link=bool(self.material_link and self.material_ref),
         )
+
+    def outline_settings(self) -> tuple[float, float, int] | None:
+        """Eigene Kontur-Einstellung ``(Leistung %, Tempo mm/min, Durchgänge)`` oder None.
+
+        Wie LightBurns Unterebene „Line“ unter einer „Fill“-Ebene: nur mit Füllung und
+        „Kontur mitlasern“; nicht gesetzte Werte (0) gelten wie die Ebene. Sind alle drei
+        gleich der Ebene, gibt es keine eigene Einstellung (None) – Ausgabe wie bisher.
+        """
+        if self.fill_mode == "none" or not self.hatch_outline:
+            return None
+        own = (float(self.outline_power or self.power), float(self.outline_speed or self.speed),
+               int(self.outline_passes or self.passes))
+        if own == (float(self.power), float(self.speed), int(self.passes)):
+            return None
+        return own
 
     def to_dict(self) -> dict:
         d = {"id": self.id, "name": self.name, "color": self.color,
@@ -465,7 +492,10 @@ class Layer:
             # Rampe: kaputte Werte → aus (normalized), nur JSON true schaltet „nur außen“ ein
             **{k: (d[k] is True if k == "ramp_outer_only" else d[k])
                for k in _RAMP_FIELDS if k in d},
-            **{k: type(v)(d[k]) for k, v in FILL_LAYER_DEFAULTS.items() if k in d},
+            **{k: type(v)(d[k]) for k, v in FILL_LAYER_DEFAULTS.items()
+               if k in d and k not in OUTLINE_FIELDS},
+            # Eigene Kontur-Einstellung: kaputte Werte → wie die Ebene (normalized)
+            **{k: d[k] for k in OUTLINE_FIELDS if k in d},
             material_ref=str(d.get("material_ref", "")),
             material_link=bool(d.get("material_link", False)),
         ).normalized()
@@ -479,6 +509,20 @@ def _clean_range(value, rng, digits: int) -> float:
         return float(rng[0])
     if not math.isfinite(v):
         return float(rng[0])
+    return round(_clamp(v, *rng), digits) + 0.0
+
+
+def _clean_optional(value, rng, digits: int) -> float:
+    """Optionaler Wert: 0 = nicht gesetzt, sonst im Bereich ``rng`` gerundet; kaputte Werte
+    (Text, NaN, ±inf, Wahrheitswerte, ≤ 0) = 0 (nicht gesetzt)."""
+    if isinstance(value, bool):
+        return 0.0
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(v) or v <= 0:
+        return 0.0
     return round(_clamp(v, *rng), digits) + 0.0
 
 
