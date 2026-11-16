@@ -263,17 +263,16 @@ def test_speed_changes_progress(qapp):
 
 
 def test_timer_drives_playback(qapp):
-    from PySide6.QtTest import QTest
+    from lumacut_canvas.path_preview import PLAY_TICK_MS
     ed = _editor(_doc())
     pv = ed.path_preview
     pv.set_play_speed(1)
     pv.play()
     assert pv._play_timer.isActive()
-    # der Takt führt das Abspielen weiter (großzügige Frist: volle Testläufe unter Last)
-    import time
-    deadline = time.monotonic() + 5.0
-    while pv._play_t <= 0 and time.monotonic() < deadline:
-        QTest.qWait(20)
+    assert pv._play_timer.interval() == PLAY_TICK_MS
+    # der Takt führt das Abspielen weiter – deterministisch über das Timer-Signal statt
+    # Wanduhr (im vollen Testlauf kann ein verspäteter Neubau das Abspielen anhalten)
+    pv._play_timer.timeout.emit()
     assert pv._play_t > 0
     assert pv.playing or pv.limit is None
     pv.pause()
