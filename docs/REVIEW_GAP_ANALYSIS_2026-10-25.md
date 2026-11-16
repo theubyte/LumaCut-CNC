@@ -15315,3 +15315,60 @@ Still open:
   blocks accepted by the Pi, the time estimate and path preview against the real run, the
   fields by finger in touch mode on the Windows tablet and the values in a saved project after
   a restart).
+
+## 85. Status update 2026-11-16 (review round 78)
+
+Done this round (path preview playback and view options – LightBurn's *Preview* window
+„Play“ / „Show traversal moves“ / „Shade according to power“; Canvas drawing tools / Machine /
+Scan Probe / Materials untouched – `path_preview.py` gains playback and two view toggles,
+`toolpath.py` a time axis, `theme.py` a touch-sized slider; model, export, planner and G-code
+writer unchanged):
+
+- Closed since §84 by others: none – main had no commit since `81ceca0` (round 77); the Canvas
+  worktree (`canvas-work`) still has no commit since 2026-10-26.
+- Gap picked: the path preview (priority 3 of the review) could only be scrubbed by hand with
+  the slider. LightBurn's preview plays the job back at an adjustable speed, can hide the
+  traversal moves and shades every cut by its power, so ramps, tab pulses, own outline power,
+  weak engrave layers and image grey levels are visible before sending. Chosen as the last
+  open part of the path-preview priority; view only, so projects and G-code stay unchanged.
+- **Time axis** (`lumacut_canvas/toolpath.py`): `Toolpath.move_times()` (length / feed, rapids
+  at F9000 like `lumacut_job.estimate.RAPID_FEED`, optional axis limit) and
+  `cumulative_times(total_s)` scale those shares so the last move ends exactly at the
+  estimate's G-code time (with acceleration, without approach / parking); `count_until()`
+  gives the moves finished at a time.
+- **Preview** (`lumacut_canvas/path_preview.py`): **„▶ Abspielen“** / „❚❚ Pause“ runs the path
+  in send order from the slider (from the start when the slider is at the end) at 1× / 10× /
+  50× (default) / 200× / 1000× of the estimated real time (40 ms tick); dragging the slider,
+  a rebuild or switching the preview off stops playback. The readout adds „nach ca. …“ – the
+  estimated time up to the slider. **„Leerfahrten“** (on) hides the grey travel moves while
+  lengths / time / run numbers stay. **„Leistung“** (off) shades every cut by its `S` value in
+  16 levels (alpha 0.15 … 1, every cut stays visible). Session-only view state, not saved.
+- **Touch**: buttons ≥ 40 px, slider handle 28 px on a visible groove (`theme.py`). README
+  path preview section updated.
+
+Tests:
+
+- New `tests/test_path_preview_playback.py` (17 tests): move times / feed / axis limit,
+  cumulative times scaled to the estimate, `count_until`; shade levels / alpha; defaults change
+  nothing and G-code / document / undo stay unchanged; hiding travel keeps cuts / lengths / run
+  numbers; shading by `S` in custom G-code and from the planner with a ramp and a weak layer;
+  time axis equal to the estimate's G-code time, readout at the slider; play to the end and
+  stop, duration per speed, pause / resume / scrub / rebuild / preview off stop playback; speed
+  combo; timer (driven through the timer signal – a wall-clock wait failed once in the full
+  suite because a late preview rebuild stopped playback); empty preview; no estimate; touch
+  sizes; main window.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv
+(`/workspace/lcvenv`, PySide6 6.12): **3092 passed, 3 skipped, 1 failed** (14.7 min) – the one
+failure was the wall-clock timer test above, rewritten to use the timer signal; the preview
+test files then pass (31 passed).
+
+Output change for old files: none – view state only; G-code and project files are untouched.
+
+Still open: unchanged from §84 (job placement on the camera image, print-and-cut, rotary,
+min/max corner power, Dot Mode dwell, material-test / Materials items, image dot-size model,
+CoreXY time model). For playback: no per-move laser-on animation of image rows beyond the
+move order (an image is many short `G1` moves, played like any other), and the time axis
+spreads the estimate by length / feed rather than replaying the planner's per-move
+acceleration. Hardware check still needed: playback time vs. a real run on the Pi, and the
+slider / buttons by finger on the Windows tablet.
