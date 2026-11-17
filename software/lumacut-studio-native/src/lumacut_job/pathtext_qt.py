@@ -17,7 +17,7 @@ from lumacut_canvas.alongpath import PathCurve, pick_path, shape_curve
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand
 
 from . import arctext, pathtext
-from .arctext_qt import glyphs_for, spec_from_text
+from .arctext_qt import _FontKindMixin, glyphs_for, missing_note, spec_from_text
 from .pathtext import PathTextSpec
 
 TITLE = "Text auf Pfad"
@@ -38,7 +38,7 @@ def split_selection(doc, ids) -> tuple[str | None, str | None]:
     return path_id, (texts[0] if len(texts) == 1 else None)
 
 
-class PathTextDialog(QDialog):
+class PathTextDialog(_FontKindMixin, QDialog):
     """Einstellungen; ``spec()`` liefert die normalisierte :class:`PathTextSpec`."""
 
     def __init__(self, curve: PathCurve, parent=None, spec: PathTextSpec | None = None,
@@ -61,6 +61,7 @@ class PathTextDialog(QDialog):
         row.addWidget(self.bold)
         row.addWidget(self.italic)
         row.addStretch(1)
+        self._init_font_kind(s.font_family)
         self.height_mm = self._spin(arctext.HEIGHT_RANGE, s.height_mm, " mm",
                                     "Höhe der Großbuchstaben")
         self.position = self._spin(pathtext.POSITION_RANGE, s.position_pct, " %",
@@ -95,6 +96,7 @@ class PathTextDialog(QDialog):
         self.delete_path = QCheckBox("Pfad danach löschen (nur Hilfslinie)")
         self.delete_path.setChecked(False)
         form.addRow("Text", self.text)
+        form.addRow("Schriftart", self.kind)
         form.addRow("Schrift", self.font_box)
         form.addRow("", style)
         form.addRow("Schrifthöhe", self.height_mm)
@@ -148,8 +150,8 @@ class PathTextDialog(QDialog):
                             distance_mm=self.distance.value(),
                             flip=bool(self.side.currentData()), align=self.align.currentData(),
                             rotate=self.rotate.isChecked(),
-                            font_family=self.font_box.currentFont().family(),
-                            bold=self.bold.isChecked(),
+                            font_family=self.family(),
+                            bold=self.bold.isChecked() and not self.kind.currentData(),
                             italic=self.italic.isChecked()).normalized(self.curve.closed)
 
     def replace_source(self) -> bool:
@@ -171,7 +173,7 @@ class PathTextDialog(QDialog):
             self.info.setText(str(exc))
             self.ok_button.setEnabled(False)
             return
-        self.info.setText(res.readout())
+        self.info.setText(res.readout() + missing_note(s.text, s.font_family))
         self.ok_button.setEnabled(bool(shapes))
 
 

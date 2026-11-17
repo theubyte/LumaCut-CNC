@@ -19,7 +19,10 @@ der Winkel bezieht: Mitte (``center``), Anfang (``start``) oder Ende
 
 Die Glyphen kommen als :class:`Glyph` (Vorschub + Umrisse relativ zum
 Ursprung auf der Grundlinie, Y nach unten); die Qt-Seite
-(:mod:`lumacut_job.arctext_qt`) liefert sie aus der Schrift.
+(:mod:`lumacut_job.arctext_qt`) liefert sie aus der Schrift. Glyphen einer
+Einlinien-Schrift (:mod:`lumacut_canvas.linefont`, ``Glyph.open``) bestehen aus
+offenen Strichen und werden offene ``path``-Objekte (je Buchstabe ein Objekt, je
+Strich ein Ring) – einmal als Linie gelasert, nie gefüllt.
 """
 
 from __future__ import annotations
@@ -44,11 +47,15 @@ ALIGN_LABELS = {"center": "Mitte", "start": "Anfang", "end": "Ende"}
 
 @dataclass(frozen=True)
 class Glyph:
-    """Ein Zeichen: Vorschub (mm) und Umrisse relativ zum Grundlinien-Ursprung."""
+    """Ein Zeichen: Vorschub (mm) und Umrisse relativ zum Grundlinien-Ursprung.
+
+    ``open``: die Ringe sind offene Striche einer Einlinien-Schrift (ab 2 Punkten),
+    sonst geschlossene Umrisse (ab 3 Punkten)."""
 
     char: str
     advance: float
     rings: tuple[tuple[Point, ...], ...] = ()
+    open: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,6 +94,7 @@ class Placement:
     rotation_deg: float       # Drehung des Buchstabens (Uhrzeigersinn)
     anchor: Point             # Punkt auf dem Kreis
     rings: list[Ring] = field(default_factory=list)
+    open: bool = False        # offene Striche (Einlinien-Schrift)
 
 
 def point_on_circle(center: Point, radius: float, angle_deg: float) -> Point:
@@ -144,7 +152,7 @@ def place_glyphs(glyphs: list[Glyph], radius_mm: float, angle_deg: float = 0.0,
                 du = u - g.advance / 2.0
                 pts.append((anchor[0] + du * c - v * si, anchor[1] + du * si + v * c))
             rings.append(pts)
-        out.append(Placement(g.char, ang, rot, anchor, rings))
+        out.append(Placement(g.char, ang, rot, anchor, rings, g.open))
         s += g.advance + spacing_mm
     return out
 
@@ -173,20 +181,30 @@ def arc_shapes(glyphs: list[Glyph], spec: ArcSpec, layer_id: str,
     dx, dy = tx - (x0 + x1) / 2.0, ty - (y0 + y1) / 2.0
     cdx, cdy = clamp_offset(Rect(x0 + dx, y0 + dy, x1 - x0, y1 - y0))
     dx, dy = dx + cdx, dy + cdy
+    return letter_shapes(places, layer_id, dx, dy)
+
+
+def letter_shapes(places, layer_id: str, dx: float = 0.0, dy: float = 0.0) -> list[Shape]:
+    """Gesetzte Buchstaben (``rings`` / ``open`` je Placement) als gruppierte Objekte:
+    Umrissschrift je Buchstabe ein ``polygon`` mit Löchern, Einlinien-Schrift je
+    Buchstabe ein offener ``path`` mit einem Ring je Strich. Verschoben um ``dx``/``dy``."""
     group = new_id()
     out = []
-    for rings in rings_all:
+    for p in places:
+        if not p.rings:
+            continue
+        least = 2 if p.open else 3
         flat: list[Point] = []
         starts = []
-        for ring in rings:
-            if len(ring) < 3:
+        for ring in p.rings:
+            if len(ring) < least:
                 continue
             if flat:
                 starts.append(len(flat))
             flat.extend((x + dx, y + dy) for x, y in ring)
-        if len(flat) < 3:
+        if len(flat) < least:
             continue
-        sh = Shape.from_points("polygon", flat, layer_id, rings=starts)
+        sh = Shape.from_points("path" if p.open else "polygon", flat, layer_id, rings=starts)
         sh.groups = (group,)
         out.append(sh)
     return out

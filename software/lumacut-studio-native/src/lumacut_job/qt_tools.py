@@ -1408,12 +1408,13 @@ class JobTools(QObject):
 
     def arc_text(self, spec=None, replace: bool | None = None) -> list[str]:
         """Bogentext einfügen (ein Undo-Schritt); ein ausgewählter Text wird übernommen."""
+        from .arctext import ArcSpec
         from .arctext_qt import ArcTextDialog, insert_arc_text, spec_from_text
         doc = self.editor.document
         sel = [i for i in (self.editor.selection or ()) if doc.has_shape(i)]
         src = doc.shape(sel[0]) if len(sel) == 1 and doc.shape(sel[0]).kind == "text" else None
         if spec is None:
-            dlg = ArcTextDialog(self.window, spec_from_text(src) if src else None,
+            dlg = ArcTextDialog(self.window, spec_from_text(src) if src else self._new_text_spec(ArcSpec),
                                 can_replace=src is not None)
             if dlg.exec() != QDialog.Accepted:
                 return []
@@ -1429,11 +1430,19 @@ class JobTools(QObject):
                   + (" – Text ersetzt" if replace_id else ""))
         return ids
 
+    def _new_text_spec(self, cls):
+        """Vorbelegung ohne ausgewählten Text: die zuletzt für neue Texte gewählte
+        Einlinien-Schrift (PropertyBar), sonst die Standardwerte."""
+        from lumacut_canvas.linefont import is_line_font
+        family = getattr(self.editor, "text_font_family", "")
+        return cls(font_family=family) if is_line_font(family) else None
+
     def path_text(self, spec=None, replace: bool | None = None,
                   remove_path: bool = False) -> list[str]:
         """Text auf Pfad (ein Undo-Schritt): Auswahl = ein Pfad, optional ein Text."""
         from lumacut_canvas.alongpath import shape_curve
 
+        from .pathtext import PathTextSpec
         from .pathtext_qt import (TITLE, PathTextDialog, insert_path_text, spec_from_text_shape,
                                   split_selection)
         doc = self.editor.document
@@ -1449,7 +1458,8 @@ class JobTools(QObject):
                 self._msg(f"{TITLE}: {exc}")
                 return []
             dlg = PathTextDialog(curve, self.window,
-                                 spec_from_text_shape(doc.shape(text_id)) if text_id else None,
+                                 spec_from_text_shape(doc.shape(text_id)) if text_id
+                                 else self._new_text_spec(PathTextSpec),
                                  can_replace=text_id is not None)
             if dlg.exec() != QDialog.Accepted:
                 return []

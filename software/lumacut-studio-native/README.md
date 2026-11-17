@@ -582,8 +582,14 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
 - **Bogentext** („Bogentext…“, *Alt+B*): Text entlang eines Kreises als Vektor-Umrisse (ein
   Polygon je Buchstabe, gruppiert); oben/außen im Uhrzeigersinn oder unten/innen, Radius, Winkel,
   Bezugspunkt Mitte/Anfang/Ende, Zeichenabstand, Schrift/Fett/Kursiv. Ist genau ein Textobjekt
-  ausgewählt, wird es übernommen und kann ersetzt werden. Code: `src/lumacut_job/arctext.py`,
-  `arctext_qt.py`.
+  ausgewählt, wird es übernommen und kann ersetzt werden. „Schriftart“ wählt
+  „Umrissschrift“ oder eine **Einlinien-Schrift** („Einlinie (Sans)“ / „Einlinie
+  (Schreibschrift)“, wie LightBurns Single-Line-Fonts auf dem Kreis): dann ist jeder Buchstabe
+  ein offener Pfad mit einem Teilpfad je Strich, einmal als Linie gelasert und nie gefüllt
+  (ideal für Ringbeschriftungen auf Untersetzern, Skalen und Stempeln); Fett ist dann aus,
+  fehlende Zeichen nennt die Info („?“). Ein ausgewählter Einlinien-Text bringt seine Schrift
+  mit, neue Bogentexte übernehmen die zuletzt für Texte gewählte Einlinien-Schrift; „Bogentext
+  bearbeiten“ behält sie. Code: `src/lumacut_job/arctext.py`, `arctext_qt.py`.
 - **Text auf Pfad** („Text auf Pfad…“, *Alt+Umschalt+P*, wie LightBurns *Text on Path*):
   Text an eine ausgewählte Linie, einen (offenen) Pfad, ein Polygon / einen Stern, ein Rechteck
   oder eine Ellipse hängen – ein Polygon je Buchstabe, gruppiert, wie „Text in Pfade“ unabhängig
@@ -597,7 +603,8 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   mittig auf dem Pfad), Zeichenabstand, Schrift / Fett / Kursiv; Info mit Text- und Pfadlänge
   (auf offenen Pfaden wird über das Ende hinaus verlängert und gemeldet). Ein mit ausgewählter
   Text wird übernommen und kann ersetzt werden, der Pfad optional gelöscht (nur Hilfslinie);
-  ein Rückgängig-Schritt. Code: `src/lumacut_job/pathtext.py`, `pathtext_qt.py`, Pfad-Kurve in
+  ein Rückgängig-Schritt. Mit „Schriftart“ = Einlinie wird jeder Buchstabe ein offener Pfad
+  (Striche, nie gefüllt) – wie beim Bogentext. Code: `src/lumacut_job/pathtext.py`, `pathtext_qt.py`, Pfad-Kurve in
   `lumacut_canvas/alongpath.py`.
 - **Code bearbeiten** („Code bearbeiten…“, *Alt+E*, oder Doppelklick auf einen Code): QR-Code,
   Barcode, Data Matrix, Aztec-, PDF417-Code und Bogentext bleiben nach dem Einfügen bearbeitbar. Der Dialog öffnet mit

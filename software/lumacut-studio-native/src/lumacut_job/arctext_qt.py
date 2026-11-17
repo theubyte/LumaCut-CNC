@@ -2,7 +2,10 @@
 
 Qt liefert nur die Buchstabenumrisse (``QPainterPath.addText``) und die
 Vorschübe (``QFontMetricsF``, mit Unterschneidung); das Setzen auf den Kreis
-rechnet :func:`lumacut_job.arctext.place_glyphs`.
+rechnet :func:`lumacut_job.arctext.place_glyphs`. Einlinien-Schriften
+(:mod:`lumacut_canvas.linefont`, LightBurns *single-line fonts*) liefern ihre
+Striche ohne Qt (:func:`line_glyphs_for`); die Auswahl „Schriftart“
+(:func:`font_kind_box`) teilen sich Bogentext und „Text auf Pfad…“.
 """
 
 from __future__ import annotations
@@ -14,8 +17,11 @@ from PySide6.QtGui import QFont, QFontMetricsF, QPainterPath, QTransform
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFontComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QWidget)
 
+from lumacut_canvas import linefont
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand
-from lumacut_canvas.shape_paths import FLATTEN_TOL_MM, shape_text_path, text_font
+from lumacut_canvas.linefont import LINE_FONT_LABELS, LINE_FONTS, is_line_font, missing_chars
+from lumacut_canvas.shape_paths import (FLATTEN_TOL_MM, LINE_FONT_EM, shape_text_path, text_bounds,
+                                        text_font)
 
 from . import arctext
 from .arctext import ArcSpec, Glyph
@@ -32,9 +38,42 @@ def cap_height_pt(font: QFont) -> float:
     return cap if cap > 0 else fm.ascent() * 0.7
 
 
+OUTLINE_LABEL = "Umrissschrift"
+# Versalhöhe der Hershey-Glyphen (−12 … 9) in Hershey-Einheiten.
+LINE_CAP_UNITS = linefont.BASE_LINE + 12.0
+
+
+def line_glyphs_for(text: str, family: str, height_mm: float, italic: bool = False) -> list[Glyph]:
+    """Einlinien-Buchstaben als offene :class:`Glyph` in mm (``height_mm`` = Versalhöhe).
+
+    Gleiche Striche wie ein Einlinien-Textobjekt (:func:`linefont.text_strokes`):
+    Vorschub der Hershey-Glyphe, „Kursiv“ schräg gestellt, „Fett“ ohne Wirkung,
+    unbekannte Zeichen als „?“."""
+    scale = float(height_mm) / LINE_CAP_UNITS
+    out = []
+    for ch in text:
+        g = linefont.glyph(family, ch)
+        rings = []
+        if not ch.isspace():
+            for stroke in g.strokes:
+                pts = []
+                for gx, gy in stroke:
+                    px = gx - g.left
+                    if italic:
+                        px += linefont.ITALIC_SLANT * (linefont.BASE_LINE - gy)
+                    pts.append((px * scale, (gy - linefont.BASE_LINE) * scale))
+                if len(pts) >= 2:
+                    rings.append(tuple(pts))
+        out.append(Glyph(ch, max(0.0, g.advance * scale), tuple(rings), open=True))
+    return out
+
+
 def glyphs_for(text: str, family: str, height_mm: float, bold: bool = False,
                italic: bool = False, tol: float = FLATTEN_TOL_MM) -> list[Glyph]:
-    """Buchstaben als :class:`Glyph` in mm; ``height_mm`` = Höhe der Großbuchstaben."""
+    """Buchstaben als :class:`Glyph` in mm; ``height_mm`` = Höhe der Großbuchstaben.
+    Einlinien-Schriften geben offene Striche (:func:`line_glyphs_for`)."""
+    if is_line_font(family):
+        return line_glyphs_for(text, family, height_mm, italic)
     font = text_font(family, bold, italic)
     fm = QFontMetricsF(font)
     scale = float(height_mm) / cap_height_pt(font)
@@ -63,16 +102,66 @@ def glyphs_for(text: str, family: str, height_mm: float, bold: bool = False,
 def spec_from_text(shape) -> ArcSpec:
     """Vorbelegung aus einem Textobjekt: Text, Schrift und Großbuchstabenhöhe."""
     text = " ".join((shape.text or "").split("\n"))
-    font = text_font(shape.font_family, shape.font_bold, shape.font_italic)
-    r = shape_text_path(shape).boundingRect()
-    cap = abs(shape.geom.h) / r.height() * cap_height_pt(font) if r.height() > 0 else 8.0
+    if is_line_font(shape.font_family):   # Versalhöhe der Hershey-Striche in Aufbau-Einheiten
+        r = text_bounds(shape_text_path(shape))
+        cap_units = LINE_CAP_UNITS * LINE_FONT_EM / linefont.EM_UNITS
+    else:
+        r = shape_text_path(shape).boundingRect()
+        cap_units = cap_height_pt(text_font(shape.font_family, shape.font_bold, shape.font_italic))
+    cap = abs(shape.geom.h) / r.height() * cap_units if r.height() > 0 else 8.0
     width = abs(shape.geom.w)
     return ArcSpec(text=text, height_mm=round(cap, 1), radius_mm=round(max(10.0, width / 2.0), 1),
                    font_family=shape.font_family, bold=shape.font_bold,
                    italic=shape.font_italic).normalized()
 
 
-class ArcTextDialog(QDialog):
+def font_kind_box(family: str) -> QComboBox:
+    """Auswahl „Umrissschrift“ / „Einlinie (Sans)“ / „Einlinie (Schreibschrift)“
+    (Daten: ``""`` oder der Name der Einlinien-Schrift), vorbelegt nach ``family``."""
+    box = QComboBox()
+    box.addItem(OUTLINE_LABEL, "")
+    for name in LINE_FONTS:
+        box.addItem(LINE_FONT_LABELS[name], name)
+    box.setCurrentIndex(max(0, box.findData(family if is_line_font(family) else "")))
+    box.setToolTip("Umrissschrift: Buchstaben als geschlossene Umrisse (Füllen, Schneiden). "
+                   "Einlinie: jeder Buchstabe ein offener Strich, einmal als Linie gelasert – "
+                   "wie LightBurns Single-Line-Fonts / xTools Einlinien-Schrift")
+    return box
+
+
+def missing_note(text: str, family: str) -> str:
+    """Hinweis auf Zeichen, die eine Einlinien-Schrift nur als „?“ zeigt (sonst leer)."""
+    if not is_line_font(family):
+        return ""
+    missing = missing_chars(text, family)
+    return f" – ohne Zeichen für „{missing}“ (erscheint als „?“)" if missing else ""
+
+
+class _FontKindMixin:
+    """Gemeinsame Schriftart-Logik der Dialoge (``kind``, ``font_box``, ``bold``)."""
+
+    def _init_font_kind(self, family: str) -> None:
+        self.kind = font_kind_box(family)
+        if is_line_font(family):
+            self.font_box.setCurrentFont(QFont(_DEFAULT_OUTLINE))
+        self.kind.currentIndexChanged.connect(self._kind_changed)
+        self._kind_changed()
+
+    def _kind_changed(self) -> None:
+        line = bool(self.kind.currentData())
+        self.font_box.setEnabled(not line)
+        self.bold.setEnabled(not line)
+        if hasattr(self, "info"):
+            self._update()
+
+    def family(self) -> str:
+        return self.kind.currentData() or self.font_box.currentFont().family()
+
+
+_DEFAULT_OUTLINE = "Segoe UI"
+
+
+class ArcTextDialog(_FontKindMixin, QDialog):
     """Bogentext-Einstellungen; ``spec()`` liefert die normalisierte :class:`ArcSpec`."""
 
     def __init__(self, parent=None, spec: ArcSpec | None = None, can_replace: bool = False):
@@ -93,6 +182,7 @@ class ArcTextDialog(QDialog):
         row.addWidget(self.bold)
         row.addWidget(self.italic)
         row.addStretch(1)
+        self._init_font_kind(s.font_family)
         self.height_mm = self._mm(arctext.HEIGHT_RANGE, s.height_mm, "Höhe der Großbuchstaben")
         self.radius = self._mm(arctext.RADIUS_RANGE, s.radius_mm, "Radius der Grundlinie")
         self.side = QComboBox()
@@ -120,6 +210,7 @@ class ArcTextDialog(QDialog):
         self.replace.setChecked(can_replace)
         self.replace.setVisible(can_replace)
         form.addRow("Text", self.text)
+        form.addRow("Schriftart", self.kind)
         form.addRow("Schrift", self.font_box)
         form.addRow("", style)
         form.addRow("Schrifthöhe", self.height_mm)
@@ -170,7 +261,7 @@ class ArcTextDialog(QDialog):
                        height_mm=self.height_mm.value(), spacing_mm=self.spacing.value(),
                        angle_deg=self.angle.value(), bottom=bool(self.side.currentData()),
                        align=self.align.currentData(),
-                       font_family=self.font_box.currentFont().family(), bold=self.bold.isChecked(),
+                       font_family=self.family(), bold=self.bold.isChecked() and not self.kind.currentData(),
                        italic=self.italic.isChecked()).normalized()
 
     def replace_source(self) -> bool:
@@ -193,7 +284,7 @@ class ArcTextDialog(QDialog):
             return
         sweep = math.degrees(span / s.radius_mm)
         self.info.setText(f"Textlänge {span:.1f} mm, Bogen {sweep:.0f}° von 360°, "
-                          f"Kreis Ø {2 * s.radius_mm:.1f} mm")
+                          f"Kreis Ø {2 * s.radius_mm:.1f} mm" + missing_note(s.text, s.font_family))
         self.ok_button.setEnabled(True)
 
 
@@ -237,4 +328,5 @@ def insert_arc_text(editor, spec: ArcSpec, replace_id: str | None = None,
     return ids
 
 
-__all__ = ["ArcTextDialog", "glyphs_for", "insert_arc_text", "spec_from_text"]
+__all__ = ["ArcTextDialog", "OUTLINE_LABEL", "font_kind_box", "glyphs_for", "insert_arc_text",
+           "line_glyphs_for", "missing_note", "spec_from_text"]

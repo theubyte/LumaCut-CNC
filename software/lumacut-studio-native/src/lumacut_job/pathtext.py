@@ -25,7 +25,9 @@ rechts). Offene Pfade werden über ihre Enden hinaus geradlinig verlängert –
 
 Das Ergebnis sind gruppierte ``polygon``-Objekte (ein Objekt je Buchstabe, mit
 Löchern) – wie „Text in Pfade“ und Bogentext unabhängig von installierten
-Schriften und für Füllen, Schneiden, Kerf, Stege usw. nutzbar.
+Schriften und für Füllen, Schneiden, Kerf, Stege usw. nutzbar. Mit einer
+Einlinien-Schrift (``Glyph.open``) wird jeder Buchstabe ein offener ``path``
+(ein Ring je Strich), einmal als Linie gelasert und nie gefüllt.
 """
 
 from __future__ import annotations
@@ -34,10 +36,11 @@ import math
 from dataclasses import dataclass, field
 
 from lumacut_canvas.alongpath import PathCurve
-from lumacut_canvas.model import Shape, new_id
+from lumacut_canvas.model import Shape
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
-from .arctext import ALIGN_LABELS, ALIGNS, HEIGHT_RANGE, MAX_CHARS, SPACING_RANGE, Glyph, text_span
+from .arctext import (ALIGN_LABELS, ALIGNS, HEIGHT_RANGE, MAX_CHARS, SPACING_RANGE, Glyph, letter_shapes,
+                      text_span)
 
 Point = tuple[float, float]
 Ring = list[Point]
@@ -88,6 +91,7 @@ class Placement:
     rotation_deg: float       # Drehung des Buchstabens (Uhrzeigersinn, 0 = aufrecht)
     anchor: Point
     rings: list[Ring] = field(default_factory=list)
+    open: bool = False        # offene Striche (Einlinien-Schrift)
 
 
 @dataclass
@@ -147,7 +151,7 @@ def place_on_path(glyphs: list[Glyph], curve: PathCurve, spec: PathTextSpec) -> 
                 du = u - g.advance / 2.0
                 pts.append((base[0] + du * c - v * si, base[1] + du * si + v * c))
             rings.append(pts)
-        out.append(Placement(g.char, mid, rot, base, rings))
+        out.append(Placement(g.char, mid, rot, base, rings, g.open))
         cur += g.advance + s.spacing_mm
     return PathTextResult(out, span, L, curve.closed, overhang)
 
@@ -169,22 +173,7 @@ def pathtext_shapes(glyphs: list[Glyph], curve: PathCurve, spec: PathTextSpec,
     if x0 < -_TOL or y0 < -_TOL or x1 > WORK_WIDTH_MM + _TOL or y1 > WORK_HEIGHT_MM + _TOL:
         raise ValueError("Der Text ragt aus der Arbeitsfläche – Seite, Abstand, Lage oder "
                          "Schrifthöhe ändern")
-    group = new_id()
-    out = []
-    for rings in rings_all:
-        flat: list[Point] = []
-        starts = []
-        for ring in rings:
-            if len(ring) < 3:
-                continue
-            if flat:
-                starts.append(len(flat))
-            flat.extend(ring)
-        if len(flat) < 3:
-            continue
-        sh = Shape.from_points("polygon", flat, layer_id, rings=starts)
-        sh.groups = (group,)
-        out.append(sh)
+    out = letter_shapes(res.placements, layer_id)
     return out, res
 
 
