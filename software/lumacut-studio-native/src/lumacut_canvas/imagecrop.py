@@ -26,7 +26,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from .model import FILLABLE_KINDS, Geometry, Shape, rotate_point
+from .model import FILLABLE_KINDS, Geometry, Shape, is_closed_shape, rotate_point
 
 MASK_KINDS = FILLABLE_KINDS
 
@@ -92,7 +92,7 @@ def decode_png(png: bytes) -> tuple[np.ndarray, np.ndarray | None]:
 
 def mask_shapes(shapes) -> list[Shape]:
     """The shapes that can serve as a mask (closed, not images)."""
-    return [s for s in shapes if s.kind in MASK_KINDS]
+    return [s for s in shapes if s.kind in MASK_KINDS and is_closed_shape(s)]
 
 
 def mask_path(shapes):

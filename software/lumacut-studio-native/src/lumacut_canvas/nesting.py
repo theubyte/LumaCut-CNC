@@ -35,7 +35,7 @@ from shapely.geometry import LineString, Polygon, box
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from .model import Document, Geometry, Shape
+from .model import Document, Geometry, Shape, is_closed_shape
 from .workarea import WORK_RECT, Rect
 
 SPACING_MM = 2.0
@@ -83,7 +83,8 @@ def shape_footprint(shape: Shape) -> BaseGeometry:
     for poly in shape_polygons(shape, _OUTLINE_TOL_MM):
         if len(poly) < 2:
             continue
-        if shape.kind in _OPEN_KINDS and not _is_loop(poly):
+        if (shape.kind in _OPEN_KINDS or shape.kind == "text" and not is_closed_shape(shape)) \
+                and not _is_loop(poly):   # Einlinien-Text: Striche als Linien
             parts.append(LineString(poly))
         elif len(poly) >= 3:
             p = Polygon(poly)

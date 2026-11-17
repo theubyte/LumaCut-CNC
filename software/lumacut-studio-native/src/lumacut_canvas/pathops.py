@@ -16,7 +16,7 @@ from shapely.geometry import LineString, MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from .model import FILLABLE_KINDS, Document, Shape
+from .model import Document, Shape, is_closed_shape
 from .shape_paths import FLATTEN_TOL_MM, shape_polygons
 
 OPS = ("union", "subtract", "intersect", "xor", "weld")
@@ -50,7 +50,7 @@ def _rings(shape: Shape) -> list[list[tuple[float, float]]]:
 
 
 def is_closed(shape: Shape) -> bool:
-    return shape.kind in FILLABLE_KINDS
+    return is_closed_shape(shape)
 
 
 def shape_area(shape: Shape) -> BaseGeometry:
@@ -180,21 +180,27 @@ def offset(shapes: Iterable[Shape], distance_mm: float, join: str = "round") -> 
 
 def text_to_outline(shape: Shape) -> Shape | None:
     """Text als Pfad (ein Polygon mit allen Buchstaben-Ringen); Füllung und
-    G-Code bleiben identisch, der Text hängt danach nicht mehr von Schriften ab."""
+    G-Code bleiben identisch, der Text hängt danach nicht mehr von Schriften ab.
+    Einlinien-Text wird ein offener Pfad mit einem Ring je Strich."""
     if shape.kind != "text":
         raise PathOpError("Nur Textobjekte lassen sich in Pfade umwandeln.")
-    rings = _rings(shape)
+    closed = is_closed_shape(shape)
+    # Einlinien-Schrift: offene Striche bleiben offen (Pfad „path“, je Strich ein Ring;
+    # ein in sich geschlossener Strich behält seinen Endpunkt = Anfangspunkt).
+    rings = _rings(shape) if closed else [
+        pts for pts in shape_polygons(shape, _FLATTEN_TOL_MM) if len(pts) >= 2]
+    least = 3 if closed else 2
     pts: list[tuple[float, float]] = []
     starts: list[int] = []
     for r in rings:
-        if len(r) < 3:
+        if len(r) < least:
             continue
         if pts:
             starts.append(len(pts))
         pts.extend(r)
-    if len(pts) < 3:
+    if len(pts) < least:
         return None
-    out = Shape.from_points("polygon", pts, shape.layer_id, rings=starts)
+    out = Shape.from_points("polygon" if closed else "path", pts, shape.layer_id, rings=starts)
     out.groups = shape.groups
     out.priority = shape.priority
     out.reverse = shape.reverse     # umgekehrte Laufrichtung gilt für alle Buchstaben

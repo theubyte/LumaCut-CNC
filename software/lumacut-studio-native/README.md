@@ -1034,6 +1034,23 @@ Drehung, Ellipsen und Text werden berücksichtigt.
   Ein Undo-Schritt für die ganze Auswahl. Wirkt auf Anzeige, Füllung, G-Code, SVG/PNG-Export,
   „In Pfade“ und Seriennummern. Gespeichert als `"weld": true` nur, wenn gesetzt. Code:
   `shape_paths.weld_path`, `lumacut_canvas/text_ui.py`.
+- **Einlinien-Schrift** (PropertyBar, Auswahl links vor der Schriftart, wie LightBurns
+  *Single-Line Fonts* und xTools Einlinien-Schriften): „Umrissschrift“ (die gewählte
+  Schriftart), **„Einlinie (Sans)“** oder **„Einlinie (Schreibschrift)“**. Bei einer
+  Einlinien-Schrift ist jeder Buchstabe ein einzelner offener Strich (Hershey-Schriften
+  *Roman Simplex* / *Script Simplex*), den der Laser genau einmal abfährt – schnell, dünn und
+  gleichmäßig für Beschriftungen, Skalen, kleine Nummern, Unterschriften und Stifte; ein
+  Umriss-Text wird dagegen doppelt umfahren oder flächig gefüllt. Umlaute, ß, Akzente, €,
+  °, Gedankenstrich, „Anführungszeichen“ und … sind dabei, andere Zeichen erscheinen als „?“
+  (die Statusleiste nennt sie). Größe, Kursiv (schräg gestellt), Abstand, Zeilen,
+  Ausrichtung und ¶ wirken wie gewohnt; Fett und Verschweißen sind aus. Einlinien-Text wird
+  nie gefüllt – auch auf einer Füll-Ebene wird er als Linie gelasert – und ist keine Maske
+  zum Zuschneiden; „In Pfade“ macht daraus einen offenen Pfad mit einem Teilpfad je Strich.
+  Die letzte Wahl gilt für neue Texte, „Umrissschrift“ führt zur zuletzt gewählten
+  Schriftart zurück; ein Undo-Schritt für die ganze Auswahl. Gespeichert als Schriftname
+  (`"font": "LumaCut Einlinie"` / `"LumaCut Einlinie Schreibschrift"`), kein neuer
+  Schlüssel. Code: `lumacut_canvas/linefont.py` (Glyphen in `linefont_data.py`),
+  `shape_paths.line_text_path`, `model.is_closed_shape`, `lumacut_canvas/text_ui.py`.
 - Polygone können dafür mehrere Ringe haben (`"rings"` in der Datei, nur wenn vorhanden).
 
 ### Schnittstellen für andere Module (Scan & Probe)

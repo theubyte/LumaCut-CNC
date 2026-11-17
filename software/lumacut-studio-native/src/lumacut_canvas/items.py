@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem, QWidget
 
 from . import theme
 from .touch import MOUSE, TouchMetrics
-from .model import Geometry, Layer, Shape, rotate_point
+from .model import Geometry, Layer, Shape, is_closed_shape, rotate_point
 from .shape_paths import geometry_transform, shape_path
 from .workarea import Rect
 
@@ -46,11 +46,14 @@ class ShapeItem(QGraphicsItem):
         self._kind = shape.kind
         self._geom = shape.geom.copy()
         self._png: bytes | None = None
+        self._filled = False   # Text mit Umrissschrift: gefüllt gezeichnet
         self.update_from(shape, layer)
 
     def update_from(self, shape: Shape, layer: Layer) -> None:
         self.prepareGeometryChange()
         self._kind = shape.kind
+        # Einlinien-Text (offene Striche) wird nur als Linie gezeichnet, nicht gefüllt.
+        self._filled = shape.kind == "text" and is_closed_shape(shape)
         self._geom = shape.geom.copy()
         self._png = shape.image.png if shape.kind == "image" and shape.image else None
         self._path = shape_path(shape)
@@ -117,7 +120,7 @@ class ShapeItem(QGraphicsItem):
         if self._png is not None:
             self._paint_image(p)
         p.setPen(pen)
-        if self._kind == "text":
+        if self._filled:
             fill = QColor(self._color)
             fill.setAlpha(170)
             p.setBrush(QBrush(fill))

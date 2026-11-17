@@ -36,7 +36,7 @@ from shapely.geometry import LineString, Point as SPoint
 from shapely.ops import substring, unary_union
 from shapely.strtree import STRtree
 
-from .model import FILLABLE_KINDS, Shape
+from .model import FILLABLE_KINDS, Shape, is_closed_shape
 from .pathjoin import JOIN_TOLERANCE_MM, is_open, open_pieces
 
 TRIM_MAX_MM = 3.0
@@ -123,7 +123,7 @@ def _closed_outlines(shapes: Iterable[Shape]) -> list[LineString]:
     out: list[LineString] = []
     for s in shapes:
         if s.kind not in FILLABLE_KINDS or s.generator:
-            continue
+            continue   # Einlinien-Text schneidet mit seinen offenen Strichen
         from .shape_paths import shape_polygons
         for ring in shape_polygons(s, 0.01):
             if len(ring) >= 2:
@@ -217,6 +217,9 @@ def shape_rings(shape: Shape) -> list[tuple[list[Point], bool]]:
         pts = _world_points(shape)
         return [(_close(pts[a:b]), True) for a, b in shape.ring_ranges() if b - a >= 2]
     from .shape_paths import shape_polygons
+    if not is_closed_shape(shape):   # Einlinien-Text: Striche nicht schließen
+        return [(r, len(r) > 2 and r[0] == r[-1]) for r in shape_polygons(shape, _FLATTEN_MM)
+                if len(r) >= 2]
     return [(_close(r), True) for r in shape_polygons(shape, _FLATTEN_MM) if len(r) >= 2]
 
 

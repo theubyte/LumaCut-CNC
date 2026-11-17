@@ -34,7 +34,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from .model import FILLABLE_KINDS, Shape, rotate_point
+from .model import Shape, is_closed_shape, rotate_point
 
 Point = tuple[float, float]
 
@@ -441,7 +441,7 @@ def duplicate_key(shape: Shape):
     """Vergleichsschlüssel (Ebene, geschlossen, Ringe) oder None (nicht vergleichbar)."""
     if shape.kind == "image" or shape.generator:
         return None
-    closed = shape.kind in FILLABLE_KINDS
+    closed = is_closed_shape(shape)
     if shape.kind in OPEN_KINDS and not shape.curves:
         rings = open_pieces(shape)
     else:

@@ -33,7 +33,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from .model import FILLABLE_KINDS, Shape, rotate_point
+from .model import Shape, is_closed_shape, rotate_point
 from .pathjoin import _common_groups, nest_rings
 
 Point = tuple[float, float]
@@ -52,7 +52,7 @@ def can_combine(shape: Shape) -> bool:
 
 
 def is_closed_kind(shape: Shape) -> bool:
-    return shape.kind in FILLABLE_KINDS
+    return is_closed_shape(shape)
 
 
 def _world(pts: Iterable[Point], rot: float, center: Point) -> list[Point]:

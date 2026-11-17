@@ -18,14 +18,15 @@ import math
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QButtonGroup, QDoubleSpinBox, QFontComboBox, QHBoxLayout, QInputDialog,
-                               QLabel, QToolButton, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDoubleSpinBox, QFontComboBox, QHBoxLayout,
+                               QInputDialog, QLabel, QToolButton, QWidget)
 
 from . import icons
 from .edit_commands import ReplaceShapeCommand
+from .linefont import LINE_FONT_LABELS, LINE_FONTS, is_line_font, missing_chars
 from .model import (LETTER_SPACING_RANGE, LINE_SPACING_RANGE, TEXT_ALIGN_LABELS, TEXT_ALIGNS, Shape,
                     read_letter_spacing, read_line_spacing, read_text_align, rotate_point)
-from .shape_paths import em_units, shape_text_path, text_aspect, text_font, text_layout
+from .shape_paths import shape_text_path, text_aspect, text_bounds, text_em, text_layout
 
 MM_PER_PT = 25.4 / 72.0
 SIZE_RANGE_PT = (2.0, 2000.0)
@@ -33,8 +34,8 @@ SIZE_RANGE_PT = (2.0, 2000.0)
 
 def _em_ratio(s: Shape) -> float:
     """Boxhöhe / Geviert für Text und Schrift von ``s`` (aus dem Umriss)."""
-    em = em_units(text_font(s.font_family, s.font_bold, s.font_italic))
-    h = shape_text_path(s).boundingRect().height()
+    em = text_em(s.font_family, s.font_bold, s.font_italic)
+    h = text_bounds(shape_text_path(s)).height()
     return h / em if h > 0 else 1.0
 
 
@@ -81,6 +82,13 @@ TIP_WELD = ("Buchstaben verschweißen (wie LightBurn „Weld“): überlappende 
             "Schreibschrift, negativer Zeichenabstand, enge Zeilen – werden zu einem Umriss "
             "vereinigt. Kein Schnitt quer durch die Buchstaben, ausgeschnittene Namen bleiben "
             "ein Teil, Überlappungen werden mitgefüllt. Der Text bleibt bearbeitbar.")
+TIP_LINE_FONT = ("Strichart der Schrift. „Umrissschrift“ = die gewählte Schriftart (Buchstaben-Umrisse, "
+                 "füllbar). „Einlinie“ wie LightBurns Single-Line-Fonts / xTools Einlinien-Schrift: "
+                 "jeder Buchstabe ist ein einzelner Strich, der Laser fährt ihn einmal ab – schnell, "
+                 "dünn und gleichmäßig für Beschriftungen, Skalen, kleine Nummern und Stifte. "
+                 "Einlinien-Text wird nicht gefüllt (auch nicht auf einer Füll-Ebene: dort wird er "
+                 "als Linie gelasert), Fett und Verschweißen wirken nicht, Kursiv stellt schräg.")
+OUTLINE_LABEL = "Umrissschrift"
 TIP_MULTILINE = "Text mehrzeilig bearbeiten … (eine Zeile je Absatz; die Buchstaben behalten ihre Größe)"
 
 
@@ -102,8 +110,8 @@ def with_layout(s: Shape, *, letter_spacing: float | None = None, line_spacing: 
     if text is not None:
         out.text = text
     g = s.geom
-    r0 = shape_text_path(s).boundingRect()
-    r1 = shape_text_path(out).boundingRect()
+    r0 = text_bounds(shape_text_path(s))
+    r1 = text_bounds(shape_text_path(out))
     if min(r0.width(), r0.height(), r1.width(), r1.height()) <= 0:
         return out
     w = math.copysign(r1.width() * abs(g.w) / r0.width(), g.w if g.w else 1.0)
@@ -150,6 +158,13 @@ class TextStyleControls(QWidget):
         self.family.setMinimumWidth(150)
         self.family.setMaximumWidth(220)
         self.family.currentFontChanged.connect(self._family_chosen)
+        self.stroke = QComboBox()
+        self.stroke.setObjectName("TextLineFont")
+        self.stroke.setToolTip(TIP_LINE_FONT)
+        self.stroke.addItem(OUTLINE_LABEL, "")
+        for name in LINE_FONTS:
+            self.stroke.addItem(LINE_FONT_LABELS[name], name)
+        self.stroke.activated.connect(self._stroke_chosen)
         self.size = QDoubleSpinBox()
         self.size.setObjectName("TextFontSize")
         self.size.setRange(*SIZE_RANGE_PT)
@@ -201,6 +216,7 @@ class TextStyleControls(QWidget):
         self.outline.setText("In Pfade")
         self.outline.setToolTip("Text in Pfade umwandeln (für Schraffur und G-Code ohne Schriftabhängigkeit)")
         self.outline.clicked.connect(lambda: editor.actions_by_name["text_to_path"].trigger())
+        lay.addWidget(self.stroke)
         lay.addWidget(self.family)
         lay.addWidget(QLabel("Größe"))
         lay.addWidget(self.size)
@@ -259,7 +275,16 @@ class TextStyleControls(QWidget):
         self._updating = True
         try:
             s = texts[0]
-            self.family.setCurrentFont(QFont(s.font_family))
+            lines = {t.font_family if is_line_font(t.font_family) else "" for t in texts}
+            line = next(iter(lines)) if len(lines) == 1 else None
+            self.stroke.setCurrentIndex(max(0, self.stroke.findData(line)) if line is not None else -1)
+            any_line = any(is_line_font(t.font_family) for t in texts)
+            all_line = all(is_line_font(t.font_family) for t in texts)
+            if not any_line:
+                self.family.setCurrentFont(QFont(s.font_family))
+            self.family.setEnabled(not all_line)
+            self.bold.setEnabled(not all_line)
+            self.weld.setEnabled(not all_line)
             if not self.size.hasFocus():
                 self.size.setValue(size_pt(s))
             self.bold.setChecked(all(t.font_bold for t in texts))
@@ -310,7 +335,27 @@ class TextStyleControls(QWidget):
             self.ed.text_font_italic = style["italic"]
 
     def _family_chosen(self, font: QFont) -> None:
+        if self._updating:
+            return
         self._apply(family=font.family(), label="Schriftart")
+        self.ed.text_outline_family = font.family()   # Rückweg aus einer Einlinien-Schrift
+
+    def _stroke_chosen(self, index: int) -> None:
+        """Umriss- oder Einlinien-Schrift für alle ausgewählten Texte (ein Undo-Schritt);
+        gilt wie die Schriftart auch für neue Textobjekte."""
+        if self._updating or index < 0:
+            return
+        name = self.stroke.itemData(index) or ""
+        family = name or getattr(self.ed, "text_outline_family", "") or self.family.currentFont().family()
+        texts = self._texts()
+        new = [with_style(t, family=family) for t in texts if t.font_family != family]
+        if new:
+            self._push(new, LINE_FONT_LABELS[name] if name else OUTLINE_LABEL)
+        self.ed.text_font_family = family
+        self.refresh()
+        missing = "".join(dict.fromkeys(ch for t in texts for ch in missing_chars(t.text, name))) if name else ""
+        if missing:
+            self.ed.notify(f"{LINE_FONT_LABELS[name]}: ohne Zeichen für „{missing}“ – erscheint als „?“")
 
     def _size_edited(self, pt: float) -> None:
         if self._updating:

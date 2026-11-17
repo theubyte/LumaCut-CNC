@@ -316,6 +316,7 @@ class CanvasEditor(QWidget):
         self.snap_enabled = True
         self.snap_step_mm = 1.0
         self.text_font_family = "Segoe UI"
+        self.text_outline_family = "Segoe UI"   # letzte Umrissschrift (text_ui, Einlinien-Umschalter)
         self.text_font_bold = False
         self.text_font_italic = False
         self.file_path: Path | None = None

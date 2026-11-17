@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Callable, Iterable
 
 from . import hatch as _hatch
+from .linefont import is_line_font
 from .material import DEPTH_PER_PASS_RANGE, THICKNESS_RANGE
 from .workarea import (COORD_CONVENTION, KNOWN_COORD_CONVENTIONS, Rect, clamp_offset, fit_scale,
                        is_inside_work_area)
@@ -88,6 +89,16 @@ FILL_LAYER_FIELDS = tuple(FILL_LAYER_DEFAULTS)
 OUTLINE_FIELDS = ("outline_power", "outline_speed", "outline_passes")
 # Geschlossene Objektarten, die gefüllt werden (Linie/Freihand/Bild nicht).
 FILLABLE_KINDS = ("rect", "ellipse", "polygon", "text")
+
+
+def is_closed_shape(shape) -> bool:
+    """Objekt mit geschlossenen Umrissen (füllbar, Maske, Boole-Fläche). Text in einer
+    Einlinien-Schrift (:mod:`linefont`, LightBurns *single-line font*) besteht aus
+    offenen Strichen und zählt wie ein offener Pfad."""
+    return shape.kind in FILLABLE_KINDS and not (shape.kind == "text"
+                                                 and is_line_font(shape.font_family))
+
+
 # Verknüpfung mit der Materialbibliothek (lumacut_materials): ``material_ref``
 # = "lib:<material>/<operation>/<laser>", ``material_link`` = Ebene folgt der
 # Bibliothek (Dicke ändern plant Leistung/Geschwindigkeit/Durchgänge neu).

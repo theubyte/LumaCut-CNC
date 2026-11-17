@@ -22,7 +22,7 @@ from PySide6.QtSvg import QSvgGenerator
 
 from .hatch import LINE_FILL_MODES, fill_segments, pass_angles
 from .material import layer_pass_plan
-from .model import CUT_LAYER_FIELDS, FILLABLE_KINDS, MAX_FOCUS_DROP_MM, Document, Layer, Shape
+from .model import CUT_LAYER_FIELDS, MAX_FOCUS_DROP_MM, Document, Layer, Shape, is_closed_shape
 from .shape_paths import shape_path, shape_polygons
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM, Rect, machine_to_screen, to_machine
 
@@ -128,7 +128,7 @@ def shape_fill_segments(shape: Shape, layer: Layer):
     Rahmen). Leer, wenn die Ebene nicht füllt oder das Objekt offen ist.
     Füllt immer nur dieses Objekt (``fill_grouping`` siehe :func:`layer_fill_blocks`).
     """
-    if layer.fill_mode == "none" or shape.kind not in FILLABLE_KINDS:
+    if layer.fill_mode == "none" or not is_closed_shape(shape):
         return []
     polys = shape_polygons(shape)
     return fill_segments(polys, layer.fill_mode, layer.line_interval_mm, layer.hatch_angle,
@@ -137,7 +137,7 @@ def shape_fill_segments(shape: Shape, layer: Layer):
 
 def _fill_shape_groups(doc: Document, layer: Layer) -> list[list[Shape]]:
     """Objekte der Ebene, die jeweils gemeinsam gefüllt werden (Objekt-Reihenfolge)."""
-    shapes = [s for s in doc.shapes_in_layer(layer.id) if s.kind in FILLABLE_KINDS]
+    shapes = [s for s in doc.shapes_in_layer(layer.id) if is_closed_shape(s)]
     grouping = getattr(layer, "fill_grouping", "individual")
     mode = _unit_mode(doc)
     if grouping == "together":
@@ -382,8 +382,8 @@ def _job_layer(doc: Document, layer: Layer, fill_blocks, ids: set[str] | None = 
             continue
         if s.kind == "image":
             continue  # Bilder werden gerastert (lumacut_job.images), nicht umfahren
-        if s.kind in FILLABLE_KINDS and layer.fill_mode != "none" and not layer.hatch_outline:
-            continue  # nur Füllung, keine Kontur
+        if is_closed_shape(s) and layer.fill_mode != "none" and not layer.hatch_outline:
+            continue  # nur Füllung, keine Kontur (Einlinien-Text: Striche immer)
         if s.kind == "line":
             path = shape_path(s)
             a, b = path.elementAt(0), path.elementAt(1)
@@ -533,7 +533,7 @@ def _paint(doc: Document, p: QPainter, line_width_mm: float, show_fill: bool = F
                 continue
             if s.id in filled and not layer.hatch_outline:
                 continue
-            p.setBrush(QBrush(color) if s.kind == "text" else Qt.NoBrush)
+            p.setBrush(QBrush(color) if s.kind == "text" and is_closed_shape(s) else Qt.NoBrush)
             p.drawPath(shape_path(s))
 
 

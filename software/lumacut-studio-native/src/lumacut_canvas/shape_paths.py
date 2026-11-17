@@ -10,6 +10,7 @@ import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QFont, QFontInfo, QFontMetricsF, QPainterPath, QTransform
 
+from .linefont import EM_UNITS as _LINE_EM_UNITS, is_line_font, text_strokes
 from .model import Geometry, Shape, text_layout
 
 # Text wird in dieser Größe aufgebaut und dann exakt in die Objektbox skaliert,
@@ -46,6 +47,38 @@ def text_font(family: str, bold: bool = False, italic: bool = False) -> QFont:
     return font
 
 
+# Einlinien-Schriften (:mod:`linefont`): Geviert in Aufbau-Einheiten wie eine Systemschrift
+# bei 96 dpi (100 pt = 133,3 px), damit Größe in pt, Zeilenabstand und Zeichenabstand
+# dieselbe Bedeutung haben.
+LINE_FONT_EM = _TEXT_BUILD_PT * 96.0 / 72.0
+
+
+def text_em(family: str, bold: bool = False, italic: bool = False) -> float:
+    """Geviert der Schrift ``family`` in Aufbau-Einheiten (auch für Einlinien-Schriften)."""
+    if is_line_font(family):
+        return LINE_FONT_EM
+    return em_units(text_font(family, bold, italic))
+
+
+def line_text_path(text: str, family: str, italic: bool = False, *, letter_spacing: float = 0.0,
+                   line_spacing: float = 100.0, align: str = "left") -> QPainterPath:
+    """Einlinien-Text (LightBurns *single-line font*) als offene Striche in Aufbau-Einheiten.
+
+    Jeder Strich ist ein offener Teilpfad (``moveTo`` / ``lineTo``, kein ``closeSubpath``);
+    in sich geschlossene Striche („o“) enden auf ihrem Anfangspunkt. Gleicher Satz wie
+    :func:`text_path` (Zeilenabstand 1,25 × 100 pt, Zeichenabstand in % des Gevierts).
+    """
+    k = LINE_FONT_EM / _LINE_EM_UNITS
+    path = QPainterPath()
+    for stroke in text_strokes(text, family, italic, letter_spacing=letter_spacing,
+                               line_spacing=line_spacing, align=align,
+                               pitch_units=_TEXT_BUILD_PT * 1.25 / k):
+        path.moveTo(stroke[0][0] * k, stroke[0][1] * k)
+        for x, y in stroke[1:]:
+            path.lineTo(x * k, y * k)
+    return path
+
+
 def em_units(font: QFont) -> float:
     """Geviert (Schriftgröße) von ``font`` in Umriss-Einheiten."""
     em = QFontInfo(font).pixelSize()
@@ -63,7 +96,12 @@ def text_path(text: str, family: str, bold: bool = False, italic: bool = False, 
     der Schriftgröße zusätzlich nach jedem Zeichen, ``line_spacing`` in % des
     Standard-Zeilenabstands (1,25 × Schriftgröße), ``align`` richtet die Zeilen nach
     ihrer Laufweite links / mittig / rechts aus. Standardwerte = bisheriger Umriss.
+    Einlinien-Schriften (:func:`linefont.is_line_font`) geben offene Striche
+    (:func:`line_text_path`, ``bold`` wirkungslos, ``italic`` = schräg gestellt).
     """
+    if is_line_font(family):
+        return line_text_path(text, family, italic, letter_spacing=letter_spacing,
+                              line_spacing=line_spacing, align=align)
     path = QPainterPath()
     font = text_font(family, bold, italic)
     if letter_spacing:
@@ -82,6 +120,18 @@ def text_path(text: str, family: str, bold: bool = False, italic: bool = False, 
     for i, line in enumerate(lines):
         path.addText(QPointF(offsets[i], i * pitch), font, line)
     return path
+
+
+def text_bounds(path: QPainterPath) -> QRectF:
+    """Box eines Textpfads. Ein Einlinien-Text aus nur waagrechten (oder senkrechten)
+    Strichen – „-“, „_“, „|“ – hätte Höhe (Breite) 0; die fehlende Ausdehnung wird
+    dann um den Strich herum auf 1 Aufbau-Einheit gesetzt, damit er in eine Box passt."""
+    r = path.boundingRect()
+    if r.width() > 0 and r.height() <= 0:
+        r = QRectF(r.x(), r.y() - 0.5, r.width(), 1.0)
+    elif r.height() > 0 and r.width() <= 0:
+        r = QRectF(r.x() - 0.5, r.y(), 1.0, r.height())
+    return r
 
 
 def shape_text_path(shape: Shape) -> QPainterPath:
@@ -125,7 +175,7 @@ def text_aspect(text: str, family: str, bold: bool = False, italic: bool = False
                 **layout) -> float:
     """Breite/Höhe des Textumrisses, um neue Textobjekte maßstäblich anzulegen
     (``layout``: Text-Satz wie :func:`text_path`)."""
-    r = text_path(text, family, bold, italic, **layout).boundingRect()
+    r = text_bounds(text_path(text, family, bold, italic, **layout))
     return r.width() / r.height() if r.height() > 0 else 1.0
 
 
@@ -201,15 +251,15 @@ def local_path(shape: Shape) -> QPainterPath:
         add_ellipse(path, box)
     elif shape.kind == "text":
         src = shape_text_path(shape)
-        r = src.boundingRect()
+        r = text_bounds(src)
         if r.width() > 0 and r.height() > 0:
             t = QTransform()
             t.translate(box.x(), box.y())
             t.scale(box.width() / r.width(), box.height() / r.height())
             t.translate(-r.x(), -r.y())
             path = t.map(src)
-            if shape.text_weld:
-                path = weld_path(path)
+            if shape.text_weld and not is_line_font(shape.font_family):
+                path = weld_path(path)   # Einlinien-Striche haben keine Fläche
     return path
 
 
