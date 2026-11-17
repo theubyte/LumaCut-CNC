@@ -1,7 +1,8 @@
 """Werkzeuge: Auswahl (Verschieben/Skalieren/Drehen/Rahmenauswahl), Rechteck,
 Ellipse, Linie, Polygon, Vieleck / Stern (:mod:`ngon`), Freihand, Text, Stege (manuelle Haltestege, :mod:`tabs_ui`),
 Startpunkt (manueller Konturstart, :mod:`startpoint_ui`),
-Messen (Abstand / Winkel, :mod:`measure_ui`).
+Messen (Abstand / Winkel, :mod:`measure_ui`),
+Trimmen (Stücke zwischen Kreuzungen entfernen, :mod:`trim_ui`).
 
 Der :class:`ToolController` bekommt Mausereignisse in Szene-mm von der
 :class:`~canvas_view.CanvasView`. Während eines Zugs wird das Modell live
@@ -49,15 +50,17 @@ class Tool(str, Enum):
     TABS = "tabs"
     START = "start"
     MEASURE = "measure"
+    TRIM = "trim"
 
 
 TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.NODE: "Knoten", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
                Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.NGON: "Vieleck / Stern",
                Tool.FREEHAND: "Freihand", Tool.TEXT: "Text", Tool.TABS: "Stege",
-               Tool.START: "Startpunkt", Tool.MEASURE: "Messen"}
+               Tool.START: "Startpunkt", Tool.MEASURE: "Messen", Tool.TRIM: "Trimmen"}
 TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.NODE: "N", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
                   Tool.POLYGON: "P", Tool.NGON: "S", Tool.FREEHAND: "F", Tool.TEXT: "T", Tool.TABS: "Alt+Shift+T",
-                  Tool.START: "Alt+Shift+A", Tool.MEASURE: "M"}
+                  Tool.START: "Alt+Shift+A", Tool.MEASURE: "M",
+                  Tool.TRIM: "Alt+Shift+X"}
 CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
 # Freihand: Ramer-Douglas-Peucker-Toleranz in mm (Abweichung von der gezeichneten
 # Linie) und Mindestabstand roher Mauspunkte.
@@ -225,6 +228,9 @@ class ToolController:
         mt = getattr(self.ed, "measure_tool", None)
         if mt is not None:
             mt.cancel()
+        tr = getattr(self.ed, "trim_tool", None)
+        if tr is not None:
+            tr.cancel()
         if self._mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if self._mode in ("draw", "poly", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -257,6 +263,8 @@ class ToolController:
             self.ed.start_tool.cancel()
         if mode == "measure":
             self.ed.measure_tool.abort()
+        if mode == "trim":
+            self.ed.trim_tool.cancel()
         if mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if mode in ("draw", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -308,6 +316,9 @@ class ToolController:
         elif self.tool == Tool.MEASURE:
             self._mode = "measure"
             self.ed.measure_tool.press(pos, mods)
+        elif self.tool == Tool.TRIM:
+            self._mode = "trim"
+            self.ed.trim_tool.press(pos)
         elif self.tool == Tool.TEXT:
             self._osnap_begin((), mods)
             try:
@@ -383,6 +394,12 @@ class ToolController:
         if self._mode == "start":
             if dragging:
                 self.ed.start_tool.move(pos)
+            return
+        if self._mode == "trim":
+            self.ed.trim_tool.move(pos)
+            return
+        if self._mode is None and self.tool == Tool.TRIM and not self.roi_pending:
+            self.ed.trim_tool.hover(pos)       # Maus: zeigen, welches Stück wegfiele
             return
         if self._mode == "measure" or (self._mode is None and self.tool == Tool.MEASURE
                                        and not self.roi_pending):
@@ -677,6 +694,9 @@ class ToolController:
             return
         if mode == "measure":
             self.ed.measure_tool.release(pos, mods)
+            return
+        if mode == "trim":
+            self.ed.trim_tool.release(pos)
             return
         if mode == "free":
             self.finish_freehand(pos)

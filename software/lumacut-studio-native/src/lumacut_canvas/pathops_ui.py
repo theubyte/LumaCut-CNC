@@ -1,7 +1,8 @@
 """Menü „Pfad“ im Canvas: Boole-Operationen, Verschweißen, Versatz, Text in Pfade,
 Zerlegen / Kombinieren (:mod:`pathsplit`, LightBurn *Break Apart* / *Combine* – deren
 Alt+B / Alt+C belegen hier Bogentext und Barcode, darum Strg+Alt+B / Strg+Alt+C),
-Aufräumen (verbinden, schließen, vereinfachen, Duplikate – :mod:`pathjoin_ui`), Ecken
+Aufräumen (verbinden, schließen, vereinfachen, Überstände, Duplikate – :mod:`pathjoin_ui`;
+Werkzeug „Trimmen“ – :mod:`trim_ui`), Ecken
 abrunden / abschrägen (:mod:`pathfillet_ui`, LightBurn *Radius tool*), Bild mit Form
 zuschneiden (:mod:`imagecrop_ui`, LightBurn *Crop Image*).
 
@@ -29,7 +30,7 @@ SPLIT_ACTIONS = [
 MENU_ACTIONS = ([f"bool_{op}" for op in pathops.OPS] + [None, "path_offset"] + pathfillet_ui.MENU_ACTIONS + ["text_to_path"]
                 + imagecrop_ui.MENU_ACTIONS + [None]
                 + [name for name, _t, _k in SPLIT_ACTIONS] + [None]
-                + pathjoin_ui.MENU_ACTIONS + [None, "tool_tabs", "tabs_even", "tabs_clear",
+                + pathjoin_ui.MENU_ACTIONS + ["tool_trim", None, "tool_tabs", "tabs_even", "tabs_clear",
                                                     "tool_start", "start_clear",
                                                     "path_reverse"])
 

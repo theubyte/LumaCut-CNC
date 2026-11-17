@@ -83,7 +83,7 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   liegen an derselben sichtbaren Stelle; unbekannte Werte werden abgelehnt.
 
 - **Werkzeuge:** Auswahl (V), Rechteck (R), Ellipse (E), Linie (L), Polygon (P), Vieleck / Stern (S),
-  Freihand (F), Text (T), Messen (M, siehe unten).
+  Freihand (F), Text (T), Messen (M, siehe unten), Trimmen (Alt+Umschalt+X, siehe „Überstände abschneiden“).
   *Umschalt* beim Zeichnen = Quadrat/Kreis/45°-Linie; Klick ohne Ziehen legt
   ein 20-mm-Objekt an. Doppelklick auf Text = Text ändern. Polygon: Klick = Punkt,
   Doppelklick/Enter oder Klick auf den ersten Punkt = schließen, Rücktaste = Punkt weg.
@@ -156,7 +156,17 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Danach lassen sich die Ecken mit „Pfade verbinden“ (Alt+J) zu geschlossenen Konturen verbinden.
   Ebene, Gruppen, Priorität und Laufrichtung bleiben, ein Undo-Schritt; Formen ohne Überstand
   bleiben unverändert.
-  Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathsimplify.py`, `pathtrim.py`, `pathjoin_ui.py`.
+  Werkzeug **„Trimmen“** (Alt+Umschalt+X, Werkzeugleiste und Pfad-Menü, wie LightBurns *Trim Shapes*
+  per Klick): Tippen auf eine Linie, einen offenen Pfad oder den Umriss eines Rechtecks / einer
+  Ellipse / eines Polygons entfernt das Stück bis zu den zwei nächsten Kreuzungen mit anderen Formen
+  (oder bis zum freien Ende) – auch innere Stücke zwischen zwei Kreuzungen, längere Überstände und
+  doppelt übereinanderliegende Strecken. Mit der Maus zeigt es vorher rot gestrichelt, was wegfällt;
+  mit dem Finger trimmt der Tipp direkt (Strg+Z holt es zurück). Geschlossene Formen werden dabei zum
+  offenen Pfad, Löcher eines Polygons bleiben geschlossen; Ebene, Gruppen, Priorität und
+  Laufrichtung bleiben, ein Undo-Schritt je Tippen. Es schneidet an allen sichtbaren Formen (auch
+  gesperrten, Text, QR-Codes), getrimmt werden nur Linien und Umrisse entsperrter Ebenen.
+  Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathsimplify.py`, `pathtrim.py`, `pathjoin_ui.py`,
+  `trim_ui.py`.
 - **Ecken abrunden …** (Pfad-Menü, Alt+Umschalt+R, wie LightBurns *Radius*-Werkzeug / xTool
   „Eckenradius“ für Polygone und Sterne): „Abrunden“ ersetzt jede Ecke durch einen Bogen mit dem
   eingestellten Radius (abgeflacht auf ≤ 0,02 mm, nur `G1`), „Abschrägen“ durch eine gerade Fase.
@@ -187,7 +197,7 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   („Fang: Kantenmitte“). Alt beim Ziehen setzt ihn aus; ausgeblendete Ebenen fangen nicht,
   gesperrte schon. Die Wahl wird in QSettings (`canvas/object_snap`) gespeichert. Code:
   `lumacut_canvas/objsnap.py` (Qt-frei), `objsnap_ui.py`.
-- **Messen** (Werkzeug M, letzter Knopf der Werkzeugleiste und im Menü „Design“ – wie
+- **Messen** (Werkzeug M, Knopf nach „Startpunkt“ in der Werkzeugleiste und im Menü „Design“ – wie
   LightBurns *Measure*-Werkzeug): von Punkt zu Punkt ziehen oder zwei Punkte antippen (nach dem
   ersten Tipp folgt das Ende der Maus). Beide Punkte fangen wie die Zeichenwerkzeuge an Knoten,
   Ecken, Kantenmitten, Mittelpunkten, Quadranten und Linien-Enden („An Objekten fangen“, 7 px /

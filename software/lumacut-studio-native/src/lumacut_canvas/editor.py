@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QWidget)
 
 from . import (arrange_ui, corners_ui, icons, measure_ui, ngon, ngon_ui, node_ui, objsnap_ui, pathops_ui,
-               priority_ui, startpoint_ui, tabs_ui, text_ui, theme, touch, units)
+               priority_ui, startpoint_ui, tabs_ui, text_ui, theme, touch, trim_ui, units)
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip, VScrollStrip
@@ -434,6 +434,7 @@ class CanvasEditor(QWidget):
         self.tab_tool = tabs_ui.install(self)     # manuelle Stege (Tool.TABS)
         self.start_tool = startpoint_ui.install(self)  # manueller Startpunkt (Tool.START)
         self.measure_tool = measure_ui.install(self)  # Messen (Tool.MEASURE)
+        self.trim_tool = trim_ui.install(self)    # Trimmen (Tool.TRIM)
         self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
                   lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
         # Anzeige-Einheit mm/Zoll; Text zeigt die aktuelle Einheit (kein Symbol).
@@ -551,6 +552,9 @@ class CanvasEditor(QWidget):
         elif tool == Tool.MEASURE:
             self.notify("Werkzeug: Messen – von Punkt zu Punkt ziehen oder zwei Punkte antippen "
                         "(fängt an Objekten / Raster, Umschalt = 15°-Schritte, Alt = frei, Esc löscht)")
+        elif tool == Tool.TRIM:
+            self.notify("Werkzeug: Trimmen – Stück einer Linie / eines Umrisses antippen entfernt es "
+                        "bis zu den nächsten Kreuzungen (rot = fällt weg), Strg+Z holt es zurück")
         elif tool == Tool.NGON:
             self.notify("Werkzeug: Vieleck / Stern – vom Mittelpunkt aus ziehen (Umschalt dreht in "
                         "15°-Schritten), Tippen legt 20 mm an; Seiten / Stern in der Eigenschaftsleiste")

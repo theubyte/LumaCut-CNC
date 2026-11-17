@@ -285,6 +285,21 @@ def _measure(p, c):
     p.restore()
 
 
+def _trim(p, c):
+    """Trimmen: zwei gekreuzte Linien, das Stück rechts oben gestrichelt (fällt weg)."""
+    _pen(p, c, 1.8)
+    p.drawLine(QPointF(3, 15), QPointF(13, 15))
+    p.drawLine(QPointF(9, 21), QPointF(9, 3))
+    pen = QPen(QColor(c), 1.8)
+    pen.setDashPattern([1.2, 1.6])
+    pen.setCapStyle(Qt.FlatCap)
+    p.setPen(pen)
+    p.drawLine(QPointF(13, 15), QPointF(21, 15))
+    _pen(p, c, 1.5)
+    p.drawLine(QPointF(15, 6), QPointF(21, 12))
+    p.drawLine(QPointF(15, 12), QPointF(21, 6))
+
+
 def _align(p, c, where: str):
     """Textausrichtung: vier Zeilen unterschiedlicher Länge, links / mittig / rechts bündig."""
     _pen(p, c, 2.0)
@@ -315,6 +330,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
     "touch": _touch, "path": _path, "arrange": _arrange,
     "pathops": _pathops, "node": _node, "tabs": _tabs, "start": _start, "measure": _measure,
+    "trim": _trim,
     "align_left": lambda p, c: _align(p, c, "left"), "align_center": lambda p, c: _align(p, c, "center"),
     "align_right": lambda p, c: _align(p, c, "right"), "text_weld": _text_weld,
 }
