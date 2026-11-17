@@ -916,6 +916,16 @@ Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
   Ergebnis außerhalb der Arbeitsfläche (es würde sonst in die Fläche geschoben). Steht die
   Startposition am Pi auf „Kopfposition“ / „Benutzer-Ursprung“, weist die Meldung darauf hin
   (für Passmarken „Absolut“ wählen). Kein neuer Projekt-Schlüssel – nur die Objekte bewegen sich.
+  **Drei Marken** („Passmarken: drei Marken“ im Kontextmenü des Werkzeugs, Vorgabe aus, gilt
+  für die Sitzung): nach Ist 2 noch **Soll 3** / **Ist 3** antippen (dritte Marke über Eck, z. B.
+  drei Ecken des Bogens; Eingabe vorher richtet an zwei Marken aus). Maßhaltig gleicht die
+  Bewegung alle drei Marken nach kleinsten Quadraten aus (die Meldung nennt die größte
+  Rest-Abweichung); mit „Maßstab angleichen“ skaliert es **X und Y getrennt** – für Drucker, die
+  quer etwas anders drucken als längs, was zwei Marken nicht erkennen. Ein schief eingezogenes
+  Blatt (Scherung) bleibt als Rest-Abweichung stehen und wird gemeldet; gedrehte Objekte bleiben
+  formtreu wie beim Skalieren am Rahmen. Abgelehnt werden zusätzlich gespiegelte Marken
+  (Reihenfolge vertauscht) und für getrennte Maßstäbe Marken auf einer Linie. Der Zahlen-Dialog
+  hat dafür „Drittes Paar verwenden“.
 - **Ausrichten** links / mittig / rechts / oben / mittig / unten (Strg+Umschalt+←/H/→/↑/V/↓):
   mehrere Einheiten an der Auswahl-Hüllbox, ein einzelnes Objekt an der Arbeitsfläche.
 - **Verteilen** waagerecht/senkrecht: gleiche Lücken, die äußeren Einheiten bleiben

@@ -7,11 +7,15 @@ Ablauf (Maus oder Finger, je ein Tippen):
    Objekte, wenn „An Objekten fangen“ an ist; sonst die genaue Stelle, kein Raster),
 2. **Ist 1** – dieselbe Marke dort antippen, wo sie wirklich liegt – auf dem
    Kamerascan als Hintergrund (genaue Stelle, ohne Raster- und Objektfang),
-3. **Soll 2**, 4. **Ist 2** – zweite Marke, möglichst weit von der ersten entfernt.
+3. **Soll 2**, 4. **Ist 2** – zweite Marke, möglichst weit von der ersten entfernt,
+5. **Soll 3**, 6. **Ist 3** – nur mit „Passmarken: drei Marken“ (Kontextmenü,
+   Vorgabe aus): dritte Marke über Eck; gleicht alle drei aus und kann mit
+   „Maßstab angleichen“ X und Y getrennt skalieren (:mod:`marks`).
 
-Nach dem vierten Tippen werden die ausgewählten Objekte (ohne Auswahl: alle
+Nach dem vierten (mit drei Marken: sechsten) Tippen werden die ausgewählten Objekte (ohne Auswahl: alle
 Objekte entsperrter, sichtbarer Ebenen) in **einem** Undo-Schritt verschoben und
-gedreht (:mod:`marks`); Eingabe nach dem zweiten Tippen verschiebt nur. Bis dahin
+gedreht (:mod:`marks`); Eingabe nach dem zweiten Tippen verschiebt nur, nach
+dem vierten richtet sie an zwei Marken aus. Bis dahin
 zeigt die Zeichenfläche die Punkte (blau = Soll, orange = Ist), die Pfeile
 Soll → Ist und gestrichelt, wohin das Design käme. Ziehen statt Tippen setzt den
 Punkt beim Loslassen (feines Nachführen mit dem Finger). Rücktaste nimmt den
@@ -49,12 +53,14 @@ IST_COLOR = "#ff9f43"
 GHOST_COLOR = "#ffffff"
 Z_VALUE = 2.04e9
 TAP_PX = 6.0
-STEPS = ("Soll 1", "Ist 1", "Soll 2", "Ist 2")
+STEPS = ("Soll 1", "Ist 1", "Soll 2", "Ist 2", "Soll 3", "Ist 3")
 STEP_HINTS = (
     "Marke 1 im Design antippen (fängt an Objekten)",
     "Marke 1 dort antippen, wo sie wirklich liegt (Kamerascan, genaue Stelle)",
     "Marke 2 im Design antippen – oder Eingabe = nur verschieben",
     "Marke 2 dort antippen, wo sie wirklich liegt",
+    "Marke 3 im Design antippen (über Eck) – oder Eingabe = an zwei Marken ausrichten",
+    "Marke 3 dort antippen, wo sie wirklich liegt",
 )
 
 
@@ -90,11 +96,13 @@ class MarksOverlay(QGraphicsItem):
         self.points: list[tuple[float, float]] = []
         self.hover: tuple[float, float] | None = None
         self.ghost: list[list[tuple[float, float]]] = []
+        self.limit = 4
         self.setZValue(Z_VALUE)
         self.setAcceptedMouseButtons(Qt.NoButton)
         self.setVisible(False)
 
-    def set_state(self, points, hover, ghost) -> None:
+    def set_state(self, points, hover, ghost, limit: int = 4) -> None:
+        self.limit = int(limit)
         self.points = list(points)
         self.hover = hover
         self.ghost = [list(g) for g in ghost or []]
@@ -116,7 +124,7 @@ class MarksOverlay(QGraphicsItem):
             for poly in self.ghost:
                 p.drawPolygon(QPolygonF([QPointF(*q) for q in poly]))
         pts = list(self.points)
-        if self.hover is not None and len(pts) < 4:
+        if self.hover is not None and len(pts) < self.limit:
             pts.append(self.hover)
         for i in range(0, len(pts) - 1, 2):       # Pfeil Soll → Ist
             a, b = QPointF(*pts[i]), QPointF(*pts[i + 1])
@@ -160,8 +168,9 @@ class MarksTool:
 
     def __init__(self, editor) -> None:
         self.ed = editor
-        self.points: list[tuple[float, float]] = []   # Soll 1, Ist 1, Soll 2, Ist 2
+        self.points: list[tuple[float, float]] = []   # Soll 1, Ist 1, Soll 2, Ist 2 (, Soll 3, Ist 3)
         self.scale = False
+        self.three = False                            # „Passmarken: drei Marken“ (Sitzung)
         self._press: QPointF | None = None
         self._hover: tuple[float, float] | None = None
         self.item = MarksOverlay(editor)
@@ -177,8 +186,13 @@ class MarksTool:
 
     @property
     def step(self) -> int:
-        """Index des nächsten Punkts (0 … 3)."""
+        """Index des nächsten Punkts (0 … 3, mit drei Marken 0 … 5)."""
         return len(self.points)
+
+    @property
+    def max_points(self) -> int:
+        """Punkte bis zum automatischen Ausrichten (4, mit drei Marken 6)."""
+        return 6 if self.three else 4
 
     @property
     def active(self) -> bool:
@@ -220,7 +234,7 @@ class MarksTool:
         if len(pts) < 2:
             return []
         try:
-            f = self.fit(pts[: 4 if len(pts) >= 4 else 2])
+            f = self.fit(pts[: len(pts) // 2 * 2])
         except marks.MarkError:
             return []
         ids, _ = self.target_ids()
@@ -232,13 +246,13 @@ class MarksTool:
 
     def refresh(self) -> None:
         pts = list(self.points)
-        if self._hover is not None and len(pts) < 4:
+        if self._hover is not None and len(pts) < self.max_points:
             pts.append(self._hover)
-        self.item.set_state(self.points, self._hover if len(self.points) < 4 else None,
-                            self._ghost(pts))
+        self.item.set_state(self.points, self._hover if len(self.points) < self.max_points else None,
+                            self._ghost(pts), self.max_points)
 
     def _prompt(self) -> None:
-        i = min(self.step, 3)
+        i = min(self.step, self.max_points - 1)
         ids, is_sel = self.target_ids()
         what = (f"{len(ids)} ausgewählte Objekt(e)" if is_sel
                 else f"alle {len(ids)} Objekt(e)")
@@ -275,14 +289,17 @@ class MarksTool:
             self.ed.set_selection(ids)
         text = f"Passmarken: {len(ids)} Objekt(e) ausgerichtet – {marks.summary(f)}"
         if f.error_mm > marks.WARN_ERROR_MM:
-            text += " – Abweichung groß: Punkte prüfen oder „Maßstab angleichen“"
+            if f.pairs == 3 and f.scales is not None:
+                text += " – Rest-Abweichung groß: Blatt schief bedruckt (Scherung) oder Punkte prüfen"
+            else:
+                text += " – Abweichung groß: Punkte prüfen oder „Maßstab angleichen“"
         hint = placement_hint()
         self.ed.notify(text + hint + " – Strg+Z holt es zurück")
         return True
 
     def apply_points(self) -> bool:
         pts = list(self.points)
-        n = 4 if len(pts) >= 4 else 2
+        n = min(len(pts) // 2 * 2, self.max_points)
         if len(pts) < 2:
             self.ed.notify("Passmarken: erst Soll 1 und Ist 1 antippen")
             return False
@@ -298,7 +315,7 @@ class MarksTool:
             if self.item.isVisible():
                 self.refresh()
             return
-        self._hover = self.point_for(pos) if len(self.points) < 4 else None
+        self._hover = self.point_for(pos) if len(self.points) < self.max_points else None
         self.refresh()
 
     def press(self, pos: QPointF) -> None:
@@ -322,7 +339,7 @@ class MarksTool:
             osnap.end()
         self._hover = None
         self.points.append(p)
-        if len(self.points) == 4:
+        if len(self.points) >= self.max_points:
             if not self.apply_points():
                 self.points.pop()                    # letzten Ist-Punkt neu setzen
                 self.refresh()
@@ -379,6 +396,21 @@ class MarksTool:
         self.refresh()
         self.ed.notify("Passmarken: Maßstab angleichen " + ("an" if self.scale else "aus (maßhaltig)"))
 
+    def set_three(self, on: bool) -> None:
+        """„Passmarken: drei Marken“ – sechs statt vier Punkte (Sitzung, Vorgabe aus)."""
+        self.three = bool(on)
+        a = self.ed.actions_by_name.get("marks_three")
+        if a is not None and a.isChecked() != self.three:
+            a.blockSignals(True)
+            a.setChecked(self.three)
+            a.blockSignals(False)
+        if len(self.points) > self.max_points:
+            self.points = self.points[: self.max_points]
+        self.refresh()
+        self.ed.notify("Passmarken: " + ("drei Marken – nach Ist 2 noch Soll 3 / Ist 3 antippen "
+                                         "(gleicht aus, mit „Maßstab angleichen“ X und Y getrennt)"
+                                         if self.three else "zwei Marken"))
+
     def numeric_dialog(self) -> bool:
         dlg = MarksDialog(self, self.ed)
         if dlg.exec() != QDialog.Accepted:
@@ -422,7 +454,12 @@ class MarksDialog(QDialog):
         self.scale = QCheckBox("Maßstab angleichen (sonst maßhaltig)")
         self.scale.setChecked(tool.scale)
         self.scale.toggled.connect(self.update_info)
+        self.third = QCheckBox("Drittes Paar verwenden (ausgleichen; mit „Maßstab angleichen“ "
+                               "X und Y getrennt)")
+        self.third.setChecked(tool.three)
+        self.third.toggled.connect(self.update_info)
         lay.addWidget(self.second)
+        lay.addWidget(self.third)
         lay.addWidget(self.scale)
         self.info = QLabel()
         self.info.setWordWrap(True)
@@ -439,9 +476,10 @@ class MarksDialog(QDialog):
         pts = list(self.tool.points)
         ids, _ = self.tool.target_ids()
         b = self.tool.doc.selection_bounds(ids) if ids else None
-        corners = ([(b.x, b.y), (b.x, b.y), (b.right, b.bottom), (b.right, b.bottom)] if b is not None
-                   else [(0.0, 0.0)] * 4)
-        for i in range(4):
+        corners = ([(b.x, b.y), (b.x, b.y), (b.right, b.bottom), (b.right, b.bottom),
+                    (b.x, b.bottom), (b.x, b.bottom)] if b is not None
+                   else [(0.0, 0.0)] * len(STEPS))
+        for i in range(len(STEPS)):
             if i < len(pts):
                 x, y = pts[i]
             elif i % 2 == 1 and i - 1 < len(pts):
@@ -455,18 +493,22 @@ class MarksDialog(QDialog):
         self.second.setChecked(len(pts) != 2 and len(pts) != 3)
 
     def set_point(self, i: int, u: float, v: float) -> None:
-        """Punkt ``i`` (0 … 3) in Anzeige-Koordinaten setzen (für Tests / Skripte)."""
+        """Punkt ``i`` (0 … 5) in Anzeige-Koordinaten setzen (für Tests / Skripte)."""
         self.spins[i][0].setValue(u)
         self.spins[i][1].setValue(v)
 
     def screen_points(self) -> list[tuple[float, float]]:
-        n = 4 if self.second.isChecked() else 2
+        n = 2
+        if self.second.isChecked():
+            n = 6 if self.third.isChecked() else 4
         return [user_to_screen(sx.value(), sy.value()) for sx, sy in self.spins[:n]]
 
     def update_info(self, *_a) -> None:
-        for sx, sy in self.spins[2:]:
-            sx.setEnabled(self.second.isChecked())
-            sy.setEnabled(self.second.isChecked())
+        self.third.setEnabled(self.second.isChecked())
+        for i, (sx, sy) in enumerate(self.spins[2:], start=2):
+            on = self.second.isChecked() and (i < 4 or self.third.isChecked())
+            sx.setEnabled(on)
+            sy.setEnabled(on)
         pts = self.screen_points()
         ok = True
         try:
@@ -493,6 +535,7 @@ def add_to_menu(editor, menu) -> None:
     a = editor.actions_by_name
     menu.addAction(a["marks_numeric"])
     menu.addAction(a["marks_scale"])
+    menu.addAction(a["marks_three"])
     if editor.marks_tool.points:
         menu.addAction(a["marks_clear"])
 
@@ -506,6 +549,10 @@ def install(editor) -> MarksTool:
                     lambda on: tool.set_scale(on), checkable=True)
     s.setToolTip("Aus (Vorgabe): Design bleibt maßhaltig, nur verschieben / drehen. An: zusätzlich "
                  "gleichmäßig skalieren, damit beide Marken genau treffen")
+    t = editor._act("marks_three", "Passmarken: drei Marken",
+                    lambda on: tool.set_three(on), checkable=True)
+    t.setToolTip("Aus (Vorgabe): zwei Marken. An: dritte Marke über Eck – gleicht alle drei aus und "
+                 "skaliert mit „Maßstab angleichen“ X und Y getrennt (Drucker druckt quer anders als längs)")
     editor._act("marks_clear", "Passmarken löschen",
                 lambda: tool.clear() and editor.notify("Passmarken gelöscht"))
     return tool
