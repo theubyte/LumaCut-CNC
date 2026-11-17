@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
                                QLabel, QLineEdit, QMenu, QMessageBox, QToolBar, QToolButton, QVBoxLayout,
                                QWidget)
 
-from . import (arrange_ui, corners_ui, icons, measure_ui, ngon, ngon_ui, node_ui, objsnap_ui, pathops_ui,
+from . import (arrange_ui, corners_ui, icons, marks_ui, measure_ui, ngon, ngon_ui, node_ui, objsnap_ui, pathops_ui,
                priority_ui, startpoint_ui, tabs_ui, text_ui, theme, touch, trim_ui, units)
 from .fill_preview import FillPreview
 from .path_preview import PathPreview, PathPreviewBar
@@ -435,6 +435,7 @@ class CanvasEditor(QWidget):
         self.start_tool = startpoint_ui.install(self)  # manueller Startpunkt (Tool.START)
         self.measure_tool = measure_ui.install(self)  # Messen (Tool.MEASURE)
         self.trim_tool = trim_ui.install(self)    # Trimmen (Tool.TRIM)
+        self.marks_tool = marks_ui.install(self)  # Passmarken (Tool.MARKS)
         self._act("touch_mode", "Touch-Modus (große Anfasser und Knöpfe)",
                   lambda on: self.set_touch_mode(on), None, "touch", checkable=True)
         # Anzeige-Einheit mm/Zoll; Text zeigt die aktuelle Einheit (kein Symbol).
@@ -556,6 +557,10 @@ class CanvasEditor(QWidget):
             self.notify("Werkzeug: Trimmen – Stück einer Linie / eines Umrisses antippen entfernt es "
                         "bis zu den nächsten Kreuzungen (rot = fällt weg), über mehrere Stücke ziehen "
                         "entfernt alle gekreuzten, Strg+Z holt es zurück")
+        elif tool == Tool.MARKS:
+            self.notify("Werkzeug: Passmarken – Marke 1 im Design, dann auf dem Kamerascan antippen, "
+                        "ebenso Marke 2: Auswahl (ohne Auswahl alles) wird verschoben und gedreht "
+                        "wie Drucken und Schneiden; Zahlen über das Kontextmenü, Strg+Z holt es zurück")
         elif tool == Tool.NGON:
             self.notify("Werkzeug: Vieleck / Stern – vom Mittelpunkt aus ziehen (Umschalt dreht in "
                         "15°-Schritten), Tippen legt 20 mm an; Seiten / Stern in der Eigenschaftsleiste")
@@ -582,6 +587,8 @@ class CanvasEditor(QWidget):
             node_ui.add_to_menu(self, menu)
         if self.tools.tool == Tool.MEASURE:
             measure_ui.add_to_menu(self, menu)
+        if self.tools.tool == Tool.MARKS:
+            marks_ui.add_to_menu(self, menu)
         if self.selection:
             groups.append(("copy", "duplicate", "delete"))
             groups.append(("rotate_ccw", "rotate_cw", "group", "ungroup"))
@@ -991,6 +998,9 @@ class CanvasEditor(QWidget):
         mt = getattr(self, "measure_tool", None)
         if mt is not None:
             mt.clear()  # eine Messung gehört zum vorigen Dokument
+        mk = getattr(self, "marks_tool", None)
+        if mk is not None:
+            mk.clear()  # Passmarken ebenso
         self.view.fit_work_area()
         self.fileChanged.emit(self.title())
 

@@ -300,6 +300,19 @@ def _trim(p, c):
     p.drawLine(QPointF(15, 12), QPointF(21, 6))
 
 
+def _marks(p, c):
+    """Passmarken: zwei Fadenkreuz-Marken (links oben, rechts unten) mit Pfeil dazwischen."""
+    _pen(p, c, 1.5)
+    for x, y in ((6.5, 6.5), (17.5, 17.5)):
+        p.drawEllipse(QPointF(x, y), 3.2, 3.2)
+        p.drawLine(QPointF(x - 5, y), QPointF(x + 5, y))
+        p.drawLine(QPointF(x, y - 5), QPointF(x, y + 5))
+    pen = QPen(QColor(c), 1.5)
+    pen.setDashPattern([1.5, 1.5])
+    p.setPen(pen)
+    p.drawLine(QPointF(10.5, 10.5), QPointF(14, 14))
+
+
 def _align(p, c, where: str):
     """Textausrichtung: vier Zeilen unterschiedlicher Länge, links / mittig / rechts bündig."""
     _pen(p, c, 2.0)
@@ -330,7 +343,7 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "rotate_cw": _rotate, "rotate_ccw": lambda p, c: _rotate(p, c, False),
     "touch": _touch, "path": _path, "arrange": _arrange,
     "pathops": _pathops, "node": _node, "tabs": _tabs, "start": _start, "measure": _measure,
-    "trim": _trim,
+    "trim": _trim, "marks": _marks,
     "align_left": lambda p, c: _align(p, c, "left"), "align_center": lambda p, c: _align(p, c, "center"),
     "align_right": lambda p, c: _align(p, c, "right"), "text_weld": _text_weld,
 }

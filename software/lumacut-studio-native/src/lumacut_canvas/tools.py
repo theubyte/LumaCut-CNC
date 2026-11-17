@@ -2,7 +2,8 @@
 Ellipse, Linie, Polygon, Vieleck / Stern (:mod:`ngon`), Freihand, Text, Stege (manuelle Haltestege, :mod:`tabs_ui`),
 Startpunkt (manueller Konturstart, :mod:`startpoint_ui`),
 Messen (Abstand / Winkel, :mod:`measure_ui`),
-Trimmen (Stücke zwischen Kreuzungen entfernen, :mod:`trim_ui`).
+Trimmen (Stücke zwischen Kreuzungen entfernen, :mod:`trim_ui`),
+Passmarken (Design an zwei Marken ausrichten, :mod:`marks_ui`).
 
 Der :class:`ToolController` bekommt Mausereignisse in Szene-mm von der
 :class:`~canvas_view.CanvasView`. Während eines Zugs wird das Modell live
@@ -51,16 +52,18 @@ class Tool(str, Enum):
     START = "start"
     MEASURE = "measure"
     TRIM = "trim"
+    MARKS = "marks"
 
 
 TOOL_LABELS = {Tool.SELECT: "Auswahl", Tool.NODE: "Knoten", Tool.RECT: "Rechteck", Tool.ELLIPSE: "Ellipse",
                Tool.LINE: "Linie", Tool.POLYGON: "Polygon", Tool.NGON: "Vieleck / Stern",
                Tool.FREEHAND: "Freihand", Tool.TEXT: "Text", Tool.TABS: "Stege",
-               Tool.START: "Startpunkt", Tool.MEASURE: "Messen", Tool.TRIM: "Trimmen"}
+               Tool.START: "Startpunkt", Tool.MEASURE: "Messen", Tool.TRIM: "Trimmen",
+               Tool.MARKS: "Passmarken"}
 TOOL_SHORTCUTS = {Tool.SELECT: "V", Tool.NODE: "N", Tool.RECT: "R", Tool.ELLIPSE: "E", Tool.LINE: "L",
                   Tool.POLYGON: "P", Tool.NGON: "S", Tool.FREEHAND: "F", Tool.TEXT: "T", Tool.TABS: "Alt+Shift+T",
                   Tool.START: "Alt+Shift+A", Tool.MEASURE: "M",
-                  Tool.TRIM: "Alt+Shift+X"}
+                  Tool.TRIM: "Alt+Shift+X", Tool.MARKS: "Alt+Shift+M"}
 CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
 # Freihand: Ramer-Douglas-Peucker-Toleranz in mm (Abweichung von der gezeichneten
 # Linie) und Mindestabstand roher Mauspunkte.
@@ -231,6 +234,9 @@ class ToolController:
         tr = getattr(self.ed, "trim_tool", None)
         if tr is not None:
             tr.cancel()
+        mk = getattr(self.ed, "marks_tool", None)
+        if mk is not None:
+            mk.cancel()
         if self._mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if self._mode in ("draw", "poly", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -265,6 +271,8 @@ class ToolController:
             self.ed.measure_tool.abort()
         if mode == "trim":
             self.ed.trim_tool.cancel()
+        if mode == "marks":
+            self.ed.marks_tool.abort()
         if mode in ("move", "resize", "rotate") and self._orig:
             self._apply(self._orig)
         if mode in ("draw", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
@@ -319,6 +327,9 @@ class ToolController:
         elif self.tool == Tool.TRIM:
             self._mode = "trim"
             self.ed.trim_tool.press(pos)
+        elif self.tool == Tool.MARKS:
+            self._mode = "marks"
+            self.ed.marks_tool.press(pos)
         elif self.tool == Tool.TEXT:
             self._osnap_begin((), mods)
             try:
@@ -400,6 +411,12 @@ class ToolController:
             return
         if self._mode is None and self.tool == Tool.TRIM and not self.roi_pending:
             self.ed.trim_tool.hover(pos)       # Maus: zeigen, welches Stück wegfiele
+            return
+        if self._mode == "marks":
+            self.ed.marks_tool.move(pos)
+            return
+        if self._mode is None and self.tool == Tool.MARKS and not self.roi_pending:
+            self.ed.marks_tool.hover(pos)      # nächster Punkt folgt der Maus
             return
         if self._mode == "measure" or (self._mode is None and self.tool == Tool.MEASURE
                                        and not self.roi_pending):
@@ -698,6 +715,9 @@ class ToolController:
         if mode == "trim":
             self.ed.trim_tool.release(pos)
             return
+        if mode == "marks":
+            self.ed.marks_tool.release(pos)
+            return
         if mode == "free":
             self.finish_freehand(pos)
             return
@@ -824,6 +844,8 @@ class ToolController:
             return True
         if self.tool == Tool.MEASURE and not self.roi_pending and self.ed.measure_tool.key_press(event):
             return True  # Esc löscht zuerst die Messung (Auswahl bleibt)
+        if self.tool == Tool.MARKS and not self.roi_pending and self.ed.marks_tool.key_press(event):
+            return True  # Esc löscht zuerst die Passmarken (Auswahl bleibt)
         if event.key() == Qt.Key_Escape and self.roi_pending:
             self.cancel()  # nur die Bereichsauswahl abbrechen, Auswahl bleibt
             return True

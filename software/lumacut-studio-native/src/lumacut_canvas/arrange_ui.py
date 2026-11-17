@@ -1,4 +1,4 @@
-"""Menü „Anordnen“ im Canvas: Ausrichten, Verteilen, Raster- und Kreis-Array, Entlang Pfad
+"""Menü „Anordnen“ im Canvas: Passmarken (Drucken und Schneiden, :mod:`marks_ui`), Ausrichten, Verteilen, Raster- und Kreis-Array, Entlang Pfad
 kopieren, Verschachteln.
 
 Von :class:`CanvasEditor` über :func:`install` eingebunden (Aktionen +
@@ -21,7 +21,7 @@ ALIGN_SHORTCUTS = {  # wie in gängigen Laserprogrammen: Strg+Umschalt+Pfeil/Buc
     "top": "Ctrl+Shift+Up", "bottom": "Ctrl+Shift+Down",
     "hcenter": "Ctrl+Shift+H", "vcenter": "Ctrl+Shift+V",
 }
-MENU_ACTIONS = ([f"align_{m}" for m in arrange.ALIGN_MODES]
+MENU_ACTIONS = (["tool_marks", "marks_numeric", None] + [f"align_{m}" for m in arrange.ALIGN_MODES]
                 + [None, "distribute_h", "distribute_v", None, "array_grid", "array_circular"]
                 + alongpath_ui.MENU_ACTIONS
                 + [None] + nesting_ui.MENU_ACTIONS)

@@ -83,7 +83,8 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   liegen an derselben sichtbaren Stelle; unbekannte Werte werden abgelehnt.
 
 - **Werkzeuge:** Auswahl (V), Rechteck (R), Ellipse (E), Linie (L), Polygon (P), Vieleck / Stern (S),
-  Freihand (F), Text (T), Messen (M, siehe unten), Trimmen (Alt+Umschalt+X, siehe „Überstände abschneiden“).
+  Freihand (F), Text (T), Messen (M, siehe unten), Trimmen (Alt+Umschalt+X, siehe „Überstände abschneiden“),
+  Passmarken (Alt+Umschalt+M, siehe „Anordnen“).
   *Umschalt* beim Zeichnen = Quadrat/Kreis/45°-Linie; Klick ohne Ziehen legt
   ein 20-mm-Objekt an. Doppelklick auf Text = Text ändern. Polygon: Klick = Punkt,
   Doppelklick/Enter oder Klick auf den ersten Punkt = schließen, Rücktaste = Punkt weg.
@@ -889,12 +890,32 @@ dazu (ohne Referenzfahrt/Abtasten; Höhen, Kopfposition und Versatz am Ursprung
 aus dem Pi-Status, offline die Pi-Standardwerte ab X0/Y0). Sehr große Rasterjobs werden vollständig gelesen;
 bei vielen tausend Zeilen kann das Neuberechnen spürbar dauern.
 
-### Anordnen: Ausrichten, Verteilen, Arrays, Entlang Pfad kopieren, Verschachteln
+### Anordnen: Passmarken, Ausrichten, Verteilen, Arrays, Entlang Pfad kopieren, Verschachteln
 
 Knopf „Anordnen“ in der Aktionsleiste (und Untermenü im Kontextmenü), Rechnen in
 `lumacut_canvas/arrange.py` (Qt-frei), Oberfläche in `arrange_ui.py`. Jede Aktion ist ein
 Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
 
+- **Passmarken** (Werkzeug, Alt+Umschalt+M, Werkzeugleiste und oben im Menü „Anordnen“, wie
+  LightBurns *Print and Cut*, `marks.py` / `marks_ui.py`): legt das Design an zwei Marken auf
+  das echte Werkstück – z. B. einen bedruckten Aufkleberbogen mit zwei Fadenkreuzen, ein schon
+  graviertes Teil zum Ausschneiden oder ein schief eingelegtes Brett. Vier Tipps: **Soll 1**
+  (Marke im Design, fängt an Mitten / Ecken / Knoten, kein Raster), **Ist 1** (dieselbe Marke auf
+  dem Kamerascan als Hintergrund, genau dort, ohne Fang), **Soll 2**, **Ist 2** – dann werden die
+  ausgewählten Objekte (ohne Auswahl alle Objekte entsperrter Ebenen) in einem Undo-Schritt
+  verschoben und gedreht. Eingabe nach dem ersten Paar verschiebt nur; Rücktaste nimmt den
+  letzten Punkt zurück, Esc löscht die Punkte (die Auswahl bleibt). Vorschau: blaue Kreise =
+  Soll, orange Fadenkreuze = Ist, Pfeile dazwischen und gestrichelt, wohin das Design kommt.
+  Ohne „Passmarken: Maßstab angleichen“ (Kontextmenü, Vorgabe aus) bleibt das Design
+  maßhaltig: Mitte auf Mitte, Richtung auf Richtung, ein abweichender Abstand verteilt sich zur
+  Hälfte auf beide Marken (die Meldung nennt Abstand Ist/Soll und Abweichung je Marke); an
+  skaliert es zusätzlich gleichmäßig, damit beide Marken genau treffen. „Passmarken als
+  Zahlen …“ nimmt Soll / Ist als X/Y in Anzeige-Koordinaten (z. B. mit dem Lineal gemessen),
+  vorbelegt mit den angetippten Punkten bzw. den Ecken der Auswahl. Abgelehnt wird: Marken
+  näher als 5 mm, ein Ist-Abstand mehr als 10 % neben dem Soll-Abstand (falsche Marke?) und ein
+  Ergebnis außerhalb der Arbeitsfläche (es würde sonst in die Fläche geschoben). Steht die
+  Startposition am Pi auf „Kopfposition“ / „Benutzer-Ursprung“, weist die Meldung darauf hin
+  (für Passmarken „Absolut“ wählen). Kein neuer Projekt-Schlüssel – nur die Objekte bewegen sich.
 - **Ausrichten** links / mittig / rechts / oben / mittig / unten (Strg+Umschalt+←/H/→/↑/V/↓):
   mehrere Einheiten an der Auswahl-Hüllbox, ein einzelnes Objekt an der Arbeitsfläche.
 - **Verteilen** waagerecht/senkrecht: gleiche Lücken, die äußeren Einheiten bleiben
