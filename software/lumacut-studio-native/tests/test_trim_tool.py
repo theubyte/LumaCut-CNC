@@ -280,7 +280,7 @@ def test_nothing_no_crossing_locked_and_drag(ed):
     click(ed, 120, 100)
     assert "kreuzt keine andere Form" in ed.msgs[-1] and ed.undo_stack.count() == n0
     _add(ed, [seg(lid, (120, 90), (120, 110))])
-    ed.tools.press(QPointF(110, 100), NO)            # Ziehen ist kein Tippen
+    ed.tools.press(QPointF(110, 105), NO)            # Ziehen ist kein Tippen (kreuzt nichts)
     ed.tools.move(QPointF(130, 130), NO, True)
     ed.tools.release(QPointF(130, 130), NO)
     assert ed.document.has_shape(lone.id)
