@@ -554,7 +554,8 @@ class CanvasEditor(QWidget):
                         "(fängt an Objekten / Raster, Umschalt = 15°-Schritte, Alt = frei, Esc löscht)")
         elif tool == Tool.TRIM:
             self.notify("Werkzeug: Trimmen – Stück einer Linie / eines Umrisses antippen entfernt es "
-                        "bis zu den nächsten Kreuzungen (rot = fällt weg), Strg+Z holt es zurück")
+                        "bis zu den nächsten Kreuzungen (rot = fällt weg), über mehrere Stücke ziehen "
+                        "entfernt alle gekreuzten, Strg+Z holt es zurück")
         elif tool == Tool.NGON:
             self.notify("Werkzeug: Vieleck / Stern – vom Mittelpunkt aus ziehen (Umschalt dreht in "
                         "15°-Schritten), Tippen legt 20 mm an; Seiten / Stern in der Eigenschaftsleiste")

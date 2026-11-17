@@ -18,7 +18,8 @@ Erzeugte Objekte werden übergangen.
 
 Für das Werkzeug „Trimmen“ (:mod:`trim_ui`, LightBurns Klick-Trimmen) liefert
 :class:`TrimIndex` das Stück einer Form zwischen den zwei nächsten Kreuzungen
-unter einem Punkt (auch innere Stücke und Stücke geschlossener Formen).
+unter einem Punkt (auch innere Stücke und Stücke geschlossener Formen) und mit
+:meth:`TrimIndex.sweep` alle Stücke, die eine gezogene Linie kreuzt.
 """
 
 from __future__ import annotations
@@ -256,6 +257,23 @@ class TrimPick:
         return LineString(self.removed).length if len(self.removed) >= 2 else 0.0
 
 
+@dataclass
+class TrimSweep:
+    """Ergebnis von :meth:`TrimIndex.sweep`: alle Stücke, die eine Zuglinie kreuzt."""
+    fence: list[Point]
+    pieces: list[list[Point]] = field(default_factory=list)            # entfernte Stücke
+    replace: list[tuple[str, list[Shape]]] = field(default_factory=list)  # (ID, Ersatz) je Form
+    skipped: int = 0                     # gekreuzte Umrisse ohne Kreuzung mit anderen Formen
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.pieces)
+
+    @property
+    def length_mm(self) -> float:
+        return sum(LineString(p).length for p in self.pieces if len(p) >= 2)
+
+
 class TrimIndex:
     """Räumlicher Index aller Umrisse für das Trimmwerkzeug.
 
@@ -298,6 +316,90 @@ class TrimIndex:
                 best, best_d = j, key
         return best
 
+    def _bounds(self, j: int) -> tuple[list[float], str]:
+        """Grenzen der Stücke entlang Umriss ``j`` (Abstände ab Linienstart).
+
+        Offen: ``[0, Kreuzungen…, Länge]`` – Stück ``i`` reicht von ``b[i]`` bis
+        ``b[i + 1]``. Geschlossen: die Kreuzungen ``c`` (mindestens zwei) – Stück
+        ``i`` reicht von ``c[i]`` bis ``c[i + 1]``, das letzte über den Ringstart
+        bis ``c[0]``. Zweiter Wert: Hinweistext, wenn nichts zu trimmen ist."""
+        line = self.lines[j]
+        closed = self.rings[self.owner[j][0]][self.owner[j][1]][1]
+        total = line.length
+        near = [i for i in self.tree.query(line.buffer(JOIN_TOLERANCE_MM)) if i != j]
+        cutters = unary_union([self.lines[i] for i in near]) if near else None
+        cuts = [] if cutters is None or cutters.is_empty else _cut_distances(line, cutters)
+        tol_c = JOIN_TOLERANCE_MM
+        if closed:
+            cuts = _merge([d % total if total - d > tol_c else 0.0 for d in cuts], tol_c)
+            if len(cuts) >= 2 and total - cuts[-1] <= tol_c and cuts[0] <= tol_c:
+                cuts.pop()
+            if len(cuts) < 2:
+                return [], "die Kontur kreuzt keine andere Form zweimal – Entf löscht das ganze Objekt"
+            return cuts, ""
+        inner = _merge([d for d in cuts if tol_c < d < total - tol_c], tol_c)
+        if not inner:
+            return [], "das Stück kreuzt keine andere Form – Entf löscht das ganze Objekt"
+        return [0.0, *inner, total], ""
+
+    def _piece_at(self, j: int, bounds: list[float], t: float) -> int:
+        """Nummer des Stücks von Umriss ``j``, in dem der Abstand ``t`` liegt."""
+        if self.rings[self.owner[j][0]][self.owner[j][1]][1]:
+            if t < bounds[0] or t >= bounds[-1]:
+                return len(bounds) - 1
+            return max(n for n, c in enumerate(bounds) if c <= t)
+        return max(n for n in range(len(bounds) - 1) if bounds[n] <= t)
+
+    def _split(self, j: int, bounds: list[float], gone: set[int]) -> tuple[list[list[Point]], list[list[Point]]]:
+        """(entfernte Stücke, verbleibende Stücke) von Umriss ``j`` ohne die Stücke ``gone``.
+
+        Benachbarte Stücke gleicher Art werden zu einem Linienzug zusammengefasst."""
+        line = self.lines[j]
+        total = line.length
+        closed = self.rings[self.owner[j][0]][self.owner[j][1]][1]
+
+        def run(a: float, b: float) -> list[Point]:
+            if a < b:
+                return _coords(substring(line, a, b))
+            return _coords(substring(line, a, total)) + _coords(substring(line, 0.0, b))[1:]
+
+        removed: list[list[Point]] = []
+        rest: list[list[Point]] = []
+        if closed:
+            n = len(bounds)
+            if len(gone) >= n:
+                return [run(bounds[0], bounds[0])], []
+            # Beginn am ersten bleibenden Stück hinter einem entfernten – so hängen
+            # benachbarte Stücke auch über den Ringstart hinweg zusammen.
+            first = min(k for k in gone if (k + 1) % n not in gone)
+            order = [(first + 1 + m) % n for m in range(n)]
+            m = 0
+            while m < n:
+                k = order[m]
+                is_gone = k in gone
+                e = m
+                while e + 1 < n and (order[e + 1] in gone) == is_gone:
+                    e += 1
+                a, b = bounds[k], bounds[(order[e] + 1) % n]
+                (removed if is_gone else rest).append(run(a, b))
+                m = e + 1
+        else:
+            n = len(bounds) - 1
+            m = 0
+            while m < n:
+                is_gone = m in gone
+                e = m
+                while e + 1 < n and ((e + 1) in gone) == is_gone:
+                    e += 1
+                a, b = bounds[m], bounds[e + 1]
+                if is_gone:
+                    removed.append(run(a, b))
+                elif b - a > _MIN_REST_MM:
+                    rest.append(run(a, b))
+                m = e + 1
+        rest = [r for r in rest if len(r) >= 2 and LineString(r).length > _MIN_REST_MM]
+        return [r for r in removed if len(r) >= 2], rest
+
     def pick(self, point: Point, tol: float) -> TrimPick | None:
         """Stück unter ``point`` (Fangabstand ``tol`` mm) oder ``None``."""
         p = SPoint(point)
@@ -306,57 +408,58 @@ class TrimIndex:
             return None
         sid, k = self.owner[j]
         shape = self.by_id[sid]
-        pts, closed = self.rings[sid][k]
-        line = self.lines[j]
-        total = line.length
-        near = [i for i in self.tree.query(line.buffer(JOIN_TOLERANCE_MM)) if i != j]
-        cutters = unary_union([self.lines[i] for i in near]) if near else None
-        cuts = [] if cutters is None or cutters.is_empty else _cut_distances(line, cutters)
-        tol_c = JOIN_TOLERANCE_MM
-        t = line.project(p)
-        if closed:
-            cuts = _merge([d % total if total - d > tol_c else 0.0 for d in cuts], tol_c)
-            if len(cuts) >= 2 and total - cuts[-1] <= tol_c and cuts[0] <= tol_c:
-                cuts.pop()
-            if len(cuts) < 2:
-                return TrimPick(shape, k, pts, reason="die Kontur kreuzt keine andere Form zweimal – "
-                                                      "Entf löscht das ganze Objekt")
-            if t < cuts[0] or t >= cuts[-1]:
-                a, b = cuts[-1], cuts[0]
-                removed = _coords(substring(line, a, total)) + _coords(substring(line, 0.0, b))[1:]
-                rest = [_coords(substring(line, b, a))]
-            else:
-                i = max(n for n, c in enumerate(cuts) if c <= t)
-                a, b = cuts[i], cuts[i + 1]
-                removed = _coords(substring(line, a, b))
-                rest = [_coords(substring(line, b, total)) + _coords(substring(line, 0.0, a))[1:]]
-        else:
-            inner = _merge([d for d in cuts if tol_c < d < total - tol_c], tol_c)
-            if not inner:
-                return TrimPick(shape, k, pts, reason="das Stück kreuzt keine andere Form – "
-                                                      "Entf löscht das ganze Objekt")
-            bounds = [0.0, *inner, total]
-            i = max(n for n in range(len(bounds) - 1) if bounds[n] <= t)
-            a, b = bounds[i], bounds[i + 1]
-            removed = _coords(substring(line, a, b))
-            rest = []
-            if a > _MIN_REST_MM:
-                rest.append(_coords(substring(line, 0.0, a)))
-            if total - b > _MIN_REST_MM:
-                rest.append(_coords(substring(line, b, total)))
-        rest = [r for r in rest if len(r) >= 2 and LineString(r).length > _MIN_REST_MM]
-        pick = TrimPick(shape, k, removed)
+        pts, _closed = self.rings[sid][k]
+        bounds, reason = self._bounds(j)
+        if reason:
+            return TrimPick(shape, k, pts, reason=reason)
+        removed, rest = self._split(j, bounds, {self._piece_at(j, bounds, self.lines[j].project(p))})
+        pick = TrimPick(shape, k, removed[0] if removed else [])
         pick.remove = [sid]
-        pick.add = self._rebuild(shape, k, rest)
+        pick.add = self._rebuild(shape, {k: rest})
         return pick
 
-    def _rebuild(self, shape: Shape, k: int, rest: list[list[Point]]) -> list[Shape]:
+    def sweep(self, a: Point, b: Point) -> TrimSweep:
+        """Alle Stücke, die die Strecke ``a``–``b`` kreuzt (Ziehen über mehrere Stücke).
+
+        Die Stücke werden gegen den Zustand *vor* dem Zug bestimmt – genau das, was
+        die Vorschau zeigt –, je Form entsteht ein Ersatz (ein Undo-Schritt für alle)."""
+        out = TrimSweep([tuple(map(float, a)), tuple(map(float, b))])
+        if self.tree is None or math.dist(a, b) < 1e-6:
+            return out
+        fence = LineString([a, b])
+        hits: dict[str, dict[int, set[int]]] = {}
+        bounds_of: dict[int, list[float]] = {}
+        for j in sorted(int(i) for i in self.tree.query(fence)):
+            sid, k = self.owner[j]
+            if sid not in self.targets:
+                continue
+            ts = [self.lines[j].project(q) for q in _hit_points(fence.intersection(self.lines[j]))]
+            if not ts:
+                continue
+            bounds, reason = self._bounds(j)
+            if reason:
+                out.skipped += 1
+                continue
+            bounds_of[j] = bounds
+            hits.setdefault(sid, {}).setdefault(j, set()).update(self._piece_at(j, bounds, t) for t in ts)
+        order = {s.id: i for i, s in enumerate(self.shapes)}
+        for sid in sorted(hits, key=order.__getitem__):
+            shape = self.by_id[sid]
+            rests: dict[int, list[list[Point]]] = {}
+            for j, gone in hits[sid].items():
+                removed, rest = self._split(j, bounds_of[j], gone)
+                out.pieces.extend(removed)
+                rests[self.owner[j][1]] = rest
+            out.replace.append((sid, self._rebuild(shape, rests)))
+        return out
+
+    def _rebuild(self, shape: Shape, rests: dict[int, list[list[Point]]]) -> list[Shape]:
         rings = self.rings[shape.id]
         open_parts: list[list[Point]] = []
         closed_parts: list[list[Point]] = []
         for n, (pts, closed) in enumerate(rings):
-            if n == k:
-                open_parts.extend(rest)
+            if n in rests:
+                open_parts.extend(rests[n])
             elif closed and shape.kind == "polygon":
                 closed_parts.append(pts[:-1] if len(pts) > 3 else pts)
             else:
@@ -378,6 +481,19 @@ class TrimIndex:
             s.reverse = shape.reverse
             out.append(s)
         return out
+
+
+def _hit_points(g) -> list[SPoint]:
+    """Kreuzungspunkte der Zuglinie mit einem Umriss (bei Überdeckung die Mitte)."""
+    if g.is_empty:
+        return []
+    if g.geom_type == "Point":
+        return [g]
+    if g.geom_type in ("LineString", "LinearRing"):
+        return [g.interpolate(0.5, normalized=True)]
+    if hasattr(g, "geoms"):
+        return [q for part in g.geoms for q in _hit_points(part)]
+    return []
 
 
 POINT_KINDS_MIN = {"polygon": 3, "path": 2}

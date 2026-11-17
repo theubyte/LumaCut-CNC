@@ -8,6 +8,10 @@
   „Überstände abschneiden …“ entfernen.
 * Eine geschlossene Form wird dabei zum offenen Pfad (wie in LightBurn); weitere
   Ringe eines Polygons (Löcher) bleiben ein geschlossenes Polygon.
+* Ziehen über mehrere Stücke (wie LightBurns Trimmen mit gedrückter Maustaste)
+  zieht eine Linie; jedes Stück, das sie kreuzt, fällt beim Loslassen weg – alle
+  zusammen in einem Undo-Schritt. Bestimmt werden die Stücke gegen den Zustand vor
+  dem Zug, also genau das, was die rote Vorschau zeigt.
 * Mit der Maus zeigt das Werkzeug vorher rot gestrichelt, welches Stück wegfällt
   (grau: hier gibt es nichts zu trimmen); mit dem Finger (Touch-Modus, größerer
   Fangabstand) entfernt der Tipp direkt, Strg+Z holt es zurück.
@@ -41,34 +45,57 @@ class TrimMarker(QGraphicsItem):
         self.setZValue(1.07e9)
         self.setAcceptedMouseButtons(Qt.NoButton)
         self.piece: list[tuple[float, float]] = []
+        self.pieces: list[list[tuple[float, float]]] = []   # Ziehen: alle Stücke
+        self.fence: list[tuple[float, float]] = []          # Ziehen: die Zuglinie
         self.ok = True
         self.touch = False
         self.setVisible(False)
 
     def show_piece(self, piece, ok: bool) -> None:
         piece = list(piece or [])
-        if piece == self.piece and ok == self.ok and self.isVisible() == bool(piece):
+        if (piece == self.piece and ok == self.ok and not self.fence
+                and self.isVisible() == bool(piece)):
             return
         self.piece, self.ok = piece, ok
+        self.pieces, self.fence = ([piece] if piece else []), []
         self.setVisible(bool(piece))
+        self.update()
+
+    def show_sweep(self, fence, pieces) -> None:
+        """Zuglinie (grau gestrichelt) und alle Stücke, die beim Loslassen wegfallen."""
+        self.fence = list(fence or [])
+        self.pieces = [list(p) for p in pieces or [] if len(p) >= 2]
+        self.piece = self.pieces[0] if len(self.pieces) == 1 else []
+        self.ok = bool(self.pieces)
+        self.setVisible(bool(self.fence))
         self.update()
 
     def boundingRect(self) -> QRectF:  # noqa: N802 - Qt API
         return QRectF(-20, -20, WORK_WIDTH_MM + 40, WORK_HEIGHT_MM + 40)
 
     def paint(self, p: QPainter, option, widget=None) -> None:
-        if len(self.piece) < 2:
-            return
         p.setRenderHint(QPainter.Antialiasing)
-        path = QPainterPath(QPointF(*self.piece[0]))
-        for pt in self.piece[1:]:
-            path.lineTo(QPointF(*pt))
+        p.setBrush(Qt.NoBrush)
+        if len(self.fence) == 2:
+            pen = QPen(QColor(NONE_COLOR), 2.0 if self.touch else 1.5)
+            pen.setCosmetic(True)
+            pen.setStyle(Qt.DotLine)
+            p.setPen(pen)
+            p.drawLine(QPointF(*self.fence[0]), QPointF(*self.fence[1]))
+        path = QPainterPath()
+        for piece in self.pieces:
+            if len(piece) < 2:
+                continue
+            path.moveTo(QPointF(*piece[0]))
+            for pt in piece[1:]:
+                path.lineTo(QPointF(*pt))
+        if path.isEmpty():
+            return
         pen = QPen(QColor(TRIM_COLOR if self.ok else NONE_COLOR), 4.0 if self.touch else 3.0)
         pen.setCosmetic(True)
         pen.setStyle(Qt.DashLine)
         pen.setCapStyle(Qt.RoundCap)
         p.setPen(pen)
-        p.setBrush(Qt.NoBrush)
         p.drawPath(path)
 
 
@@ -145,6 +172,42 @@ class TrimTool:
         self.ed.notify(f"Trimmen: {what} von {pick.length_mm:.1f} mm entfernt – Strg+Z holt es zurück")
         return True
 
+    def sweep(self, a: QPointF, b: QPointF) -> pathtrim.TrimSweep:
+        return self.index().sweep((a.x(), a.y()), (b.x(), b.y()))
+
+    def trim_sweep(self, a: QPointF, b: QPointF) -> int:
+        """Alle Stücke entfernen, die die Zuglinie ``a``–``b`` kreuzt (ein Undo-Schritt).
+
+        Rückgabe: Anzahl entfernter Stücke."""
+        sw = self.sweep(a, b)
+        self.item.show_piece([], True)
+        if not sw.ok:
+            locked = pathtrim.TrimIndex(list(self.index().shapes)).sweep((a.x(), a.y()), (b.x(), b.y()))
+            if locked.ok:
+                self.ed.notify("Trimmen: die gekreuzten Formen liegen auf gesperrten Ebenen")
+            elif sw.skipped:
+                self.ed.notify("Trimmen: die Linie kreuzt nur Formen ohne Kreuzung mit anderen – "
+                               "Entf löscht ein ganzes Objekt")
+            else:
+                self.ed.notify("Trimmen: die gezogene Linie kreuzt kein Stück zum Trimmen")
+            return 0
+        sel = list(self.ed.selection)
+        stack = self.ed.undo_stack
+        stack.beginMacro("Trimmen")
+        try:
+            for sid, add in sw.replace:
+                stack.push(ReplaceShapesCommand(self.doc, [sid], add, "Trimmen"))
+                if sid in sel:
+                    sel = [i for i in sel if i != sid] + [s.id for s in add]
+        finally:
+            stack.endMacro()
+        self.ed.set_selection([i for i in sel if self.doc.has_shape(i)])
+        n = len(sw.pieces)
+        what = "1 Stück" if n == 1 else f"{n} Stücke"
+        self.ed.notify(f"Trimmen: {what} ({sw.length_mm:.1f} mm) von {len(sw.replace)} Form(en) "
+                       "entfernt – Strg+Z holt alle zurück")
+        return n
+
     # --- Eingaben (Szenen-mm) --------------------------------------------
     def press(self, pos: QPointF) -> None:
         self._start = QPointF(pos)
@@ -155,12 +218,21 @@ class TrimTool:
             return
         if (pos - self._start).manhattanLength() * self.ed.view.px_per_mm > TAP_PX:
             self._moved = True
-        self.hover(pos)
+        if not self._moved:
+            self.hover(pos)
+            return
+        # Ziehen: Zuglinie und alle Stücke zeigen, die sie kreuzt
+        self.item.touch = bool(getattr(self.ed, "touch_mode", False))
+        sw = self.sweep(self._start, pos)
+        self.item.show_sweep(sw.fence, sw.pieces)
 
     def release(self, pos: QPointF) -> None:
         start, self._start = self._start, None
-        if start is None or self._moved:
-            self._moved = False
+        moved, self._moved = self._moved, False
+        if start is None:
+            return
+        if moved:
+            self.trim_sweep(start, pos)
             return
         self.trim_at(start)
 
