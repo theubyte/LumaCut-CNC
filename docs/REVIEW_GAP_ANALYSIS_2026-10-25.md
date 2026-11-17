@@ -15866,3 +15866,91 @@ and overlapping collinear lines are not merged on the canvas. Hardware check: an
 figure-eight outline with one loop trimmed and the other cut with two manual tabs on 3 mm
 plywood (tabs where they were placed, no burn on the removed loop), and the tap on a loop by
 finger on the Windows tablet.
+
+## 93. Status update 2026-11-17 (review round 86)
+
+Done this round (print-and-cut alignment – LightBurn's *Print and Cut* / two-point alignment;
+Machine / Scan Probe / Materials untouched – new `marks.py` / `marks_ui.py`, one tool in
+`tools.py` / `editor.py`, two entries at the top of the Anordnen menu, one icon; model,
+planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §92 by others: none – main had no commit since `389d385` (round 85); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: after four trim rounds a different item of the §88 list. Min/max corner power
+  (`LASER_POWER_TRAP`, §14) and Dot Mode dwell (laser-on dwell in the SKR firmware / Pi guard)
+  still need the user's firmware decision, rotary needs hardware, the image dot-size model
+  needs the Materials library, the CoreXY time model has no built machine to calibrate
+  against. Print-and-cut was listed as „registration marks via the camera – Machine / Scan
+  Probe“, but its core is pure Studio work: the camera scan already lies as a calibrated
+  backdrop under the canvas (Scan Probe's job, unchanged), what was missing is moving the
+  design onto marks seen there – which also covers the „job placement on the camera image“
+  part for parts that are already on the bed. Typical diode-laser jobs: cutting out printed
+  stickers / labels / cards with registration crosses, cutting an engraved part a second time
+  after it was moved, engraving onto a crooked board or a pre-cut blank. No G-code command,
+  Pi or firmware change, nothing camera-side – no user decision needed.
+- **Model** (`lumacut_canvas/marks.py`, Qt-free): `fit_marks(soll, ist, scale)` → `MarkFit`.
+  One pair moves only (Soll lands on Ist). Two pairs move and rotate; rigid by default (part
+  sizes stay true – the laser cuts at real size): the middle of the Soll points lands on the
+  middle of the Ist points and the direction Soll 1 → 2 on Ist 1 → 2, a distance mismatch is
+  split over both marks (`error_mm`, reported with the ratio). With „Maßstab angleichen“ it
+  also scales uniformly so both marks hit exactly (print came out slightly larger / smaller).
+  `map_geometry` goes through the existing `Geometry.mapped` / `rotated` / `translated`, so
+  rotated shapes, text, images, lines, paths, tabs and start points follow without shear.
+  Refused with German messages: marks closer than 5 mm, an Ist distance more than 10 % off
+  the Soll distance (wrong mark tapped / swapped), non-finite values.
+- **Tool** „Passmarken“ (`marks_ui.py`, Alt+Umschalt+M, last in the tool strip and at the top
+  of „Anordnen“ / its context submenu): four taps – Soll 1 (object snap to centres / corners /
+  nodes if „An Objekten fangen“ is on, never the 1-mm grid), Ist 1 (exact tap on the camera
+  scan, no snap at all), Soll 2, Ist 2 – move the selection (without one: every object of
+  visible unlocked layers, then selected) in one undo step „Passmarken ausrichten“; Enter
+  after the first pair only moves, Backspace takes the last point back, Esc clears the points
+  first (selection kept), a drag places the point on release (fine positioning by finger), a
+  second finger keeps the points, a tool switch clears them. Overlay: blue circles = Soll,
+  orange crosses = Ist, numbered, dashed arrows, the boxes of the moved objects dashed while
+  the next point follows the mouse. A wrong fourth point is refused and can be tapped again.
+  Context menu in the tool: „Passmarken als Zahlen …“ (Soll / Ist as X/Y in display
+  coordinates, prefilled with the tapped points or the selection box corners, live summary,
+  OK disabled on an implausible entry, „Zweites Paar verwenden“, „Maßstab angleichen“),
+  „Passmarken: Maßstab angleichen“ (session, default off), „Passmarken löschen“.
+- **Hardware / Pi**: alignment is absolute. The document clamps shapes into the work area, so
+  a result reaching outside is refused instead of silently shifted (registration would be
+  lost). If the Pi's start position („Aktuelle Position“ / „Benutzer-Ursprung“,
+  `park_routine.active_start`) would shift the job, the status line says so and asks for
+  „Absolut“. The G-code is the normal output of the moved shapes – checked against the Pi's
+  `MarlinLaserGuard`.
+- README paragraph „Passmarken“ under „Anordnen“ and the tool list updated.
+
+Tests: new `tests/test_print_cut_marks.py` (32 tests): one pair moving, two pairs rotating
+onto both marks, rigid fit splitting a 1 % distance error with the size kept, scale mode
+hitting both marks with uniform scale, polygon / path / rotated rect / line / text matching
+the mapped points in both modes, tabs and start point following, display angle / summary
+texts, six refused inputs, identity and work-area helpers, Pi-safe G-code of a moved rect
+with the same cut length and moved corners; tool action / shortcut / icon / strip place, four
+taps with snap to the circle centre and an exact Ist point as one undo step (other objects
+untouched, undo restores), all objects without a selection with a locked layer kept, Enter
+moving only, Backspace / Esc with the selection kept, a refused fourth point tapped again,
+overlay / ghost / touch painting, drag placement / second finger / tool switch, object snap
+off, empty document and identity, result outside the work area refused and retried, scale
+action and context menu, Anordnen menu order, numeric dialog (prefill, one pair, refused
+entry, rotation, apply) and its prefill from the selection, Pi start position hint, save /
+load with the same keys as a plain project, unique Alt+Shift+M in the main window.
+`test_trim_tool.py` no longer expects „Trimmen“ to be the last tool of the strip.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3346 passed, 3 skipped** (14.6 min; 3314 + 32 new print-and-cut tests), no failure.
+
+Output change for old files: none – the code only runs when the tool or the dialog is used;
+no new project key, model, planner and G-code writer unchanged.
+
+Still open: unchanged from §88 minus the alignment part of print-and-cut – camera placement
+beyond marks (dragging the job on a live camera picture), automatic mark detection in the
+camera image (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials items,
+image dot-size model, CoreXY time model, text items, live image mask; the trim refinements of
+§92. For the marks: Ist points are only as exact as the camera scan calibration and the tap
+(zoom in; or measure and type them); no automatic search for printed crosses, no
+three-point / affine fit (a print skewed by the printer stays skewed), no „Kopfposition
+übernehmen“ (the head camera's offset to the laser is Scan Probe's calibration), the scale
+choice is not remembered across sessions, and the Pi's „Kopfposition“ / „Benutzer-Ursprung“
+start is only warned about, not compensated. Hardware check: print a sticker sheet with two
+crosses, lay it crooked on the bed, camera scan, align with the tool on the Windows tablet by
+finger and cut the outlines (registration within ≈ 0.3 mm), and the same with typed
+coordinates measured with a ruler.
