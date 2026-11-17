@@ -15799,3 +15799,70 @@ manual tabs / start points of a trimmed shape are dropped, and overlapping colli
 not merged automatically on the canvas. Hardware check: a 3 × 3 box grid with all inner pieces
 removed by two sweeps and cut on 3 mm plywood (no burnt stubs), and the sweep by finger on the
 Windows tablet (preview visible next to the finger, pinch zoom aborts, one Strg+Z restores all).
+
+## 92. Status update 2026-11-17 (review round 85)
+
+Done this round (trim at self-crossings and manual tabs / start points kept while trimming – two
+trim follow-ups of §91; Machine / Scan Probe / Materials untouched – only `pathtrim.py`
+(`self_cuts`, `TrimIndex._own_cuts`, `_carry_marks`, `dropped_marks`, `marks_note`) and two
+status texts in `trim_ui.py`; model, planner and G-code writer unchanged):
+
+- Closed since §91 by others: none – main had no commit since `f7a9e68` (round 84).
+- Gap picked: of the §91 trim follow-ups, two were real correctness gaps rather than comfort:
+  a figure eight (common in SVG / DXF imports, ornaments, infinity signs, bow-tie outlines) or a
+  path with a loop could not be trimmed at its own crossing at all („kreuzt keine andere Form“),
+  and every trim silently threw away the manual tabs and the start point of the trimmed shape –
+  also those on contours that were not touched (the outer ring when a hole was trimmed), so a
+  part could fall out of the sheet on the next cut. Weighed against min/max corner power
+  (`LASER_POWER_TRAP`, user decision §14) and Dot Mode dwell (laser-on dwell in the SKR / Pi
+  guard) – both still wait for the user –, the CoreXY time model (Gestell v1 is designed, not
+  built – nothing to calibrate against), the image dot-size model (needs the material library –
+  Materials) and the text items (less relevant for real jobs). No user decision needed.
+- **Self-crossings** (`lumacut_canvas/pathtrim.py`): `self_cuts(pts, closed)` finds every place
+  where a polyline crosses or touches itself (segment pairs via an `STRtree`, a quick
+  `is_simple` exit for the normal case) and returns both passes along the line; neighbouring
+  segments (also across the ring closure) and hits closer than 0.05 mm along the line (duplicate
+  points) do not count, parallel overlaps are skipped. `TrimIndex` adds them to the crossings
+  with other shapes (cached per outline – hover asks often), so taps and sweeps cut a figure eight
+  into its two loops and a looped path into tail / loop / end. A rest piece of a closed ring whose
+  ends meet on the crossing (the other loop of a figure eight) stays a **closed polygon** instead
+  of becoming an open path – it can still be filled, kerf-offset and tabbed. Ends behind the
+  own crossing behave like a T-joint. `trim_stubs` (automatic stub trimming) is unchanged.
+- **Tabs / start point** (`_carry_marks`): replacement polygons (rings that stay closed: the
+  untouched rings of a polygon, the remaining loop of a figure eight) take over the manual tabs
+  and the start point lying on them (`tabs.carry_tabs` / `startpoint.carry_start`, 0.05 mm);
+  those on a removed piece or a contour that became an open path are dropped (open paths cannot
+  carry them). The status line names them: „… entfernt (1 Steg und 1 Startpunkt auf offenen /
+  entfernten Stücken entfallen) – Strg+Z holt es zurück“; a figure-eight tap says „Stück der
+  Kontur“ without „jetzt offener Pfad“. Shapes without tabs / start point keep the round 84
+  result objects unchanged.
+- README paragraph under „Trimmen“ and the module docs of `pathtrim.py` / `trim_ui.py` updated.
+
+Tests: new `tests/test_trim_self_cross.py` (16 tests): `self_cuts` for a figure eight (both
+passes), a simple ring, duplicate points, a looped path and a crossing through a vertex passed
+twice (also as ring start); tap on one loop keeping the other closed with layer / groups /
+priority / direction, a figure eight alone now trimmable while a lone rectangle still is not,
+loop and end of an open path, self-crossings together with another cutter, sweep over both loops
+/ one loop, rotated and curved figure eights, stub trimming unchanged; tabs and start point kept
+on the outer ring when a hole is trimmed, tabs following the remaining loop and a start point
+dropped / kept, an opened rectangle dropping its tab, no copy without marks, G-code of the
+remaining loop burning its perimeter minus the carried 2 mm tab and passing the Pi guard; tool
+tap with preview, one undo step, selection and the status note, sweep over a path loop, save /
+load with the carried tab and no new key.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3314 passed, 3 skipped** (14.0 min; 3298 + 16 new self-crossing / tab tests), no failure.
+
+Output change for old files: none – the code only runs on a trim tap or sweep; no new project
+key, model, planner and G-code writer unchanged.
+
+Still open: unchanged from §88 (camera placement, print-and-cut, rotary, min/max corner power,
+Dot Mode dwell, Materials items, image dot-size model, CoreXY time model, text items, live
+image mask). For trim: the fence is a straight line (no freehand sweep path), curves of a
+trimmed path are flattened (0.01 mm), the remaining loop of a figure eight becomes a polygon
+(curves flattened, start of the ring at the crossing), tabs / start points on pieces that become
+open are dropped (open paths have none), a path whose loop is removed keeps tail and end as two
+sub-paths meeting at the crossing (the planner joins them in one pass only if it chooses to),
+and overlapping collinear lines are not merged on the canvas. Hardware check: an imported
+figure-eight outline with one loop trimmed and the other cut with two manual tabs on 3 mm
+plywood (tabs where they were placed, no burn on the removed loop), and the tap on a loop by
+finger on the Windows tablet.

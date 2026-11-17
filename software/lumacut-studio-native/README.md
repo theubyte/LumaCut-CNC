@@ -170,6 +170,12 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   beim Loslassen weg – z. B. alle inneren Stege eines Rasters mit einem Strich, auch mehrere Stücke
   derselben Form. Die Stücke gelten gegen den Stand vor dem Zug (genau die Vorschau), alle zusammen
   sind ein Undo-Schritt „Trimmen“; ein zweiter Finger (Zoomen) bricht den Zug ab.
+  Auch **Selbstkreuzungen** teilen eine Form in Stücke: bei einer Acht (z. B. aus einem Import) fällt
+  per Tippen eine Schlaufe weg und die andere bleibt eine geschlossene Kontur (füllbar, mit Kerf und
+  Stegen), bei einem Pfad mit Schleife lässt sich die Schleife oder das Ende hinter der eigenen
+  Kreuzung entfernen. **Manuelle Stege und der Startpunkt** bleiben auf allen Konturen, die
+  geschlossen bleiben (Außenring beim Trimmen eines Lochs, übrige Schlaufe einer Acht); die auf
+  einem entfernten oder nun offenen Stück entfallen, die Statuszeile nennt ihre Zahl.
   Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathsimplify.py`, `pathtrim.py`, `pathjoin_ui.py`,
   `trim_ui.py`.
 - **Ecken abrunden …** (Pfad-Menü, Alt+Umschalt+R, wie LightBurns *Radius*-Werkzeug / xTool
