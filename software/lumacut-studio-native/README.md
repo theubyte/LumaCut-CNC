@@ -165,6 +165,11 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   offenen Pfad, Löcher eines Polygons bleiben geschlossen; Ebene, Gruppen, Priorität und
   Laufrichtung bleiben, ein Undo-Schritt je Tippen. Es schneidet an allen sichtbaren Formen (auch
   gesperrten, Text, QR-Codes), getrimmt werden nur Linien und Umrisse entsperrter Ebenen.
+  **Ziehen über mehrere Stücke** (Maus oder Finger, wie LightBurns Trimmen mit gedrückter Taste)
+  zieht eine graue Zuglinie; jedes Stück, das sie kreuzt, wird rot gestrichelt gezeigt und fällt
+  beim Loslassen weg – z. B. alle inneren Stege eines Rasters mit einem Strich, auch mehrere Stücke
+  derselben Form. Die Stücke gelten gegen den Stand vor dem Zug (genau die Vorschau), alle zusammen
+  sind ein Undo-Schritt „Trimmen“; ein zweiter Finger (Zoomen) bricht den Zug ab.
   Code: `lumacut_canvas/pathjoin.py` (Qt-frei bis auf Kurven), `pathsimplify.py`, `pathtrim.py`, `pathjoin_ui.py`,
   `trim_ui.py`.
 - **Ecken abrunden …** (Pfad-Menü, Alt+Umschalt+R, wie LightBurns *Radius*-Werkzeug / xTool

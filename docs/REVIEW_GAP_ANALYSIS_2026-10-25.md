@@ -15739,3 +15739,63 @@ overlapping collinear lines are still not merged automatically on the canvas (th
 frame lines crossing, inner pieces trimmed by tap and the result joined and cut on 3 mm plywood
 (no burnt stubs, corners clean), a rectangle with a line across trimmed to an open „U“ and
 scored, and the tool by finger on the Windows tablet (hit distance, undo).
+
+## 91. Status update 2026-11-17 (review round 84)
+
+Done this round (trim by dragging across several pieces – LightBurn's *Trim Shapes* with the
+button held; Machine / Scan Probe / Materials untouched – only `pathtrim.py` (`TrimIndex.sweep`,
+`TrimSweep`) and `trim_ui.py`, one status text in `editor.py`; model, planner and G-code writer
+unchanged):
+
+- Closed since §90 by others: none – main had no commit since `7e534ba` (round 83); the Canvas
+  worktree (`canvas-work`) still has no commit since 2026-10-26.
+- Gap picked: the first trim follow-up of §90 – the trim tool needed one tap per piece, so
+  cleaning a grid, a box layout or a CAD import with dozens of inner pieces meant dozens of taps
+  and undo steps, and a drag was simply ignored. LightBurn trims every segment the pointer
+  crosses while the button is held. Weighed against min/max corner power (still the
+  `LASER_POWER_TRAP` user decision of §14) and Dot Mode dwell (needs a laser-on dwell on the SKR /
+  Pi guard) – both need a hardware or user decision; the sweep needs none and is the natural
+  completion of the touch editing tool.
+- **Model** (`lumacut_canvas/pathtrim.py`): `TrimIndex.sweep(a, b)` intersects the straight fence
+  `a`–`b` with every trimmable outline (overlapping stretches count at their middle) and removes
+  every piece it crosses, all determined against the state *before* the sweep – exactly what the
+  preview shows, the same result as tapping each piece of the untouched drawing. Several pieces of
+  one shape (two arms of an open „U“, both halves of a ring) are removed together; neighbouring
+  removed pieces become one polyline, neighbouring kept pieces one rest path, also across the
+  start of a closed ring; a ring with every piece crossed disappears, other rings of a polygon
+  (outer ring / holes) stay closed. `TrimSweep` holds the fence, the removed pieces, one
+  replacement per shape in stacking order and the number of crossed outlines with nothing to
+  trim. `pick` now uses the same piece bounds / split helpers – single taps give the same shapes
+  as in round 83.
+- **Tool** (`lumacut_canvas/trim_ui.py`): once the pointer moves more than 6 px a grey dotted
+  fence follows the finger / mouse and every piece that would go is shown red dashed (grey fence
+  alone = nothing to trim); release removes them all as **one** undo step „Trimmen“ (macro of one
+  replacement per shape, each in its own stacking place); the selection follows the replaced
+  shapes; status „Trimmen: 2 Stücke (40.0 mm) von 2 Form(en) entfernt – Strg+Z holt alle
+  zurück“, with clear texts for nothing crossed, shapes without a crossing and locked layers; a
+  second finger (pinch zoom) aborts the sweep. Taps are unchanged. README paragraph under
+  „Trimmen“ and the tool hint updated.
+
+Tests: new `tests/test_trim_sweep.py` (15 tests): fence across two lines of a # grid, same result
+as two taps, two pieces of one open path, neighbouring ring pieces merged (also across the ring
+start), whole closed shape gone with its cutter trimmed too, polygon hole crossed alone with the
+outer ring kept closed, nothing crossed / zero length / no crossing / non-editable / text, fence
+along a line, G-code shorter by exactly the pieces and Pi-safe; tool preview and one undo step
+with redo and stacking places, preview following the finger, selection following and taps still
+working afterwards, shapes without crossing / locked layer / pinch abort, touch mode, save / load
+without a new key. `test_trim_tool.py`: the „drag is no tap“ check now drags across nothing (a
+drag across a line trims it).
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3298 passed, 3 skipped** (16.4 min; 3283 + 15 new sweep tests), no failure.
+
+Output change for old files: none – the tool only runs on a tap or drag; no new project key,
+model, planner and G-code writer unchanged.
+
+Still open: unchanged from §88 (camera placement, print-and-cut, rotary, min/max corner power,
+Dot Mode dwell, Materials items, image dot-size model, CoreXY time model, text items, live
+image mask). For trim: the fence is a straight line (no freehand sweep path), self-crossings of
+one ring (figure eight) are not cut points, curves of a trimmed path are flattened (0.01 mm),
+manual tabs / start points of a trimmed shape are dropped, and overlapping collinear lines are
+not merged automatically on the canvas. Hardware check: a 3 × 3 box grid with all inner pieces
+removed by two sweeps and cut on 3 mm plywood (no burnt stubs), and the sweep by finger on the
+Windows tablet (preview visible next to the finger, pinch zoom aborts, one Strg+Z restores all).
