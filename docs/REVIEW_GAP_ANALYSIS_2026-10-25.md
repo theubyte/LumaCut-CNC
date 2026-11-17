@@ -15673,3 +15673,69 @@ between two crossings), closed shapes are only cutters, never trimmed, and overl
 collinear lines are not merged. Hardware check: a drawn # grid with overshoots trimmed and
 joined, cut on 3 mm plywood – clean corners, no burnt stubs – and the dialog by finger on the
 Windows tablet.
+
+## 90. Status update 2026-11-17 (review round 83)
+
+Done this round (trim tool per segment – LightBurn's *Trim Shapes* by click; Machine / Scan
+Probe / Materials untouched – new `trim_ui.py`, `pathtrim.TrimIndex`, one `Tool.TRIM` entry in
+`tools.py` / `editor.py`, one icon, one Pfad menu entry; model, planner and G-code writer
+unchanged):
+
+- Closed since §89 by others: none – main had no commit since `0ede553` (round 82); the Canvas
+  worktree (`canvas-work`) still has no commit since 2026-10-26.
+- Gap picked: the trim follow-up of §89 – „Überstände abschneiden“ only removes free ends up to a
+  limit; inner pieces between two crossings (a window cut out of a frame, the middle bar of an
+  „H“ grid, a doubled stretch of two overlapping imported lines, an overshoot longer than the
+  limit) still needed node editing. LightBurn's *Trim Shapes* removes exactly the clicked piece
+  between the nearest crossings. Chosen over the remaining items because every other open item
+  needs hardware, a user decision or another agent (camera, print-and-cut, rotary, corner power,
+  dwell, Materials) or matters less for real jobs (text items, live mask); no user decision
+  needed – it is a pure editing tool, nothing changes until the user taps.
+- **Model** (`lumacut_canvas/pathtrim.py`): `TrimIndex(shapes, editable)` builds an STR tree of
+  every outline (open pieces of paths / lines, rings of rect / ellipse / polygon / star / text /
+  generated objects, in world mm incl. rotation; images ignored). `pick(point, tol)` takes the
+  nearest trimmable outline under the point (topmost shape on a tie), finds its crossings with
+  every other outline – also the other rings of the same shape, overlapping collinear stretches
+  count with both ends – and returns a `TrimPick` with the removed piece, its length and the
+  replacement shapes. Open pieces lose the stretch between the two crossings around the point
+  (or crossing to free end); a closed ring needs at least two crossings and loses the arc
+  between them (also across the ring start), the rest becomes an open `path` (like LightBurn),
+  other rings of a polygon (holes) stay a closed `polygon`. Layer, groups, priority and
+  direction are kept; a piece without an inner crossing is refused („Entf löscht das ganze
+  Objekt“). Text, images and generated objects (`can_trim`) are never trimmed, only cut by.
+- **Tool** (`lumacut_canvas/trim_ui.py`, `tools.py`): „Trimmen“ (Alt+Umschalt+X, last button of
+  the tool strip, also Pfad menu / context menu after „Offene Formen auswählen“). With the mouse
+  the hover shows the piece that would go as a red dashed line (grey = nothing to trim); a tap
+  or click removes it as one undo step „Trimmen“ in the original stacking place, a drag is no
+  tap; the selection follows the replaced shape; touch mode uses the larger hit distance.
+  Cutters are all shapes of visible layers (also locked ones), only shapes of unlocked layers
+  are trimmed („die Ebene dieser Form ist gesperrt“); the index is rebuilt after every document
+  change. README paragraph under „Überstände abschneiden“, tool list and the Messen paragraph (no longer the last button) updated.
+
+Tests: new `tests/test_trim_tool.py` (22 tests): inner piece / end piece / last piece of a line,
+refusal without an inner crossing, rectangle piece to an open path (also across the ring
+start), ellipse arc length, closed shape with one crossing refused, polygon hole kept as
+polygon, other ring of the same shape as cutter, rotated rectangle, text / generated / locked
+shapes as cutters only, nearest and topmost shape, collinear overlap trimmed, G-code shorter by
+exactly the piece and Pi-safe; tool label / shortcut / icon / strip place / cursor, hover preview
+and tap with one undo step each and undo back to the original ids, closed rect with the
+selection following, nothing / no crossing / drag / locked layer, cancel / abort / hidden layer,
+touch reach, Pfad and context menu, save / load without a new key, unique Alt+Shift+X in the
+main window. `test_measure.py` now checks the measure tool right after the start tool instead
+of last in the strip.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3283 passed, 3 skipped** (15.5 min; 3261 + 22 new trim tool tests), no failure.
+
+Output change for old files: none – the tool only runs on a tap; no new project key, model,
+planner and G-code writer unchanged.
+
+Still open: unchanged from §88 (camera placement, print-and-cut, rotary, min/max corner power,
+Dot Mode dwell, Materials items, image dot-size model, CoreXY time model, text items, live
+image mask). For trim: no drag-across-several-segments sweep (one tap per piece), self-crossings
+of one ring (figure eight) are not cut points, curves of a trimmed path are flattened (0.01 mm)
+like the other cleanup actions, manual tabs / start points of a trimmed shape are dropped, and
+overlapping collinear lines are still not merged automatically on the canvas (the planner's
+„Überlappungen entfernen“ handles it in the G-code). Hardware check: a box lid with a window –
+frame lines crossing, inner pieces trimmed by tap and the result joined and cut on 3 mm plywood
+(no burnt stubs, corners clean), a rectangle with a line across trimmed to an open „U“ and
+scored, and the tool by finger on the Windows tablet (hit distance, undo).
