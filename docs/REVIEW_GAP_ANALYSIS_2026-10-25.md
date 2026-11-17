@@ -15954,3 +15954,83 @@ start is only warned about, not compensated. Hardware check: print a sticker she
 crosses, lay it crooked on the bed, camera scan, align with the tool on the Windows tablet by
 finger and cut the outlines (registration within ≈ 0.3 mm), and the same with typed
 coordinates measured with a ruler.
+
+## 94. Status update 2026-11-17 (review round 87)
+
+Done this round (three print-and-cut marks – a fit across three marks and separate X / Y
+scale; Machine / Scan Probe / Materials untouched – only `marks.py` (`_fit_three`,
+`MarkFit.scales`) and `marks_ui.py` (sixth / fifth tap, switch, dialog row); model, planner,
+G-code writer, Pi and camera code unchanged):
+
+- Closed since §93 by others: none – main had no commit since `5100554` (round 86); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the open items were weighed again. Min/max corner power (`LASER_POWER_TRAP`, §14)
+  and Dot Mode dwell (laser-on dwell in the SKR firmware / Pi guard) still wait for the user's
+  firmware decision; rotary needs hardware; automatic mark detection and job placement on the
+  live camera picture are Scan Probe / Machine; the image dot-size model and Materials items
+  belong to Materials; the CoreXY time model has no built machine to calibrate against; the
+  text items and the live image mask matter less for real jobs. The most direct gap for real
+  diode-laser jobs was the §93 limit „no three-point fit“: with two marks a print can only be
+  moved, turned and scaled uniformly, but office / inkjet printers commonly print a few tenths
+  of a percent differently across the paper than along the feed – on an A4 sticker sheet that
+  is 0.5–1 mm at the far corner, more than the kerf, and two marks cannot even see it (both
+  marks hit, the error shows up elsewhere). A third mark over the corner measures it and
+  corrects X and Y separately; it also catches a wrongly tapped mark (rest error) and a swapped
+  mark order (mirrored triangle). Pure Studio work, no G-code command, Pi or firmware change –
+  no user decision needed.
+- **Model** (`lumacut_canvas/marks.py`, Qt-free): `fit_marks` takes up to three pairs
+  (`MAX_PAIRS`). Three pairs, rigid (default): least-squares (Procrustes) rotation about the
+  centroid of the Soll marks onto the centroid of the Ist marks – the size stays true,
+  `error_mm` is the largest rest distance of a mark. With „Maßstab angleichen“: for each angle
+  the X / Y factors of the design have a closed least-squares form; the angle with the smallest
+  rest error is found by a ±15° scan around the rigid angle and a golden-section search.
+  `MarkFit.scales = (sx, sy)` (design axes, before the rotation; `scale` is their mean),
+  applied through the existing `Geometry.mapped` – unrotated objects exactly, rotated ones
+  form-true without shear like scaling on the frame. A shear (sheet pulled in crookedly) is
+  not applied but stays as reported rest error. Refused with German messages: any pair of
+  marks closer than 5 mm or more than 10 % off (the message names the pair, „Marke 1 und 3“),
+  a mirrored triangle („Reihenfolge der Marken vertauscht?“), for X / Y scale marks on one
+  line or without 5 mm spread in X and Y („über Eck legen“) and a factor more than 10 % off.
+  One and two pairs behave exactly as in §93.
+- **Tool** (`marks_ui.py`): „Passmarken: drei Marken“ (checkable, context menu of the tool
+  after „Maßstab angleichen“, session, default off). With it, the tool waits for six taps
+  (Soll 3 snaps like Soll 1 / 2, Ist 3 exact); Enter after four or five points aligns on two
+  marks, Backspace takes the last point back, switching it off trims to four points; overlay
+  and dashed preview work with up to three numbered pairs. The status line shows „Maßstab X …
+  %, Y … %“ / „größte Rest-Abweichung … mm (drei Marken ausgeglichen)“ and warns above 0.5 mm
+  („Blatt schief bedruckt (Scherung) oder Punkte prüfen“). „Passmarken als Zahlen …“ got rows
+  Soll 3 / Ist 3 and „Drittes Paar verwenden“ (prefilled with the lower left corner of the
+  selection, enabled only with the second pair).
+- README paragraph „Passmarken“ under „Anordnen“ extended.
+
+Tests: new `tests/test_print_cut_three_marks.py` (22 tests): exact rigid three marks,
+least-squares balance (residuals sum to zero, any other angle worse) with the size kept, X / Y
+scale and angle recovered exactly, rotated objects form-true with the centre exact, polygon /
+path / rect / line / text / tabs / start point following, shear as reported rest error,
+summaries, six refused inputs (pair off, pair too close, mirrored, collinear / flat for X / Y
+scale, non-finite), collinear marks fine without scale and extra points ignored, Pi-safe G-code
+of an X / Y-scaled rect with the expected cut length; switch in the context menu default off,
+six taps with object snap as one undo step with X / Y scale and undo, Enter after five points
+aligning on two marks, Backspace / overlay limit / switching off, a wrong sixth point refused
+and tapped again, numeric dialog with the third pair, save without a new key. The 32 tests of
+§93 pass unchanged (two-mark behaviour identical).
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3368 passed, 3 skipped** (15.7 min; 3346 + 22 new three-mark tests), no failure.
+
+Output change for old files: none – the code only runs when the tool or the dialog is used
+with the new switch on; no new project key, model, planner and G-code writer unchanged.
+
+Still open: unchanged from §93 minus the three-point fit – camera placement beyond marks
+(dragging the job on a live camera picture), automatic mark detection in the camera image
+(Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials items, image dot-size
+model, CoreXY time model, text items, live image mask; the trim refinements of §92. For the
+marks: shear is reported, not corrected (shapes would have to become polygons – a sheet
+pulled in crookedly should be laid again); X / Y scale works in the design's axes (a design
+printed rotated on the sheet gets the factors along its own axes); rotated objects keep their
+form under X / Y scale, so their corners can be off by up to the scale difference times their
+size; the three-marks switch and the scale choice are not remembered across sessions; more
+than three marks are ignored; the §93 limits (camera calibration, no automatic search, no
+„Kopfposition übernehmen“, Pi start only warned about) still apply. Hardware check: print an
+A4 sticker sheet with three crosses at the corners, measure the printer's X / Y scale with a
+ruler, align with three marks and „Maßstab angleichen“ on the Windows tablet and cut (all
+outlines within ≈ 0.3 mm, also at the corner far from the marks), and compare with two marks.
