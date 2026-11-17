@@ -16144,3 +16144,88 @@ not map xTool's single-line fonts (no sample file). Hardware check: a label with
 5°“ in both fonts at 5 mm and 15 mm on plywood and anodised aluminium with one line pass on
 the Windows app (sharp single strokes, umlaut dots visible, no double line), compare time and
 look with the same text filled, and the combo box by finger on the Windows tablet.
+
+## 96. Status update 2026-11-17 (review round 89)
+
+Done this round (single-line fonts for „Bogentext…“ and „Text auf Pfad…“ – LightBurn's *Text on
+Path* with a single-line font / xTool's single-line text on a circle; Machine / Scan Probe /
+Materials untouched – `Glyph.open` and one shared `letter_shapes` in `arctext.py`, the same in
+`pathtext.py`, `line_glyphs_for` and a „Schriftart“ combo in `arctext_qt.py` / `pathtext_qt.py`,
+a default spec in `qt_tools.py`; planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §95 by others: none – main had no commit since `1878a39` (round 88); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the first follow-up of §95. Round 88 gave text objects single-line fonts, but
+  the two curved-text tools still built outline letters from them (fallback font) – exactly
+  the job where diode-laser users want single-line text most: names and dates around a round
+  coaster or a wooden badge, ring scales, the lower line of a stamp, text along a curved edge.
+  LightBurn sets single-line fonts on a path and xTool Creative Space offers single-line text
+  on a circle. „LumaCut 2026“ on a 40 mm arc at 8 mm burns 202 mm of line (estimate ≈ 23 s)
+  instead of 2179 mm of 0.1 mm hatch in DejaVu Sans (≈ 291 s, default motion profile). The
+  other candidates stay behind it: own single-line SVG fonts need a font format decision and
+  sample files, kerf handling of open strokes is a layer setting question, justified text /
+  kerning / upper-case switch and the live image mask are conveniences. Pure Studio work, no
+  user decision needed, not owned by another agent (arc / path text were last changed by
+  review rounds).
+- **Glyphs** (`arctext_qt.line_glyphs_for`): for the two single-line fonts `glyphs_for` returns
+  the Hershey strokes of `linefont.glyph` as open `Glyph`s (`open=True`, rings from 2 points):
+  „Schrifthöhe“ is the cap height (21 Hershey units), the advance is the Hershey advance (so a
+  flat arc / path text is exactly as long as the single-line text object of the same cap
+  height), „Kursiv“ is the same 0.2 slant, „Fett“ has no effect, composed umlauts / ß / € / °
+  and the „?“ fallback come from `linefont`. Outline fonts take the old Qt path unchanged.
+- **Objects** (`arctext.letter_shapes`, used by `arc_shapes` and `pathtext_shapes`): a placed
+  letter with open strokes becomes an open `path` with one ring per stroke (one object per
+  letter, grouped like before); outline letters stay `polygon`s with holes – same order, same
+  group, same points as before the refactoring. Being `path`s, the letters are never filled
+  (also on a fill layer), are no crop mask, are open for trim / Boolean offset / nesting and
+  keep their rigid placement (baseline on the circle / the path, rotation by the chord). A
+  horizontal stroke on a straight path („-“) is a valid zero-height path.
+- **Dialogs**: both dialogs get „Schriftart“ before „Schrift“ – „Umrissschrift“ / „Einlinie
+  (Sans)“ / „Einlinie (Schreibschrift)“ (`font_kind_box`, tooltip names LightBurn / xTool);
+  with a single-line font the font family and „Fett“ are disabled, „Kursiv“, height, spacing,
+  side, angle / position stay; the info line names characters shown as „?“
+  (`missing_note`). A selected single-line text brings its font and its cap height
+  (`spec_from_text` measures the Hershey cap height through `text_bounds`); without a selected
+  text the dialogs start with the single-line font last chosen for new texts
+  (`editor.text_font_family`), otherwise as before.
+- **Edit / file**: the generator dict stores `"font_family": "LumaCut Einlinie"` in the
+  existing arc text spec – „Bogentext bearbeiten“ (double click) reopens with the single-line
+  font and rebuilds open letters in the same group; scaling scales height / radius as before.
+  No new project key; the letters are ordinary `path` objects with `rings`, so older
+  versions open such files (as open paths, the generator spec shows their fallback font when
+  edited there).
+
+Tests: new `tests/test_line_font_curved.py` (27 tests): open glyphs with cap height and
+doubling, advances equal to the single-line text object, umlaut strokes, italic slant, bold
+ignored, „?“ and its note, outline glyphs still closed; arc shapes as open paths one per
+letter with all strokes (both fonts), baseline on the circle, bottom side and its radius
+check, open and closed paths, flat dash, outline arc / path text still polygons with holes;
+strokes lasered once on cut and fill layers, Pi-safe G-code with the stroke length and more
+than 3 × shorter than outline arc text (both fonts); dialog font kind both ways with bold /
+font box state and info note, opening with a line font, path dialog; spec from a line text
+keeps font and cap height (also lower-case only); window insert in one undo step with the
+generator font, replacing a script line text by arc text, path text replacing a line text on
+a circle, remembered line font as dialog default, „Bogentext bearbeiten“ keeping the font,
+save / load of the open letters with their generator.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3447 passed, 3 skipped** (17.0 min; 3420 + 27 new single-line arc / path text tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – arc and path texts in outline fonts give the same
+polygons and G-code (the shared `letter_shapes` reproduces the old loop exactly), existing
+generated arc texts edit as before; only a single-line font chosen in one of the two dialogs
+takes the new path, no new project key.
+
+Still open: unchanged from §95 except the arc / path text item – camera placement beyond
+marks, automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell,
+Materials items, image dot-size model, CoreXY time model, the text items (justified lines,
+kerning, vertical text, upper-case switch, inline editing, xTool text style import), live
+image mask, the trim refinements of §92 and the print-and-cut limits of §93 / §94; for
+single-line fonts: no import of own single-line fonts (SVG fonts would be the next step, a
+sample font from the user would help), faceted Hershey curves at large sizes, no glyphs
+outside Latin-1, kerf offset applies only to closed letters, the xTool import does not map
+xTool's single-line fonts. New limits: curved single-line letters are rigid like outline
+letters (not bent along the curve – same as LightBurn / xTool), and the barcode's human-
+readable line still uses outline fonts only. Hardware check: „Grüße 20 €“ around an 80 mm
+coaster in both single-line fonts at 5 mm, top and bottom side, with one line pass on the
+Windows app (no double line, umlaut dots visible, letters upright on the circle), the same
+text on an open curved path, and the „Schriftart“ combo by finger on the Windows tablet.
