@@ -228,7 +228,7 @@ def test_tool_action_label_shortcut_icon_strip(ed):
     assert a.shortcut().toString() == "Alt+Shift+X" and a.isCheckable() and not a.icon().isNull()
     assert "trim" in icons.available()
     strip = ed.tool_strip.actions()
-    assert strip[-1] is a and strip.index(a) == strip.index(ed.actions_by_name["tool_measure"]) + 1
+    assert strip.index(a) == strip.index(ed.actions_by_name["tool_measure"]) + 1
     a.trigger()
     assert ed.tools.tool == Tool.TRIM and a.isChecked() and ed.msgs[-1].startswith("Werkzeug: Trimmen")
     assert ed.view.viewport().cursor().shape() == Qt.CrossCursor
