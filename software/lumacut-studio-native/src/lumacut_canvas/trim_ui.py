@@ -8,6 +8,10 @@
   „Überstände abschneiden …“ entfernen.
 * Eine geschlossene Form wird dabei zum offenen Pfad (wie in LightBurn); weitere
   Ringe eines Polygons (Löcher) bleiben ein geschlossenes Polygon.
+* Auch Stellen, an denen sich eine Form selbst kreuzt, teilen sie in Stücke (Acht,
+  Schleife eines Pfads); die übrige Schlaufe einer Acht bleibt geschlossen.
+  Manuelle Stege und der Startpunkt bleiben auf Konturen, die geschlossen bleiben;
+  die Statuszeile nennt die, die mit einem Stück wegfallen.
 * Ziehen über mehrere Stücke (wie LightBurns Trimmen mit gedrückter Maustaste)
   zieht eine Linie; jedes Stück, das sie kreuzt, fällt beim Loslassen weg – alle
   zusammen in einem Undo-Schritt. Bestimmt werden die Stücke gegen den Zustand vor
@@ -168,8 +172,15 @@ class TrimTool:
             sel += [s.id for s in pick.add]
         self.ed.set_selection([i for i in sel if self.doc.has_shape(i)])
         self.item.show_piece([], True)
-        what = "Stück" if pick.shape.kind in ("path", "line") else "Stück der Kontur (jetzt offener Pfad)"
-        self.ed.notify(f"Trimmen: {what} von {pick.length_mm:.1f} mm entfernt – Strg+Z holt es zurück")
+        if pick.shape.kind in ("path", "line"):
+            what = "Stück"
+        elif any(s.kind == "path" for s in pick.add):
+            what = "Stück der Kontur (jetzt offener Pfad)"
+        else:
+            what = "Stück der Kontur"
+        note = pathtrim.marks_note(*pathtrim.dropped_marks([pick.shape], pick.add))
+        self.ed.notify(f"Trimmen: {what} von {pick.length_mm:.1f} mm entfernt{note} – "
+                       "Strg+Z holt es zurück")
         return True
 
     def sweep(self, a: QPointF, b: QPointF) -> pathtrim.TrimSweep:
@@ -191,6 +202,9 @@ class TrimTool:
             else:
                 self.ed.notify("Trimmen: die gezogene Linie kreuzt kein Stück zum Trimmen")
             return 0
+        by_id = self.index().by_id
+        note = pathtrim.marks_note(*pathtrim.dropped_marks(
+            [by_id[sid] for sid, _ in sw.replace], [s for _, add in sw.replace for s in add]))
         sel = list(self.ed.selection)
         stack = self.ed.undo_stack
         stack.beginMacro("Trimmen")
@@ -205,7 +219,7 @@ class TrimTool:
         n = len(sw.pieces)
         what = "1 Stück" if n == 1 else f"{n} Stücke"
         self.ed.notify(f"Trimmen: {what} ({sw.length_mm:.1f} mm) von {len(sw.replace)} Form(en) "
-                       "entfernt – Strg+Z holt alle zurück")
+                       f"entfernt{note} – Strg+Z holt alle zurück")
         return n
 
     # --- Eingaben (Szenen-mm) --------------------------------------------

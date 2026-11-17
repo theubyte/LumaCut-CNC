@@ -19,7 +19,11 @@ Erzeugte Objekte werden übergangen.
 Für das Werkzeug „Trimmen“ (:mod:`trim_ui`, LightBurns Klick-Trimmen) liefert
 :class:`TrimIndex` das Stück einer Form zwischen den zwei nächsten Kreuzungen
 unter einem Punkt (auch innere Stücke und Stücke geschlossener Formen) und mit
-:meth:`TrimIndex.sweep` alle Stücke, die eine gezogene Linie kreuzt.
+:meth:`TrimIndex.sweep` alle Stücke, die eine gezogene Linie kreuzt. Dabei
+zählen auch Stellen, an denen sich eine Kontur selbst kreuzt (Acht, Schleife
+eines Pfads); eine Schlaufe, die danach in sich geschlossen bleibt, bleibt eine
+geschlossene Kontur, und manuelle Stege / Startpunkte auf Konturen, die
+geschlossen bleiben, werden übernommen.
 """
 
 from __future__ import annotations
@@ -186,6 +190,8 @@ def trim_stubs(shapes: Iterable[Shape], max_mm: float = TRIM_MAX_MM) -> TrimResu
 
 TRIM_TARGET_KINDS = ("path", "line", "rect", "ellipse", "polygon")
 _FLATTEN_MM = 0.01
+#: Stege / Startpunkt liegen höchstens so weit neben einer Kontur, die geschlossen bleibt.
+CARRY_MARK_TOL_MM = 0.05
 
 
 def can_trim(shape: Shape) -> bool:
@@ -228,6 +234,59 @@ def _coords(g) -> list[Point]:
     if g.is_empty or g.geom_type != "LineString":
         return []
     return [(float(x), float(y)) for x, y in g.coords]
+
+
+def _seg_hit(p: Point, p2: Point, q: Point, q2: Point) -> tuple[float, float] | None:
+    """Parameter (s, t) ∈ [0, 1]² des Schnittpunkts zweier Strecken (parallel: ``None``)."""
+    rx, ry = p2[0] - p[0], p2[1] - p[1]
+    sx, sy = q2[0] - q[0], q2[1] - q[1]
+    den = rx * sy - ry * sx
+    scale = math.hypot(rx, ry) * math.hypot(sx, sy)
+    if scale <= 1e-18 or abs(den) <= 1e-12 * scale:
+        return None
+    qx, qy = q[0] - p[0], q[1] - p[1]
+    a = (qx * sy - qy * sx) / den
+    b = (qx * ry - qy * rx) / den
+    eps = 1e-9
+    if -eps <= a <= 1 + eps and -eps <= b <= 1 + eps:
+        return min(max(a, 0.0), 1.0), min(max(b, 0.0), 1.0)
+    return None
+
+
+def self_cuts(pts: list[Point], closed: bool, tol: float = JOIN_TOLERANCE_MM) -> list[float]:
+    """Abstände (ab Linienstart) der Stellen, an denen der Linienzug sich selbst kreuzt
+    oder berührt – jede Kreuzung liefert beide Durchgänge (Acht: zwei Abstände).
+
+    Nachbarstrecken (auch über den Ringschluss) zählen nicht; zwei Treffer, die
+    entlang der Linie höchstens ``tol`` auseinanderliegen, sind keine Kreuzung
+    (doppelte Punkte). Parallele Überdeckungen werden übergangen."""
+    if len(pts) < 4:
+        return []
+    line = LineString(pts)
+    if line.is_simple:
+        return []
+    total = line.length
+    cum = [0.0]
+    for a, b in zip(pts, pts[1:]):
+        cum.append(cum[-1] + math.dist(a, b))
+    segs = [LineString([a, b]) for a, b in zip(pts, pts[1:])]
+    n = len(segs)
+    tree = STRtree(segs)
+    out: list[float] = []
+    for i in range(n):
+        for k in sorted(int(x) for x in tree.query(segs[i])):
+            if k <= i + 1 or (closed and i == 0 and k == n - 1):
+                continue
+            hit = _seg_hit(pts[i], pts[i + 1], pts[k], pts[k + 1])
+            if hit is None:
+                continue
+            di = cum[i] + hit[0] * (cum[i + 1] - cum[i])
+            dk = cum[k] + hit[1] * (cum[k + 1] - cum[k])
+            gap = dk - di
+            if gap <= tol or (closed and total - gap <= tol):
+                continue
+            out += [di, dk]
+    return sorted(out)
 
 
 def _merge(ds: list[float], tol: float) -> list[float]:
@@ -297,6 +356,14 @@ class TrimIndex:
                 self.owner.append((s.id, k))
         self.by_id = {s.id: s for s in self.shapes}
         self.tree = STRtree(self.lines) if self.lines else None
+        self._self_cuts: dict[int, list[float]] = {}
+
+    def _own_cuts(self, j: int) -> list[float]:
+        """Selbstkreuzungen von Umriss ``j`` (zwischengespeichert – Hover rechnet oft)."""
+        if j not in self._self_cuts:
+            pts, closed = self.rings[self.owner[j][0]][self.owner[j][1]]
+            self._self_cuts[j] = self_cuts(pts, closed)
+        return self._self_cuts[j]
 
     def _nearest(self, p: SPoint, tol: float) -> int | None:
         if self.tree is None:
@@ -329,13 +396,15 @@ class TrimIndex:
         near = [i for i in self.tree.query(line.buffer(JOIN_TOLERANCE_MM)) if i != j]
         cutters = unary_union([self.lines[i] for i in near]) if near else None
         cuts = [] if cutters is None or cutters.is_empty else _cut_distances(line, cutters)
+        cuts = sorted(cuts + self._own_cuts(j))     # Acht / Schleife: kreuzt sich selbst
         tol_c = JOIN_TOLERANCE_MM
         if closed:
             cuts = _merge([d % total if total - d > tol_c else 0.0 for d in cuts], tol_c)
             if len(cuts) >= 2 and total - cuts[-1] <= tol_c and cuts[0] <= tol_c:
                 cuts.pop()
             if len(cuts) < 2:
-                return [], "die Kontur kreuzt keine andere Form zweimal – Entf löscht das ganze Objekt"
+                return [], ("die Kontur kreuzt keine andere Form zweimal (und sich selbst nicht) – "
+                            "Entf löscht das ganze Objekt")
             return cuts, ""
         inner = _merge([d for d in cuts if tol_c < d < total - tol_c], tol_c)
         if not inner:
@@ -459,7 +528,12 @@ class TrimIndex:
         closed_parts: list[list[Point]] = []
         for n, (pts, closed) in enumerate(rings):
             if n in rests:
-                open_parts.extend(rests[n])
+                for r in rests[n]:
+                    # Schlaufe einer Acht: beide Enden auf der Kreuzung -> bleibt geschlossen
+                    if closed and len(r) >= 4 and math.dist(r[0], r[-1]) <= 1e-6:
+                        closed_parts.append(r[:-1])
+                    else:
+                        open_parts.append(r)
             elif closed and shape.kind == "polygon":
                 closed_parts.append(pts[:-1] if len(pts) > 3 else pts)
             else:
@@ -480,7 +554,53 @@ class TrimIndex:
             s.priority = shape.priority
             s.reverse = shape.reverse
             out.append(s)
+        return _carry_marks(shape, out)
+
+
+def _carry_marks(shape: Shape, out: list[Shape]) -> list[Shape]:
+    """Manuelle Stege und den Startpunkt von ``shape`` auf die Ersatzformen übertragen.
+
+    Nur Konturen, die geschlossen bleiben (Polygon-Ringe, Schlaufen einer Acht),
+    tragen sie weiter; Stege / Startpunkt auf einem Stück, das wegfällt oder zum
+    offenen Pfad wird, entfallen (offene Pfade haben keine). Ohne Stege und
+    Startpunkt bleiben die Formen unverändert."""
+    if not (shape.tabs or shape.start):
         return out
+    from .startpoint import carry_start
+    from .tabs import carry_tabs
+    tabs = shape.tab_points()
+    start = shape.start_point()
+    res: list[Shape] = []
+    for s in out:
+        if s.kind == "polygon":
+            if tabs:
+                s = carry_tabs(s, tabs, CARRY_MARK_TOL_MM)
+            if start is not None:
+                s = carry_start(s, start, CARRY_MARK_TOL_MM)
+                if s.start:
+                    start = None             # nur eine Ersatzform bekommt den Startpunkt
+        res.append(s)
+    return res
+
+
+def dropped_marks(old: Iterable[Shape], new: Iterable[Shape]) -> tuple[int, int]:
+    """(entfallene Stege, entfallene Startpunkte) beim Ersetzen von ``old`` durch ``new``."""
+    old, new = list(old), list(new)
+    tabs = sum(len(s.tabs) for s in old) - sum(len(s.tabs) for s in new)
+    starts = sum(1 for s in old if s.start) - sum(1 for s in new if s.start)
+    return max(tabs, 0), max(starts, 0)
+
+
+def marks_note(tabs: int, starts: int) -> str:
+    """Hinweis für die Statuszeile, wenn Stege / Startpunkte wegfallen (sonst leer)."""
+    parts = []
+    if tabs:
+        parts.append("1 Steg" if tabs == 1 else f"{tabs} Stege")
+    if starts:
+        parts.append("1 Startpunkt" if starts == 1 else f"{starts} Startpunkte")
+    if not parts:
+        return ""
+    return f" ({' und '.join(parts)} auf offenen / entfernten Stücken entfallen)"
 
 
 def _hit_points(g) -> list[SPoint]:
