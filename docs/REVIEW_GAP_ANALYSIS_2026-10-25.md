@@ -16034,3 +16034,113 @@ than three marks are ignored; the §93 limits (camera calibration, no automatic 
 A4 sticker sheet with three crosses at the corners, measure the printer's X / Y scale with a
 ruler, align with three marks and „Maßstab angleichen“ on the Windows tablet and cut (all
 outlines within ≈ 0.3 mm, also at the corner far from the marks), and compare with two marks.
+
+## 95. Status update 2026-11-17 (review round 88)
+
+Done this round (single-line fonts for text objects – LightBurn's *single-line fonts* / xTool's
+single-line text; Machine / Scan Probe / Materials untouched – new `linefont.py` /
+`linefont_data.py`, a branch in `shape_paths.text_path`, `model.is_closed_shape` used where
+„closed kind“ was meant, one combo box in `text_ui.py`; planner, G-code writer, Pi and camera
+code unchanged):
+
+- Closed since §94 by others: none – main had no commit since `62a0a42` (round 87); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: after six trim / print-and-cut rounds a different area, as asked. The open list
+  was weighed again: min/max corner power (`LASER_POWER_TRAP`, §14) and Dot Mode dwell still
+  wait for the user's firmware decision; rotary needs hardware; camera live placement and
+  automatic mark detection are Scan Probe / Machine; Materials items and the image dot-size
+  model are Materials; the CoreXY time model has no built machine to calibrate against; the
+  remaining text items (justified lines, kerning, vertical text, upper-case switch) and the
+  live image mask are conveniences. A re-scan of the whole document against LightBurn / xTool
+  found one feature that was never listed: **single-line (stroke) fonts**. LumaCut could only
+  write text as letter outlines – a cut layer burns every letter twice (inside and outside of
+  the stroke), a fill layer hatches it line by line. LightBurn ships / reads single-line fonts
+  and xTool Creative Space has single-line text exactly because diode lasers use them all the
+  time: labels and part numbers, scales and rulers, small serial numbers, signatures and
+  names in thin script, marking with a pen or a low-power line. „LumaCut 2026“ at 8 mm burns
+  202 mm of line (estimate ≈ 23 s) instead of 2265 mm of 0.1 mm hatch with the same box in
+  DejaVu Sans (≈ 388 s; measured with the default motion profile), in one pass, and stays
+  sharp at sizes where filled letters run together. Imported single-line SVGs worked, but not
+  as editable text. Pure Studio work, no G-code command, Pi or firmware change – no user
+  decision needed, not owned by another agent (text objects were last changed by review
+  rounds 79 / 80).
+- **Glyphs** (`lumacut_canvas/linefont.py`, Qt-free, data in `linefont_data.py`): the Hershey
+  vector fonts *Roman Simplex* („LumaCut Einlinie“, sans) and *Script Simplex* („LumaCut
+  Einlinie Schreibschrift“) for ASCII 32–126, taken as `.jhf` lines from the MIT-licensed
+  *Hershey-Fonts* 2.1.0 package with the original NBS credit (no new dependency – the data is
+  a Python module, so the PyInstaller build picks it up with `--collect-submodules`). German
+  and Western letters are composed from base letter + mark via Unicode decomposition (ä ö ü Ä
+  Ö Ü with Hershey-style dots above the letter, é è ê ñ å ç …, the dot of i / j replaced by
+  the accent); ß, €, ° and the ellipsis are own strokes; dashes, typographic quotes, ×, ·,
+  non-breaking spaces map to their ASCII glyphs; anything else becomes „?“
+  (`missing_chars`). `text_strokes` sets lines with the same layout as outline text (§86):
+  letter spacing in % of the em, line pitch 1.25 × 100 pt × „Zeilen“, left / centre / right
+  by advance, „Kursiv“ as a 0.2 slant; „Fett“ has no meaning for a stroke.
+- **Outline** (`shape_paths.py`): `text_path` returns open strokes for the two font names
+  (`line_text_path` – `moveTo` / `lineTo` only, no `closeSubpath`, no curves; a closed letter
+  like „o“ ends on its start point and is a closed polyline for the planner). The em is the
+  same as a system font at 96 dpi (`text_em`, 133.3 build units for 100 pt), so „Größe“ in pt,
+  spacing and line pitch mean the same; `text_bounds` gives a flat text („-“, „_“) a 1-unit
+  box so it still fits its object box. Weld is skipped for single-line text. Display, hit
+  test, G-code, preview, estimate, frame, SVG / PNG export, serial numbers and variable text
+  follow through `local_path` / `shape_polygons`.
+- **Open, not filled** (`model.is_closed_shape`): a single-line text counts like an open path
+  wherever `FILLABLE_KINDS` stood for „closed“: never filled – on a fill layer its strokes are
+  lasered as lines (also with „Kontur mitlasern“ off, like an open path), the canvas and the
+  PNG / SVG export draw it without brush, not a mask for „Bild mit Form zuschneiden“, no area
+  for Boolean operations (offset works on the lines), open footprint for nesting, open
+  strokes as cutters for trim (not closed by the trim index), duplicate check / split / join
+  as open. „In Pfade“ turns it into an open `path` with one ring per stroke (same polylines,
+  same G-code). Outline text and every other kind take exactly the old paths.
+- **UI** (`text_ui.py`): a combo box before the font family – „Umrissschrift“ / „Einlinie
+  (Sans)“ / „Einlinie (Schreibschrift)“ (tooltip names LightBurn's single-line fonts / xTool's
+  single-line text) – changes all selected editable texts in one undo step, keeps their height
+  and fits the width (like a font change); the choice is remembered for new texts,
+  „Umrissschrift“ returns to the last chosen system font (`editor.text_outline_family`).
+  With a single-line font, font family, „F“ and „Verschweißen“ are disabled, „K“, size,
+  spacing, alignment and ¶ stay; a mixed selection shows no entry. Characters the font cannot
+  draw are named in the status line („… erscheint als „?““). Touch mode makes the combo 40+ px
+  high like the other bar controls.
+- **File**: stored as the font name (`"font": "LumaCut Einlinie"` / `"LumaCut Einlinie
+  Schreibschrift"`) – no new key; older LumaCut versions show such a text in their fallback
+  font. README paragraph „Einlinien-Schrift“ under „Pfad“ / text.
+
+Tests: new `tests/test_line_font.py` (52 tests): `.jhf` parsing, every printable ASCII glyph in
+both fonts, composed umlauts / accents with the dots above the letter, ß / € / °, typographic
+aliases and the ellipsis, „?“ fallback and `missing_chars`, i / j with accent; open strokes
+without curves, „o“ closed on itself, em and cap height, letter spacing / alignment / line
+pitch, italic slant, bold ignored, flat text box, system-font bounds unchanged, box fit and
+rotation, weld ignored, `is_closed_shape`; save / load as font name without new key, old
+outline-text file and G-code unchanged; one polyline per stroke on a cut layer, no fill and
+all strokes on a fill layer (outline on / off), mixed layer fills only the outline text,
+Pi-safe G-code with the cut length of the strokes and more than 3 × shorter than the hatched
+outline text (both fonts), estimate; „In Pfade“ as open path with identical polylines,
+outline text still a polygon, Boolean area refused / offset as lines, crop mask ignored, trim
+rings open, nesting footprint as line, serial numbers keep the font, PNG export leaves the
+„o“ hollow; combo entries / tooltip, switch in one undo step keeping the height, back to the
+last outline font, mixed selection, missing characters named, locked layer, new texts,
+size / spacing on a line text, canvas item unfilled, touch size, main window.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3420 passed, 3 skipped** (19.1 min; 3368 + 52 new single-line font tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – only texts with one of the two new font names take the
+new paths; every existing text (system font) gives the same outline, fill and G-code
+(`is_closed_shape` is true for it, `text_bounds` returns the plain bounding box), no new
+project key.
+
+Still open: unchanged from §94 – camera placement beyond marks, automatic mark detection
+(Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials items, image dot-size
+model, CoreXY time model, the text items (justified lines, kerning, vertical text, upper-case
+switch, inline editing, xTool text style import), live image mask, the trim refinements of §92
+and the print-and-cut limits of §93 / §94. For single-line fonts: two built-in fonts only (no
+import of the user's own single-line fonts – LightBurn reads SHX / its own format; SVG fonts
+would be the next step); Hershey glyphs are polylines (round letters are visibly faceted at
+large sizes); Greek, Cyrillic and symbols outside Latin-1 show
+„?“; „Fett“ is not emulated (more passes or a wider line are the laser way); on a layer with a
+kerf offset closed letters („o“, „D“) are offset like any closed contour while open strokes
+are not (engrave single-line text on a layer without kerf); „Bogentext…“ / „Text auf Pfad…“
+build outline text from a selected single-line text (fallback font); the xTool import does
+not map xTool's single-line fonts (no sample file). Hardware check: a label with „Grüße 20 €
+5°“ in both fonts at 5 mm and 15 mm on plywood and anodised aluminium with one line pass on
+the Windows app (sharp single strokes, umlaut dots visible, no double line), compare time and
+look with the same text filled, and the combo box by finger on the Windows tablet.
