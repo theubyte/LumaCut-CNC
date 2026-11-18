@@ -1,6 +1,7 @@
 """Edit generated objects again (Qt side of :mod:`lumacut_job.generated`).
 
-Double click on a QR code, barcode, Data Matrix, Aztec / PDF417 code, arc text or box (select tool) or
+Double click on a QR code, barcode, Data Matrix, Aztec / PDF417 code, arc text, box or
+living hinge (select tool) or
 „Code bearbeiten…“ (Alt+E) opens the generator's dialog with the stored
 parameters – sizes scaled by what the user did with the handles – and replaces
 the group in one undo step: same layer, same centre, same rotation, same
@@ -20,7 +21,8 @@ from .generated import Unit
 EDIT_TITLES = {"qr": "QR-Code bearbeiten", "barcode": "Barcode bearbeiten",
                "datamatrix": "Data Matrix bearbeiten", "aztec": "Aztec-Code bearbeiten",
                "pdf417": "PDF417-Code bearbeiten",
-               "arctext": "Bogentext bearbeiten", "box": "Box bearbeiten"}
+               "arctext": "Bogentext bearbeiten", "box": "Box bearbeiten",
+               "hinge": "Flex-Scharnier bearbeiten"}
 
 
 def build_shapes(spec, layer_id: str) -> list:
@@ -56,6 +58,9 @@ def build_shapes(spec, layer_id: str) -> list:
     elif kind == "box":
         from . import boxgen
         shapes = boxgen.box_shapes(boxgen.centered(s), layer_id)
+    elif kind == "hinge":
+        from . import hinge
+        shapes = hinge.hinge_shapes(hinge.centered(s), layer_id)
     else:
         from . import arctext
         from .arctext_qt import glyphs_for
@@ -128,6 +133,11 @@ def edit_dialog(unit: Unit, spec, layer, parent=None, touch: bool | None = None)
     elif unit.kind == "box":
         from .boxgen_qt import BoxDialog
         dlg = BoxDialog(parent, spec, active_layer=layer, touch=touch)
+        dlg.new_layer.setChecked(False)
+        dlg.new_layer.setVisible(False)
+    elif unit.kind == "hinge":
+        from .hinge_qt import HingeDialog
+        dlg = HingeDialog(parent, spec, active_layer=layer, touch=touch)
         dlg.new_layer.setChecked(False)
         dlg.new_layer.setVisible(False)
     else:

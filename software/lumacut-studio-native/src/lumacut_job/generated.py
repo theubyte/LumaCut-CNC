@@ -1,5 +1,5 @@
 """Re-editable generated objects (QR code, barcode, Data Matrix, Aztec, PDF417,
-arc text, finger-joint box).
+arc text, finger-joint box, living hinge).
 
 The generators create static ``polygon`` groups. To make them editable like in
 LightBurn / xTool Creative Space, every part of such a group carries the same
@@ -34,14 +34,17 @@ from .aztec import AztecSpec
 from .barcode import BarcodeSpec
 from .boxgen import BoxSpec
 from .datamatrix import DataMatrixSpec
+from .hinge import HingeSpec
 from .pdf417 import Pdf417Spec
 from .qr import QrSpec
 
 VERSION = 1
 SPECS = {"qr": QrSpec, "barcode": BarcodeSpec, "datamatrix": DataMatrixSpec, "aztec": AztecSpec,
-         "pdf417": Pdf417Spec, "arctext": ArcSpec, "box": BoxSpec}
+         "pdf417": Pdf417Spec, "arctext": ArcSpec, "box": BoxSpec,
+         "hinge": HingeSpec}
 LABELS = {"qr": "QR-Code", "barcode": "Barcode", "datamatrix": "Data Matrix", "aztec": "Aztec-Code",
-          "pdf417": "PDF417-Code", "arctext": "Bogentext", "box": "Box"}
+          "pdf417": "PDF417-Code", "arctext": "Bogentext", "box": "Box",
+          "hinge": "Flex-Scharnier"}
 _POSITION = ("x", "y")
 # Below this relative change the user did not scale the object (rounding of moves etc.).
 SCALE_EPS = 0.002
@@ -182,7 +185,9 @@ def scaled_spec(spec, scale: tuple[float, float]):
     text height with Y; PDF417 takes its width from X and the row height
     (in module widths) from the ratio Y / X. A box keeps its stored sizes (the flat
     layout of its panels has no meaningful scale – material and joints would not
-    scale with it). Unscaled specs are returned unchanged.
+    scale with it). A living hinge stretches its field (and the frame margin) with the
+    handles but keeps slit length, bridge and pitch – those are what make it bend.
+    Unscaled specs are returned unchanged.
     """
     sx, sy = scale
     if abs(sx - 1.0) <= SCALE_EPS and abs(sy - 1.0) <= SCALE_EPS:
@@ -200,6 +205,10 @@ def scaled_spec(spec, scale: tuple[float, float]):
     if isinstance(spec, ArcSpec):
         return replace(spec, radius_mm=_r(spec.radius_mm * k), height_mm=_r(spec.height_mm * k),
                        spacing_mm=_r(spec.spacing_mm * k)).normalized()
+    if isinstance(spec, HingeSpec):
+        across = sy if spec.horizontal else sx
+        return replace(spec, width_mm=_r(spec.width_mm * sx), height_mm=_r(spec.height_mm * sy),
+                       margin_mm=_r(spec.margin_mm * across)).normalized()
     return spec
 
 

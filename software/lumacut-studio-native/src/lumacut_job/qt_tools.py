@@ -957,9 +957,17 @@ class JobTools(QObject):
             "Kerf, mit oder ohne Deckel) als Schneidteile einfügen – wie der Box-Generator von "
             "xTool Studio; per Doppelklick wieder bearbeitbar")
         self.box_action.setObjectName("box_generator_action")
+        self.hinge_action = self._add(
+            "Flex-Scharnier…", self.hinge, "Alt+Shift+H",
+            "Biegescharnier (Living Hinge) aus versetzten Schlitzen einfügen – gerade, Wellen oder "
+            "Rauten, Feldgröße, Schlitzlänge, Steg, Linienabstand, mit Biegerechner; macht "
+            "Sperrholz biegsam (runde Box-Ecken, Armbänder) – wie die Living-Hinge-Muster für "
+            "LightBurn / xTool; mit Auswahl auf deren Größe; per Doppelklick wieder bearbeitbar")
+        self.hinge_action.setObjectName("hinge_action")
         self.edit_generated_action = self._add(
             "Code bearbeiten…", self.edit_generated, "Alt+E",
-            "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-, PDF417-Code, Bogentext oder Box mit seinen "
+            "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-, PDF417-Code, Bogentext, Box oder "
+            "Flex-Scharnier mit seinen "
             "Parametern "
             "neu erzeugen (auch per Doppelklick)")
         self.edit_generated_action.setObjectName("edit_generated_action")
@@ -1419,6 +1427,45 @@ class JobTools(QObject):
                   "und Durchgänge zum Durchschneiden prüfen")
         return ids
 
+    def hinge(self, spec=None, new_layer: bool | None = None,
+              center: tuple[float, float] | None = None) -> list[str]:
+        """Insert a living hinge (one undo step); default: active layer when it cuts, else a
+        new cut layer „Scharnier“. With a selection the dialog starts with its size and
+        the hinge is centred on it."""
+        from .hinge import SIZE_RANGE, HingeSpec
+        from .hinge_qt import HingeDialog, insert_hinge, selection_field
+        from .qr_qt import layer_fills
+        doc = self.editor.document
+        active = doc.active_layer or (doc.layers[0] if doc.layers else None)
+        if spec is None:
+            start = None
+            field = selection_field(self.editor)
+            if field is not None:
+                center = field[0] if center is None else center
+                w, h = field[1]
+                lo = SIZE_RANGE[0]
+                thick = float(getattr(active, "thickness_mm", 0.0) or 0.0)
+                start = HingeSpec(width_mm=max(w, lo), height_mm=max(h, lo),
+                                  thickness_mm=thick if thick > 0 else 3.0)
+            dlg = HingeDialog(self.window, spec=start, active_layer=active,
+                              touch=bool(getattr(self.editor, "touch_mode", False)))
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, new_layer = dlg.spec(), dlg.fill_layer()
+        if new_layer is None:
+            new_layer = layer_fills(active) or bool(getattr(active, "locked", False))
+        try:
+            ids = insert_hinge(self.editor, spec, new_layer=new_layer, center=center)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "Flex-Scharnier", str(exc))
+            self._msg(f"Flex-Scharnier: {exc}")
+            return []
+        layer = doc.shape(ids[0]).layer_id if ids else ""
+        name = doc.layer(layer).name if layer else ""
+        self._msg(f"Flex-Scharnier eingefügt ({len(ids)} Schnitte, Ebene „{name}“) – erst an "
+                  "einem Reststück testen, Leistung und Geschwindigkeit zum Durchschneiden prüfen")
+        return ids
+
     def pdf417(self, spec=None, fill_layer: bool | None = None) -> list[str]:
         """Insert a PDF417 code (one undo step); default: active layer."""
         from .pdf417_qt import Pdf417Dialog, insert_pdf417
@@ -1551,7 +1598,7 @@ class JobTools(QObject):
             return []
         if unit is None:
             self._msg("Code bearbeiten: bitte einen QR-Code, Barcode, Data Matrix, "
-                      "Bogentext oder eine Box auswählen (Doppelklick genügt)")
+                      "Bogentext, eine Box oder ein Flex-Scharnier auswählen (Doppelklick genügt)")
             return []
         doc = self.editor.document
         if spec is None:
