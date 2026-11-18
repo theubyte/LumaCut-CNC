@@ -11,7 +11,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QFont, QFontInfo, QFontMetricsF, QPainterPath, QTransform
 
 from .linefont import EM_UNITS as _LINE_EM_UNITS, is_line_font, text_strokes
-from .model import Geometry, Shape, text_layout
+from .model import Geometry, Shape, cased_text, text_layout
 
 # Text wird in dieser Größe aufgebaut und dann exakt in die Objektbox skaliert,
 # dadurch ist die Box (und nicht die Punktgröße) die maßgebliche Größe in mm.
@@ -89,7 +89,7 @@ def em_units(font: QFont) -> float:
 
 def text_path(text: str, family: str, bold: bool = False, italic: bool = False, *,
               letter_spacing: float = 0.0, line_spacing: float = 100.0,
-              align: str = "left") -> QPainterPath:
+              align: str = "left", case: str = "") -> QPainterPath:
     """Textumriss in Aufbau-Einheiten (eine Zeile je ``\\n``).
 
     Text-Satz wie LightBurns *H-Space / V-Space / Align X*: ``letter_spacing`` in %
@@ -98,7 +98,9 @@ def text_path(text: str, family: str, bold: bool = False, italic: bool = False, 
     ihrer Laufweite links / mittig / rechts aus. Standardwerte = bisheriger Umriss.
     Einlinien-Schriften (:func:`linefont.is_line_font`) geben offene Striche
     (:func:`line_text_path`, ``bold`` wirkungslos, ``italic`` = schräg gestellt).
+    ``case`` = Schreibweise (:func:`model.cased_text`, „upper“ = Großbuchstaben).
     """
+    text = cased_text(text, case)
     if is_line_font(family):
         return line_text_path(text, family, italic, letter_spacing=letter_spacing,
                               line_spacing=line_spacing, align=align)

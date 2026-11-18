@@ -17,8 +17,12 @@ labels scale with the zoom (heights in mm, like the objects).
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QTransform
+
+from lumacut_canvas.model import cased_text
 
 from . import vartext as vt
 
@@ -131,6 +135,8 @@ class VarTextValues(QObject):
                     v = values.get(s.id)
                     if v is None:
                         continue
+                    if s.text_case and not v.error:   # „Großbuchstaben“: Wert wie gelasert
+                        v = replace(v, text=cased_text(v.text, s.text_case))
                     b = s.bounds()
                     labels.append(Label(s.id, v, QRectF(b.x, b.y, b.w, b.h), WORK_HEIGHT_MM))
                     clock = clock or vt.uses_clock(s.text)

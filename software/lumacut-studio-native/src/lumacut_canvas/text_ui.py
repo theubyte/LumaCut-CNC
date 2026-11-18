@@ -24,8 +24,9 @@ from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDoubleSpinBox, QFontCom
 from . import icons
 from .edit_commands import ReplaceShapeCommand
 from .linefont import LINE_FONT_LABELS, LINE_FONTS, is_line_font, missing_chars
-from .model import (LETTER_SPACING_RANGE, LINE_SPACING_RANGE, TEXT_ALIGN_LABELS, TEXT_ALIGNS, Shape,
-                    read_letter_spacing, read_line_spacing, read_text_align, rotate_point)
+from .model import (LETTER_SPACING_RANGE, LINE_SPACING_RANGE, TEXT_ALIGN_LABELS, TEXT_ALIGNS,
+                    TEXT_CASE_LABELS, Shape, display_text, read_letter_spacing, read_line_spacing,
+                    read_text_align, read_text_case, rotate_point)
 from .shape_paths import shape_text_path, text_aspect, text_bounds, text_em, text_layout
 
 MM_PER_PT = 25.4 / 72.0
@@ -89,11 +90,17 @@ TIP_LINE_FONT = ("Strichart der Schrift. „Umrissschrift“ = die gewählte Sch
                  "Einlinien-Text wird nicht gefüllt (auch nicht auf einer Füll-Ebene: dort wird er "
                  "als Linie gelasert), Fett und Verschweißen wirken nicht, Kursiv stellt schräg.")
 OUTLINE_LABEL = "Umrissschrift"
+TIP_CASE = ("Großbuchstaben (wie xTool „Originalschreibweise / Großbuchstaben“): der Text wird in "
+            "Versalien gezeigt und gelasert (ä → Ä, ß → SS), gespeichert bleibt er, wie er "
+            "getippt wurde – ausschalten stellt die Originalschreibweise wieder her. Gilt auch "
+            "für Werte variabler Texte (CSV-Namen, Eingaben beim Senden) und Seriennummern. "
+            "Die Schriftgröße bleibt, die Box passt sich den Versalien an.")
 TIP_MULTILINE = "Text mehrzeilig bearbeiten … (eine Zeile je Absatz; die Buchstaben behalten ihre Größe)"
 
 
 def with_layout(s: Shape, *, letter_spacing: float | None = None, line_spacing: float | None = None,
-                align: str | None = None, text: str | None = None) -> Shape:
+                align: str | None = None, text: str | None = None,
+                case: str | None = None) -> Shape:
     """Kopie von ``s`` mit geändertem Text-Satz (und/oder Text).
 
     Die Buchstaben behalten ihre Größe in mm (Maßstab je Achse aus der alten Box),
@@ -109,6 +116,8 @@ def with_layout(s: Shape, *, letter_spacing: float | None = None, line_spacing: 
         out.text_align = read_text_align(align)
     if text is not None:
         out.text = text
+    if case is not None:
+        out.text_case = read_text_case(case)
     g = s.geom
     r0 = text_bounds(shape_text_path(s))
     r1 = text_bounds(shape_text_path(out))
@@ -206,6 +215,12 @@ class TextStyleControls(QWidget):
         self.weld.setIcon(icons.icon("text_weld"))
         self.weld.setToolTip(TIP_WELD)
         self.weld.toggled.connect(self._weld_toggled)
+        self.upper = QToolButton()
+        self.upper.setObjectName("TextUpperCase")
+        self.upper.setText("AA")
+        self.upper.setCheckable(True)
+        self.upper.setToolTip(TIP_CASE)
+        self.upper.toggled.connect(self._case_toggled)
         self.multiline = QToolButton()
         self.multiline.setObjectName("TextMultiline")
         self.multiline.setText("¶")
@@ -229,6 +244,7 @@ class TextStyleControls(QWidget):
         lay.addWidget(self.letter)
         lay.addWidget(self.line_label)
         lay.addWidget(self.line)
+        lay.addWidget(self.upper)
         lay.addWidget(self.weld)
         lay.addWidget(self.multiline)
         lay.addWidget(self.outline)
@@ -304,6 +320,7 @@ class TextStyleControls(QWidget):
             if not self.line.hasFocus():
                 self.line.setValue(s.line_spacing)
             self.weld.setChecked(all(t.text_weld for t in texts))
+            self.upper.setChecked(all(t.text_case == "upper" for t in texts))
             self.multiline.setEnabled(len(texts) == 1)
         finally:
             self._updating = False
@@ -353,7 +370,7 @@ class TextStyleControls(QWidget):
             self._push(new, LINE_FONT_LABELS[name] if name else OUTLINE_LABEL)
         self.ed.text_font_family = family
         self.refresh()
-        missing = "".join(dict.fromkeys(ch for t in texts for ch in missing_chars(t.text, name))) if name else ""
+        missing = "".join(dict.fromkeys(ch for t in texts for ch in missing_chars(display_text(t), name))) if name else ""
         if missing:
             self.ed.notify(f"{LINE_FONT_LABELS[name]}: ohne Zeichen für „{missing}“ – erscheint als „?“")
 
@@ -369,10 +386,16 @@ class TextStyleControls(QWidget):
         if self._updating:
             return
         texts = self._texts()
-        key = {"align": "text_align"}.get(field, field)
+        key = {"align": "text_align", "case": "text_case"}.get(field, field)
         new = [with_layout(t, **{field: value}) for t in texts if getattr(t, key) != value]
         if new:
             self._push(new, label, merge)
+
+    def _case_toggled(self, on: bool) -> None:
+        """Großbuchstaben für alle ausgewählten Texte ein / aus (ein Undo-Schritt, die Box
+        folgt der neuen Laufweite, die Schriftgröße bleibt)."""
+        case = "upper" if on else ""
+        self._layout_edited("case", case, TEXT_CASE_LABELS[case])
 
     def _weld_toggled(self, on: bool) -> None:
         """Verschweißen für alle ausgewählten Texte ein / aus (ein Undo-Schritt)."""

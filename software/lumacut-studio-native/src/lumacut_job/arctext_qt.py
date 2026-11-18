@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 
 from lumacut_canvas import linefont
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand
+from lumacut_canvas.model import display_text
 from lumacut_canvas.linefont import LINE_FONT_LABELS, LINE_FONTS, is_line_font, missing_chars
 from lumacut_canvas.shape_paths import (FLATTEN_TOL_MM, LINE_FONT_EM, shape_text_path, text_bounds,
                                         text_font)
@@ -101,7 +102,7 @@ def glyphs_for(text: str, family: str, height_mm: float, bold: bool = False,
 
 def spec_from_text(shape) -> ArcSpec:
     """Vorbelegung aus einem Textobjekt: Text, Schrift und Großbuchstabenhöhe."""
-    text = " ".join((shape.text or "").split("\n"))
+    text = " ".join(display_text(shape).split("\n"))    # mit Schreibweise (Großbuchstaben)
     if is_line_font(shape.font_family):   # Versalhöhe der Hershey-Striche in Aufbau-Einheiten
         r = text_bounds(shape_text_path(shape))
         cap_units = LINE_CAP_UNITS * LINE_FONT_EM / linefont.EM_UNITS

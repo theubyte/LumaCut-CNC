@@ -126,6 +126,11 @@ LETTER_SPACING_RANGE = (-50.0, 200.0)
 LINE_SPACING_RANGE = (50.0, 400.0)
 TEXT_ALIGNS = ("left", "center", "right")
 TEXT_ALIGN_LABELS = {"left": "Linksbündig", "center": "Zentriert", "right": "Rechtsbündig"}
+# Schreibweise (xTool „Originalschreibweise / Großbuchstaben“): der gespeicherte Text bleibt,
+# wie er getippt wurde; Umriss, Box und G-Code zeigen ihn in Großbuchstaben – auch die Werte
+# variabler Texte (CSV-Namen, Eingaben) und Seriennummern. "" = Originalschreibweise.
+TEXT_CASES = ("upper",)
+TEXT_CASE_LABELS = {"": "Originalschreibweise", "upper": "Großbuchstaben"}
 
 
 @dataclass(frozen=True)
@@ -739,6 +744,9 @@ class Shape:
     letter_spacing: float = 0.0
     line_spacing: float = 100.0
     text_align: str = "left"
+    # Schreibweise für kind == "text" (:data:`TEXT_CASES`): "upper" zeigt und lasert den Text
+    # in Großbuchstaben (``text`` bleibt unverändert). "" = wie getippt (bisheriges Verhalten).
+    text_case: str = ""
     # Buchstaben verschweißen für kind == "text" (LightBurn *Text › Weld*): überlappende
     # Buchstaben (Schreibschrift, negativer Zeichenabstand, enge Zeilen) werden zu einem
     # Umriss vereinigt – keine Schnitte quer durch die Buchstaben, Überlappungen werden
@@ -815,6 +823,8 @@ class Shape:
                 d["line_spacing"] = round(self.line_spacing, 3)
             if self.text_align != "left":
                 d["align"] = self.text_align
+            if self.text_case:
+                d["case"] = self.text_case
             if self.text_weld:
                 d["weld"] = True
         if self.kind in POINT_KINDS:
@@ -867,6 +877,7 @@ class Shape:
                      start=read_start(d.get("start")) if kind in START_POINT_KINDS else (),
                      reverse=d.get("reverse") is True and kind in REVERSE_KINDS,
                      text_weld=d.get("weld") is True and kind == "text",
+                     text_case=read_text_case(d.get("case")) if kind == "text" else "",
                      **(read_text_layout(d) if kind == "text" else {}))
 
 
@@ -919,6 +930,24 @@ def read_text_align(raw) -> str:
     return raw if isinstance(raw, str) and raw in TEXT_ALIGNS else "left"
 
 
+def read_text_case(raw) -> str:
+    """Schreibweise (Datei / Eingabe) aus :data:`TEXT_CASES`; Unbekanntes = Original ("")."""
+    return raw if isinstance(raw, str) and raw in TEXT_CASES else ""
+
+
+def cased_text(text: str, case: str = "") -> str:
+    """``text`` in der Schreibweise ``case`` – „upper“: Großbuchstaben nach Unicode
+    (ä → Ä, ß → SS wie im Duden-Versalsatz ohne ẞ); sonst unverändert."""
+    if case == "upper":
+        return (text or "").upper()
+    return text
+
+
+def display_text(shape) -> str:
+    """Text, wie ein Textobjekt ihn zeigt und lasert (mit seiner Schreibweise)."""
+    return cased_text(getattr(shape, "text", "") or "", getattr(shape, "text_case", ""))
+
+
 def text_layout(shape) -> dict:
     """Text-Satz von ``shape`` als Schlüsselwörter für ``shape_paths.text_path`` /
     ``text_aspect`` – nur abweichende Werte (leer = Standard-Satz)."""
@@ -929,6 +958,8 @@ def text_layout(shape) -> dict:
         out["line_spacing"] = float(shape.line_spacing)
     if getattr(shape, "text_align", "left") != "left":
         out["align"] = shape.text_align
+    if getattr(shape, "text_case", ""):
+        out["case"] = shape.text_case
     return out
 
 
