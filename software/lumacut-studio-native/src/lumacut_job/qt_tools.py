@@ -964,10 +964,17 @@ class JobTools(QObject):
             "Sperrholz biegsam (runde Box-Ecken, Armbänder) – wie die Living-Hinge-Muster für "
             "LightBurn / xTool; mit Auswahl auf deren Größe; per Doppelklick wieder bearbeitbar")
         self.hinge_action.setObjectName("hinge_action")
+        self.bentbox_action = self._add(
+            "Flex-Box (runde Ecken)…", self.bentbox, "Alt+Shift+L",
+            "Box mit runden Ecken einfügen: die Wand ist ein Streifen mit Flex-Scharnier in jeder "
+            "Ecke, Boden und Deckel greifen mit Fingerzinken ein (Maße außen oder innen, "
+            "Eckradius, Materialdicke, Kerf, Wand zweiteilig) – wie die Flex-Box von boxes.py, "
+            "die LightBurn- / xTool-Nutzer importieren; per Doppelklick wieder bearbeitbar")
+        self.bentbox_action.setObjectName("bentbox_action")
         self.edit_generated_action = self._add(
             "Code bearbeiten…", self.edit_generated, "Alt+E",
-            "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-, PDF417-Code, Bogentext, Box oder "
-            "Flex-Scharnier mit seinen "
+            "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-, PDF417-Code, Bogentext, Box, "
+            "Flex-Scharnier oder Flex-Box mit seinen "
             "Parametern "
             "neu erzeugen (auch per Doppelklick)")
         self.edit_generated_action.setObjectName("edit_generated_action")
@@ -1466,6 +1473,36 @@ class JobTools(QObject):
                   "einem Reststück testen, Leistung und Geschwindigkeit zum Durchschneiden prüfen")
         return ids
 
+    def bentbox(self, spec=None, new_layer: bool | None = None) -> list[str]:
+        """Insert a bent box with rounded corners (one undo step); default: active layer
+        when it cuts, else a new cut layer „Flex-Box“."""
+        from .bentbox_qt import BentBoxDialog, insert_bentbox
+        from .qr_qt import layer_fills
+        doc = self.editor.document
+        active = doc.active_layer or (doc.layers[0] if doc.layers else None)
+        if spec is None:
+            dlg = BentBoxDialog(self.window, active_layer=active,
+                                touch=bool(getattr(self.editor, "touch_mode", False)))
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, new_layer = dlg.spec(), dlg.fill_layer()
+        if new_layer is None:
+            new_layer = layer_fills(active) or bool(getattr(active, "locked", False))
+        try:
+            ids = insert_bentbox(self.editor, spec, new_layer=new_layer)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "Flex-Box", str(exc))
+            self._msg(f"Flex-Box: {exc}")
+            return []
+        layer = doc.shape(ids[0]).layer_id if ids else ""
+        name = doc.layer(layer).name if layer else ""
+        s = spec.normalized()
+        n_parts = (2 if s.split else 1) + (2 if s.lid else 1)
+        self._msg(f"Flex-Box eingefügt ({n_parts} Teile, {len(ids)} Schnitte, Ebene „{name}“) – "
+                  "erst ein Scharnier an einem Reststück testen, Leistung, Geschwindigkeit und "
+                  "Durchgänge zum Durchschneiden prüfen")
+        return ids
+
     def pdf417(self, spec=None, fill_layer: bool | None = None) -> list[str]:
         """Insert a PDF417 code (one undo step); default: active layer."""
         from .pdf417_qt import Pdf417Dialog, insert_pdf417
@@ -1598,7 +1635,8 @@ class JobTools(QObject):
             return []
         if unit is None:
             self._msg("Code bearbeiten: bitte einen QR-Code, Barcode, Data Matrix, "
-                      "Bogentext, eine Box oder ein Flex-Scharnier auswählen (Doppelklick genügt)")
+                      "Bogentext, eine Box, ein Flex-Scharnier oder eine Flex-Box auswählen "
+                      "(Doppelklick genügt)")
             return []
         doc = self.editor.document
         if spec is None:

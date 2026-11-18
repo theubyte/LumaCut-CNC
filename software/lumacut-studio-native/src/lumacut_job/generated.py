@@ -1,5 +1,5 @@
 """Re-editable generated objects (QR code, barcode, Data Matrix, Aztec, PDF417,
-arc text, finger-joint box, living hinge).
+arc text, finger-joint box, living hinge, bent box).
 
 The generators create static ``polygon`` groups. To make them editable like in
 LightBurn / xTool Creative Space, every part of such a group carries the same
@@ -32,6 +32,7 @@ from lumacut_canvas.model import Geometry, keep_inside_together, rotate_point
 from .arctext import ArcSpec
 from .aztec import AztecSpec
 from .barcode import BarcodeSpec
+from .bentbox import BentBoxSpec
 from .boxgen import BoxSpec
 from .datamatrix import DataMatrixSpec
 from .hinge import HingeSpec
@@ -41,10 +42,10 @@ from .qr import QrSpec
 VERSION = 1
 SPECS = {"qr": QrSpec, "barcode": BarcodeSpec, "datamatrix": DataMatrixSpec, "aztec": AztecSpec,
          "pdf417": Pdf417Spec, "arctext": ArcSpec, "box": BoxSpec,
-         "hinge": HingeSpec}
+         "hinge": HingeSpec, "bentbox": BentBoxSpec}
 LABELS = {"qr": "QR-Code", "barcode": "Barcode", "datamatrix": "Data Matrix", "aztec": "Aztec-Code",
           "pdf417": "PDF417-Code", "arctext": "Bogentext", "box": "Box",
-          "hinge": "Flex-Scharnier"}
+          "hinge": "Flex-Scharnier", "bentbox": "Flex-Box"}
 _POSITION = ("x", "y")
 # Below this relative change the user did not scale the object (rounding of moves etc.).
 SCALE_EPS = 0.002
@@ -185,7 +186,7 @@ def scaled_spec(spec, scale: tuple[float, float]):
     text height with Y; PDF417 takes its width from X and the row height
     (in module widths) from the ratio Y / X. A box keeps its stored sizes (the flat
     layout of its panels has no meaningful scale – material and joints would not
-    scale with it). A living hinge stretches its field (and the frame margin) with the
+    scale with it); the same holds for a bent box. A living hinge stretches its field (and the frame margin) with the
     handles but keeps slit length, bridge and pitch – those are what make it bend.
     Unscaled specs are returned unchanged.
     """

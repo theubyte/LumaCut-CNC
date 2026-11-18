@@ -1,7 +1,7 @@
 """Edit generated objects again (Qt side of :mod:`lumacut_job.generated`).
 
-Double click on a QR code, barcode, Data Matrix, Aztec / PDF417 code, arc text, box or
-living hinge (select tool) or
+Double click on a QR code, barcode, Data Matrix, Aztec / PDF417 code, arc text, box,
+living hinge or bent box (select tool) or
 „Code bearbeiten…“ (Alt+E) opens the generator's dialog with the stored
 parameters – sizes scaled by what the user did with the handles – and replaces
 the group in one undo step: same layer, same centre, same rotation, same
@@ -22,7 +22,7 @@ EDIT_TITLES = {"qr": "QR-Code bearbeiten", "barcode": "Barcode bearbeiten",
                "datamatrix": "Data Matrix bearbeiten", "aztec": "Aztec-Code bearbeiten",
                "pdf417": "PDF417-Code bearbeiten",
                "arctext": "Bogentext bearbeiten", "box": "Box bearbeiten",
-               "hinge": "Flex-Scharnier bearbeiten"}
+               "hinge": "Flex-Scharnier bearbeiten", "bentbox": "Flex-Box bearbeiten"}
 
 
 def build_shapes(spec, layer_id: str) -> list:
@@ -61,6 +61,9 @@ def build_shapes(spec, layer_id: str) -> list:
     elif kind == "hinge":
         from . import hinge
         shapes = hinge.hinge_shapes(hinge.centered(s), layer_id)
+    elif kind == "bentbox":
+        from . import bentbox
+        shapes = bentbox.bentbox_shapes(bentbox.centered(s), layer_id)
     else:
         from . import arctext
         from .arctext_qt import glyphs_for
@@ -138,6 +141,11 @@ def edit_dialog(unit: Unit, spec, layer, parent=None, touch: bool | None = None)
     elif unit.kind == "hinge":
         from .hinge_qt import HingeDialog
         dlg = HingeDialog(parent, spec, active_layer=layer, touch=touch)
+        dlg.new_layer.setChecked(False)
+        dlg.new_layer.setVisible(False)
+    elif unit.kind == "bentbox":
+        from .bentbox_qt import BentBoxDialog
+        dlg = BentBoxDialog(parent, spec, active_layer=layer, touch=touch)
         dlg.new_layer.setChecked(False)
         dlg.new_layer.setVisible(False)
     else:
