@@ -16229,3 +16229,90 @@ readable line still uses outline fonts only. Hardware check: „Grüße 20 €�
 coaster in both single-line fonts at 5 mm, top and bottom side, with one line pass on the
 Windows app (no double line, umlaut dots visible, letters upright on the circle), the same
 text on an open curved path, and the „Schriftart“ combo by finger on the Windows tablet.
+
+## 97. Status update 2026-11-18 (review round 90)
+
+Done this round (warp selection – LightBurn's *Warp Selection* / *Deform*, xTool's „Verzerren“ /
+arch envelope; Machine / Scan Probe / Materials untouched – new `lumacut_canvas/warp.py` and
+`warp_ui.py`, one entry in `pathops_ui.py`; model, planner, G-code writer, Pi and camera code
+unchanged):
+
+- Closed since §96 by others: none – main had no commit since `10a7e41` (round 89); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked after a re-scan against LightBurn / xTool: **Verzerren** was not listed at all,
+  yet it is a daily tool for real diode-laser jobs – a logo or name narrowed towards the top
+  for a tapered surface (lamp shade, flower pot, the flattened side of a cup), text in a
+  trapezoid or arched envelope for badges, crests and wooden signs, and a design pulled into a
+  perspective. LightBurn has *Warp Selection* (four corners) and *Deform*, xTool Creative Space
+  an arch / envelope warp for text. The listed items stay behind it: min/max corner power and
+  Dot Mode dwell wait for the user, own single-line fonts wait for a sample file, kerf of
+  closed single-line letters and the faceted Hershey curves are smaller quality points, the
+  text items and the live image mask are conveniences, CoreXY / dot-size models have nothing
+  to calibrate against (Gestell v1 not built, material library is Materials). Pure Studio
+  work, no user decision needed, not owned by another agent (the Pfad menu was last changed
+  by review rounds).
+- **Mapping** (`warp.Warp`): the common box of the selection goes onto a quad (top left, top
+  right, bottom right, bottom left in screen direction). „Hülle“ is bilinear like LightBurn's
+  *Warp*: every box edge goes linearly onto its quad edge, lines across the area bend; an
+  optional **Wölbung** of the top and bottom edge (parabola with the given rise in the middle,
+  + = up; both equal = arch, top + / bottom − = barrel) covers the *Deform* / arch cases.
+  „Perspektive“ is projective (homography from the four corners): straight lines stay
+  straight, the box centre lands on the crossing of the quad's diagonals.
+- **Accuracy**: curves are flattened at 0.005 mm, then every segment is subdivided until its
+  quarter, middle and three-quarter points lie within 0.01 mm of the chord (`warp_polyline`,
+  depth ≤ 14) – edges that stay straight (box edges under „Hülle“, all lines under
+  „Perspektive“) get no extra points; total deviation from the exact mapping ≤ ≈ 0.02 mm.
+  „Herzlichen Glückwunsch 2026“ in DejaVu Sans warps in ≈ 15 ms, so the preview follows the
+  finger.
+- **Objects**: closed shapes (rect incl. corner radius, ellipse, polygon with holes, outline
+  text, also welded) become one `polygon` with all rings, open ones (line, freehand / path
+  with curves, single-line text with one ring per stroke) a `path`; rotation is baked in.
+  Layer, groups, priority, reversed direction, manual tabs and start point are carried
+  (mapped and snapped back onto the warped contour); images are left as they are and named
+  in the readout; generator specs (arc text, codes) are dropped like after „In Pfade“.
+- **Refused**: quads that are concave, folded, collapsed or mirrored („muss konvex bleiben“),
+  bulges that would make the top edge cross the bottom (Jacobian checked on a 13 × 13 grid),
+  a selection less than 0.5 mm wide or high (a single horizontal line alone), non-finite
+  input, and results reaching outside the work area (OK disabled, the action changes nothing).
+- **Dialog** („Verzerren …“, Alt+Umschalt+W, Pfad menu in the action bar and the context menu
+  right after „Ecken abrunden …“): „Art“, a preview with the dashed box, the warped outlines
+  and four corner handles dragged by mouse or finger (scale frozen while dragging, 44 px hit
+  area in touch mode), → X / ↓ Y offsets per corner in mm, „Wölbung oben / unten“ (disabled
+  for „Perspektive“), quick buttons „Oben schmaler“ / „Unten schmaler“ (10 % of the width per
+  side), „Rechts höher“ (10 % of the height), „Bogen“ (15 % of the height), „Zurücksetzen“, a
+  live readout (objects, closed / open, new size, images, work area). OK stays off while
+  nothing changed or the quad is refused. One undo step, every object keeps its place in the
+  stack, the warped objects stay selected; the chosen „Art“ is remembered for the session.
+
+Tests: new `tests/test_warp.py` (27 tests): identity, corners onto the quad in both modes,
+envelope box edges linear (rect stays four points) and a diagonal bent within tolerance of the
+exact curve, perspective lines straight with the centre on the diagonals, arch and barrel
+bulge, ellipse / polygon with hole / rotated freehand curve against the exact mapping, outline
+text as polygon with holes and single-line text as open strokes, attributes / tabs / start
+point carried, five refused quads, flat selection / NaN / flat line with an area, images
+skipped and counted, work area flag, presets; G-code of a warped shape cut (perimeter) and
+hatched (area / interval) and of warped single-line text on a fill layer (strokes once), all
+through the Pi guard; dialog presets / modes / OK state / refused input, corner drag with
+mouse events, touch sizes; editor one undo step with stacking and selection, nothing
+selected / locked layer / cancel / outside / folded, menu position and 44 px touch context
+menu row, save / load without new keys, Alt+Shift+W unique in the main window.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3474 passed, 3 skipped** (17.1 min; 3447 + 27 new warp tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – a new action only; warped results are ordinary
+`polygon` / `path` objects, no new project key, older versions open such files.
+
+Still open: unchanged from §96 – camera placement beyond marks, automatic mark detection
+(Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials items, image dot-size
+model, CoreXY time model, the text items, live image mask, the trim refinements of §92, the
+print-and-cut limits of §93 / §94 and the single-line font limits of §95 / §96. For warping:
+images are not warped (a photo on a tapered surface still needs an outside tool); the warp is
+destructive – text becomes outlines / strokes and can no longer be edited as text (as in
+LightBurn; undo restores), generated arc texts / codes lose their generator; only one
+quad + edge bulge (no free 3 × 3 / 4 × 4 mesh like LightBurn's *Deform* with inner points,
+no left / right edge bulge); a true conical unroll for a tapered cup on a rotary is an
+annular sector, not a trapezoid – that belongs to the rotary item; the session remembers
+only the mode, not the corner offsets. Hardware check: a name warped „Oben schmaler“ and
+with „Bogen“ engraved on 3 mm plywood on the Windows app (smooth curves, no facets, letters
+filled once without gaps), a filled warped logo with a cut outline and manual tabs in
+register, and the corner handles dragged by finger on the Windows tablet.
