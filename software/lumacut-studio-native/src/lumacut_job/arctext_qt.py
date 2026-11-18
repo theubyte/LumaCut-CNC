@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 from lumacut_canvas import linefont
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand
 from lumacut_canvas.model import display_text
-from lumacut_canvas.linefont import LINE_FONT_LABELS, LINE_FONTS, is_line_font, missing_chars
+from lumacut_canvas.linefont import font_label, is_line_font, line_fonts, missing_chars
 from lumacut_canvas.shape_paths import (FLATTEN_TOL_MM, LINE_FONT_EM, shape_text_path, text_bounds,
                                         text_font)
 
@@ -50,7 +50,7 @@ def line_glyphs_for(text: str, family: str, height_mm: float, italic: bool = Fal
     Gleiche Striche wie ein Einlinien-Textobjekt (:func:`linefont.text_strokes`):
     Vorschub der Hershey-Glyphe, „Kursiv“ schräg gestellt, „Fett“ ohne Wirkung,
     unbekannte Zeichen als „?“."""
-    scale = float(height_mm) / LINE_CAP_UNITS
+    scale = float(height_mm) / linefont.cap_units(family)
     out = []
     for ch in text:
         g = linefont.glyph(family, ch)
@@ -105,7 +105,7 @@ def spec_from_text(shape) -> ArcSpec:
     text = " ".join(display_text(shape).split("\n"))    # mit Schreibweise (Großbuchstaben)
     if is_line_font(shape.font_family):   # Versalhöhe der Hershey-Striche in Aufbau-Einheiten
         r = text_bounds(shape_text_path(shape))
-        cap_units = LINE_CAP_UNITS * LINE_FONT_EM / linefont.EM_UNITS
+        cap_units = linefont.cap_units(shape.font_family) * LINE_FONT_EM / linefont.EM_UNITS
     else:
         r = shape_text_path(shape).boundingRect()
         cap_units = cap_height_pt(text_font(shape.font_family, shape.font_bold, shape.font_italic))
@@ -121,8 +121,10 @@ def font_kind_box(family: str) -> QComboBox:
     (Daten: ``""`` oder der Name der Einlinien-Schrift), vorbelegt nach ``family``."""
     box = QComboBox()
     box.addItem(OUTLINE_LABEL, "")
-    for name in LINE_FONTS:
-        box.addItem(LINE_FONT_LABELS[name], name)
+    for name in line_fonts():            # eingebaute und eigene (geladene) Einlinien-Schriften
+        box.addItem(font_label(name), name)
+    if is_line_font(family) and box.findData(family) < 0:     # eigene Schrift, hier nicht geladen
+        box.addItem(font_label(family), family)
     box.setCurrentIndex(max(0, box.findData(family if is_line_font(family) else "")))
     box.setToolTip("Umrissschrift: Buchstaben als geschlossene Umrisse (Füllen, Schneiden). "
                    "Einlinie: jeder Buchstabe ein offener Strich, einmal als Linie gelasert – "

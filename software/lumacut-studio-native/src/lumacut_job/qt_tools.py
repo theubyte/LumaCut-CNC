@@ -1125,6 +1125,10 @@ class JobTools(QObject):
             if tracker is not None:
                 g = tracker.remember(g, usage)
             note = (note + " " + usage.summary()).strip()
+        from lumacut_canvas.linefont import missing_fonts_note
+        fonts = missing_fonts_note(s.font_family for s in doc.shapes if s.kind == "text")
+        if fonts:
+            note = (note + " " + fonts + ".").strip()
         if self.selection_only:
             note = ("Nur Auswahl. " + note).strip()
         return g, note

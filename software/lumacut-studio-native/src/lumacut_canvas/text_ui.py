@@ -18,12 +18,13 @@ import math
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDoubleSpinBox, QFontComboBox, QHBoxLayout,
-                               QInputDialog, QLabel, QToolButton, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDoubleSpinBox, QFileDialog, QFontComboBox,
+                               QHBoxLayout, QInputDialog, QLabel, QToolButton, QWidget)
 
 from . import icons
 from .edit_commands import ReplaceShapeCommand
-from .linefont import LINE_FONT_LABELS, LINE_FONTS, is_line_font, missing_chars
+from . import linefont
+from .linefont import font_label, is_line_font, line_fonts, missing_chars
 from .model import (LETTER_SPACING_RANGE, LINE_SPACING_RANGE, TEXT_ALIGN_LABELS, TEXT_ALIGNS,
                     TEXT_CASE_LABELS, Shape, display_text, read_letter_spacing, read_line_spacing,
                     TEXT_VALIGN_LABELS, read_text_align, read_text_case, refit_geom,
@@ -102,6 +103,13 @@ TIP_VERTICAL = ("Senkrechter Text (wie xTool Studio „vertikales Layout“): di
                 "Jede Zeile (¶) wird eine Spalte, die Spalten stehen von links nach rechts; "
                 "„Abstand“ wirkt zwischen den Buchstaben, „Zeilen“ zwischen den Spalten, die "
                 "Ausrichtung oben / mittig / unten. Die Schriftgröße bleibt, die Box passt sich an.")
+TIP_LOAD_FONT = ("Eigene Einlinien-Schrift laden … (wie LightBurns eigene Single-Line-Fonts): SVG-Font "
+                 "(.svg – z. B. die Hershey- / EMS-Schriften aus Inkscapes „Hershey Text“, Relief "
+                 "SingleLine) oder Hershey-Schrift (.jhf). Die Schrift wird in den LumaCut-Schriftordner "
+                 "kopiert und steht danach in der Auswahl links und bei Bogentext / Text auf Pfad; "
+                 "ausgewählte Texte bekommen sie gleich. Projekte speichern nur den Namen – auf einem "
+                 "anderen Rechner die Schrift dort auch laden.")
+FONT_FILE_FILTER = "Einlinien-Schriften (*.svg *.jhf);;SVG-Font (*.svg);;Hershey-Schrift (*.jhf)"
 TIP_MULTILINE = "Text mehrzeilig bearbeiten … (eine Zeile je Absatz; die Buchstaben behalten ihre Größe)"
 
 
@@ -172,10 +180,14 @@ class TextStyleControls(QWidget):
         self.stroke = QComboBox()
         self.stroke.setObjectName("TextLineFont")
         self.stroke.setToolTip(TIP_LINE_FONT)
-        self.stroke.addItem(OUTLINE_LABEL, "")
-        for name in LINE_FONTS:
-            self.stroke.addItem(LINE_FONT_LABELS[name], name)
+        self._fill_stroke_box()
         self.stroke.activated.connect(self._stroke_chosen)
+        self.load_font = QToolButton()
+        self.load_font.setObjectName("TextLineFontLoad")
+        self.load_font.setText("…")
+        self.load_font.setToolTip(TIP_LOAD_FONT)
+        self.load_font.clicked.connect(lambda: self.load_line_font())
+        self.ask_font_path = self._ask_font_path      # Tests ersetzen den Dateidialog
         self.size = QDoubleSpinBox()
         self.size.setObjectName("TextFontSize")
         self.size.setRange(*SIZE_RANGE_PT)
@@ -240,6 +252,7 @@ class TextStyleControls(QWidget):
         self.outline.setToolTip("Text in Pfade umwandeln (für Schraffur und G-Code ohne Schriftabhängigkeit)")
         self.outline.clicked.connect(lambda: editor.actions_by_name["text_to_path"].trigger())
         lay.addWidget(self.stroke)
+        lay.addWidget(self.load_font)
         lay.addWidget(self.family)
         lay.addWidget(QLabel("Größe"))
         lay.addWidget(self.size)
@@ -259,6 +272,69 @@ class TextStyleControls(QWidget):
         lay.addWidget(self.outline)
         self._updating = False
         self.setVisible(False)
+
+    def _fill_stroke_box(self, extra: str | None = None) -> None:
+        """„Umrissschrift“, eingebaute und eigene Einlinien-Schriften (+ ``extra``: eine eigene
+        Schrift eines Textes, die hier nicht geladen ist – „(fehlt)“)."""
+        box = self.stroke
+        box.blockSignals(True)
+        try:
+            box.clear()
+            for name, label in self._wanted_items(extra):
+                box.addItem(label, name)
+        finally:
+            box.blockSignals(False)
+
+    def _stroke_items(self) -> list[tuple[str, str]]:
+        return [(self.stroke.itemData(i), self.stroke.itemText(i)) for i in range(self.stroke.count())]
+
+    @staticmethod
+    def _wanted_items(extra: str | None = None) -> list[tuple[str, str]]:
+        names = line_fonts()
+        if extra and extra not in names:
+            names.append(extra)
+        return [("", OUTLINE_LABEL)] + [(n, font_label(n)) for n in names]
+
+    def _ask_font_path(self) -> str:
+        path, _ = QFileDialog.getOpenFileName(self, "Einlinien-Schrift laden", "", FONT_FILE_FILTER)
+        return path
+
+    def load_line_font(self, path: str | None = None) -> str:
+        """Eigene Einlinien-Schrift (SVG-Font / Hershey .jhf) laden, in den Schriftordner
+        kopieren und den ausgewählten Texten geben (ein Undo-Schritt). Gibt den Namen
+        zurück, "" bei Abbruch oder Fehler (Meldung in der Statuszeile)."""
+        if path is None:
+            path = self.ask_font_path()
+        if not path:
+            return ""
+        try:
+            family = linefont.install_font_file(path)
+        except linefont.FontFileError as exc:
+            self.ed.notify(f"Einlinien-Schrift nicht geladen: {exc}")
+            return ""
+        n = sum(1 for k in linefont.glyph_chars(family) if not k.isspace())
+        self._fill_stroke_box()
+        self.ed.notify(f"{font_label(family)} geladen ({n} Zeichen)")
+        idx = self.stroke.findData(family)
+        if self._texts():
+            self._stroke_chosen(idx)
+        else:
+            self.ed.text_font_family = family
+            self.refresh()
+        self._redraw_family(family)
+        return family
+
+    def _redraw_family(self, family: str) -> None:
+        """Texte mit dieser Schrift neu zeichnen (vorher evtl. mit dem Ersatz gezeichnet)."""
+        scene = getattr(self.ed, "scene", None)
+        doc = self.ed.document
+        if scene is None:
+            return
+        for s in doc.shapes:
+            if s.kind == "text" and s.font_family == family:
+                item = scene.items_by_id.get(s.id)
+                if item is not None:
+                    item.update_from(s, doc.layer(s.layer_id))
 
     @staticmethod
     def _percent_spin(name: str, rng: tuple[float, float], step: float, tip: str) -> QDoubleSpinBox:
@@ -302,6 +378,8 @@ class TextStyleControls(QWidget):
             s = texts[0]
             lines = {t.font_family if is_line_font(t.font_family) else "" for t in texts}
             line = next(iter(lines)) if len(lines) == 1 else None
+            if self._stroke_items() != self._wanted_items(line):
+                self._fill_stroke_box(line)
             self.stroke.setCurrentIndex(max(0, self.stroke.findData(line)) if line is not None else -1)
             any_line = any(is_line_font(t.font_family) for t in texts)
             all_line = all(is_line_font(t.font_family) for t in texts)
@@ -380,12 +458,12 @@ class TextStyleControls(QWidget):
         texts = self._texts()
         new = [with_style(t, family=family) for t in texts if t.font_family != family]
         if new:
-            self._push(new, LINE_FONT_LABELS[name] if name else OUTLINE_LABEL)
+            self._push(new, font_label(name) if name else OUTLINE_LABEL)
         self.ed.text_font_family = family
         self.refresh()
         missing = "".join(dict.fromkeys(ch for t in texts for ch in missing_chars(display_text(t), name))) if name else ""
         if missing:
-            self.ed.notify(f"{LINE_FONT_LABELS[name]}: ohne Zeichen für „{missing}“ – erscheint als „?“")
+            self.ed.notify(f"{font_label(name)}: ohne Zeichen für „{missing}“ – erscheint als „?“")
 
     def _size_edited(self, pt: float) -> None:
         if self._updating:

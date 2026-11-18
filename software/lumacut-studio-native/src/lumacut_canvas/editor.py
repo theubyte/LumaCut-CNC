@@ -983,7 +983,9 @@ class CanvasEditor(QWidget):
         load_into(self.document, path)
         self.file_path = Path(path)
         self._reset_history()
-        self.notify(f"Geöffnet: {self.file_path.name}")
+        from .linefont import missing_fonts_note
+        note = missing_fonts_note(s.font_family for s in self.document.shapes if s.kind == "text")
+        self.notify(f"Geöffnet: {self.file_path.name}" + (f" – {note}" if note else ""))
 
     def save_file(self, path: str | os.PathLike[str]) -> Path:
         p = save_document(self.document, path)
