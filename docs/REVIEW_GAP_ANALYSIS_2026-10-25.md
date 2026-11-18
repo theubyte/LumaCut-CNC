@@ -16479,3 +16479,102 @@ lay it horizontally; the xTool import does not read xTool's vertical setting (no
 Hardware check: a vertical „WEIN“ tag as filled outline text and a vertical name list from a
 CSV as single-line text on 3 mm plywood on the Windows app (letters centred, equal size for
 short and long names, boxes not clipped), and the „A↓“ button by finger on the Windows tablet.
+
+## 100. Status update 2026-11-18 (review round 93)
+
+Done this round (own single-line fonts – LightBurn's custom single-line fonts; Machine / Scan
+Probe / Materials untouched – SVG font / Hershey `.jhf` reader, font folder and stand-in in
+`linefont.py`, the „…“ button and the dynamic stroke choice in `text_ui.py`, the per-font cap
+height and font list in `arctext_qt.py`, one note each in `editor.load_file` and
+`JobTools.job_gcode`; shape paths, planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §99 by others: none – main had no commit since `ad2ba0c` (round 92); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „no import of own single-line fonts“ of the single-line font limits listed open
+  since §95 / §96 („SVG fonts would be the next step“). LightBurn loads its own and SHX
+  single-line fonts; xTool ships a fixed set. Two built-in Hershey fonts are thin for real
+  work: engravers and pen-plotter users want a rounder sans (EMS Readability, Relief
+  SingleLine), a technical or a handwriting font, and the free single-line fonts out there are
+  SVG fonts (Inkscape's „Hershey Text“ set, Evil Mad Scientist's EMS fonts) or the original
+  Hershey `.jhf` files. It extends a finished feature, needs no user decision, is finishable
+  with tests and is not owned by another agent. The other open text items (justified lines,
+  kerning, inline editing, xTool text style import) are smaller conveniences or need sample
+  files; rotary still needs hardware and a user decision, min/max corner power and Dot Mode
+  dwell still wait for the user.
+- **Reading** (`parse_svg_font`, `parse_jhf_font`, `read_font_file`): SVG fonts by
+  `<font>` / `<font-face units-per-em>` / `<glyph unicode d horiz-adv-x>` / `<missing-glyph>`
+  (namespaced or not, DOCTYPE allowed, `<!ENTITY>` refused); one em becomes the built-in em
+  (32 Hershey units), the baseline the built-in baseline, y flipped – so size in pt, line and
+  letter spacing mean the same as for the built-in fonts. Lines as they are, curves and arcs
+  (svgelements) cut into chords of at most 0.5 Hershey units (≈ 0.016 em), `Z` closes the
+  stroke on its start like the Hershey „o“. Ligature glyphs (more than one character) are
+  skipped, a doubled character keeps its first glyph, the missing glyph becomes „?“, a missing
+  space gets the font's default advance, typographic aliases (– „ “ …) map to the font's own
+  „-“ / „"“ when it has no glyph for them. The cap height is measured on „H“ (then I E F T L K
+  N), else `cap-height`, else 0.7 em – Inkscape's Hershey Sans says 500 but draws its „H“ 662
+  high. `.jhf` files take the glyphs in order from the space like the built-in data and join
+  the wrapped lines of the original files (8 + 2 × count characters). Broken files, plain SVG
+  drawings („bitte über „Importieren“ öffnen“), other suffixes and files over 8 MB are refused
+  with a German message.
+- **Font folder** (`install_font_file`, `user_font_dir`, `ensure_user_fonts`): the file is
+  copied to `%APPDATA%\LumaCut\fonts` (Windows; `~/.local/share/LumaCut/fonts` elsewhere,
+  `LUMACUT_FONT_DIR` for tests / portable use) under the font's name and read again at the
+  next start; loading a font with the same name replaces it, broken files in the folder are
+  skipped. The family stored in `Shape.font_family` is `"LumaCut Einlinie: <Name>"` – no new
+  project key, the existing `"font"` value carries it.
+- **Missing font**: a project with an own font opened on a PC without it draws the built-in
+  sans as stand-in (the text never turns into an outline font); the stroke choice shows
+  „Einlinie: Name (fehlt)“, „Geöffnet: …“ names the missing font and the job note at
+  send / estimate / save G-code says „Einlinien-Schrift „Name“ fehlt auf diesem Rechner –
+  Ersatz: Einlinie (Sans)“. Loading the font afterwards redraws those texts with it.
+- **Output**: everything that already handled the built-in single-line fonts follows without
+  own code – open strokes on the canvas, cut once on a fill layer (never filled), kerf only on
+  closed letters, upper case, vertical text, spacing / alignment, variable text and serial
+  numbers, „In Pfade“, SVG / PNG export, time estimate and Pi-safe G-code. „Bogentext…“ /
+  „Text auf Pfad…“ list the own fonts and take the font's own cap height.
+- **Bedienung**: „…“ button (`TextLineFontLoad`, tooltip names LightBurn, Inkscape, .svg /
+  .jhf and that projects store only the name) right of the stroke choice, 44 px in touch mode
+  like the other buttons. It opens the file dialog, reports „Einlinie: Name geladen (n
+  Zeichen)“ and gives the font to the selected editable texts in one undo step (box height
+  kept like the stroke choice), without selection it becomes the font for new texts; cancel
+  and refused files change nothing.
+
+Tests: new `tests/test_line_font_user.py` (43 tests): SVG font em / baseline / first glyph
+wins, relative commands, closed glyphs, arcs and curves flattened finely, ligatures skipped,
+missing glyph and space, cap height fallbacks, units per em, refused files in German; `.jhf`
+equal to the built-in glyphs, wrapped lines, broken files, names and suffixes, size limit;
+install into the font folder, replace without duplicate, read again on start with broken
+files skipped, missing font falling back to the sans and named, composed umlauts; open strokes
+in the text em, size in pt, spacing and vertical, Pi-safe G-code one pass per stroke, no fill,
+built-in G-code unchanged with a font installed, text to path, save / load storing only the
+name; arc glyphs and arc spec with the font's cap height, arc font box with own and missing
+fonts; load button one undo step / without selection / cancel and bad file / missing font in
+the combo / redraw after install / choose from the combo / missing chars / touch size and
+tooltip, open project warning, main window job note. `conftest.py` points `LUMACUT_FONT_DIR`
+at a temp folder and forgets loaded fonts after each test.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3610 passed, 3 skipped** (15.1 min; 3567 + 43 new own single-line font tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – no new key; texts in outline or built-in single-line fonts
+give the same outline and G-code as before; only texts set to an own font use its strokes.
+
+Still open: unchanged from §99 except the own single-line fonts – camera placement beyond
+marks, automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell,
+Materials items, image dot-size model, CoreXY time model, the remaining text items (justified
+lines, kerning, inline editing, xTool text style import), live image mask, the trim
+refinements of §92, the print-and-cut limits of §93 / §94, the single-line font limits of
+§95 / §96 apart from the import, the warp limits of §97, the case limits of §98 and the
+vertical text limits of §99. For own fonts: SVG fonts and Hershey `.jhf` only – no SHX
+(AutoCAD) or LightBurn's own format, no single-line OpenType fonts (Relief SingleLine as
+OTF / TTF is a closed-outline trick; its SVG version works); no kerning pairs (`<hkern>` is
+ignored), no vertical metrics of the font (line pitch stays 1.25 em); SVG glyph `transform`s
+are not applied (fonts from Inkscape / EMS have none); the project stores only the name, not
+the glyphs – on another PC the font file must be loaded there too (the stand-in is the
+built-in sans, named in the note); a loaded font cannot be removed in the app (delete the
+file in the font folder and restart); `.jhf` files map their glyphs from the space in order
+(the original numbered `hersh.oc` sets with gaps are not mapped by number). Hardware check:
+load Inkscape's „EMS Readability“ and „Hershey Sans 1-stroke“ SVG fonts on the Windows app,
+engrave „Grüße 20 € Äpfel“ at 5 mm and 15 mm on plywood with one line pass (smooth curves, no
+facets, umlaut dots, no double line), the same text around an 80 mm coaster with „Bogentext…“,
+reopen the project after a restart (font still there), open it on a PC without the font
+(„(fehlt)“ and note visible), and the „…“ button by finger on the Windows tablet.
