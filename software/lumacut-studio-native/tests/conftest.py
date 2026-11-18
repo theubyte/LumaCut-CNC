@@ -11,6 +11,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import tempfile  # noqa: E402
 os.environ.setdefault("LUMACUT_AUTOSAVE_DIR", tempfile.mkdtemp(prefix="lumacut-autosave-"))
 os.environ.setdefault("LUMACUT_HISTORY_DIR", tempfile.mkdtemp(prefix="lumacut-history-"))
+# Eigene Einlinien-Schriften der Tests nie in den echten Schriftordner
+os.environ.setdefault("LUMACUT_FONT_DIR", tempfile.mkdtemp(prefix="lumacut-fonts-"))
 # Zuletzt gesehene Pi-Bewegungsgrenzen (Zeitschätzung) nie in die echten QSettings
 os.environ.setdefault("LUMACUT_MOTION_SETTINGS", os.path.join(
     tempfile.mkdtemp(prefix="lumacut-motion-"), "motion.ini"))
@@ -41,6 +43,22 @@ def _collect_qt_garbage():
     yield
     import gc
     gc.collect()
+
+
+@pytest.fixture(autouse=True)
+def _reset_user_line_fonts():
+    """Eigene Einlinien-Schriften eines Tests (Ordner und Register) nie in den nächsten."""
+    yield
+    mod = sys.modules.get("lumacut_canvas.linefont")
+    if mod is None:
+        return
+    folder = Path(os.environ["LUMACUT_FONT_DIR"])
+    files = list(folder.iterdir()) if folder.is_dir() else []
+    for p in files:
+        if p.is_file():
+            p.unlink()
+    if files or mod._USER_FONTS or mod.USER_FONT_ERRORS:
+        mod.clear_user_fonts()
 
 
 @pytest.fixture(autouse=True)
