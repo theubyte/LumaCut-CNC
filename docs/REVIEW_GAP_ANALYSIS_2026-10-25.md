@@ -16666,3 +16666,97 @@ or more passes – fingers press-fit without glue and without gaps, corners squa
 as shown in the readout; the same box open-top and with „Innenmaße“; then 0.05 and 0.15 mm
 kerf to find the right value for the laser; a large box near the work area size (layout turned,
 nothing outside); re-edit by double click and the dialog by finger on the Windows tablet.
+
+## 102. Status update 2026-11-18 (review round 95)
+
+Done this round (living hinge generator – the flex / kerf-bend patterns LightBurn and xTool users
+import from boxes.py or online generators; Machine / Scan Probe / Materials untouched – geometry,
+readout, bend helper and warnings in the new pure-Python `hinge.py`, dialog, preview and
+insertion in the new `hinge_qt.py`, the „hinge“ kind in `generated.py` / `generated_qt.py`, the
+action in `JobTools` (`qt_tools.py`) and one entry in the Design menu (`main_view.py`); shape
+paths, planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §101 by others: none – main had no commit since `b73465e` (round 94); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „no living hinges“ of the box generator limits of §101. A living hinge (staggered
+  slits that let 3 mm plywood bend) is the next thing diode-laser owners build after a finger
+  box: rounded box corners, bracelets, book and notebook covers, lamp shades. LightBurn has no
+  generator (users draw the pattern by hand or import it from boxes.py / online generators),
+  xTool Creative Space / Studio users import it too. It is a self-contained design tool, needs no
+  user decision and no hardware, is finishable with tests and is not owned by another agent.
+  The other open items (rotary, min/max corner power, Dot Mode dwell) still need hardware or the
+  user, the text items (justified lines, kerning) are smaller conveniences.
+- **Pattern** (`HingeSpec`, `columns`, `slit_plan`, `slits`): a field W × H with slit lines
+  `pitch` apart across the bend, centred (at least half a pitch from the field edges). Even
+  lines: the slit count nearest to the wished slit length, stretched so that slits and bridges
+  fill the field exactly, a bridge at both ends; odd lines: shifted by half a period – their
+  bridges lie in the middle of the neighbours' slits, and half slits run out to the field edge
+  („Halbe Schlitze bis zum Rand“, otherwise they stop one bridge before it, too short ones are
+  left out). Three patterns: „Gerade Schlitze“ (open straight paths), „Wellen“ (each slit an
+  S-curve of 0.3 × pitch amplitude, chords ≤ 0.5 mm, open paths) and „Rauten“ (closed rhombus
+  holes 0.7 × pitch wide; the half holes at an open edge are open paths ending on the edge). The
+  cuts never touch each other (≥ 0.4 × pitch between lines, one bridge inside a line). Slits
+  vertical (bend around a vertical axis) or horizontal („Schlitze waagrecht“). Optional frame
+  („Rahmen mitschneiden“): a closed rectangle around the field with a plain margin on both sides
+  across the bend; the planner cuts it last (inner shapes first). A field shorter than two
+  bridges + 1 mm and more than 6000 cuts are refused with a German message.
+- **Bend helper and readout**: a field b wide across the bend wraps θ around the neutral radius
+  b / θ (inner radius b / θ − t / 2); the readout shows lines, cuts, slit length, bridge, cut
+  length and the inner radius for 90° and 180°, and „Breite berechnen“ sets the field width
+  (height for horizontal slits) from an inner radius and an angle – e.g. the 90° corner of a box.
+  Warnings: material between the lines under 0.8 mm (burns / breaks), bridges under 1.5 mm
+  (tear), slits shorter than three bridges (stiff), pitch over twice the thickness (bends
+  hardly), fill layer (would engrave).
+- **Insertion**: slits as `path` / `polygon` objects, the frame as `polygon`, in one group on
+  the active layer when it cuts, else (fill layer, locked layer or „Neue Ebene“ checked) on a new
+  cut layer „Scharnier“ (no fill, thickness noted, power / speed from the active layer) – one
+  undo step „Flex-Scharnier einfügen“. With a selection the dialog starts with the selection's
+  size and the hinge is centred on it (e.g. a rectangle drawn where the bend goes); without, it
+  is centred on the work area. The group carries the parameters in the existing generator dict
+  (kind „hinge“, no new project key) and is re-edited in place by double click (also in touch
+  mode) or „Code bearbeiten…“ (Alt+E); scaling the group stretches the field and the margin but
+  keeps slit length, bridge and pitch (they make the bend).
+- **Bedienung**: „Flex-Scharnier…“ (Alt+Shift+H) in the Auftrag menu and the Design menu; the
+  dialog takes the material thickness from the active layer, shows the cuts as a preview and the
+  readout, 44 px controls in touch mode and fits a 720 px tablet screen. The status line after
+  inserting reminds to test on an offcut first.
+
+Tests: new `tests/test_living_hinge.py` (33 tests): spec clamps, across / along / part size;
+line positions centred a pitch apart, slit count nearest to the wish filling the field exactly,
+too short refused, odd lines bridging the middle of the even slits, open and closed edges;
+straight, wave and diamond cuts inside the field never touching, waves as S-curves on their
+line, diamond holes closed with open half holes on the edge; frame with margin, too many slits
+and too big refused; bend radius / field width inverse, readout and warnings; one centred group;
+generator meta round trip and scaling keeping the slits; Pi-safe G-code cutting every slit once
+and the frame last, saved project round trip, old projects unchanged; dialog defaults / layer
+thickness / pattern / frame margin / warnings / disabled OK / bend helper / touch 44 px; window
+action, shortcut, menus, one undo step, new cut layer for fill or locked layers, dialog cancel /
+accept, selection size and centre, re-edit in place and double click in touch mode.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3676 passed, 3 skipped** (23.8 min; 3643 + 33 new living hinge tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – no new key; projects and G-code without a hinge are
+unchanged.
+
+Still open: unchanged from §101 except the living hinge – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials
+items, image dot-size model, CoreXY time model, the remaining text items (justified lines,
+kerning, inline editing, xTool text style import), live image mask, the trim refinements of
+§92, the print-and-cut limits of §93 / §94, the single-line font limits of §95 / §96 / §100,
+the warp limits of §97, the case limits of §98, the vertical text limits of §99 and the box
+generator limits of §101 (without the living hinge). For the living hinge: rectangular fields
+only – the pattern is not clipped to a selected circle or free shape (the selection only gives
+size and centre) and not merged into a box panel (insert the box with plain walls and put the
+hinge over the wall, or draw the rounded box by hand); no bent box generator (rounded corners
+with hinges built in), no spiral, honeycomb or cross patterns, no varying density across the
+field; the bend readout is the geometry of the neutral fibre – how far a hinge really bends
+depends on wood, glue and moisture and must be tried on an offcut; the slits are cut as open
+lines (no kerf compensation – none is needed for slits); many short cuts take time, the
+estimate counts them like any other cut.
+Hardware check: on the Windows app a 60 × 50 mm hinge with frame (10 mm margin) from 3 mm
+plywood with the defaults (straight slits, 20 mm slit, 3 mm bridge, 2 mm pitch) cut through in
+one or more passes – nothing burnt through between the lines, all bridges intact, the part bends
+by hand to 90° and back without breaking; the same with „Wellen“ and „Rauten“; 1.5 and 3 mm
+pitch to compare stiffness; a 90° corner from the bend helper (10 mm inner radius) fitted around
+a box corner; select a rectangle, insert the hinge on it (same size, same place); re-edit by
+double click and the dialog by finger on the Windows tablet.
