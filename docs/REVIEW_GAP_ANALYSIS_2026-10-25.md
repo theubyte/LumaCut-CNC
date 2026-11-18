@@ -16396,3 +16396,86 @@ does not read xTool's case setting (no sample file). Hardware check: a CSV name 
 case with „Großbuchstaben“ on as single-line tags on 3 mm plywood on the Windows app (all names
 in capitals, „Groß“ burned as „GROSS“, boxes not clipped), the same as filled outline text,
 and the „AA“ button by finger on the Windows tablet.
+
+## 99. Status update 2026-11-18 (review round 92)
+
+Done this round (vertical text – xTool Studio's „vertikales Layout“ for text; Machine / Scan
+Probe / Materials untouched – a `text_vertical` field with `text_anchor` / `refit_geom` in
+`model.py`, `vertical_text_path` / `text_size` and a `vertical` argument of
+`shape_paths.text_path`, the „A↓“ toggle in `text_ui.py`, `refit_vertical` / `vertical_box` in
+`vartext.py` and the vertical cells in `serial.py`; planner, G-code writer, Pi and camera code
+unchanged):
+
+- Closed since §98 by others: none – main had no commit since `1707cc0` (round 91); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „vertical text“ of the text items listed open since §95. xTool Studio (Desktop
+  V1.5 release notes: „Text now supports … vertical layout“) has it, LightBurn has not (its
+  forum answer is one letter per line, which centres the letters by advance width so narrow
+  letters stand skewed, or one text object per letter). On a diode laser it is a common job:
+  door and shelf signs, bookmarks, banners, cable and drawer labels, wine-bottle tags, vertical
+  name strips on keyrings. Smaller than inline editing or kerning, finishable with tests, no
+  user decision needed, not owned by another agent. Justified lines are still left out (neither
+  LightBurn nor xTool has them); min/max corner power and Dot Mode dwell still wait for the
+  user.
+- **Model** (`Shape.text_vertical`): False = horizontal (default, old behaviour). Saved as the
+  optional key `"vertical": true` only when on and only for text objects (anything but JSON
+  `true` reads as horizontal) – the one new key of this round, needed because the layout must
+  survive save / load and act on values filled in at send time. Files without it are
+  byte-identical and give the same G-code; an older version opens a file with the key and shows
+  the text horizontally.
+- **Layout** (`vertical_text_path`, reached through `text_path(…, vertical=True)` /
+  `text_layout` like spacing / alignment / case): each character upright, its outline centred
+  on the column (so „I“ under „W“ stands straight – the skew LightBurn users complain about),
+  baselines 1.25 × 100 pt apart like horizontal lines, „Abstand“ (letter spacing) adds
+  % of the em to that pitch, each line (¶) becomes a column, columns left to right
+  1.25 × em × „Zeilen“ % apart, alignment left / centre / right acts as top / middle / bottom
+  for shorter columns, spaces keep their row. Outline and single-line fonts alike (single-line
+  strokes stay open), upper case, weld, fill / hatch, kerf, job polylines, G-code, SVG export,
+  „In Pfade“ and the time estimate see the vertical outline without own code.
+- **Box**: `with_layout(…, vertical=…)` keeps the letter size (mm per build unit per axis) and
+  refits the box around the anchor of `model.text_anchor` – horizontal as before (top edge left
+  / centre / right), vertical the left edge at the top / middle / bottom; switching back
+  restores the old box exactly, rotated and mirrored texts keep their corner and mirroring.
+  `refit_geom` is now the shared anchor maths (identical results for horizontal texts). Font
+  size in pt reads and scales the vertical box correctly.
+- **Variable text and serial numbers**: for a vertical text the evaluated value keeps the letter
+  size and the box follows in height (and width) around the anchor (`refit_vertical`) –
+  „ANNA“ from a CSV is shorter than „MAXIMILIAN“, the letters are equally big; horizontal texts
+  keep the old height-preserving refit. Serial number grids use the tallest copy as row pitch.
+- **Bedienung**: „A↓“ toggle (`TextVertical`, checkable, tooltip names xTool and the column /
+  spacing / alignment meaning) in the text property bar after „AA“; 44 px in touch mode like the
+  other buttons. It applies to all selected editable texts in one undo step („Senkrechter Text“
+  / „Waagrechter Text“), mixed selections show it unchecked, locked layers are left alone. On a
+  vertical text the alignment buttons' tooltips read „Oben / Mittig / Unten“.
+
+Tests: new `tests/test_text_vertical.py` (52 tests): default not saved, round trip, only `true`
+read, text objects only, old files unchanged, anchor / refit maths; letters stacked on the row
+pitch and centred per outline, lines as columns left to right, line spacing, top / middle /
+bottom alignment, letter spacing, spaces, upper case combined, horizontal path unchanged,
+single-line strokes open inside the box, `text_size`; switch keeps font size and corner and
+restores the box, bottom anchor, rotated / mirrored, size edit; Pi-safe G-code for outline and
+single-line fonts with the same cut length as the horizontal text, hatch, G-code unchanged
+without the key, CSV values and serial numbers with constant letter size, rotated refit, text
+to path, SVG, weld; button one undo step / whole selection / refresh / align tooltips / align
+anchor / locked layer / edit and capitals / canvas item / touch size / tooltip, save / load,
+main window.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3567 passed, 3 skipped** (15.2 min; 3515 + 52 new vertical text tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – without `"vertical"` the text path, box and G-code are the
+same as before; only a text with the switch on is laid out vertically.
+
+Still open: unchanged from §98 except vertical text – camera placement beyond marks, automatic
+mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials items,
+image dot-size model, CoreXY time model, the remaining text items (justified lines, kerning,
+inline editing, xTool text style import), live image mask, the trim refinements of §92, the
+print-and-cut limits of §93 / §94, the single-line font limits of §95 / §96, the warp limits of
+§97 and the case limits of §98. For vertical text: upright stacked letters only (no rotated
+„sideways“ Latin run – that is a 90° rotation – and no CJK punctuation rotation or
+tate-chū-yoko); columns run left to right (traditional CJK order right to left is not offered);
+the column pitch is fixed at 1.25 × em × line spacing, not the widest letter; ligatures and
+combining marks are laid out per code point; „Bogentext…“ / „Text auf Pfad…“ take the text but
+lay it horizontally; the xTool import does not read xTool's vertical setting (no sample file).
+Hardware check: a vertical „WEIN“ tag as filled outline text and a vertical name list from a
+CSV as single-line text on 3 mm plywood on the Windows app (letters centred, equal size for
+short and long names, boxes not clipped), and the „A↓“ button by finger on the Windows tablet.
