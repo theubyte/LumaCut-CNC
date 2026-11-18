@@ -56,7 +56,8 @@ import re
 from dataclasses import asdict, dataclass, field, fields, replace
 from typing import Callable
 
-from lumacut_canvas.model import Document, Shape, new_id, rotate_point, text_layout
+from lumacut_canvas.model import (Document, Shape, new_id, refit_geom, rotate_point, text_anchor,
+                                  text_layout)
 
 KIND = "vartext"
 VERSION = 1
@@ -497,6 +498,8 @@ def refit_text(shape: Shape, text: str, aspect: Callable[..., float]) -> Shape:
     h = abs(g.h)
     if h <= 0:
         return out
+    if shape.text_vertical:     # senkrecht: die Höhe folgt dem Text, die Buchstaben bleiben gleich groß
+        return refit_vertical(shape, text)
     lay = text_layout(shape)    # Zeichen-/Zeilenabstand, Ausrichtung (nur abweichende Werte)
     old = aspect(shape.text, shape.font_family, shape.font_bold, shape.font_italic, **lay)
     new = aspect(text, shape.font_family, shape.font_bold, shape.font_italic, **lay)
@@ -509,6 +512,35 @@ def refit_text(shape: Shape, text: str, aspect: Callable[..., float]) -> Shape:
     lx, ly = rotate_point(cx - g.w / 2.0, cy, cx, cy, g.rot)
     ncx, ncy = rotate_point(lx + w_new / 2.0, ly, lx, ly, g.rot)
     out.geom = replace(g.copy(), x=ncx - w_new / 2.0, y=ncy - g.h / 2.0, w=w_new)
+    return out
+
+
+def vertical_box(shape: Shape, text: str) -> tuple[float, float] | None:
+    """Box (w, h) in mm für ``text`` im senkrechten Satz von ``shape`` mit dessen
+    Buchstabengröße (mm je Aufbau-Einheit aus der alten Box, Spiegelung bleibt); None,
+    wenn ein Umriss leer ist."""
+    from lumacut_canvas.shape_paths import text_size
+    lay = text_layout(shape)
+    fam = (shape.font_family, shape.font_bold, shape.font_italic)
+    w0, h0 = text_size(shape.text, *fam, **lay)
+    w1, h1 = text_size(text, *fam, **lay)
+    g = shape.geom
+    if min(w0, h0, w1, h1) <= 0:
+        return None
+    w = math.copysign(w1 * abs(g.w) / w0, g.w if g.w else 1.0)
+    h = math.copysign(h1 * abs(g.h) / h0, g.h if g.h else 1.0)
+    return (w, h) if math.isfinite(w) and math.isfinite(h) else None
+
+
+def refit_vertical(shape: Shape, text: str) -> Shape:
+    """Copy of a vertical text ``shape`` with ``text``: same letter size, font and
+    rotation; the box follows the text around its anchor (left edge at the top /
+    middle / bottom by alignment, in the rotated frame)."""
+    out = shape.copy()
+    out.text = text
+    box = vertical_box(shape, text)
+    if box is not None:
+        out.geom = refit_geom(shape.geom, box[0], box[1], *text_anchor(shape))
     return out
 
 
@@ -693,5 +725,5 @@ __all__ = ["INPUT_NAMES", "InputField", "clean_input", "clear_input_values", "do
            "advanced_spec", "evaluate", "evaluate_document", "format_counter", "format_datetime",
            "has_placeholders", "is_variable", "load_csv", "make_meta", "new_epoch", "new_series",
            "parse_csv", "spec_dict",
-           "placeholders", "PreviewValue", "preview_values", "reading_order", "refit_text", "series_key", "spec_of", "uses_counter",
+           "placeholders", "PreviewValue", "preview_values", "reading_order", "refit_text", "refit_vertical", "series_key", "spec_of", "uses_counter",
            "uses_clock", "uses_csv"]

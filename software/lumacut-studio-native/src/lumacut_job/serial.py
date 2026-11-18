@@ -131,7 +131,13 @@ def serial_shapes(src: Shape, spec: SerialSpec, aspect: Callable[..., float],
     stretch = abs(g.w) / (h * base) if base > 0 else 1.0
     widths = [h * aspect(t, src.font_family, src.font_bold, src.font_italic, **lay) * stretch
               for t in texts]
-    cell_w = max(widths)
+    heights = [h] * len(texts)
+    if src.text_vertical:   # senkrecht: Höhe und Breite folgen dem Text, Buchstaben gleich groß
+        from .vartext import vertical_box
+        boxes_ = [vertical_box(src, t) or (g.w, g.h) for t in texts]
+        widths, heights = [b[0] for b in boxes_], [b[1] for b in boxes_]
+    cell_w = max(abs(w) for w in widths)
+    cell_h = max(abs(v) for v in heights)
     cols = min(s.columns, len(texts))
     rows = (len(texts) + cols - 1) // cols
     group = new_id()
@@ -142,16 +148,20 @@ def serial_shapes(src: Shape, spec: SerialSpec, aspect: Callable[..., float],
         meta = vt.make_meta(replace(base_spec, series=vt.new_series(), start=s.start,
                                     step=s.step, current=s.start, per_copy=True))
         tw = h * aspect(s.template, src.font_family, src.font_bold, src.font_italic, **lay) * stretch
+        th = h
+        if src.text_vertical:
+            from .vartext import vertical_box
+            tw, th = vertical_box(src, s.template) or (g.w, g.h)
     out: list[Shape] = []
-    for i, (text, w) in enumerate(zip(texts, widths)):
+    for i, (text, w, hh) in enumerate(zip(texts, widths, heights)):
         r, c = divmod(i, cols)
         sh = src.copy(new_identity=True)
         sh.text = text
         sh.generator = None if (src.generator or {}).get("kind") == "vartext" else src.generator
         if meta is not None:     # variable: template on the canvas, evaluated at send time
-            sh.text, sh.generator, w = s.template, meta, tw
+            sh.text, sh.generator, w, hh = s.template, meta, tw, th
         sh.geom = replace(g.copy(), x=g.x + c * (cell_w + s.gap_x_mm),
-                          y=g.y + r * (h + s.gap_y_mm), w=w, h=h)
+                          y=g.y + r * (cell_h + s.gap_y_mm), w=w, h=hh)
         sh.groups = (group,) + tuple(src.groups)
         out.append(sh)
     boxes = [sh.bounds() for sh in out]

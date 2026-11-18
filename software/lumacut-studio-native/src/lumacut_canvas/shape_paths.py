@@ -89,7 +89,7 @@ def em_units(font: QFont) -> float:
 
 def text_path(text: str, family: str, bold: bool = False, italic: bool = False, *,
               letter_spacing: float = 0.0, line_spacing: float = 100.0,
-              align: str = "left", case: str = "") -> QPainterPath:
+              align: str = "left", case: str = "", vertical: bool = False) -> QPainterPath:
     """Textumriss in Aufbau-Einheiten (eine Zeile je ``\\n``).
 
     Text-Satz wie LightBurns *H-Space / V-Space / Align X*: ``letter_spacing`` in %
@@ -99,8 +99,12 @@ def text_path(text: str, family: str, bold: bool = False, italic: bool = False, 
     Einlinien-Schriften (:func:`linefont.is_line_font`) geben offene Striche
     (:func:`line_text_path`, ``bold`` wirkungslos, ``italic`` = schräg gestellt).
     ``case`` = Schreibweise (:func:`model.cased_text`, „upper“ = Großbuchstaben).
+    ``vertical`` = senkrechter Satz (:func:`vertical_text_path`).
     """
     text = cased_text(text, case)
+    if vertical:
+        return vertical_text_path(text, family, bold, italic, letter_spacing=letter_spacing,
+                                  line_spacing=line_spacing, align=align)
     if is_line_font(family):
         return line_text_path(text, family, italic, letter_spacing=letter_spacing,
                               line_spacing=line_spacing, align=align)
@@ -121,6 +125,48 @@ def text_path(text: str, family: str, bold: bool = False, italic: bool = False, 
         offsets = [(widest - a) * share for a in adv]
     for i, line in enumerate(lines):
         path.addText(QPointF(offsets[i], i * pitch), font, line)
+    return path
+
+
+def _glyph_path(ch: str, family: str, bold: bool, italic: bool) -> QPainterPath:
+    """Ein Zeichen als Pfad in Aufbau-Einheiten, Grundlinie bei y = 0 (wie Zeile 1 von
+    :func:`text_path`)."""
+    if is_line_font(family):
+        return line_text_path(ch, family, italic)
+    path = QPainterPath()
+    path.addText(QPointF(0.0, 0.0), text_font(family, bold, italic), ch)
+    return path
+
+
+def vertical_text_path(text: str, family: str, bold: bool = False, italic: bool = False, *,
+                       letter_spacing: float = 0.0, line_spacing: float = 100.0,
+                       align: str = "left") -> QPainterPath:
+    """Senkrechter Text (xTool Studio „vertikales Layout“): Zeichen aufrecht untereinander.
+
+    Jede Zeile (``\n``) wird eine Spalte, die Spalten stehen von links nach rechts. Jedes
+    Zeichen sitzt waagrecht mit der Mitte seines Umrisses auf der Spaltenmitte (schmale
+    Buchstaben wie „I“ stehen nicht schief), die Grundlinien liegen im Zeilenabstand
+    1,25 × 100 pt – ``letter_spacing`` (% des Gevierts) vergrößert ihn. Spaltenabstand
+    1,25 × Geviert × ``line_spacing`` %. ``align`` richtet kürzere Spalten oben („left“),
+    mittig („center“) oder unten („right“) aus. Leerzeichen belegen einen Platz.
+    """
+    em = text_em(family, bold, italic)
+    row = _TEXT_BUILD_PT * 1.25 + letter_spacing / 100.0 * em
+    col = 1.25 * em * line_spacing / 100.0
+    lines = [line or " " for line in (text or " ").split("\n")]
+    longest = max(len(line) for line in lines)
+    share = {"center": 0.5, "right": 1.0}.get(align, 0.0)
+    path = QPainterPath()
+    cache: dict[str, tuple[QPainterPath, float]] = {}
+    for c, line in enumerate(lines):
+        y0 = (longest - len(line)) * row * share
+        for i, ch in enumerate(line):
+            if ch not in cache:
+                g = _glyph_path(ch, family, bold, italic)
+                cache[ch] = (g, g.boundingRect().center().x())
+            g, mid = cache[ch]
+            if not g.isEmpty():
+                path.addPath(g.translated(c * col - mid, y0 + i * row))
     return path
 
 
@@ -179,6 +225,14 @@ def text_aspect(text: str, family: str, bold: bool = False, italic: bool = False
     (``layout``: Text-Satz wie :func:`text_path`)."""
     r = text_bounds(text_path(text, family, bold, italic, **layout))
     return r.width() / r.height() if r.height() > 0 else 1.0
+
+
+def text_size(text: str, family: str, bold: bool = False, italic: bool = False,
+              **layout) -> tuple[float, float]:
+    """Breite und Höhe des Textumrisses in Aufbau-Einheiten (``layout`` wie :func:`text_path`)
+    – zum Anpassen senkrechter Texte, deren Höhe dem Text folgt."""
+    r = text_bounds(text_path(text, family, bold, italic, **layout))
+    return r.width(), r.height()
 
 
 def curve_controls(p0, p1, p2, p3) -> tuple[tuple[float, float], tuple[float, float]]:

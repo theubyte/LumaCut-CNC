@@ -26,7 +26,8 @@ from .edit_commands import ReplaceShapeCommand
 from .linefont import LINE_FONT_LABELS, LINE_FONTS, is_line_font, missing_chars
 from .model import (LETTER_SPACING_RANGE, LINE_SPACING_RANGE, TEXT_ALIGN_LABELS, TEXT_ALIGNS,
                     TEXT_CASE_LABELS, Shape, display_text, read_letter_spacing, read_line_spacing,
-                    read_text_align, read_text_case, rotate_point)
+                    TEXT_VALIGN_LABELS, read_text_align, read_text_case, refit_geom,
+                    text_anchor)
 from .shape_paths import shape_text_path, text_aspect, text_bounds, text_em, text_layout
 
 MM_PER_PT = 25.4 / 72.0
@@ -71,7 +72,8 @@ def with_style(s: Shape, family: str | None = None, bold: bool | None = None,
 
 
 TIP_ALIGN = ("Ausrichtung mehrzeiliger Texte (wie LightBurn „Align X“): Zeilen links, mittig oder "
-             "rechts nach ihrer Laufweite ausrichten. Wirkt erst ab zwei Zeilen (¶).")
+             "rechts nach ihrer Laufweite ausrichten. Wirkt erst ab zwei Zeilen (¶). Bei "
+             "senkrechtem Text richtet sie die Spalten oben, mittig oder unten aus.")
 TIP_LETTER = ("Zeichenabstand (wie LightBurn „H-Space“ / xTool „Zeichenabstand“) in % der "
               "Schriftgröße – zusätzlich nach jedem Zeichen, negativ rückt die Buchstaben "
               "zusammen. 0 % = Abstand der Schrift. Die Buchstaben behalten ihre Größe, die "
@@ -95,17 +97,23 @@ TIP_CASE = ("Großbuchstaben (wie xTool „Originalschreibweise / Großbuchstabe
             "getippt wurde – ausschalten stellt die Originalschreibweise wieder her. Gilt auch "
             "für Werte variabler Texte (CSV-Namen, Eingaben beim Senden) und Seriennummern. "
             "Die Schriftgröße bleibt, die Box passt sich den Versalien an.")
+TIP_VERTICAL = ("Senkrechter Text (wie xTool Studio „vertikales Layout“): die Buchstaben stehen "
+                "aufrecht untereinander – für Schilder, Lesezeichen, Fahnen und schmale Leisten. "
+                "Jede Zeile (¶) wird eine Spalte, die Spalten stehen von links nach rechts; "
+                "„Abstand“ wirkt zwischen den Buchstaben, „Zeilen“ zwischen den Spalten, die "
+                "Ausrichtung oben / mittig / unten. Die Schriftgröße bleibt, die Box passt sich an.")
 TIP_MULTILINE = "Text mehrzeilig bearbeiten … (eine Zeile je Absatz; die Buchstaben behalten ihre Größe)"
 
 
 def with_layout(s: Shape, *, letter_spacing: float | None = None, line_spacing: float | None = None,
                 align: str | None = None, text: str | None = None,
-                case: str | None = None) -> Shape:
+                case: str | None = None, vertical: bool | None = None) -> Shape:
     """Kopie von ``s`` mit geändertem Text-Satz (und/oder Text).
 
     Die Buchstaben behalten ihre Größe in mm (Maßstab je Achse aus der alten Box),
     die Box folgt dem neuen Umriss. Fest bleibt die obere Kante – links, in der Mitte
-    oder rechts je nach (neuer) Ausrichtung, im gedrehten Objektrahmen.
+    oder rechts je nach (neuer) Ausrichtung, im gedrehten Objektrahmen; bei senkrechtem
+    Text die linke Kante oben, mittig oder unten (:func:`model.text_anchor`).
     """
     out = s.copy()
     if letter_spacing is not None:
@@ -118,6 +126,8 @@ def with_layout(s: Shape, *, letter_spacing: float | None = None, line_spacing: 
         out.text = text
     if case is not None:
         out.text_case = read_text_case(case)
+    if vertical is not None:
+        out.text_vertical = bool(vertical)
     g = s.geom
     r0 = text_bounds(shape_text_path(s))
     r1 = text_bounds(shape_text_path(out))
@@ -127,15 +137,7 @@ def with_layout(s: Shape, *, letter_spacing: float | None = None, line_spacing: 
     h = math.copysign(r1.height() * abs(g.h) / r0.height(), g.h if g.h else 1.0)
     if not (math.isfinite(w) and math.isfinite(h)):
         return out
-    fx = {"left": 0.0, "center": 0.5, "right": 1.0}[out.text_align]
-    if g.rot:
-        cx, cy = g.center()
-        ax, ay = rotate_point(g.x + fx * g.w, g.y, cx, cy, g.rot)       # Anker in der Welt
-        ox, oy = rotate_point(fx * w - w / 2.0, -h / 2.0, 0.0, 0.0, g.rot)  # Anker − neue Mitte
-        out.geom.x, out.geom.y = ax - ox - w / 2.0, ay - oy - h / 2.0
-    elif fx:
-        out.geom.x = g.x + fx * (g.w - w)
-    out.geom.w, out.geom.h = w, h
+    out.geom = refit_geom(g, w, h, *text_anchor(out))
     return out
 
 
@@ -221,6 +223,12 @@ class TextStyleControls(QWidget):
         self.upper.setCheckable(True)
         self.upper.setToolTip(TIP_CASE)
         self.upper.toggled.connect(self._case_toggled)
+        self.vertical = QToolButton()
+        self.vertical.setObjectName("TextVertical")
+        self.vertical.setText("A↓")
+        self.vertical.setCheckable(True)
+        self.vertical.setToolTip(TIP_VERTICAL)
+        self.vertical.toggled.connect(self._vertical_toggled)
         self.multiline = QToolButton()
         self.multiline.setObjectName("TextMultiline")
         self.multiline.setText("¶")
@@ -245,6 +253,7 @@ class TextStyleControls(QWidget):
         lay.addWidget(self.line_label)
         lay.addWidget(self.line)
         lay.addWidget(self.upper)
+        lay.addWidget(self.vertical)
         lay.addWidget(self.weld)
         lay.addWidget(self.multiline)
         lay.addWidget(self.outline)
@@ -307,8 +316,11 @@ class TextStyleControls(QWidget):
             self.italic.setChecked(all(t.font_italic for t in texts))
             aligns = {t.text_align for t in texts}
             self.align_group.setExclusive(False)
+            vertical = all(t.text_vertical for t in texts)
+            labels = TEXT_VALIGN_LABELS if vertical else TEXT_ALIGN_LABELS
             for key, b in self.align_buttons.items():
                 b.setChecked(aligns == {key})
+                b.setToolTip(f"{labels[key]} – {TIP_ALIGN}")
             self.align_group.setExclusive(True)
             multi = any(line_count(t) > 1 for t in texts)
             for b in self.align_buttons.values():
@@ -321,6 +333,7 @@ class TextStyleControls(QWidget):
                 self.line.setValue(s.line_spacing)
             self.weld.setChecked(all(t.text_weld for t in texts))
             self.upper.setChecked(all(t.text_case == "upper" for t in texts))
+            self.vertical.setChecked(vertical)
             self.multiline.setEnabled(len(texts) == 1)
         finally:
             self._updating = False
@@ -386,7 +399,7 @@ class TextStyleControls(QWidget):
         if self._updating:
             return
         texts = self._texts()
-        key = {"align": "text_align", "case": "text_case"}.get(field, field)
+        key = {"align": "text_align", "case": "text_case", "vertical": "text_vertical"}.get(field, field)
         new = [with_layout(t, **{field: value}) for t in texts if getattr(t, key) != value]
         if new:
             self._push(new, label, merge)
@@ -396,6 +409,11 @@ class TextStyleControls(QWidget):
         folgt der neuen Laufweite, die Schriftgröße bleibt)."""
         case = "upper" if on else ""
         self._layout_edited("case", case, TEXT_CASE_LABELS[case])
+
+    def _vertical_toggled(self, on: bool) -> None:
+        """Senkrechten Satz für alle ausgewählten Texte ein / aus (ein Undo-Schritt, die
+        Schriftgröße bleibt, die Box folgt dem neuen Umriss um ihre linke obere Ecke)."""
+        self._layout_edited("vertical", bool(on), "Senkrechter Text" if on else "Waagrechter Text")
 
     def _weld_toggled(self, on: bool) -> None:
         """Verschweißen für alle ausgewählten Texte ein / aus (ein Undo-Schritt)."""

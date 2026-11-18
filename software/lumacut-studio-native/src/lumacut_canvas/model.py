@@ -131,6 +131,8 @@ TEXT_ALIGN_LABELS = {"left": "Linksbündig", "center": "Zentriert", "right": "Re
 # variabler Texte (CSV-Namen, Eingaben) und Seriennummern. "" = Originalschreibweise.
 TEXT_CASES = ("upper",)
 TEXT_CASE_LABELS = {"": "Originalschreibweise", "upper": "Großbuchstaben"}
+# Ausrichtung senkrechter Texte: dieselben Werte wie :data:`TEXT_ALIGNS`, wirken längs der Spalte.
+TEXT_VALIGN_LABELS = {"left": "Oben", "center": "Mittig", "right": "Unten"}
 
 
 @dataclass(frozen=True)
@@ -747,6 +749,10 @@ class Shape:
     # Schreibweise für kind == "text" (:data:`TEXT_CASES`): "upper" zeigt und lasert den Text
     # in Großbuchstaben (``text`` bleibt unverändert). "" = wie getippt (bisheriges Verhalten).
     text_case: str = ""
+    # Senkrechter Text für kind == "text" (xTool Studio „vertikales Layout“): die Zeichen stehen
+    # untereinander, jede Zeile (``\n``) ist eine Spalte, Spalten von links nach rechts; die
+    # Ausrichtung wirkt dann oben / mittig / unten. False = waagrecht (bisheriges Verhalten).
+    text_vertical: bool = False
     # Buchstaben verschweißen für kind == "text" (LightBurn *Text › Weld*): überlappende
     # Buchstaben (Schreibschrift, negativer Zeichenabstand, enge Zeilen) werden zu einem
     # Umriss vereinigt – keine Schnitte quer durch die Buchstaben, Überlappungen werden
@@ -825,6 +831,8 @@ class Shape:
                 d["align"] = self.text_align
             if self.text_case:
                 d["case"] = self.text_case
+            if self.text_vertical:
+                d["vertical"] = True
             if self.text_weld:
                 d["weld"] = True
         if self.kind in POINT_KINDS:
@@ -878,6 +886,7 @@ class Shape:
                      reverse=d.get("reverse") is True and kind in REVERSE_KINDS,
                      text_weld=d.get("weld") is True and kind == "text",
                      text_case=read_text_case(d.get("case")) if kind == "text" else "",
+                     text_vertical=d.get("vertical") is True and kind == "text",
                      **(read_text_layout(d) if kind == "text" else {}))
 
 
@@ -960,6 +969,32 @@ def text_layout(shape) -> dict:
         out["align"] = shape.text_align
     if getattr(shape, "text_case", ""):
         out["case"] = shape.text_case
+    if getattr(shape, "text_vertical", False):
+        out["vertical"] = True
+    return out
+
+
+def text_anchor(shape) -> tuple[float, float]:
+    """Fester Punkt der Box beim Anpassen an neuen Text / Satz als Anteil (fx, fy) der Box:
+    waagrecht die obere Kante links / Mitte / rechts je nach Ausrichtung, senkrecht die
+    linke Kante oben / Mitte / unten."""
+    f = {"left": 0.0, "center": 0.5, "right": 1.0}.get(getattr(shape, "text_align", "left"), 0.0)
+    return (0.0, f) if getattr(shape, "text_vertical", False) else (f, 0.0)
+
+
+def refit_geom(g: "Geometry", w: float, h: float, fx: float, fy: float) -> "Geometry":
+    """Kopie von ``g`` mit Breite ``w`` / Höhe ``h``; der Punkt (fx, fy) der Box (Anteile, im
+    gedrehten Objektrahmen) bleibt in der Welt, wo er war."""
+    out = g.copy()
+    if g.rot:
+        cx, cy = g.center()
+        ax, ay = rotate_point(g.x + fx * g.w, g.y + fy * g.h, cx, cy, g.rot)        # Anker in der Welt
+        ox, oy = rotate_point(fx * w - w / 2.0, fy * h - h / 2.0, 0.0, 0.0, g.rot)  # Anker − neue Mitte
+        out.x, out.y = ax - ox - w / 2.0, ay - oy - h / 2.0
+    else:
+        out.x = g.x + fx * (g.w - w)
+        out.y = g.y + fy * (g.h - h)
+    out.w, out.h = w, h
     return out
 
 
