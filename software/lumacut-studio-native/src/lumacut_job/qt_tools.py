@@ -951,9 +951,15 @@ class JobTools(QObject):
             "hängen – Lage, Abstand, Seite, Bezugspunkt; ein mit ausgewählter Text wird übernommen "
             "(wie LightBurn „Text on Path“)")
         self.path_text_action.setObjectName("path_text_action")
+        self.box_action = self._add(
+            "Box-Generator…", self.box, "Alt+Shift+B",
+            "Box mit Fingerzinken aus Platten (Maße außen oder innen, Materialdicke, Zinkenbreite, "
+            "Kerf, mit oder ohne Deckel) als Schneidteile einfügen – wie der Box-Generator von "
+            "xTool Studio; per Doppelklick wieder bearbeitbar")
+        self.box_action.setObjectName("box_generator_action")
         self.edit_generated_action = self._add(
             "Code bearbeiten…", self.edit_generated, "Alt+E",
-            "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-, PDF417-Code oder Bogentext mit seinen "
+            "Ausgewählten QR-Code, Barcode, Data Matrix, Aztec-, PDF417-Code, Bogentext oder Box mit seinen "
             "Parametern "
             "neu erzeugen (auch per Doppelklick)")
         self.edit_generated_action.setObjectName("edit_generated_action")
@@ -1386,6 +1392,33 @@ class JobTools(QObject):
         self._msg(f"Aztec-Code eingefügt ({len(ids)} Flächen, Ebene „{name}“)")
         return ids
 
+    def box(self, spec=None, new_layer: bool | None = None) -> list[str]:
+        """Insert a finger-joint box (one undo step); default: active layer when it cuts,
+        else a new cut layer „Box“."""
+        from .boxgen_qt import BoxDialog, insert_box
+        from .qr_qt import layer_fills
+        doc = self.editor.document
+        active = doc.active_layer or (doc.layers[0] if doc.layers else None)
+        if spec is None:
+            dlg = BoxDialog(self.window, active_layer=active,
+                            touch=bool(getattr(self.editor, "touch_mode", False)))
+            if dlg.exec() != QDialog.Accepted:
+                return []
+            spec, new_layer = dlg.spec(), dlg.fill_layer()
+        if new_layer is None:
+            new_layer = layer_fills(active) or bool(getattr(active, "locked", False))
+        try:
+            ids = insert_box(self.editor, spec, new_layer=new_layer)
+        except ValueError as exc:
+            QMessageBox.warning(self.window, "Box-Generator", str(exc))
+            self._msg(f"Box-Generator: {exc}")
+            return []
+        layer = doc.shape(ids[0]).layer_id if ids else ""
+        name = doc.layer(layer).name if layer else ""
+        self._msg(f"Box eingefügt ({len(ids)} Teile, Ebene „{name}“) – Leistung, Geschwindigkeit "
+                  "und Durchgänge zum Durchschneiden prüfen")
+        return ids
+
     def pdf417(self, spec=None, fill_layer: bool | None = None) -> list[str]:
         """Insert a PDF417 code (one undo step); default: active layer."""
         from .pdf417_qt import Pdf417Dialog, insert_pdf417
@@ -1517,8 +1550,8 @@ class JobTools(QObject):
             self._msg(f"Code bearbeiten: {exc}")
             return []
         if unit is None:
-            self._msg("Code bearbeiten: bitte einen QR-Code, Barcode, Data Matrix oder "
-                      "Bogentext auswählen (Doppelklick genügt)")
+            self._msg("Code bearbeiten: bitte einen QR-Code, Barcode, Data Matrix, "
+                      "Bogentext oder eine Box auswählen (Doppelklick genügt)")
             return []
         doc = self.editor.document
         if spec is None:

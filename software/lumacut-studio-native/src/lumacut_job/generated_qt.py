@@ -1,6 +1,6 @@
 """Edit generated objects again (Qt side of :mod:`lumacut_job.generated`).
 
-Double click on a QR code, barcode, Data Matrix, Aztec / PDF417 code or arc text (select tool) or
+Double click on a QR code, barcode, Data Matrix, Aztec / PDF417 code, arc text or box (select tool) or
 „Code bearbeiten…“ (Alt+E) opens the generator's dialog with the stored
 parameters – sizes scaled by what the user did with the handles – and replaces
 the group in one undo step: same layer, same centre, same rotation, same
@@ -20,7 +20,7 @@ from .generated import Unit
 EDIT_TITLES = {"qr": "QR-Code bearbeiten", "barcode": "Barcode bearbeiten",
                "datamatrix": "Data Matrix bearbeiten", "aztec": "Aztec-Code bearbeiten",
                "pdf417": "PDF417-Code bearbeiten",
-               "arctext": "Bogentext bearbeiten"}
+               "arctext": "Bogentext bearbeiten", "box": "Box bearbeiten"}
 
 
 def build_shapes(spec, layer_id: str) -> list:
@@ -53,6 +53,9 @@ def build_shapes(spec, layer_id: str) -> list:
         code = s.encode()
         shapes = barcode.barcode_shapes(barcode.centered(s, None, code), layer_id, code,
                                         glyph_fn(s.font_family))
+    elif kind == "box":
+        from . import boxgen
+        shapes = boxgen.box_shapes(boxgen.centered(s), layer_id)
     else:
         from . import arctext
         from .arctext_qt import glyphs_for
@@ -100,8 +103,12 @@ def replace_unit(editor, unit: Unit, spec) -> list[str]:
     return ids
 
 
-def edit_dialog(unit: Unit, spec, layer, parent=None) -> QDialog:
-    """The generator's own dialog in edit mode (no new-layer / replace option)."""
+def edit_dialog(unit: Unit, spec, layer, parent=None, touch: bool | None = None) -> QDialog:
+    """The generator's own dialog in edit mode (no new-layer / replace option).
+
+    ``touch`` None: the touch mode of the main window's canvas (``parent.canvas``)."""
+    if touch is None:
+        touch = bool(getattr(getattr(parent, "canvas", None), "touch_mode", False))
     from .qr_qt import layer_fills
     if unit.kind == "qr":
         from .qr_qt import QrDialog
@@ -118,6 +125,11 @@ def edit_dialog(unit: Unit, spec, layer, parent=None) -> QDialog:
     elif unit.kind == "barcode":
         from .barcode_qt import BarcodeDialog
         dlg = BarcodeDialog(parent, spec, active_layer=layer)
+    elif unit.kind == "box":
+        from .boxgen_qt import BoxDialog
+        dlg = BoxDialog(parent, spec, active_layer=layer, touch=touch)
+        dlg.new_layer.setChecked(False)
+        dlg.new_layer.setVisible(False)
     else:
         from .arctext_qt import ArcTextDialog
         dlg = ArcTextDialog(parent, spec, can_replace=False)
