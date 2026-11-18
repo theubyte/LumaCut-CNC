@@ -16578,3 +16578,91 @@ engrave „Grüße 20 € Äpfel“ at 5 mm and 15 mm on plywood with one line p
 facets, umlaut dots, no double line), the same text around an 80 mm coaster with „Bogentext…“,
 reopen the project after a restart (font still there), open it on a PC without the font
 („(fehlt)“ and note visible), and the „…“ button by finger on the Windows tablet.
+
+## 101. Status update 2026-11-18 (review round 94)
+
+Done this round (finger-joint box generator – xTool Studio's Box Generator; Machine / Scan Probe
+/ Materials untouched – geometry, layout and readout in the new pure-Python `boxgen.py`, dialog,
+preview and insertion in the new `boxgen_qt.py`, the „box“ kind in `generated.py` /
+`generated_qt.py`, the action in `JobTools` (`qt_tools.py`) and one entry in the Design menu
+(`main_view.py`); shape paths, planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §100 by others: none – main had no commit since `0ce8124` (round 93); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „no box / finger-joint generator“. xTool Creative Space / xTool Studio ship a Box
+  Generator, LightBurn users rely on boxes.py / MakerCase and import the SVG. A box from 3 mm
+  plywood is the first real project of most diode-laser owners; without a generator they have
+  to leave the app, guess the kerf and import the panels again. It is a self-contained design
+  tool, needs no user decision, is finishable with tests and is not owned by another agent. The
+  other open items (rotary, min/max corner power, Dot Mode dwell) still need hardware or the
+  user, the text items are smaller conveniences.
+- **Geometry** (`BoxSpec`, `panels`, `finger_count`): a closed box (6 panels) or an open-top box
+  (5 panels, straight top edges of the walls) of outer or inner size W × D × H (10–1000 mm per
+  axis) from material of thickness t (0.5–12 mm). The joints come from one ownership rule of the
+  box shell, so every finger meets its slot and nothing overlaps: the 4 vertical edges (t × t
+  over the full height, corners included) are split into an odd number of segments, front /
+  back own the even ones (so the corners), left / right the odd ones; the 8 horizontal edges
+  between the walls and bottom / lid are split the same way, the wall owns the even ones,
+  bottom / lid the odd ones; the inner face of every panel always belongs to it. The finger
+  count of an edge is the odd number closest to length / finger width, at least 3 when each
+  finger stays at least the material thickness (and 1 mm) wide, so both panels of an edge get
+  the same pattern. Boxes with a side below 3 t + 2 mm are refused with a German message.
+- **Kerf**: every panel is grown by half the kerf (mitred, corners stay square, default
+  0.1 mm, 0–1 mm), so fingers come out kerf wider and slots kerf narrower and the parts fit as
+  designed after the beam has burnt the line away. The dialog warns when the active layer
+  already has a kerf offset (it would be applied twice) and when fingers are narrower than
+  the material.
+- **Layout** (`layout`, `box_shapes`, `centered`): the panels are laid out flat with the chosen
+  spacing (0.5–50 mm) by shelf packing, tallest first, tried as drawn and turned by 90° (the
+  smaller layout that fits wins), centred on the work area; a layout larger than the work area
+  disables OK and is refused with the needed size. The readout names outer and inner size,
+  number of panels, finger counts per axis and the space needed on the sheet.
+- **Insertion**: the panels are closed `polygon` objects in one group on the active layer when
+  it cuts, else (fill layer, locked layer or „Neue Ebene“ checked) on a new cut layer „Box“ (no
+  fill, thickness noted, power / speed taken from the active layer) – one undo step „Box
+  einfügen“. The group carries the parameters in the existing generator dict (kind „box“, no
+  new project key) and is re-edited in place by double click (also in touch mode) or „Code
+  bearbeiten…“ (Alt+E); scaling the group does not scale the stored sizes (material and joints
+  would not scale with it).
+- **Bedienung**: „Box-Generator…“ (Alt+Shift+B) in the Auftrag menu and the Design menu; the
+  dialog takes the material thickness from the active layer, shows a flat preview of the panels
+  and the readout, 44 px controls in touch mode. The status line after inserting reminds to
+  check power, speed and passes for cutting through.
+
+Tests: new `tests/test_box_generator.py` (33 tests): odd finger count closest to the wish, at
+least three, never thinner than the material; spec clamps and inner / outer sizes with and
+without lid; six / five panels, outer faces, axis-parallel square corners, panels folded back
+into 3D fill the shell exactly once for five boxes, open walls with straight top, tab counts
+against slots, kerf as mitred half-kerf growth, too small refused; layout apart and inside the
+work area, tall panels turned, too big refused, one centred group; readout; generator meta and
+file round trip, sizes not scaled, Pi-safe G-code cutting every panel once, old projects
+unchanged; dialog defaults / layer thickness / warnings / disabled OK / touch 44 px; window
+action, shortcut, menus, one undo step, new cut layer for fill or locked layers, dialog cancel /
+accept, re-edit in place and double click in touch mode.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3643 passed, 3 skipped** (25.5 min; 3610 + 33 new box generator tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – no new key; projects and G-code without a box are
+unchanged.
+
+Still open: unchanged from §100 except the box generator – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials
+items, image dot-size model, CoreXY time model, the remaining text items (justified lines,
+kerning, inline editing, xTool text style import), live image mask, the trim refinements of
+§92, the print-and-cut limits of §93 / §94, the single-line font limits of §95 / §96 / §100,
+the warp limits of §97, the case limits of §98 and the vertical text limits of §99. For the
+box generator: rectangular finger-joint boxes only – no living hinges, no dividers / inner
+walls, no sliding, hinged or inset lids and no lid-fit variants (the lid is a sixth finger-
+jointed panel, glued or pressed on), no T-slot / screw joints, no dovetails or dog-bone /
+T-bone corner relief (not needed for a laser, the corners stay sharp), no rounded or polygon
+boxes, no drawers or trays; one finger width for all edges (the count per edge is derived); no
+panel labels engraved on the parts; panels are not nested with other parts or placed around
+existing objects (the layout is centred on the work area); the kerf is one value for all
+edges – the right value depends on material, lens and focus and must be measured; no material
+bow or thickness tolerance compensation (plywood „3 mm“ is often 2.8–3.2 mm – measure it).
+Hardware check: a 100 × 80 × 50 mm box with lid from 3 mm plywood on the Windows app with the
+default 0.1 mm kerf (measure the real sheet thickness first and enter it), cut through in one
+or more passes – fingers press-fit without glue and without gaps, corners square, inner size
+as shown in the readout; the same box open-top and with „Innenmaße“; then 0.05 and 0.15 mm
+kerf to find the right value for the laser; a large box near the work area size (layout turned,
+nothing outside); re-edit by double click and the dialog by finger on the Windows tablet.
