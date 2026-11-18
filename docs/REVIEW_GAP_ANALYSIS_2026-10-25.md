@@ -16316,3 +16316,83 @@ only the mode, not the corner offsets. Hardware check: a name warped „Oben sch
 with „Bogen“ engraved on 3 mm plywood on the Windows app (smooth curves, no facets, letters
 filled once without gaps), a filled warped logo with a cut outline and manual tabs in
 register, and the corner handles dragged by finger on the Windows tablet.
+
+## 98. Status update 2026-11-18 (review round 91)
+
+Done this round (upper-case switch for text objects – xTool Studio / Creative Space
+„Originalschreibweise / Großbuchstaben“; Machine / Scan Probe / Materials untouched – a
+`text_case` field with `cased_text` / `display_text` in `model.py`, a `case` argument of
+`shape_paths.text_path`, the „AA“ toggle in `text_ui.py`, one line each in
+`arctext_qt.spec_from_text` and `vartext_preview`; planner, G-code writer, Pi and camera code
+unchanged):
+
+- Closed since §97 by others: none – main had no commit since `416a72d` (round 90); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the „upper-case switch“ of the text items listed open since §95. xTool's text
+  panel has „Originalschreibweise / Großbuchstaben“ (LightBurn has none – there one retypes the
+  text). On a diode laser it matters most where the text is not typed by hand: name tags,
+  keyrings and place cards from a CSV list in mixed case, names typed in at send, serial
+  plates – sign makers want them in capitals without editing the list. A destructive „convert
+  to capitals“ would break variable text templates (`{Name}` → `{NAME}` is a different column),
+  so the switch is non-destructive. The other text items (justified lines – neither LightBurn
+  nor xTool has them –, kerning, vertical text, inline editing, xTool text style import) are
+  bigger or conveniences; min/max corner power and Dot Mode dwell still wait for the user, own
+  single-line fonts for a sample file. Pure Studio work, no user decision needed, not owned by
+  another agent (text code was last changed by review rounds).
+- **Model** (`Shape.text_case`, `TEXT_CASES = ("upper",)`): "" = as typed (default, old
+  behaviour), "upper" = capitals. `cased_text` uses Unicode upper case – ä → Ä, é → É, ß → SS
+  (the usual German capitals without ẞ, which neither Hershey font nor most system fonts carry);
+  `display_text(shape)` is the text as shown and lasered. `Shape.text` always keeps the typed
+  text. Saved as the optional key `"case": "upper"` only when on (only for text objects; unknown
+  values read as original) – the one new key of this round, needed because the switch must be
+  reversible and must act on values filled in at send time. Files without it are byte-identical
+  and give the same G-code; an older version opens a file with the key and shows the text as
+  typed.
+- **Outline** (`text_path(…, case=…)`, passed through `text_layout` like spacing / alignment):
+  outline and single-line fonts build exactly the path of the capitalised text, so the canvas
+  item, fill / hatch, kerf, weld, job polylines, G-code, SVG export, „In Pfade“ and the time
+  estimate all see capitals without own code. `text_aspect` takes the same layout, so the box
+  fits wherever texts are measured.
+- **Variable text and serial numbers**: the template is evaluated as before (CSV columns and
+  `{input:…}` labels are matched as typed), the evaluated text keeps `text_case` and is refitted
+  with the capitalised width (`refit_text` / `serial_shapes` use `text_layout`) – „anna müller“
+  from the CSV is burned as „ANNA MÜLLER“, the canvas value label shows „→ ANNA MÜLLER“, the
+  job summary keeps the evaluated value.
+- **Bedienung**: „AA“ toggle (`TextUpperCase`, checkable, tooltip names xTool and ß → SS) in
+  the text property bar between line spacing and „Verschweißen“; 44 px in touch mode like the
+  other buttons. It applies to all selected editable texts in one undo step („Großbuchstaben“ /
+  „Originalschreibweise“), mixed selections show it unchecked; the font size stays, the box
+  follows the new width around its top anchor (left, centre or right by alignment, also rotated
+  or mirrored) and switching off restores the old box exactly. Editing the text keeps the
+  switch; „Bogentext…“ / „Text auf Pfad…“ take the capitals from a selected text; the
+  single-line „?“ note checks the capitals (ß → SS needs no „?“).
+
+Tests: new `tests/test_text_case.py` (41 tests): German capitals incl. ß → SS, default not
+saved, round trip keeping the typed text, unknown values and non-text kinds ignored, old files
+unchanged; outline and single-line paths identical to the capitalised text, font size and top
+anchor kept for left / right / rotated / mirrored text and the box restored when switched off;
+job polylines and Pi-safe G-code equal to the capitalised text, G-code unchanged without the
+key; CSV variable text burned and refitted in capitals, canvas value labels, serial numbers,
+text to path, arc text preset, SVG export; button one undo step / whole selection / refresh
+without push / locked layer / edited text / line font note / canvas item / touch size /
+tooltip, save / load, main window.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3515 passed, 3 skipped** (15.8 min; 3474 + 41 new upper-case tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – without `"case"` the text path, box and G-code are the
+same as before; only a text with the switch on is lasered in capitals.
+
+Still open: unchanged from §97 except the upper-case switch – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials
+items, image dot-size model, CoreXY time model, the remaining text items (justified lines,
+kerning, vertical text, inline editing, xTool text style import), live image mask, the trim
+refinements of §92, the print-and-cut limits of §93 / §94, the single-line font limits of
+§95 / §96 and the warp limits of §97. For the switch: capitals only (no lower case / title
+case / small caps – xTool has only „Großbuchstaben“ too); ß becomes „SS“, not „ẞ“; generated
+arc / path texts are built from the capitals at creation and are not switchable afterwards;
+the switch is per object, not remembered for new texts; the canvas shows a variable text
+template in capitals too („{NAME}“ – the value label shows the real value); the xTool import
+does not read xTool's case setting (no sample file). Hardware check: a CSV name list in mixed
+case with „Großbuchstaben“ on as single-line tags on 3 mm plywood on the Windows app (all names
+in capitals, „Groß“ burned as „GROSS“, boxes not clipped), the same as filled outline text,
+and the „AA“ button by finger on the Windows tablet.
