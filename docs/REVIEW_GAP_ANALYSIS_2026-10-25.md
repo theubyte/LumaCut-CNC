@@ -16760,3 +16760,101 @@ by hand to 90° and back without breaking; the same with „Wellen“ and „Rau
 pitch to compare stiffness; a 90° corner from the bend helper (10 mm inner radius) fitted around
 a box corner; select a rectangle, insert the hinge on it (same size, same place); re-edit by
 double click and the dialog by finger on the Windows tablet.
+
+## 103. Status update 2026-11-18 (review round 96)
+
+Done this round (bent box generator – the boxes.py „FlexBox“ LightBurn and xTool users import;
+Machine / Scan Probe / Materials untouched – geometry, layout, readout and warnings in the new
+pure-Python `bentbox.py` (built on `boxgen.py` finger counts / shelf layout and `hinge.py` slits),
+dialog, preview and insertion in the new `bentbox_qt.py`, the „bentbox“ kind in `generated.py` /
+`generated_qt.py`, the action in `JobTools` (`qt_tools.py`) and one entry in the Design menu
+(`main_view.py`); shape paths, planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §102 by others: none – main had no commit since `0dc84ca` (round 95); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „no bent box generator (rounded corners with hinges built in)“ of the living hinge
+  limits of §102. With §101 and §102 users could only cut a square box or a loose hinge field
+  and had to draw the rounded box by hand – the classic flex box (wall strip with living hinges
+  in the corners, rounded bottom and lid) is what most people want the hinge for and what they
+  import from boxes.py into LightBurn / xTool Creative Space. It combines the two generators,
+  needs no user decision and no hardware for the geometry, is finishable with tests and is not
+  owned by another agent. Hinges clipped to free shapes and the text items (justified lines,
+  kerning) are smaller conveniences; rotary, min/max corner power and Dot Mode dwell still need
+  hardware or the user.
+- **Geometry** (`BentBoxSpec`, `parts`, `wall_layout`, `notches`, `side_counts`): a closed or
+  open-top box of outer or inner size W × D × H (10–1000 mm) with inner corner radius r (3–300
+  mm, inside face of the wall; outer radius R = r + t) from material of thickness t. The wall is
+  one strip (or two halves, „Wand zweiteilig“) that starts and ends in the middle of the back:
+  ½ back, corner, right, corner, front, corner, left, corner, ½ back. Each corner is a living
+  hinge (pattern, slit, bridge and pitch as in §102, edges closed) exactly as wide as the 90° arc
+  of the neutral fibre, (r + t / 2) · π / 2, so the strip wraps the inner radius; developed length
+  2 (W − 2R) + 2 (D − 2R) + 4 · arc. Bottom and lid are rounded rectangles of the inner footprint
+  with radius r; along every straight side (W − 2R or D − 2R) the finger rule of §101 applies –
+  odd segment count, the wall owns the even segments (both ends, so it stays whole where it
+  starts to bend), the plate the odd ones as tabs t deep that pass through notches t high in
+  the wall's bottom (and top, with lid) edge; the back tabs are split over the seam. Sides too
+  short for three segments carry no tabs (W = D = 2R gives a round tube with a glued-in bottom).
+  Radius too large for the box, wall lower than 3 t + 2 mm and corners narrower than two hinge
+  lines are refused with a German message.
+- **Kerf**: every part (wall halves, bottom, lid) is grown by half the kerf (mitred) as in §101,
+  so tabs come out kerf wider and notches kerf narrower; the hinge slits are open lines / holes and
+  only move with their part. The dialog warns when the active layer already has a kerf offset.
+- **Layout and readout**: parts laid out flat with spacing by shelf packing, long parts turned by
+  90° when that fits better, centred on the work area; a layout larger than the work area disables
+  OK and suggests „Wand zweiteilig“ (a 200 × 150 × 60 mm open box needs it on 360 × 340 mm). The
+  readout names outer / inner size, corner radius, wall length and parts, hinge pattern with lines
+  per corner and arc width, number of cuts, finger counts and the space needed; warnings from the
+  corner hinge (§102), plates without tabs and fingers narrower than the material.
+- **Insertion**: hinge cuts as `path` / `polygon` objects, part outlines as closed `polygon`, all in
+  one group (the planner cuts the slits before their wall) on the active layer when it cuts, else
+  (fill layer, locked layer or „Neue Ebene“ checked) on a new cut layer „Flex-Box“ (no fill,
+  thickness noted, power / speed from the active layer) – one undo step „Flex-Box einfügen“. The
+  group carries the parameters in the existing generator dict (kind „bentbox“, no new project key)
+  and is re-edited in place by double click (also in touch mode) or „Code bearbeiten…“ (Alt+E);
+  scaling the group does not scale the stored sizes (like the box).
+- **Bedienung**: „Flex-Box (runde Ecken)…“ (Alt+Shift+L) in the Auftrag menu and the Design menu;
+  the dialog takes the material thickness from the active layer, shows the flat parts with their
+  hinge cuts and the readout, 44 px controls in touch mode and fits a 720 px tablet screen (663 px
+  high). The status line after inserting reminds to test one hinge on an offcut first.
+
+Tests: new `tests/test_bent_box.py` (30 tests): spec clamps, outer / inner size, outer radius,
+arc of the neutral fibre as hinge width, straight lengths and developed wall length; wall walk
+from the middle of the back with the front middle half way; folded wall notches meeting the plate
+tabs exactly on every side including the seam (four box sizes), never a notch where the wall
+bends; odd tab counts, round tube without tabs; wall and plate areas, straight top of open boxes,
+rounded plate corners; half-kerf growth with slits not offset; straight, wave and diamond hinge
+cuts only in the corners inside the wall and apart; two-part wall; impossible boxes refused;
+layout apart inside the work area, long wall needing two parts; one centred group; readout and
+warnings; generator meta round trip, sizes not scaled; Pi-safe G-code cutting every part and slit
+once, saved project round trip, old projects unchanged; dialog defaults / layer thickness /
+pattern / split / warnings / disabled OK / touch 44 px fitting 720 px; window action, shortcut,
+menus, one undo step, new cut layer for fill or locked layers, dialog cancel / accept, re-edit in
+place and double click in touch mode.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3706 passed, 3 skipped** (24.1 min; 3676 + 30 new bent box tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – no new key; projects and G-code without a bent box are
+unchanged.
+
+Still open: unchanged from §102 except the bent box generator – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials
+items, image dot-size model, CoreXY time model, the remaining text items (justified lines,
+kerning, inline editing, xTool text style import), live image mask, the trim refinements of
+§92, the print-and-cut limits of §93 / §94, the single-line font limits of §95 / §96 / §100,
+the warp limits of §97, the case limits of §98, the vertical text limits of §99, the box
+generator limits of §101 and the living hinge limits of §102 (hinge fields still rectangular,
+not clipped to a selected shape). For the bent box: four equal 90° corners only – no oval,
+round-ended (stadium) or polygon boxes with other angles, no corners of different radii; the
+seams are plain butt joints held by the bottom and lid tabs (glue or tape them – no finger or
+dovetail seam joint); no hinged or sliding lid, no lid lip, no dividers; the hinge field is
+exactly the arc (not lengthened into the straight sides) and keeps its edges closed; the
+developed length uses the neutral fibre in the middle of the sheet – real plywood bends with the
+neutral fibre a bit off-centre, so a long wall may come out a few tenths of a millimetre long or
+short at the seam (sand or press it); the kerf is one value for all parts and the right value
+must be measured; material thickness tolerance is not compensated.
+Hardware check: on the Windows app a 100 × 80 × 50 mm flex box with lid from 3 mm plywood with
+the defaults (10 mm inner radius, straight slits, 2 mm pitch, 0.1 mm kerf), cut through in one
+or more passes – the wall bends around all four corners by hand without breaking, the bottom and
+lid tabs press into the notches, the seam at the back closes without a gap; the same with
+„Wellen“ and „Rauten“ and with 6 / 20 mm radius; an open 200 × 150 × 60 mm box with „Wand
+zweiteilig“ (two seams); re-edit by double click and the dialog by finger on the Windows tablet.
