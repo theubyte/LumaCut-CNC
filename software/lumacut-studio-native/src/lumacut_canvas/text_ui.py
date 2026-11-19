@@ -317,7 +317,9 @@ class TextStyleControls(QWidget):
             return ""
         n = sum(1 for k in linefont.glyph_chars(family) if not k.isspace())
         self._fill_stroke_box()
-        self.ed.notify(f"{font_label(family)} geladen ({n} Zeichen)")
+        pairs = linefont.kerning_pairs(family)
+        kern = f", {pairs} Kerning-Paare" if pairs else ""
+        self.ed.notify(f"{font_label(family)} geladen ({n} Zeichen{kern})")
         idx = self.stroke.findData(family)
         if self._texts():
             self._stroke_chosen(idx)

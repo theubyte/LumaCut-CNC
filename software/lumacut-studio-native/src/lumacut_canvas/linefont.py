@@ -89,6 +89,7 @@ USER_FONT_SUFFIXES = (".svg", ".jhf")
 _USER_FONTS: dict[str, dict[str, "Glyph"]] = {}
 _USER_FILES: dict[str, Path] = {}
 _USER_CAPS: dict[str, float] = {}
+_USER_KERN: dict[str, dict[tuple[str, str], float]] = {}   # Schrift -> (links, rechts) -> Korrektur
 _USER_STATE = {"scanned": False}
 USER_FONT_ERRORS: dict[str, str] = {}        # Dateiname -> Grund (beim Einlesen übersprungen)
 
@@ -110,6 +111,16 @@ def font_label(family: str) -> str:
         return LINE_FONT_LABELS[family]
     name = family[len(USER_FONT_PREFIX):] if is_user_font(family) else family
     return f"Einlinie: {name}" + ("" if font_available(family) else " (fehlt)")
+
+
+class KernedGlyphs(dict):
+    """Glyphen einer eigenen Schrift mit ihren Kerning-Paaren (``kerning``: (links, rechts) ->
+    Korrektur des Vorschubs in Hershey-Einheiten, negativ = enger) – ein ``dict`` wie bisher,
+    damit :func:`parse_svg_font` / :func:`read_font_file` ihre Rückgabe behalten."""
+
+    def __init__(self, *args, kerning: dict[tuple[str, str], float] | None = None, **kw) -> None:
+        super().__init__(*args, **kw)
+        self.kerning: dict[tuple[str, str], float] = dict(kerning or {})
 
 
 class Glyph:
@@ -234,9 +245,50 @@ def missing_chars(text: str, family: str) -> str:
     return "".join(ch for ch in dict.fromkeys(text or "") if not has_glyph(family, ch))
 
 
+def _kern_char(glyphs: dict[str, Glyph], ch: str) -> str:
+    """Zeichen, unter dem ``ch`` in den Kerning-Paaren steht: Tab wie Leerzeichen, ein
+    zusammengesetzter Umlaut ohne eigene Glyphe wie sein Grundbuchstabe („Ä“ wie „A“)."""
+    if ch == "\t":
+        return " "
+    if ch in glyphs:
+        return ch
+    decomp = unicodedata.normalize("NFD", ch)
+    return decomp[0] if len(decomp) > 1 and decomp[0] in glyphs else ch
+
+
+def kerning(family: str, left: str, right: str) -> float:
+    """Kerning-Korrektur zwischen ``left`` und ``right`` in Hershey-Einheiten (negativ =
+    enger), aus den ``<hkern>``-Paaren eines geladenen SVG-Fonts; eingebaute Schriften,
+    ``.jhf``-Schriften und fehlende Schriften haben keine Paare (0)."""
+    if not is_user_font(family) or left == "\n" or right == "\n":
+        return 0.0
+    pairs = _USER_KERN.get(family)
+    if not pairs:
+        return 0.0
+    glyphs = _USER_FONTS.get(family) or {}
+    return pairs.get((_kern_char(glyphs, left), _kern_char(glyphs, right)), 0.0)
+
+
+def kerning_pairs(family: str) -> int:
+    """Anzahl der Kerning-Paare der Schrift (0 ohne Paare)."""
+    return len(_USER_KERN.get(family) or {}) if font_available(family) else 0
+
+
+def advances(line: str, family: str, letter_spacing_units: float = 0.0) -> list[float]:
+    """Vorschub je Zeichen einer Zeile: Glyphe + Zusatzabstand + Kerning zum nächsten Zeichen."""
+    out = []
+    for j, ch in enumerate(line):
+        adv = glyph(family, ch).advance + letter_spacing_units
+        if j + 1 < len(line):
+            adv += kerning(family, ch, line[j + 1])
+        out.append(adv)
+    return out
+
+
 def line_advance(line: str, family: str, letter_spacing_units: float = 0.0) -> float:
-    """Laufweite einer Zeile in Hershey-Einheiten (mit Zusatzabstand je Zeichen)."""
-    return sum(glyph(family, ch).advance + letter_spacing_units for ch in line)
+    """Laufweite einer Zeile in Hershey-Einheiten (mit Zusatzabstand je Zeichen und den
+    Kerning-Paaren der Schrift)."""
+    return sum(advances(line, family, letter_spacing_units))
 
 
 def word_starts(line: str) -> list[int]:
@@ -297,6 +349,7 @@ def text_strokes(text: str, family: str, italic: bool = False, *, letter_spacing
         dy = i * pitch
         shifts = (justify_shifts(line, widest - ink[i])
                   if align == "justify" and justified(lines, i) else None)
+        steps = advances(line, family, extra)
         for j, ch in enumerate(line):
             g = glyph(family, ch)
             gx0 = x + shifts[j] if shifts else x
@@ -308,7 +361,7 @@ def text_strokes(text: str, family: str, italic: bool = False, *, letter_spacing
                         px += ITALIC_SLANT * (BASE_LINE - gy)
                     pts.append((px, gy + dy))
                 out.append(pts)
-            x += g.advance + extra
+            x += steps[j]
     return out
 
 
@@ -410,7 +463,8 @@ def parse_svg_font(data: bytes | str) -> tuple[str, dict[str, Glyph], float]:
     k = EM_UNITS / upm
     default_adv = _num(font.get("horiz-adv-x"), upm / 3.0)
     name = (face_attr.get("font-family") or font.get("id") or "").strip().strip("'\"")
-    glyphs: dict[str, Glyph] = {}
+    glyphs: dict[str, Glyph] = KernedGlyphs()
+    names: dict[str, str] = {}
     missing: Glyph | None = None
     for el in font.iter():
         tag = _local(el.tag)
@@ -426,14 +480,69 @@ def parse_svg_font(data: bytes | str) -> tuple[str, dict[str, Glyph], float]:
         if uni is None or len(uni) != 1 or uni in glyphs:
             continue
         glyphs[uni] = g
+        gname = (el.get("glyph-name") or "").strip()
+        if gname:
+            for part in gname.split(","):
+                names.setdefault(part.strip(), uni)
     if not any(g.strokes for g in glyphs.values()):
         raise FontFileError("der SVG-Font enthält keine Glyphen mit Strichen")
+    glyphs.kerning = _svg_kerning(font, glyphs, names, k)
     _complete(glyphs, default_adv * k, missing)
     cap = next((BASE_LINE - min(y for st in glyphs[c].strokes for _x, y in st)
                 for c in _CAP_PROBES if c in glyphs and glyphs[c].strokes), 0.0)
     if cap <= 0:
         cap = _num(face_attr.get("cap-height"), 0.0) * k or 0.7 * EM_UNITS
     return name, glyphs, cap
+
+
+MAX_KERN_PAIRS = 100_000
+
+
+def _kern_set(chars: str | None, glyph_names: str | None, glyphs: dict[str, Glyph],
+              names: dict[str, str]) -> list[str]:
+    """Zeichen einer ``<hkern>``-Seite: ``u1``/``u2`` (Zeichen, ``U+0041``, ``U+0041-005A``,
+    durch Kommas getrennt) und ``g1``/``g2`` (``glyph-name``s); nur Zeichen mit Glyphe."""
+    out: list[str] = []
+    for part in (chars or "").split(","):
+        item = part.strip() if part.strip() else part
+        if not item:
+            continue
+        m = re.fullmatch(r"[Uu]\+([0-9A-Fa-f]{1,6})(?:-([0-9A-Fa-f]{1,6}))?", item)
+        if m and len(item) > 1:
+            lo = int(m.group(1), 16)
+            hi = int(m.group(2), 16) if m.group(2) else lo
+            out += [chr(c) for c in range(lo, min(hi, 0x10FFFF) + 1) if chr(c) in glyphs]
+        elif len(item) == 1 and item in glyphs:
+            out.append(item)
+    for part in (glyph_names or "").split(","):
+        uni = names.get(part.strip())
+        if uni is not None:
+            out.append(uni)
+    return list(dict.fromkeys(out))
+
+
+def _svg_kerning(font, glyphs: dict[str, Glyph], names: dict[str, str],
+                 k: float) -> dict[tuple[str, str], float]:
+    """``<hkern u1 u2 g1 g2 k>`` -> (links, rechts) -> Korrektur in Hershey-Einheiten.
+
+    ``k`` rückt das Paar wie im SVG-Standard um ``k`` Schrifteinheiten zusammen (negativ:
+    auseinander); das erste Paar gilt, wenn ein Paar mehrfach vorkommt (wie in Browsern).
+    ``<vkern>`` (senkrechter Text) wird nicht gelesen."""
+    pairs: dict[tuple[str, str], float] = {}
+    for el in font.iter():
+        if _local(el.tag) != "hkern":
+            continue
+        amount = _num(el.get("k"), 0.0)
+        if amount == 0.0:
+            continue
+        left = _kern_set(el.get("u1"), el.get("g1"), glyphs, names)
+        right = _kern_set(el.get("u2"), el.get("g2"), glyphs, names)
+        for a in left:
+            for b in right:
+                if len(pairs) >= MAX_KERN_PAIRS:
+                    return pairs
+                pairs.setdefault((a, b), -amount * k)
+    return pairs
 
 
 def _jhf_records(text: str) -> list[str]:
@@ -523,6 +632,7 @@ def register_font(family: str, glyphs: dict[str, Glyph], cap_units: float = BASE
         raise ValueError(f"kein Name einer eigenen Einlinien-Schrift: {family!r}")
     _USER_FONTS[family] = glyphs
     _USER_CAPS[family] = float(cap_units)
+    _USER_KERN[family] = dict(getattr(glyphs, "kerning", None) or {})
     if source is not None:
         _USER_FILES[family] = Path(source)
     for key in [k for k in _CACHE if k[0] == family]:
@@ -627,6 +737,7 @@ def clear_user_fonts() -> None:
     _USER_FONTS.clear()
     _USER_FILES.clear()
     _USER_CAPS.clear()
+    _USER_KERN.clear()
     USER_FONT_ERRORS.clear()
     _USER_STATE["scanned"] = False
     for key in [k for k in _CACHE if is_user_font(k[0])]:
@@ -650,7 +761,7 @@ def missing_fonts_note(families) -> str:
 
 __all__ = ["EM_UNITS", "LINE_FONTS", "LINE_FONT_LABELS", "LINE_FONT_SANS", "LINE_FONT_SCRIPT",
            "USER_FONT_PREFIX", "FontFileError", "Glyph", "cap_units", "clear_user_fonts", "ensure_user_fonts",
-           "font_available", "font_label", "glyph", "glyph_chars", "has_glyph", "install_font_file", "is_line_font",
-           "is_user_font", "line_advance", "line_fonts", "missing_chars", "missing_fonts_note", "missing_user_fonts",
+           "KernedGlyphs", "advances", "font_available", "font_label", "glyph", "glyph_chars", "has_glyph", "install_font_file", "is_line_font",
+           "is_user_font", "kerning", "kerning_pairs", "line_advance", "line_fonts", "missing_chars", "missing_fonts_note", "missing_user_fonts",
            "parse_jhf_font", "parse_jhf_line", "parse_svg_font", "read_font_file", "register_font",
            "text_strokes", "user_font_dir", "user_fonts"]

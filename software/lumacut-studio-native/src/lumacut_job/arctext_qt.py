@@ -52,8 +52,9 @@ def line_glyphs_for(text: str, family: str, height_mm: float, italic: bool = Fal
     unbekannte Zeichen als „?“."""
     scale = float(height_mm) / linefont.cap_units(family)
     out = []
-    for ch in text:
+    for i, ch in enumerate(text):
         g = linefont.glyph(family, ch)
+        kern = linefont.kerning(family, ch, text[i + 1]) if i + 1 < len(text) else 0.0
         rings = []
         if not ch.isspace():
             for stroke in g.strokes:
@@ -65,7 +66,7 @@ def line_glyphs_for(text: str, family: str, height_mm: float, italic: bool = Fal
                     pts.append((px * scale, (gy - linefont.BASE_LINE) * scale))
                 if len(pts) >= 2:
                     rings.append(tuple(pts))
-        out.append(Glyph(ch, max(0.0, g.advance * scale), tuple(rings), open=True))
+        out.append(Glyph(ch, max(0.0, (g.advance + kern) * scale), tuple(rings), open=True))
     return out
 
 
