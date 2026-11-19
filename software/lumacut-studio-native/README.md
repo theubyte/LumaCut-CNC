@@ -1068,6 +1068,13 @@ Drehung, Ellipsen und Text werden berücksichtigt.
   (`"font": "LumaCut Einlinie"` / `"LumaCut Einlinie Schreibschrift"`), kein neuer
   Schlüssel. Code: `lumacut_canvas/linefont.py` (Glyphen in `linefont_data.py`),
   `shape_paths.line_text_path`, `model.is_closed_shape`, `lumacut_canvas/text_ui.py`.
+  **Kerning-Paare eigener SVG-Fonts**: die `<hkern>`-Paare einer geladenen SVG-Schrift (`u1` /
+  `u2` mit Zeichen, `U+0041` oder `U+0041-005A`, `g1` / `g2` mit `glyph-name`s, `k` in
+  Schrifteinheiten) rücken Paare wie „AV“ oder „To“ zusammen – in Zeilen, Ausrichtung,
+  Blocksatz, Textbox, Bogentext / Text auf Pfad und G-Code; zusammengesetzte Umlaute nutzen
+  die Paare ihres Grundbuchstabens („ÄV“ wie „AV“). Die Statusleiste nennt beim Laden die
+  Zahl der Paare. Eingebaute Schriften, `.jhf` und senkrechter Text bleiben ohne Kerning
+  (`linefont.kerning`).
 - Polygone können dafür mehrere Ringe haben (`"rings"` in der Datei, nur wenn vorhanden).
 
 ### Schnittstellen für andere Module (Scan & Probe)

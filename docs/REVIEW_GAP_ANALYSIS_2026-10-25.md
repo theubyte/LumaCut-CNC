@@ -15662,7 +15662,7 @@ objects, range clamp, trim + join giving a closed polygon, G-code shorter by exa
 and Pi-safe, dialog readout / OK state, editor action with undo / selection / cancel / locked
 layer, Pfad and context menu, unique Alt+Shift+O in the main window.
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3261 passed, 3 skipped** (18.0 min; 3244 + 17 new trim tests), no failure.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3261 passed, 3 skipped** (18.0 min; 3244 + 17 new trim tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
 
 Output change for old files: none – the action is only run by the user; no new project key.
 
@@ -15724,7 +15724,7 @@ touch reach, Pfad and context menu, save / load without a new key, unique Alt+Sh
 main window. `test_measure.py` now checks the measure tool right after the start tool instead
 of last in the strip.
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3283 passed, 3 skipped** (15.5 min; 3261 + 22 new trim tool tests), no failure.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3283 passed, 3 skipped** (15.5 min; 3261 + 22 new trim tool tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
 
 Output change for old files: none – the tool only runs on a tap; no new project key, model,
 planner and G-code writer unchanged.
@@ -15786,7 +15786,7 @@ working afterwards, shapes without crossing / locked layer / pinch abort, touch 
 without a new key. `test_trim_tool.py`: the „drag is no tap“ check now drags across nothing (a
 drag across a line trims it).
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3298 passed, 3 skipped** (16.4 min; 3283 + 15 new sweep tests), no failure.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3298 passed, 3 skipped** (16.4 min; 3283 + 15 new sweep tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
 
 Output change for old files: none – the tool only runs on a tap or drag; no new project key,
 model, planner and G-code writer unchanged.
@@ -15850,7 +15850,7 @@ remaining loop burning its perimeter minus the carried 2 mm tab and passing the 
 tap with preview, one undo step, selection and the status note, sweep over a path loop, save /
 load with the carried tab and no new key.
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3314 passed, 3 skipped** (14.0 min; 3298 + 16 new self-crossing / tab tests), no failure.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3314 passed, 3 skipped** (14.0 min; 3298 + 16 new self-crossing / tab tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
 
 Output change for old files: none – the code only runs on a trim tap or sweep; no new project
 key, model, planner and G-code writer unchanged.
@@ -15936,7 +15936,7 @@ entry, rotation, apply) and its prefill from the selection, Pi start position hi
 load with the same keys as a plain project, unique Alt+Shift+M in the main window.
 `test_trim_tool.py` no longer expects „Trimmen“ to be the last tool of the strip.
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3346 passed, 3 skipped** (14.6 min; 3314 + 32 new print-and-cut tests), no failure.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3346 passed, 3 skipped** (14.6 min; 3314 + 32 new print-and-cut tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
 
 Output change for old files: none – the code only runs when the tool or the dialog is used;
 no new project key, model, planner and G-code writer unchanged.
@@ -16015,7 +16015,7 @@ aligning on two marks, Backspace / overlay limit / switching off, a wrong sixth 
 and tapped again, numeric dialog with the third pair, save without a new key. The 32 tests of
 §93 pass unchanged (two-mark behaviour identical).
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3368 passed, 3 skipped** (15.7 min; 3346 + 22 new three-mark tests), no failure.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3368 passed, 3 skipped** (15.7 min; 3346 + 22 new three-mark tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
 
 Output change for old files: none – the code only runs when the tool or the dialog is used
 with the new switch on; no new project key, model, planner and G-code writer unchanged.
@@ -16988,3 +16988,66 @@ different styles (one style per text object, as before).
 Hardware check: on the Windows app click with the text tool and type a two-line name, double
 click it and change a word, cancel with Esc; then the same by finger on the Windows tablet with
 the on-screen keyboard and „✓“ / „✕“.
+
+## 106. Status update 2026-11-19 (review round 99)
+
+Done this round (kerning pairs of own single-line SVG fonts; Machine / Scan Probe / Materials
+untouched – `linefont.py` (reading `<hkern>`, `kerning`, `advances`, the layout), the arc text
+glyph advances in `arctext_qt.py` and the load message in `text_ui.py`; planner, G-code writer,
+Pi and camera code unchanged):
+
+- Closed since §105 by others: none – main had no commit since `1aadaa2` (round 98); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „kerning pairs“ of the remaining text items and of the own single-line font limits
+  of §100 (`<hkern>` was ignored). LightBurn lays out text with the font's kerning, and outline
+  text in LumaCut already does (Qt), but own single-line fonts – the ones for fast engraving of
+  names and labels – set every letter on its plain advance, so „AV“, „To“, „Ty“ or „LT“ showed
+  wide holes. It needs no user decision or hardware, is finishable with tests and is not owned
+  by another agent. The xTool text style import stays open; rotary, min/max corner power and
+  Dot Mode dwell still need hardware or the user.
+- **Reading**: every `<hkern>` of an SVG font – `u1` / `u2` as comma lists of characters,
+  `U+0041` or `U+0041-005A` ranges, `g1` / `g2` as `glyph-name`s (comma lists too), `k` in font
+  units moving the pair closer (negative: wider) – becomes a pair table in Hershey units, scaled
+  by `units-per-em` like the glyphs. Pairs with characters the font has no glyph for, `k = 0`
+  and `<vkern>` are skipped; the first pair wins when a pair repeats (like browsers); at most
+  100 000 pairs. `parse_svg_font` / `read_font_file` keep their return value (the glyph dict
+  carries the pairs, `KernedGlyphs`).
+- **Layout**: each character advances by glyph + letter spacing + the pair with the next
+  character (`linefont.advances`), so line width, left / centre / right alignment, justified
+  lines (flush right edges), the text box, „In Pfade“, SVG export, serial numbers / variable
+  text and the G-code all use the kerned positions; arc text and text on a path get the same
+  kerned advances. Composed umlauts without an own glyph use their base letter's pairs („ÄV“ like
+  „AV“), a tab counts as a space. Vertical text (one centred letter per row) is not kerned.
+- **Unchanged**: built-in Hershey fonts, `.jhf` fonts, SVG fonts without `<hkern>` and texts in
+  a missing font (drawn with the Sans) have no pairs – their strokes and G-code are identical.
+- **UI**: loading a font reports „Einlinie: Name geladen (n Zeichen, m Kerning-Paare)“; without
+  pairs the message is as before.
+
+Tests: new `tests/test_line_font_kerning.py` (26 tests): hkern parsing (characters, ranges,
+glyph name lists, u1 + g1 together, negative k, duplicate pair, zero k, unknown characters,
+vkern, units-per-em, comma lists with a space, pair limit), fonts without pairs and `.jhf`,
+lookup, built-in fonts without kerning, missing font, line advance with letter spacing, the
+second letter shifted by the pair, umlaut and tab, right alignment and justified lines ending
+flush, narrower text box, vertical text unkerned, Pi-safe G-code with the cut length of the
+strokes, strokes inside the box, arc glyph advances, save / load without a new key, reinstall
+without pairs and re-reading the font folder, built-in text unchanged, load message.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3797 passed, 3 skipped** (25.5 min; 3771 + 26 new kerning tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: only texts in an own SVG font that contains `<hkern>` pairs are
+now set kerned (narrower box at the same letter height, as in LightBurn); everything else –
+built-in fonts, `.jhf`, outline fonts, projects – is unchanged. No new project key.
+
+Still open: unchanged from §105 except kerning pairs – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials
+items, image dot-size model, CoreXY time model, the xTool text style import, live image mask,
+the trim refinements of §92, the print-and-cut limits of §93 / §94, the single-line font limits
+of §95 / §96 / §100 (without kerning pairs), the warp limits of §97, the case limits of §98, the
+vertical text limits of §99, the box generator limits of §101, the living hinge limits of
+§102, the bent box limits of §103, the justified line limits of §104 and the inline editing
+limits of §105. For kerning: only `<hkern>` of SVG fonts (no GPOS of OpenType, no kerning for
+`.jhf` and the built-in Hershey fonts, which have none), no manual kerning between two chosen
+letters, no switch to turn the font's kerning off.
+Hardware check: load an SVG single-line font with `<hkern>` pairs (the status line names the
+pairs on loading) and laser „AVATAR Tokyo“ at 10 mm on plywood – „AV“ and „To“ should
+sit as close as in Inkscape; then the same text as arc text around an 80 mm coaster.
