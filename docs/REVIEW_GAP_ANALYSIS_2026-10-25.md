@@ -15662,7 +15662,7 @@ objects, range clamp, trim + join giving a closed polygon, G-code shorter by exa
 and Pi-safe, dialog readout / OK state, editor action with undo / selection / cancel / locked
 layer, Pfad and context menu, unique Alt+Shift+O in the main window.
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3261 passed, 3 skipped** (18.0 min; 3244 + 17 new trim tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3261 passed, 3 skipped** (18.0 min; 3244 + 17 new trim tests), no failure.
 
 Output change for old files: none – the action is only run by the user; no new project key.
 
@@ -15724,7 +15724,7 @@ touch reach, Pfad and context menu, save / load without a new key, unique Alt+Sh
 main window. `test_measure.py` now checks the measure tool right after the start tool instead
 of last in the strip.
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3283 passed, 3 skipped** (15.5 min; 3261 + 22 new trim tool tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3283 passed, 3 skipped** (15.5 min; 3261 + 22 new trim tool tests), no failure.
 
 Output change for old files: none – the tool only runs on a tap; no new project key, model,
 planner and G-code writer unchanged.
@@ -15786,7 +15786,7 @@ working afterwards, shapes without crossing / locked layer / pinch abort, touch 
 without a new key. `test_trim_tool.py`: the „drag is no tap“ check now drags across nothing (a
 drag across a line trims it).
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3298 passed, 3 skipped** (16.4 min; 3283 + 15 new sweep tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3298 passed, 3 skipped** (16.4 min; 3283 + 15 new sweep tests), no failure.
 
 Output change for old files: none – the tool only runs on a tap or drag; no new project key,
 model, planner and G-code writer unchanged.
@@ -15850,7 +15850,7 @@ remaining loop burning its perimeter minus the carried 2 mm tab and passing the 
 tap with preview, one undo step, selection and the status note, sweep over a path loop, save /
 load with the carried tab and no new key.
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3314 passed, 3 skipped** (14.0 min; 3298 + 16 new self-crossing / tab tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3314 passed, 3 skipped** (14.0 min; 3298 + 16 new self-crossing / tab tests), no failure.
 
 Output change for old files: none – the code only runs on a trim tap or sweep; no new project
 key, model, planner and G-code writer unchanged.
@@ -15936,7 +15936,7 @@ entry, rotation, apply) and its prefill from the selection, Pi start position hi
 load with the same keys as a plain project, unique Alt+Shift+M in the main window.
 `test_trim_tool.py` no longer expects „Trimmen“ to be the last tool of the strip.
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3346 passed, 3 skipped** (14.6 min; 3314 + 32 new print-and-cut tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3346 passed, 3 skipped** (14.6 min; 3314 + 32 new print-and-cut tests), no failure.
 
 Output change for old files: none – the code only runs when the tool or the dialog is used;
 no new project key, model, planner and G-code writer unchanged.
@@ -16015,7 +16015,7 @@ aligning on two marks, Backspace / overlay limit / switching off, a wrong sixth 
 and tapped again, numeric dialog with the third pair, save without a new key. The 32 tests of
 §93 pass unchanged (two-mark behaviour identical).
 
-Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3368 passed, 3 skipped** (15.7 min; 3346 + 22 new three-mark tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3368 passed, 3 skipped** (15.7 min; 3346 + 22 new three-mark tests), no failure.
 
 Output change for old files: none – the code only runs when the tool or the dialog is used
 with the new switch on; no new project key, model, planner and G-code writer unchanged.
