@@ -16922,3 +16922,69 @@ read a justified setting.
 Hardware check: on the Windows app a three-line plaque text in an outline font and in a
 single-line font justified on 3 mm plywood – right edges of all but the last line flush, word
 gaps even; the button by finger on the Windows tablet.
+
+## 105. Status update 2026-11-19 (review round 98)
+
+Done this round (on-canvas inline text editing; Machine / Scan Probe / Materials untouched – new
+`inline_text.py`, the text tool and double click in `tools.py`, the editor hooks in `editor.py`;
+planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §104 by others: none – main had no commit since `5cc4b0e` (round 97); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „inline editing“ of the remaining text items (§95 – §104). In LightBurn you click
+  with the text tool and type, and a double click edits a text in place; xTool edits text on the
+  canvas. LumaCut opened a modal dialog for every new text and every edit (a single-line dialog
+  that even hid line breaks). It is the most used text action, helps the touch target (the
+  on-screen keyboard opens with the field), needs no user decision or hardware, is finishable
+  with tests and is not owned by another agent. Kerning pairs and xTool text style import stay
+  open; rotary, min/max corner power and Dot Mode dwell still need hardware or the user.
+- **Field on the canvas**: a click with the text tool or a double click on a text opens a small
+  input field directly below the text (above it when there is no room below, always inside the
+  view; it follows zoom and scroll). Existing text is preselected so typing replaces it; the
+  field uses the text's font family, bold and italic.
+- **Live**: every keystroke resets the text on the canvas with its font, size, alignment,
+  letter / line spacing, case and vertical setting – the letters keep their size, the box follows
+  (`text_ui.with_layout`); a new text appears with the first character at the click point
+  (snapped like before) with the default letter height and grows by lines, not smaller.
+- **Keys**: Enter = new line, Ctrl+Enter / „✓“ / clicking elsewhere = done, Esc / „✕“ = cancel
+  (old text back, or no new object); switching windows keeps the field open, switching tools or
+  saving commits it, a new / opened document discards it, a deleted object closes it.
+- **Undo**: exactly one step („Text einfügen“ / „Text ändern“), none when nothing changed or
+  everything was deleted. The live preview runs through merged `ReplaceShapeCommand`s that are
+  rolled back and replaced by the one clean step; if another command lands in between, the typed
+  text still wins and Esc still restores the old one.
+- **Touch**: „✓“ / „✕“ 44 px and a 20 px font in touch mode; the buttons take no focus so a tap
+  does not end the edit by focus loss.
+- `CanvasEditor.inline_text_editing = False` gives the old dialogs; arc text / generated objects
+  and images keep their own double click; the „¶“ multi-line dialog stays.
+
+Tests: new `tests/test_inline_text.py` (32 tests): field on by default, opened by double click
+with the text selected and the text's font, placed below / above inside the view, following zoom
+and scroll; live text with growing box and fixed letter height and corner, Enter for new lines
+with a growing field, Ctrl+Enter one undo step with undo / redo, Esc and Esc after another
+command restoring the old text, no step for unchanged / retyped / emptied text, buttons without
+focus, focus loss commits but window switch does not, multi-line text with right alignment and
+spacing kept, style / layer / id kept, CR normalisation, deleted object, dialog path when switched
+off, generated objects keep their handler; text tool: empty field without object, new text while
+typing as one insert with selection and undo, default letter height, Esc / empty leaves nothing,
+snapping as before, locked layer, tool switch, new document, save commits, another command in
+between, outline equal to a dialog made text; touch sizes. `test_object_snap.py` and
+`test_text_layout.py` run their dialog tests with `inline_text_editing = False`.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3771 passed, 3 skipped** (27.0 min; 3739 + 32 new inline text tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – no new key; projects and G-code are unchanged.
+
+Still open: unchanged from §104 except inline editing – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials
+items, image dot-size model, CoreXY time model, the remaining text items (kerning pairs, xTool
+text style import), live image mask, the trim refinements of §92, the print-and-cut limits of
+§93 / §94, the single-line font limits of §95 / §96 / §100, the warp limits of §97, the case limits
+of §98, the vertical text limits of §99, the box generator limits of §101, the living hinge limits
+of §102, the bent box limits of §103 and the justified line limits of §104. For inline editing:
+the field is a separate box below the text, not a caret inside the drawn letters; arc text and
+text on a path still open their dialogs; no in-field selection of single characters for
+different styles (one style per text object, as before).
+Hardware check: on the Windows app click with the text tool and type a two-line name, double
+click it and change a word, cancel with Esc; then the same by finger on the Windows tablet with
+the on-screen keyboard and „✓“ / „✕“.

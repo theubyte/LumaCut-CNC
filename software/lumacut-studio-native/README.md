@@ -86,7 +86,13 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   Freihand (F), Text (T), Messen (M, siehe unten), Trimmen (Alt+Umschalt+X, siehe „Überstände abschneiden“),
   Passmarken (Alt+Umschalt+M, siehe „Anordnen“).
   *Umschalt* beim Zeichnen = Quadrat/Kreis/45°-Linie; Klick ohne Ziehen legt
-  ein 20-mm-Objekt an. Doppelklick auf Text = Text ändern. Polygon: Klick = Punkt,
+  ein 20-mm-Objekt an. **Text direkt auf der Arbeitsfläche** (wie LightBurn / xTool): mit dem
+  Text-Werkzeug klicken und lostippen, Doppelklick auf einen Text bearbeitet ihn an Ort und
+  Stelle. Ein Eingabefeld erscheint direkt unter dem Text (ohne Platz darunter darüber), jede
+  Eingabe zeigt sich sofort auf der Arbeitsfläche mit Schrift, Größe und Satz des Texts;
+  Enter = neue Zeile, Strg+Enter / ✓ / Klick daneben = fertig, Esc / ✕ = abbrechen. Genau ein
+  Undo-Schritt („Text einfügen“ / „Text ändern“), keiner ohne Änderung; ✓ / ✕ im Touch-Modus
+  44 px (die Bildschirmtastatur öffnet sich mit dem Feld). Polygon: Klick = Punkt,
   Doppelklick/Enter oder Klick auf den ersten Punkt = schließen, Rücktaste = Punkt weg.
   Freihand: ziehen zeichnet einen offenen Pfad (ohne Raster); beim Loslassen wird er mit
   Ramer-Douglas-Peucker vereinfacht (Toleranz 0,2 mm, `tools.FREEHAND_TOLERANCE_MM`), Esc bricht ab.
@@ -1026,8 +1032,8 @@ Drehung, Ellipsen und Text werden berücksichtigt.
   Einlinien-Schriften; senkrechter Text dehnt die Lücken der Spalten bis zur längsten Spalte); **„Abstand“** (−50 … 200 % der Schriftgröße, 0 = Abstand der Schrift) fügt
   nach jedem Zeichen Platz ein bzw. rückt die Buchstaben zusammen; **„Zeilen“** (50 … 400 %,
   100 % = bisheriger Zeilenabstand 1,25 × Schriftgröße) ändert den Zeilenabstand. **¶** öffnet
-  den Text mehrzeilig (eine Zeile je Absatz; Doppelklick auf einen mehrzeiligen Text öffnet
-  denselben Dialog). Die Buchstaben behalten ihre Größe in mm, die Box folgt dem Umriss; fest
+  den Text mehrzeilig im Dialog (eine Zeile je Absatz; Doppelklick bearbeitet direkt auf der
+  Arbeitsfläche, Enter = neue Zeile). Die Buchstaben behalten ihre Größe in mm, die Box folgt dem Umriss; fest
   bleibt die obere Kante links, mittig oder rechts je nach Ausrichtung (auch gedreht).
   Ausrichtung und Zeilenabstand sind erst ab zwei Zeilen aktiv. Ein Undo-Schritt für die
   ganze Auswahl, Pfeilschritte im selben Feld werden zusammengefasst. Wirkt auf Anzeige,
