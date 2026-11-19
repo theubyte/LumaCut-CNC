@@ -107,7 +107,8 @@ def test_anchor_and_refit_geom():
         cx, cy = g.center()
         return rotate_point(g.x + fx * g.w, g.y + fy * g.h, cx, cy, g.rot)
     assert pt(g1, 0.0, 0.5) == pytest.approx(pt(g0, 0.0, 0.5), abs=1e-9) and g1.rot == 30.0
-    assert TEXT_VALIGN_LABELS == {"left": "Oben", "center": "Mittig", "right": "Unten"}
+    assert TEXT_VALIGN_LABELS == {"left": "Oben", "center": "Mittig", "right": "Unten",
+                                  "justify": "Blocksatz (Spalten bis unten)"}
 
 
 # --- Umriss ----------------------------------------------------------------------------------
