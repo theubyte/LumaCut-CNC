@@ -777,6 +777,10 @@ class ToolController:
     def _create_text(self, pos: QPointF) -> None:
         if not self._active_layer_ok():
             return
+        inline = getattr(self.ed, "inline_text", None)
+        if inline is not None and getattr(self.ed, "inline_text_editing", False):
+            inline.new_text(_clamp_point(self.snap_point(pos)), DEFAULT_TEXT_HEIGHT_MM)
+            return  # Text entsteht beim Tippen direkt auf der Arbeitsfläche (inline_text)
         text, ok = QInputDialog.getText(self.ed, "Text", "Text eingeben:", text="LumaCut")
         if not ok or not text.strip():
             return
@@ -818,6 +822,10 @@ class ToolController:
                 handler(hit)
             return
         if hit and self.doc.shape(hit).kind == "text":
+            inline = getattr(self.ed, "inline_text", None)
+            if inline is not None and getattr(self.ed, "inline_text_editing", False):
+                inline.edit_shape(hit)  # an Ort und Stelle tippen (inline_text)
+                return
             old = self.doc.shape(hit).text
             if "\n" in old:    # mehrzeiliger Text: mehrzeiliger Dialog (text_ui)
                 from .text_ui import edit_multiline

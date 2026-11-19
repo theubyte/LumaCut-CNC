@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (QComboBox, QDoubleSpinBox, QFileDialog, QGraphics
 from . import (arrange_ui, corners_ui, icons, marks_ui, measure_ui, ngon, ngon_ui, node_ui, objsnap_ui, pathops_ui,
                priority_ui, startpoint_ui, tabs_ui, text_ui, theme, touch, trim_ui, units)
 from .fill_preview import FillPreview
+from .inline_text import InlineTextEditor
 from .path_preview import PathPreview, PathPreviewBar
 from .fit import HScrollStrip, VScrollStrip
 from .canvas_view import PX_PER_MM_100, CanvasScene, CanvasView, Ruler
@@ -327,6 +328,10 @@ class CanvasEditor(QWidget):
         self.view = CanvasView(self.scene)
         self.tools = ToolController(self)
         self.view.tool_handler = self.tools
+        # Text direkt auf der Arbeitsfläche tippen statt im Dialog (inline_text; False =
+        # die alten Eingabedialoge).
+        self.inline_text_editing = True
+        self.inline_text = InlineTextEditor(self)
         self.view.zoom_anchor_provider = self._selection_center
         self.view.cursorMoved.connect(self.cursorMoved)
         self.view.viewChanged.connect(self._emit_zoom)
@@ -535,6 +540,9 @@ class CanvasEditor(QWidget):
 
     # --- Zustand ----------------------------------------------------------
     def set_tool(self, tool: Tool) -> None:
+        it = getattr(self, "inline_text", None)
+        if it is not None:
+            it.commit()  # offenes Text-Eingabefeld zuerst übernehmen
         self.tools.set_tool(tool)
         self.actions_by_name[f"tool_{tool.value}"].setChecked(True)
         ne = getattr(self, "node_editor", None)
@@ -988,6 +996,7 @@ class CanvasEditor(QWidget):
         self.notify(f"Geöffnet: {self.file_path.name}" + (f" – {note}" if note else ""))
 
     def save_file(self, path: str | os.PathLike[str]) -> Path:
+        self.inline_text.commit()  # getippter Text als ein Schritt, bevor gespeichert wird
         p = save_document(self.document, path)
         self.file_path = p
         self.undo_stack.setClean()
@@ -996,6 +1005,7 @@ class CanvasEditor(QWidget):
         return p
 
     def _reset_history(self) -> None:
+        self.inline_text.discard()  # neues / geladenes Dokument: Eingabefeld ohne Schritt zu
         self.undo_stack.clear()
         self.set_selection([])
         mt = getattr(self, "measure_tool", None)
