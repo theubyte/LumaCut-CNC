@@ -392,6 +392,7 @@ def test_text_click_snaps_to_corner(ed, monkeypatch):
     from PySide6.QtWidgets import QInputDialog
     add(ed, rect(20.4, 30.6, 40, 20))
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("Hallo", True)))
+    ed.inline_text_editing = False  # Dialog-Weg; Inline-Weg: test_inline_text.py
     ed.set_tool(Tool.TEXT)
     ed.tools.press(QPointF(20.9, 51.0), NO)
     ed.tools.release(QPointF(20.9, 51.0), NO)

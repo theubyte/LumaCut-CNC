@@ -422,6 +422,7 @@ def test_multiline_edit_dialog(ed, monkeypatch):
 
 def test_double_click_multiline_text_opens_the_multiline_dialog(ed, monkeypatch):
     t = _add(ed, "Zeile 1\nZeile 2")
+    ed.inline_text_editing = False  # Dialog-Weg; Inline-Weg: test_inline_text.py
     calls = []
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(
         lambda *a, **k: calls.append("single") or ("x", False)))
