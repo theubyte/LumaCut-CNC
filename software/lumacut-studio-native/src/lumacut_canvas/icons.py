@@ -314,10 +314,13 @@ def _marks(p, c):
 
 
 def _align(p, c, where: str):
-    """Textausrichtung: vier Zeilen unterschiedlicher Länge, links / mittig / rechts bündig."""
+    """Textausrichtung: vier Zeilen unterschiedlicher Länge, links / mittig / rechts bündig;
+    Blocksatz: drei volle Zeilen und eine kurze letzte Zeile links."""
     _pen(p, c, 2.0)
     for y, w in ((6, 16), (10, 10), (14, 16), (18, 8)):
-        x0 = {"left": 4.0, "center": 12.0 - w / 2.0, "right": 20.0 - w}[where]
+        if where == "justify" and y < 18:
+            w = 16
+        x0 = {"left": 4.0, "center": 12.0 - w / 2.0, "right": 20.0 - w, "justify": 4.0}[where]
         p.drawLine(QPointF(x0, y), QPointF(x0 + w, y))
 
 
@@ -345,7 +348,8 @@ _PAINTERS: dict[str, Callable[[QPainter, str], None]] = {
     "pathops": _pathops, "node": _node, "tabs": _tabs, "start": _start, "measure": _measure,
     "trim": _trim, "marks": _marks,
     "align_left": lambda p, c: _align(p, c, "left"), "align_center": lambda p, c: _align(p, c, "center"),
-    "align_right": lambda p, c: _align(p, c, "right"), "text_weld": _text_weld,
+    "align_right": lambda p, c: _align(p, c, "right"),
+    "align_justify": lambda p, c: _align(p, c, "justify"), "text_weld": _text_weld,
 }
 
 

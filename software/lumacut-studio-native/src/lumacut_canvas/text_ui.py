@@ -73,8 +73,11 @@ def with_style(s: Shape, family: str | None = None, bold: bool | None = None,
 
 
 TIP_ALIGN = ("Ausrichtung mehrzeiliger Texte (wie LightBurn „Align X“): Zeilen links, mittig oder "
-             "rechts nach ihrer Laufweite ausrichten. Wirkt erst ab zwei Zeilen (¶). Bei "
-             "senkrechtem Text richtet sie die Spalten oben, mittig oder unten aus.")
+             "rechts nach ihrer Laufweite ausrichten oder im Blocksatz – jede Zeile außer der "
+             "letzten wird an den Wortlücken gedehnt, bis sie so breit ist wie die breiteste "
+             "(Zeilen ohne Leerzeichen bleiben links). Wirkt erst ab zwei Zeilen (¶). Bei "
+             "senkrechtem Text richtet sie die Spalten oben, mittig oder unten aus bzw. dehnt "
+             "die Lücken der Spalten bis unten.")
 TIP_LETTER = ("Zeichenabstand (wie LightBurn „H-Space“ / xTool „Zeichenabstand“) in % der "
               "Schriftgröße – zusätzlich nach jedem Zeichen, negativ rückt die Buchstaben "
               "zusammen. 0 % = Abstand der Schrift. Die Buchstaben behalten ihre Größe, die "

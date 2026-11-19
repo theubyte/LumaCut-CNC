@@ -121,18 +121,22 @@ PRIORITY_RANGE = (0, 999)
 # Text-Satz (LightBurn *Text › H-Space / V-Space / Align X*, xTool „Zeichenabstand“ /
 # „Zeilenabstand“ / „Ausrichtung“): Zeichenabstand in % der Schriftgröße (Geviert,
 # 0 = Schrift-Standard), Zeilenabstand in % des bisherigen Zeilenabstands (100 % =
-# 1,25 × Schriftgröße), Ausrichtung mehrzeiliger Texte.
+# 1,25 × Schriftgröße), Ausrichtung mehrzeiliger Texte. „justify“ = Blocksatz: jede Zeile außer
+# der letzten wird an den Wortlücken bis zur Breite der breitesten Zeile gedehnt (im Datei-Feld
+# "align" wie die anderen Werte – ältere Versionen lesen ihn als linksbündig).
 LETTER_SPACING_RANGE = (-50.0, 200.0)
 LINE_SPACING_RANGE = (50.0, 400.0)
-TEXT_ALIGNS = ("left", "center", "right")
-TEXT_ALIGN_LABELS = {"left": "Linksbündig", "center": "Zentriert", "right": "Rechtsbündig"}
+TEXT_ALIGNS = ("left", "center", "right", "justify")
+TEXT_ALIGN_LABELS = {"left": "Linksbündig", "center": "Zentriert", "right": "Rechtsbündig",
+                     "justify": "Blocksatz"}
 # Schreibweise (xTool „Originalschreibweise / Großbuchstaben“): der gespeicherte Text bleibt,
 # wie er getippt wurde; Umriss, Box und G-Code zeigen ihn in Großbuchstaben – auch die Werte
 # variabler Texte (CSV-Namen, Eingaben) und Seriennummern. "" = Originalschreibweise.
 TEXT_CASES = ("upper",)
 TEXT_CASE_LABELS = {"": "Originalschreibweise", "upper": "Großbuchstaben"}
 # Ausrichtung senkrechter Texte: dieselben Werte wie :data:`TEXT_ALIGNS`, wirken längs der Spalte.
-TEXT_VALIGN_LABELS = {"left": "Oben", "center": "Mittig", "right": "Unten"}
+TEXT_VALIGN_LABELS = {"left": "Oben", "center": "Mittig", "right": "Unten",
+                      "justify": "Blocksatz (Spalten bis unten)"}
 
 
 @dataclass(frozen=True)
@@ -977,7 +981,7 @@ def text_layout(shape) -> dict:
 def text_anchor(shape) -> tuple[float, float]:
     """Fester Punkt der Box beim Anpassen an neuen Text / Satz als Anteil (fx, fy) der Box:
     waagrecht die obere Kante links / Mitte / rechts je nach Ausrichtung, senkrecht die
-    linke Kante oben / Mitte / unten."""
+    linke Kante oben / Mitte / unten. Blocksatz hält wie linksbündig die linke (obere) Ecke."""
     f = {"left": 0.0, "center": 0.5, "right": 1.0}.get(getattr(shape, "text_align", "left"), 0.0)
     return (0.0, f) if getattr(shape, "text_vertical", False) else (f, 0.0)
 

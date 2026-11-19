@@ -239,6 +239,38 @@ def line_advance(line: str, family: str, letter_spacing_units: float = 0.0) -> f
     return sum(glyph(family, ch).advance + letter_spacing_units for ch in line)
 
 
+def word_starts(line: str) -> list[int]:
+    """Indizes der Wörter einer Zeile nach dem ersten – dort dehnt der Blocksatz die Lücken.
+
+    Eine Lücke ist ein Lauf von Leerzeichen zwischen zwei Wörtern; Leerzeichen am Anfang
+    (Einzug) und am Ende der Zeile sind keine Lücke.
+    """
+    return [k for k in range(1, len(line)) if line[k] != " " and line[k - 1] == " "
+            and line[:k].strip(" ")]
+
+
+def justified(lines: list[str], i: int) -> bool:
+    """Zeile ``i`` wird im Blocksatz gedehnt: nicht die letzte Zeile und mit mindestens einer
+    Wortlücke (wie der Blocksatz einer Textverarbeitung – letzte Zeile und einzelne Wörter
+    bleiben linksbündig)."""
+    return i < len(lines) - 1 and bool(word_starts(lines[i]))
+
+
+def justify_shifts(line: str, extra: float) -> list[float]:
+    """Verschiebung je Zeichen von ``line``, um ``extra`` gleichmäßig auf die Wortlücken zu
+    verteilen (Zeichen vor der ersten Lücke 0, Zeichen des letzten Worts ``extra``)."""
+    starts = word_starts(line)
+    if not starts or extra <= 0:
+        return [0.0] * len(line)
+    step = extra / len(starts)
+    out, k = [], 0
+    for j in range(len(line)):
+        while k < len(starts) and starts[k] <= j:
+            k += 1
+        out.append(k * step)
+    return out
+
+
 def text_strokes(text: str, family: str, italic: bool = False, *, letter_spacing: float = 0.0,
                  line_spacing: float = 100.0, align: str = "left",
                  pitch_units: float = 1.25 * EM_UNITS * 0.75) -> list[Stroke]:
@@ -246,7 +278,8 @@ def text_strokes(text: str, family: str, italic: bool = False, *, letter_spacing
 
     Text-Satz wie :func:`shape_paths.text_path`: ``letter_spacing`` in % des Gevierts
     nach jedem Zeichen, ``line_spacing`` in % von ``pitch_units`` (Zeilenabstand),
-    ``align`` richtet die Zeilen nach ihrer Laufweite aus. ``italic`` stellt schräg.
+    ``align`` richtet die Zeilen nach ihrer Laufweite aus („justify“ = Blocksatz an den
+    Wortlücken, :func:`justify_shifts`). ``italic`` stellt schräg.
     Zeile i hat ihre Grundlinie bei ``BASE_LINE + i · pitch``.
     """
     extra = letter_spacing / 100.0 * EM_UNITS
@@ -255,16 +288,22 @@ def text_strokes(text: str, family: str, italic: bool = False, *, letter_spacing
     adv = [line_advance(line, family, extra) for line in lines]
     widest = max(adv) if adv else 0.0
     share = {"center": 0.5, "right": 1.0}.get(align, 0.0) if len(lines) > 1 else 0.0
+    if align == "justify" and len(lines) > 1:      # Blocksatz: bis zum Ende der breitesten Zeile
+        ink = [line_advance(line.rstrip(" "), family, extra) for line in lines]
+        widest = max(ink)
     out: list[Stroke] = []
     for i, line in enumerate(lines):
         x = (widest - adv[i]) * share
         dy = i * pitch
-        for ch in line:
+        shifts = (justify_shifts(line, widest - ink[i])
+                  if align == "justify" and justified(lines, i) else None)
+        for j, ch in enumerate(line):
             g = glyph(family, ch)
+            gx0 = x + shifts[j] if shifts else x
             for s in g.strokes:
                 pts = []
                 for gx, gy in s:
-                    px = x + gx - g.left
+                    px = gx0 + gx - g.left
                     if italic:
                         px += ITALIC_SLANT * (BASE_LINE - gy)
                     pts.append((px, gy + dy))

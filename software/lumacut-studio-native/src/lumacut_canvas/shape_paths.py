@@ -10,7 +10,8 @@ import math
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QFont, QFontInfo, QFontMetricsF, QPainterPath, QTransform
 
-from .linefont import EM_UNITS as _LINE_EM_UNITS, is_line_font, text_strokes
+from .linefont import (EM_UNITS as _LINE_EM_UNITS, is_line_font, justified, justify_shifts,
+                       text_strokes, word_starts)
 from .model import Geometry, Shape, cased_text, text_layout
 
 # Text wird in dieser Größe aufgebaut und dann exakt in die Objektbox skaliert,
@@ -95,7 +96,8 @@ def text_path(text: str, family: str, bold: bool = False, italic: bool = False, 
     Text-Satz wie LightBurns *H-Space / V-Space / Align X*: ``letter_spacing`` in %
     der Schriftgröße zusätzlich nach jedem Zeichen, ``line_spacing`` in % des
     Standard-Zeilenabstands (1,25 × Schriftgröße), ``align`` richtet die Zeilen nach
-    ihrer Laufweite links / mittig / rechts aus. Standardwerte = bisheriger Umriss.
+    ihrer Laufweite links / mittig / rechts aus, „justify“ = Blocksatz (:func:`_add_justified`).
+    Standardwerte = bisheriger Umriss.
     Einlinien-Schriften (:func:`linefont.is_line_font`) geben offene Striche
     (:func:`line_text_path`, ``bold`` wirkungslos, ``italic`` = schräg gestellt).
     ``case`` = Schreibweise (:func:`model.cased_text`, „upper“ = Großbuchstaben).
@@ -123,9 +125,35 @@ def text_path(text: str, family: str, bold: bool = False, italic: bool = False, 
         widest = max(adv)
         share = 0.5 if align == "center" else 1.0
         offsets = [(widest - a) * share for a in adv]
+    if align == "justify" and len(lines) > 1:
+        _add_justified(path, font, lines, pitch)
+        return path
     for i, line in enumerate(lines):
         path.addText(QPointF(offsets[i], i * pitch), font, line)
     return path
+
+
+def _add_justified(path: QPainterPath, font: QFont, lines: list[str], pitch: float) -> None:
+    """Blocksatz: jede Zeile außer der letzten endet mit ihrem letzten Zeichen (ohne
+    Leerzeichen am Ende) an der Laufweite der breitesten Zeile; die fehlende Breite wird
+    gleichmäßig auf die Wortlücken verteilt (:func:`linefont.justify_shifts`). Die Wörter
+    behalten Zeichenabstand und Unterschneidung der Schrift (jedes Wort ein ``addText``,
+    Lage aus der Laufweite der Zeile bis zum Wortanfang). Zeilen ohne Lücke und die letzte
+    Zeile bleiben linksbündig."""
+    fm = QFontMetricsF(font)
+    ink = [fm.horizontalAdvance(line.rstrip(" ")) for line in lines]
+    widest = max(ink)
+    for i, line in enumerate(lines):
+        y = i * pitch
+        extra = widest - ink[i]
+        if not justified(lines, i) or extra <= 1e-9:
+            path.addText(QPointF(0.0, y), font, line)
+            continue
+        starts = word_starts(line)
+        shifts = justify_shifts(line, extra)
+        for a, b in zip([0] + starts, starts + [len(line)]):
+            x = (fm.horizontalAdvance(line[:a]) if a else 0.0) + shifts[a]
+            path.addText(QPointF(x, y), font, line[a:b])
 
 
 def _glyph_path(ch: str, family: str, bold: bool, italic: bool) -> QPainterPath:
@@ -148,7 +176,9 @@ def vertical_text_path(text: str, family: str, bold: bool = False, italic: bool 
     Buchstaben wie „I“ stehen nicht schief), die Grundlinien liegen im Zeilenabstand
     1,25 × 100 pt – ``letter_spacing`` (% des Gevierts) vergrößert ihn. Spaltenabstand
     1,25 × Geviert × ``line_spacing`` %. ``align`` richtet kürzere Spalten oben („left“),
-    mittig („center“) oder unten („right“) aus. Leerzeichen belegen einen Platz.
+    mittig („center“) oder unten („right“) aus; Blocksatz („justify“) dehnt die Wortlücken
+    jeder Spalte außer der letzten, bis ihr letztes Zeichen auf der Höhe des letzten Zeichens
+    der längsten Spalte steht. Leerzeichen belegen einen Platz.
     """
     em = text_em(family, bold, italic)
     row = _TEXT_BUILD_PT * 1.25 + letter_spacing / 100.0 * em
@@ -156,17 +186,21 @@ def vertical_text_path(text: str, family: str, bold: bool = False, italic: bool 
     lines = [line or " " for line in (text or " ").split("\n")]
     longest = max(len(line) for line in lines)
     share = {"center": 0.5, "right": 1.0}.get(align, 0.0)
+    if align == "justify":      # Blocksatz längs der Spalte: bis zum Ende der längsten Spalte
+        longest = max(len(line.rstrip(" ")) for line in lines)
     path = QPainterPath()
     cache: dict[str, tuple[QPainterPath, float]] = {}
     for c, line in enumerate(lines):
         y0 = (longest - len(line)) * row * share
+        shifts = (justify_shifts(line, (longest - len(line.rstrip(" "))) * row)
+                  if align == "justify" and len(lines) > 1 and justified(lines, c) else None)
         for i, ch in enumerate(line):
             if ch not in cache:
                 g = _glyph_path(ch, family, bold, italic)
                 cache[ch] = (g, g.boundingRect().center().x())
             g, mid = cache[ch]
             if not g.isEmpty():
-                path.addPath(g.translated(c * col - mid, y0 + i * row))
+                path.addPath(g.translated(c * col - mid, y0 + i * row + (shifts[i] if shifts else 0.0)))
     return path
 
 
