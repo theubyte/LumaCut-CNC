@@ -16858,3 +16858,67 @@ or more passes – the wall bends around all four corners by hand without breaki
 lid tabs press into the notches, the seam at the back closes without a gap; the same with
 „Wellen“ and „Rauten“ and with 6 / 20 mm radius; an open 200 × 150 × 60 mm box with „Wand
 zweiteilig“ (two seams); re-edit by double click and the dialog by finger on the Windows tablet.
+
+## 104. Status update 2026-11-19 (review round 97)
+
+Done this round (justified lines for multi-line text – „Blocksatz“; Machine / Scan Probe /
+Materials untouched – layout in `shape_paths.py` (outline fonts) and `linefont.py` (built-in and
+own single-line fonts), the "justify" value in `model.py`, the button in `text_ui.py` and its
+icon in `icons.py`; planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §103 by others: none – main had no commit since `766a778` (round 96); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „justified lines“ of the remaining text items (§99 – §103). LightBurn's Align X
+  only offers left / middle / right, but
+  signs, plaques and certificate texts with several lines look much cleaner with even right
+  edges; it needs no user decision and no hardware, is finishable with tests and is not owned by
+  another agent. Kerning pairs, inline editing and xTool text style import stay open; rotary,
+  min/max corner power and Dot Mode dwell still need hardware or the user.
+- **Layout**: a fourth alignment „Blocksatz“ next to links / zentriert / rechtsbündig. Every
+  line but the last is stretched at its word gaps (one run of spaces is one gap; leading spaces
+  stay an indent) until its last character – trailing spaces ignored – ends at the advance of
+  the widest line; the extra width is shared evenly over the gaps. Lines without a gap and the
+  last line stay left aligned. Each word is placed from the advance of the line up to it, so the
+  words keep the font's kerning and the letter spacing („Abstand“) and line spacing („Zeilen“)
+  combine as before. Works for outline fonts, the built-in and own single-line fonts (strokes
+  only shifted, also italic) and vertical text (the gaps of every column but the last are
+  stretched to the end of the longest column). The box is anchored at the top left like left
+  aligned text.
+- **Storage**: the existing `"align"` field takes `"justify"` (older versions read it as left) –
+  no new project key; projects and G-code without justified text are unchanged.
+- **Bedienung**: button with icon and tooltip in the text property bar, one undo step for the
+  whole selection keeping the top left, checked state follows the selection, disabled for one
+  line texts, own tooltip for vertical text, 44 px in touch mode. Text to path, SVG export,
+  weld, serial numbers and variable text (CSV) keep the justification.
+
+Tests: new `tests/test_text_justify.py` (33 tests): word gaps only between words – indent
+and trailing spaces not, one run of spaces one gap; all lines but the last with a gap; extra
+shared evenly; "justify" in the existing align field, round trip, old files unchanged, anchor
+top left; outline font: lines ending at the widest advance, widest and last line unchanged,
+words moved only sideways by equal steps, one line / no gap / indent, trailing spaces ignored,
+letter and line spacing, box; single-line font strokes justified and only shifted, italic, old
+alignments stroke for stroke and outline for outline as before; vertical columns stretched to
+the longest; Pi-safe G-code with the same cut length, G-code unchanged without justify, text to
+path / SVG / weld / serial numbers / variable text; button, one undo step, checked state,
+disabled for one line, vertical tooltip, canvas item, touch 44 px, save / load, main window.
+`tests/test_text_vertical.py` knows the new vertical label.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3739 passed, 3 skipped** (21.2 min; 3706 + 33 new justified line tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – no new key; projects and G-code without justified text are
+unchanged.
+
+Still open: unchanged from §103 except justified lines – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials
+items, image dot-size model, CoreXY time model, the remaining text items (kerning pairs, inline
+editing, xTool text style import), live image mask, the trim refinements of §92, the
+print-and-cut limits of §93 / §94, the single-line font limits of §95 / §96 / §100, the warp
+limits of §97, the case limits of §98, the vertical text limits of §99, the box generator
+limits of §101, the living hinge limits of §102 and the bent box limits of §103. For justified
+lines: only word gaps are stretched – no letter spacing stretch, no hyphenation and no automatic
+line breaks (the lines are the ones typed; the widest line sets the measure, there is no fixed
+box width); arc text and text on a path are not covered by this round; the xTool / LightBurn import does not
+read a justified setting.
+Hardware check: on the Windows app a three-line plaque text in an outline font and in a
+single-line font justified on 3 mm plywood – right edges of all but the last line flush, word
+gaps even; the button by finger on the Windows tablet.

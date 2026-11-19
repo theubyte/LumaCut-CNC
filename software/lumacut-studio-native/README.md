@@ -1017,9 +1017,13 @@ Drehung, Ellipsen und Text werden berücksichtigt.
   und Schnitt behalten die Höhe und passen die Breite an; die letzte Wahl gilt für neue
   Texte. Gespeichert als `"bold"`/`"italic"` (nur wenn gesetzt).
 - **Text-Satz** (PropertyBar neben Fett / Kursiv, wie LightBurns *Text › Align X / H-Space /
-  V-Space* und xTools „Ausrichtung“ / „Zeichenabstand“ / „Zeilenabstand“): drei Knöpfe
-  **links / zentriert / rechtsbündig** richten die Zeilen eines mehrzeiligen Texts nach ihrer
-  Laufweite aus; **„Abstand“** (−50 … 200 % der Schriftgröße, 0 = Abstand der Schrift) fügt
+  V-Space* und xTools „Ausrichtung“ / „Zeichenabstand“ / „Zeilenabstand“): vier Knöpfe
+  **links / zentriert / rechtsbündig / Blocksatz** richten die Zeilen eines mehrzeiligen Texts
+  nach ihrer Laufweite aus – im **Blocksatz** wird jede Zeile außer der letzten an ihren
+  Wortlücken gleichmäßig gedehnt, bis ihr letztes Zeichen (ohne Leerzeichen am Ende) auf der
+  Laufweite der breitesten Zeile endet; Einzug, Zeilen ohne Leerzeichen und die letzte Zeile
+  bleiben linksbündig, die Wörter behalten Unterschneidung und Zeichenabstand (auch
+  Einlinien-Schriften; senkrechter Text dehnt die Lücken der Spalten bis zur längsten Spalte); **„Abstand“** (−50 … 200 % der Schriftgröße, 0 = Abstand der Schrift) fügt
   nach jedem Zeichen Platz ein bzw. rückt die Buchstaben zusammen; **„Zeilen“** (50 … 400 %,
   100 % = bisheriger Zeilenabstand 1,25 × Schriftgröße) ändert den Zeilenabstand. **¶** öffnet
   den Text mehrzeilig (eine Zeile je Absatz; Doppelklick auf einen mehrzeiligen Text öffnet
