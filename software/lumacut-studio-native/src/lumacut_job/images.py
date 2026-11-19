@@ -92,7 +92,7 @@ def render_gray(shape: Shape, interval_mm: float) -> tuple[np.ndarray, tuple[flo
     from lumacut_canvas.image_cache import qimage_for
     from lumacut_canvas.shape_paths import geometry_transform
 
-    src = qimage_for(shape.image.png)
+    src = qimage_for(shape.image.view_png)
     if src.isNull():
         raise ValueError("Bilddaten beschädigt")
     b = shape.geom.bounds()
@@ -129,7 +129,7 @@ def alpha_qimage(shape: Shape):
 
     from lumacut_canvas.image_cache import qimage_for
 
-    src = qimage_for(shape.image.png)
+    src = qimage_for(shape.image.view_png)
     if src.isNull() or not src.hasAlphaChannel():
         return None
     a = src.convertToFormat(QImage.Format_Alpha8)
@@ -341,7 +341,7 @@ def render_gray_frame(shape: Shape, geo: ScanGeometry) -> np.ndarray:
 
     from lumacut_canvas.image_cache import qimage_for
 
-    src = qimage_for(shape.image.png)
+    src = qimage_for(shape.image.view_png)
     if src.isNull():
         raise ValueError("Bilddaten beschädigt")
     neg = shape.image.settings.negative

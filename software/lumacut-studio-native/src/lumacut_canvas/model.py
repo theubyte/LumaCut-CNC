@@ -339,15 +339,36 @@ class RasterImage:
     px_width: int
     px_height: int
     settings: ImageSettings = field(default_factory=ImageSettings)
+    # Live-Maske (LightBurn *Apply Mask to Image*, :mod:`imagemask`): Ringe der Maskenform,
+    # normiert auf die ungedrehte Objektbox (0..1) wie ``Shape.points`` – Verschieben,
+    # Skalieren und Drehen nehmen sie mit. Gerade-Ungerade-Regel wie eine Füllung. Außerhalb
+    # wird das Bild durchsichtig und nicht gelasert; ``png`` bleibt unverändert, darum lässt
+    # sich die Maske jederzeit wieder lösen. ``mask_layer`` = Ebene, auf die die Form beim
+    # Lösen zurückkommt. Leer = keine Maske (bisheriges Verhalten).
+    mask: tuple = ()
+    mask_layer: str = ""
+
+    @property
+    def view_png(self) -> bytes:
+        """Das PNG, wie es gezeigt und gelasert wird: ``png`` mit angewandter Maske."""
+        if not self.mask:
+            return self.png
+        from .imagemask import masked_png
+        return masked_png(self.png, self.px_width, self.px_height, self.mask)
 
     def dpi(self, width_mm: float) -> float:
         """Effektive Auflösung bei der aktuellen Objektbreite."""
         return self.px_width / (abs(width_mm) / 25.4) if width_mm else 0.0
 
     def to_dict(self) -> dict:
-        return {"png": base64.b64encode(self.png).decode("ascii"),
-                "px": [self.px_width, self.px_height],
-                "settings": self.settings.to_dict()}
+        d = {"png": base64.b64encode(self.png).decode("ascii"),
+             "px": [self.px_width, self.px_height],
+             "settings": self.settings.to_dict()}
+        if self.mask:
+            d["mask"] = [[[u, v] for u, v in ring] for ring in self.mask]
+            if self.mask_layer:
+                d["mask_layer"] = self.mask_layer
+        return d
 
     @staticmethod
     def from_dict(d: dict) -> "RasterImage":
@@ -357,7 +378,10 @@ class RasterImage:
         w, h = (int(v) for v in d.get("px", (0, 0)))
         if w <= 0 or h <= 0:
             raise ValueError("Bildgröße fehlt")
-        return RasterImage(png, w, h, ImageSettings.from_dict(d.get("settings", {})))
+        mask = tuple(tuple((float(u), float(v)) for u, v in ring)
+                     for ring in d.get("mask") or () if len(ring) >= 3)
+        return RasterImage(png, w, h, ImageSettings.from_dict(d.get("settings", {})),
+                           mask=mask, mask_layer=str(d.get("mask_layer", "")) if mask else "")
 
 
 # Vorgabefarben für neue Ebenen, gut unterscheidbar auf dunklem Grund.

@@ -149,10 +149,12 @@ def crop_image(image: Shape, shapes) -> CropResult:
     lb = image.geom.local_bounds()
     if lb.w <= 0 or lb.h <= 0:
         raise CropError("Das Bild hat keine Fläche.")
-    gray, alpha = decode_png(image.image.png)
+    gray, alpha = decode_png(image.image.view_png)   # a live mask is baked in
     h, w = gray.shape
     if (w, h) != (image.image.px_width, image.image.px_height):
         image = replace(image, image=replace(image.image, px_width=w, px_height=h))
+    if image.image.mask:
+        image = replace(image, image=replace(image.image, mask=(), mask_layer=""))
     inside = mask_pixels(image, masks)
     visible = inside if alpha is None else (inside & (alpha > 0))
     before = int(np.count_nonzero(alpha > 0)) if alpha is not None else w * h

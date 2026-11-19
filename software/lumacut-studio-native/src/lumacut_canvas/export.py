@@ -540,7 +540,7 @@ def _paint(doc: Document, p: QPainter, line_width_mm: float, show_fill: bool = F
 def _paint_image(p: QPainter, s) -> None:
     from .image_cache import qimage_for
     from .shape_paths import geometry_transform
-    img = qimage_for(s.image.png)
+    img = qimage_for(s.image.view_png)
     if img.isNull():
         return
     b = s.geom.local_bounds()

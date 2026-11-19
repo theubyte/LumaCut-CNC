@@ -120,7 +120,7 @@ class ImageSettingsDialog(QDialog):
         (Drehung, Glättung, Spiegelung im Maschinen-Nullpunkt)."""
         super().__init__(parent)
         if shape is not None and getattr(shape, "image", None) is not None:
-            png = shape.image.png if png is None else png
+            png = shape.image.view_png if png is None else png
             height_mm = shape.geom.h if height_mm is None else height_mm
         self._shape = shape
         self._render_key = None
@@ -676,6 +676,9 @@ class ImportTools(QObject):
         menu.addAction(self.trace_action)
         if "image_crop" in by:      # Bild mit Form zuschneiden (lumacut_canvas.imagecrop_ui)
             menu.addAction(by["image_crop"])
+        for name in ("image_mask", "image_mask_release"):   # Live-Bildmaske (imagemask_ui)
+            if name in by:
+                menu.addAction(by[name])
         if "export" in by:
             menu.addAction(by["export"])
         menu.addSeparator()
@@ -856,7 +859,7 @@ class ImportTools(QObject):
         old = sh.image.settings
         if settings is None:
             dlg = ImageSettingsDialog(old, sh.geom.w, sh.image.px_width, self.window,
-                                      png=sh.image.png, height_mm=sh.geom.h, shape=sh)
+                                      png=sh.image.view_png, height_mm=sh.geom.h, shape=sh)
             if dlg.exec() != QDialog.Accepted:
                 return False
             settings = dlg.settings()

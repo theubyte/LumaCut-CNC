@@ -34,7 +34,7 @@ class TraceDialog(QDialog):
         self.setWindowTitle("Bild nachzeichnen")
         self.shape = shape
         st = (settings or TraceSettings.for_image(shape)).normalized()
-        gray = decode_gray(shape.image.png)
+        gray = decode_gray(shape.image.view_png)
         h, w = gray.shape
         f = min(1.0, PREVIEW_PX / max(w, h))
         if f < 1.0:

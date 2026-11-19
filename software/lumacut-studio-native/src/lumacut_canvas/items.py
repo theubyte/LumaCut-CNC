@@ -55,7 +55,7 @@ class ShapeItem(QGraphicsItem):
         # Einlinien-Text (offene Striche) wird nur als Linie gezeichnet, nicht gefüllt.
         self._filled = shape.kind == "text" and is_closed_shape(shape)
         self._geom = shape.geom.copy()
-        self._png = shape.image.png if shape.kind == "image" and shape.image else None
+        self._png = shape.image.view_png if shape.kind == "image" and shape.image else None
         self._path = shape_path(shape)
         self._color = QColor(layer.color)
         self._rebuild_hit()

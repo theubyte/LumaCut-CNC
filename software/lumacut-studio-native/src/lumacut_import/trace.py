@@ -510,7 +510,7 @@ def image_mm_per_px(shape: Shape) -> tuple[float, float]:
 def trace_image(shape: Shape, settings: TraceSettings) -> TraceResult:
     if shape.kind != "image" or shape.image is None:
         raise ValueError("Kein Bildobjekt")
-    return trace_gray(decode_gray(shape.image.png), settings, image_mm_per_px(shape))
+    return trace_gray(decode_gray(shape.image.view_png), settings, image_mm_per_px(shape))
 
 
 def to_canvas(shape: Shape, ring: Ring) -> Ring:

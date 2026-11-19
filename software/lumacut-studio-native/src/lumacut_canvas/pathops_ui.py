@@ -4,7 +4,8 @@ Alt+B / Alt+C belegen hier Bogentext und Barcode, darum Strg+Alt+B / Strg+Alt+C)
 Aufräumen (verbinden, schließen, vereinfachen, Überstände, Duplikate – :mod:`pathjoin_ui`;
 Werkzeug „Trimmen“ – :mod:`trim_ui`), Ecken
 abrunden / abschrägen (:mod:`pathfillet_ui`, LightBurn *Radius tool*), Bild mit Form
-zuschneiden (:mod:`imagecrop_ui`, LightBurn *Crop Image*), Verzerren (:mod:`warp_ui`, LightBurn
+zuschneiden (:mod:`imagecrop_ui`, LightBurn *Crop Image*), Live-Bildmaske (:mod:`imagemask_ui`,
+LightBurn *Apply Mask to Image* / *Remove Mask*), Verzerren (:mod:`warp_ui`, LightBurn
 *Warp Selection* / *Deform*).
 
 Von :class:`CanvasEditor` über :func:`install` eingebunden (Aktionen + Knopf
@@ -18,7 +19,7 @@ from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QMenu, QToolButton)
 
-from . import icons, imagecrop_ui, pathfillet_ui, pathjoin_ui, pathops, pathsplit, warp_ui
+from . import icons, imagecrop_ui, imagemask_ui, pathfillet_ui, pathjoin_ui, pathops, pathsplit, warp_ui
 from .edit_commands import ReplaceShapesCommand
 
 BOOL_SHORTCUTS = {"union": "Ctrl+Alt+U", "subtract": "Ctrl+Alt+S", "intersect": "Ctrl+Alt+I",
@@ -30,7 +31,7 @@ SPLIT_ACTIONS = [
 ]
 MENU_ACTIONS = ([f"bool_{op}" for op in pathops.OPS] + [None, "path_offset"] + pathfillet_ui.MENU_ACTIONS
                 + warp_ui.MENU_ACTIONS + ["text_to_path"]
-                + imagecrop_ui.MENU_ACTIONS + [None]
+                + imagecrop_ui.MENU_ACTIONS + imagemask_ui.MENU_ACTIONS + [None]
                 + [name for name, _t, _k in SPLIT_ACTIONS] + [None]
                 + pathjoin_ui.MENU_ACTIONS + ["tool_trim", None, "tool_tabs", "tabs_even", "tabs_clear",
                                                     "tool_start", "start_clear",
@@ -198,6 +199,7 @@ def install(editor) -> PathOps:
     ops.cleanup = pathjoin_ui.install(editor)   # verbinden / schließen / vereinfachen / Duplikate / offene Formen
     ops.fillet = pathfillet_ui.install(editor)  # Ecken abrunden / abschrägen
     ops.image_crop = imagecrop_ui.install(editor)  # Bild mit Form zuschneiden
+    ops.image_mask = imagemask_ui.install(editor)  # Live-Bildmaske anwenden / lösen
     ops.warp = warp_ui.install(editor)  # Verzerren (Hülle / Perspektive)
     return ops
 
@@ -216,7 +218,7 @@ def add_to_bar(editor, bar) -> QToolButton:
     btn.setObjectName("PathOpsButton")
     btn.setIcon(icons.icon("pathops"))
     btn.setToolTip("Pfad: vereinigen, abziehen, schneiden, verschweißen, versetzen, Ecken abrunden, verzerren, Text in Pfade, "
-                   "Bild mit Form zuschneiden, "
+                   "Bild mit Form zuschneiden, Maske auf Bild anwenden / lösen, "
                    "zerlegen / kombinieren, Pfade verbinden / schließen / vereinfachen, Duplikate löschen, "
                    "manuelle Stege (setzen, gleichmäßig verteilen, entfernen), Startpunkt der Kontur, "
                    "Richtung umkehren")
