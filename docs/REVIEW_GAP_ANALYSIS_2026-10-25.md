@@ -17051,3 +17051,68 @@ letters, no switch to turn the font's kerning off.
 Hardware check: load an SVG single-line font with `<hkern>` pairs (the status line names the
 pairs on loading) and laser „AVATAR Tokyo“ at 10 mm on plywood – „AV“ and „To“ should
 sit as close as in Inkscape; then the same text as arc text around an 80 mm coaster.
+
+## 107. Status update 2026-11-20 (review round 100)
+
+Done this round (live image mask; Machine / Scan Probe / Materials untouched – new
+`imagemask.py` / `imagemask_ui.py`, the mask on `RasterImage` in `model.py`, the masked view in
+`export.py`, `imagecrop.py`, `items.py`, `lumacut_job/images.py`, `trace.py` / `trace_qt.py`, the
+menu entries in `pathops_ui.py` and `lumacut_import/qt.py`; planner, G-code writer, Pi and
+camera code unchanged):
+
+- Closed since §106 by others: none – main had no commit since `6efe5d3` (round 99); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „live image mask“ (open since the crop of §91). LightBurn has next to the
+  destructive *Crop Image* a non-destructive *Tools › Apply Mask to Image* / *Remove Mask*: the
+  mask travels with the image and can be taken off and reshaped later. LumaCut only had the
+  destructive crop (undo was the only way back). It needs no user decision or hardware, is
+  finishable with tests and is not owned by another agent. The xTool text style import stays
+  open; rotary, min/max corner power and Dot Mode dwell still need hardware or the user.
+- **Apply**: „Maske auf Bild anwenden“ (*Pfad* menu, context menu „Pfad“, *Datei* menu,
+  Ctrl+Alt+Shift+M) with one image and one or more closed shapes selected (rectangle, ellipse,
+  polygon / star, text, closed paths) stores the shapes as the image's mask – several shapes
+  and holes combine by the even-odd rule like a fill (text counters stay open), outlines
+  flattened to 0.01 mm, at most 200 000 points. The rings are stored normalised to the
+  image's unrotated box like `Shape.points`, so moving, scaling and rotating the image carries
+  the mask along. The shapes are taken into the image (as in LightBurn).
+- **View / job**: the original pixels and the box stay; `RasterImage.view_png` makes pixels
+  whose centre lies outside transparent, so canvas, job, frame, estimate, dialog preview,
+  SVG / PNG export and „Bild nachzeichnen“ use the same paths as a cropped image –
+  transparent pixels never burn (threshold, Floyd, Jarvis, grayscale, sketch, adjusted images).
+- **Release**: „Bildmaske lösen“ makes the image whole again and gives the mask back as one
+  editable closed polygon (all rings) on the layer the shape came from (fallback: the image's
+  layer) – edit or move it and apply it again. Apply and release are each **one** undo step;
+  images or masks on locked layers are left alone, wrong selections only show a note.
+  Cropping a masked image bakes the mask in (the crop of §91 then works on the masked view).
+- **Project**: `"mask"` (rings) and `"mask_layer"` are only written for masked images; broken
+  rings (fewer than three points) are ignored on loading. Images without a mask are byte-identical.
+
+Tests: new `tests/test_image_mask.py` (39 tests): plain image view, pixels and box kept, view
+equal to the destructive crop rule, even-odd ring and text counters, mask following move /
+scale / rotation, rotated mask shape, release restoring the whole image with rings and groups,
+errors, crop baking the mask; no burn outside in threshold / Floyd / grayscale / sketch /
+adjusted Jarvis, shorter job and plain job unchanged after release, inside mask, Pi-safe
+G-code, PNG export and dialog preview, trace; save / load round trip, broken rings ignored;
+one undo step for apply and release, mask layer and fallback, wrong selections, locked layers,
+canvas item, menus, tooltip / shortcut, touch rows, main window.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3836 passed, 3 skipped** (35.4 min; 3797 + 39 new image mask tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – images without a mask take the unchanged code paths, so
+G-code, previews, export and project files stay byte-identical; the mask keys are only written
+for masked images.
+
+Still open: unchanged from §106 except the live image mask – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials
+items, image dot-size model, CoreXY time model, the xTool text style import, the trim
+refinements of §92, the print-and-cut limits of §93 / §94, the single-line font limits of
+§95 / §96 / §100 / §106, the warp limits of §97, the case limits of §98, the vertical text
+limits of §99, the box generator limits of §101, the living hinge limits of §102, the bent box
+limits of §103, the justified line limits of §104 and the inline editing limits of §105. For
+the mask: the edge is pixel-exact like the crop (pixel centre inside, no feathering); open
+paths and lines are not masks (close them first); one mask per image (release before applying
+a new one); the mask shape is not shown as its own object while applied (release to edit it);
+the xTool import does not read xTool masks.
+Hardware check: place a photo, draw a heart over it, „Maske auf Bild anwenden“, move and rotate
+the image and engrave it (Jarvis) on 4 mm plywood on the Windows app – no burn outside the
+heart; then „Bildmaske lösen“, enlarge the heart, apply again and engrave – the larger heart.
