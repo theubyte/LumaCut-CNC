@@ -48,6 +48,7 @@ MODE_LABELS = {
 }
 PREVIEW_SIZE = 300          # px, längste Kante der Vorschau im Dialog
 PREVIEW_DEBOUNCE_MS = 150
+TOUCH_ROW_PX = 44           # px, Fingerziel der Punktgrößen-Zeile im Touch-Modus
 
 FILTER = ("Alle unterstützten (" + " ".join(f"*{s}" for s in ALL_SUFFIXES) + ");;"
           "Vektor (*.svg *.dxf *.pdf *.ai *.eps);;"
@@ -113,7 +114,7 @@ class ImageSettingsDialog(QDialog):
 
     def __init__(self, settings: ImageSettings, width_mm: float, px_width: int, parent=None,
                  png: bytes | None = None, height_mm: float | None = None,
-                 shape=None) -> None:
+                 shape=None, prefs=None) -> None:
         """``png`` + ``height_mm``: Bilddaten für die Vorschau (ohne: keine Vorschau).
 
         ``shape``: das Bildobjekt – dann rendert die Vorschau es wie der Auftrag
@@ -123,6 +124,7 @@ class ImageSettingsDialog(QDialog):
             png = shape.image.view_png if png is None else png
             height_mm = shape.geom.h if height_mm is None else height_mm
         self._shape = shape
+        self._prefs = prefs               # QSettings für „Laserpunkt simulieren“ (optional)
         self._render_key = None
         self._rendered = None
         self._render_cache: dict = {}     # (Linienabstand, Negativ, Winkel) → (gray, inside)
@@ -294,6 +296,36 @@ class ImageSettingsDialog(QDialog):
         pass_row.addWidget(QLabel("Vorschau zeigt"))
         pass_row.addWidget(self.preview_pass, 1)
         self.preview_pass_row.setVisible(False)
+        # Laserpunkt simulieren: Spuren in der echten Punktgröße statt eines
+        # Pixels je Laserpunkt (Lücken / Überlappung bei falschem Linienabstand).
+        from .spot_preview import SPOT_RANGE_MM, load_prefs
+        sim_on, spot = load_prefs(prefs)
+        self.spot_sim = QCheckBox("Laserpunkt simulieren")
+        self.spot_sim.setObjectName("image_spot_sim")
+        self.spot_sim.setChecked(sim_on)
+        self.spot_sim.setToolTip("Vorschau als Lupe mit der echten Breite der gelaserten Spur: "
+                                 "Linienabstand größer als der Punkt = helle Streifen, viel "
+                                 "kleiner = Spuren überlappen und das Bild wird dunkler. "
+                                 "Punktgröße = gemessene Breite einer gelaserten Linie mit "
+                                 "Ihren Werten (Diodenlaser typisch 0,06–0,15 mm). Nur Vorschau – "
+                                 "der Auftrag bleibt unverändert.")
+        self.spot_size = self._dspin(SPOT_RANGE_MM[0], SPOT_RANGE_MM[1], spot, 3, 0.01, " mm")
+        self.spot_size.setObjectName("image_spot_size")
+        self.spot_size.setToolTip("Punktgröße (Breite einer gelaserten Linie), für alle Bilder "
+                                  "gespeichert")
+        self.spot_to_interval = QPushButton("Als Linienabstand")
+        self.spot_to_interval.setObjectName("image_spot_to_interval")
+        self.spot_to_interval.setToolTip("Linienabstand = Punktgröße setzen (die Spuren liegen "
+                                         "dicht an dicht, wie LightBurn und xTool es empfehlen)")
+        self.spot_to_interval.clicked.connect(self.apply_spot_interval)
+        self.spot_row = QWidget()
+        self.spot_row.setObjectName("image_spot_row")
+        spot_row = QHBoxLayout(self.spot_row)
+        spot_row.setContentsMargins(0, 0, 0, 0)
+        spot_row.addWidget(self.spot_sim)
+        spot_row.addWidget(self.spot_size)
+        spot_row.addWidget(self.spot_to_interval)
+        self._apply_touch_sizes()
         self.preview_label = QLabel()
         self.preview_label.setWordWrap(True)
         self.preview_label.setMaximumWidth(PREVIEW_SIZE)
@@ -323,6 +355,7 @@ class ImageSettingsDialog(QDialog):
             right = QVBoxLayout()
             right.addWidget(self.preview)
             right.addWidget(self.preview_pass_row)
+            right.addWidget(self.spot_row)
             right.addWidget(self.preview_label)
             right.addWidget(self.histogram)
             right.addWidget(self.histogram_label)
@@ -330,6 +363,7 @@ class ImageSettingsDialog(QDialog):
             row.addLayout(right)
         else:
             self.preview.hide()
+            self.spot_row.hide()
             self.preview_label.hide()
             self.histogram.hide()
             self.histogram_label.hide()
@@ -353,10 +387,34 @@ class ImageSettingsDialog(QDialog):
                   self.black_point, self.white_point):
             w.valueChanged.connect(self._schedule_preview)
         self.negative.toggled.connect(self._schedule_preview)
+        self.spot_sim.toggled.connect(self._spot_changed)
+        self.spot_size.valueChanged.connect(self._spot_changed)
         self._update()
         if self._gray is not None:
             self._preview_timer.stop()
             self.update_preview()
+
+    def _apply_touch_sizes(self) -> None:
+        """Im Touch-Modus 44 px hohe Bedienelemente der Punktgrößen-Zeile."""
+        parent = self.parent()
+        ed = getattr(parent, "canvas", parent)
+        if bool(getattr(ed, "touch_mode", False)):
+            for w in (self.spot_sim, self.spot_size, self.spot_to_interval):
+                w.setMinimumHeight(TOUCH_ROW_PX)
+
+    def spot_mm(self) -> float | None:
+        """Simulierte Punktgröße der Vorschau (None = aus)."""
+        return self.spot_size.value() if self.spot_sim.isChecked() else None
+
+    def _spot_changed(self, *_args) -> None:
+        from .spot_preview import save_prefs
+        save_prefs(self._prefs, self.spot_sim.isChecked(), self.spot_size.value())
+        self.spot_size.setEnabled(self.spot_sim.isChecked())
+        self._update()
+
+    def apply_spot_interval(self) -> None:
+        """Linienabstand = Punktgröße (im erlaubten Bereich des Linienabstands)."""
+        self.interval.setValue(self.spot_size.value())
 
     @staticmethod
     def _dspin(lo, hi, value, decimals, step, suffix) -> QDoubleSpinBox:
@@ -379,6 +437,7 @@ class ImageSettingsDialog(QDialog):
         self.dot_width.setMaximum(self.interval.value())
         self.sharpen_radius.setEnabled(self.sharpen.value() > 0)
         self.angle_increment.setEnabled(self.passes.value() > 1)
+        self.spot_size.setEnabled(self.spot_sim.isChecked())
         self._update_pass_choices()
         dpi = 25.4 / self.interval.value()
         src_dpi = self._px / self._width_mm * 25.4 if self._width_mm > 0 else 0
@@ -458,12 +517,14 @@ class ImageSettingsDialog(QDialog):
             if self._shape is not None and sel in (self.ALL_PASSES, self.ALL_PASSES_SUM):
                 pv = preview_shape_passes(self._shape, st,
                                           rendered_for=lambda k: self._render_cached(st, k),
-                                          burn_sum=sel == self.ALL_PASSES_SUM)
+                                          burn_sum=sel == self.ALL_PASSES_SUM,
+                                          spot_mm=self.spot_mm())
             elif self._shape is not None:
                 pv = preview_shape(self._shape, st, rendered=self._render_cached(st, sel),
-                                   pass_index=sel)
+                                   pass_index=sel, spot_mm=self.spot_mm())
             else:
-                pv = preview_array(self._gray, self._width_mm, self._height_mm, st)
+                pv = preview_array(self._gray, self._width_mm, self._height_mm, st,
+                                   spot_mm=self.spot_mm())
         except ValueError as exc:
             self.preview.clear()
             self.preview_label.setText(f"Keine Vorschau: {exc}")
@@ -475,7 +536,17 @@ class ImageSettingsDialog(QDialog):
                                           Qt.SmoothTransformation))
         h, w = pv.pixels.shape
         text = f"Vorschau: {w} × {h} Laserpunkte, {pv.burn_share * 100:.0f} % gelasert"
-        if pv.cropped:
+        if pv.spot is not None:
+            from .spot_preview import verdict_text
+            info = pv.spot
+            sw, sh = info.size_mm
+            text = (f"Vorschau: Laserpunkt {info.spot_mm:g} mm simuliert, {info.dots[0]} × "
+                    f"{info.dots[1]} Laserpunkte = {sw:.1f} × {sh:.1f} mm, "
+                    f"{pv.burn_share * 100:.0f} % gelasert")
+            if pv.cropped or info.cropped:
+                text += " (Lupe auf die Bildmitte)"
+            text += ". " + verdict_text(info.interval_mm, info.spot_mm)
+        elif pv.cropped:
             text += " (Ausschnitt aus der Bildmitte)"
         rot = self._shape.geom.rot if self._shape is not None else 0.0
         if rot:
@@ -859,7 +930,8 @@ class ImportTools(QObject):
         old = sh.image.settings
         if settings is None:
             dlg = ImageSettingsDialog(old, sh.geom.w, sh.image.px_width, self.window,
-                                      png=sh.image.view_png, height_mm=sh.geom.h, shape=sh)
+                                      png=sh.image.view_png, height_mm=sh.geom.h, shape=sh,
+                                      prefs=self.settings)
             if dlg.exec() != QDialog.Accepted:
                 return False
             settings = dlg.settings()
