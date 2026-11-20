@@ -1288,6 +1288,19 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   her. Zweimal zuschneiden schneidet weiter. Gespeichert wird das zugeschnittene Bild als
   PNG mit Alphakanal – keine neuen Datei-Schlüssel; Bilder ohne Zuschnitt bleiben bytegleich.
   Code: `src/lumacut_canvas/imagecrop.py`, `imagecrop_ui.py`.
+- **Maske auf Bild anwenden / Bildmaske lösen** (*Pfad › Maske auf Bild anwenden*, auch *Datei*
+  und Kontextmenü „Pfad“; *Strg+Alt+Umschalt+M*; wie LightBurns *Tools › Apply Mask to Image* /
+  *Remove Mask*): die zerstörungsfreie Variante des Zuschneidens. Ein Bild und darüber eine oder
+  mehrere geschlossene Formen auswählen – die Formen werden zur **Live-Maske** des Bildes
+  (Gerade-Ungerade wie beim Zuschneiden). Außerhalb wird das Bild durchsichtig und nie gelasert,
+  die **Bildpunkte bleiben aber erhalten** und die Box behält ihre Größe. Die Maske wandert beim
+  Verschieben, Skalieren und Drehen mit dem Bild. *Bildmaske lösen* macht das Bild wieder ganz
+  und gibt die Maskenform als bearbeitbare geschlossene Form auf ihrer Ebene zurück – ändern
+  oder verschieben und neu anwenden. Je **ein** Rückgängig-Schritt; Bilder auf gesperrten Ebenen
+  und Masken auf gesperrten Ebenen werden nicht angefasst. Zuschneiden eines maskierten Bildes
+  übernimmt die Maske fest. Gespeichert werden die Maskenringe im Bild (`"mask"`, `"mask_layer"`,
+  nur bei maskierten Bildern) – Bilder ohne Maske bleiben bytegleich. Code:
+  `src/lumacut_canvas/imagemask.py`, `imagemask_ui.py`.
 - Jeder Import ist **ein** Rückgängig-Schritt und wird in die Arbeitsfläche (360×340 mm) eingepasst.
 - Code: `src/lumacut_import/` (Qt-frei) und `src/lumacut_import/qt.py` (Menü, Drop).
 
