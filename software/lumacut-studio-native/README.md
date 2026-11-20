@@ -1266,6 +1266,19 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   Live-Vorschau zeigt den ersten Durchgang im gedrehten Raster, in Canvas-Lage zurückgedreht.
   Winkel 0 = bisherige Ausgabe (ältere Dateien unverändert). Bilder werden im
   Auftrag vor den Vektor-Ebenen graviert.
+  **Laserpunkt simulieren** (unter der Vorschau, mit **Punktgröße** 0,01…1 mm, Vorgabe 0,08 mm,
+  für alle Bilder gespeichert): die Vorschau wird zur Lupe auf die Bildmitte (höchstens
+  600 × 600 Bildpunkte) und zeigt die gelaserten **Spuren in der echten Strahlbreite** statt
+  eines Pixels je Laserpunkt – jede Rasterzeile als Spur entlang der Scan-Richtung (Gauß-Strahl,
+  eine Linie mit voller Leistung ist genau die Punktgröße breit), überlappende Spuren werden
+  dunkler, die Punktbreitenkorrektur kürzt die Strecken wie im G-code. So sieht man vor dem
+  Lasern **helle Streifen**, wenn der Linienabstand größer als der Punkt ist, und ein dunkles,
+  matschiges Foto, wenn die Spuren stark überlappen; der Hinweis nennt die passende DPI-Zahl,
+  **Als Linienabstand** setzt den Linienabstand auf die Punktgröße (die Empfehlung von LightBurn
+  und xTool). Gilt für alle Modi, Scan-Winkel, alle Durchgänge und die Brennsumme. Punktgröße =
+  gemessene Breite einer gelaserten Linie mit den eigenen Werten (Material, Leistung und
+  Geschwindigkeit werden nicht modelliert). Nur Vorschau – Projekt und G-code bleiben
+  unverändert. Code: `src/lumacut_import/spot_preview.py`.
 - **Bild nachzeichnen** (*Datei › Bild nachzeichnen…*, *Alt+T*, wie LightBurn „Trace Image“):
   wandelt das ausgewählte Bild in Vektorkonturen. Schwellwert (dunkler = Kontur; Startwert aus den
   Bildeinstellungen), Invertieren, Glättung (Weichzeichnen vor dem Schwellwert), Toleranz
