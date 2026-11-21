@@ -1333,6 +1333,18 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   übernimmt die Maske fest. Gespeichert werden die Maskenringe im Bild (`"mask"`, `"mask_layer"`,
   nur bei maskierten Bildern) – Bilder ohne Maske bleiben bytegleich. Code:
   `src/lumacut_canvas/imagemask.py`, `imagemask_ui.py`.
+- **Mehrere Masken / Bereich im Bild ausblenden** (*Pfad › Bereich im Bild ausblenden*, auch
+  *Datei* und Kontextmenü „Pfad“; *Strg+Alt+Umschalt+H*): *Maske auf Bild anwenden* auf ein Bild,
+  das schon eine Maske hat, **verkleinert** sie – sichtbar bleibt nur die Überschneidung von alter
+  Maske und neuer Form (zwei Masken übereinander). *Bereich im Bild ausblenden* ist die
+  **umgekehrte Maske**: die Fläche der Formen wird durchsichtig und nie gelasert, der Rest bleibt
+  (Logo, Datumsstempel oder Hintergrundecke aus einem Foto nehmen); auf einem maskierten Bild
+  kommen weitere Löcher dazu. Beides lässt sich beliebig kombinieren. Sind **mehrere Bilder**
+  ausgewählt, bekommt jedes Bild, das die Formen berühren, sie im selben Rückgängig-Schritt;
+  unberührte Bilder bleiben, wie sie sind (die Statuszeile nennt sie). Gespeichert wird weiter
+  nur ein Ringsatz (Außenkontur + Löcher) im Bild – keine neuen Datei-Schlüssel, eine erste
+  Maske bleibt bytegleich. *Bildmaske lösen* gibt die zusammengesetzte Form zurück (nach dem
+  Ausblenden: Bildrechteck mit Loch).
 - Jeder Import ist **ein** Rückgängig-Schritt und wird in die Arbeitsfläche (360×340 mm) eingepasst.
 - Code: `src/lumacut_import/` (Qt-frei) und `src/lumacut_import/qt.py` (Menü, Drop).
 
