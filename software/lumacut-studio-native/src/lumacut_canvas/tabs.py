@@ -252,6 +252,8 @@ class EvenTabsResult:
     removed: int = 0           # ersetzte (alte) manuelle Stege
     zero_width_layers: list[str] = field(default_factory=list)
     auto_layers: list[str] = field(default_factory=list)
+    #: Ausgelassene Konturen für die Vorschau: ``(Ring, "inner" | "short")``.
+    skipped: list[tuple[list[Point], str]] = field(default_factory=list)
 
     @property
     def changed(self) -> int:
@@ -322,11 +324,13 @@ def place_even_tabs(doc, shapes: Iterable[Shape], values: dict | None = None) ->
         for ring, inner in zip(rings, flags):
             if inner:
                 res.skipped_inner += 1
+                res.skipped.append((ring, "inner"))
                 continue
             L = ring_length(ring)
             n = even_count(L, width, v["mode"], v["count"], v["spacing_mm"], v["max_count"])
             if L < v["min_perimeter_mm"] or L < 2 * width + 1.0 or n <= 0:
                 res.too_short += 1
+                res.skipped.append((ring, "short"))
                 continue
             new = even_points_on_ring(ring, n, width, v["avoid_corners"])
             if new:

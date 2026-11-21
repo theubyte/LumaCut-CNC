@@ -8,6 +8,10 @@
   tabs*) verteilt manuelle Stege auf einmal auf die Auswahl (ohne Auswahl auf
   alle bearbeitbaren Objekte): Anzahl je Kontur oder Abstand, Ecken meiden,
   innere Konturen auslassen – ein Undo-Schritt; danach einzeln verschiebbar.
+  Solange der Dialog offen ist, zeigt die Arbeitsfläche live, wo die Stege
+  landen (blaue Balken = neu, graue = ersetzte alte Stege, gestrichelte
+  Konturen = ausgelassen); der Dialog rückt neben die Objekte. Abbrechen lässt
+  alles unverändert (kein Undo-Schritt).
 * Pfad › „Manuelle Stege entfernen“ löscht die Stege der Auswahl.
 * Alle manuellen Stege sind auf der Arbeitsfläche als kurze orange Balken in
   Stegbreite der Ebene markiert (immer, nicht nur im Werkzeug); die
@@ -22,8 +26,8 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
                                QFormLayout, QGraphicsItem, QLabel, QSpinBox)
 
@@ -33,6 +37,10 @@ from .model import Shape, tabs_from_world
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
 TAB_COLOR = "#ff8a3d"
+PREVIEW_COLOR = "#2fa8ff"  # Vorschau neuer Stege (Dialog „Stege gleichmäßig setzen“)
+REMOVED_COLOR = "#9a9a9a"  # Vorschau: alte manuelle Stege, die ersetzt würden
+SKIPPED_COLOR = "#9a9a9a"  # Vorschau: ausgelassene Konturen (gestrichelt)
+TOUCH_PX = 44              # Mindesthöhe der Bedienelemente im Touch-Modus
 MARKER_PX = 4.0            # Strichstärke der Markierung (Bildschirm-Pixel)
 MIN_MARKER_MM = 0.6        # Markierung mindestens so lang (Stegbreite 0 / sehr klein)
 ACTIONS = (("tabs_clear", "Manuelle Stege entfernen"),)
@@ -52,25 +60,58 @@ class TabMarkers(QGraphicsItem):
         self.setZValue(1.05e9)
         self.setAcceptedMouseButtons(Qt.NoButton)
         self.marks: list[tuple[QPointF, QPointF, bool]] = []   # (von, bis, hervorgehoben)
+        #: Vorschau des Dialogs: (von, bis, "new" | "removed")
+        self.preview_marks: list[tuple[QPointF, QPointF, str]] = []
+        #: Vorschau: ausgelassene Konturen (Ring in mm, "inner" | "short")
+        self.skipped: list[tuple[list[tuple[float, float]], str]] = []
         self.setVisible(False)
 
     def sync(self) -> None:
         marks = self.ctl.marker_segments()
-        if not marks and not self.marks:
+        pmarks, skipped = self.ctl.preview_segments()
+        if not marks and not self.marks and not pmarks and not self.preview_marks \
+                and not skipped and not self.skipped:
             return              # keine Stege: nichts neu zeichnen (häufigster Fall)
         self.marks = marks
-        self.setVisible(bool(marks))
+        self.preview_marks = pmarks
+        self.skipped = skipped
+        self.setVisible(bool(marks or pmarks or skipped))
         self.update()
 
     def boundingRect(self) -> QRectF:  # noqa: N802 - Qt API
         return QRectF(-20, -20, WORK_WIDTH_MM + 40, WORK_HEIGHT_MM + 40)
 
     def paint(self, p: QPainter, option, widget=None) -> None:
-        if not self.marks:
+        if not (self.marks or self.preview_marks or self.skipped):
             return
         p.setRenderHint(QPainter.Antialiasing)
+        if self.skipped:
+            pen = QPen(QColor(SKIPPED_COLOR), 1.5, Qt.DashLine)
+            pen.setCosmetic(True)
+            p.setPen(pen)
+            p.setBrush(Qt.NoBrush)
+            for ring, _why in self.skipped:
+                if len(ring) >= 2:
+                    path = QPainterPath(QPointF(*ring[0]))
+                    for q in ring[1:]:
+                        path.lineTo(QPointF(*q))
+                    p.drawPath(path)
         for a, b, hot in self.marks:
             pen = QPen(QColor("#ffffff" if hot else TAB_COLOR), MARKER_PX + (2 if hot else 0))
+            pen.setCosmetic(True)
+            pen.setCapStyle(Qt.FlatCap)
+            p.setPen(pen)
+            p.drawLine(a, b)
+        for a, b, kind in self.preview_marks:
+            if kind == "new":           # weißer Rand, damit Blau auf Holz und Schwarz sichtbar bleibt
+                under = QPen(QColor("#ffffff"), MARKER_PX + 3)
+                under.setCosmetic(True)
+                under.setCapStyle(Qt.FlatCap)
+                p.setPen(under)
+                p.drawLine(a, b)
+                pen = QPen(QColor(PREVIEW_COLOR), MARKER_PX + 1)
+            else:
+                pen = QPen(QColor(REMOVED_COLOR), MARKER_PX - 1.5)
             pen.setCosmetic(True)
             pen.setCapStyle(Qt.FlatCap)
             p.setPen(pen)
@@ -86,6 +127,8 @@ class TabTool:
         self._moved = False
         self._start = QPointF()
         self.hot: tuple[str, int] | None = None          # gezogener Steg (hervorgehoben)
+        #: Vorschau des Dialogs „Stege gleichmäßig setzen“ (None = keine)
+        self.preview: tabs.EvenTabsResult | None = None
         self.item = TabMarkers(self)
         editor.scene.addItem(self.item)
         editor.documentChanged.connect(self.item.sync)
@@ -107,24 +150,84 @@ class TabTool:
         return max(m.handle_hit_px, m.handle_px / 2) * self.mm_per_px()
 
     # --- Anzeige -----------------------------------------------------------
+    def _visible_layer(self, s: Shape):
+        layer = next((l for l in self.doc.layers if l.id == s.layer_id), None)
+        return layer if layer is not None and layer.visible else None
+
+    @staticmethod
+    def _bar(layer, rings, q) -> tuple[QPointF, QPointF]:
+        half = max(float(getattr(layer, "tab_width_mm", 1.0) or 0.0), MIN_MARKER_MM) / 2
+        _d, _pt, k = tabs.nearest_on_rings(rings, q)
+        ux, uy = 1.0, 0.0
+        if k >= 0:
+            ux, uy = _tangent(rings[k], q)
+        return (QPointF(q[0] - ux * half, q[1] - uy * half),
+                QPointF(q[0] + ux * half, q[1] + uy * half))
+
+    def _preview_split(self) -> dict[str, tuple[list, list, list]]:
+        """Je Objekt der Vorschau: (bleibende, neue, ersetzte) Steg-Punkte in mm."""
+        out = {}
+        if self.preview is None:
+            return out
+        for new in self.preview.add:
+            if not self.doc.has_shape(new.id):
+                continue
+            old_pts = self.doc.shape(new.id).tab_points()
+            new_pts = new.tab_points()
+
+            def near(p, pts):
+                return any(math.dist(p, q) < 1e-6 for q in pts)
+            kept = [p for p in new_pts if near(p, old_pts)]
+            added = [p for p in new_pts if not near(p, old_pts)]
+            gone = [p for p in old_pts if not near(p, new_pts)]
+            out[new.id] = (kept, added, gone)
+        return out
+
     def marker_segments(self) -> list[tuple[QPointF, QPointF, bool]]:
         out = []
+        split = self._preview_split()
         for s in self.doc.shapes:
             if not s.tabs:
                 continue
-            layer = next((l for l in self.doc.layers if l.id == s.layer_id), None)
-            if layer is None or not layer.visible:
+            layer = self._visible_layer(s)
+            if layer is None:
                 continue
-            half = max(float(getattr(layer, "tab_width_mm", 1.0) or 0.0), MIN_MARKER_MM) / 2
             rings = tabs.closed_rings(s)
-            for i, q in enumerate(s.tab_points()):
-                d, _pt, k = tabs.nearest_on_rings(rings, q)
-                ux, uy = 1.0, 0.0
-                if k >= 0:
-                    ux, uy = _tangent(rings[k], q)
-                out.append((QPointF(q[0] - ux * half, q[1] - uy * half),
-                            QPointF(q[0] + ux * half, q[1] + uy * half), self.hot == (s.id, i)))
+            pts = s.tab_points()
+            keep = split[s.id][0] if s.id in split else None
+            for i, q in enumerate(pts):
+                if keep is not None and not any(math.dist(q, k) < 1e-6 for k in keep):
+                    continue        # in der Vorschau neu oder ersetzt (eigene Markierung)
+                a, b = self._bar(layer, rings, q)
+                out.append((a, b, self.hot == (s.id, i)))
         return out
+
+    def preview_segments(self) -> tuple[list[tuple[QPointF, QPointF, str]], list]:
+        """Vorschau-Markierungen (neu / ersetzt) und ausgelassene Konturen."""
+        if self.preview is None:
+            return [], []
+        marks = []
+        for sid, (_kept, added, gone) in self._preview_split().items():
+            s = self.doc.shape(sid)
+            layer = self._visible_layer(s)
+            if layer is None:
+                continue
+            rings = tabs.closed_rings(s)
+            for kind, pts in (("removed", gone), ("new", added)):
+                for q in pts:
+                    a, b = self._bar(layer, rings, q)
+                    marks.append((a, b, kind))
+        return marks, [(list(r), why) for r, why in self.preview.skipped]
+
+    def set_preview(self, result: tabs.EvenTabsResult | None) -> None:
+        """Vorschau zeigen (``None`` = aus) – ändert das Dokument nicht."""
+        if result is None and self.preview is None:
+            return
+        self.preview = result
+        self.item.sync()
+
+    def clear_preview(self) -> None:
+        self.set_preview(None)
 
     # --- Treffer -----------------------------------------------------------
     def _targets(self) -> list[Shape]:
@@ -280,7 +383,8 @@ def _tangent(ring, q) -> tuple[float, float]:
 class EvenTabsDialog(QDialog):
     """„Stege gleichmäßig setzen“: Verteilung, Anzahl / Abstand, Optionen; Zähler live."""
 
-    def __init__(self, doc, shapes, parent=None, values: dict | None = None) -> None:
+    def __init__(self, doc, shapes, parent=None, values: dict | None = None, *,
+                 touch: bool = False, on_preview=None, show_preview: bool = True) -> None:
         super().__init__(parent)
         self.setWindowTitle("Stege gleichmäßig setzen")
         self.setObjectName("EvenTabsDialog")
@@ -331,6 +435,14 @@ class EvenTabsDialog(QDialog):
         self.replace = QCheckBox("Vorhandene manuelle Stege ersetzen")
         self.replace.setChecked(v["replace"])
         self.replace.setToolTip("Aus: neue Stege kommen zu den vorhandenen hinzu")
+        self.show_preview = QCheckBox("Vorschau auf der Arbeitsfläche")
+        self.show_preview.setObjectName("EvenTabsPreview")
+        self.show_preview.setChecked(bool(show_preview))
+        self.show_preview.setToolTip("Zeigt live, wo die Stege landen: blau = neuer Steg, grau = "
+                                     "ersetzter alter Steg, gestrichelt = ausgelassene Kontur "
+                                     "(innen / zu kurz) – erst OK ändert das Projekt")
+        self.show_preview.setVisible(on_preview is not None)
+        self.on_preview = on_preview
         self.readout = QLabel()
         self.readout.setObjectName("EvenTabsReadout")
         self.readout.setWordWrap(True)
@@ -342,11 +454,27 @@ class EvenTabsDialog(QDialog):
         form.addRow("", self.avoid_corners)
         form.addRow("", self.skip_inner)
         form.addRow("", self.replace)
+        form.addRow("", self.show_preview)
         form.addRow(self.readout)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         form.addRow(self.buttons)
+        self.touch = bool(touch)
+        if self.touch:           # Finger: jedes Bedienelement mindestens 44 px hoch
+            for w in (self.mode, self.count, self.spacing, self.max_count, self.min_perimeter,
+                      self.avoid_corners, self.skip_inner, self.replace, self.show_preview):
+                w.setMinimumHeight(TOUCH_PX)
+            # eigenes Stylesheet: schlägt die 34-px-Regel des Touch-Stils der Arbeitsfläche
+            self.setStyleSheet(
+                f"QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QPushButton "
+                f"{{ min-height: {TOUCH_PX}px; }} "
+                "QCheckBox::indicator { width: 26px; height: 26px; }")
+            for b in self.buttons.buttons():
+                b.setMinimumHeight(TOUCH_PX)
+                b.setMinimumWidth(96)
+        self.show_preview.toggled.connect(self.update_readout)
+        self.finished.connect(self._end_preview)
         for w in (self.mode,):
             w.currentIndexChanged.connect(self.update_readout)
         for w in (self.count, self.spacing, self.max_count, self.min_perimeter):
@@ -366,6 +494,16 @@ class EvenTabsDialog(QDialog):
         res = self.result_preview()
         self.readout.setText(res.readout())
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(res.changed > 0)
+        if self.on_preview is not None:
+            self.on_preview(res if self.show_preview.isChecked() else None)
+
+    def _end_preview(self, *_args) -> None:
+        if self.on_preview is not None:
+            self.on_preview(None)
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        self._end_preview()
+        super().closeEvent(event)
 
     def values(self) -> dict:
         return {"mode": self.mode.currentData(), "count": self.count.value(),
@@ -375,17 +513,96 @@ class EvenTabsDialog(QDialog):
                 "min_perimeter_mm": self.min_perimeter.value(), "replace": self.replace.isChecked()}
 
 
+def side_position(size: QSize, avail: QRect, target: QRect, margin: int = 12) -> QPoint | None:
+    """Linke obere Ecke für einen Dialog der Größe ``size`` in ``avail``, die ``target``
+    nicht verdeckt – rechts, links, über oder unter dem Ziel (None, wenn nichts passt)."""
+    w, h = size.width(), size.height()
+    if w <= 0 or h <= 0 or avail.isEmpty():
+        return None
+
+    def clamp(v, lo, hi):
+        return max(lo, min(int(v), hi))
+    cy = clamp(target.top() + (target.height() - h) / 2, avail.top(), avail.bottom() - h + 1)
+    cx = clamp(target.left() + (target.width() - w) / 2, avail.left(), avail.right() - w + 1)
+    for x, y in ((target.right() + 1 + margin, cy), (target.left() - margin - w, cy),
+                 (cx, target.top() - margin - h), (cx, target.bottom() + 1 + margin)):
+        r = QRect(int(x), int(y), w, h)
+        if avail.contains(r) and not r.intersects(target):
+            return QPoint(int(x), int(y))
+    return None
+
+
+def shapes_screen_rect(editor, shapes) -> QRect:
+    """Bildschirm-Rechteck (global) der Konturen von ``shapes`` in der Arbeitsfläche."""
+    xs, ys = [], []
+    for s in shapes:
+        for ring in tabs.closed_rings(s):
+            xs.extend(p[0] for p in ring)
+            ys.extend(p[1] for p in ring)
+    view = getattr(editor, "view", None)
+    if not xs or view is None:
+        return QRect()
+    poly = view.mapFromScene(QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)))
+    r = poly.boundingRect()
+    return QRect(view.viewport().mapToGlobal(r.topLeft()), r.size())
+
+
+def place_beside(dlg: QDialog, editor, shapes) -> bool:
+    """Dialog neben die Objekte rücken, wenn er sie mittig über dem Fenster verdecken würde
+    (True = verschoben) – so bleibt die Vorschau der Stege sichtbar."""
+    target = shapes_screen_rect(editor, shapes)
+    view = getattr(editor, "view", None)
+    if target.isEmpty() or view is None:
+        return False
+    win = view.window()
+    avail = win.frameGeometry() if win is not None else QRect()
+    screen = view.screen()
+    if screen is not None:
+        sg = screen.availableGeometry()
+        avail = avail.intersected(sg) if avail.intersects(sg) else sg
+    dlg.adjustSize()
+    hint = dlg.sizeHint()
+    size = QSize(max(dlg.width(), hint.width()), max(dlg.height(), hint.height()))
+    centred = QRect(QPoint(0, 0), size)
+    centred.moveCenter(avail.center())
+    if not centred.intersects(target):
+        return False
+    pos = side_position(size, avail, target)
+    if pos is None:
+        return False
+    dlg.move(pos)
+    return True
+
+
 class EvenTabs:
     """Aktion „Stege gleichmäßig setzen …“ (ein Undo-Schritt, letzte Eingabe je Sitzung)."""
 
-    def __init__(self, editor) -> None:
+    def __init__(self, editor, tool: "TabTool | None" = None) -> None:
         self.ed = editor
+        self.tool = tool
         self.last = tabs.even_defaults()
+        self.show_preview = True             # Vorschau auf der Arbeitsfläche (je Sitzung)
         self.ask = self._ask                 # für Tests austauschbar
 
+    def preview(self, result) -> None:
+        if self.tool is not None:
+            self.tool.set_preview(result)
+
+    def dialog(self, shapes) -> EvenTabsDialog:
+        dlg = EvenTabsDialog(self.ed.document, shapes, self.ed, self.last,
+                             touch=bool(getattr(self.ed, "touch_mode", False)),
+                             on_preview=self.preview, show_preview=self.show_preview)
+        place_beside(dlg, self.ed, shapes)
+        return dlg
+
     def _ask(self, shapes):
-        dlg = EvenTabsDialog(self.ed.document, shapes, self.ed, self.last)
-        return dlg.values() if dlg.exec() == QDialog.Accepted else None
+        dlg = self.dialog(shapes)
+        try:
+            ok = dlg.exec() == QDialog.Accepted
+            self.show_preview = dlg.show_preview.isChecked()
+            return dlg.values() if ok else None
+        finally:
+            self.preview(None)
 
     def scope(self) -> list[Shape]:
         doc = self.ed.document
@@ -421,10 +638,11 @@ class EvenTabs:
 def install(editor) -> TabTool:
     tool = TabTool(editor)
     editor._act("tabs_clear", ACTIONS[0][1], lambda _=False: tool.clear_selection())
-    tool.even = EvenTabs(editor)
+    tool.even = EvenTabs(editor, tool)
     name, text, key = EVEN_ACTION
     editor._act(name, text, lambda _=False: tool.even.run(), QKeySequence(key))
     return tool
 
 
-__all__ = ["TabTool", "TabMarkers", "EvenTabs", "EvenTabsDialog", "install", "tabs_from_world"]
+__all__ = ["TabTool", "TabMarkers", "EvenTabs", "EvenTabsDialog", "install", "place_beside",
+           "side_position", "tabs_from_world"]
