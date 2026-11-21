@@ -17,6 +17,12 @@ die reine Füllgeometrie (``scan_offset_pending``), danach die verschobenen
 Linien. Jede neue Änderung bricht einen laufenden Lauf ab (``should_stop`` im
 Planer) und verwirft sein Ergebnis – es wird nie eine veraltete Planung
 gezeichnet. Ergebnisse holt ein Timer im GUI-Thread ab.
+
+Mit Winkel-Schritt je Durchgang (``Layer.fill_angle_increment``, LightBurn „Angle
+Increment“) zeigt sie zusätzlich die weiteren Durchgänge unter ihrem eigenen
+Winkel (``export.layer_pass_fill_blocks``) – blasser in der Ebenenfarbe, jeder
+Winkel nur einmal; ``lines`` bleibt Durchgang 1, die weiteren stehen in
+``pass_lines``. Sie zeigen die reine Füllgeometrie (ohne Scan-Versatz).
 """
 
 from __future__ import annotations
@@ -26,12 +32,13 @@ import threading
 from PySide6.QtCore import QLineF, QObject, QRectF, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen
 
-from .export import layer_fill_blocks
+from .export import layer_fill_blocks, layer_pass_fill_blocks
 
 OVERLAY_KEY = "fill_preview"
 DEBOUNCE_MS = 120
 POLL_MS = 25                  # Abholen des Hintergrund-Ergebnisses
 MAX_PREVIEW_LINES = 200_000   # darüber wird nicht mehr gezeichnet (nur der G-Code zählt)
+PASS_ALPHA = 0.45             # Deckkraft der weiteren Durchgänge (Winkel-Schritt)
 BACKGROUND = True             # Planer im Hintergrund (False: synchron, z. B. für Skripte)
 
 
@@ -90,6 +97,9 @@ class FillPreview(QObject):
         self.visible = True
         self.opacity = 0.75
         self.lines: list[tuple[QColor, list[QLineF]]] = []
+        # Weitere Durchgänge mit Winkel-Schritt: (Farbe, Winkel, Linien) je Ebene und Winkel.
+        self.pass_lines: list[tuple[QColor, float, list[QLineF]]] = []
+        self.show_all_passes = True        # weitere Durchgänge zeigen (Winkel-Schritt)
         self.truncated = False
         self.scan_offset_applied = False   # zuletzt mit Scan-Versatz gezeichnet
         self.scan_offset_pending = False   # Planer läuft noch, gezeichnet ist die reine Geometrie
@@ -175,19 +185,21 @@ class FillPreview(QObject):
 
     def _draw(self, doc, shifted) -> None:
         out: list[tuple[QColor, list[QLineF]]] = []
+        extra: list[tuple[QColor, float, list[QLineF]]] = []
         total = 0
         self.truncated = False
-        self.scan_offset_applied = shifted is not None
         self.scan_offset_applied = shifted is not None
         for layer in doc.layers:
             if not layer.visible or layer.fill_mode == "none":
                 continue
             lines: list[QLineF] = []
+            first = None
             try:
                 if shifted is not None:
                     blocks = [shifted.get(layer.id, [])]
                 else:
-                    blocks = [segs for _ids, segs in layer_fill_blocks(doc, layer)]
+                    first = layer_fill_blocks(doc, layer)
+                    blocks = [segs for _ids, segs in first]
             except ValueError:          # zu viele Linien: Hinweis kommt beim Export
                 self.truncated = True
                 blocks = []
@@ -201,21 +213,70 @@ class FillPreview(QObject):
                 out.append((QColor(layer.color), lines))
             if total > MAX_PREVIEW_LINES:
                 break
+            if self.show_all_passes:
+                total = self._add_passes(doc, layer, first, extra, total)
+                if total > MAX_PREVIEW_LINES:
+                    break
         self.lines = out
+        self.pass_lines = extra
         # Nur angemeldet, solange es etwas zu zeigen gibt (andere Overlays unberührt).
-        if out and not self._installed:
+        if (out or extra) and not self._installed:
             self.editor.add_overlay(OVERLAY_KEY, self, z=50)
             self._installed = True
-        elif not out and self._installed:
+        elif not (out or extra) and self._installed:
             self.editor.remove_overlay(OVERLAY_KEY)
             self._installed = False
-        elif out:
+        elif out or extra:
             self.editor.refresh_overlays()
+
+    def _add_passes(self, doc, layer, first, extra, total: int) -> int:
+        """Durchgänge 2 … n mit Winkel-Schritt an ``extra`` hängen (je Winkel einmal,
+        der Winkel von Durchgang 1 entfällt); gibt die neue Linienzahl zurück."""
+        from .export import layer_fill_pass_angles
+        angles = layer_fill_pass_angles(layer)
+        if not angles:
+            return total
+        try:
+            passes = layer_pass_fill_blocks(doc, layer, first)
+        except ValueError:
+            self.truncated = True
+            return total
+        seen = {angles[0]}
+        color = QColor(layer.color)
+        color.setAlphaF(PASS_ALPHA)
+        for angle, blocks in zip(angles, passes or []):
+            if angle in seen:
+                continue
+            seen.add(angle)
+            lines: list[QLineF] = []
+            for _ids, segs in blocks:
+                total += len(segs)
+                if total > MAX_PREVIEW_LINES:
+                    self.truncated = True
+                    break
+                lines.extend(QLineF(a[0], a[1], b[0], b[1]) for a, b in segs)
+            if lines:
+                extra.append((QColor(color), float(angle), lines))
+            if total > MAX_PREVIEW_LINES:
+                break
+        return total
 
     def line_count(self) -> int:
         return sum(len(l) for _, l in self.lines)
 
+    def pass_line_count(self) -> int:
+        """Linien der weiteren Durchgänge (Winkel-Schritt)."""
+        return sum(len(l) for _c, _a, l in self.pass_lines)
+
+    def pass_angles_shown(self) -> list[float]:
+        """Winkel der gezeigten weiteren Durchgänge (Reihenfolge der Ebenen / Durchgänge)."""
+        return [a for _c, a, _l in self.pass_lines]
+
     def paint(self, painter: QPainter, work: QRectF) -> None:
+        # Weitere Durchgänge zuerst und blasser, damit Durchgang 1 oben klar bleibt.
+        for color, _angle, lines in self.pass_lines:
+            painter.setPen(QPen(color, 0))
+            painter.drawLines(lines)
         for color, lines in self.lines:
             pen = QPen(color, 0)          # kosmetisch: 1 px bei jedem Zoom
             painter.setPen(pen)

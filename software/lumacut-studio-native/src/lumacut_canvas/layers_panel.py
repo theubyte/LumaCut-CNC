@@ -449,6 +449,7 @@ class LayersPanel(QWidget):
             "schraffiert um diesen Winkel gedreht (z. B. 45° bei 4 Durchgängen: 0°, 45°, "
             "90°, 135°) – die Linien liegen nicht genau übereinander, die Gravur wird "
             "gleichmäßiger und ohne Rillen. Wirkt erst ab 2 Durchgängen; 0° = aus. "
+            "Die Arbeitsfläche zeigt die weiteren Durchgänge blasser unter dem ersten. "
             "Nur Schraffur und Kreuzschraffur")
         self.fill_angle_step.valueChanged.connect(
             lambda v: self._param_edited("fill_angle_increment", v))
