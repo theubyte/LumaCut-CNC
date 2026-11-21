@@ -1345,6 +1345,18 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   nur ein Ringsatz (Außenkontur + Löcher) im Bild – keine neuen Datei-Schlüssel, eine erste
   Maske bleibt bytegleich. *Bildmaske lösen* gibt die zusammengesetzte Form zurück (nach dem
   Ausblenden: Bildrechteck mit Loch).
+- **Weiche Maskenkante** (*Pfad › Weiche Maskenkante …*, auch *Datei* und Kontextmenü „Pfad“;
+  *Strg+Alt+Umschalt+F*): ein maskiertes Bild blendet **innen an der Maskenkante** über die
+  eingestellte Breite (0–50 mm, Schnellknöpfe hart / 2 / 5 / 10 mm) weich auf Weiß aus (= nicht
+  lasern) – die klassische Vignette, z. B. ein ovales Porträt mit weichem Rand auf Holz. Der
+  Verlauf ist eine S-Kurve; außerhalb der Maske wird wie bisher nie gelasert, der Bildrand selbst
+  ist keine Maskenkante (bei *Bereich ausblenden* wird nur das Loch weich). Der Dialog zeigt eine
+  kleine Vorschau wie gelasert. Am besten mit Dithering (Jarvis, Floyd …) oder Graustufen – dort
+  werden die Punkte zum Rand hin immer lichter. Mehrere ausgewählte maskierte Bilder bekommen
+  die Breite in einem Rückgängig-Schritt; 0 mm macht die Kante wieder hart. Die Breite wird in
+  Bildpunkten gespeichert (`"mask_feather"`, nur bei weicher Kante) und wächst beim Skalieren
+  mit; *Bildmaske lösen* macht das Bild wieder ganz und hart, *Zuschneiden* übernimmt den
+  Verlauf fest in die Bildpunkte. Bilder mit harter Maske bleiben bytegleich.
 - Jeder Import ist **ein** Rückgängig-Schritt und wird in die Arbeitsfläche (360×340 mm) eingepasst.
 - Code: `src/lumacut_import/` (Qt-frei) und `src/lumacut_import/qt.py` (Menü, Drop).
 
