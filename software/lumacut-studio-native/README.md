@@ -1279,6 +1279,16 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   gemessene Breite einer gelaserten Linie mit den eigenen Werten (Material, Leistung und
   Geschwindigkeit werden nicht modelliert). Nur Vorschau – Projekt und G-code bleiben
   unverändert. Code: `src/lumacut_import/spot_preview.py`.
+  **Länglicher Diodenpunkt**: neben der Punktgröße **X** gibt es eine eigene Größe **Y** (beide in
+  Maschinenlage, z. B. 0,08 × 0,06 mm – die meisten Diodenlaser brennen keinen runden Punkt, der
+  Emitter ist ein Streifen). Solange Y = X ist, folgt Y der X-Größe (runder Punkt wie bisher).
+  Der Strahl wird dann ein elliptischer Gauß, im Raster jedes Durchgangs um dessen Scan-Winkel
+  gedreht: die Spur ist **quer zur Scan-Richtung** so breit wie der Punkt in dieser Richtung
+  (0° = Y-Größe, 90° = X-Größe, dazwischen √(X²·sin² + Y²·cos²)). Streifen-/Überlappungs-Hinweis
+  und **Als Linienabstand** richten sich nach dieser Spurbreite (beim gezeigten Durchgang; alle
+  Durchgänge / Brennsumme: der erste), der Hinweis nennt außerdem die Spurbreite bei um 90°
+  gedrehtem Scan-Winkel, wenn sie sich um mindestens 15 % unterscheidet. Y wird wie X für alle
+  Bilder gespeichert (`image_preview/spot_y_mm`; ältere Einstellungen ohne Y = runder Punkt).
 - **Bild nachzeichnen** (*Datei › Bild nachzeichnen…*, *Alt+T*, wie LightBurn „Trace Image“):
   wandelt das ausgewählte Bild in Vektorkonturen. Schwellwert (dunkler = Kontur; Startwert aus den
   Bildeinstellungen), Invertieren, Glättung (Weichzeichnen vor dem Schwellwert), Toleranz
