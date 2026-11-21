@@ -808,8 +808,12 @@ Undo-Schritt.
   und ohne Rillen. Kreuzschraffur dreht beide Richtungen mit. Wirkt erst ab 2 Durchgängen
   (Durchgänge der Ebene); Konturen bleiben in jedem Durchgang gleich. Im G-Code steht je
   Durchgang `; FILL ANGLE a`; Zeitschätzung und Pfadvorschau zeigen jeden Durchgang mit
-  seinem Winkel, die Schraffur auf der Arbeitsfläche den ersten Durchgang. Offset-Füllung
-  hat keinen Winkel, das Feld ist dort ausgegraut.
+  seinem Winkel. Auch die Schraffur auf der Arbeitsfläche zeigt alle Durchgänge: den ersten
+  kräftig in der Ebenenfarbe, jeden weiteren Winkel blasser darunter (jeder Winkel nur
+  einmal, z. B. bei 0°/90°/0°/90° nur eine Kreuzlage) – so sieht man das Kreuzmuster schon
+  vor dem Senden. Mit Scan-Versatz ist nur der erste Durchgang verschoben dargestellt, die
+  weiteren als reine Füllgeometrie. Offset-Füllung hat keinen Winkel, das Feld ist dort
+  ausgegraut.
 - **Scan-Versatz** („Scan-Versatz…“, Menü „Auftrag“; wie LightBurn „Scanning Offset
   Adjustment“): bei schneller, bidirektionaler Gravur brennt der Laser in Fahrtrichtung
   etwas zu spät, hin- und rücklaufende Linien liegen versetzt und senkrechte Kanten werden
