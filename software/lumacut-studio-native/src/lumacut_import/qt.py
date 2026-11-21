@@ -298,8 +298,9 @@ class ImageSettingsDialog(QDialog):
         self.preview_pass_row.setVisible(False)
         # Laserpunkt simulieren: Spuren in der echten Punktgröße statt eines
         # Pixels je Laserpunkt (Lücken / Überlappung bei falschem Linienabstand).
-        from .spot_preview import SPOT_RANGE_MM, load_prefs
+        from .spot_preview import SPOT_RANGE_MM, load_prefs, load_spot_y
         sim_on, spot = load_prefs(prefs)
+        spot_y = load_spot_y(prefs, spot)
         self.spot_sim = QCheckBox("Laserpunkt simulieren")
         self.spot_sim.setObjectName("image_spot_sim")
         self.spot_sim.setChecked(sim_on)
@@ -311,12 +312,27 @@ class ImageSettingsDialog(QDialog):
                                  "der Auftrag bleibt unverändert.")
         self.spot_size = self._dspin(SPOT_RANGE_MM[0], SPOT_RANGE_MM[1], spot, 3, 0.01, " mm")
         self.spot_size.setObjectName("image_spot_size")
-        self.spot_size.setToolTip("Punktgröße (Breite einer gelaserten Linie), für alle Bilder "
-                                  "gespeichert")
+        self.spot_size.setPrefix("X ")
+        self.spot_size.setToolTip("Punktgröße in X der Maschine (Breite einer gelaserten Linie "
+                                  "entlang Y), für alle Bilder gespeichert")
+        # Diodenlaser brennen meist einen länglichen Punkt (z. B. 0,08 × 0,06 mm):
+        # Y getrennt, solange Y = X ist, folgt Y der X-Größe (runder Punkt).
+        self.spot_size_y = self._dspin(SPOT_RANGE_MM[0], SPOT_RANGE_MM[1], spot_y, 3, 0.01,
+                                       " mm")
+        self.spot_size_y.setObjectName("image_spot_size_y")
+        self.spot_size_y.setPrefix("Y ")
+        self.spot_size_y.setToolTip("Punktgröße in Y der Maschine (Breite einer gelaserten "
+                                    "Linie entlang X). Diodenlaser haben meist einen länglichen "
+                                    "Punkt (z. B. 0,08 × 0,06 mm) – dann ist die Spur quer zur "
+                                    "Scan-Richtung so breit wie der Punkt in dieser Richtung. "
+                                    "Gleich X = runder Punkt (Y folgt dann X).")
+        self._spot_x_last = self.spot_size.value()
         self.spot_to_interval = QPushButton("Als Linienabstand")
         self.spot_to_interval.setObjectName("image_spot_to_interval")
-        self.spot_to_interval.setToolTip("Linienabstand = Punktgröße setzen (die Spuren liegen "
-                                         "dicht an dicht, wie LightBurn und xTool es empfehlen)")
+        self.spot_to_interval.setToolTip("Linienabstand = Spurbreite quer zur Scan-Richtung "
+                                         "setzen (bei rundem Punkt die Punktgröße; die Spuren "
+                                         "liegen dicht an dicht, wie LightBurn und xTool es "
+                                         "empfehlen)")
         self.spot_to_interval.clicked.connect(self.apply_spot_interval)
         self.spot_row = QWidget()
         self.spot_row.setObjectName("image_spot_row")
@@ -324,6 +340,7 @@ class ImageSettingsDialog(QDialog):
         spot_row.setContentsMargins(0, 0, 0, 0)
         spot_row.addWidget(self.spot_sim)
         spot_row.addWidget(self.spot_size)
+        spot_row.addWidget(self.spot_size_y)
         spot_row.addWidget(self.spot_to_interval)
         self._apply_touch_sizes()
         self.preview_label = QLabel()
@@ -388,7 +405,8 @@ class ImageSettingsDialog(QDialog):
             w.valueChanged.connect(self._schedule_preview)
         self.negative.toggled.connect(self._schedule_preview)
         self.spot_sim.toggled.connect(self._spot_changed)
-        self.spot_size.valueChanged.connect(self._spot_changed)
+        self.spot_size.valueChanged.connect(self._spot_x_changed)
+        self.spot_size_y.valueChanged.connect(self._spot_changed)
         self._update()
         if self._gray is not None:
             self._preview_timer.stop()
@@ -399,22 +417,49 @@ class ImageSettingsDialog(QDialog):
         parent = self.parent()
         ed = getattr(parent, "canvas", parent)
         if bool(getattr(ed, "touch_mode", False)):
-            for w in (self.spot_sim, self.spot_size, self.spot_to_interval):
+            for w in (self.spot_sim, self.spot_size, self.spot_size_y, self.spot_to_interval):
                 w.setMinimumHeight(TOUCH_ROW_PX)
 
-    def spot_mm(self) -> float | None:
-        """Simulierte Punktgröße der Vorschau (None = aus)."""
-        return self.spot_size.value() if self.spot_sim.isChecked() else None
+    def spot_mm(self) -> float | tuple[float, float] | None:
+        """Simulierte Punktgröße der Vorschau (None = aus): eine Zahl für einen
+        runden Punkt, ``(X, Y)`` für einen länglichen Diodenpunkt."""
+        if not self.spot_sim.isChecked():
+            return None
+        x, y = self.spot_size.value(), self.spot_size_y.value()
+        from .spot_preview import ROUND_TOL
+        return x if abs(x - y) <= ROUND_TOL else (x, y)
+
+    def _spot_x_changed(self, value: float) -> None:
+        """Runder Punkt (Y = alte X-Größe): Y folgt X."""
+        from .spot_preview import ROUND_TOL
+        last, self._spot_x_last = self._spot_x_last, value
+        if abs(self.spot_size_y.value() - last) <= ROUND_TOL:
+            self.spot_size_y.blockSignals(True)
+            self.spot_size_y.setValue(value)
+            self.spot_size_y.blockSignals(False)
+        self._spot_changed()
 
     def _spot_changed(self, *_args) -> None:
         from .spot_preview import save_prefs
-        save_prefs(self._prefs, self.spot_sim.isChecked(), self.spot_size.value())
+        save_prefs(self._prefs, self.spot_sim.isChecked(), self.spot_size.value(),
+                   self.spot_size_y.value())
         self.spot_size.setEnabled(self.spot_sim.isChecked())
+        self.spot_size_y.setEnabled(self.spot_sim.isChecked())
         self._update()
 
+    def spot_track_mm(self) -> float:
+        """Spurbreite quer zur Scan-Richtung des gezeigten Durchgangs (alle
+        Durchgänge / Brennsumme: der erste)."""
+        from .image_preview import pass_angle
+        from .spot_preview import track_width
+        sel = self.preview_pass_index()
+        angle = pass_angle(self.settings(), max(0, sel))
+        return track_width(self.spot_size.value(), self.spot_size_y.value(), angle)
+
     def apply_spot_interval(self) -> None:
-        """Linienabstand = Punktgröße (im erlaubten Bereich des Linienabstands)."""
-        self.interval.setValue(self.spot_size.value())
+        """Linienabstand = Spurbreite quer zur Scan-Richtung (runder Punkt: die
+        Punktgröße; im erlaubten Bereich des Linienabstands)."""
+        self.interval.setValue(round(self.spot_track_mm(), self.interval.decimals()))
 
     @staticmethod
     def _dspin(lo, hi, value, decimals, step, suffix) -> QDoubleSpinBox:
@@ -438,6 +483,7 @@ class ImageSettingsDialog(QDialog):
         self.sharpen_radius.setEnabled(self.sharpen.value() > 0)
         self.angle_increment.setEnabled(self.passes.value() > 1)
         self.spot_size.setEnabled(self.spot_sim.isChecked())
+        self.spot_size_y.setEnabled(self.spot_sim.isChecked())
         self._update_pass_choices()
         dpi = 25.4 / self.interval.value()
         src_dpi = self._px / self._width_mm * 25.4 if self._width_mm > 0 else 0
@@ -540,12 +586,13 @@ class ImageSettingsDialog(QDialog):
             from .spot_preview import verdict_text
             info = pv.spot
             sw, sh = info.size_mm
-            text = (f"Vorschau: Laserpunkt {info.spot_mm:g} mm simuliert, {info.dots[0]} × "
+            text = (f"Vorschau: Laserpunkt {info.label} simuliert, {info.dots[0]} × "
                     f"{info.dots[1]} Laserpunkte = {sw:.1f} × {sh:.1f} mm, "
                     f"{pv.burn_share * 100:.0f} % gelasert")
             if pv.cropped or info.cropped:
                 text += " (Lupe auf die Bildmitte)"
-            text += ". " + verdict_text(info.interval_mm, info.spot_mm)
+            text += ". " + verdict_text(info.interval_mm, info.spot_mm, info.spot_y_mm,
+                                        info.angle)
         elif pv.cropped:
             text += " (Ausschnitt aus der Bildmitte)"
         rot = self._shape.geom.rot if self._shape is not None else 0.0

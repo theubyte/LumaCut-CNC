@@ -71,27 +71,43 @@ def preview_settings(st: ImageSettings) -> RasterSettings:
 
 def preview_array(gray: np.ndarray, width_mm: float, height_mm: float,
                   settings: ImageSettings, max_pixels: int = MAX_PREVIEW_PIXELS,
-                  spot_mm: float | None = None) -> Preview:
+                  spot_mm: float | tuple[float, float] | None = None) -> Preview:
     """Gravurbild (Laserpunkte) für ``gray`` (uint8, 0 = schwarz) in ``width_mm × height_mm``.
     ``spot_mm``: Laserpunkt simulieren (:func:`with_spot`)."""
     st = settings.normalized()
     g = resample(gray, width_mm, height_mm, st.line_interval_mm)
-    return with_spot(preview_pixels(g, st, max_pixels), st, spot_mm, max_pixels)
+    # Ohne Bildobjekt laufen die Zeilen waagerecht; ein länglicher Punkt liegt
+    # trotzdem so zur Zeile wie im ersten Durchgang des Auftrags.
+    return with_spot(preview_pixels(g, st, max_pixels), st, spot_mm, max_pixels,
+                     pass_angle(st, 0))
 
 
-def with_spot(pv: Preview, settings: ImageSettings, spot_mm: float | None,
-              max_pixels: int = MAX_PREVIEW_PIXELS) -> Preview:
+def split_spot(spot_mm) -> tuple[float, float | None]:
+    """``spot_mm`` als Zahl (runder Punkt) oder ``(X, Y)`` (länglicher
+    Diodenpunkt) → ``(X, Y oder None)``."""
+    if isinstance(spot_mm, (tuple, list)):
+        x, y = spot_mm
+        return float(x), (None if y is None else float(y))
+    return float(spot_mm), None
+
+
+def with_spot(pv: Preview, settings: ImageSettings, spot_mm,
+              max_pixels: int = MAX_PREVIEW_PIXELS, angle: float = 0.0) -> Preview:
     """Vorschau ``pv`` (ein Pixel je Laserpunkt, Zeilen = Rasterzeilen) durch
     das Bild der gelaserten Spuren mit der Punktgröße ``spot_mm`` ersetzen
     (:func:`lumacut_import.spot_preview.simulate_spot`, Punktbreitenkorrektur
-    wie im Auftrag); ``None`` = unverändert. ``burn_share`` bleibt der Anteil
+    wie im Auftrag); ``None`` = unverändert. ``spot_mm`` darf ``(X, Y)`` sein
+    (länglicher Diodenpunkt in Maschinenlage), ``angle`` ist dann der
+    Scan-Winkel des Rasters von ``pv``. ``burn_share`` bleibt der Anteil
     gelaserter Punkte."""
     if spot_mm is None:
         return pv
     from .spot_preview import simulate_spot
     st = settings.normalized()
-    pv.pixels, pv.spot = simulate_spot(pv.pixels, st.line_interval_mm, spot_mm,
-                                       st.dot_width_mm, max_pixels)
+    x, y = split_spot(spot_mm)
+    pv.pixels, pv.spot = simulate_spot(pv.pixels, st.line_interval_mm, x,
+                                       st.dot_width_mm, max_pixels, spot_y_mm=y,
+                                       angle=angle)
     return pv
 
 
@@ -172,7 +188,7 @@ def render_for_preview(shape, settings: ImageSettings, pass_index: int = 0):
 
 
 def preview_shape(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_PIXELS,
-                  rendered=None, pass_index: int = 0, spot_mm: float | None = None) -> Preview:
+                  rendered=None, pass_index: int = 0, spot_mm: float | tuple[float, float] | None = None) -> Preview:
     """Vorschau eines Bildobjekts mit genau den Pixeln des Auftrags
     (:func:`lumacut_job.images.image_job`): gerendert samt Drehung, im
     Maschinen-Nullpunkt oben rechts gespiegelt gerechnet (Fehlerverteilung
@@ -201,7 +217,7 @@ def preview_shape(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_
         if not pv.cropped and mask is not None and mask.shape == pv.pixels.shape and mask.any():
             # Anteil bezogen auf das Bild, nicht auf das größere gedrehte Raster.
             pv.burn_share = min(1.0, pv.burn_share * mask.size / int(mask.sum()))
-        pv = with_spot(pv, st, spot_mm, max_pixels)
+        pv = with_spot(pv, st, spot_mm, max_pixels, angle)
         pv.pixels = rotate_pixels(pv.pixels, angle)
         return pv
     if IMAGE_FLIP_X:
@@ -285,7 +301,7 @@ def sum_previews(previews: list[Preview], counts: list[int] | None = None) -> Pr
 
 def preview_shape_passes(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_PIXELS,
                          rendered_for=None, burn_sum: bool = False,
-                         spot_mm: float | None = None) -> Preview:
+                         spot_mm: float | tuple[float, float] | None = None) -> Preview:
     """Alle Durchgänge eines Bildobjekts mit Winkel-Schritt übereinander
     (:func:`overlay_previews`); jeder Winkel wird nur einmal gerechnet.
     ``rendered_for(pass_index)``: liefert ein bereits gerechnetes
