@@ -17277,3 +17277,90 @@ line interval, one with scan angle 0°, one with 90°; measure one single line a
 along Y with a loupe and enter them as „X“ / „Y“. With an oblong spot the simulation should
 show stripes (or overlap) in exactly the square where the burn shows them, and „Als
 Linienabstand“ should give an evenly closed square in both directions.
+
+## 110. Status update 2026-11-21 (review round 103)
+
+Done this round (movable preview window and spot magnifier; Machine / Scan Probe / Materials
+untouched – the crop helpers in `lumacut_import/spot_preview.py`, the `focus_mm` pass-through in
+`lumacut_import/image_preview.py` and the drag / „Mitte“ handling of the preview in
+`lumacut_import/qt.py`; planner, G-code writer, job, project format, Pi, camera and material
+code unchanged):
+
+- Closed since §109 by others: none – main had no commit since `ee80d4d` (round 102); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note; `canvas-work` and
+  `pi-ui-redesign` have no new commits since 2026-10-26.
+- Gap picked: the magnifier limit of the spot simulation in §108 / §109 („the magnifier always
+  shows the image centre (no panning)“) together with the older crop limit of the image preview
+  itself (§34: „big images as a centre crop ≤ 360 000 dots“). A photo of 60 × 60 mm or more at
+  0.1 mm (≥ 600 × 600 dots) was only previewed in its middle, and the spot magnifier of
+  rounds 101 / 102 (often only 10–15 mm wide) as well – the parts users actually check before
+  burning (eyes, text, fine edges, the dark background) usually are not in the middle.
+  LightBurn's *Adjust Image* preview can be zoomed and panned; LumaCut's could not. No user
+  decision, no hardware, no material library, finishable with tests and not owned by another
+  agent. Touch use (drag with the finger) is part of the priorities. CoreXY time model (frame
+  not built, Machine), the xTool text style import (no sample file), the mask follow-ups of §107
+  and adding energy across passes in the burn sum were weighed but help less day to day.
+- **Window**: `preview_array`, `preview_shape` and `preview_shape_passes` take `focus_mm` – the
+  centre of the shown window in mm next to the image centre, canvas orientation (x right,
+  y down); None or (0, 0) = the old centred crop, byte-identical. `focus_dots` maps it into the
+  raster that is computed: turned by the scan angle of the pass (the inverse of
+  `rotate_pixels`), mirrored in X for the top-right origin (`IMAGE_FLIP_X`); the object rotation
+  needs nothing extra because the canvas offset already lies in the rendered frame.
+  `preview_pixels(…, offset=)` moves the crop of large images (filter margin of sharpen /
+  sketch moves along, so the window shows the same dots as the whole image there – threshold
+  and sharpen checked pixel by pixel); `simulate_spot(…, offset=)` moves the magnifier inside
+  that window (`offset_crop`: nearest dot, clamped to the edges; `SpotInfo.center` /
+  `Preview.center` report the real centre, `Preview.focus_mm` the real centre in canvas mm,
+  None when the whole image is shown). All passes / burn sum: if an edge stops the centre
+  differently in two passes (an oblique raster is bigger), all passes are computed again with
+  the tightest common centre (per axis the smallest value towards the wish), so the windows
+  still lie on top of each other.
+- **Dialog**: drag the preview with the mouse or the finger (Qt turns touch into mouse events,
+  Windows touch screens included) like a map – the content follows the pointer, the scale is
+  the shown pixmap (preview dots or magnifier sub-pixels per screen pixel); open / closed hand
+  cursor while a window is shown. Double-click or **„Mitte“** (in the row under the preview,
+  44 px in touch mode, only enabled when moved) goes back to the centre. The focus is clamped
+  to the (rotated) image box (`clamp_focus`) and after each preview set to the real centre, so
+  dragging back from an edge has no dead way. It survives changes of line interval, mode, pass
+  and spot; it is not saved (per dialog). The text under the preview names the place:
+  „Ausschnitt aus der Bildmitte – ziehen verschiebt“, „Lupe 12.0 mm links, 6.0 mm über der
+  Bildmitte – ziehen verschiebt, Doppelklick = Mitte“. Small images (whole image shown) do not
+  react to dragging.
+
+Tests: new `tests/test_image_preview_pan.py` (44 tests): centred crop equal to the old formula
+(also for (0, 0) and invalid offsets), window following the offset and stopping at the edges,
+magnifier offset and clamp, whole magnifier ignoring the offset, moved window equal to the same
+part of the whole image incl. the sharpen margin; focus round trip for 0° / 30° / 90° / −45°
+with and without mirror, focus clamped to a turned image; black block found for 0° / 30° / 90° /
+−45° scans, both origins, rotated images (and not with the wrong turn), byte-identical previews
+without focus (plain, round and oblong spot, oblique scan, all passes, array), array preview,
+spot magnifier on the block incl. inside a moved preview window, all passes / burn sum sharing
+one window, common focus rule, job untouched; dialog: centred start with hint and hand cursor,
+small image without window, mouse drag like a map (QTest), double-click and „Mitte“, drag to the
+block, edge stop without dead way back, rotated image, magnifier drag scale, focus kept across
+settings, all passes in the dialog, position text, touch 44 px, no image data.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3936 passed, 3 skipped** (23.5 min; 3892 + 44 new preview window tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – the window is preview only and not saved; without a focus
+the previews take the unchanged centred crop; no new image setting or project key, G-code, job,
+frame, estimate and export byte-identical.
+
+Still open: unchanged from §109 except the magnifier panning – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell, Materials
+items, CoreXY time model, the xTool text style import, the mask follow-ups of §107 (feathered
+edge, open paths, several masks, xTool masks), the trim refinements of §92, the print-and-cut
+limits of §93 / §94, the single-line font limits of §95 / §96 / §100 / §106, the warp limits of
+§97, the case limits of §98, the vertical text limits of §99, the box generator limits of §101,
+the living hinge limits of §102, the bent box limits of §103, the justified line limits of §104,
+the inline editing limits of §105 and the spot simulation limits of §109 (rectangular flat-top
+spot, per-material spot, material response, spot not on the canvas / path preview, burn sum
+averaging darkness). For the window: no zoom (the window size stays the 600 × 600 dot crop /
+the magnifier size of §108), no overview with a frame of the shown part, no keyboard panning,
+error diffusion (Floyd, Jarvis, …) starts fresh at the window edge like the centred crop did
+before (the first rows of the window can differ slightly from the job there), the position is
+not remembered between dialogs.
+Hardware check: on the Windows app (also with the touch screen) open the image settings of a
+100 × 100 mm photo at 0.1 mm, drag the preview to a face in a corner, switch on „Laserpunkt
+simulieren“ and drag the magnifier over the eyes; engrave a 20 × 20 mm test of that corner – the
+burn should show the structure the magnifier showed. Double-tap returns to the centre.
