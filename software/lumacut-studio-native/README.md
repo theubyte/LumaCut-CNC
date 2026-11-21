@@ -349,6 +349,14 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     weggeschoben), „Innere Konturen auslassen“ (Löcher – auch eigene Objekte derselben Ebene)
     und „Vorhandene manuelle Stege ersetzen“; Zähler live im Dialog, ein Undo-Schritt, danach
     lässt sich jeder Steg einzeln verschieben oder entfernen.
+    Solange der Dialog offen ist, zeigt die Arbeitsfläche live, wo die Stege landen
+    („Vorschau auf der Arbeitsfläche“, an): blaue Balken mit weißem Rand = neuer Steg, graue
+    Balken = alter manueller Steg, der ersetzt würde, gestrichelte graue Kontur = ausgelassen
+    (innere Kontur oder zu kurz); orange bleiben die Stege, die unverändert bleiben. Jede
+    Änderung im Dialog (Anzahl, Abstand, Ecken meiden …) aktualisiert die Vorschau sofort; erst
+    OK ändert das Projekt (ein Undo-Schritt), Abbrechen lässt alles unverändert. Würde der
+    Dialog die Objekte verdecken, rückt er daneben (rechts, links, darüber oder darunter). Im
+    Touch-Modus sind alle Felder, Schalter und Knöpfe mindestens 44 px hoch.
     Code: `lumacut_canvas/tabs.py`, `tabs_ui.py`, `lumacut_job/cutpath.py`.
   - *Startpunkt* (Werkzeug „Startpunkt“, Alt+Umschalt+A, wie LightBurns *Set Start Point*):
     Tippen auf den Umriss einer geschlossenen Form legt dort fest, wo ihre Kontur beginnt
