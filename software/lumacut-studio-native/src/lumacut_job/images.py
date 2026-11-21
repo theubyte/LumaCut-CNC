@@ -143,7 +143,8 @@ def render_inside(shape: Shape, interval_mm: float) -> np.ndarray | None:
     """Bool-Maske „Pixel liegt im (gedrehten) Bild“ im Raster von :func:`render_gray`.
 
     ``None`` bei ungedrehten Bildern ohne Alpha (Hüllbox = Bild, alles innen).
-    Zugeschnittene Bilder (Alpha): innen = sichtbarer Teil (Alpha ≥ 50 %).
+    Zugeschnittene Bilder (Alpha): innen = sichtbarer Teil (Alpha ≥ 50 %; weiche
+    Maskenkante: jedes Alpha > 0, siehe :func:`_inside_level`).
     """
     alpha = alpha_qimage(shape)
     if not shape.geom.rot and alpha is None:
@@ -172,7 +173,15 @@ def render_inside(shape: Shape, interval_mm: float) -> np.ndarray | None:
     p.end()
     stride = canvas.bytesPerLine()
     arr = np.frombuffer(canvas.constBits(), dtype=np.uint8, count=stride * rows)
-    return arr.reshape(rows, stride)[:, :cols] >= 128
+    return arr.reshape(rows, stride)[:, :cols] >= _inside_level(shape)
+
+
+def _inside_level(shape: Shape) -> int:
+    """Alpha from which a pixel counts as inside: 50 % (cropped / hard masked images) – or
+    any alpha for a soft mask edge (:attr:`RasterImage.mask_feather`), so image adjustments
+    keep the whole fade instead of cutting its outer half."""
+    im = shape.image
+    return 1 if im is not None and im.mask and im.mask_feather > 0 else 128
 
 
 def _strip(program: str) -> list[str]:
@@ -360,7 +369,7 @@ def render_inside_frame(shape: Shape, geo: ScanGeometry) -> np.ndarray:
     if alpha is not None:   # zugeschnittenes Bild: sichtbarer Teil
         arr = _paint_frame(shape, geo, QColor(0, 0, 0),
                            lambda p: p.drawImage(QRectF(lb.x, lb.y, lb.w, lb.h), alpha))
-        return arr >= 128
+        return arr >= _inside_level(shape)
     arr = _paint_frame(shape, geo, QColor(0, 0, 0),
                        lambda p: p.fillRect(QRectF(lb.x, lb.y, lb.w, lb.h), QColor(255, 255, 255)))
     return arr >= 128

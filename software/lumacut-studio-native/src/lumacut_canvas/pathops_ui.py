@@ -218,7 +218,7 @@ def add_to_bar(editor, bar) -> QToolButton:
     btn.setObjectName("PathOpsButton")
     btn.setIcon(icons.icon("pathops"))
     btn.setToolTip("Pfad: vereinigen, abziehen, schneiden, verschweißen, versetzen, Ecken abrunden, verzerren, Text in Pfade, "
-                   "Bild mit Form zuschneiden, Maske auf Bild anwenden / Bereich ausblenden / lösen, "
+                   "Bild mit Form zuschneiden, Maske auf Bild anwenden / Bereich ausblenden / lösen / weiche Kante, "
                    "zerlegen / kombinieren, Pfade verbinden / schließen / vereinfachen, Duplikate löschen, "
                    "manuelle Stege (setzen, gleichmäßig verteilen, entfernen), Startpunkt der Kontur, "
                    "Richtung umkehren")

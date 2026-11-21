@@ -912,7 +912,7 @@ class ImportTools(QObject):
         menu.addAction(self.trace_action)
         if "image_crop" in by:      # Bild mit Form zuschneiden (lumacut_canvas.imagecrop_ui)
             menu.addAction(by["image_crop"])
-        for name in ("image_mask", "image_mask_hide", "image_mask_release"):   # Live-Bildmaske (imagemask_ui)
+        for name in ("image_mask", "image_mask_hide", "image_mask_release", "image_mask_feather"):   # Live-Bildmaske (imagemask_ui)
             if name in by:
                 menu.addAction(by[name])
         if "export" in by:

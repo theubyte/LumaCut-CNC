@@ -347,6 +347,11 @@ class RasterImage:
     # Lösen zurückkommt. Leer = keine Maske (bisheriges Verhalten).
     mask: tuple = ()
     mask_layer: str = ""
+    # Weiche Maskenkante (Runde 105, :func:`imagemask.feather_alpha`): Breite des Verlaufs in
+    # Bildpunkten von ``png`` – innen an der Maskenkante blendet das Bild weich auf Weiß
+    # (= nicht lasern) aus. Bildpunkte statt mm, damit der Verlauf beim Skalieren mitwächst
+    # wie die Maske. 0 = harte Kante (bisheriges Verhalten); nur mit Maske wirksam.
+    mask_feather: float = 0.0
 
     @property
     def view_png(self) -> bytes:
@@ -354,7 +359,7 @@ class RasterImage:
         if not self.mask:
             return self.png
         from .imagemask import masked_png
-        return masked_png(self.png, self.px_width, self.px_height, self.mask)
+        return masked_png(self.png, self.px_width, self.px_height, self.mask, self.mask_feather)
 
     def dpi(self, width_mm: float) -> float:
         """Effektive Auflösung bei der aktuellen Objektbreite."""
@@ -368,6 +373,8 @@ class RasterImage:
             d["mask"] = [[[u, v] for u, v in ring] for ring in self.mask]
             if self.mask_layer:
                 d["mask_layer"] = self.mask_layer
+            if self.mask_feather > 0:
+                d["mask_feather"] = round(float(self.mask_feather), 3)
         return d
 
     @staticmethod
@@ -380,8 +387,15 @@ class RasterImage:
             raise ValueError("Bildgröße fehlt")
         mask = tuple(tuple((float(u), float(v)) for u, v in ring)
                      for ring in d.get("mask") or () if len(ring) >= 3)
+        try:
+            feather = float(d.get("mask_feather", 0.0)) if mask else 0.0
+        except (TypeError, ValueError):
+            feather = 0.0
+        if not math.isfinite(feather) or feather < 0:
+            feather = 0.0
         return RasterImage(png, w, h, ImageSettings.from_dict(d.get("settings", {})),
-                           mask=mask, mask_layer=str(d.get("mask_layer", "")) if mask else "")
+                           mask=mask, mask_layer=str(d.get("mask_layer", "")) if mask else "",
+                           mask_feather=feather)
 
 
 # Vorgabefarben für neue Ebenen, gut unterscheidbar auf dunklem Grund.

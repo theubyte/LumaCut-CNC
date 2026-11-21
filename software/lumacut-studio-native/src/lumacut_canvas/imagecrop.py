@@ -154,7 +154,7 @@ def crop_image(image: Shape, shapes) -> CropResult:
     if (w, h) != (image.image.px_width, image.image.px_height):
         image = replace(image, image=replace(image.image, px_width=w, px_height=h))
     if image.image.mask:
-        image = replace(image, image=replace(image.image, mask=(), mask_layer=""))
+        image = replace(image, image=replace(image.image, mask=(), mask_layer="", mask_feather=0.0))
     inside = mask_pixels(image, masks)
     visible = inside if alpha is None else (inside & (alpha > 0))
     before = int(np.count_nonzero(alpha > 0)) if alpha is not None else w * h

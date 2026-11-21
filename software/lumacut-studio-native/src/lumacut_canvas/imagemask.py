@@ -25,6 +25,17 @@ Unlike :mod:`imagecrop` (destructive *Crop Image*), the mask is stored on the im
   release, project files, view and job need nothing new. Several selected images take the
   same shapes at once (:class:`imagemask_ui.ImageMask`).
 
+* **Soft edge** (round 105, „Weiche Maskenkante …“): :attr:`model.RasterImage.mask_feather`
+  is the width (pixels of ``png``) of a fade *inside* the mask edge – the alpha rises along an
+  S-curve (smoothstep) from 0 on the edge to full at the feather width, so the photo fades to
+  white (= no burn) instead of ending at a hard line: the classic vignette of an oval portrait
+  on wood. Outside the mask nothing changes (still never lasered); the image border is no mask
+  edge and is not faded. Distance in pixels via OpenCV's exact distance transform. The fade is
+  part of :attr:`RasterImage.view_png` (grey + soft alpha), so canvas, job, preview and export
+  take it from the same place; the job composites the soft alpha onto white and – only for a
+  feathered image – counts every pixel with alpha ≥ 1 as inside, so image adjustments do not
+  cut the outer half of the fade.
+
 A plain first „Maske auf Bild anwenden“ stores the shapes' rings exactly as before (no
 polygon operation), so masks of round 100 stay byte-identical.
 
@@ -33,6 +44,7 @@ Images without a mask (every image before this feature) are unchanged byte for b
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from functools import lru_cache
 
@@ -47,6 +59,8 @@ FLATTEN_TOL_MM = 0.01
 MAX_MASK_POINTS = 200_000
 MODES = ("keep", "hide")       # keep = show inside the shapes (mask), hide = make them transparent
 MIN_AREA_PX2 = 1e-6            # slivers of the polygon operations below this are dropped
+FEATHER_RANGE_MM = (0.0, 50.0)  # width of the soft mask edge in the dialog
+MAX_FEATHER_PX = 4000.0        # stored width at most (keeps the distance transform meaningful)
 
 
 class MaskError(CropError):
@@ -88,24 +102,50 @@ def mask_inside(w: int, h: int, mask) -> np.ndarray:
     return _bytes_of(canvas, h)[:, :w] >= 128
 
 
+def feather_alpha(inside: np.ndarray, feather_px: float) -> np.ndarray:
+    """Soft alpha (float 0..1, h × w) of the bool ``inside`` area with a fade ``feather_px``
+    wide inside its edge (smoothstep of the pixel centre's distance to the nearest outside
+    pixel centre minus half a pixel). The image border is no edge. ``feather_px`` ≤ 0.5 gives
+    the hard mask (1 inside, 0 outside)."""
+    inside = np.asarray(inside, bool)
+    f = float(feather_px)
+    if not math.isfinite(f) or f <= 0.5 or not inside.any():
+        return inside.astype(np.float32)
+    import cv2
+    padded = np.pad(inside, 1, constant_values=True).astype(np.uint8)
+    dist = cv2.distanceTransform(padded, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)[1:-1, 1:-1]
+    t = np.clip((dist - 0.5) / f, 0.0, 1.0)
+    return np.where(inside, t * t * (3.0 - 2.0 * t), 0.0).astype(np.float32)
+
+
 @lru_cache(maxsize=32)
-def _masked(png: bytes, w: int, h: int, mask: tuple) -> bytes:
+def _masked(png: bytes, w: int, h: int, mask: tuple, feather: float = 0.0) -> bytes:
     gray, alpha = decode_png(png)
     ph, pw = gray.shape
     inside = mask_inside(pw, ph, mask)
     base = np.full(gray.shape, 255, np.uint8) if alpha is None else alpha
-    new_alpha = np.where(inside, base, 0).astype(np.uint8)
+    if feather > 0:
+        soft = feather_alpha(inside, feather)
+        new_alpha = np.rint(base.astype(np.float32) * soft).astype(np.uint8)
+    else:
+        new_alpha = np.where(inside, base, 0).astype(np.uint8)
     new_gray = np.where(new_alpha > 0, gray, 255).astype(np.uint8)
     if bool((new_alpha == 255).all()):
         return encode_png(new_gray)
     return encode_png(new_gray, new_alpha)
 
 
-def masked_png(png: bytes, w: int, h: int, mask) -> bytes:
-    """``png`` with the mask applied (cached – the canvas asks on every repaint)."""
+def masked_png(png: bytes, w: int, h: int, mask, feather: float = 0.0) -> bytes:
+    """``png`` with the mask applied (cached – the canvas asks on every repaint).
+
+    ``feather`` = width of the soft edge in pixels (0 = hard edge, the result of round 100)."""
     if not mask:
         return png
-    return _masked(png, int(w), int(h), tuple(tuple(map(tuple, r)) for r in mask))
+    rings = tuple(tuple(map(tuple, r)) for r in mask)
+    f = float(feather) if feather and math.isfinite(float(feather)) and feather > 0 else 0.0
+    if f:
+        return _masked(png, int(w), int(h), rings, f)
+    return _masked(png, int(w), int(h), rings)
 
 
 # ------------------------------------------------------------------------- apply / release
@@ -258,9 +298,100 @@ def mask_outline(image: Shape, layer_id: str) -> Shape:
 def release_mask(image: Shape, layer_id: str) -> tuple[Shape, Shape]:
     """(image without mask, mask outline on ``layer_id``)."""
     outline = mask_outline(image, layer_id)
-    whole = replace(image, image=replace(image.image, mask=(), mask_layer=""))
+    whole = replace(image, image=replace(image.image, mask=(), mask_layer="", mask_feather=0.0))
     return whole, outline
 
 
-__all__ = ["MODES", "MaskError", "MaskResult", "apply_mask", "area_rings", "combine_rings",
-           "mask_inside", "mask_outline", "mask_rings", "masked_png", "release_mask", "ring_area"]
+# ------------------------------------------------------------------------- soft edge
+
+def px_per_mm(image: Shape) -> float:
+    """Pixels of ``png`` per mm of the image's current width (0 without width)."""
+    lb = image.geom.local_bounds()
+    return image.image.px_width / abs(lb.w) if lb.w else 0.0
+
+
+def feather_mm(image: Shape) -> float:
+    """The image's soft mask edge in mm at its current size (0 = hard)."""
+    if image.kind != "image" or image.image is None or not image.image.mask:
+        return 0.0
+    ppm = px_per_mm(image)
+    return image.image.mask_feather / ppm if ppm else 0.0
+
+
+@dataclass
+class FeatherResult:
+    shape: Shape            # the image with the new soft edge (same id)
+    feather_px: float       # stored width in pixels
+    soft_share: float       # share of the visible pixels lying in the fade (0..1)
+
+
+def set_feather(image: Shape, width_mm: float) -> FeatherResult:
+    """Image with a soft mask edge ``width_mm`` wide (0 = hard edge again); see module doc."""
+    if image.kind != "image" or image.image is None:
+        raise MaskError("Für die weiche Kante ein Bild auswählen.")
+    if not image.image.mask:
+        raise MaskError("Das Bild hat keine Maske – erst „Maske auf Bild anwenden“ oder "
+                        "„Bereich im Bild ausblenden“, dann die Kante weich machen.")
+    try:
+        mm = float(width_mm)
+    except (TypeError, ValueError):
+        raise MaskError("Ungültige Breite für die weiche Kante.") from None
+    if not math.isfinite(mm) or mm < 0:
+        raise MaskError("Ungültige Breite für die weiche Kante.")
+    mm = min(mm, FEATHER_RANGE_MM[1])
+    ppm = px_per_mm(image)
+    if ppm <= 0:
+        raise MaskError("Das Bild hat keine Fläche.")
+    px = round(min(mm * ppm, MAX_FEATHER_PX), 3)
+    if px <= 0.5:
+        px = 0.0
+    if abs(px - image.image.mask_feather) < 1e-9:
+        raise MaskError("Die Kante hat schon diese Breite – nichts zu ändern." if px else
+                        "Die Maskenkante ist schon hart – nichts zu ändern.")
+    out = replace(image, image=replace(image.image, mask_feather=px))
+    _g, alpha = decode_png(out.image.view_png)
+    if alpha is None:
+        share = 0.0
+    else:
+        visible = int(np.count_nonzero(alpha))
+        share = int(np.count_nonzero((alpha > 0) & (alpha < 255))) / visible if visible else 0.0
+    return FeatherResult(out, px, share)
+
+
+@lru_cache(maxsize=4)
+def _preview_base(png: bytes, max_px: int):
+    """(grey, alpha or None, source width) of ``png`` scaled down to ≤ ``max_px`` (cached – the
+    dialog asks on every change of the width)."""
+    import cv2
+    gray, alpha = decode_png(png)
+    h, w = gray.shape
+    scale = min(1.0, float(max_px) / max(w, h))
+    pw, ph = max(1, int(round(w * scale))), max(1, int(round(h * scale)))
+    if (pw, ph) != (w, h):
+        gray = cv2.resize(gray, (pw, ph), interpolation=cv2.INTER_AREA)
+        alpha = None if alpha is None else cv2.resize(alpha, (pw, ph),
+                                                      interpolation=cv2.INTER_AREA)
+    gray.setflags(write=False)
+    if alpha is not None:
+        alpha.setflags(write=False)
+    return gray, alpha, w
+
+
+def feather_preview(image: Shape, width_mm: float, max_px: int = 220) -> np.ndarray:
+    """Small grey preview (uint8, ≤ ``max_px`` on the long side) of the masked image with a
+    soft edge ``width_mm`` wide, composited on white like the job sees it (white = no burn)."""
+    gray, alpha, w = _preview_base(image.image.png, int(max_px))
+    ph, pw = gray.shape
+    base = np.ones((ph, pw), np.float32) if alpha is None else alpha.astype(np.float32) / 255.0
+    if image.image.mask:
+        ppm = px_per_mm(image)
+        f = max(0.0, float(width_mm)) * ppm * (pw / w) if ppm else 0.0
+        base = base * feather_alpha(mask_inside(pw, ph, image.image.mask), f)
+    out = 255.0 - (255.0 - gray.astype(np.float32)) * base
+    return np.clip(np.rint(out), 0, 255).astype(np.uint8)
+
+
+__all__ = ["FEATHER_RANGE_MM", "FeatherResult", "MODES", "MaskError", "MaskResult", "apply_mask",
+           "area_rings", "combine_rings", "feather_alpha", "feather_mm", "feather_preview", "mask_inside",
+           "mask_outline", "mask_rings", "masked_png", "px_per_mm", "release_mask", "ring_area",
+           "set_feather"]

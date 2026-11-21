@@ -13,11 +13,19 @@ the overlap; „Bereich im Bild ausblenden“ (Ctrl+Alt+Shift+H) is the inverse 
 shapes' area turns transparent, the rest stays (on a masked image: more holes). With several
 images selected, every image the shapes overlap takes them in the same single undo step;
 images the shapes do not touch stay as they are.
+
+Soft edge (round 105): „Weiche Maskenkante …“ (Ctrl+Alt+Shift+F) asks for a width in mm and
+lets the masked image fade to white (= no burn) inside its mask edge – a vignette like an oval
+portrait on wood. Preview in the dialog, quick buttons, 0 mm = hard edge again; all selected
+masked images in one undo step. Computation in :func:`imagemask.set_feather`.
 """
 
 from __future__ import annotations
 
-from PySide6.QtGui import QKeySequence
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QImage, QKeySequence, QPixmap
+from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QHBoxLayout,
+                               QLabel, QPushButton)
 
 from . import imagemask
 from .commands import AddShapesCommand, DeleteShapesCommand
@@ -46,12 +54,96 @@ HIDE_TIP = ("Umgekehrte Maske: die Fläche der ausgewählten geschlossenen Forme
 RELEASE_TIP = ("Die Maske vom Bild lösen (wie LightBurns „Remove Mask“): das Bild ist wieder "
                "ganz, die Maskenform kommt als bearbeitbare Form zurück – ändern oder "
                "verschieben und neu anwenden.")
-MENU_ACTIONS = [APPLY, HIDE, RELEASE]
+FEATHER = "image_mask_feather"
+FEATHER_TEXT = "Weiche Maskenkante …"
+FEATHER_SHORTCUT = "Ctrl+Alt+Shift+F"
+FEATHER_TIP = ("Die Maskenkante eines Bildes weich machen: innen an der Kante blendet das Bild "
+               "über die eingestellte Breite sanft auf Weiß aus (= nicht lasern) – z. B. ein "
+               "ovales Porträt mit weichem Rand (Vignette) auf Holz. Außerhalb der Maske bleibt "
+               "alles frei, die Bildpunkte bleiben erhalten; 0 mm macht die Kante wieder hart. "
+               "Am besten mit Dithering (Jarvis, Floyd) oder Graustufen.  (Strg+Alt+Umschalt+F)")
+FEATHER_DEFAULT_MM = 3.0
+FEATHER_PRESETS_MM = (0.0, 2.0, 5.0, 10.0)
+MENU_ACTIONS = [APPLY, HIDE, RELEASE, FEATHER]
+
+
+class FeatherDialog(QDialog):
+    """Width of the soft mask edge (mm) with a small preview of the first image."""
+
+    def __init__(self, image, parent=None, value_mm: float = FEATHER_DEFAULT_MM,
+                 touch: bool = False, count: int = 1) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Weiche Maskenkante")
+        self.image = image
+        form = QFormLayout(self)
+        self.preview = QLabel()
+        self.preview.setObjectName("FeatherPreview")
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setMinimumSize(220, 120)
+        self.preview.setToolTip("Vorschau wie gelasert: Weiß = kein Laser")
+        form.addRow(self.preview)
+        self.width = QDoubleSpinBox()
+        self.width.setObjectName("FeatherWidth")
+        self.width.setRange(*imagemask.FEATHER_RANGE_MM)
+        self.width.setDecimals(1)
+        self.width.setSingleStep(0.5)
+        self.width.setSuffix(" mm")
+        self.width.setValue(float(value_mm))
+        self.width.setToolTip("Breite des Verlaufs innen an der Maskenkante (0 = harte Kante)")
+        if touch:
+            self.width.setMinimumHeight(44)
+        form.addRow("Breite", self.width)
+        row = QHBoxLayout()
+        self.preset_buttons = []
+        for mm in FEATHER_PRESETS_MM:
+            b = QPushButton("hart" if mm == 0 else f"{mm:g} mm")
+            b.setObjectName(f"FeatherPreset_{mm:g}")
+            if touch:
+                b.setMinimumHeight(44)
+            b.clicked.connect(lambda _=False, v=mm: self.width.setValue(v))
+            row.addWidget(b)
+            self.preset_buttons.append(b)
+        form.addRow(row)
+        self.readout = QLabel()
+        self.readout.setObjectName("FeatherReadout")
+        self.readout.setWordWrap(True)
+        form.addRow(self.readout)
+        self.count = count
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        if touch:
+            for b in self.buttons.buttons():
+                b.setMinimumHeight(44)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        form.addRow(self.buttons)
+        self.width.valueChanged.connect(self.update_preview)
+        self.update_preview()
+
+    def value(self) -> float:
+        return float(self.width.value())
+
+    def update_preview(self) -> None:
+        mm = self.value()
+        arr = imagemask.feather_preview(self.image, mm)
+        h, w = arr.shape
+        img = QImage(arr.tobytes(), w, h, w, QImage.Format_Grayscale8).copy()
+        self.preview.setPixmap(QPixmap.fromImage(img))
+        px = mm * imagemask.px_per_mm(self.image)
+        many = f" – gilt für alle {self.count} ausgewählten Bilder mit Maske" if self.count > 1 else ""
+        if px <= 0.5:
+            text = "Harte Kante: das Bild endet scharf an der Maske."
+        else:
+            text = (f"Verlauf {mm:g} mm (≈ {px:.0f} Bildpunkte) innen an der Maskenkante: das "
+                    f"Bild blendet weich auf Weiß aus, außerhalb wird nicht gelasert. Mit "
+                    f"Dithering wird der Rand immer lichter.")
+        self.readout.setText(text + many)
 
 
 class ImageMask:
     def __init__(self, editor) -> None:
         self.editor = editor
+        self.last_feather_mm = FEATHER_DEFAULT_MM   # last soft edge width (session)
+        self.ask_feather = None                     # tests: callable(image, mm, count) -> mm | None
 
     def _shapes(self):
         ed = self.editor
@@ -110,6 +202,60 @@ class ImageMask:
         """Make the selected shapes' area of the selected images transparent (inverse mask)."""
         return self.apply("hide")
 
+    def _ask_feather(self, image, value_mm: float, count: int):
+        dlg = FeatherDialog(image, self.editor, value_mm,
+                            touch=bool(getattr(self.editor, "touch_mode", False)), count=count)
+        return dlg.value() if dlg.exec() == QDialog.Accepted else None
+
+    def feather(self) -> bool:
+        """Ask for the soft edge width and set it on the selected masked images."""
+        ed = self.editor
+        doc = ed.document
+        images = [s for s in self._shapes() if s.kind == "image" and s.image is not None]
+        masked = [s for s in images if s.image.mask]
+        if not masked:
+            ed.notify("Weiche Maskenkante: ein Bild mit Maske auswählen" +
+                      (" – erst „Maske auf Bild anwenden“ oder „Bereich im Bild ausblenden“."
+                       if images else "."))
+            return False
+        if any(not doc.is_editable(s.id) for s in masked):
+            ed.notify("Weiche Maskenkante: die Ebene des Bildes ist gesperrt.")
+            return False
+        current = imagemask.feather_mm(masked[0])
+        ask = getattr(self, "ask_feather", None) or self._ask_feather
+        mm = ask(masked[0], round(current, 1) if current > 0 else self.last_feather_mm,
+                 len(masked))
+        if mm is None:
+            return False
+        results, errors = [], []
+        for image in masked:
+            try:
+                results.append(imagemask.set_feather(image, mm))
+            except imagemask.MaskError as e:
+                errors.append(str(e))
+        if not results:
+            ed.notify(f"Weiche Maskenkante: {errors[0]}")
+            return False
+        if mm > 0:
+            self.last_feather_mm = float(mm)
+        ed.undo_stack.beginMacro("Weiche Maskenkante")
+        for res in results:
+            ed.undo_stack.push(ReplaceShapeCommand(doc, res.shape, "Weiche Maskenkante"))
+        ed.undo_stack.endMacro()
+        ed.set_selection([res.shape.id for res in results])
+        skipped = (f" – {len(images) - len(results)} Bild"
+                   f"{'er' if len(images) - len(results) > 1 else ''} ohne Maske oder unverändert"
+                   if len(images) > len(results) else "")
+        what = "1 Bild" if len(results) == 1 else f"{len(results)} Bilder"
+        if results[0].feather_px <= 0:
+            ed.notify(f"Maskenkante wieder hart ({what}){skipped}")
+        else:
+            share = round(results[0].soft_share * 100)
+            ed.notify(f"Weiche Maskenkante {mm:g} mm ({what}): das Bild blendet innen an der "
+                      f"Kante auf Weiß aus ({share} % der sichtbaren Fläche im Verlauf) – 0 mm "
+                      f"macht die Kante wieder hart{skipped}")
+        return True
+
     def release(self) -> bool:
         """Release the mask of the selected images; True when changed."""
         ed = self.editor
@@ -150,4 +296,8 @@ def install(editor) -> ImageMask:
     r = editor._act(RELEASE, RELEASE_TEXT, lambda _=False: tool.release(), None)
     r.setToolTip(RELEASE_TIP)
     r.setStatusTip(RELEASE_TIP)
+    f = editor._act(FEATHER, FEATHER_TEXT, lambda _=False: tool.feather(),
+                    QKeySequence(FEATHER_SHORTCUT))
+    f.setToolTip(FEATHER_TIP)
+    f.setStatusTip(FEATHER_TIP)
     return tool
