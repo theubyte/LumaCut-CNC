@@ -17364,3 +17364,85 @@ Hardware check: on the Windows app (also with the touch screen) open the image s
 100 × 100 mm photo at 0.1 mm, drag the preview to a face in a corner, switch on „Laserpunkt
 simulieren“ and drag the magnifier over the eyes; engrave a 20 × 20 mm test of that corner – the
 burn should show the structure the magnifier showed. Double-tap returns to the centre.
+
+## 111. Status update 2026-11-21 (review round 104)
+
+Done this round (several image masks and hiding an area; Machine / Scan Probe / Materials
+untouched – `imagemask.py` / `imagemask_ui.py`, the menu entry in `lumacut_import/qt.py` and the
+tooltip of the Pfad button in `pathops_ui.py`; model, project format, job, planner, G-code
+writer, Pi and camera code unchanged):
+
+- Closed since §110 by others: none – main had no commit since `351891d` (round 103); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note; `canvas-work` and
+  `pi-ui-redesign` have no new commits since 2026-10-26.
+- Gap picked: the mask follow-ups of §107 „one mask per image (release before applying a new
+  one)“ and „several masks“, plus the inverse case. LightBurn's *Apply Mask to Image* works on
+  one image with one mask (remove it before a new one), and taking a part *out* of a photo (a
+  logo, a date stamp, a background corner) needs a grouped frame shape around the hole – a
+  frequent forum question. LumaCut had the same limits: a second mask was refused and an
+  inverse mask needed a hand-drawn rectangle around the image. Day-to-day photo
+  work, no user decision, no hardware, no material library, finishable with tests and not owned
+  by another agent. The CoreXY time model (frame not built, Machine), open paths as masks
+  (LightBurn also needs closed shapes), a feathered edge and the xTool mask import (no sample
+  file) were weighed but help less.
+- **Narrowing**: „Maske auf Bild anwenden“ on an image that already has a mask keeps only the
+  overlap of the old mask and the new shapes (`combine_rings(…, "keep")`, shapely in pixel
+  units: even-odd area of each ring set, intersection, back to normalised exterior + hole
+  rings). Shapes that do not touch the visible part, or that cover it completely, only show a
+  note („überdeckt den sichtbaren Teil nicht“, „ändert die Maske nicht“). The first plain mask
+  keeps the rings of round 100 unchanged (no polygon operation), so earlier masks stay
+  byte-identical.
+- **Hide** („Bereich im Bild ausblenden“, Ctrl+Alt+Shift+H, *Pfad* menu, context menu „Pfad“,
+  *Datei* menu, after „Maske auf Bild anwenden“): the inverse mask – the shapes' even-odd area
+  becomes transparent and is never lasered, the rest stays (`mode="hide"`: visible area minus
+  the shapes, on a plain image the image box minus the shapes). On a masked image it punches
+  further holes; keep and hide combine in any order (keep-then-hide equals hide-then-keep up
+  to rim pixels). Hiding everything or nothing visible is refused with a note. Pixels that were
+  already transparent in the PNG count as hidden.
+- **Several images**: with more than one image selected, every image the shapes overlap gets
+  them in the same single undo step; images the shapes do not touch stay unchanged and the
+  status line names them („1 Bild nicht berührt“). One image on a locked layer refuses the
+  whole step (as release does). The mask layer of the first mask is kept for release.
+- **Storage / release**: the result is still one set of even-odd rings in `RasterImage.mask` –
+  no new project key, view / job / frame / estimate / export / trace unchanged. „Bildmaske
+  lösen“ returns the combined outline as one polygon (after hiding: the image rectangle with the
+  hole), and applying that polygon again gives the same view.
+
+Tests: new `tests/test_image_mask_combine.py` (33 tests): first mask rings unchanged, unknown
+mode; narrowing to the overlap, order symmetry, inverse mask on a plain image (box + hole,
+complement of the keep mask), further holes, keep after hide equal to hide after keep, even-odd
+hide ring, hidden text; errors outside / nothing left / hidden part (keep and hide) / unchanged /
+disjoint; existing transparency counted as hidden, first mask layer kept, rotated image incl.
+release bounds and move, release re-applied to the same view, no burned point in a hidden
+circle (Jarvis), Pi-safe G-code (Floyd), save / load; editor: hide in one undo step, second
+apply narrowing with undo, several images keep / hide in one step with undo, untouched image
+named, locked image refusing all, wrong selection, release after hide, tooltip / shortcut /
+context menu order, touch 44 px row, unique main window shortcut and *Datei* menu. The round-100
+tests now expect the menu order apply / hide / release, the „ändert die Maske nicht“ note for a
+second identical mask, and two selected images to be fine (the wrong-selection case is now two
+images the shape does not touch).
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3969 passed, 3 skipped** (27.7 min; 3936 + 33 new mask tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – images without a mask and images with one plain mask keep
+their rings, view, G-code and project data byte-identical; only a second mask or a hidden area
+writes combined rings into the existing `"mask"` key.
+
+Still open: unchanged from §110 except the „one mask per image“ limit – camera placement beyond
+marks, automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell
+(waiting for the firmware decision on `LASER_POWER_TRAP`), Materials items, CoreXY time model,
+the xTool text style import, the trim refinements of §92, the print-and-cut limits of §93 / §94,
+the single-line font limits of §95 / §96 / §100 / §106, the warp limits of §97, the case limits
+of §98, the vertical text limits of §99, the box generator limits of §101, the living hinge
+limits of §102, the bent box limits of §103, the justified line limits of §104, the inline
+editing limits of §105, the spot simulation limits of §109 and the window limits of §110. For
+the mask: open paths and lines are still no masks (close them first, as in LightBurn); the edge
+stays pixel-exact (no feathering); the masks are merged into one outline at once, so the single
+masks cannot be released or moved one by one (release gives the combined outline); the mask
+shape is not shown as its own object while applied; the xTool import does not read xTool masks.
+Hardware check: on the Windows app (also with the touch screen: long press › Pfad) place a
+photo, draw a heart over it and „Maske auf Bild anwenden“; draw a small circle inside the heart,
+select image and circle and „Bereich im Bild ausblenden“ – the heart gets a hole; engrave it
+(Jarvis) on 4 mm plywood – no burn outside the heart or inside the circle. Then select two photos
+side by side and a star over the gap between them, „Maske auf Bild anwenden“ – both get their
+part of the star in one undo step.
