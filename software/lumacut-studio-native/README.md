@@ -1289,6 +1289,15 @@ laserbare Materialien. Siehe [docs/MATERIALS.md](docs/MATERIALS.md)
   Durchgänge / Brennsumme: der erste), der Hinweis nennt außerdem die Spurbreite bei um 90°
   gedrehtem Scan-Winkel, wenn sie sich um mindestens 15 % unterscheidet. Y wird wie X für alle
   Bilder gespeichert (`image_preview/spot_y_mm`; ältere Einstellungen ohne Y = runder Punkt).
+  **Ausschnitt / Lupe verschieben**: große Bilder zeigt die Vorschau als Ausschnitt von höchstens
+  600 × 600 Laserpunkten, die Laserpunkt-Simulation als Lupe – bisher immer aus der Bildmitte.
+  Jetzt lässt sich der gezeigte Bereich mit Maus oder Finger **ziehen** (wie eine Karte, der
+  Inhalt folgt dem Zeiger), **Doppelklick** oder **Mitte** (unter der Vorschau, 44 px im
+  Touch-Modus) setzt ihn zurück auf die Bildmitte. Die Mitte wird in mm neben der Bildmitte in
+  Canvas-Lage geführt und am Bildrand begrenzt; sie folgt Drehung des Bildes, Scan-Winkel, allen
+  Durchgängen / Brennsumme (alle mit derselben Mitte) und Linienabstand. Der Text unter der
+  Vorschau nennt die Lage („Lupe 12.0 mm links, 6.0 mm über der Bildmitte“). Nur Vorschau –
+  nicht gespeichert, Projekt und G-code bleiben unverändert.
 - **Bild nachzeichnen** (*Datei › Bild nachzeichnen…*, *Alt+T*, wie LightBurn „Trace Image“):
   wandelt das ausgewählte Bild in Vektorkonturen. Schwellwert (dunkler = Kontur; Startwert aus den
   Bildeinstellungen), Invertieren, Glättung (Weichzeichnen vor dem Schwellwert), Toleranz
