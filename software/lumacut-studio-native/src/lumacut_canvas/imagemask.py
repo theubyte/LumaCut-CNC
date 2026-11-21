@@ -15,6 +15,18 @@ Unlike :mod:`imagecrop` (destructive *Crop Image*), the mask is stored on the im
 * **Release**: the mask comes back as one closed polygon (with all rings) on the layer the
   shape came from, the image is whole again. Edit the outline and apply it again – that is
   how the mask is moved or reshaped.
+* **Several masks** (round 104): applying shapes to an image that already has a mask narrows
+  it – the new mask is the overlap of the old one and the shapes (two masks on top of each
+  other, like applying LightBurn's mask a second time to the masked result). **Hide**
+  (``mode="hide"``, „Bereich im Bild ausblenden“) is the opposite: the shapes' area becomes
+  transparent and the rest stays – the inverse mask, e.g. to take a logo, a date stamp or a
+  background corner out of a photo; on a masked image it punches further holes. Both combine
+  in any order; the result is stored as one set of even-odd rings (exterior + holes), so
+  release, project files, view and job need nothing new. Several selected images take the
+  same shapes at once (:class:`imagemask_ui.ImageMask`).
+
+A plain first „Maske auf Bild anwenden“ stores the shapes' rings exactly as before (no
+polygon operation), so masks of round 100 stay byte-identical.
 
 Images without a mask (every image before this feature) are unchanged byte for byte.
 """
@@ -25,12 +37,16 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 
 import numpy as np
+from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry.base import BaseGeometry
 
 from .imagecrop import CropError, _bytes_of, canvas_to_pixels, decode_png, encode_png, mask_shapes
 from .model import Shape
 
 FLATTEN_TOL_MM = 0.01
 MAX_MASK_POINTS = 200_000
+MODES = ("keep", "hide")       # keep = show inside the shapes (mask), hide = make them transparent
+MIN_AREA_PX2 = 1e-6            # slivers of the polygon operations below this are dropped
 
 
 class MaskError(CropError):
@@ -116,13 +132,65 @@ def mask_rings(image: Shape, shapes) -> tuple:
     return tuple(rings)
 
 
-def apply_mask(image: Shape, shapes) -> MaskResult:
-    """Image with the even-odd area of ``shapes`` as live mask (see module doc)."""
+def ring_area(rings, w: int, h: int) -> BaseGeometry:
+    """Even-odd area of normalised ``rings`` in pixel units (shapely) – like :func:`mask_inside`."""
+    area: BaseGeometry = Polygon()
+    for ring in rings:
+        if len(ring) < 3:
+            continue
+        area = area.symmetric_difference(Polygon([(u * w, v * h) for u, v in ring]).buffer(0))
+    return area
+
+
+def area_rings(area: BaseGeometry, w: int, h: int) -> tuple:
+    """Area in pixel units → normalised rings (every polygon's exterior and holes, even-odd)."""
+    if area.is_empty:
+        return ()
+    if isinstance(area, Polygon):
+        polys = [area]
+    elif isinstance(area, MultiPolygon):
+        polys = list(area.geoms)
+    else:
+        polys = [g for g in getattr(area, "geoms", ()) if isinstance(g, (Polygon, MultiPolygon))]
+        polys = [p for g in polys for p in (g.geoms if isinstance(g, MultiPolygon) else [g])]
+    rings = []
+    for p in polys:
+        if p.area <= MIN_AREA_PX2:
+            continue
+        for ring in (p.exterior, *p.interiors):
+            pts = [(float(x) / w, float(y) / h) for x, y in ring.coords]
+            if len(pts) > 1 and pts[0] == pts[-1]:
+                pts.pop()
+            if len(pts) >= 3:
+                rings.append(tuple(pts))
+    return tuple(rings)
+
+
+def combine_rings(old: tuple, new: tuple, mode: str, w: int, h: int) -> tuple:
+    """Rings of the combined mask: ``old`` (empty = whole image) narrowed by ``new``.
+
+    ``keep``: overlap of the old visible area and the shapes; ``hide``: the old visible area
+    without the shapes. A first ``keep`` mask returns ``new`` unchanged."""
+    if mode not in MODES:
+        raise ValueError(f"unknown mask mode {mode!r}")
+    if mode == "keep" and not old:
+        return tuple(new)
+    box = Polygon([(0, 0), (w, 0), (w, h), (0, h)])
+    base = ring_area(old, w, h).intersection(box) if old else box
+    shapes = ring_area(new, w, h)
+    area = base.intersection(shapes) if mode == "keep" else base.difference(shapes)
+    return area_rings(area, w, h)
+
+
+def apply_mask(image: Shape, shapes, mode: str = "keep") -> MaskResult:
+    """Image with the even-odd area of ``shapes`` as live mask (see module doc).
+
+    ``mode="keep"`` shows only the inside of the shapes, ``mode="hide"`` makes the inside
+    transparent. An existing mask is narrowed (overlap resp. further holes)."""
+    if mode not in MODES:
+        raise ValueError(f"unknown mask mode {mode!r}")
     if image.kind != "image" or image.image is None:
         raise MaskError("Für die Maske ein Bild auswählen.")
-    if image.image.mask:
-        raise MaskError("Das Bild hat schon eine Maske – erst „Bildmaske lösen“, die Form "
-                        "ändern und dann neu anwenden.")
     masks = mask_shapes(shapes)
     if not masks:
         raise MaskError("Für die Maske eine geschlossene Form (Rechteck, Ellipse, Vieleck, Text "
@@ -134,20 +202,32 @@ def apply_mask(image: Shape, shapes) -> MaskResult:
     h, w = gray.shape
     if (w, h) != (image.image.px_width, image.image.px_height):
         image = replace(image, image=replace(image.image, px_width=w, px_height=h))
-    rings = mask_rings(image, masks)
-    points = sum(len(r) for r in rings)
-    if not rings:
+    new = mask_rings(image, masks)
+    if not new:
         raise MaskError("Die Form hat keine Fläche.")
+    old = tuple(image.image.mask)
+    shown = np.ones((h, w), bool) if alpha is None else alpha > 0
+    before = shown & mask_inside(w, h, old) if old else shown
+    shape_inside = mask_inside(w, h, new)
+    if not (shape_inside & before).any():
+        raise MaskError("Die Form überdeckt das Bild nicht – Form über das Bild legen."
+                        if not old else
+                        "Die Form überdeckt den sichtbaren Teil des Bildes nicht – Form über "
+                        "den sichtbaren Teil legen.")
+    rings = combine_rings(old, new, mode, w, h)
+    points = sum(len(r) for r in rings)
     if points > MAX_MASK_POINTS:
         raise MaskError(f"Die Maske hat zu viele Punkte ({points}) – Form erst vereinfachen.")
-    inside = mask_inside(w, h, rings)
-    shown = np.ones((h, w), bool) if alpha is None else alpha > 0
-    visible = inside & shown
+    visible = shown & mask_inside(w, h, rings) if rings else np.zeros((h, w), bool)
     if not visible.any():
-        raise MaskError("Die Form überdeckt das Bild nicht – Form über das Bild legen.")
-    if np.array_equal(visible, shown):
-        raise MaskError("Die Form deckt das ganze Bild ab – nichts zu maskieren.")
-    layer = masks[0].layer_id
+        raise MaskError("Die Form verdeckt den ganzen sichtbaren Teil – es bliebe nichts übrig."
+                        if mode == "hide" else
+                        "Die Form überdeckt den sichtbaren Teil des Bildes nicht – Form über "
+                        "den sichtbaren Teil legen.")
+    if np.array_equal(visible, before):
+        raise MaskError("Die Form deckt das ganze Bild ab – nichts zu maskieren." if not old
+                        else "Die Form ändert die Maske nicht – nichts zu maskieren.")
+    layer = image.image.mask_layer if old and image.image.mask_layer else masks[0].layer_id
     out = replace(image, image=replace(image.image, mask=rings, mask_layer=layer))
     share = int(np.count_nonzero(visible)) / int(np.count_nonzero(shown))
     return MaskResult(out, share, len(rings), points)
@@ -182,5 +262,5 @@ def release_mask(image: Shape, layer_id: str) -> tuple[Shape, Shape]:
     return whole, outline
 
 
-__all__ = ["MaskError", "MaskResult", "apply_mask", "mask_inside", "mask_outline", "mask_rings",
-           "masked_png", "release_mask"]
+__all__ = ["MODES", "MaskError", "MaskResult", "apply_mask", "area_rings", "combine_rings",
+           "mask_inside", "mask_outline", "mask_rings", "masked_png", "release_mask", "ring_area"]
