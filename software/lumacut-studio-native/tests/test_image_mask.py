@@ -157,7 +157,7 @@ def test_release_keeps_all_rings_and_groups(qapp):
     ("no_mask", "geschlossene Form"),
     ("outside", "überdeckt das Bild nicht"),
     ("covers", "ganze Bild"),
-    ("twice", "schon eine Maske"),
+    ("twice", "ändert die Maske nicht"),
     ("open", "geschlossene Form"),
 ])
 def test_errors(qapp, case, text):
@@ -342,16 +342,17 @@ def test_release_falls_back_to_the_image_layer(ed):
     assert new[0].layer_id == im.layer_id
 
 
-@pytest.mark.parametrize("what", ["no_image", "no_mask", "two_images"])
+@pytest.mark.parametrize("what", ["no_image", "no_mask", "two_images_untouched"])
 def test_wrong_selection_only_notifies(ed, what):
     im, m = _setup(ed)
     if what == "no_image":
         ed.set_selection([m.id])
     elif what == "no_mask":
         ed.set_selection([im.id])
-    else:
+    else:       # since round 104 several images are fine – but the shape touches neither
         other = _image(Geometry(150, 150, 40, 20), layer=ed.document.active_layer_id)
         ed.document.add_shape(other)
+        ed.document.shape(m.id).geom = Geometry(300, 300, 20, 20)
         ed.set_selection([im.id, other.id, m.id])
     msgs = []
     ed.statusMessage.connect(msgs.append)
@@ -397,7 +398,8 @@ def test_actions_in_path_menu_and_context_menu(ed):
     _setup(ed)
     texts = [a.text() for a in ed.path_ops_button.menu().actions() if a.text()]
     i = texts.index(imagecrop_ui.TEXT)
-    assert texts[i + 1:i + 3] == [imagemask_ui.APPLY_TEXT, imagemask_ui.RELEASE_TEXT]
+    assert texts[i + 1:i + 4] == [imagemask_ui.APPLY_TEXT, imagemask_ui.HIDE_TEXT,
+                                  imagemask_ui.RELEASE_TEXT]
     menu = ed.build_context_menu(QPointF(70, 60))
     sub = next(a.menu() for a in menu.actions() if a.menu() is not None
                and a.menu().objectName() == "PathOpsMenu")
@@ -445,7 +447,8 @@ def test_main_window_shortcut_is_unique_and_in_the_file_menu(qapp, tmp_path):
         assert owners == {imagemask_ui.APPLY_TEXT}
         texts = [a.text() for a in w.import_tools.menu.actions()]
         i = texts.index(imagecrop_ui.TEXT)
-        assert texts[i + 1:i + 3] == [imagemask_ui.APPLY_TEXT, imagemask_ui.RELEASE_TEXT]
+        assert texts[i + 1:i + 4] == [imagemask_ui.APPLY_TEXT, imagemask_ui.HIDE_TEXT,
+                                      imagemask_ui.RELEASE_TEXT]
         ed = w.canvas
         im, _m = _setup(ed)
         ed.actions_by_name["image_mask"].trigger()
