@@ -26,6 +26,11 @@ Bildanpassung (Helligkeit, Kontrast, Gamma, Schärfen) und der Skizzen-Modus
 laufen über dieselben Funktionen wie der Auftrag (``power_map`` /
 ``adjusted_height``); Nachbarschaftsfilter (Schärfen, Skizze) werden bei einem
 Ausschnitt mit Rand gerechnet, damit die Ausschnittkante nicht abweicht.
+``focus_mm`` (:func:`preview_array`, :func:`preview_shape`,
+:func:`preview_shape_passes`) verschiebt den Ausschnitt großer Bilder und die
+Lupe der Laserpunkt-Simulation: Mitte des gezeigten Bereichs in mm neben der
+Bildmitte in Canvas-Lage (x rechts, y unten), an den Rändern begrenzt –
+:attr:`Preview.focus_mm` meldet die tatsächliche Mitte. None = mittig wie bisher.
 """
 
 from __future__ import annotations
@@ -53,6 +58,17 @@ class Preview:
     # Laserpunkt-Simulation (:mod:`.spot_preview`): ``pixels`` ist dann das
     # vergrößerte Bild der Spuren (mehrere Bildpunkte je Laserpunkt); sonst None.
     spot: object | None = None
+    # Mitte des Ausschnitts von ``preview_pixels`` gegenüber der Mitte des
+    # gerechneten Bildes (Laserpunkte, x rechts, y unten, in dessen Raster).
+    center: tuple[float, float] = (0.0, 0.0)
+    # Tatsächliche Mitte des gezeigten Bereichs in mm neben der Bildmitte
+    # (Canvas-Lage); None = ganzes Bild zu sehen (kein Ausschnitt, keine Lupe).
+    focus_mm: tuple[float, float] | None = None
+
+    @property
+    def pannable(self) -> bool:
+        """Nur ein Ausschnitt / eine Lupe zu sehen – verschiebbar."""
+        return bool(self.cropped or (self.spot is not None and self.spot.cropped))
 
 
 def preview_settings(st: ImageSettings) -> RasterSettings:
@@ -71,15 +87,100 @@ def preview_settings(st: ImageSettings) -> RasterSettings:
 
 def preview_array(gray: np.ndarray, width_mm: float, height_mm: float,
                   settings: ImageSettings, max_pixels: int = MAX_PREVIEW_PIXELS,
-                  spot_mm: float | tuple[float, float] | None = None) -> Preview:
+                  spot_mm: float | tuple[float, float] | None = None,
+                  focus_mm: tuple[float, float] | None = None) -> Preview:
     """Gravurbild (Laserpunkte) für ``gray`` (uint8, 0 = schwarz) in ``width_mm × height_mm``.
-    ``spot_mm``: Laserpunkt simulieren (:func:`with_spot`)."""
+    ``spot_mm``: Laserpunkt simulieren (:func:`with_spot`); ``focus_mm``: Mitte
+    von Ausschnitt / Lupe in mm neben der Bildmitte (None = mittig)."""
     st = settings.normalized()
     g = resample(gray, width_mm, height_mm, st.line_interval_mm)
+    off = focus_dots(focus_mm, st.line_interval_mm)
+    pv = preview_pixels(g, st, max_pixels, offset=off)
     # Ohne Bildobjekt laufen die Zeilen waagerecht; ein länglicher Punkt liegt
     # trotzdem so zur Zeile wie im ersten Durchgang des Auftrags.
-    return with_spot(preview_pixels(g, st, max_pixels), st, spot_mm, max_pixels,
-                     pass_angle(st, 0))
+    pv = with_spot(pv, st, spot_mm, max_pixels, pass_angle(st, 0),
+                   offset=_rest(off, pv.center))
+    return _set_focus(pv, st.line_interval_mm)
+
+
+# ----------------------------------------------------------- Ausschnitt verschieben
+def focus_dots(focus_mm, interval_mm: float, angle: float = 0.0,
+               flip_x: bool = False) -> tuple[float, float] | None:
+    """Mitte ``focus_mm`` (mm neben der Bildmitte, Canvas-Lage, x rechts,
+    y unten) in Laserpunkten im gerechneten Raster: um den Scan-Winkel
+    ``angle`` gedreht (Raster des Durchgangs, :func:`rotate_pixels` dreht es
+    gegen den Uhrzeigersinn zurück) bzw. in X gespiegelt (``flip_x``,
+    Maschinen-Nullpunkt rechts). None / (0, 0) = mittig → None."""
+    import math
+
+    from .spot_preview import valid_offset
+    off = valid_offset(focus_mm)
+    if off is None:
+        return None
+    dx, dy = off[0] / interval_mm, off[1] / interval_mm
+    if angle:
+        t = math.radians(angle)
+        c, s = math.cos(t), math.sin(t)
+        dx, dy = dx * c - dy * s, dx * s + dy * c
+    if flip_x:
+        dx = -dx
+    return dx, dy
+
+
+def dots_to_focus(center: tuple[float, float], interval_mm: float, angle: float = 0.0,
+                  flip_x: bool = False) -> tuple[float, float]:
+    """Umkehrung von :func:`focus_dots`: Laserpunkte im Raster → mm in Canvas-Lage."""
+    import math
+    rx, ry = float(center[0]), float(center[1])
+    if flip_x:
+        rx = -rx
+    if angle:
+        t = math.radians(angle)
+        c, s = math.cos(t), math.sin(t)
+        rx, ry = rx * c + ry * s, -rx * s + ry * c
+    return rx * interval_mm, ry * interval_mm
+
+
+def clamp_focus(focus_mm, width_mm: float, height_mm: float,
+                rotation: float = 0.0) -> tuple[float, float] | None:
+    """Mitte ``focus_mm`` (mm neben der Bildmitte, Canvas-Lage) auf das Bild
+    begrenzen: im (um ``rotation`` Grad gedrehten) Bild ``width_mm × height_mm``,
+    damit Ausschnitt / Lupe nicht in die weißen Ecken der Hüllbox wandern.
+    None / (0, 0) = mittig → None."""
+    import math
+
+    from .spot_preview import valid_offset
+    off = valid_offset(focus_mm)
+    if off is None:
+        return None
+    t = math.radians(rotation or 0.0)
+    c, s = math.cos(t), math.sin(t)
+    lx, ly = off[0] * c + off[1] * s, -off[0] * s + off[1] * c   # in Bildlage
+    hw, hh = max(0.0, width_mm / 2.0), max(0.0, height_mm / 2.0)
+    lx, ly = min(max(lx, -hw), hw), min(max(ly, -hh), hh)
+    out = (lx * c - ly * s, lx * s + ly * c)
+    return valid_offset(out)
+
+
+def _rest(off, center) -> tuple[float, float] | None:
+    """Rest der gewünschten Mitte ``off`` nach dem Ausschnitt mit Mitte ``center``
+    (für die Lupe, bezogen auf die Mitte des Ausschnitts)."""
+    if off is None:
+        return None
+    return off[0] - center[0], off[1] - center[1]
+
+
+def _set_focus(pv: Preview, interval_mm: float, angle: float = 0.0,
+               flip_x: bool = False) -> Preview:
+    """:attr:`Preview.focus_mm` aus den Mitten von Ausschnitt und Lupe."""
+    if not pv.pannable:
+        pv.focus_mm = None
+        return pv
+    cx, cy = pv.center
+    if pv.spot is not None:
+        cx, cy = cx + pv.spot.center[0], cy + pv.spot.center[1]
+    pv.focus_mm = dots_to_focus((cx, cy), interval_mm, angle, flip_x)
+    return pv
 
 
 def split_spot(spot_mm) -> tuple[float, float | None]:
@@ -92,14 +193,16 @@ def split_spot(spot_mm) -> tuple[float, float | None]:
 
 
 def with_spot(pv: Preview, settings: ImageSettings, spot_mm,
-              max_pixels: int = MAX_PREVIEW_PIXELS, angle: float = 0.0) -> Preview:
+              max_pixels: int = MAX_PREVIEW_PIXELS, angle: float = 0.0,
+              offset: tuple[float, float] | None = None) -> Preview:
     """Vorschau ``pv`` (ein Pixel je Laserpunkt, Zeilen = Rasterzeilen) durch
     das Bild der gelaserten Spuren mit der Punktgröße ``spot_mm`` ersetzen
     (:func:`lumacut_import.spot_preview.simulate_spot`, Punktbreitenkorrektur
     wie im Auftrag); ``None`` = unverändert. ``spot_mm`` darf ``(X, Y)`` sein
     (länglicher Diodenpunkt in Maschinenlage), ``angle`` ist dann der
     Scan-Winkel des Rasters von ``pv``. ``burn_share`` bleibt der Anteil
-    gelaserter Punkte."""
+    gelaserter Punkte. ``offset``: Mitte der Lupe in Laserpunkten neben der
+    Mitte von ``pv`` (None = mittig)."""
     if spot_mm is None:
         return pv
     from .spot_preview import simulate_spot
@@ -107,24 +210,30 @@ def with_spot(pv: Preview, settings: ImageSettings, spot_mm,
     x, y = split_spot(spot_mm)
     pv.pixels, pv.spot = simulate_spot(pv.pixels, st.line_interval_mm, x,
                                        st.dot_width_mm, max_pixels, spot_y_mm=y,
-                                       angle=angle)
+                                       angle=angle, offset=offset)
     return pv
 
 
 def preview_pixels(g: np.ndarray, settings: ImageSettings,
                    max_pixels: int = MAX_PREVIEW_PIXELS,
-                   inside: np.ndarray | None = None) -> Preview:
+                   inside: np.ndarray | None = None,
+                   offset: tuple[float, float] | None = None) -> Preview:
     """Wie :func:`preview_array`, aber ``g`` liegt schon im Linienabstand vor
-    (ein Pixel = ein Laserpunkt); ``inside`` = Innen-Maske wie im Auftrag."""
+    (ein Pixel = ein Laserpunkt); ``inside`` = Innen-Maske wie im Auftrag.
+    ``offset``: Mitte des Ausschnitts großer Bilder in Laserpunkten neben der
+    Bildmitte (x rechts, y unten; None = mittig), an den Rändern begrenzt."""
+    from .spot_preview import crop_center, offset_crop
     st = settings.normalized()
     s = preview_settings(st)
     rows, cols = g.shape
     cropped = rows * cols > max_pixels
     margin = (0, 0, 0, 0)
+    center = (0.0, 0.0)
     if cropped:
         ch = min(rows, max(1, int(max_pixels ** 0.5)))
         cw = min(cols, max(1, max_pixels // ch))
-        y0, x0 = (rows - ch) // 2, (cols - cw) // 2
+        y0, x0 = offset_crop(rows, cols, ch, cw, offset)
+        center = crop_center(rows, cols, y0, x0, ch, cw)
         # Filter-Rand (Schärfen, Skizze) mitnehmen: Ausschnitt = gleiche Pixel wie im Auftrag.
         m = filter_margin(s)
         t, lft = min(m, y0), min(m, x0)
@@ -146,7 +255,8 @@ def preview_pixels(g: np.ndarray, settings: ImageSettings,
         pm = power_map(g, s, margin=margin if any(margin) else 0, **kw)
         out = 255.0 - pm.astype(np.float64) * 255.0 / max(1, round(st.power / 100 * PWM_MAX))
         share = float(np.mean(pm > 0)) if pm.size else 0.0
-    return Preview(np.clip(np.rint(out), 0, 255).astype(np.uint8), cropped, share)
+    return Preview(np.clip(np.rint(out), 0, 255).astype(np.uint8), cropped, share,
+                   center=center)
 
 
 # ----------------------------------------------------------- wie der Auftrag
@@ -188,7 +298,8 @@ def render_for_preview(shape, settings: ImageSettings, pass_index: int = 0):
 
 
 def preview_shape(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_PIXELS,
-                  rendered=None, pass_index: int = 0, spot_mm: float | tuple[float, float] | None = None) -> Preview:
+                  rendered=None, pass_index: int = 0, spot_mm: float | tuple[float, float] | None = None,
+                  focus_mm: tuple[float, float] | None = None) -> Preview:
     """Vorschau eines Bildobjekts mit genau den Pixeln des Auftrags
     (:func:`lumacut_job.images.image_job`): gerendert samt Drehung, im
     Maschinen-Nullpunkt oben rechts gespiegelt gerechnet (Fehlerverteilung
@@ -197,7 +308,9 @@ def preview_shape(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_
     ``rendered``: bereits gerechnetes ``(gray, inside)`` (Cache des Dialogs).
     ``pass_index``: Durchgang mit Winkel-Schritt (0 = erster, wie bisher).
     ``spot_mm``: Laserpunkt simulieren (:func:`with_spot`) – im Raster des
-    Durchgangs gerechnet (Spuren entlang der Scan-Richtung), dann gedreht."""
+    Durchgangs gerechnet (Spuren entlang der Scan-Richtung), dann gedreht.
+    ``focus_mm``: Mitte von Ausschnitt / Lupe in mm neben der Bildmitte
+    (Canvas-Lage), im Raster des Durchgangs gedreht bzw. gespiegelt."""
     from lumacut_canvas.workarea import IMAGE_FLIP_X
     from lumacut_job.raster import wrap_angle
     st = settings.normalized()
@@ -213,22 +326,29 @@ def preview_shape(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_
         # Gerechnet im gedrehten Raster (Halbton wie im Auftrag), angezeigt
         # zurückgedreht – so liegt das Bild wie auf dem Canvas.
         st = replace(st, halftone_angle=wrap_angle(st.halftone_angle + angle))
-        pv = preview_pixels(gray, st, max_pixels, inside)
+        off = focus_dots(focus_mm, st.line_interval_mm, angle)
+        pv = preview_pixels(gray, st, max_pixels, inside, offset=off)
         if not pv.cropped and mask is not None and mask.shape == pv.pixels.shape and mask.any():
             # Anteil bezogen auf das Bild, nicht auf das größere gedrehte Raster.
             pv.burn_share = min(1.0, pv.burn_share * mask.size / int(mask.sum()))
-        pv = with_spot(pv, st, spot_mm, max_pixels, angle)
+        pv = with_spot(pv, st, spot_mm, max_pixels, angle, offset=_rest(off, pv.center))
         pv.pixels = rotate_pixels(pv.pixels, angle)
-        return pv
+        return _set_focus(pv, st.line_interval_mm, angle)
+    off = focus_dots(focus_mm, st.line_interval_mm, flip_x=IMAGE_FLIP_X)
     if IMAGE_FLIP_X:
         gray = np.ascontiguousarray(gray[:, ::-1])
         if inside is not None:
             inside = np.ascontiguousarray(inside[:, ::-1])
         st = replace(st, halftone_angle=-st.halftone_angle)
-    pv = preview_pixels(gray, st, max_pixels, inside)
+    pv = preview_pixels(gray, st, max_pixels, inside, offset=off)
     if IMAGE_FLIP_X:
+        # Zurückgespiegelt: Ausschnitt und weitere Rechnung in Canvas-Lage.
         pv.pixels = np.ascontiguousarray(pv.pixels[:, ::-1])
-    return with_spot(pv, st, spot_mm, max_pixels)
+        pv.center = (-pv.center[0], pv.center[1])
+        if off is not None:
+            off = (-off[0], off[1])
+    pv = with_spot(pv, st, spot_mm, max_pixels, offset=_rest(off, pv.center))
+    return _set_focus(pv, st.line_interval_mm)
 
 
 def distinct_pass_indices(settings: ImageSettings) -> list[int]:
@@ -301,26 +421,59 @@ def sum_previews(previews: list[Preview], counts: list[int] | None = None) -> Pr
 
 def preview_shape_passes(shape, settings: ImageSettings, max_pixels: int = MAX_PREVIEW_PIXELS,
                          rendered_for=None, burn_sum: bool = False,
-                         spot_mm: float | tuple[float, float] | None = None) -> Preview:
+                         spot_mm: float | tuple[float, float] | None = None,
+                         focus_mm: tuple[float, float] | None = None) -> Preview:
     """Alle Durchgänge eines Bildobjekts mit Winkel-Schritt übereinander
     (:func:`overlay_previews`); jeder Winkel wird nur einmal gerechnet.
     ``rendered_for(pass_index)``: liefert ein bereits gerechnetes
     ``(gray, inside)`` (Cache des Dialogs), sonst wird gerendert.
     ``burn_sum``: Brennsumme (:func:`sum_previews`) statt dunkelstem Wert –
     ein Winkel, der in mehreren Durchgängen vorkommt, zählt so oft.
-    ``spot_mm``: jeder Durchgang mit simuliertem Laserpunkt (:func:`with_spot`)."""
+    ``spot_mm``: jeder Durchgang mit simuliertem Laserpunkt (:func:`with_spot`).
+    ``focus_mm``: Mitte von Ausschnitt / Lupe (:func:`preview_shape`); begrenzt
+    ein Rand die Mitte in einem Durchgang stärker, rechnen alle mit der
+    engsten Mitte, damit die Ausschnitte übereinanderliegen."""
     from lumacut_job.images import pass_angles
     st = settings.normalized()
     angles = pass_angles(st)
-    previews, counts = [], []
-    for k in distinct_pass_indices(st):
-        rendered = rendered_for(k) if rendered_for is not None else None
-        previews.append(preview_shape(shape, st, max_pixels, rendered=rendered, pass_index=k,
-                                      spot_mm=spot_mm))
-        counts.append(angles.count(angles[k]))
-    if burn_sum:
-        return sum_previews(previews, counts)
-    return overlay_previews(previews)
+    indices = distinct_pass_indices(st)
+
+    def compute(focus):
+        out = []
+        for k in indices:
+            rendered = rendered_for(k) if rendered_for is not None else None
+            out.append(preview_shape(shape, st, max_pixels, rendered=rendered, pass_index=k,
+                                     spot_mm=spot_mm, focus_mm=focus))
+        return out
+
+    previews = compute(focus_mm)
+    focus = _common_focus(previews, focus_mm, st.line_interval_mm)
+    if focus is not None:
+        previews = compute(focus)
+    counts = [angles.count(angles[k]) for k in indices]
+    combined = sum_previews(previews, counts) if burn_sum else overlay_previews(previews)
+    combined.focus_mm = previews[0].focus_mm
+    return combined
+
+
+def _common_focus(previews: list[Preview], focus_mm, interval_mm: float):
+    """Engste tatsächliche Mitte mehrerer Durchgänge (je Achse der kleinste
+    Betrag in Richtung des Wunsches), wenn sie um mehr als einen halben
+    Laserpunkt auseinanderliegen; sonst None (kein zweiter Lauf nötig)."""
+    from .spot_preview import valid_offset
+    want = valid_offset(focus_mm)
+    got = [p.focus_mm for p in previews if p.focus_mm is not None]
+    if want is None or len(previews) < 2 or len(got) < 2:
+        return None
+    tol = 0.5 * interval_mm
+    if all(abs(g[0] - got[0][0]) <= tol and abs(g[1] - got[0][1]) <= tol for g in got):
+        return None
+
+    def tight(axis):
+        vals = [g[axis] if want[axis] * g[axis] > 0 else 0.0 for g in got]
+        return min(vals, key=abs) if want[axis] else 0.0
+
+    return tight(0), tight(1)
 
 
 def rotate_pixels(pixels: np.ndarray, angle: float) -> np.ndarray:

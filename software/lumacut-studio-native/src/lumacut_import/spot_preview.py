@@ -30,7 +30,10 @@ Scan-Richtung so breit wie der Punkt in dieser Richtung
 
 Gezeigt wird ein mittiger Ausschnitt mit ``sub`` (ungerade, 1…7) Bildpunkten
 je Laserpunkt, höchstens ``max_pixels`` Bildpunkte – eine Lupe auf die echte
-Punktstruktur. G-code, Auftrag und Projekt bleiben unverändert.
+Punktstruktur. ``offset`` verschiebt die Lupe (Laserpunkte von der Mitte, an
+den Rändern begrenzt; :attr:`SpotInfo.center` = tatsächliche Mitte), so lässt
+sich jede Stelle des Bildes prüfen. G-code, Auftrag und Projekt bleiben
+unverändert.
 """
 
 from __future__ import annotations
@@ -68,6 +71,9 @@ class SpotInfo:
     dot_width_mm: float = 0.0
     spot_y_mm: float | None = None   # Punktgröße in Y (None = rund, wie X)
     angle: float = 0.0               # Scan-Winkel des Durchgangs (Grad)
+    # Mitte der Lupe gegenüber der Mitte der Vorschau (Laserpunkte, x rechts,
+    # y unten, im Raster von ``pixels``); mittige Lupe ≈ (0, 0).
+    center: tuple[float, float] = (0.0, 0.0)
 
     @property
     def size_y_mm(self) -> float:
@@ -208,13 +214,48 @@ def subsamples(interval_mm: float, spot_mm: float) -> int:
     return min(n, MAX_SUB)
 
 
-def _crop(rows: int, cols: int, budget: int) -> tuple[int, int, int, int]:
-    """Mittiger Ausschnitt ``(y0, x0, h, w)`` mit höchstens ``budget`` Punkten."""
+def _crop(rows: int, cols: int, budget: int,
+          offset: tuple[float, float] | None = None) -> tuple[int, int, int, int]:
+    """Ausschnitt ``(y0, x0, h, w)`` mit höchstens ``budget`` Punkten – mittig
+    oder um ``offset`` (Punkte, x rechts, y unten) verschoben, an den
+    Rändern begrenzt."""
     if rows * cols <= budget:
         return 0, 0, rows, cols
     ch = min(rows, max(1, int(budget ** 0.5)))
     cw = min(cols, max(1, budget // ch))
-    return (rows - ch) // 2, (cols - cw) // 2, ch, cw
+    return offset_crop(rows, cols, ch, cw, offset) + (ch, cw)
+
+
+def valid_offset(offset) -> tuple[float, float] | None:
+    """``offset`` als ``(x, y)`` endlicher Zahlen; None / (0, 0) / ungültig = mittig."""
+    if offset is None:
+        return None
+    try:
+        ox, oy = (float(v) for v in offset)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(ox) and math.isfinite(oy)) or (ox == 0.0 and oy == 0.0):
+        return None
+    return ox, oy
+
+
+def offset_crop(rows: int, cols: int, ch: int, cw: int,
+                offset: tuple[float, float] | None = None) -> tuple[int, int]:
+    """Linke obere Ecke ``(y0, x0)`` eines ``ch × cw``-Ausschnitts: mittig
+    (wie bisher ``(rows − ch) // 2``) oder mit der Mitte ``offset`` Punkte
+    neben der Mitte, innerhalb ``0 … rows − ch`` / ``0 … cols − cw``."""
+    off = valid_offset(offset)
+    if off is None:
+        return (rows - ch) // 2, (cols - cw) // 2
+    ox, oy = off
+    y0 = int(math.floor((rows - ch) / 2.0 + oy + 0.5))
+    x0 = int(math.floor((cols - cw) / 2.0 + ox + 0.5))
+    return min(max(0, y0), rows - ch), min(max(0, x0), cols - cw)
+
+
+def crop_center(rows: int, cols: int, y0: int, x0: int, ch: int, cw: int) -> tuple[float, float]:
+    """Mitte eines Ausschnitts gegenüber der Mitte des Ganzen (Punkte, ``(x, y)``)."""
+    return x0 + cw / 2.0 - cols / 2.0, y0 + ch / 2.0 - rows / 2.0
 
 
 def _rows_with_dot_width(power: np.ndarray, sub: int, dw_px: float) -> np.ndarray:
@@ -317,14 +358,17 @@ def simulate_spot(pixels: np.ndarray, interval_mm: float, spot_mm: float,
                   dot_width_mm: float = 0.0,
                   max_pixels: int = MAX_PREVIEW_PIXELS,
                   spot_y_mm: float | None = None,
-                  angle: float = 0.0) -> tuple[np.ndarray, SpotInfo]:
+                  angle: float = 0.0,
+                  offset: tuple[float, float] | None = None) -> tuple[np.ndarray, SpotInfo]:
     """Vorschaupixel (uint8, 0 = volle Leistung, 255 = nicht lasern; ein Pixel
     je Laserpunkt, Zeilen = Rasterzeilen) → Bild der gelaserten Spuren mit
     der Punktgröße ``spot_mm`` (uint8, 0 = schwarz) und :class:`SpotInfo`.
 
     ``spot_y_mm``: Punktgröße in Y der Maschine für einen länglichen
     Diodenpunkt (None = rund); ``angle``: Scan-Winkel des Durchgangs, in
-    dessen Raster ``pixels`` liegen (der Punkt liegt dort entsprechend gedreht)."""
+    dessen Raster ``pixels`` liegen (der Punkt liegt dort entsprechend gedreht).
+    ``offset``: Mitte der Lupe in Laserpunkten neben der Mitte von ``pixels``
+    (x rechts, y unten; None = mittig wie bisher), an den Rändern begrenzt."""
     if not interval_mm > 0:
         raise ValueError("Linienabstand muss größer als 0 sein")
     spot = clamp_spot(spot_mm)
@@ -339,7 +383,7 @@ def simulate_spot(pixels: np.ndarray, interval_mm: float, spot_mm: float,
         raise ValueError("leere Vorschau")
     sub = subsamples(interval_mm, small)
     rows, cols = px.shape
-    y0, x0, ch, cw = _crop(rows, cols, max(1, int(max_pixels) // (sub * sub)))
+    y0, x0, ch, cw = _crop(rows, cols, max(1, int(max_pixels) // (sub * sub)), offset)
     # Rand mitnehmen, damit Spuren knapp außerhalb in den Ausschnitt strahlen.
     m = int(math.ceil(1.5 * big / interval_mm)) + 1
     t, lft = min(m, y0), min(m, x0)
@@ -358,7 +402,8 @@ def simulate_spot(pixels: np.ndarray, interval_mm: float, spot_mm: float,
     out = np.clip(np.rint(255.0 * (1.0 - dark)), 0, 255).astype(np.uint8)
     out = out[t * sub:(t + ch) * sub, lft * sub:(lft + cw) * sub]
     info = SpotInfo(spot, float(interval_mm), sub, (cw, ch), (ch, cw) != (rows, cols),
-                    float(dot_width_mm), spot_y, angle)
+                    float(dot_width_mm), spot_y, angle,
+                    crop_center(rows, cols, y0, x0, ch, cw))
     return np.ascontiguousarray(out), info
 
 

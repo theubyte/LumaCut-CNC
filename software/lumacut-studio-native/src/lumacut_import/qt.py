@@ -49,6 +49,22 @@ MODE_LABELS = {
 PREVIEW_SIZE = 300          # px, längste Kante der Vorschau im Dialog
 PREVIEW_DEBOUNCE_MS = 150
 TOUCH_ROW_PX = 44           # px, Fingerziel der Punktgrößen-Zeile im Touch-Modus
+FOCUS_CENTER_MM = 0.05      # mm, Mitte des Ausschnitts so nah an der Bildmitte = „Bildmitte“
+
+
+def focus_text(what: str, focus_mm) -> str:
+    """„Lupe auf die Bildmitte – ziehen verschiebt“ bzw. „Ausschnitt 12.0 mm
+    links, 6.0 mm über der Bildmitte – ziehen verschiebt, Doppelklick = Mitte“."""
+    fx, fy = focus_mm if focus_mm is not None else (0.0, 0.0)
+    parts = []
+    if abs(fx) >= FOCUS_CENTER_MM:
+        parts.append(f"{abs(fx):.1f} mm {'rechts' if fx > 0 else 'links'}")
+    if abs(fy) >= FOCUS_CENTER_MM:
+        parts.append(f"{abs(fy):.1f} mm {'unter' if fy > 0 else 'über'}")
+    if not parts:
+        prefix = "aus der" if what == "Ausschnitt" else "auf die"
+        return f"{what} {prefix} Bildmitte – ziehen verschiebt"
+    return f"{what} {', '.join(parts)} der Bildmitte – ziehen verschiebt, Doppelklick = Mitte"
 
 FILTER = ("Alle unterstützten (" + " ".join(f"*{s}" for s in ALL_SUFFIXES) + ");;"
           "Vektor (*.svg *.dxf *.pdf *.ai *.eps);;"
@@ -281,6 +297,11 @@ class ImageSettingsDialog(QDialog):
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumSize(PREVIEW_SIZE, PREVIEW_SIZE)
         self.preview.setStyleSheet("background: white; border: 1px solid #bbb;")
+        # Ausschnitt großer Bilder / Lupe der Laserpunkt-Simulation verschieben:
+        # mit Maus oder Finger ziehen, Doppelklick = zurück zur Bildmitte.
+        self._focus_mm: tuple[float, float] | None = None
+        self._drag = None                 # (Startpunkt, Mitte beim Start, mm je Bildschirmpixel)
+        self.preview.installEventFilter(self)
         # Durchgang der Vorschau (Winkel-Schritt): jeder Durchgang einzeln
         # oder alle übereinander – vorher war nur der erste zu sehen.
         self.preview_pass = QComboBox()
@@ -342,6 +363,13 @@ class ImageSettingsDialog(QDialog):
         spot_row.addWidget(self.spot_size)
         spot_row.addWidget(self.spot_size_y)
         spot_row.addWidget(self.spot_to_interval)
+        self.preview_center = QPushButton("Mitte")
+        self.preview_center.setObjectName("image_preview_center")
+        self.preview_center.setToolTip("Ausschnitt / Lupe der Vorschau zurück auf die Bildmitte "
+                                       "(verschieben: in der Vorschau ziehen, Doppelklick = Mitte)")
+        self.preview_center.setEnabled(False)
+        self.preview_center.clicked.connect(self.center_preview)
+        spot_row.addWidget(self.preview_center)
         self._apply_touch_sizes()
         self.preview_label = QLabel()
         self.preview_label.setWordWrap(True)
@@ -417,8 +445,91 @@ class ImageSettingsDialog(QDialog):
         parent = self.parent()
         ed = getattr(parent, "canvas", parent)
         if bool(getattr(ed, "touch_mode", False)):
-            for w in (self.spot_sim, self.spot_size, self.spot_size_y, self.spot_to_interval):
+            for w in (self.spot_sim, self.spot_size, self.spot_size_y, self.spot_to_interval,
+                      self.preview_center):
                 w.setMinimumHeight(TOUCH_ROW_PX)
+
+    # ------------------------------------------------- Ausschnitt verschieben
+    def preview_focus_mm(self) -> tuple[float, float] | None:
+        """Mitte von Ausschnitt / Lupe der Vorschau in mm neben der Bildmitte
+        (Canvas-Lage, x rechts, y unten); None = Bildmitte."""
+        return self._focus_mm
+
+    def _image_box(self) -> tuple[float, float, float]:
+        """Breite, Höhe und Drehung des Bildes (mm, Grad) für die Begrenzung."""
+        if self._shape is not None:
+            g = self._shape.geom
+            return g.w, g.h, g.rot
+        return self._width_mm, self._height_mm or 0.0, 0.0
+
+    def set_preview_focus(self, focus_mm, update: bool = True) -> None:
+        """Mitte von Ausschnitt / Lupe setzen (auf das Bild begrenzt) und die
+        Vorschau neu rechnen (``update``: sofort, sonst entprellt)."""
+        from .image_preview import clamp_focus
+        self._focus_mm = clamp_focus(focus_mm, *self._image_box())
+        self.preview_center.setEnabled(self._focus_mm is not None)
+        if update:
+            self.update_preview()
+        else:
+            self._schedule_preview()
+
+    def center_preview(self) -> None:
+        """„Mitte“ / Doppelklick: Ausschnitt / Lupe zurück auf die Bildmitte."""
+        self.set_preview_focus(None)
+
+    def _mm_per_screen_px(self) -> float | None:
+        """mm je Bildschirmpixel der gezeigten Vorschau (None = nichts zu verschieben)."""
+        pv = self.last_preview
+        if pv is None or not pv.pannable:
+            return None
+        h, w = pv.pixels.shape
+        scale = min(PREVIEW_SIZE / max(1, w), PREVIEW_SIZE / max(1, h))
+        interval = self.settings().line_interval_mm
+        sub = pv.spot.sub if pv.spot is not None else 1
+        return interval / sub / scale
+
+    def drag_preview(self, dx_px: float, dy_px: float, start=None, update: bool = False) -> None:
+        """Vorschau um ``dx_px`` / ``dy_px`` Bildschirmpixel ziehen (wie eine
+        Karte: der Inhalt folgt dem Finger, die Mitte wandert entgegen)."""
+        per = self._mm_per_screen_px()
+        if per is None:
+            return
+        fx, fy = start if start is not None else (self._focus_mm or (0.0, 0.0))
+        self.set_preview_focus((fx - dx_px * per, fy - dy_px * per), update=update)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is getattr(self, "preview", None):
+            et = event.type()
+            if et == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
+                self._drag = None
+                self.center_preview()
+                return True
+            if et == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                per = self._mm_per_screen_px()
+                if per is not None:
+                    self._drag = (event.position(), self._focus_mm or (0.0, 0.0))
+                    self.preview.setCursor(Qt.ClosedHandCursor)
+                    return True
+            elif et == QEvent.MouseMove and self._drag is not None:
+                p0, f0 = self._drag
+                d = event.position() - p0
+                self.drag_preview(d.x(), d.y(), start=f0)
+                return True
+            elif et == QEvent.MouseButtonRelease and self._drag is not None:
+                p0, f0 = self._drag
+                self._drag = None
+                d = event.position() - p0
+                self.drag_preview(d.x(), d.y(), start=f0, update=True)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _update_preview_cursor(self) -> None:
+        pv = self.last_preview
+        if self._drag is None:
+            if pv is not None and pv.pannable:
+                self.preview.setCursor(Qt.OpenHandCursor)
+            else:
+                self.preview.unsetCursor()
 
     def spot_mm(self) -> float | tuple[float, float] | None:
         """Simulierte Punktgröße der Vorschau (None = aus): eine Zahl für einen
@@ -564,19 +675,25 @@ class ImageSettingsDialog(QDialog):
                 pv = preview_shape_passes(self._shape, st,
                                           rendered_for=lambda k: self._render_cached(st, k),
                                           burn_sum=sel == self.ALL_PASSES_SUM,
-                                          spot_mm=self.spot_mm())
+                                          spot_mm=self.spot_mm(), focus_mm=self._focus_mm)
             elif self._shape is not None:
                 pv = preview_shape(self._shape, st, rendered=self._render_cached(st, sel),
-                                   pass_index=sel, spot_mm=self.spot_mm())
+                                   pass_index=sel, spot_mm=self.spot_mm(),
+                                   focus_mm=self._focus_mm)
             else:
                 pv = preview_array(self._gray, self._width_mm, self._height_mm, st,
-                                   spot_mm=self.spot_mm())
+                                   spot_mm=self.spot_mm(), focus_mm=self._focus_mm)
         except ValueError as exc:
             self.preview.clear()
             self.preview_label.setText(f"Keine Vorschau: {exc}")
             return
         self.preview_runs += 1
         self.last_preview = pv
+        if self._focus_mm is not None and pv.focus_mm is not None and self._drag is None:
+            # Am Rand begrenzt: mit der tatsächlichen Mitte weiterziehen (kein toter Weg).
+            from .image_preview import clamp_focus
+            self._focus_mm = clamp_focus(pv.focus_mm, *self._image_box())
+            self.preview_center.setEnabled(self._focus_mm is not None)
         pix = QPixmap.fromImage(to_qimage(pv.pixels))
         self.preview.setPixmap(pix.scaled(PREVIEW_SIZE, PREVIEW_SIZE, Qt.KeepAspectRatio,
                                           Qt.SmoothTransformation))
@@ -590,11 +707,12 @@ class ImageSettingsDialog(QDialog):
                     f"{info.dots[1]} Laserpunkte = {sw:.1f} × {sh:.1f} mm, "
                     f"{pv.burn_share * 100:.0f} % gelasert")
             if pv.cropped or info.cropped:
-                text += " (Lupe auf die Bildmitte)"
+                text += f" ({focus_text('Lupe', self._focus_mm and pv.focus_mm)})"
             text += ". " + verdict_text(info.interval_mm, info.spot_mm, info.spot_y_mm,
                                         info.angle)
         elif pv.cropped:
-            text += " (Ausschnitt aus der Bildmitte)"
+            text += f" ({focus_text('Ausschnitt', self._focus_mm and pv.focus_mm)})"
+        self._update_preview_cursor()
         rot = self._shape.geom.rot if self._shape is not None else 0.0
         if rot:
             text += f", gedreht um {rot:g}°"
