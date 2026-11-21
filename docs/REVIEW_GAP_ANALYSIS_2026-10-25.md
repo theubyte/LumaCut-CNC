@@ -17116,3 +17116,80 @@ the xTool import does not read xTool masks.
 Hardware check: place a photo, draw a heart over it, „Maske auf Bild anwenden“, move and rotate
 the image and engrave it (Jarvis) on 4 mm plywood on the Windows app – no burn outside the
 heart; then „Bildmaske lösen“, enlarge the heart, apply again and engrave – the larger heart.
+
+## 108. Status update 2026-11-20 (review round 101)
+
+Done this round (laser spot simulation in the image preview; Machine / Scan Probe / Materials
+untouched – new `lumacut_import/spot_preview.py`, the `spot_mm` pass-through in
+`lumacut_import/image_preview.py` and the row under the preview in `lumacut_import/qt.py`;
+planner, G-code writer, job, project format, Pi and camera code unchanged):
+
+- Closed since §107 by others: none – main had no commit since `22ec510` (round 100); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: „image dot-size model“ (open since the dither preview of §34, round 27: „the preview
+  shows one pixel per dot and does not model the material's real dot size / beam spread“). The
+  preview drew every dot as a square exactly one line interval wide, so the most common photo
+  mistake on a diode laser – a line interval far from the spot size – was invisible until the
+  wood was burnt: white stripes between the rows when the interval is larger than the spot,
+  a dark, muddy photo without detail when the tracks overlap. LightBurn and xTool Creative
+  Space both tell users to set the interval to the spot size, but neither shows the effect.
+  The spot size is entered by the user (the measured width of one lasered line), so the
+  material library (Materials) is not needed. No user decision or hardware, finishable with
+  tests, not owned by another agent. CoreXY time model (frame not built, Machine), the xTool
+  text style import (no sample file) and the mask follow-ups were weighed but give less value
+  for engraving now.
+- **Model** (`spot_preview.simulate_spot`): from the preview pixels (exactly the dots and powers
+  of the job) every raster row becomes a track on its centre line; along the row the burnt runs
+  are those of the G-code (dot width correction shortens them with the job's `_dot_width`,
+  single dots keep `MIN_DOT_PX`, greyscale neighbours keep their common edge), across it a
+  Gaussian beam with σ = spot / 4. Energy of overlapping tracks adds up; darkness
+  `1 − exp(−k·E)` (normalised so a track centre at full power is black) with `k` such that a
+  single full-power line is exactly the spot wide (edge = 50 % grey). Rendered with 1…7 (odd)
+  sub-pixels per dot (one sub-pixel ≤ σ), a centred magnifier of at most 600 × 600 px with a
+  margin so tracks just outside the crop still bleed in; OpenCV separable blur, ~30 ms.
+- **Preview**: `preview_array`, `preview_shape` and `preview_shape_passes` take `spot_mm`
+  (None = the old preview, pixel for pixel). With a scan angle the tracks are simulated in the
+  pass's rotated raster and then turned back, so the stripes run along the scan direction;
+  all passes on top of each other and the burn sum combine the simulated passes. The share of
+  lasered dots stays as before.
+- **Dialog**: row „☐ Laserpunkt simulieren [0.080 mm] [Als Linienabstand]“ under the preview
+  (44 px in touch mode, hidden without image data). The line under the preview names the spot,
+  the dots and mm shown, „Lupe auf die Bildmitte“ and a verdict: spot < 0.9 × interval „helle
+  Streifen … Linienabstand ≈ Punktgröße (n DPI) wählen“, spot > 1.6 × interval „die Spuren
+  überlappen stark …“, otherwise „Linienabstand passt“. „Als Linienabstand“ sets the line
+  interval to the spot (clamped to the interval range). Switch and spot size are kept in the
+  app's QSettings (`image_preview/simulate_spot`, `image_preview/spot_mm`) for all images;
+  default off.
+
+Tests: new `tests/test_image_spot_preview.py` (26 tests): single line spot-wide with a black
+centre, wider spot / lower power, gaps / dense / overlap against the line interval, dithered
+area darker with a bigger spot, white stays white, dot width correction like the G-code runs
+incl. single dots and greyscale edges, odd bounded sub-samples, centred magnifier with tracks
+from outside the crop, invalid input and clamping, verdict and hint text, prefs round trip;
+preview unchanged without spot, scan direction 0° / 90°, dot width of the settings, all passes
+and burn sum, job and settings untouched; dialog default off, simulation and hints, spot as
+line interval, settings independent of the simulation, remembered choice, no image data,
+touch 44 px, main window passing its settings.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3862 passed, 3 skipped** (25.4 min; 3836 + 26 new spot simulation tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – the simulation is preview only and off by default; no new
+image setting or project key, G-code, job, frame, estimate and export byte-identical.
+
+Still open: unchanged from §107 except the image dot-size model – camera placement beyond
+marks, automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell,
+Materials items, CoreXY time model, the xTool text style import, the mask follow-ups of §107
+(feathered edge, open paths, several masks, xTool masks), the trim refinements of §92, the
+print-and-cut limits of §93 / §94, the single-line font limits of §95 / §96 / §100 / §106, the
+warp limits of §97, the case limits of §98, the vertical text limits of §99, the box generator
+limits of §101, the living hinge limits of §102, the bent box limits of §103, the justified
+line limits of §104 and the inline editing limits of §105. For the spot simulation: one round
+spot size for all images (no elliptic / rectangular diode spot, no per-material spot – would
+come with the material library, Materials), material response, power and speed are not
+modelled (the spot is the measured line width at one's own settings), the canvas and the
+path preview still show one pixel per dot, the magnifier always shows the image centre (no
+panning), the burn sum averages simulated darkness rather than adding energy across passes.
+Hardware check: engrave a 10 × 10 mm black square at 0.1 mm and at 0.05 mm line interval on
+plywood with the Windows app and measure one line with a loupe – enter that width as
+„Punktgröße“; the simulation should show the white stripes of the first and the dark overlap
+of the second square, and „Als Linienabstand“ should give an evenly closed square.
