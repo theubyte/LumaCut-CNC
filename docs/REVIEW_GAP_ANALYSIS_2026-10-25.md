@@ -17446,3 +17446,77 @@ select image and circle and „Bereich im Bild ausblenden“ – the heart gets 
 (Jarvis) on 4 mm plywood – no burn outside the heart or inside the circle. Then select two photos
 side by side and a star over the gap between them, „Maske auf Bild anwenden“ – both get their
 part of the star in one undo step.
+
+## 112. Status update 2026-11-21 (review round 105)
+
+Done this round (soft mask edge; Machine / Scan Probe / Materials untouched – `imagemask.py` /
+`imagemask_ui.py`, the `mask_feather` field on `RasterImage` in `model.py`, the inside level in
+`lumacut_job/images.py`, the crop reset in `imagecrop.py`, the menu entry in
+`lumacut_import/qt.py` and the tooltip of the Pfad button in `pathops_ui.py`; planner, G-code
+writer, Pi and camera code unchanged):
+
+- Closed since §111 by others: none – main had no commit since `13abd98` (round 104); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the mask follow-up of §107 / §111 „the edge stays pixel-exact (no feathering)“.
+  LightBurn's *Apply Mask to Image* and xTool's mask only cut hard; a photo that fades out
+  softly (the oval portrait with a vignette on a wooden board, a pet photo fading into the
+  grain) needs an external image editor and a re-import, and the mask is then lost. Day-to-day
+  photo engraving on a diode laser, no user decision, no hardware, no material library,
+  finishable with tests and not owned by another agent. Releasing single masks and showing the
+  mask outline while applied were weighed but help less on the workpiece.
+- **Soft edge**: „Weiche Maskenkante …“ (*Pfad* menu, context menu „Pfad“, *Datei* menu,
+  Ctrl+Alt+Shift+F, after „Bildmaske lösen“) asks for a width of 0–50 mm (quick buttons hart /
+  2 / 5 / 10 mm, 44 px in touch mode) with a small preview as lasered (white = no burn) and a
+  readout of the width in image pixels. The visible part fades *inside* the mask edge along an
+  S-curve (smoothstep of the exact OpenCV distance of the pixel centre to the edge), so the
+  burn thins out towards the edge with dithering and the power falls off in grayscale; outside
+  the mask nothing is ever lasered. The image border is no mask edge (after „Bereich im Bild
+  ausblenden“ only the hole gets a soft rim). 0 mm makes the edge hard again.
+- **Storage**: `RasterImage.mask_feather` = width in pixels of the PNG, so the fade scales
+  with the image like the mask; project key `"mask_feather"` only for soft edges of masked
+  images, broken or negative values load as hard. `view_png` carries the soft alpha, so canvas,
+  job, frame, estimate, preview and export need nothing new; the job composites it onto white
+  (negative images: onto black, then inverted) and – only for a feathered image – counts every
+  pixel with alpha > 0 as inside, so image adjustments and sketch keep the outer half of the fade
+  instead of cutting it at 50 %.
+- **Editing**: several selected masked images take the width in one undo step, unmasked images
+  are named in the status line; locked layers refuse; the dialog offers the image's current
+  width or the last soft width of the session. Narrowing / hiding keeps the width, „Bildmaske
+  lösen“ makes the image whole and hard again, cropping bakes the fade into the pixels.
+
+Tests: new `tests/test_image_mask_feather.py` (41 tests): hard for small widths, S-curve rising
+inward, image border no edge, hard masks byte-identical, soft view with pixels kept and nothing
+outside, soft hole rim on hide, mm ↔ pixels and scaling, move / rotation, invalid widths, errors
+without mask / unchanged / already hard, clamp and back to hard, narrowing keeps and release /
+crop drop the width, save / load incl. broken values and no mask, document round trip, preview;
+dithered job thinning towards the edge and never outside, grayscale power falling off, adjusted
+image keeping the outer half of the fade, hard job unchanged, Pi-safe G-code; editor: one undo
+step, offered width, back to hard, cancel, several images with the unmasked one named, wrong
+selection, locked layer, unchanged width, release after feather; dialog preview / presets /
+readout, touch 44 px, menus / tooltip / shortcut, context menu touch row, unique main window
+shortcut and *Datei* menu.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4010 passed, 3 skipped** (27.7 min; 3969 + 41 new soft edge tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – images without a mask and images with a hard mask keep
+their view, G-code and project data byte-identical; only a soft edge writes `"mask_feather"`.
+
+Still open: unchanged from §111 except the feathered mask edge – camera placement beyond marks,
+automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell (waiting for
+the firmware decision on `LASER_POWER_TRAP`), Materials items, CoreXY time model, the xTool text
+style import, the trim refinements of §92, the print-and-cut limits of §93 / §94, the
+single-line font limits of §95 / §96 / §100 / §106, the warp limits of §97, the case limits of
+§98, the vertical text limits of §99, the box generator limits of §101, the living hinge limits
+of §102, the bent box limits of §103, the justified line limits of §104, the inline editing
+limits of §105, the spot simulation limits of §109, the window limits of §110 and the mask
+limits of §111 (open paths, single masks not releasable one by one, mask shape not shown while
+applied, no xTool mask import). For the soft edge: one width for the whole mask (no per-edge
+width, no outward fade beyond the shape, no free gradient / radial vignette without a mask),
+the fade is measured in image pixels – on an image stretched unevenly in X and Y it is wider
+in the stretched direction; threshold mode only shows the 50 % line of the fade (use
+dithering or grayscale); after cropping a soft image the baked fade is cut at 50 % again when
+image adjustments are on; the canvas shows the fade but the path preview still shows dots.
+Hardware check: on the Windows app (also with the touch screen: long press › Pfad) place a
+portrait, draw an ellipse over the face, „Maske auf Bild anwenden“, then „Weiche Maskenkante …“
+› 5 mm; engrave it with Jarvis at 0.1 mm on 4 mm plywood – the dots get sparser towards the
+ellipse and fade into the bare wood, nothing burns outside. Ctrl+Z gives the hard oval back.
