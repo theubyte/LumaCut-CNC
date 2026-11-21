@@ -17193,3 +17193,87 @@ Hardware check: engrave a 10 × 10 mm black square at 0.1 mm and at 0.05 mm line
 plywood with the Windows app and measure one line with a loupe – enter that width as
 „Punktgröße“; the simulation should show the white stripes of the first and the dark overlap
 of the second square, and „Als Linienabstand“ should give an evenly closed square.
+
+## 109. Status update 2026-11-21 (review round 102)
+
+Done this round (elliptic diode spot in the laser spot simulation; Machine / Scan Probe /
+Materials untouched – `lumacut_import/spot_preview.py`, the `(X, Y)` / scan angle pass-through
+in `lumacut_import/image_preview.py` and the Y size in the row under the preview in
+`lumacut_import/qt.py`; planner, G-code writer, job, project format, Pi, camera and material
+code unchanged):
+
+- Closed since §108 by others: none – main had no commit since `5ebd15c` (round 101); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the first limit of the spot simulation in §108 („one round spot size for all
+  images (no elliptic / rectangular diode spot …)“). Most diode lasers do not burn a round
+  spot – the emitter is a stripe, so the focused spot is oblong (typical data sheets
+  0.08 × 0.06 mm, 0.08 × 0.1 mm). The track across the scan direction is then as wide as the
+  spot in *that* direction: a line interval that fits at 0° leaves stripes or overlaps at 90°,
+  and the round-101 verdict and „Als Linienabstand“ used one size for both. This is exactly
+  LumaCut's diode hardware, needs no user decision, no hardware and no material library (the
+  user enters the two measured line widths), finishable with tests and not owned by another
+  agent. CoreXY time model (frame not built, Machine), the xTool text style import (no sample
+  file), the mask follow-ups of §107 and the movable magnifier were weighed but help less with
+  the most common diode photo mistake.
+- **Model**: `simulate_spot(…, spot_y_mm=None, angle=0.0)` – `spot_mm` is the size in machine
+  X, `spot_y_mm` the size in machine Y (None or equal = round, the round-101 code path
+  byte-identically). The beam is an elliptic Gaussian with σx = X / 4, σy = Y / 4 in machine
+  axes; `raster_sigmas` turns its covariance into the raster of the pass (rows along the scan
+  direction, machine X at `(cos, sin)` – the inverse of `rotate_pixels`, checked by turning a
+  simulated dot back). 0° / 90° stay a separable blur, oblique angles use a full 2D kernel
+  (directions thinner than 0.3 px clamped like before); energy normalised so the centre of a
+  full-power line is black, so a single line is exactly `track_width` wide:
+  √(X²·sin²θ + Y²·cos²θ) – 0° = Y, 90° = X. Sub-samples follow the smaller size, the magnifier
+  margin the bigger one; an oblique 600 × 600 px magnifier takes ~25 ms.
+- **Verdict**: stripes / ok / overlap against the track width; the text names the spot as
+  „X × Y mm“, „Spur quer zur Scan-Richtung … mm breit“, the DPI of the track and, when the
+  track at the scan angle turned by 90° differs by ≥ 15 %, „Bei Scan-Winkel …° wäre die Spur …
+  mm schmaler / breiter“. Round spots keep the round-101 text.
+- **Preview**: `preview_array`, `preview_shape` and `preview_shape_passes` take `spot_mm` as a
+  number or `(X, Y)`; every pass is simulated with its own scan angle (crosshatch: the 90° pass
+  gets the X track), all passes and the burn sum combine them as before. Without an image
+  object the rows stay horizontal but the spot lies to them like in the first pass of the job.
+- **Dialog**: the row under the preview is now „☐ Laserpunkt simulieren [X 0.080 mm]
+  [Y 0.080 mm] [Als Linienabstand]“ (44 px in touch mode). Y follows X while both are equal
+  (round spot stays one entry), an own Y makes the spot oblong; `spot_mm()` returns a number
+  or `(X, Y)`. „Als Linienabstand“ sets the interval to the track width of the shown pass
+  (all passes / burn sum: the first). Y is kept in QSettings (`image_preview/spot_y_mm`); older
+  prefs without it open round.
+
+Tests: new `tests/test_image_elliptic_spot.py` (30 tests): track width across the scan
+direction for 0° / 90° / oblique, raster covariance turning with the angle, label and info;
+round spot byte-identical to round 101, line width following the size across the rows, oblong
+single dot, oblique scans (30°, 45°, 60°, −30°) keeping the spot in machine axes and the wrong
+turn not, gaps and overlap depending on the scan direction, very thin oblique spot, magnifier
+margin of the bigger size, bounded oblique preview; verdict text with track and other
+direction, prefs incl. old prefs without Y; spot split, shape preview per scan angle, rotated
+scan, array preview like the first pass, all passes, job untouched; dialog Y following X while
+round, oblong label and track hint, line interval from the track width incl. the shown pass,
+remembered Y, settings independent, touch 44 px. The 26 round-101 tests pass unchanged.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **3892 passed, 3 skipped** (23.9 min; 3862 + 30 new elliptic spot tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – the simulation is preview only and off by default; round
+spots take the unchanged code path; no new image setting or project key, G-code, job, frame,
+estimate and export byte-identical.
+
+Still open: unchanged from §108 except the elliptic diode spot – camera placement beyond
+marks, automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell,
+Materials items, CoreXY time model, the xTool text style import, the mask follow-ups of §107
+(feathered edge, open paths, several masks, xTool masks), the trim refinements of §92, the
+print-and-cut limits of §93 / §94, the single-line font limits of §95 / §96 / §100 / §106, the
+warp limits of §97, the case limits of §98, the vertical text limits of §99, the box generator
+limits of §101, the living hinge limits of §102, the bent box limits of §103, the justified
+line limits of §104 and the inline editing limits of §105. For the spot simulation: the spot
+is a Gaussian ellipse in machine axes (a truly rectangular flat-top diode spot and a spot
+turned against the axes are not modelled), one spot for all images (no per-material spot –
+Materials), material response, power and speed are not modelled, the canvas and the path
+preview still show one pixel per dot, the magnifier always shows the image centre (no
+panning), the burn sum averages simulated darkness rather than adding energy across passes;
+without an image object (plain image data) the rows are drawn horizontal even for another
+scan angle (only the track width follows the angle).
+Hardware check: on the Windows app engrave two 10 × 10 mm black squares on plywood at 0.08 mm
+line interval, one with scan angle 0°, one with 90°; measure one single line along X and one
+along Y with a loupe and enter them as „X“ / „Y“. With an oblong spot the simulation should
+show stripes (or overlap) in exactly the square where the burn shows them, and „Als
+Linienabstand“ should give an evenly closed square in both directions.
