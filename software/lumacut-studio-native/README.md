@@ -357,6 +357,10 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     OK ändert das Projekt (ein Undo-Schritt), Abbrechen lässt alles unverändert. Würde der
     Dialog die Objekte verdecken, rückt er daneben (rechts, links, darüber oder darunter). Im
     Touch-Modus sind alle Felder, Schalter und Knöpfe mindestens 44 px hoch.
+    Trägt ein Objekt einen *Startpunkt*, wird die Kontur, auf der er liegt, ab diesem Punkt
+    verteilt (dort beginnen Schnitt und Anfahrt): jeder Steg hält den Startabstand schon beim
+    Setzen, der Planer muss keinen vom Start wegschieben, und die Lücken im G-Code liegen genau
+    auf den blauen Balken; der Zähler meldet „… Kontur(en) ab dem gesetzten Startpunkt verteilt“.
     Code: `lumacut_canvas/tabs.py`, `tabs_ui.py`, `lumacut_job/cutpath.py`.
   - *Startpunkt* (Werkzeug „Startpunkt“, Alt+Umschalt+A, wie LightBurns *Set Start Point*):
     Tippen auf den Umriss einer geschlossenen Form legt dort fest, wo ihre Kontur beginnt
