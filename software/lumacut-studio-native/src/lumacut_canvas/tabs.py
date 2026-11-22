@@ -13,7 +13,11 @@ automatischen Stege der Ebene; Stegbreite 0 schaltet alle Stege der Ebene ab.
 tabs* im Steg-Werkzeug) verteilt manuelle Stege auf einmal: eine feste Anzahl
 je Kontur oder einer je … mm Umfang, wie die automatischen Stege der Ebene von
 Konturstart und Ecken weggeschoben – danach lassen sie sich einzeln
-verschieben oder entfernen.
+verschieben oder entfernen. Trägt das Objekt einen manuellen Startpunkt
+(:mod:`startpoint`), wird die Kontur, auf der er liegt, ab diesem Punkt verteilt
+(dort beginnt beim Senden der Schnitt bzw. die Anfahrt) – so hält jeder Steg den
+Startabstand schon beim Setzen, und der Planer muss keinen von seinem Platz
+schieben.
 
 Hier nur die Rechnung (Qt nur über :func:`shape_paths.shape_polygons`); die
 Bedienung (Werkzeug „Stege“, Markierungen, Menü) liegt in :mod:`tabs_ui`.
@@ -214,6 +218,18 @@ def even_points_on_ring(ring: list[Point], n: int, width: float,
             for c in tab_centers(cum[-1], n, max(width, 1e-9), corners)]
 
 
+def start_ring_index(shape: Shape, rings: list[list[Point]]) -> int:
+    """Index des Rings, auf dem der manuelle Startpunkt des Objekts liegt (der
+    nächste, höchstens :data:`startpoint.START_SNAP_MM` entfernt – wie beim
+    Senden), sonst ``-1``."""
+    p = shape.start_point() if shape is not None else None
+    if p is None or not rings:
+        return -1
+    from .startpoint import START_SNAP_MM
+    d, _q, k = nearest_on_rings(rings, p)
+    return k if d <= START_SNAP_MM else -1
+
+
 def _inner_flags(rings: list[list[Point]], others: list[list[Point]]) -> list[bool]:
     """Liegt der Ring in einem anderen (größeren) Ring – eigenem Loch-Umriss oder
     einem anderen Objekt derselben Ebene? Ein Prüfpunkt je Ring wie beim Planer."""
@@ -254,6 +270,7 @@ class EvenTabsResult:
     auto_layers: list[str] = field(default_factory=list)
     #: Ausgelassene Konturen für die Vorschau: ``(Ring, "inner" | "short")``.
     skipped: list[tuple[list[Point], str]] = field(default_factory=list)
+    from_start: int = 0        # Konturen ab dem manuellen Startpunkt verteilt
 
     @property
     def changed(self) -> int:
@@ -273,6 +290,8 @@ class EvenTabsResult:
             text += f" · {self.skipped_inner} innere Kontur(en) ausgelassen"
         if self.too_short:
             text += f" · {self.too_short} Kontur(en) zu kurz"
+        if self.from_start and self.tabs:
+            text += f" · {self.from_start} Kontur(en) ab dem gesetzten Startpunkt verteilt"
         if self.zero_width_layers:
             names = ", ".join(f"„{n}“" for n in self.zero_width_layers)
             text += (f" · Achtung: Stegbreite 0 auf Ebene {names} – dort wird kein Steg geschnitten "
@@ -292,7 +311,9 @@ def place_even_tabs(doc, shapes: Iterable[Shape], values: dict | None = None) ->
     ersetzen die neuen Stege die manuellen Stege des Objekts, sonst kommen sie
     hinzu (zu nahe an einem vorhandenen entfallen). Objekte, an denen kein
     neuer Steg entsteht, bleiben unverändert (auch ihre alten Stege) und
-    erscheinen nicht im Ergebnis.
+    erscheinen nicht im Ergebnis. Die Kontur, auf der ein manueller Startpunkt
+    des Objekts liegt (höchstens :data:`startpoint.START_SNAP_MM` entfernt, wie
+    beim Senden), wird ab diesem Punkt verteilt (:func:`start_ring_index`).
     """
     v = _clean_even(values)
     res = EvenTabsResult()
@@ -321,7 +342,9 @@ def place_even_tabs(doc, shapes: Iterable[Shape], values: dict | None = None) ->
                  else [False] * len(rings))
         pts: list[Point] = []
         contours = 0
-        for ring, inner in zip(rings, flags):
+        from_start = 0
+        k_start = start_ring_index(s, rings)
+        for k, (ring, inner) in enumerate(zip(rings, flags)):
             if inner:
                 res.skipped_inner += 1
                 res.skipped.append((ring, "inner"))
@@ -332,10 +355,14 @@ def place_even_tabs(doc, shapes: Iterable[Shape], values: dict | None = None) ->
                 res.too_short += 1
                 res.skipped.append((ring, "short"))
                 continue
+            if k == k_start:
+                from .startpoint import rotate_ring_to
+                ring = rotate_ring_to(ring, s.start_point())
             new = even_points_on_ring(ring, n, width, v["avoid_corners"])
             if new:
                 pts.extend(new)
                 contours += 1
+                from_start += k == k_start
         old = s.tab_points()
         keep = [] if v["replace"] else list(old)
         if keep:
@@ -350,6 +377,7 @@ def place_even_tabs(doc, shapes: Iterable[Shape], values: dict | None = None) ->
         res.tabs += len(pts)
         res.contours += contours
         res.removed += len(old) if v["replace"] else 0
+        res.from_start += from_start
     # Warnungen nur für Ebenen, auf denen wirklich etwas gesetzt wird
     used = {getattr(doc.layer(s.layer_id), "name", "") for s in res.add} if hasattr(doc, "layer") else set()
     res.zero_width_layers = [n for n in zero if n in used]
