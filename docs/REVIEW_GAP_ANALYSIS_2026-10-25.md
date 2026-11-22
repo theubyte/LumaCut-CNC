@@ -17520,3 +17520,68 @@ Hardware check: on the Windows app (also with the touch screen: long press › P
 portrait, draw an ellipse over the face, „Maske auf Bild anwenden“, then „Weiche Maskenkante …“
 › 5 mm; engrave it with Jarvis at 0.1 mm on 4 mm plywood – the dots get sparser towards the
 ellipse and fade into the bare wood, nothing burns outside. Ctrl+Z gives the hard oval back.
+
+## 113. Status update 2026-11-21 (review round 106)
+
+Done this round (live canvas preview for even tabs; Machine / Scan Probe / Materials untouched –
+`tabs_ui.py`, the `skipped` list on `EvenTabsResult` in `tabs.py` and the tooltip of the Pfad
+button in `pathops_ui.py`; model, project format, job, planner, G-code writer, Pi and camera
+code unchanged):
+
+- Closed since §112 by others: none – main had no commit since `87a6ce6` (round 105); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the tabs limit of §79 / the tabs note „the dialog has no per-object preview on
+  the canvas (the orange markers appear after OK, undo restores)“ – priority group kerf / tabs /
+  lead-in. LightBurn's *Auto-place tabs* and xTool's bridges show the result only after
+  applying; on a sheet of coasters or a plate with holes the user had to press OK, look, undo
+  and try again for every change of count, spacing or „Ecken meiden“. Day-to-day cutting on a
+  diode laser, no user decision, no hardware, no material library, finishable with tests and not
+  owned by another agent.
+- **Live preview**: while „Stege gleichmäßig setzen …“ (Alt+Umschalt+G) is open, the canvas
+  shows exactly what OK will do: blue bars with a white rim in the layer's tab width for new
+  tabs, thinner grey bars for old manual tabs that „Vorhandene manuelle Stege ersetzen“ would
+  remove, dashed grey outlines for contours left without tabs (inner contour or too short – the
+  reason comes from the new `EvenTabsResult.skipped`), unchanged tabs stay orange. Every change
+  in the dialog (count / spacing, corners, inner contours, replace) updates it at once; hidden
+  layers get no bars.
+- **Display only**: document, undo stack and G-code stay untouched until OK (one undo step as
+  before); cancel, closing the dialog or an error clear the preview and restore the normal
+  markers. The switch „Vorschau auf der Arbeitsfläche“ (on by default) is remembered for the
+  session.
+- **Placement / touch**: when the dialog would cover the selected objects it moves beside them
+  (right, left, above or below, clamped to the screen; centred when nothing fits). In touch mode
+  all fields, switches and buttons are at least 44 px high.
+
+Tests: new `tests/test_even_tabs_preview.py` (20 tests): skipped contours with reason and
+unchanged readout; replace mode new blue / old grey / none orange with bars in tab width,
+document and undo untouched, clear restoring the marker; add mode keeping old tabs orange;
+skipped hole and untouched objects; hidden layer; painted blue pixels; dialog feeding the
+preview live, switch off / on, reject clearing, switch hidden without hook; touch 44 px and
+desktop size; action with preview during the dialog, one undo step on OK, cancel remembering the
+switch, cleared after an error, touch dialog from the action; placement right / left / above /
+below / none, clamped, moved beside covered objects, centred otherwise; G-code unchanged by the
+preview and equal after OK through the Pi guard; main window hook and Pfad tooltip.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4030 passed, 3 skipped** (28.5 min; 4010 + 20 new even-tabs preview tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – the preview is display only; tab positions, G-code and
+project data after OK are byte-identical to round 105.
+
+Still open: unchanged from §112 except the even-tabs canvas preview – camera placement beyond
+marks, automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode dwell
+(waiting for the firmware decision on `LASER_POWER_TRAP`), Materials items, CoreXY time model,
+the xTool text style import, the trim refinements of §92, the print-and-cut limits of §93 / §94,
+the single-line font limits of §95 / §96 / §100 / §106, the warp limits of §97, the case limits
+of §98, the vertical text limits of §99, the box generator limits of §101, the living hinge
+limits of §102, the bent box limits of §103, the justified line limits of §104, the inline
+editing limits of §105, the spot simulation limits of §109, the window limits of §110, the mask
+limits of §111 and the soft edge limits of §112. For the preview: the bars sit on the object's
+outline before kerf and before the planner's start clearance (as the even placement itself),
+so a tab the planner pushes off the contour start still shows on its even spot; the preview
+lives only in the even-tabs dialog (the manual tab tool and „Innere Formen ohne Stege“ have
+none), and the path preview still shows tabs only after OK.
+Hardware check: on the Windows app (also with the touch screen: long press › Pfad) select a
+sheet of coasters and a plate with holes, Alt+Umschalt+G – the blue bars move live with count /
+spacing and „Ecken meiden“, holes show dashed; Abbrechen leaves the orange markers as before,
+OK places them in one undo step; cut with Jarvis on 3 mm plywood – the tabs sit where the blue
+bars were.
