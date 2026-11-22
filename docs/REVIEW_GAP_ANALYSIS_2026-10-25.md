@@ -17585,3 +17585,63 @@ sheet of coasters and a plate with holes, Alt+Umschalt+G – the blue bars move 
 spacing and „Ecken meiden“, holes show dashed; Abbrechen leaves the orange markers as before,
 OK places them in one undo step; cut with Jarvis on 3 mm plywood – the tabs sit where the blue
 bars were.
+
+## 114. Status update 2026-11-22 (review round 107)
+
+Done this round (canvas hatch preview for every angle-increment pass; Machine / Scan Probe /
+Materials untouched – `fill_preview.py` and the tooltip of „Winkel-Schritt“ in
+`layers_panel.py`; model, project format, job, planner, G-code writer, Pi and camera code
+unchanged):
+
+- Closed since §113 by others: none – main had no commit since `87a6ce6` (round 105) besides
+  round 106; no Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the „Winkel-Schritt“ limit of §80 „the canvas hatch overlay and the scan-offset
+  fill preview show pass 1 only – the path preview (G-code) and the estimate show every pass“ –
+  priority group vector fill / hatch. LightBurn's *Angle Increment* is visible only in its
+  separate preview window, xTool Creative Space has no angle increment at all; with a 45° or
+  90° step the user could not see on the canvas where the turned passes reach (slivers, thin
+  strokes and narrow letters often get lines only from a later pass). Day-to-day engraving on a
+  diode laser, no user decision, no hardware, no material library, finishable with tests and
+  not owned by another agent.
+- **Every pass on the canvas** (`lumacut_canvas/fill_preview.py`): with an effective
+  „Winkel-Schritt“ (`export.layer_fill_pass_angles`) the fill preview draws the further passes
+  under their own angle beneath pass 1, in the layer colour at 45 % opacity (`PASS_ALPHA`), so
+  pass 1 stays clearly on top. Each angle is drawn once (0° / 90° / 0° / 90° → one cross
+  layer; the angle of pass 1 is skipped). The lines come from the same
+  `export.layer_pass_fill_blocks` as the G-code passes (pass 1's blocks are reused, equal
+  angles computed once), so what is shown is what burns.
+- **Unchanged**: pass 1 is drawn as before, including the delayed scan-offset shift; further
+  passes are plain fill geometry. They count towards the 200 000-line limit of the preview
+  (`truncated` as before). Hidden layers, offset fill, one pass, „Keine“ fill or a step without
+  effect add nothing; the overlay is registered only while there is something to show. The
+  tooltip of „Winkel-Schritt“ mentions the canvas display. New helpers `pass_line_count()` /
+  `pass_angles_shown()` and the switch `show_all_passes` (on).
+
+Tests: new `tests/test_fill_preview_passes.py` (16 tests): second pass under its own angle with
+the layer colour at 45 %, each angle once and the first angle skipped, no extra passes without
+an effective step / with one pass / offset fill / no fill, pass 1 unchanged by the step,
+cross-hatch, hidden layer and switch, several layers, document change, line limit, painted
+vertical lines, scan offset keeping pass 1 shifted, G-code untouched and the pass-2 burns equal
+to the preview, panel tooltip.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4046 passed, 3 skipped** (30.5 min; 4030 + 16 new pass preview tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – the preview is display only; job layers, G-code and project
+data are byte-identical to round 106.
+
+Still open: unchanged from §113 except the hatch-overlay part of the §80 limit – camera
+placement beyond marks, automatic mark detection (Scan Probe), rotary, min/max corner power,
+Dot Mode dwell (waiting for the firmware decision on `LASER_POWER_TRAP`), Materials items,
+CoreXY time model, the xTool text style import, the trim refinements of §92, the print-and-cut
+limits of §93 / §94, the single-line font limits of §95 / §96 / §100 / §106, the warp limits of
+§97, the case limits of §98, the vertical text limits of §99, the box generator limits of §101,
+the living hinge limits of §102, the bent box limits of §103, the justified line limits of
+§104, the inline editing limits of §105, the spot simulation limits of §109, the window limits
+of §110, the mask limits of §111, the soft edge limits of §112 and the even-tabs preview limits
+of §113. For the pass preview: further passes show the plain fill geometry without the scan
+offset (only pass 1 is shifted); all further passes share one opacity (no per-pass colour or
+pass selector on the canvas); vector fills only (image layers keep their own preview).
+Hardware check: on the Windows app (also with the touch screen) set a hatched logo layer to 4
+passes and „Winkel-Schritt“ 45° – the canvas shows the 45° / 90° / 135° lines paler beneath the
+0° lines, a 90° step shows one cross layer; engrave with Jarvis on 4 mm plywood or slate – the
+turned passes burn where the pale lines were.
