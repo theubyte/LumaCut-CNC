@@ -624,6 +624,24 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   ein Rückgängig-Schritt. Mit „Schriftart“ = Einlinie wird jeder Buchstabe ein offener Pfad
   (Striche, nie gefüllt) – wie beim Bogentext. Code: `src/lumacut_job/pathtext.py`, `pathtext_qt.py`, Pfad-Kurve in
   `lumacut_canvas/alongpath.py`.
+- **Flex-Scharnier** („Flex-Scharnier…“, *Alt+Umschalt+H*, Menü „Auftrag“ und Design-Menü; die
+  Living-Hinge-Muster, die LightBurn- und xTool-Nutzer aus boxes.py oder Online-Generatoren
+  importieren): versetzte Schlitze, die Sperrholz biegsam machen – gerade Schlitze, Wellen oder
+  Rauten, senkrecht oder waagrecht, Schlitzlänge, Steg, Linienabstand, halbe Schlitze bis zum
+  Rand, optional mit Rahmen und Rand; Biegerechner (Innenradius und Winkel → Breite), Anzeige von
+  Schnitten, Schnittlänge und Biegeradius, Warnungen bei zu dünnen Stegen. Mit Auswahl übernimmt
+  das Feld deren Größe und Mitte. **Auf Form zuschneiden:** enthält die Auswahl geschlossene Formen,
+  die kein einfaches Rechteck sind (Kreis, Oval, Bogen, Buchstaben, Formen mit Loch –
+  gerade-ungerade wie eine Bildmaske), füllt das Muster nur deren Umriss („Auf die ausgewählte
+  Form zuschneiden“, an): mit „Halbe Schlitze bis zum Rand“ laufen die Schnitte bis an den Umriss
+  (offene halbe Rauten enden darauf), sonst bleibt überall ein Steg zum Umriss (Rauten werden zu
+  kleineren geschlossenen Löchern); zu kurze Reststücke entfallen. Die Form selbst bleibt
+  unverändert und wird wie gewohnt geschnitten (kein Rahmen), die Vorschau zeigt sie gestrichelt.
+  Der Umriss wird im Objekt gespeichert: Doppelklick / „Code bearbeiten…“ öffnet mit Form,
+  Musterwechsel halten das Feld auf der Form (auch verschoben / gedreht), Breite / Höhe ändern
+  oder Skalieren streckt die Form mit. Ein Rechteck als Auswahl ergibt das bisherige Feld.
+  Eingefügt als eine Gruppe auf der aktiven Schneid-Ebene oder einer neuen Ebene „Scharnier“, ein
+  Rückgängig-Schritt; im Touch-Modus 44 px. Code: `src/lumacut_job/hinge.py`, `hinge_qt.py`.
 - **Code bearbeiten** („Code bearbeiten…“, *Alt+E*, oder Doppelklick auf einen Code): QR-Code,
   Barcode, Data Matrix, Aztec-, PDF417-Code und Bogentext bleiben nach dem Einfügen bearbeitbar. Der Dialog öffnet mit
   den gespeicherten Einstellungen (die Größe folgt einer seither geänderten Skalierung); „Übernehmen“
