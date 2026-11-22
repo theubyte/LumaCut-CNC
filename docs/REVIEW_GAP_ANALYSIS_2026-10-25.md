@@ -17712,3 +17712,89 @@ point in a corner of a plate with the Startpunkt tool, Alt+Umschalt+G with 4 tab
 bars sit evenly from that corner and the counter reports „1 Kontur(en) ab dem gesetzten
 Startpunkt verteilt“; cut with Jarvis on 3 mm plywood with a 2 mm lead-in – the lead-in starts
 at the point and every tab gap sits where its blue bar was.
+
+## 116. Status update 2026-11-22 (review round 109)
+
+Done this round (living hinge clipped to a free shape; Machine / Scan Probe / Materials untouched
+– `hinge.py`, `hinge_qt.py`, the hinge action in `qt_tools.py` and the re-edit centre in
+`generated_qt.py` / the empty-outline rule in `generated.py`; model, project format, planner,
+G-code writer, Pi and camera code unchanged):
+
+- Closed since §115 by others: none – main had no commit since `be3c43e` (round 108); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the living hinge limit of §102 „rectangular fields only – the pattern is not
+  clipped to a selected circle or free shape (the selection only gives size and centre)“. The
+  priority groups kerf / tabs / lead-in, vector fill / hatch, path preview and touch are down to
+  small refinements (§113 – §115), so this round took a substantial, user-visible design gap
+  instead: round coasters that flex, oval bracelet ends, lamp-shade arcs, a flex zone shaped like
+  a letter. LightBurn has no hinge generator at all, xTool Creative Space neither; users import
+  rectangular patterns from boxes.py / online generators and trim them by hand with boolean
+  operations (slow, and every trimmed slit leaves a sliver or a torn bridge). No user decision,
+  no hardware, no material library, finishable with tests and not owned by another agent.
+- **Clip to the shape** (`lumacut_job/hinge.py`): new `HingeSpec.outline` – closed rings
+  normalised to the field box (0…1, even-odd like an image mask, so holes and letters work).
+  `clip_cuts` clips the pattern with shapely: with „Halbe Schlitze bis zum Rand“ the cuts run
+  out to the outline (open half diamonds end on it), otherwise the outline is shrunk by one
+  bridge so every cut keeps a bridge to it (diamonds become smaller closed holes, never open
+  V-shapes); pieces shorter than 0.8 mm are left out, slits fully inside stay byte-identical. The
+  shape itself is not cut by the hinge (it stays the user's object with its own layer, tabs and
+  start point), so frame / margin do not apply. `outline_from_rings` builds the outline from
+  world rings and returns none for a plain axis-parallel rectangle (the old field is exact) –
+  a turned rectangle does clip; very detailed outlines are simplified to ≤ 4000 points.
+  Readout „· auf die Form zugeschnitten (… Steg zum Umriss / Schnitte bis an den Umriss)“, a
+  shape too small or too narrow for the pattern is refused in German.
+- **Dialog / insertion** (`hinge_qt.py`, `qt_tools.py`): with closed shapes in the selection
+  (images and open paths ignored, rotation-aware) the field takes the outline's bounding box and
+  centre, the dialog shows „Auf die ausgewählte Form zuschneiden“ (on; 44 px in touch mode),
+  frame and margin are greyed while clipping, the preview draws the outline dashed; switching it
+  off gives the old rectangular field over the shape's box. One undo step as before, the status
+  line says „Flex-Scharnier auf die Form zugeschnitten eingefügt …“; the action tooltip mentions
+  it.
+- **Re-edit / file**: the outline travels in the existing generator dict (no new project key;
+  rectangular hinges get no `outline` entry, so their project data stay as before). Double click
+  / „Code bearbeiten…“ opens with the shape; because clipped cuts may sit off the field centre,
+  `replace_unit` now keeps the *field* (not the cuts' bounding box) in place – pattern, pitch or
+  edge changes never walk the hinge off the shape, also after moving or turning the group.
+  Width / height in the dialog and scaling the group stretch the outline with the field.
+
+Tests: new `tests/test_hinge_shape.py` (26 tests): outline cleaning; box, rectangle without
+outline, turned rectangle, even-odd hole, point cap; cuts inside the shape and never touching for
+all patterns with open and closed edges, bridge to the outline, inner slits unchanged, open half
+diamonds on the edge and cut-back closed holes, hole of the shape and no frame, placement and a
+too small shape refused, readout and centre offset, rectangular hinges unchanged and no new meta
+key; JSON round trip and stretched outline, Pi-safe G-code with the shape, saved project; dialog
+switch / frame greyed / preview outline / switch off, touch 44 px and disabled OK; selection
+outline of closed shapes only incl. a turned ellipse, window insert on a selected ellipse in one
+undo step keeping the ellipse, switch off giving the rectangle, selected rectangle keeping the
+old field, re-edit keeping the field on the shape across pattern changes and after move / turn.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4084 passed, 3 skipped** (28.5 min; 4058 + 26 new clipped hinge tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – projects without a hinge, rectangular hinges (also inserted
+on a selected rectangle) and their G-code are byte-identical to round 108; only hinges inserted
+on a non-rectangular selection carry the new `outline` entry in their generator dict.
+
+Still open: unchanged from §115 except the free-shape part of the §102 living hinge limits –
+camera placement beyond marks, automatic mark detection (Scan Probe), rotary, min/max corner
+power, Dot Mode dwell (waiting for the firmware decision on `LASER_POWER_TRAP`), Materials items,
+CoreXY time model, the xTool text style import, the trim refinements of §92, the print-and-cut
+limits of §93 / §94, the single-line font limits of §95 / §96 / §100 / §106, the warp limits of
+§97, the case limits of §98, the vertical text limits of §99, the box generator limits of §101,
+the living hinge limits of §102 (no hinge merged into a box panel, no spiral / honeycomb / cross
+patterns, no varying density), the bent box limits of §103, the justified line limits of §104,
+the inline editing limits of §105, the spot simulation limits of §109, the window limits of
+§110, the mask limits of §111, the soft edge limits of §112, the even-tabs preview limits of
+§113, the pass preview limits of §114 and the start point limits of §115. For the clipped hinge:
+the pattern stays axis-parallel inside the shape (it does not follow a curved shape like an arc
+strip – the slits do not turn with the arc), the bend helper and readout still measure the
+shape's bounding box across the bend, open edges let neighbouring lines both run out to a curved
+outline (a narrow finger at a tangent point – use closed edges for delicate parts), the
+selection's shapes are combined even-odd (two overlapping shapes cancel their overlap, as with
+image masks), editing or moving the original shape later does not update the stored outline
+(re-insert, or move both together), and open paths are no outline.
+Hardware check: on the Windows app (also with the touch screen: long press › Design) draw a
+60 mm circle, select it, Alt+Umschalt+H – the dialog shows the circle dashed with the slits
+inside; insert with „Rauten“ and „Halbe Schlitze bis zum Rand“ off, cut circle and hinge
+through on 3 mm plywood – every hole keeps a bridge to the rim, the disc bends
+by hand; the same with an oval bracelet end and with open edges; double click the hinge, change
+the pitch – it stays on the circle.
