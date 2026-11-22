@@ -17645,3 +17645,70 @@ Hardware check: on the Windows app (also with the touch screen) set a hatched lo
 passes and „Winkel-Schritt“ 45° – the canvas shows the 45° / 90° / 135° lines paler beneath the
 0° lines, a 90° step shows one cross layer; engrave with Jarvis on 4 mm plywood or slate – the
 turned passes burn where the pale lines were.
+
+## 115. Status update 2026-11-22 (review round 108)
+
+Done this round (even tabs distributed from the start point; Machine / Scan Probe / Materials
+untouched – `tabs.py` and the mode tooltip in `tabs_ui.py`; model, project format, job, planner,
+G-code writer, Pi and camera code unchanged):
+
+- Closed since §114 by others: none – main had no commit since `319469b` (round 107) besides
+  this round; no Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the start point limit of §81 „nesting and „Stege gleichmäßig setzen …“ ignore it
+  (manual tabs only keep the start clearance at send)“ together with the tabs limit of §79 /
+  §113 „the positions are computed … from the outline's own start point, so the planner's start
+  choice can move a tab off its even spot“ – priority group kerf / tabs / lead-in. A user who
+  fixes where a part starts (lead-in on the waste side, start in a hidden corner) and then
+  auto-places tabs got the tabs counted from the drawn start: one could land right on the
+  chosen start, the planner then pushed it by the start clearance, so the gaps in the G-code no
+  longer matched the even spacing nor the blue preview bars of §113. LightBurn's *Auto-place
+  tabs* has the same blind spot. Day-to-day cutting on a diode laser, no user decision, no
+  hardware, no material library, finishable with tests and not owned by another agent.
+- **From the start point** (`lumacut_canvas/tabs.py`): `place_even_tabs` finds the ring the
+  object's manual start point belongs to (new `start_ring_index` – the nearest closed ring
+  within `startpoint.START_SNAP_MM` = 1.5 mm, the same rule as at send) and distributes that
+  ring from the start (`startpoint.rotate_ring_to`): tab centres at (i + ½) · L / n from the
+  start, pushed off the start (and with „Ecken meiden“ off corners) as before. Every tab keeps
+  the start clearance already when placed, so the planner leaves all of them on their even spot
+  and the G-code gaps sit exactly on the preview bars. Holes and further letters of the object
+  keep their own start (the planner's – one start point per object, §81); a start point farther
+  than 1.5 mm from every ring is ignored as at send. Running direction does not matter (the
+  clearance is kept at both ends of the ring, so a reversed object keeps every tab in place).
+- **Readout / tooltip**: the counter of the dialog adds „· n Kontur(en) ab dem gesetzten
+  Startpunkt verteilt“ (only when tabs are placed); the tooltip of „Verteilung“ mentions it. The
+  live preview of §113 follows automatically (it shows the same result).
+
+Tests: new `tests/test_even_tabs_start.py` (12 tests): start ring index within the snap
+distance incl. the hole ring of a combined object, distribution (i + ½) · L / n from the start,
+start clearance with corners / spacing / without corner avoidance (the old placement put a tab
+exactly on the start), unchanged placement without a start point and with a start far from every
+ring, rotated shape, only the start ring rotated and a skipped hole counting nothing, readout,
+G-code gaps exactly on the placed tabs (against the shifted old tab) through the Pi guard, kerf
+and lead-in keeping the even spots, dialog tooltip / readout, dialog preview.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4058 passed, 3 skipped** (29.4 min; 4046 + 12 new start-point tab tests), no failure (a first run under load had the timing-sensitive Machine test `test_machine_stability.py::test_close_during_frame_or_job_asks` time out once – untouched by this round, it passes alone and in the full rerun) – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – project data are untouched; only newly placed even tabs on
+an object that carries a start point land on other spots (objects without a start point get
+byte-identical tabs and G-code).
+
+Still open: unchanged from §114 except the even-tabs / start point part of the §81 and §113
+limits – camera placement beyond marks, automatic mark detection (Scan Probe), rotary, min/max
+corner power, Dot Mode dwell (waiting for the firmware decision on `LASER_POWER_TRAP`),
+Materials items, CoreXY time model, the xTool text style import, the trim refinements of §92,
+the print-and-cut limits of §93 / §94, the single-line font limits of §95 / §96 / §100 / §106,
+the warp limits of §97, the case limits of §98, the vertical text limits of §99, the box
+generator limits of §101, the living hinge limits of §102, the bent box limits of §103, the
+justified line limits of §104, the inline editing limits of §105, the spot simulation limits of
+§109, the window limits of §110, the mask limits of §111, the soft edge limits of §112, the
+even-tabs preview limits of §113 and the pass preview limits of §114. For this round: contours
+without a manual start point are still distributed from their drawn start, so the planner's
+own start choice („Besten Startpunkt wählen“, „Möglichst an Ecken beginnen“, lead-in moved off
+a blocked side) can still push a tab there by the start clearance; setting or moving a start
+point *after* placing tabs does not redistribute them (place them again – one undo step);
+nesting still ignores the start point.
+Hardware check: on the Windows app (also with the touch screen: long press › Pfad) set a start
+point in a corner of a plate with the Startpunkt tool, Alt+Umschalt+G with 4 tabs – the blue
+bars sit evenly from that corner and the counter reports „1 Kontur(en) ab dem gesetzten
+Startpunkt verteilt“; cut with Jarvis on 3 mm plywood with a 2 mm lead-in – the lead-in starts
+at the point and every tab gap sits where its blue bar was.
