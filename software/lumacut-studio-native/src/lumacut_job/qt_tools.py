@@ -962,7 +962,8 @@ class JobTools(QObject):
             "Biegescharnier (Living Hinge) aus versetzten Schlitzen einfügen – gerade, Wellen oder "
             "Rauten, Feldgröße, Schlitzlänge, Steg, Linienabstand, mit Biegerechner; macht "
             "Sperrholz biegsam (runde Box-Ecken, Armbänder) – wie die Living-Hinge-Muster für "
-            "LightBurn / xTool; mit Auswahl auf deren Größe; per Doppelklick wieder bearbeitbar")
+            "LightBurn / xTool; mit Auswahl auf deren Größe, bei Kreis, Oval oder freier Form "
+            "auf deren Umriss zugeschnitten; per Doppelklick wieder bearbeitbar")
         self.hinge_action.setObjectName("hinge_action")
         self.bentbox_action = self._add(
             "Flex-Box (runde Ecken)…", self.bentbox, "Alt+Shift+L",
@@ -1438,22 +1439,25 @@ class JobTools(QObject):
               center: tuple[float, float] | None = None) -> list[str]:
         """Insert a living hinge (one undo step); default: active layer when it cuts, else a
         new cut layer „Scharnier“. With a selection the dialog starts with its size and
-        the hinge is centred on it."""
+        the hinge is centred on it; closed shapes in the selection (not a plain rectangle)
+        offer clipping the pattern to their outline."""
         from .hinge import SIZE_RANGE, HingeSpec
-        from .hinge_qt import HingeDialog, insert_hinge, selection_field
+        from .hinge_qt import HingeDialog, insert_hinge, selection_field, selection_outline
         from .qr_qt import layer_fills
         doc = self.editor.document
         active = doc.active_layer or (doc.layers[0] if doc.layers else None)
         if spec is None:
             start = None
-            field = selection_field(self.editor)
+            shaped = selection_outline(self.editor)
+            field = shaped[:2] if shaped is not None else selection_field(self.editor)
             if field is not None:
                 center = field[0] if center is None else center
                 w, h = field[1]
                 lo = SIZE_RANGE[0]
                 thick = float(getattr(active, "thickness_mm", 0.0) or 0.0)
+                outline = shaped[2] if shaped is not None and min(w, h) >= lo else ()
                 start = HingeSpec(width_mm=max(w, lo), height_mm=max(h, lo),
-                                  thickness_mm=thick if thick > 0 else 3.0)
+                                  thickness_mm=thick if thick > 0 else 3.0, outline=outline)
             dlg = HingeDialog(self.window, spec=start, active_layer=active,
                               touch=bool(getattr(self.editor, "touch_mode", False)))
             if dlg.exec() != QDialog.Accepted:
@@ -1469,8 +1473,10 @@ class JobTools(QObject):
             return []
         layer = doc.shape(ids[0]).layer_id if ids else ""
         name = doc.layer(layer).name if layer else ""
-        self._msg(f"Flex-Scharnier eingefügt ({len(ids)} Schnitte, Ebene „{name}“) – erst an "
-                  "einem Reststück testen, Leistung und Geschwindigkeit zum Durchschneiden prüfen")
+        shaped = " auf die Form zugeschnitten" if getattr(spec, "outline", ()) else ""
+        self._msg(f"Flex-Scharnier{shaped} eingefügt ({len(ids)} Schnitte, Ebene „{name}“) – erst "
+                  "an einem Reststück testen, Leistung und Geschwindigkeit zum Durchschneiden "
+                  "prüfen")
         return ids
 
     def bentbox(self, spec=None, new_layer: bool | None = None) -> list[str]:

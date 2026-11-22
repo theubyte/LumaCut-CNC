@@ -23,6 +23,17 @@ the most flexible; the half holes at the edges are open paths ending on the
 edge). An optional ``frame`` (closed rectangle) cuts the part out, with
 ``margin_mm`` of plain material on both sides across the bend.
 
+Free shapes: ``outline`` holds closed rings (even-odd, like an image mask) in
+coordinates normalised to the field box (0…1 in X and Y, y down). With an
+outline the pattern is clipped to that shape instead of the rectangle – a
+circle, an oval bracelet end, a lamp-shade arc, letters. ``open_edges``: the
+cuts run out to the outline (open half slits / half holes ending on it);
+otherwise every cut keeps one ``bridge_mm`` from the outline (closed holes are
+cut back to a closed hole). Pieces shorter than ``MIN_SLIT`` are left out. The
+outline itself is not cut (the selected shape stays the part's contour), so
+``frame`` / ``margin_mm`` do not apply; stretching the field stretches the
+outline with it.
+
 Readout: number of slits, cut length and the bend the field allows –
 a hinge of width ``b`` across the bend wraps an angle θ around the neutral
 radius ``b / θ`` (inner radius ``b / θ − t / 2``); :func:`width_for` is the
@@ -35,6 +46,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
+
+from shapely.geometry import GeometryCollection, LineString, MultiLineString, Polygon
+from shapely.ops import linemerge
 
 from lumacut_canvas.model import Shape, new_id
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
@@ -52,6 +66,8 @@ MIN_SLIT = 0.8                    # mm: shorter edge slits are left out
 WAVE_AMPLITUDE = 0.3              # × pitch, so neighbouring waves stay ≥ 0.4 × pitch apart
 DIAMOND_HALF = 0.35               # × pitch half width of a diamond hole
 STEP_MM = 0.5                     # chord length of the wave polylines
+MAX_OUTLINE_POINTS = 4000         # points of a free outline (kept in the project file)
+FULL_BOX = 0.999                  # outline area ≥ this × field box: a plain rectangle
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -73,6 +89,7 @@ class HingeSpec:
     margin_mm: float = 10.0       # plain material on both sides across the bend (frame only)
     x: float = 0.0                # top left corner of the part (frame or field)
     y: float = 0.0
+    outline: tuple = ()           # free shape: rings normalised to the field box (even-odd)
 
     def normalized(self) -> "HingeSpec":
         def f(v, rng, default):
@@ -93,7 +110,13 @@ class HingeSpec:
                          thickness_mm=f(self.thickness_mm, THICKNESS_RANGE, 3.0),
                          open_edges=bool(self.open_edges), frame=bool(self.frame),
                          margin_mm=f(self.margin_mm, MARGIN_RANGE, 10.0),
-                         x=float(self.x), y=float(self.y))
+                         x=float(self.x), y=float(self.y),
+                         outline=normalize_outline(self.outline))
+
+    @property
+    def clipped(self) -> bool:
+        """True: the pattern is clipped to a free outline (no rectangle frame)."""
+        return bool(self.outline)
 
     def across(self) -> float:
         """Field size across the bend (perpendicular to the slits)."""
@@ -108,7 +131,7 @@ class HingeSpec:
     def part_size(self) -> tuple[float, float]:
         """(w, h) of the inserted part: the frame with its margins, else the field."""
         s = self.normalized()
-        m = s.margin_mm if s.frame else 0.0
+        m = s.margin_mm if s.frame and not s.outline else 0.0
         if s.horizontal:
             return s.width_mm, s.height_mm + 2 * m
         return s.width_mm + 2 * m, s.height_mm
@@ -120,6 +143,76 @@ class Slit:
 
     points: tuple[tuple[float, float], ...]
     closed: bool
+
+
+def normalize_outline(raw) -> tuple:
+    """Clean outline: tuple of rings (≥ 3 finite points, 0…1, rounded), empty when unusable."""
+    rings = []
+    try:
+        items = list(raw or ())
+    except TypeError:
+        return ()
+    for ring in items:
+        pts = []
+        try:
+            for p in ring:
+                x, y = float(p[0]), float(p[1])
+                if not (math.isfinite(x) and math.isfinite(y)):
+                    raise ValueError
+                pts.append((round(_clamp(x, 0.0, 1.0), 6), round(_clamp(y, 0.0, 1.0), 6)))
+        except (TypeError, ValueError, IndexError):
+            continue
+        if len(pts) > 1 and pts[0] == pts[-1]:
+            pts.pop()
+        if len(pts) >= 3:
+            rings.append(tuple(pts))
+    return tuple(rings)
+
+
+def _even_odd(rings) -> Polygon:
+    area = Polygon()
+    for ring in rings:
+        if len(ring) >= 3:
+            area = area.symmetric_difference(Polygon(ring).buffer(0))
+    return area
+
+
+def outline_area(spec: HingeSpec):
+    """Even-odd area of the outline in part coordinates (top left 0 / 0), None without."""
+    s = spec.normalized()
+    if not s.outline:
+        return None
+    w, h = s.width_mm, s.height_mm
+    return _even_odd([[(u * w, v * h) for u, v in ring] for ring in s.outline])
+
+
+def outline_from_rings(rings) -> tuple[tuple[float, float, float, float], tuple]:
+    """World rings (mm, closed shapes, even-odd) → ((x0, y0, w, h), normalised outline).
+
+    The outline is empty when the rings fill their bounding box (a plain rectangle –
+    the old rectangular field is exact) or have no area. Very detailed outlines are
+    simplified until they have at most ``MAX_OUTLINE_POINTS`` points."""
+    rings = [[(float(x), float(y)) for x, y in r] for r in rings if len(r) >= 3]
+    area = _even_odd(rings)
+    if area.is_empty or area.area <= 1e-9:
+        return (0.0, 0.0, 0.0, 0.0), ()
+    x0, y0, x1, y1 = area.bounds
+    w, h = x1 - x0, y1 - y0
+    if w <= 1e-9 or h <= 1e-9 or area.area >= FULL_BOX * w * h:
+        return (x0, y0, w, h), ()
+    tol = 0.0
+    while True:
+        geo = area.simplify(tol, preserve_topology=True) if tol else area
+        polys = [geo] if isinstance(geo, Polygon) else [g for g in getattr(geo, "geoms", ())
+                                                      if isinstance(g, Polygon)]
+        out = []
+        for p in polys:
+            for ring in (p.exterior, *p.interiors):
+                pts = [((px - x0) / w, (py - y0) / h) for px, py in ring.coords]
+                out.append(pts)
+        if sum(len(r) for r in out) <= MAX_OUTLINE_POINTS or tol > 5.0:
+            return (x0, y0, w, h), normalize_outline(out)
+        tol = 0.02 if not tol else tol * 2.0
 
 
 def columns(spec: HingeSpec) -> list[float]:
@@ -232,10 +325,10 @@ def slits(spec: HingeSpec) -> list[Slit]:
 
 
 def cut_length(spec: HingeSpec) -> float:
-    """Total length of all hinge cuts (without the frame), mm."""
+    """Total length of all hinge cuts (without the frame, clipped to an outline), mm."""
     total = 0.0
-    for sl in slits(spec):
-        pts = list(sl.points) + ([sl.points[0]] if sl.closed else [])
+    for pts, closed in _field_cuts(spec):
+        pts = list(pts) + ([pts[0]] if closed else [])
         total += sum(math.dist(p, q) for p, q in zip(pts, pts[1:]))
     return total
 
@@ -254,10 +347,101 @@ def fits(spec: HingeSpec) -> bool:
     return w <= WORK_WIDTH_MM + 1e-6 and h <= WORK_HEIGHT_MM + 1e-6
 
 
+def _lines(geo) -> list:
+    if geo.is_empty:
+        return []
+    if isinstance(geo, LineString):
+        return [geo]
+    if isinstance(geo, MultiLineString):
+        merged = linemerge(geo)
+        return [merged] if isinstance(merged, LineString) else list(merged.geoms)
+    if isinstance(geo, GeometryCollection):
+        return [g for part in geo.geoms for g in _lines(part)]
+    return []
+
+
+def _polys(geo) -> list:
+    if geo.is_empty:
+        return []
+    if isinstance(geo, Polygon):
+        return [geo]
+    return [g for part in getattr(geo, "geoms", ()) for g in _polys(part)]
+
+
+def _pts(coords) -> tuple:
+    return tuple((round(float(x), 6), round(float(y), 6)) for x, y in coords)
+
+
+def clip_cuts(spec: HingeSpec, cuts) -> list:
+    """Cuts (part coordinates, top left 0 / 0) clipped to the spec's outline – see the
+    module doc. Without an outline the cuts are returned unchanged."""
+    s = spec.normalized()
+    area = outline_area(s)
+    if area is None:
+        return list(cuts)
+    region = area if s.open_edges else area.buffer(-s.bridge_mm, join_style=2)
+    if region.is_empty:
+        return []
+    prepared = region.buffer(0)
+    out = []
+    for pts, closed in cuts:
+        if closed:
+            hole = Polygon(pts)
+            if prepared.contains(hole):
+                out.append((tuple(pts), True))
+                continue
+            if not prepared.intersects(hole):
+                continue
+            if s.open_edges:
+                ring = LineString(list(pts) + [pts[0]])
+                for ln in _lines(ring.intersection(prepared)):
+                    if ln.length >= MIN_SLIT - 1e-9:
+                        out.append((_pts(ln.coords), False))
+            else:
+                for poly in _polys(hole.intersection(prepared)):
+                    if poly.length >= 2 * MIN_SLIT and poly.area > 1e-4:
+                        c = list(poly.exterior.coords)[:-1]
+                        out.append((_pts(c), True))
+            continue
+        line = LineString(pts)
+        if prepared.contains(line):
+            out.append((tuple(pts), False))
+            continue
+        for ln in _lines(line.intersection(prepared)):
+            if ln.length >= MIN_SLIT - 1e-9:
+                out.append((_pts(ln.coords), False))
+    return out
+
+
+def _field_cuts(spec: HingeSpec) -> list:
+    """Hinge cuts (no frame) in part coordinates with the top left at 0 / 0, clipped to
+    the outline when there is one."""
+    s = replace(spec.normalized(), x=0.0, y=0.0)
+    cuts = [(tuple(_to_xy(s, u, v) for u, v in sl.points), sl.closed) for sl in slits(s)]
+    return clip_cuts(s, cuts) if s.outline else cuts
+
+
+def cut_center_offset(spec: HingeSpec) -> tuple[float, float]:
+    """Centre of the cuts' bounding box minus the centre of the part box (mm). Zero for
+    rectangular fields; with a free outline the clipped cuts may sit off-centre."""
+    s = spec.normalized()
+    w, h = s.part_size()
+    cuts = part_cuts(replace(s, x=0.0, y=0.0))
+    xs = [x for pts, _c in cuts for x, _y in pts]
+    ys = [y for pts, _c in cuts for _x, y in pts]
+    if not xs:
+        return 0.0, 0.0
+    return (min(xs) + max(xs)) / 2.0 - w / 2.0, (min(ys) + max(ys)) / 2.0 - h / 2.0
+
+
 def part_cuts(spec: HingeSpec):
     """All cuts in part coordinates (top left at spec.x / spec.y): list of
-    (points, closed) – the slits, then the frame (when on)."""
+    (points, closed) – the slits (clipped to a free outline), then the frame (when on;
+    never with an outline)."""
     s = spec.normalized()
+    if s.outline:
+        return [(tuple((x + s.x, y + s.y) for x, y in pts), closed)
+                for pts, closed in _field_cuts(s)]
     out = [(tuple(_to_xy(s, u, v) for u, v in sl.points), sl.closed) for sl in slits(s)]
     if s.frame:
         w, h = s.part_size()
@@ -277,9 +461,13 @@ def hinge_shapes(spec: HingeSpec, layer_id: str) -> list[Shape]:
             or s.y + h > WORK_HEIGHT_MM + eps):
         raise ValueError(f"Das Scharnier braucht {w:.0f} × {h:.0f} mm und passt nicht auf die "
                          f"Arbeitsfläche ({WORK_WIDTH_MM:.0f} × {WORK_HEIGHT_MM:.0f} mm)")
+    cuts = part_cuts(s)
+    if not cuts:
+        raise ValueError("Die Form ist für dieses Muster zu klein oder zu schmal – Steg / "
+                         "Linienabstand kleiner machen")
     group = new_id()
     out: list[Shape] = []
-    for pts, closed in part_cuts(s):
+    for pts, closed in cuts:
         sh = Shape.from_points("polygon" if closed else "path", list(pts), layer_id)
         sh.groups = (group,)
         out.append(sh)
@@ -315,7 +503,10 @@ def describe(spec: HingeSpec) -> str:
     s = spec.normalized()
     n, la = slit_plan(s)
     cols = columns(s)
-    cuts = slits(s)
+    cuts = _field_cuts(s)
+    if s.outline and not cuts:
+        raise ValueError("Die Form ist für dieses Muster zu klein oder zu schmal – Steg / "
+                         "Linienabstand kleiner machen")
     w, h = s.part_size()
     U, t = s.across(), s.thickness_mm
     text = (f"{PATTERN_LABELS[s.pattern]}: {len(cols)} Linien, {len(cuts)} Schnitte "
@@ -323,6 +514,10 @@ def describe(spec: HingeSpec) -> str:
             f"{cut_length(s) / 1000.0:.2f} m · Biegung 90° um Innenradius ≈ "
             f"{bend_radius(U, 90, t):.1f} mm, 180° um ≈ {bend_radius(U, 180, t):.1f} mm · "
             f"Teil {w:.1f} × {h:.1f} mm")
+    if s.outline:
+        text += " · auf die Form zugeschnitten" + (
+            " (Schnitte bis an den Umriss)" if s.open_edges else
+            f" ({s.bridge_mm:.1f} mm Steg zum Umriss)")
     return text
 
 
@@ -351,7 +546,9 @@ def warnings(spec: HingeSpec) -> list[str]:
     return out
 
 
-__all__ = ["BRIDGE_RANGE", "CUT_RANGE", "HingeSpec", "MARGIN_RANGE", "MAX_SLITS", "PATTERNS",
-           "PATTERN_LABELS", "PITCH_RANGE", "SIZE_RANGE", "Slit", "THICKNESS_RANGE",
-           "bend_radius", "centered", "columns", "cut_length", "describe", "fits", "hinge_shapes",
-           "part_cuts", "slit_plan", "slits", "warnings", "width_for"]
+__all__ = ["BRIDGE_RANGE", "CUT_RANGE", "HingeSpec", "MARGIN_RANGE", "MAX_OUTLINE_POINTS",
+           "MAX_SLITS", "PATTERNS", "PATTERN_LABELS", "PITCH_RANGE", "SIZE_RANGE", "Slit",
+           "THICKNESS_RANGE", "bend_radius", "centered", "clip_cuts", "columns",
+           "cut_center_offset", "cut_length", "describe", "fits", "hinge_shapes",
+           "normalize_outline", "outline_area", "outline_from_rings", "part_cuts", "slit_plan",
+           "slits", "warnings", "width_for"]

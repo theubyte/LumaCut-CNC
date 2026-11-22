@@ -72,6 +72,8 @@ def make_meta(spec, shapes) -> dict:
     """Generator dict for freshly generated (unrotated) ``shapes``."""
     kind = spec_kind(spec)
     d = {k: v for k, v in asdict(spec.normalized()).items() if k not in _POSITION}
+    if d.get("outline") == ():      # living hinge without a free shape: no key, as before
+        del d["outline"]
     x0, y0, x1, y1 = extent(shapes)
     return {"kind": kind, "version": VERSION, "spec": d,
             "box": [round(x1 - x0, 6), round(y1 - y0, 6)]}
@@ -187,7 +189,8 @@ def scaled_spec(spec, scale: tuple[float, float]):
     (in module widths) from the ratio Y / X. A box keeps its stored sizes (the flat
     layout of its panels has no meaningful scale – material and joints would not
     scale with it); the same holds for a bent box. A living hinge stretches its field (and the frame margin) with the
-    handles but keeps slit length, bridge and pitch – those are what make it bend.
+    handles but keeps slit length, bridge and pitch – those are what make it bend; a free outline
+    (normalised to the field) is stretched with the field.
     Unscaled specs are returned unchanged.
     """
     sx, sy = scale

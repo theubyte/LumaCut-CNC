@@ -39,11 +39,13 @@ class HingePreview(QWidget):
         self.cuts: list[tuple[tuple[tuple[float, float], ...], bool]] = []
         self.size_mm = (1.0, 1.0)
         self.fits = True
+        self.outline: tuple = ()      # free shape (normalised rings), drawn grey
 
-    def set_cuts(self, cuts, size_mm, fits: bool) -> None:
+    def set_cuts(self, cuts, size_mm, fits: bool, outline=()) -> None:
         self.cuts = list(cuts)
         self.size_mm = size_mm
         self.fits = fits
+        self.outline = tuple(outline or ())
         self.update()
 
     def paintEvent(self, _event) -> None:   # pragma: no cover - drawing only
@@ -53,6 +55,14 @@ class HingePreview(QWidget):
         sw, sh = max(self.size_mm[0], 1e-6), max(self.size_mm[1], 1e-6)
         k = min((self.width() - 12) / sw, (self.height() - 12) / sh)
         p.translate((self.width() - sw * k) / 2.0, (self.height() - sh * k) / 2.0)
+        if self.outline:
+            p.setPen(QPen(QColor("#9e9e9e"), 1.0, Qt.DashLine))
+            for ring in self.outline:
+                path = QPainterPath(QPointF(ring[0][0] * sw * k, ring[0][1] * sh * k))
+                for u, v in ring[1:]:
+                    path.lineTo(u * sw * k, v * sh * k)
+                path.closeSubpath()
+                p.drawPath(path)
         p.setPen(QPen(QColor("#c62828") if not self.fits else QColor("#1565c0"), 1.0))
         for pts, closed in self.cuts:
             if not pts:
@@ -78,6 +88,7 @@ class HingeDialog(QDialog):
             spec = hinge.HingeSpec(thickness_mm=thick) if thick > 0 else hinge.HingeSpec()
         s = spec.normalized()
         self.touch = touch
+        self._outline = s.outline
         form = QFormLayout(self)
         self.pattern = QComboBox()
         self.pattern.setObjectName("HingePattern")
@@ -122,6 +133,15 @@ class HingeDialog(QDialog):
         self.margin = self._spin(s.margin_mm, hinge.MARGIN_RANGE, 1, "HingeMargin",
                                  "Rand ohne Schlitze auf beiden Seiten der Biegestrecke (nur "
                                  "mit Rahmen)")
+        self.clip = QCheckBox("Auf die ausgewählte Form zuschneiden")
+        self.clip.setObjectName("HingeClip")
+        self.clip.setChecked(bool(self._outline))
+        self.clip.setVisible(bool(self._outline))
+        self.clip.setToolTip("An: das Muster füllt nur die ausgewählte Form (Kreis, Oval, Bogen, "
+                             "Buchstaben) statt des Rechtecks. „Halbe Schlitze bis zum Rand“ an: "
+                             "Schnitte laufen bis an den Umriss; aus: überall ein Steg zum Umriss. "
+                             "Die Form selbst bleibt unverändert und wird wie gewohnt geschnitten "
+                             "(Rahmen entfällt); Breite / Höhe ändern streckt die Form mit")
         # bend helper: inner radius and angle -> width across the bend
         self.radius = self._spin(10.0, (0.0, 500.0), 1, "HingeRadius",
                                  "Innenradius der Rundung (z. B. Ecke einer Box)")
@@ -148,10 +168,12 @@ class HingeDialog(QDialog):
         self.new_layer.setChecked(self._active_fills or bool(getattr(active_layer, "locked", False)))
         self.new_layer.setToolTip("Aus: Schnitte auf die aktive Ebene" + (f" „{name}“" if name else "")
                                   + " – sie muss schneiden (keine Füllung)")
-        for cb in (self.horizontal, self.open_edges, self.frame, self.new_layer):
+        for cb in (self.horizontal, self.open_edges, self.frame, self.new_layer, self.clip):
             if touch:
                 cb.setMinimumHeight(TOUCH_PX)
         form.addRow("Muster", self.pattern)
+        if self._outline:
+            form.addRow("Form", self.clip)
         form.addRow("Breite × Höhe", self._row(self.width_mm, QLabel("×"), self.height_mm))
         # compact rows so the dialog stays on a 720 px tablet screen in touch mode
         form.addRow("", self._row(self.horizontal, self.open_edges))
@@ -179,7 +201,7 @@ class HingeDialog(QDialog):
         for sb in (self.width_mm, self.height_mm, self.cut, self.bridge, self.pitch,
                    self.thickness, self.margin):
             sb.valueChanged.connect(self._update)
-        for cb in (self.horizontal, self.open_edges, self.frame, self.new_layer):
+        for cb in (self.horizontal, self.open_edges, self.frame, self.new_layer, self.clip):
             cb.toggled.connect(self._update)
         self.pattern.currentIndexChanged.connect(self._update)
         self._update()
@@ -214,7 +236,12 @@ class HingeDialog(QDialog):
                                pitch_mm=self.pitch.value(), thickness_mm=self.thickness.value(),
                                open_edges=self.open_edges.isChecked(),
                                frame=self.frame.isChecked(),
-                               margin_mm=self.margin.value()).normalized()
+                               margin_mm=self.margin.value(),
+                               outline=self._outline if self.clipping() else ()).normalized()
+
+    def clipping(self) -> bool:
+        """True: the pattern is clipped to the selected shape."""
+        return bool(self._outline) and self.clip.isChecked()
 
     def fill_layer(self) -> bool:
         """True: insert on a new cut layer."""
@@ -228,7 +255,8 @@ class HingeDialog(QDialog):
 
     def _update(self) -> None:
         s = self.spec()
-        self.margin.setEnabled(s.frame)
+        self.frame.setEnabled(not s.clipped)
+        self.margin.setEnabled(s.frame and not s.clipped)
         try:
             text = hinge.describe(s)
             cuts = hinge.part_cuts(replace(s, x=0.0, y=0.0))
@@ -238,7 +266,7 @@ class HingeDialog(QDialog):
             self.ok_button.setEnabled(False)
             return
         fits = hinge.fits(s)
-        self.preview.set_cuts(cuts, s.part_size(), fits)
+        self.preview.set_cuts(cuts, s.part_size(), fits, s.outline)
         if not fits:
             text += " – passt nicht auf die Arbeitsfläche"
         for w in hinge.warnings(s):
@@ -289,6 +317,30 @@ def insert_hinge(editor, spec: hinge.HingeSpec, new_layer: bool = False,
     return ids
 
 
+def selection_outline(editor):
+    """(centre, (w, h), outline) of the closed shapes in the selection (rotation-aware
+    outline, even-odd like an image mask) for clipping the pattern; None when the
+    selection has no closed shape. ``outline`` is empty for a plain rectangle (the
+    rectangular field is exact then)."""
+    from lumacut_canvas.model import is_closed_shape
+    from lumacut_canvas.shape_paths import shape_polygons
+    doc = editor.document
+    parts = [doc.shape(i) for i in (getattr(editor, "selection", ()) or ()) if doc.has_shape(i)]
+    rings = []
+    for sh in parts:
+        if sh.kind == "image" or not is_closed_shape(sh):
+            continue
+        for pts in shape_polygons(sh):
+            if len(pts) > 3 and pts[0] == pts[-1]:
+                rings.append(pts[:-1])
+    if not rings:
+        return None
+    (x0, y0, w, h), outline = hinge.outline_from_rings(rings)
+    if w <= 0 or h <= 0:
+        return None
+    return (x0 + w / 2.0, y0 + h / 2.0), (w, h), outline
+
+
 def selection_field(editor) -> tuple[tuple[float, float], tuple[float, float]] | None:
     """(centre, (w, h)) of the selected objects (rotation-aware outline), None without
     a selection."""
@@ -301,4 +353,4 @@ def selection_field(editor) -> tuple[tuple[float, float], tuple[float, float]] |
 
 
 __all__ = ["CUT_LAYER_NAME", "HingeDialog", "HingePreview", "cut_layer", "insert_hinge",
-           "selection_field"]
+           "selection_field", "selection_outline"]

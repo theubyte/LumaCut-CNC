@@ -13,6 +13,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QDialog
 
 from lumacut_canvas.commands import AddShapesCommand, DeleteShapesCommand
+from lumacut_canvas.model import rotate_point
 from lumacut_canvas.workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
 
 from . import generated
@@ -95,7 +96,7 @@ def replace_unit(editor, unit: Unit, spec) -> list[str]:
     if layer.locked:
         raise ValueError(f"Ebene „{layer.name}“ ist gesperrt")
     shapes = build_shapes(spec, unit.layer_id)
-    generated.place(shapes, unit.center, unit.rot)
+    generated.place(shapes, _hinge_center(unit, spec), unit.rot)
     for sh in shapes:
         sh.groups = unit.outer + (unit.group,)
     label = generated.LABELS[unit.kind]
@@ -109,6 +110,32 @@ def replace_unit(editor, unit: Unit, spec) -> list[str]:
     ids = [sh.id for sh in shapes]
     editor.set_selection(ids)
     return ids
+
+
+def _hinge_center(unit: Unit, spec) -> tuple[float, float]:
+    """Where the new group's bounding box centre goes. A living hinge clipped to a free
+    shape has cuts that may sit off the centre of its field (the shape's box); keep the
+    field – and with it the outline – in place when the pattern changes."""
+    if unit.kind != "hinge":
+        return unit.center
+    from . import hinge
+    try:
+        old = generated.spec_from_meta(unit.meta)
+    except ValueError:
+        return unit.center
+    new = spec.normalized()
+    if not old.outline and not new.outline:
+        return unit.center
+    # the old cuts as generated, stretched with the group since; the new ones as built
+    sx, sy = unit.scale
+    ox, oy = hinge.cut_center_offset(old)
+    ox, oy = ox * sx, oy * sy
+    nx, ny = hinge.cut_center_offset(new)
+    dx, dy = nx - ox, ny - oy
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return unit.center
+    rx, ry = rotate_point(dx, dy, 0.0, 0.0, unit.rot)
+    return unit.center[0] + rx, unit.center[1] + ry
 
 
 def edit_dialog(unit: Unit, spec, layer, parent=None, touch: bool | None = None) -> QDialog:
