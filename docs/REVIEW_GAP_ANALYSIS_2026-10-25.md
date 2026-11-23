@@ -18041,3 +18041,78 @@ node outwards with the node tool and afterwards set the corner radius of a secon
 tabs to 10 mm – the blue bars stay evenly spread and away from the corners and the start, the
 status line reports „… auf dem neuen Umriss gleichmäßig neu verteilt“; cut it – every tab gap
 sits on its blue bar.
+
+## 120. Status update 2026-11-23 (review round 113)
+
+Done this round (even tabs follow scaling; Machine / Scan Probe / Materials untouched –
+`tabs.py`, `SetGeometryCommand` in `commands.py`, the selection frame handles in `tools.py`,
+the size fields in `editor.py` and the mode tooltip in `tabs_ui.py`; model, project format,
+job, planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §119 by others: none – main had no commit since `bc2dd79` (round 112); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note, no other branch
+  active since 2026-11-13.
+- Gap picked: from the §119 limits „other outline-changing operations (offset, boolean
+  operations / weld, non-uniform scaling, trim) are not part of the follow“ the most frequent
+  one, scaling – priority group kerf / tabs / lead-in. Tabs are stored normalised to the object
+  box, so resizing only stretched them: after a non-uniform resize (a 40 × 20 mm part made
+  90 × 20 mm with the right-middle handle or the W field) the tabs bunched up on the short
+  sides, and because start and corner clearance are in mm even a uniform resize left tabs that
+  had been pushed away from a corner 3 mm (×2) or 0.75 mm (×½) from it instead of 1.5 mm – the
+  planner then moved them and the G-code gaps no longer matched the blue bars. LightBurn scales
+  tabs with the shape and its *Auto-place tabs* has to be run again; xTool Creative Space only
+  regenerates tabs on demand. No user decision, no hardware, no material library, finishable
+  with tests and not owned by another agent.
+- **Follow** (`lumacut_canvas/tabs.py`, new `follow_geometry(doc, old, new, old_tabs=None)`):
+  for every object whose size changes (not only position, rotation or mirroring – those keep the
+  spots exactly), `follow_shape` of §119 runs on the scaled outline: contours whose tabs still
+  sit exactly on the spots „Stege gleichmäßig setzen …“ gives are placed again with the same
+  count and corner rule from the start point or drawn start; too small contours keep the
+  stretched tabs (readout „zu kurz – nur übertragen“). Hand-placed tabs are stretched as before
+  and not reported. Result: `{id: (old tabs, new tabs)}` only for objects whose tabs change, so
+  shapes without even tabs and every move / rotate stay byte-identical.
+- **Undo** (`commands.py`): `SetGeometryCommand` takes an optional `tabs` dict and sets tabs and
+  geometry in the same step (merging keeps the first old tabs).
+- **Where it applies**: the eight scale handles of the selection frame (also rotated single
+  objects and groups) – live while dragging for up to 25 objects with tabs
+  (`LIVE_TAB_FOLLOW_MAX`, beyond that on release), Esc (and the second-finger abort) restore size and tabs,
+  one undo step „Skalieren“, status line „Skalieren · 4 Stege an 1 Kontur auf dem skalierten
+  Umriss gleichmäßig neu verteilt“; the W / H fields (with or without locked ratio, rotated
+  single objects) in one step „Maße ändern“ with the same readout. The tooltip of „Verteilung“
+  in the even-tabs dialog mentions it.
+
+Tests: new `tests/test_tabs_follow_scale.py` (21 tests): non-uniform stretch gives exactly the
+spots of placing on the scaled outline (count 4 / 3 / 5 without corner rule / spacing – the
+count is kept); start and corner clearance after the resize; uniform ×2 restoring the 1.5 mm
+corner clearance; move, rotate, mirror and a uniform resize whose spots scale exactly leave the
+tabs; hand-moved and single hand tabs only stretched, no readout; too small; ellipse, rounded
+rectangle, rotated rectangle and a hole; saved project without new key; zero tab width; old-tabs
+override and several objects summed up; G-code gaps on the redistributed tabs with lead-in and
+start point through the Pi guard; command undo / redo / merge; handle drag live in one undo step
+with readout, undo / redo and Esc; hand tabs stretched and move unchanged through the tool; W
+field and rotated H field in one undo step with readout; dialog tooltip.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4165 passed, 3 skipped** (34.1 min; 4144 + 21 new follow-scale tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – project data are untouched; only an object resized from now
+on can move tabs, and only tabs that still sit on their even spots.
+
+Still open: unchanged from §119 except the scaling part of its last limits – camera placement
+beyond marks, automatic mark detection (Scan Probe), rotary, min/max corner power, Dot Mode
+dwell (waiting for the firmware decision on `LASER_POWER_TRAP`), Materials items, CoreXY time
+model, the xTool text style import, the trim refinements of §92, the print-and-cut limits of
+§93 / §94, the single-line font limits of §95 / §96 / §100 / §106, the warp limits of §97, the
+case limits of §98, the vertical text limits of §99, the box generator limits of §101 / §117,
+the living hinge limits of §102 / §116, the bent box limits of §103, the justified line limits
+of §104, the inline editing limits of §105, the spot simulation limits of §109, the window limits
+of §110, the mask limits of §111, the soft edge limits of §112, the even-tabs preview limits of
+§113, the pass preview limits of §114, the even-tab recognition limits of §118 and the node
+editing limits of §119. For this round: offset, boolean operations / weld and trim still do not
+redistribute even tabs; print-and-cut alignment with „Skalieren“ (marks), nesting and the
+silent shrink into the work area keep stretching them; a rounded rectangle's corner radius stays
+in mm, so stretched hand tabs on its arcs can sit slightly off the outline as before.
+Hardware check: on the Windows app (also with the touch screen) place 4 tabs on a 40 × 20 mm
+rectangle of 3 mm plywood with Alt+Umschalt+G, drag the right-middle handle to 90 mm (or type
+90 into B with the ratio lock off) – the blue bars move live and end up evenly spread, away from
+the corners, the status line reports „Skalieren · 4 Stege an 1 Kontur auf dem skalierten Umriss
+gleichmäßig neu verteilt“; cut it – every tab gap sits on its blue bar.
