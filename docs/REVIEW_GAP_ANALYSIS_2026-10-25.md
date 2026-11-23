@@ -17879,3 +17879,81 @@ the readout shows 6 compartments of 45.5 × 22.7 mm; cut through, slide the divi
 the crossings (flush top and bottom), push the grid into the box – it stands without glue, the lid
 closes on it; double click a part, set „längs“ to 0 – the box is rebuilt in place with two
 dividers.
+
+## 118. Status update 2026-11-23 (review round 111)
+
+Done this round (even tabs follow the start point; Machine / Scan Probe / Materials untouched –
+`tabs.py`, the start point tool in `startpoint_ui.py` and the mode tooltip in `tabs_ui.py`;
+model, project format, job, planner, G-code writer, Pi and camera code unchanged):
+
+- Closed since §117 by others: none – main had no commit since `e05a6a5` (round 110); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note, no other branch
+  active since 2026-11-13.
+- Gap picked: the start point limit of §115 „setting or moving a start point *after* placing
+  tabs does not redistribute them (place them again – one undo step)“ – priority group kerf /
+  tabs / lead-in. The usual order on the machine is the other way round: auto-place tabs first,
+  then look at the path preview and drag the start into a hidden corner or onto the waste side.
+  Until now the tabs stayed counted from the old start, one could end up right at the new start
+  and the planner pushed it away by the start clearance – the G-code gaps no longer matched the
+  blue bars. LightBurn's *Set Start Point* leaves auto-placed tabs where they are as well;
+  xTool Creative Space's *Tab Generation* places tabs automatically by number or spacing only
+  and has no hand-placed tabs to tell apart from even ones. No
+  user decision, no hardware, no material library, finishable with tests and not owned by
+  another agent.
+- **Follow** (`lumacut_canvas/tabs.py`, new `follow_start(doc, old, new)`): for every closed
+  contour whose distribution origin changes (the start point lands on it, moves along it, or
+  leaves it – then its drawn start counts again, as in §115), the tabs of that contour are
+  compared with the spots „Stege gleichmäßig setzen …“ gives from the old origin (`even_pattern`:
+  same count, with or without „Ecken meiden“, layer tab width or the 1 mm fallback, 0.05 mm
+  tolerance – survives the 6-digit rounding of the project file). If they match, they are placed
+  again from the new origin with the same count and corner rule, so every tab keeps the start
+  clearance and the planner moves none. If no tab sits near a corner (both rules give the same
+  spots) „Ecken meiden“ is kept (dialog default). Tabs moved or added by hand, single hand tabs,
+  tabs on contours whose origin does not change and tabs not on a contour are left exactly as
+  they are.
+- **Tool** (`startpoint_ui.py`): tap / click on the outline, Shift+tap (set and reverse), tap on
+  the point (remove), Pfad › „Startpunkte entfernen“ and dragging the point all apply it in the
+  same undo step as the start point change; while dragging the blue tab markers move live, Esc
+  restores both. The status line adds „· 4 Stege an 1 Kontur ab dem neuen Start gleichmäßig neu
+  verteilt“ or „· von Hand gesetzte Stege an 1 Kontur unverändert“; the tooltip of „Verteilung“
+  in the even-tabs dialog mentions it.
+
+Tests: new `tests/test_tabs_follow_start.py` (19 tests): setting a start redistributes exactly
+like placing after it (count 4 / 3 / 5 without corner rule / spacing mode) with every tab keeping
+the start clearance; corner rule detection incl. the ambiguous case; moving, removing and moving
+back; hand-moved, added and single hand tabs kept with readout; nothing to follow returns the
+new shape untouched (no tabs, start beyond the snap distance, start on the drawn start); changed
+tab width only matters where it pushed a tab, zero width with the fallback; start moving from
+the outer ring to the hole of a combined object (both rings follow, a skipped hole stays empty);
+rotated shape after a project round trip; readout texts; G-code gaps on the followed tabs with
+lead-in through the Pi guard (against the shifted tab without following); tool click / remove
+in one undo step each, live drag and Esc, hand tabs message, Shift+click, menu action with
+undo, dialog tooltip.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4119 passed, 3 skipped** (32.4 min; 4100 + 19 new follow-start tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – project data are untouched; only a start point set, moved or
+removed from now on can move tabs, and only tabs that still sit on their even spots.
+
+Still open: unchanged from §117 except the „start point after tabs“ part of the §115 limits –
+camera placement beyond marks, automatic mark detection (Scan Probe), rotary, min/max corner
+power, Dot Mode dwell (waiting for the firmware decision on `LASER_POWER_TRAP`), Materials items,
+CoreXY time model, the xTool text style import, the trim refinements of §92, the print-and-cut
+limits of §93 / §94, the single-line font limits of §95 / §96 / §100 / §106, the warp limits of
+§97, the case limits of §98, the vertical text limits of §99, the box generator limits of §101 /
+§117 (no sliding, hinged or inset lids, no T-slot / screw joints, no drawers, equal full-height
+dividers only), the living hinge limits of §102 / §116, the bent box limits of §103, the
+justified line limits of §104, the inline editing limits of §105, the spot simulation limits of
+§109, the window limits of §110, the mask limits of §111, the soft edge limits of §112, the
+even-tabs preview limits of §113 and the pass preview limits of §114. For this round: tabs are
+recognised as „even“ only while they sit exactly on their spots (moving a single tab by hand
+opts the whole contour out – place them again to opt back in); a changed tab width after placing
+can make tabs next to a corner unrecognised; contours without a manual start point are still
+distributed from their drawn start, so the planner's own start choice can still push a tab by
+the start clearance; nesting still ignores the start point; node editing, simplify or corner
+radius carry the tabs but do not redistribute them.
+Hardware check: on the Windows app (also with the touch screen: long press › Pfad) place 4 tabs
+on a 3 mm plywood plate with Alt+Umschalt+G, then set a start point in a corner with the
+Startpunkt tool and drag it along the edge – the blue bars move along evenly, the status line
+reports „4 Stege an 1 Kontur ab dem neuen Start gleichmäßig neu verteilt“; cut with a 2 mm
+lead-in – every tab gap sits on its blue bar, none next to the start.
