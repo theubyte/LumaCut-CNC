@@ -60,24 +60,31 @@ class SetGeometryCommand(QUndoCommand):
     """Neue Geometrie für ein oder mehrere Objekte (Verschieben, Skalieren, Zahlenfelder)."""
 
     def __init__(self, doc: Document, old: dict[str, Geometry], new: dict[str, Geometry],
-                 text: str = "Geometrie ändern", mergeable: bool = False) -> None:
+                 text: str = "Geometrie ändern", mergeable: bool = False,
+                 tabs: dict | None = None) -> None:
         super().__init__(text)
         self.doc = doc
         self.old = old
         self.new = new
         self.mergeable = mergeable
+        # Stege, die beim Skalieren neu verteilt werden (tabs.follow_geometry):
+        # ID → (alte Stege, neue Stege); im selben Undo-Schritt wie die Geometrie.
+        self.tabs = dict(tabs or {})
 
-    def _apply(self, values: dict[str, Geometry]) -> None:
+    def _apply(self, values: dict[str, Geometry], which: int) -> None:
         self.doc.begin_batch()
+        for sid, pair in self.tabs.items():
+            if self.doc.has_shape(sid):
+                self.doc.shape(sid).tabs = tuple(pair[which])
         for sid, g in values.items():
             self.doc.set_geometry(sid, g.copy())
         self.doc.end_batch()
 
     def redo(self) -> None:
-        self._apply(self.new)
+        self._apply(self.new, 1)
 
     def undo(self) -> None:
-        self._apply(self.old)
+        self._apply(self.old, 0)
 
     def id(self) -> int:  # noqa: A003 - Qt API
         return _ID_GEOMETRY if self.mergeable else -1
@@ -88,6 +95,8 @@ class SetGeometryCommand(QUndoCommand):
         if set(other.new) != set(self.new):
             return False
         self.new = other.new
+        for sid, (_o, n) in other.tabs.items():
+            self.tabs[sid] = (self.tabs[sid][0] if sid in self.tabs else _o, n)
         return True
 
 

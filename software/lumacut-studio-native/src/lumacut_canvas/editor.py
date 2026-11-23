@@ -233,7 +233,17 @@ class PropertyBar(QWidget):
         nb = Rect(nb.x + dx, nb.y + dy, w, h)
         old = {i: doc.shape(i).geom.copy() for i in sel}
         new = {i: g.mapped(ob, nb) for i, g in old.items()}
-        ed.undo_stack.push(SetGeometryCommand(doc, old, new, "Maße ändern"))
+        self._push_geometry(old, new)
+
+    def _push_geometry(self, old: dict, new: dict) -> None:
+        """„Maße ändern“ in einem Undo-Schritt; gleichmäßig gesetzte Stege werden auf
+        dem skalierten Umriss neu verteilt (:func:`tabs.follow_geometry`)."""
+        from . import tabs
+        moved, res = tabs.follow_geometry(self.ed.document, old, new)
+        self.ed.undo_stack.push(SetGeometryCommand(self.ed.document, old, new, "Maße ändern",
+                                                   tabs=moved))
+        if res.contours or res.too_short:
+            self.ed.notify(f"Maße ändern · {res.readout()}")
 
     def _edit_rotated_single(self, sid: str, g: Geometry, ob: Rect, sender) -> None:
         """Maße eines gedrehten Objekts: X/Y verschieben die Hüllbox, B/H ändern
@@ -255,7 +265,7 @@ class PropertyBar(QWidget):
             if ah == 0:
                 ng.h = 0.0
             ng = ng.with_center(cx, cy)
-        self.ed.undo_stack.push(SetGeometryCommand(self.ed.document, {sid: g.copy()}, {sid: ng}, "Maße ändern"))
+        self._push_geometry({sid: g.copy()}, {sid: ng})
 
     def _angle_edited(self, value: float) -> None:
         if self._updating:

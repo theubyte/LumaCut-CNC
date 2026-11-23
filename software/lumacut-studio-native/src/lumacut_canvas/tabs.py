@@ -33,6 +33,13 @@ derselben Anzahl und Eckenregel neu verteilt, statt nur auf den nächsten
 Umrisspunkt übertragen zu werden (dort stünden sie danach ungleich, an einer neuen
 Ecke oder am Start). Von Hand gesetzte Stege werden wie bisher nur übertragen.
 
+Auch beim Skalieren (:func:`follow_geometry` – Griffe am Auswahlrahmen, Felder B / H):
+die Stege sind auf die Objektbox normiert und würden nur mitgestreckt – nach
+ungleichmäßigem Skalieren stünden sie ungleich verteilt, und weil Start- und
+Eckenabstand in mm gelten, passen sie auch nach gleichmäßigem Skalieren nicht mehr
+genau zu ihren Plätzen. Gleichmäßig gesetzte Stege werden deshalb auf dem skalierten
+Umriss neu verteilt; von Hand gesetzte werden wie bisher mitgestreckt.
+
 Hier nur die Rechnung (Qt nur über :func:`shape_paths.shape_polygons`); die
 Bedienung (Werkzeug „Stege“, Markierungen, Menü) liegt in :mod:`tabs_ui`.
 """
@@ -673,4 +680,42 @@ def follow_shapes(doc, pairs: Iterable[tuple[Shape, Shape]]) -> tuple[list[Shape
         r = follow_shape(doc, old, new)
         out.append(r.shape)
         total.add(r)
+    return out, total
+
+
+def _size_changed(a, b) -> bool:
+    """Ändert sich die Größe (nicht nur Lage, Drehung oder Spiegelung)?"""
+    return abs(abs(a.w) - abs(b.w)) > 1e-9 or abs(abs(a.h) - abs(b.h)) > 1e-9
+
+
+def follow_geometry(doc, old: dict, new: dict,
+                    old_tabs: dict | None = None) -> tuple[dict, FollowResult]:
+    """Gleichmäßige Stege skalierter Objekte neu verteilen (:func:`follow_shape`).
+
+    ``old`` / ``new`` wie bei :class:`commands.SetGeometryCommand` (ID → Geometrie);
+    die Objekte im Dokument tragen ihre Stege vor der Änderung. Nur Objekte, deren
+    Größe sich ändert, werden geprüft – Verschieben, Drehen und Spiegeln lassen die
+    Stege, wo sie sind. Ergebnis: ``{ID: (alte Stege, neue Stege)}`` nur für Objekte,
+    deren Stege sich ändern, und die Gesamtzählung für die Meldung (von Hand gesetzte
+    Stege werden wie bisher mitgestreckt und nicht gemeldet). ``old_tabs`` (ID →
+    Stege) ersetzt die Stege im Dokument, z. B. während eines Zugs, der sie schon live
+    geändert hat."""
+    total = FollowResult(shape=None, where="auf dem skalierten Umriss", kept_text="mitgestreckt")
+    out: dict = {}
+    for sid, g in new.items():
+        if not doc.has_shape(sid):
+            continue
+        s = doc.shape(sid)
+        if old_tabs is not None and sid in old_tabs:
+            s = replace(s, tabs=tuple(old_tabs[sid]))
+        og = old.get(sid, s.geom)
+        if not s.tabs or not _size_changed(og, g):
+            continue
+        a = replace(s, geom=og.copy())
+        b = replace(s, geom=g.copy())
+        r = follow_shape(doc, a, b)
+        total.add(r)
+        if r.shape is not b and r.shape.tabs != s.tabs:
+            out[sid] = (s.tabs, r.shape.tabs)
+    total.kept = 0
     return out, total

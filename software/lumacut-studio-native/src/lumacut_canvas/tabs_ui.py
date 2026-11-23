@@ -402,7 +402,8 @@ class EvenTabsDialog(QDialog):
                              "wird seine Kontur ab dem Startpunkt verteilt – wird der Startpunkt "
                              "später gesetzt, verschoben oder entfernt, wandern die Stege mit; "
                              "ebenso werden sie nach Knoten bearbeiten, Vereinfachen, Abrunden "
-                             "oder Eckenradius auf dem neuen Umriss gleichmäßig neu verteilt")
+                             "oder Eckenradius auf dem neuen Umriss gleichmäßig neu verteilt, "
+                             "nach Skalieren (Griffe, Felder B / H) auf dem skalierten Umriss")
         self.count = QSpinBox()
         self.count.setRange(*tabs.EVEN_COUNT_RANGE)
         self.count.setValue(v["count"])

@@ -69,6 +69,9 @@ CLOSE_SNAP_PX = 8.0  # Klick so nah am ersten Punkt schließt das Polygon
 # Linie) und Mindestabstand roher Mauspunkte.
 FREEHAND_TOLERANCE_MM = 0.2
 FREEHAND_MIN_STEP_MM = 0.05
+#: Bis zu so vielen Objekten mit Stegen werden gleichmäßige Stege beim Skalieren schon
+#: während des Ziehens neu verteilt (darüber erst beim Loslassen).
+LIVE_TAB_FOLLOW_MAX = 25
 
 
 def _clamp_point(p: QPointF) -> QPointF:
@@ -139,6 +142,8 @@ class ToolController:
         self._mode: str | None = None  # "move" | "resize" | "rotate" | "rubber" | "draw"
         self._start = QPointF()
         self._orig: dict[str, Geometry] = {}
+        # Stege der Auswahl bei Zugbeginn (Skalieren verteilt gleichmäßige Stege neu).
+        self._orig_tabs: dict[str, tuple] = {}
         self._orig_bounds: Rect | None = None
         self._handle: int | None = None
         self._frame_angle = 0.0          # Drehung des Auswahlrahmens beim Start
@@ -238,7 +243,8 @@ class ToolController:
         if mk is not None:
             mk.cancel()
         if self._mode in ("move", "resize", "rotate") and self._orig:
-            self._apply(self._orig)
+            self._apply(self._orig, self._orig_tabs)
+        self._orig_tabs = {}
         if self._mode in ("draw", "poly", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
             self.doc.remove_shape(self._preview_id)
         self._poly = []
@@ -274,7 +280,8 @@ class ToolController:
         if mode == "marks":
             self.ed.marks_tool.abort()
         if mode in ("move", "resize", "rotate") and self._orig:
-            self._apply(self._orig)
+            self._apply(self._orig, self._orig_tabs)
+        self._orig_tabs = {}
         if mode in ("draw", "free") and self._preview_id and self.doc.has_shape(self._preview_id):
             self.doc.remove_shape(self._preview_id)
         self._free = []
@@ -285,8 +292,11 @@ class ToolController:
         self._moved = False
         self._osnap_end()
 
-    def _apply(self, geoms: dict[str, Geometry]) -> None:
+    def _apply(self, geoms: dict[str, Geometry], tabs: dict | None = None) -> None:
         self.doc.begin_batch()
+        for sid, t in (tabs or {}).items():
+            if self.doc.has_shape(sid):
+                self.doc.shape(sid).tabs = tuple(t)
         for sid, g in geoms.items():
             if self.doc.has_shape(sid):
                 self.doc.shape(sid).geom = g.copy()
@@ -356,6 +366,7 @@ class ToolController:
         if handle is not None:
             ov = self.ed.scene.overlay
             self._orig = {i: self.doc.shape(i).geom.copy() for i in self.ed.selection}
+            self._orig_tabs = {i: self.doc.shape(i).tabs for i in self._orig if self.doc.shape(i).tabs}
             # Rahmen (bei einem gedrehten Einzelobjekt dessen ungedrehte Box).
             self._orig_bounds = ov.rect
             self._frame_angle = ov.angle
@@ -383,6 +394,7 @@ class ToolController:
             if hit in sel:
                 self._mode = "move"
                 self._orig = {i: self.doc.shape(i).geom.copy() for i in sel}
+                self._orig_tabs = {}
                 self._orig_bounds = self.doc.selection_bounds(sel)
                 self._osnap_begin(sel, mods)
             return
@@ -495,7 +507,8 @@ class ToolController:
         a = self._frame_angle
         if not a:
             nb = resize_bounds(ob, self._handle, self.snap_point(pos), proportional)
-            self._apply({i: g.mapped(ob, nb) for i, g in self._orig.items()})
+            new = {i: g.mapped(ob, nb) for i, g in self._orig.items()}
+            self._apply(new, self._live_tabs(new))
         else:
             # Gedrehtes Einzelobjekt: im eigenen (ungedrehten) Koordinatensystem
             # skalieren, damit Griffe entlang der Objektkanten wirken.
@@ -509,8 +522,17 @@ class ToolController:
                 ng = lg.with_center(wx, wy)
                 ng.rot = g.rot
                 new[i] = ng
-            self._apply(new)
+            self._apply(new, self._live_tabs(new))
         self.ed.refresh_selection_overlay()
+
+    def _live_tabs(self, new: dict[str, Geometry]) -> dict[str, tuple]:
+        """Stege während des Skalierens: gleichmäßig gesetzte live auf dem skalierten
+        Umriss neu verteilt (wie beim Loslassen), alle anderen wie bei Zugbeginn."""
+        if not self._orig_tabs or len(self._orig_tabs) > LIVE_TAB_FOLLOW_MAX:
+            return self._orig_tabs
+        from . import tabs
+        moved, _res = tabs.follow_geometry(self.doc, self._orig, new, self._orig_tabs)
+        return {i: moved[i][1] if i in moved else t for i, t in self._orig_tabs.items()}
 
     def rotation_delta(self, pos: QPointF, snap: bool) -> float:
         """Drehwinkel seit Zugbeginn; mit ``snap`` auf 15°-Schritte (absolut
@@ -727,10 +749,18 @@ class ToolController:
         if mode in ("move", "resize", "rotate"):
             if self._moved:
                 new = {i: self.doc.shape(i).geom.copy() for i in self._orig}
-                self._apply(self._orig)
+                self._apply(self._orig, self._orig_tabs)
                 label = {"move": "Verschieben", "resize": "Skalieren", "rotate": "Drehen"}[mode]
-                self.ed.undo_stack.push(SetGeometryCommand(self.doc, self._orig, new, label))
+                moved, res = {}, None
+                if mode == "resize" and self._orig_tabs:
+                    from . import tabs
+                    moved, res = tabs.follow_geometry(self.doc, self._orig, new)
+                self.ed.undo_stack.push(SetGeometryCommand(self.doc, self._orig, new, label,
+                                                           tabs=moved))
+                if res is not None and (res.contours or res.too_short):
+                    self.ed.notify(f"{label} · {res.readout()}")
             self._orig = {}
+            self._orig_tabs = {}
         elif mode == "rubber":
             self._rubber.setVisible(False)
             r = self._rubber.rect()
