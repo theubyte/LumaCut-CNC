@@ -17798,3 +17798,84 @@ inside; insert with „Rauten“ and „Halbe Schlitze bis zum Rand“ off, cut 
 through on 3 mm plywood – every hole keeps a bridge to the rim, the disc bends
 by hand; the same with an oval bracelet end and with open edges; double click the hinge, change
 the pitch – it stays on the circle.
+
+## 117. Status update 2026-11-23 (review round 110)
+
+Done this round (slotted dividers for the finger-joint box; Machine / Scan Probe / Materials
+untouched – `boxgen.py`, `boxgen_qt.py`, the empty-divider rule in `generated.py` and the box
+action tooltip in `qt_tools.py`; model, project format, planner, G-code writer, Pi and camera
+code unchanged):
+
+- Closed since §116 by others: none – main had no commit since `fee64c6` (round 109); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note.
+- Gap picked: the box generator limit of §101 „no dividers / inner walls“. The priority groups
+  kerf / tabs / lead-in, vector fill / hatch, path preview and touch are down to small
+  refinements (§113 – §115), so – like round 109 – this round took a substantial, user-visible
+  design gap: a box with compartments (screws, beads, tea bags, tool trays) is the usual second
+  box project. xTool Studio's Box Generator has no dividers, LightBurn has no box generator;
+  users go to boxes.py (*TrayInsert* / *DividerTray*), import the SVG and fix the kerf by hand.
+  No user decision, no hardware, no material library, finishable with tests and not owned by
+  another agent.
+- **Dividers** (`lumacut_job/boxgen.py`): new `BoxSpec.dividers_x` (walls parallel to the front,
+  splitting the depth) and `dividers_y` (parallel to the sides, splitting the width), 0–20 each.
+  The compartments are equal (`BoxSpec.compartments`, `divider_positions`); every divider is the
+  full inner length × inner height (it stands on the bottom and presses against the inner faces
+  of the walls, under the lid when there is one), and where two cross they interlock with
+  half-lap slots of the material thickness – front-parallel dividers slotted from the top,
+  side-parallel ones from the bottom (egg-crate, as boxes.py's *TrayInsert*). The box panels get
+  no slots, so walls, bottom and lid stay exactly as without dividers. The kerf is added back the
+  same way as on the panels (half the kerf all round): slots come out `t − kerf` wide and the
+  dividers `kerf` longer, so they press in and stand without glue. Compartments below 5 mm or
+  below the material thickness are refused in German („Zu viele Trennwände …“). The dividers
+  follow the panels as „Trennwand quer n“ / „Trennwand längs n“ in the layout (packed on the sheet
+  with the other parts), the readout adds „· Trennwände 2 quer / 1 längs (gesteckt): 6 Fächer je
+  45.5 × 22.7 mm“.
+- **Dialog** (`boxgen_qt.py`): row „Trennwände quer / längs“ with two counters („keine“ at 0,
+  44 px in touch mode, tooltips on how they fit), the preview shows the dividers, OK is disabled
+  for too many, a hint warns that dividers without kerf sit loose. The status line counts the
+  parts as before; the action tooltip mentions the dividers. Re-edit by double click /
+  „Code bearbeiten…“ keeps the counts.
+- **File**: the counts travel in the existing generator dict (no new project key); boxes without
+  dividers write no `dividers_x` / `dividers_y` entry, so their project data stay as before, and
+  older box dicts read as „no dividers“.
+
+Tests: new `tests/test_box_dividers.py` (16 tests): defaults and clamped counts; equal
+compartments and divider positions; box panels unchanged by dividers (with / without lid, inner
+sizes with kerf) and divider names; divider size = inside, half-height slots from the top / the
+bottom, axis-parallel outline; 3D assembly for three boxes (every divider wall incl. each crossing
+filled exactly once, no divider overlapping a box panel, compartments empty); kerf growing the
+dividers and narrowing the slots to `t − kerf`; too many dividers refused; readout; layout keeps
+all parts apart; meta without dividers keeps the old keys and round trip with them, old dicts
+read as none; Pi-safe G-code cutting every divider once and unchanged G-code without dividers;
+dialog fields / preview / readout / disabled OK / loose-fit hint, touch 44 px; window insertion in
+one undo step, re-edit to fewer dividers in place, saved project. `test_box_generator.py`'s 3D
+helper now skips the dividers (box panels only).
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4100 passed, 3 skipped** (30.5 min; 4084 + 16 new divider tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – projects without a box, boxes without dividers and their
+G-code are byte-identical to round 109; only boxes with dividers carry the two new entries in
+their generator dict.
+
+Still open: unchanged from §116 except the dividers part of the §101 box generator limits –
+camera placement beyond marks, automatic mark detection (Scan Probe), rotary, min/max corner
+power, Dot Mode dwell (waiting for the firmware decision on `LASER_POWER_TRAP`), Materials items,
+CoreXY time model, the xTool text style import, the trim refinements of §92, the print-and-cut
+limits of §93 / §94, the single-line font limits of §95 / §96 / §100 / §106, the warp limits of
+§97, the case limits of §98, the vertical text limits of §99, the box generator limits of §101
+(still no sliding, hinged or inset lids, no T-slot / screw joints, no drawers), the living hinge
+limits of §102 / §116, the bent box limits of §103 (no dividers there yet), the justified line
+limits of §104, the inline editing limits of §105, the spot simulation limits of §109, the window
+limits of §110, the mask limits of §111, the soft edge limits of §112, the even-tabs preview
+limits of §113, the pass preview limits of §114 and the start point limits of §115. For the
+dividers: equal compartments only (no free positions, no different widths per compartment), the
+dividers are full inner height (no lower dividers for an open tray, no finger grips), they are
+held by friction and the crossings only (no slots in walls or bottom – a single divider without
+a crossing wall can tilt if the kerf is too small; glue it or use a larger kerf), the kerf is the
+same value as for the box.
+Hardware check: on the Windows app (also with the touch screen: long press › Design) a
+100 × 80 × 50 mm box with lid from 3 mm plywood, „Trennwände quer / längs“ 2 / 1, 0.1 mm kerf –
+the readout shows 6 compartments of 45.5 × 22.7 mm; cut through, slide the dividers together at
+the crossings (flush top and bottom), push the grid into the box – it stands without glue, the lid
+closes on it; double click a part, set „längs“ to 0 – the box is rebuilt in place with two
+dividers.
