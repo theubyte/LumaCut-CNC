@@ -326,7 +326,8 @@ def test_dialog_defaults_values_and_material_choice(qapp):
     dlg = NestDialog(3, None)
     assert dlg.values() == {"container": "work", "spacing": pytest.approx(2.0),
                             "margin": pytest.approx(2.0), "rotation": "90", "corner": "top_right",
-                            "form": "true", "keep_contained": True, "avoid_others": True}
+                            "form": "true", "keep_contained": True, "avoid_others": True,
+                            "cut_allowance": True}
     assert not dlg.container.model().item(dlg.container.findData("rect")).isEnabled()
     assert dlg.readout.text() == "3 Teil(e) ausgewählt"
     assert dlg.buttons.button(QDialogButtonBox.Ok).text() == "Verschachteln"
@@ -335,7 +336,8 @@ def test_dialog_defaults_values_and_material_choice(qapp):
     assert dlg.corner.itemText(0) == "Oben rechts (Nullpunkt)"
     dlg.deleteLater()
     vals = {"container": "rect", "spacing": 1.5, "margin": 0.0, "rotation": "45",
-            "corner": "bottom_left", "form": "box", "keep_contained": False, "avoid_others": False}
+            "corner": "bottom_left", "form": "box", "keep_contained": False, "avoid_others": False,
+            "cut_allowance": False}
     dlg = NestDialog(2, Rect(0, 0, 300, 200.5), values=vals)
     assert dlg.values() == {**vals, "spacing": pytest.approx(1.5), "margin": pytest.approx(0.0)}
     assert dlg.readout.text() == "2 Teil(e) ausgewählt · Material 300,0 × 200,5 mm"
