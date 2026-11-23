@@ -18116,3 +18116,84 @@ rectangle of 3 mm plywood with Alt+Umschalt+G, drag the right-middle handle to 9
 90 into B with the ratio lock off) – the blue bars move live and end up evenly spread, away from
 the corners, the status line reports „Skalieren · 4 Stege an 1 Kontur auf dem skalierten Umriss
 gleichmäßig neu verteilt“; cut it – every tab gap sits on its blue bar.
+
+## 121. Status update 2026-11-23 (review round 114)
+
+Done this round (nesting with kerf and lead-in allowance; Machine / Scan Probe / Materials
+untouched – `nesting.py` and `nesting_ui.py`; model, project format, job, planner, G-code
+writer, Pi and camera code unchanged):
+
+- Closed since §120 by others: none – main had no commit since `07147cf` (round 113); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note, no other branch
+  active since 2026-11-13.
+- Gap picked: the tabs area of §111–§120 is essentially done (the remaining follow limits –
+  offset, boolean operations, trim – are rare edits), so the next open item of the priority group
+  kerf / tabs / lead-in was taken: the nesting limit of §72 „kerf, lead-in / lead-out and
+  overscan are not added – „Abstand“ has to cover them“. With a 0.2 mm outward kerf and 1 mm
+  „Abstand“ the offset cut lines of two nested parts were only 0.6 mm apart, and with a 3 mm
+  lead-in the planner had to move leads to another edge, shorten them or drop them („Anfahrt
+  weggelassen (kein Platz)“) – a burn mark on the part edge exactly where a lead-in should
+  prevent it. LightBurn's nesting and xTool's „Intelligentes Verschachteln“ only know one spacing
+  value that the user has to enlarge by hand (for every part, wasting material where no lead
+  is). No user decision, no hardware, no material library, finishable with tests and not owned
+  by another agent.
+- **Allowance** (`nesting.py`, new `Allowance`, `layer_allowance`, `unit_allowance`, `grown`):
+  a part's allowance comes from the layers of its *outer* closed objects – positive kerf
+  (towards the waste side, parts larger) and the longer of lead-in / lead-out (full length, the
+  planner's perpendicular fallback reaches that far); holes and engravings inside another closed
+  object of the part, open paths and negative kerf add nothing.
+- **Nesting** (`nest(…, cut_allowance=True)`): the part's outline is grown by its kerf (mitre
+  limit 2 like the planner) before rastering, so „Abstand“ and „Randabstand“ hold between the
+  real cut lines. A second raster holds each part plus its lead room (outline grown by the lead
+  length): a new part may touch neither placed parts nor their lead rooms, its own lead room
+  must not touch placed parts – two parts keep spacing + kerf A + kerf B + max(lead A, lead B);
+  lead rooms may overlap each other (both in the waste) and stick out over the sheet edge (the
+  raster gets a border only lead rooms may use). Avoided objects („Andere Objekte aussparen“)
+  carry their own kerf and lead room. Hüllbox form uses the grown box. Without kerf / lead on the
+  layers the layout is exactly the old one (same raster, no border). The second raster costs a
+  second correlation: 60 parts ≈ 1 s without rotation, ≈ 4 s with 90° (was ≈ 0.6 / 2 s).
+- **Bedienung**: new switch „Kerf und An-/Abfahrt einrechnen“ (default on, remembered for the
+  session like the other values) with tooltip; the dialog's readout names the allowance of the
+  selection („Schnittzugabe der Ebenen: Kerf +0,10 mm, An-/Abfahrt 2,0 mm“), the spacing tooltip
+  explains it, the status line adds „Schnittzugabe eingerechnet (…, n Teil(e))“.
+
+Tests: new `tests/test_nesting_allowance.py` (17 tests): layer allowance (outward kerf, longer
+lead, negative kerf, text); part allowance only from outer closed objects (hole with lead in a
+plate, open paths, object beside); kerf spacing between the parts and to the edge, tighter
+without the switch; spacing between the planned offset contours; 3 × 3 parts with 3 / 2 mm
+leads at 0.5 mm spacing planned with full-length leads, none moved or dropped and each touching
+only its own part, while the same layout without allowance forces moved / shortened leads; lead
+rooms over the sheet edge (2 × 2 parts fit a 100 × 60 mm sheet); mixed layers (longer lead
+between a lead part and a plain one, plain parts dense as before); avoided object with its own
+lead room; holes with leads not widening the spacing; Hüllbox with kerf and lead; identical
+layouts without kerf / lead for all rotations; readout; G-code through the Pi guard and file
+round trip; dialog switch, values, tooltips and readout; editor nesting with and without the
+switch (status line, remembered value) and the real dialog showing the selection's allowance.
+`tests/test_nesting.py`: the two dialog value checks include the new key.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4182 passed, 3 skipped** (33.2 min; 4165 + 17 new nesting allowance tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – no new project key, G-code is unchanged; only a nesting run
+from now on places parts on kerf / lead layers further apart (switch off for the old spacing).
+
+Still open: unchanged from §120 except the kerf / lead part of the §72 nesting limits – camera
+placement beyond marks, automatic mark detection (Scan Probe), rotary, min/max corner power,
+Dot Mode dwell (waiting for the firmware decision on `LASER_POWER_TRAP`), Materials items,
+CoreXY time model, the xTool text style import, the trim refinements of §92, the print-and-cut
+limits of §93 / §94, the single-line font limits of §95 / §96 / §100 / §106, the warp limits of
+§97, the case limits of §98, the vertical text limits of §99, the box generator limits of §101 /
+§117, the living hinge limits of §102 / §116, the bent box limits of §103, the justified line
+limits of §104, the inline editing limits of §105, the spot simulation limits of §109, the
+window limits of §110, the mask limits of §111, the soft edge limits of §112, the even-tabs
+preview limits of §113, the pass preview limits of §114, the even-tab recognition limits of
+§118, the node editing limits of §119 and the scaling limits of §120; of §72 still no iterative
+optimisation, no part-in-part, no mirroring, no free-form material. For this round: the lead
+room is the full lead length all around the part (the planner may pick any start, so the room
+cannot be one-sided – with a manual start point it is still all around); overscan of fill layers
+is not added (the laser is off there); tabs, overcut and ramps need no room; with „Enthaltene
+Objekte zusammenhalten“ off, an object inside a plate is its own part and brings its own room.
+Hardware check: on the Windows app (also with the touch screen: long press › Anordnen) put 12
+coasters on a layer with 0.15 mm kerf and a 3 mm lead-in, nest them with „Abstand“ 1 mm – the
+dialog shows „Schnittzugabe der Ebenen: Kerf +0,15 mm, An-/Abfahrt 3,0 mm“, the status line
+„Schnittzugabe eingerechnet“; the preview shows every lead-in at its edge centre, the plan
+reports no moved or dropped lead; cut 3 mm plywood – no lead-in mark on a neighbouring part.
