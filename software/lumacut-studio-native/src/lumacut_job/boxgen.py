@@ -21,6 +21,16 @@ narrower and the parts fit as designed. The finger count of an edge is the
 odd number closest to ``length / finger_mm`` (at least 3 when the edge is long
 enough), so every edge of a length gets the same pattern on both panels.
 
+Optional dividers (egg-crate inserts like boxes.py's *TrayInsert*): ``dividers_x``
+walls parallel to the front (across the depth) and ``dividers_y`` walls parallel
+to the sides (across the width) split the inside into equal compartments. Each
+divider is the full inner length × inner height; where two cross they interlock
+with half-lap slots of the material thickness (front-parallel dividers slotted
+from the top, side-parallel ones from the bottom). They stand on the bottom and
+press against the inner faces of the walls (no slots in walls or bottom, so the
+box panels stay exactly as without dividers); the kerf is added back the same
+way, so slots fit and the dividers press in.
+
 The panels are laid out flat (shelf packing, tallest first, optionally turned
 by 90°) with ``spacing_mm`` between them; :func:`box_shapes` returns them as
 closed ``polygon`` objects in one group, ready for a cut layer. Pure Python
@@ -43,13 +53,27 @@ THICKNESS_RANGE = (0.5, 12.0)     # mm sheet thickness
 FINGER_RANGE = (2.0, 100.0)       # mm desired finger width
 KERF_RANGE = (0.0, 1.0)           # mm burnt-away width of the cut line
 SPACING_RANGE = (0.5, 50.0)       # mm between the panels on the sheet
+DIVIDER_RANGE = (0, 20)           # dividers per direction
+MIN_COMPARTMENT_MM = 5.0          # a compartment is at least this wide (and ≥ material)
 DEFAULT_KERF = 0.1                # typical 5–20 W diode laser in 3 mm plywood
 
 PANEL_NAMES = ("Vorne", "Hinten", "Links", "Rechts", "Boden", "Deckel")
+DIVIDER_X_NAME = "Trennwand quer"     # parallel to the front (X), splits the depth
+DIVIDER_Y_NAME = "Trennwand längs"    # parallel to the sides (Y), splits the width
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return lo if v < lo else hi if v > hi else v
+
+
+def _count(v) -> int:
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(v):
+        return 0
+    return int(_clamp(round(v), *DIVIDER_RANGE))
 
 
 @dataclass(frozen=True)
@@ -65,6 +89,8 @@ class BoxSpec:
     spacing_mm: float = 4.0
     x: float = 0.0                # top left corner of the layout
     y: float = 0.0
+    dividers_x: int = 0           # dividers parallel to the front (split the depth)
+    dividers_y: int = 0           # dividers parallel to the sides (split the width)
 
     def normalized(self) -> "BoxSpec":
         def f(v, rng, default):
@@ -83,7 +109,8 @@ class BoxSpec:
                        kerf_mm=f(self.kerf_mm, KERF_RANGE, DEFAULT_KERF),
                        lid=bool(self.lid), inner=bool(self.inner),
                        spacing_mm=f(self.spacing_mm, SPACING_RANGE, 4.0),
-                       x=float(self.x), y=float(self.y))
+                       x=float(self.x), y=float(self.y),
+                       dividers_x=_count(self.dividers_x), dividers_y=_count(self.dividers_y))
 
     def outer(self) -> tuple[float, float, float]:
         """Outer size (W, D, H) of the assembled box."""
@@ -100,6 +127,14 @@ class BoxSpec:
         w, d, h = s.outer()
         t = s.thickness_mm
         return w - 2 * t, d - 2 * t, h - (2 * t if s.lid else t)
+
+    def compartments(self) -> tuple[float, float]:
+        """Inner width and depth of one compartment between the dividers."""
+        s = self.normalized()
+        iw, id_, _ih = s.inside()
+        t = s.thickness_mm
+        return ((iw - s.dividers_y * t) / (s.dividers_y + 1),
+                (id_ - s.dividers_x * t) / (s.dividers_x + 1))
 
 
 def finger_count(length: float, finger: float, thickness: float) -> int:
@@ -175,8 +210,53 @@ def _ring(poly: Polygon, b: float) -> tuple[tuple[float, float], ...]:
     return tuple(out)
 
 
+def divider_positions(spec: BoxSpec) -> tuple[list[float], list[float]]:
+    """Centre lines of the dividers measured from the inner faces of the walls:
+    (positions along X of the side-parallel dividers, positions along Y of the
+    front-parallel dividers) – equal compartments."""
+    s = spec.normalized()
+    t = s.thickness_mm
+    cw, cd = s.compartments()
+    xs = [(i + 1) * cw + i * t + t / 2.0 for i in range(s.dividers_y)]
+    ys = [(i + 1) * cd + i * t + t / 2.0 for i in range(s.dividers_x)]
+    return xs, ys
+
+
+def _divider_polygon(length: float, height: float, t: float, slots, from_top: bool) -> Polygon:
+    """Divider rectangle (v up) with half-lap slots of width ``t`` at the centres ``slots``."""
+    poly = sbox(0.0, 0.0, length, height)
+    half = height / 2.0
+    cuts = [sbox(c - t / 2.0, half if from_top else -1.0, c + t / 2.0,
+                 height + 1.0 if from_top else half) for c in slots]
+    if cuts:
+        poly = poly.difference(unary_union(cuts))
+    if poly.geom_type != "Polygon":
+        raise ValueError("Trennwand zerfällt – weniger Trennwände oder dünneres Material")
+    return poly
+
+
+def _divider_specs(s: BoxSpec):
+    iw, id_, ih = s.inside()
+    t = s.thickness_mm
+    if s.dividers_x == 0 and s.dividers_y == 0:
+        return []
+    cw, cd = s.compartments()
+    least = max(MIN_COMPARTMENT_MM, t)
+    if min(cw, cd) < least - 1e-9:
+        raise ValueError(f"Zu viele Trennwände: die Fächer wären {cw:.1f} × {cd:.1f} mm "
+                         f"(jedes Fach mindestens {least:.1f} mm)")
+    xs, ys = divider_positions(s)
+    out = []
+    for i in range(s.dividers_x):
+        out.append((f"{DIVIDER_X_NAME} {i + 1}", iw, ih, _divider_polygon(iw, ih, t, xs, True)))
+    for i in range(s.dividers_y):
+        out.append((f"{DIVIDER_Y_NAME} {i + 1}", id_, ih, _divider_polygon(id_, ih, t, ys, False)))
+    return out
+
+
 def panels(spec: BoxSpec) -> list[Panel]:
-    """The flat panels of the box (front, back, left, right, bottom[, lid])."""
+    """The flat panels of the box (front, back, left, right, bottom[, lid]) followed by
+    the dividers (front-parallel first)."""
     s = spec.normalized()
     W, D, H = s.outer()
     t = s.thickness_mm
@@ -212,6 +292,12 @@ def panels(spec: BoxSpec) -> list[Panel]:
         poly = Polygon([(x + k, y + k) for x, y in poly.exterior.coords])
         res.append(Panel(name, (a, b), _ring(poly, b + 2 * k),
                          {e: v[2] if v[3] != "all" else 1 for e, v in edges.items()}))
+    for name, a, b, poly in _divider_specs(s):
+        if k > 0:
+            poly = poly.buffer(k, join_style=2, mitre_limit=10.0).simplify(0.0)
+        poly = Polygon([(x + k, y + k) for x, y in poly.exterior.coords])
+        slots = s.dividers_y if name.startswith(DIVIDER_X_NAME) else s.dividers_x
+        res.append(Panel(name, (a, b), _ring(poly, b + 2 * k), {"slots": slots}))
     return res
 
 
@@ -311,9 +397,15 @@ def describe(spec: BoxSpec) -> str:
     text = (f"Außen {W:.1f} × {D:.1f} × {H:.1f} mm, innen {iw:.1f} × {id_:.1f} × {ih:.1f} mm · "
             f"{len(ps)} Teile ({'mit Deckel' if s.lid else 'offen'}) · Zinken {nx} / {ny} / {nz} "
             f"(Breite / Tiefe / Höhe) · Platz auf dem Material {lw:.0f} × {lh:.0f} mm")
+    if s.dividers_x or s.dividers_y:
+        cw, cd = s.compartments()
+        n = (s.dividers_x + 1) * (s.dividers_y + 1)
+        text += (f" · Trennwände {s.dividers_x} quer / {s.dividers_y} längs (gesteckt): {n} Fächer "
+                 f"je {cw:.1f} × {cd:.1f} mm")
     return text
 
 
-__all__ = ["BoxSpec", "DEFAULT_KERF", "FINGER_RANGE", "KERF_RANGE", "PANEL_NAMES", "Panel",
+__all__ = ["BoxSpec", "DEFAULT_KERF", "DIVIDER_RANGE", "DIVIDER_X_NAME", "DIVIDER_Y_NAME",
+           "FINGER_RANGE", "MIN_COMPARTMENT_MM", "KERF_RANGE", "PANEL_NAMES", "Panel",
            "SIZE_RANGE", "SPACING_RANGE", "THICKNESS_RANGE", "box_shapes", "centered", "describe",
-           "finger_count", "layout", "panels"]
+           "divider_positions", "finger_count", "layout", "panels"]

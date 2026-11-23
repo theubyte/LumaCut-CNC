@@ -954,7 +954,7 @@ class JobTools(QObject):
         self.box_action = self._add(
             "Box-Generator…", self.box, "Alt+Shift+B",
             "Box mit Fingerzinken aus Platten (Maße außen oder innen, Materialdicke, Zinkenbreite, "
-            "Kerf, mit oder ohne Deckel) als Schneidteile einfügen – wie der Box-Generator von "
+            "Kerf, mit oder ohne Deckel, gesteckte Trennwände für Fächer) als Schneidteile einfügen – wie der Box-Generator von "
             "xTool Studio; per Doppelklick wieder bearbeitbar")
         self.box_action.setObjectName("box_generator_action")
         self.hinge_action = self._add(

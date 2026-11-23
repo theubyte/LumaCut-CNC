@@ -74,6 +74,9 @@ def make_meta(spec, shapes) -> dict:
     d = {k: v for k, v in asdict(spec.normalized()).items() if k not in _POSITION}
     if d.get("outline") == ():      # living hinge without a free shape: no key, as before
         del d["outline"]
+    for key in ("dividers_x", "dividers_y"):    # box without dividers: no keys, as before
+        if d.get(key) == 0:
+            del d[key]
     x0, y0, x1, y1 = extent(shapes)
     return {"kind": kind, "version": VERSION, "spec": d,
             "box": [round(x1 - x0, 6), round(y1 - y0, 6)]}

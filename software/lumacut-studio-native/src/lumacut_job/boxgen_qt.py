@@ -1,7 +1,8 @@
 """Dialog „Box-Generator…“ and insertion into the design (Qt side of :mod:`lumacut_job.boxgen`).
 
 Like xTool Studio's Box Generator: size (outer or inner), material thickness,
-finger width, kerf, with or without lid; a flat preview of the panels and a
+finger width, kerf, with or without lid, optional slotted dividers (equal
+compartments, egg-crate like boxes.py's tray insert); a flat preview of the panels and a
 readout (outer / inner size, finger counts, space on the sheet). The panels
 are inserted as closed polygons in one group – on the active layer when it
 cuts (no fill), otherwise on a new cut layer „Box“ – in one undo step. The
@@ -15,7 +16,7 @@ from dataclasses import replace
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-                               QHBoxLayout, QLabel, QSizePolicy, QWidget)
+                               QHBoxLayout, QLabel, QSizePolicy, QSpinBox, QWidget)
 
 from lumacut_canvas.commands import AddLayerCommand, AddShapesCommand
 from lumacut_canvas.model import Layer
@@ -113,6 +114,16 @@ class BoxDialog(QDialog):
         self.lid.setToolTip("Aus: offene Box ohne Deckel, Oberkanten der Wände gerade")
         self.spacing = self._spin(s.spacing_mm, boxgen.SPACING_RANGE, 1, "BoxSpacing",
                                   "Abstand der Teile auf dem Material (rechts)")
+        self.dividers_x = self._count(s.dividers_x, "BoxDividersX",
+                                      "Trennwände quer (links) – parallel zur Vorderseite, teilen "
+                                      "die Tiefe in gleiche Fächer. Volle Innenlänge und -höhe, "
+                                      "werden nur eingesteckt (Wände und Boden bleiben "
+                                      "unverändert); wo sie die Längswände kreuzen, greifen "
+                                      "Schlitze halber Höhe ineinander")
+        self.dividers_y = self._count(s.dividers_y, "BoxDividersY",
+                                      "Trennwände längs (rechts) – parallel zu den Seiten, teilen "
+                                      "die Breite in gleiche Fächer; mit Querwänden gekreuzt "
+                                      "(Schlitze von unten)")
         name = getattr(active_layer, "name", "")
         self._active_fills = layer_fills(active_layer)
         self._active_kerf = float(getattr(active_layer, "kerf_mm", 0.0) or 0.0)
@@ -130,6 +141,7 @@ class BoxDialog(QDialog):
         form.addRow("", self.inner)
         form.addRow("Materialdicke / Zinken", self._row(self.thickness, self.finger))
         form.addRow("Kerf / Abstand", self._row(self.kerf, self.spacing))
+        form.addRow("Trennwände quer / längs", self._row(self.dividers_x, self.dividers_y))
         form.addRow("", self._row(self.lid, self.new_layer))
         self.preview = BoxPreview()
         self.preview.setObjectName("BoxPreview")
@@ -148,7 +160,7 @@ class BoxDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         form.addRow(self.buttons)
         for sb in (self.width_mm, self.depth_mm, self.height_mm, self.thickness, self.finger,
-                   self.kerf, self.spacing):
+                   self.kerf, self.spacing, self.dividers_x, self.dividers_y):
             sb.valueChanged.connect(self._update)
         for cb in (self.inner, self.lid, self.new_layer):
             cb.toggled.connect(self._update)
@@ -176,13 +188,26 @@ class BoxDialog(QDialog):
             sb.setMinimumHeight(TOUCH_PX)
         return sb
 
+    def _count(self, value: int, name: str, tip: str) -> QSpinBox:
+        sb = QSpinBox()
+        sb.setObjectName(name)
+        sb.setRange(*boxgen.DIVIDER_RANGE)
+        sb.setValue(int(value))
+        sb.setSpecialValueText("keine")
+        sb.setToolTip(tip)
+        if self.touch:
+            sb.setMinimumHeight(TOUCH_PX)
+        return sb
+
     def spec(self) -> boxgen.BoxSpec:
         return boxgen.BoxSpec(width_mm=self.width_mm.value(), depth_mm=self.depth_mm.value(),
                               height_mm=self.height_mm.value(),
                               thickness_mm=self.thickness.value(), finger_mm=self.finger.value(),
                               kerf_mm=self.kerf.value(), lid=self.lid.isChecked(),
                               inner=self.inner.isChecked(),
-                              spacing_mm=self.spacing.value()).normalized()
+                              spacing_mm=self.spacing.value(),
+                              dividers_x=self.dividers_x.value(),
+                              dividers_y=self.dividers_y.value()).normalized()
 
     def fill_layer(self) -> bool:
         """True: insert on a new cut layer (name kept from the code dialogs)."""
@@ -210,6 +235,8 @@ class BoxDialog(QDialog):
                      "Kerf-Versatz, das wäre doppelt (Kerf hier oder dort auf 0)")
         if not self.new_layer.isChecked() and self._active_fills:
             text += " – Achtung: aktive Ebene füllt, die Teile würden graviert statt geschnitten"
+        if (s.dividers_x or s.dividers_y) and s.kerf_mm <= 0:
+            text += " – Trennwände ohne Kerf sitzen locker (Kerf-Test machen)"
         self.info.setText(text)
         self.ok_button.setEnabled(ok)
 
