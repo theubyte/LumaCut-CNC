@@ -14,6 +14,10 @@
   um (wie LightBurns Umschalt-Klick), bei offenen Pfaden und Linien nur die Richtung.
   Umgekehrte Objekte ohne Startpunkt zeigen am Anfang ihrer ersten Kontur einen
   hohlen Kreis mit Pfeil in Laufrichtung.
+* Gleichmäßig gesetzte Stege („Stege gleichmäßig setzen …“) folgen dem
+  Startpunkt: Setzen, Verschieben (schon beim Ziehen) und Entfernen verteilt
+  sie ab dem neuen Start gleich (:func:`tabs.follow_start`, im selben
+  Undo-Schritt); von Hand gesetzte Stege bleiben, wo sie sind.
 * Alle Startpunkte sind auf der Arbeitsfläche als grüner Punkt mit einem
   kurzen Pfeil in Laufrichtung markiert (immer, nicht nur im Werkzeug); die
   Pfadvorschau zeigt den Start so, wie er gesendet wird.
@@ -31,7 +35,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem
 
-from . import direction, startpoint
+from . import direction, startpoint, tabs
 from .edit_commands import ReplaceShapeCommand
 from .model import Shape
 from .workarea import WORK_HEIGHT_MM, WORK_WIDTH_MM
@@ -225,6 +229,15 @@ class StartTool:
                          "wirkt erst mit „Kontur“")
         return text + (" · " + " · ".join(extra) if extra else "")
 
+    def _follow(self, old: Shape, new: Shape) -> tuple[Shape, str]:
+        """Gleichmäßige Stege von ``old`` an den Startpunkt von ``new`` anpassen."""
+        res = tabs.follow_start(self.doc, old, new)
+        return res.shape, res.readout()
+
+    @staticmethod
+    def _with_extra(text: str, extra: str) -> str:
+        return f"{text} · {extra}" if extra else text
+
     def set_at(self, p: tuple[float, float]) -> Shape | None:
         """Startpunkt auf dem nächsten Umriss unter ``p`` setzen (ein Undo-Schritt)."""
         s = self.outline_at(p)
@@ -237,9 +250,10 @@ class StartTool:
             self.ed.notify(why)
             return None
         verb = "Startpunkt versetzt" if s.start else "Startpunkt gesetzt"
+        new, extra = self._follow(s, new)
         self.ed.undo_stack.push(ReplaceShapeCommand(self.doc, new, "Startpunkt setzen"))
         self.ed.set_selection(self.doc.unit_of(new.id))
-        self.ed.notify(self._status(new, verb))
+        self.ed.notify(self._with_extra(self._status(new, verb), extra))
         return new
 
     def _reverse_status(self, s: Shape, verb: str) -> str:
@@ -270,11 +284,12 @@ class StartTool:
             if new is None:
                 self.ed.notify(why)
                 return None
+            new, extra = self._follow(s, new)
             new = direction.toggled(new)
             self.ed.undo_stack.push(ReplaceShapeCommand(self.doc, new,
                                                         "Startpunkt setzen und Richtung umkehren"))
             self.ed.set_selection(self.doc.unit_of(new.id))
-            self.ed.notify(self._reverse_status(new, "Startpunkt gesetzt"))
+            self.ed.notify(self._with_extra(self._reverse_status(new, "Startpunkt gesetzt"), extra))
             return new
         s = self.open_at(p)
         if s is not None:
@@ -322,9 +337,9 @@ class StartTool:
 
     def remove(self, shape_id: str) -> None:
         s = self.doc.shape(shape_id)
-        new = startpoint.clear_start(s)
+        new, extra = self._follow(s, startpoint.clear_start(s))
         self.ed.undo_stack.push(ReplaceShapeCommand(self.doc, new, "Startpunkt entfernen"))
-        self.ed.notify(self._status(new, "Startpunkt entfernt"))
+        self.ed.notify(self._with_extra(self._status(new, "Startpunkt entfernt"), extra))
 
     def clear_selection(self) -> int:
         """Startpunkte der Auswahl entfernen (ein Undo-Schritt); Anzahl entfernter Startpunkte."""
@@ -333,22 +348,30 @@ class StartTool:
         if not shapes:
             self.ed.notify("Startpunkte entfernen: die Auswahl hat keine Startpunkte")
             return 0
+        moved = 0
         self.ed.undo_stack.beginMacro("Startpunkte entfernen")
         try:
             for s in shapes:
-                self.ed.undo_stack.push(ReplaceShapeCommand(self.doc, startpoint.clear_start(s),
+                res = tabs.follow_start(self.doc, s, startpoint.clear_start(s))
+                moved += res.tabs
+                self.ed.undo_stack.push(ReplaceShapeCommand(self.doc, res.shape,
                                                             "Startpunkte entfernen"))
         finally:
             self.ed.undo_stack.endMacro()
         n = len(shapes)
-        self.ed.notify(f"{n} Startpunkt{'e' if n != 1 else ''} entfernt – dort wählt wieder "
-                       "der Planer den Start")
+        text = (f"{n} Startpunkt{'e' if n != 1 else ''} entfernt – dort wählt wieder "
+                "der Planer den Start")
+        if moved:
+            text += (f" · {moved} gleichmäßige(r) Steg(e) ab dem gezeichneten Konturstart "
+                     "neu verteilt")
+        self.ed.notify(text)
         return n
 
     def _live(self, shape_id: str, new: Shape) -> None:
         cur = self.doc.shape(shape_id)
         self.doc.begin_batch()
         cur.start = new.start
+        cur.tabs = new.tabs
         self.doc.changed()
         self.doc.end_batch()
 
@@ -379,7 +402,7 @@ class StartTool:
         d, q, _k = startpoint.nearest_outline(orig, (pos.x(), pos.y()))
         if q is not None and self.doc.has_shape(orig.id):
             self._moved = True
-            self._live(orig.id, startpoint.with_start(orig, q))
+            self._live(orig.id, tabs.follow_start(self.doc, orig, startpoint.with_start(orig, q)).shape)
 
     def release(self) -> None:
         orig, self._drag = self._drag, None
@@ -393,10 +416,11 @@ class StartTool:
             self.remove(orig.id)
             return
         new = self.doc.shape(orig.id).copy()
+        extra = tabs.follow_start(self.doc, orig, startpoint.with_start(orig, new.start_point())).readout()
         self._live(orig.id, orig)
         self.ed.undo_stack.push(ReplaceShapeCommand(self.doc, new, "Startpunkt verschieben"))
         self._moved = False
-        self.ed.notify(self._status(new, "Startpunkt verschoben"))
+        self.ed.notify(self._with_extra(self._status(new, "Startpunkt verschoben"), extra))
 
     def cancel(self) -> None:
         if self._drag is not None and self._moved and self.doc.has_shape(self._drag.id):

@@ -19,6 +19,13 @@ verschieben oder entfernen. Trägt das Objekt einen manuellen Startpunkt
 Startabstand schon beim Setzen, und der Planer muss keinen von seinem Platz
 schieben.
 
+Wird der Startpunkt danach gesetzt, verschoben oder entfernt
+(:func:`follow_start`), wandern gleichmäßig gesetzte Stege mit: liegen die
+Stege einer Kontur genau so, wie „Stege gleichmäßig setzen …“ sie ab dem
+bisherigen Konturstart gesetzt hätte, werden sie ab dem neuen Start gleich
+verteilt (gleiche Anzahl, gleiche Eckenregel). Von Hand gesetzte oder
+verschobene Stege bleiben, wo sie sind.
+
 Hier nur die Rechnung (Qt nur über :func:`shape_paths.shape_polygons`); die
 Bedienung (Werkzeug „Stege“, Markierungen, Menü) liegt in :mod:`tabs_ui`.
 """
@@ -382,4 +389,111 @@ def place_even_tabs(doc, shapes: Iterable[Shape], values: dict | None = None) ->
     used = {getattr(doc.layer(s.layer_id), "name", "") for s in res.add} if hasattr(doc, "layer") else set()
     res.zero_width_layers = [n for n in zero if n in used]
     res.auto_layers = [n for n in auto if n in used]
+    return res
+
+
+# --- Stege folgen dem Startpunkt -------------------------------------------------------
+
+#: Ein Steg gehört zu einer Kontur bzw. zu einem gleichmäßigen Platz höchstens so weit entfernt (mm).
+FOLLOW_TOL_MM = 0.05
+
+
+def ring_origin(shape: Shape, rings: list[list[Point]], k: int) -> list[Point]:
+    """Ring ``k`` so gedreht, wie „Stege gleichmäßig setzen …“ ihn verteilt: ab dem
+    manuellen Startpunkt, wenn er auf diesem Ring liegt, sonst ab dem gezeichneten Start."""
+    ring = rings[k]
+    if start_ring_index(shape, rings) == k:
+        from .startpoint import rotate_ring_to
+        return rotate_ring_to(ring, shape.start_point())
+    return ring
+
+
+def even_pattern(ring: list[Point], pts: list[Point], width: float) -> bool | None:
+    """Liegen ``pts`` genau so, wie :func:`even_points_on_ring` sie ab dem Anfang von
+    ``ring`` setzt? Dann die Eckenregel (``True`` = „Ecken meiden“), sonst ``None``.
+    Liegen sie mit und ohne Eckenregel gleich (kein Steg nahe einer Ecke), gilt
+    „Ecken meiden“ (Voreinstellung des Dialogs; ein Steg auf einer Ecke hält schlecht)."""
+    n = len(pts)
+    if n <= 0:
+        return None
+    for avoid in (True, False):
+        want = even_points_on_ring(ring, n, width, avoid)
+        if len(want) == n and all(any(math.dist(p, q) <= FOLLOW_TOL_MM for q in pts) for p in want) \
+                and all(any(math.dist(p, q) <= FOLLOW_TOL_MM for q in want) for p in pts):
+            return avoid
+    return None
+
+
+@dataclass
+class FollowResult:
+    """Ergebnis von :func:`follow_start`."""
+    shape: Shape               # neue Form (Startpunkt von ``new``, Stege ggf. neu verteilt)
+    contours: int = 0          # Konturen mit neu verteilten Stegen
+    tabs: int = 0              # davon betroffene Stege
+    kept: int = 0              # Konturen mit Stegen, die nicht gleichmäßig lagen (unverändert)
+
+    def readout(self) -> str:
+        parts = []
+        if self.contours:
+            parts.append(f"{self.tabs} Steg{'e' if self.tabs != 1 else ''} an {self.contours} "
+                         f"Kontur{'en' if self.contours != 1 else ''} ab dem neuen Start "
+                         "gleichmäßig neu verteilt")
+        if self.kept:
+            parts.append(f"von Hand gesetzte Stege an {self.kept} Kontur"
+                         f"{'en' if self.kept != 1 else ''} unverändert")
+        return " · ".join(parts)
+
+
+def tab_width_for(doc, shape: Shape) -> float:
+    """Rechenbreite der Stege wie :func:`place_even_tabs` (Ebene, sonst Ersatzbreite)."""
+    layer = doc.layer(shape.layer_id) if doc is not None and hasattr(doc, "layer") else None
+    width = float(getattr(layer, "tab_width_mm", FALLBACK_WIDTH_MM) or 0.0)
+    return width if width > 0 else FALLBACK_WIDTH_MM
+
+
+def follow_start(doc, old: Shape, new: Shape) -> FollowResult:
+    """Stege von ``old`` an den Startpunkt von ``new`` anpassen (gleiche Geometrie,
+    nur ``start`` anders – gesetzt, verschoben oder entfernt).
+
+    Für jede Kontur, deren Verteil-Anfang sich ändert (der Startpunkt kommt auf sie,
+    wandert auf ihr oder verlässt sie – dann gilt wieder ihr gezeichneter Start):
+    liegen ihre Stege genau auf den Plätzen, die „Stege gleichmäßig setzen …“ ab dem
+    alten Anfang ergibt (:func:`even_pattern`, mit oder ohne „Ecken meiden“, Stegbreite
+    der Ebene), werden sie mit derselben Anzahl und Eckenregel ab dem neuen Anfang
+    gesetzt – jeder hält so den Startabstand, der Planer schiebt keinen. Andere Stege
+    (von Hand gesetzt / verschoben, hinzugefügt) bleiben unverändert."""
+    res = FollowResult(shape=new)
+    pts = old.tab_points()
+    rings = closed_rings(new)
+    if not pts or not rings:
+        return res
+    width = tab_width_for(doc, new)
+    on_ring: dict[int, list[Point]] = {}
+    loose: list[Point] = []
+    for p in pts:
+        d, _q, k = nearest_on_rings(rings, p)
+        if k >= 0 and d <= FOLLOW_TOL_MM:
+            on_ring.setdefault(k, []).append(p)
+        else:
+            loose.append(p)
+    out: list[Point] = list(loose)
+    changed = False
+    for k in sorted(on_ring):
+        mine = on_ring[k]
+        before, after = ring_origin(old, rings, k), ring_origin(new, rings, k)
+        if math.dist(before[0], after[0]) <= 1e-6:
+            out.extend(mine)
+            continue
+        avoid = even_pattern(before, mine, width)
+        moved = even_points_on_ring(after, len(mine), width, avoid) if avoid is not None else []
+        if len(moved) != len(mine):
+            res.kept += 1
+            out.extend(mine)
+            continue
+        out.extend(moved)
+        changed = True
+        res.contours += 1
+        res.tabs += len(mine)
+    if changed:
+        res.shape = with_tab_points(new, out)
     return res
