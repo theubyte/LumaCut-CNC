@@ -18,6 +18,20 @@ Kreuzkorrelation (OpenCV ``matchTemplate``) in einem Schritt; gewählt wird die
 Lage, die am wenigsten vom Startrand (Standard: oben rechts = Nullpunkt der
 Maschine) wegragt. Jede gewählte Lage wird exakt nachgeprüft.
 
+Schnittzugaben (``cut_allowance``, Standard an – weiter als LightBurns / xTools
+Nesting, wo „Abstand“ Kerf und Anfahrt mit abdecken muss): Der Abstand gilt
+zwischen den *echten* Schnittlinien. Liegt die Außenkontur eines Teils auf einer
+Ebene mit Kerf-Versatz nach außen (``kerf_mm`` > 0), wird sein Umriss vorher um
+den Versatz vergrößert (wie der Planer: Gehrung, Grenze 2). Hat die Ebene eine
+An- oder Abfahrt, bekommt das Teil zusätzlich einen „Anfahrtsraum“ der längeren
+von beiden rund um den (versetzten) Umriss: kein anderes Teil (und kein
+ausgespartes Objekt) liegt darin – die An-/Abfahrt eines Teils trifft so nie ein
+Nachbarteil, egal wo der Planer den Start setzt; Anfahrtsräume zweier Teile
+dürfen sich überlappen (beide liegen im Abfall) und über den Materialrand
+ragen. Zwei Teile halten also Abstand + Kerf A + Kerf B + max(Anfahrt A, B).
+Löcher und Objekte innerhalb eines Teils zählen nicht (ihr Versatz und ihre
+Anfahrt liegen im Teil).
+
 Die Teile werden nur verschoben / gedreht (``Geometry.translated`` /
 ``rotated``) – Formen, Ebenen, Stege und G-Code-Wege bleiben sonst gleich.
 Qt-frei bis auf :func:`shape_paths.shape_polygons` (Text braucht Schriften).
@@ -46,6 +60,7 @@ MAX_CELLS = 1200            # Zellen je Seite des Bereichs (Rechenzeit / Genauig
 MIN_RES_MM = 0.25           # feinste Zelle
 _OUTLINE_TOL_MM = 0.05      # Abflachung der Umrisse für die Belegung
 _CONTAIN_TOL_MM = 0.01
+EPS_MM = 1e-6
 _MAX_VERIFY = 64            # Kandidaten je Drehung, die exakt nachgeprüft werden
 
 ROTATIONS = ("none", "90", "45")
@@ -62,6 +77,46 @@ CONTAINERS = ("rect", "work")
 CONTAINER_LABELS = {"rect": "Ausgewähltes Rechteck (Material)", "work": "Arbeitsfläche"}
 
 _OPEN_KINDS = ("line", "path")
+
+
+@dataclass(frozen=True)
+class Allowance:
+    """Schnittzugabe eines Teils: Kerf-Versatz nach außen und Reichweite der
+    An-/Abfahrt über die (versetzte) Schnittlinie hinaus, je in mm."""
+
+    kerf: float = 0.0
+    lead: float = 0.0
+
+    @property
+    def active(self) -> bool:
+        return self.kerf > 1e-9 or self.lead > 1e-9
+
+    def merged(self, other: "Allowance") -> "Allowance":
+        return Allowance(max(self.kerf, other.kerf), max(self.lead, other.lead))
+
+    def text(self) -> str:
+        parts = []
+        if self.kerf > 1e-9:
+            parts.append(f"Kerf +{_fmt(self.kerf, 2)} mm")
+        if self.lead > 1e-9:
+            parts.append(f"An-/Abfahrt {_fmt(self.lead)} mm")
+        return ", ".join(parts)
+
+
+def layer_allowance(layer) -> Allowance:
+    """Zugabe, die eine Ebene einer geschlossenen Außenkontur gibt: positiver Kerf
+    (zur Abfallseite = Teil größer) und die längere von An- und Abfahrt (der Planer
+    weicht notfalls senkrecht aus – Reichweite = volle Länge)."""
+    if layer is None:
+        return Allowance()
+
+    def num(name):
+        try:
+            v = float(getattr(layer, name, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        return v if math.isfinite(v) else 0.0
+    return Allowance(max(0.0, num("kerf_mm")), max(0.0, num("lead_in_mm"), num("lead_out_mm")))
 
 
 def _fmt(v: float, decimals: int = 1) -> str:
@@ -104,6 +159,59 @@ def _fill_holes(g: BaseGeometry) -> BaseGeometry:
     if hasattr(g, "geoms"):
         return unary_union([_fill_holes(p) for p in g.geoms])
     return g
+
+
+def unit_allowance(doc: Document, shapes: Iterable[Shape]) -> Allowance:
+    """Größte Zugabe der äußeren geschlossenen Objekte eines Teils (Gruppe). Objekte,
+    die in einem anderen geschlossenen Objekt des Teils liegen (Löcher, Gravuren),
+    zählen nicht – ihr Versatz und ihre Anfahrt bleiben im Teil."""
+    shapes = list(shapes)
+    cand = []
+    for s in shapes:
+        if not is_closed_shape(s):
+            continue
+        try:
+            a = layer_allowance(doc.layer(s.layer_id))
+        except KeyError:
+            continue
+        if a.active:
+            cand.append((s, a))
+    if not cand:
+        return Allowance()
+    filled: dict[str, BaseGeometry] = {}
+
+    def solid(s: Shape) -> BaseGeometry:
+        if s.id not in filled:
+            filled[s.id] = _fill_holes(shape_footprint(s))
+        return filled[s.id]
+
+    out = Allowance()
+    for s, a in cand:
+        fp = shape_footprint(s)
+        if fp.area <= 1e-9:          # offener Pfad: kein Versatz, keine Anfahrt
+            continue
+        b = s.bounds()
+        inside = False
+        for o in shapes:
+            if o.id == s.id or not is_closed_shape(o):
+                continue
+            ob = o.bounds()
+            if ob.x > b.x + EPS_MM or ob.y > b.y + EPS_MM or ob.right < b.right - EPS_MM \
+                    or ob.bottom < b.bottom - EPS_MM or ob.w * ob.h <= b.w * b.h + 1e-9:
+                continue
+            if solid(o).buffer(_CONTAIN_TOL_MM).contains(fp):
+                inside = True
+                break
+        if not inside:
+            out = out.merged(a)
+    return out
+
+
+def grown(g: BaseGeometry, kerf: float) -> BaseGeometry:
+    """Umriss um den Kerf-Versatz vergrößert (Gehrung wie der Planer)."""
+    if kerf <= 1e-9:
+        return g
+    return g.buffer(kerf, join_style="mitre", mitre_limit=2.0, quad_segs=8)
 
 
 def unit_footprint(shapes: Iterable[Shape], form: str = "true") -> BaseGeometry:
@@ -152,12 +260,14 @@ class _Part:
     ids: list[str]
     footprint: BaseGeometry            # ungedreht, an der alten Stelle
     center: tuple[float, float]
+    allowance: Allowance = field(default_factory=Allowance)
 
 
 @dataclass
 class _Variant:
     angle: float
-    mask: np.ndarray
+    mask: np.ndarray                   # Teil (um Kerf und halben Abstand vergrößert)
+    reach: np.ndarray | None           # dazu der Anfahrtsraum (None = keiner)
     mx0: float
     my0: float
     footprint: BaseGeometry
@@ -178,6 +288,8 @@ class NestResult:
     utilization: float = 0.0
     container: Rect | None = None
     res: float = 0.0
+    allowance: Allowance = field(default_factory=Allowance)   # größte eingerechnete Zugabe
+    allowance_parts: int = 0           # Teile mit Zugabe
 
     def readout(self) -> str:
         if not self.total:
@@ -192,6 +304,9 @@ class NestResult:
             text += f" · {len(self.unplaced)} passen nicht (bleiben an ihrer Stelle)"
         if self.obstacles:
             text += f" · {self.obstacles} andere(s) Objekt(e) ausgespart"
+        if self.allowance_parts:
+            text += (f" · Schnittzugabe eingerechnet ({self.allowance.text()}, "
+                     f"{self.allowance_parts} Teil(e))")
         return text
 
 
@@ -254,16 +369,20 @@ def _merge_contained(parts: list[_Part]) -> list[_Part]:
     for r in sorted(merged):
         members = merged[r]
         ids = [i for k in members for i in parts[k].ids]
-        out.append(_Part(ids, unary_union([parts[k].footprint for k in members]), parts[r].center))
+        out.append(_Part(ids, unary_union([parts[k].footprint for k in members]), parts[r].center,
+                         parts[r].allowance))
     return out
 
 
 def nest(doc: Document, ids: Iterable[str], *, container_id: str | None = None,
          spacing: float = SPACING_MM, margin: float = MARGIN_MM, rotation: str = "90",
          corner: str = "top_right", form: str = "true", keep_contained: bool = True,
-         avoid_others: bool = True, area: Rect | None = None) -> NestResult:
+         avoid_others: bool = True, area: Rect | None = None,
+         cut_allowance: bool = True) -> NestResult:
     """Teile der Auswahl ``ids`` verschachteln. ``container_id``: Rechteck als
-    Material (bleibt stehen), sonst ``area`` bzw. die Arbeitsfläche."""
+    Material (bleibt stehen), sonst ``area`` bzw. die Arbeitsfläche.
+    ``cut_allowance``: Kerf-Versatz und An-/Abfahrt der Ebenen einrechnen (siehe
+    Modul-Doku) – ohne Kerf / Anfahrt auf den Ebenen ändert es nichts."""
     import cv2
     if rotation not in ROTATIONS:
         raise ValueError(f"Unbekannte Drehung: {rotation}")
@@ -289,8 +408,10 @@ def nest(doc: Document, ids: Iterable[str], *, container_id: str | None = None,
     parts = []
     for u in units:
         b = doc.selection_bounds(u)
-        parts.append(_Part(list(u), unit_footprint([shapes[i] for i in u]),
-                           (b.x + b.w / 2, b.y + b.h / 2)))
+        members = [shapes[i] for i in u]
+        parts.append(_Part(list(u), unit_footprint(members),
+                           (b.x + b.w / 2, b.y + b.h / 2),
+                           unit_allowance(doc, members) if cut_allowance else Allowance()))
     if keep_contained:
         parts = _merge_contained(parts)
     res_out.total = len(parts)
@@ -306,25 +427,52 @@ def nest(doc: Document, ids: Iterable[str], *, container_id: str | None = None,
     res = max(MIN_RES_MM, max(aw, ah) / MAX_CELLS)
     res_out.res = res
     W, H = int(math.floor(aw / res + 1e-9)), int(math.floor(ah / res + 1e-9))
-    occ = np.zeros((H, W), np.uint8)
+
+    # Obstacles with their own allowance (only with cut_allowance)
+    moving = {i for p in parts for i in p.ids}
+    moving.add(container_id)
+    obstacle_shapes = []
     if avoid_others:
-        moving = {i for p in parts for i in p.ids}
-        moving.add(container_id)
         region = box(ax, ay, ax + W * res, ay + H * res)
         for s in doc.shapes:
             if s.id in moving or not doc.layer(s.layer_id).visible:
                 continue
+            a = unit_allowance(doc, [s]) if cut_allowance else Allowance()
+            reach_mm = grow + a.kerf + a.lead
             b = s.bounds()
-            if b.right < ax or b.x > ax + W * res or b.bottom < ay or b.y > ay + H * res:
+            if b.right < ax - reach_mm or b.x > ax + W * res + reach_mm \
+                    or b.bottom < ay - reach_mm or b.y > ay + H * res + reach_mm:
                 continue
-            fp = shape_footprint(s)
-            if not fp.intersects(region.buffer(grow)):
+            fp = grown(shape_footprint(s), a.kerf)
+            if not fp.intersects(region.buffer(grow + a.lead)):
                 continue
-            _raster(_cover(fp, grow, res), ax, ay, res, W, H, into=occ)
-            res_out.obstacles += 1
+            obstacle_shapes.append((fp, a))
+    # Anfahrtsräume: das Raster bekommt einen Rand von P Zellen, in den nur
+    # Anfahrtsräume ragen dürfen (der Teil selbst bleibt im Bereich).
+    max_lead = max([p.allowance.lead for p in parts] + [a.lead for _fp, a in obstacle_shapes])
+    any_reach = max_lead > 1e-9
+    P = int(math.ceil(max_lead / res)) + 1 if any_reach else 0
+    Wp, Hp = W + 2 * P, H + 2 * P
+    axp, ayp = ax - P * res, ay - P * res
+    occ = np.zeros((Hp, Wp), np.uint8)                 # Teile (mit Kerf, halbem Abstand)
+    occ_reach = np.zeros((Hp, Wp), np.uint8) if any_reach else None   # Teile + Anfahrtsraum
+    outside = np.zeros((Hp, Wp), np.uint8)             # Rand außerhalb des Bereichs
+    if P:
+        outside[:P, :] = 1
+        outside[-P:, :] = 1
+        outside[:, :P] = 1
+        outside[:, -P:] = 1
+    for fp, a in obstacle_shapes:
+        _raster(_cover(fp, grow, res), axp, ayp, res, Wp, Hp, into=occ)
+        if occ_reach is not None:
+            _raster(_cover(fp, grow + a.lead, res), axp, ayp, res, Wp, Hp, into=occ_reach)
+        res_out.obstacles += 1
+    if occ_reach is not None:
+        occ_reach |= occ
 
     def variants(part: _Part) -> list[_Variant]:
         out = []
+        kerf, lead = part.allowance.kerf, part.allowance.lead
         for a in ROTATION_ANGLES[rotation]:
             if a:
                 rot = []
@@ -338,21 +486,37 @@ def nest(doc: Document, ids: Iterable[str], *, container_id: str | None = None,
                 fp = part.footprint
                 gb = _union_rect([shapes[i].bounds() for i in part.ids])
             true_fp = fp
-            # Rasterbox = exakte Hüllbox des um ``grow`` vergrößerten Umrisses (der Puffer
-            # als Vieleck liegt minimal innerhalb des echten Abstands).
+            fp = grown(fp, kerf)
+            # Rasterbox = exakte Hüllbox des um ``grow`` (+ Anfahrtsraum) vergrößerten
+            # Umrisses (der Puffer als Vieleck liegt minimal innerhalb des echten Abstands).
             fx0, fy0, fx1, fy1 = fp.bounds
-            minx, miny, maxx, maxy = fx0 - grow, fy0 - grow, fx1 + grow, fy1 + grow
+            g2 = grow + lead
+            minx, miny, maxx, maxy = fx0 - g2, fy0 - g2, fx1 + g2, fy1 + g2
             w = max(1, int(math.ceil((maxx - minx) / res - 1e-9)))
             h = max(1, int(math.ceil((maxy - miny) / res - 1e-9)))
-            region = _cover(fp, grow, res) if form == "true" else \
-                box(minx, miny, maxx, maxy).buffer(0.75 * res, join_style="mitre")
+            if form == "true":
+                region = _cover(fp, grow, res)
+            else:
+                region = box(fx0 - grow, fy0 - grow, fx1 + grow, fy1 + grow).buffer(
+                    0.75 * res, join_style="mitre")
             mask = _raster(region, minx, miny, res, w, h)
-            out.append(_Variant(a, mask, minx, miny, true_fp, gb))
+            reach = None
+            if lead > 1e-9:
+                rregion = _cover(fp, g2, res) if form == "true" else \
+                    box(minx, miny, maxx, maxy).buffer(0.75 * res, join_style="mitre")
+                reach = _raster(rregion, minx, miny, res, w, h)
+            out.append(_Variant(a, mask, reach, minx, miny, true_fp, gb))
         return out
 
     top, right = corner.startswith("top"), corner.endswith("right")
 
-    def first_fit(free: np.ndarray, h: int, w: int, mask: np.ndarray):
+    def collides(r0: int, c0: int, v: _Variant, body_occ: np.ndarray) -> bool:
+        h, w = v.mask.shape
+        if np.any(body_occ[r0:r0 + h, c0:c0 + w] & v.mask):
+            return True
+        return v.reach is not None and bool(np.any(occ[r0:r0 + h, c0:c0 + w] & v.reach))
+
+    def first_fit(free: np.ndarray, h: int, w: int, v: _Variant, body_occ: np.ndarray):
         """Beste freie Lage: kleinste Ausdehnung vom Startrand (Zeile), dann von der
         Startseite (Spalte); exakt nachgeprüft (Rundung der Korrelation)."""
         for _ in range(_MAX_VERIFY):
@@ -362,10 +526,10 @@ def nest(doc: Document, ids: Iterable[str], *, container_id: str | None = None,
             r0 = int(rows[0] if top else rows[-1])
             cols = np.flatnonzero(free[r0])
             c0 = int(cols[-1] if right else cols[0])
-            if not np.any(occ[r0:r0 + h, c0:c0 + w] & mask):
-                far_y = r0 + h if top else H - r0
-                far_x = W - c0 if right else c0 + w
-                return far_y * (W + 1) + far_x, r0, c0
+            if not collides(r0, c0, v, body_occ):
+                far_y = r0 + h if top else Hp - r0
+                far_x = Wp - c0 if right else c0 + w
+                return far_y * (Wp + 1) + far_x, r0, c0
             free[r0, c0] = False
         return None
 
@@ -375,24 +539,32 @@ def nest(doc: Document, ids: Iterable[str], *, container_id: str | None = None,
     for k in order:
         part = parts[k]
         best = None
-        occ_f = occ.astype(np.float32)
+        # Der Teil selbst darf weder Teile noch deren Anfahrtsräume noch den Rand treffen,
+        # sein Anfahrtsraum keine Teile.
+        body_occ = occ_reach if occ_reach is not None else occ
+        if P:
+            body_occ = body_occ | outside
+        body_f = body_occ.astype(np.float32)
+        occ_f = occ.astype(np.float32) if any_reach else None
         for vi, v in enumerate(variants(part)):
             h, w = v.mask.shape
-            if h > H or w > W:
+            if h > Hp or w > Wp:
                 continue
-            corr = cv2.matchTemplate(occ_f, v.mask.astype(np.float32), cv2.TM_CCORR)
+            corr = cv2.matchTemplate(body_f, v.mask.astype(np.float32), cv2.TM_CCORR)
             free = corr < 0.5
+            if v.reach is not None:
+                free &= cv2.matchTemplate(occ_f, v.reach.astype(np.float32), cv2.TM_CCORR) < 0.5
             # Die Objektboxen (bei gedrehten Ellipsen / Texten größer als der Umriss) müssen
             # in der Arbeitsfläche bleiben, sonst schiebt das Dokument sie zurück.
-            c_lo = math.ceil((v.mx0 - ax - v.boxes.x) / res - 1e-9)
-            c_hi = math.floor((WORK_RECT.right - v.boxes.right + v.mx0 - ax) / res + 1e-9)
-            r_lo = math.ceil((v.my0 - ay - v.boxes.y) / res - 1e-9)
-            r_hi = math.floor((WORK_RECT.bottom - v.boxes.bottom + v.my0 - ay) / res + 1e-9)
+            c_lo = math.ceil((v.mx0 - axp - v.boxes.x) / res - 1e-9)
+            c_hi = math.floor((WORK_RECT.right - v.boxes.right + v.mx0 - axp) / res + 1e-9)
+            r_lo = math.ceil((v.my0 - ayp - v.boxes.y) / res - 1e-9)
+            r_hi = math.floor((WORK_RECT.bottom - v.boxes.bottom + v.my0 - ayp) / res + 1e-9)
             free[:, :max(0, c_lo)] = False
             free[:, max(0, c_hi + 1):] = False
             free[:max(0, r_lo)] = False
             free[max(0, r_hi + 1):] = False
-            fit = first_fit(free, h, w, v.mask)
+            fit = first_fit(free, h, w, v, body_occ)
             if fit is None:
                 continue
             cand = (fit[0], vi, fit[1], fit[2], v)
@@ -404,8 +576,10 @@ def nest(doc: Document, ids: Iterable[str], *, container_id: str | None = None,
         _sc, _vi, r0, c0, v = best
         h, w = v.mask.shape
         occ[r0:r0 + h, c0:c0 + w] |= v.mask
-        dx = ax + c0 * res - v.mx0
-        dy = ay + r0 * res - v.my0
+        if occ_reach is not None:
+            occ_reach[r0:r0 + h, c0:c0 + w] |= v.reach if v.reach is not None else v.mask
+        dx = axp + c0 * res - v.mx0
+        dy = ayp + r0 * res - v.my0
         for i in part.ids:
             g = shapes[i].geom
             if v.angle:
@@ -414,6 +588,9 @@ def nest(doc: Document, ids: Iterable[str], *, container_id: str | None = None,
         placed_fp.append(_translate(v.footprint, dx, dy))
         res_out.placed += 1
         res_out.rotated += 1 if v.angle else 0
+        if part.allowance.active:
+            res_out.allowance = res_out.allowance.merged(part.allowance)
+            res_out.allowance_parts += 1
     if placed_fp:
         u = unary_union(placed_fp)
         minx, miny, maxx, maxy = u.bounds

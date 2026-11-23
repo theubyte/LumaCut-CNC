@@ -4,7 +4,10 @@ xTool „Intelligentes Verschachteln“).
 Von :func:`arrange_ui.install` eingebunden (gleiches „Anordnen“-Menü in der
 Aktionsleiste und im Kontextmenü). Rechnen in :mod:`nesting`; die Aktion ist
 genau ein Undo-Schritt. Bereich: die Auswahl (Teile, optional ein Rechteck als
-Material wie bei LightBurn). Kürzel Alt+Umschalt+N („Nesting“).
+Material wie bei LightBurn). Kürzel Alt+Umschalt+N („Nesting“). „Kerf und
+An-/Abfahrt einrechnen“ (Standard an) misst den Abstand zwischen den echten
+Schnittlinien und hält Platz für die An-/Abfahrt der Ebene frei; der Dialog nennt
+die Zugabe der Auswahl.
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ MENU_ACTIONS = [name for name, _t, _k in ACTIONS]
 def default_values() -> dict:
     return {"container": "work", "spacing": nesting.SPACING_MM, "margin": nesting.MARGIN_MM,
             "rotation": "90", "corner": "top_right", "form": "true",
-            "keep_contained": True, "avoid_others": True}
+            "keep_contained": True, "avoid_others": True, "cut_allowance": True}
 
 
 def _fmt(v: float) -> str:
@@ -54,7 +57,7 @@ class NestDialog(QDialog):
     """Bereich, Abstände, Drehung, Form, Startecke und Optionen; Teile-Zähler."""
 
     def __init__(self, n_parts: int, container: nesting.Rect | None, parent=None,
-                 values: dict | None = None) -> None:
+                 values: dict | None = None, allowance: nesting.Allowance | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Verschachteln")
         v = {**default_values(), **(values or {})}
@@ -67,8 +70,9 @@ class NestDialog(QDialog):
         self.container.setToolTip("Material: das größte ausgewählte Rechteck bleibt stehen und "
                                   "nimmt die Teile auf (wie LightBurn) – sonst die Arbeitsfläche")
         self.spacing = _spin(nesting.SPACING_RANGE, v["spacing"],
-                             "Mindestabstand zwischen den Teilen (Schnittbreite, Einlauf und Stege "
-                             "mit bedenken)")
+                             "Mindestabstand zwischen den Schnittlinien der Teile – mit „Kerf und "
+                             "An-/Abfahrt einrechnen“ kommen Kerf-Versatz und An-/Abfahrt der Ebene "
+                             "von selbst dazu, sonst hier mit bedenken")
         self.margin = _spin(nesting.MARGIN_RANGE, v["margin"],
                             "Mindestabstand der Teile zum Rand des Materials / der Arbeitsfläche")
         self.rotation = _combo(nesting.ROTATIONS, nesting.ROTATION_LABELS, v["rotation"])
@@ -88,8 +92,17 @@ class NestDialog(QDialog):
         self.avoid.setChecked(bool(v["avoid_others"]))
         self.avoid.setToolTip("Nicht ausgewählte sichtbare Objekte im Bereich bleiben frei "
                               "(bereits belegte Stellen auf dem Material)")
+        self.allow = QCheckBox("Kerf und An-/Abfahrt einrechnen")
+        self.allow.setChecked(bool(v["cut_allowance"]))
+        self.allow.setToolTip("Abstand gilt zwischen den echten Schnittlinien: Teile auf einer Ebene "
+                              "mit Kerf-Versatz werden um den Versatz größer gerechnet, und rund um "
+                              "jedes Teil mit An-/Abfahrt bleibt deren Länge frei – keine Anfahrt "
+                              "schneidet ins Nachbarteil (LightBurn / xTool: nur „Abstand“)")
         size = "" if container is None else f" · Material {_fmt(container.w)} × {_fmt(container.h)} mm"
-        self.readout = QLabel(f"{n_parts} Teil(e) ausgewählt{size}")
+        extra = ""
+        if allowance is not None and allowance.active:
+            extra = f" · Schnittzugabe der Ebenen: {allowance.text()}"
+        self.readout = QLabel(f"{n_parts} Teil(e) ausgewählt{size}{extra}")
         self.readout.setObjectName("NestReadout")
         self.readout.setWordWrap(True)
         form.addRow("Bereich", self.container)
@@ -100,6 +113,7 @@ class NestDialog(QDialog):
         form.addRow("Beginnen", self.corner)
         form.addRow("", self.keep)
         form.addRow("", self.avoid)
+        form.addRow("", self.allow)
         form.addRow(self.readout)
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.buttons.button(QDialogButtonBox.Ok).setText("Verschachteln")
@@ -112,19 +126,21 @@ class NestDialog(QDialog):
         return {"container": self.container.currentData(), "spacing": self.spacing.value(),
                 "margin": self.margin.value(), "rotation": self.rotation.currentData(),
                 "corner": self.corner.currentData(), "form": self.form.currentData(),
-                "keep_contained": self.keep.isChecked(), "avoid_others": self.avoid.isChecked()}
+                "keep_contained": self.keep.isChecked(), "avoid_others": self.avoid.isChecked(),
+                "cut_allowance": self.allow.isChecked()}
 
 
 class Nester:
     def __init__(self, editor) -> None:
         self.editor = editor
         self.last: dict | None = None       # letzte Eingabe (Sitzung)
+        self.allowance = nesting.Allowance()  # Schnittzugabe der aktuellen Auswahl (Dialog)
         self.ask = self._ask                # für Tests austauschbar
 
     def _ask(self, n_parts: int, container):
         # Bereich folgt der Auswahl: mit Material-Rechteck dieses, sonst die Arbeitsfläche
         vals = {**(self.last or {}), "container": "rect" if container is not None else "work"}
-        dlg = NestDialog(n_parts, container, self.editor, vals)
+        dlg = NestDialog(n_parts, container, self.editor, vals, self.allowance)
         return dlg.values() if dlg.exec() == QDialog.Accepted else None
 
     def nest(self) -> None:
@@ -139,6 +155,11 @@ class Nester:
         if not n_parts:
             ed.notify("Verschachteln: außer dem Material-Rechteck keine Teile ausgewählt.")
             return
+        self.allowance = nesting.Allowance()
+        for u in nesting._units(doc, sel):
+            if u != [cid]:
+                self.allowance = self.allowance.merged(
+                    nesting.unit_allowance(doc, [doc.shape(i) for i in u if i != cid]))
         v = self.ask(n_parts, doc.shape(cid).bounds() if cid else None)
         if not v:
             return
@@ -151,7 +172,8 @@ class Nester:
             res = nesting.nest(doc, sel, container_id=cid if v["container"] == "rect" else None,
                                spacing=v["spacing"], margin=v["margin"], rotation=v["rotation"],
                                corner=v["corner"], form=v["form"],
-                               keep_contained=v["keep_contained"], avoid_others=v["avoid_others"])
+                               keep_contained=v["keep_contained"], avoid_others=v["avoid_others"],
+                               cut_allowance=v["cut_allowance"])
         finally:
             QGuiApplication.restoreOverrideCursor()
         moves = {i: g for i, g in res.moves.items()
