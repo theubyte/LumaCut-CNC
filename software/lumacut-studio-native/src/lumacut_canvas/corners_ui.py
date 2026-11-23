@@ -68,7 +68,9 @@ class CornerRadiusControls(QWidget):
     def apply(self, value: float) -> list[Shape]:
         """Radius ``value`` (mm) auf alle ausgewählten Rechtecke setzen (ein Undo-Schritt)."""
         rects = self.rects()
-        new = [corners.with_corner_radius(s, value) for s in rects]
+        from . import tabs
+        new, moved = tabs.follow_shapes(self.ed.document,
+                                        [(s, corners.with_corner_radius(s, value)) for s in rects])
         new = [n for n, s in zip(new, rects) if n.corner_radius != s.corner_radius or n.tabs != s.tabs]
         if not new:
             return []
@@ -89,5 +91,8 @@ class CornerRadiusControls(QWidget):
         lost = sum(len(s.tabs) for s in rects) - sum(len(s.tabs) for s in self.rects())
         if lost > 0:
             text += f" · {lost} manuelle(r) Steg(e) entfernt"
+        if moved.contours or moved.too_short:
+            moved.kept = 0          # von Hand gesetzte Stege wandern wie bisher nur auf den Bogen
+            text += " · " + moved.readout()
         self.ed.notify(text)
         return new

@@ -9,6 +9,11 @@
   bietet Knoten einfügen/löschen, Kurve ⇄ Gerade, Pfad schließen/öffnen und
   „In Pfad umwandeln“ für Rechteck, Ellipse und Linie – alles fingertauglich.
 
+Manuelle Stege und der Startpunkt bleiben auf dem Umriss (auch schon beim
+Ziehen); lagen die Stege einer Kontur gleichmäßig („Stege gleichmäßig setzen …“),
+werden sie auf dem geänderten Umriss gleichmäßig neu verteilt
+(:func:`tabs.follow_shape`, im selben Undo-Schritt).
+
 Rechnen in :mod:`nodes`; Undo über :class:`ReplaceShapeCommand`.
 """
 
@@ -18,7 +23,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem, QHBoxLayout, QLabel, QMenu, QToolButton, QWidget
 
-from . import nodes, theme
+from . import nodes, tabs, theme
 from .edit_commands import ReplaceShapeCommand
 from .model import Shape
 from .shape_paths import shape_path
@@ -94,6 +99,7 @@ class NodeEditor:
         self.node: int | None = None
         self._drag_orig: Shape | None = None
         self._moved = False
+        self._live_res: tabs.FollowResult | None = None
         self.item = NodeItem(self)
         editor.scene.addItem(self.item)
         self.item.setVisible(False)
@@ -171,8 +177,25 @@ class NodeEditor:
             a["node_close"].setText("Pfad öffnen" if edit and nodes.is_closed(s) else "Pfad schließen")
 
     # --- Änderungen ------------------------------------------------------
-    def _push(self, new: Shape, label: str, merge_key: str | None = None) -> None:
+    def _follow(self, new: Shape, old: Shape | None = None) -> tabs.FollowResult:
+        """Gleichmäßige Stege von ``old`` (sonst die Form im Dokument) auf ``new`` verteilen."""
+        if old is None:
+            old = self.doc.shape(new.id) if self.doc.has_shape(new.id) else None
+        if old is None or not old.tabs:
+            return tabs.FollowResult(shape=new)
+        return tabs.follow_shape(self.doc, old, new)
+
+    def _push(self, new: Shape, label: str, merge_key: str | None = None,
+              follow: bool = True) -> None:
+        extra = ""
+        if follow:
+            res = self._follow(new)
+            new = res.shape
+            if res.contours:
+                extra = res.readout()
         self.ed.undo_stack.push(ReplaceShapeCommand(self.doc, new, label, merge_key))
+        if extra:
+            self.ed.notify(f"{label} · {extra}")
 
     def _guard(self, fn, label: str) -> bool:
         try:
@@ -187,6 +210,7 @@ class NodeEditor:
         self.doc.begin_batch()
         cur.kind, cur.geom, cur.points = new.kind, new.geom.copy(), new.points
         cur.rings, cur.curves = new.rings, new.curves
+        cur.tabs, cur.start = new.tabs, new.start     # Stege / Startpunkt bleiben am Umriss
         self.doc.changed()
         self.doc.end_batch()
 
@@ -243,7 +267,7 @@ class NodeEditor:
         s = self.shape()
         if s is None or nodes.is_editable(s):
             return False
-        ok = self._guard(lambda: self._push(nodes.to_editable(s), "In Pfad umwandeln"), "")
+        ok = self._guard(lambda: self._push(nodes.to_editable(s), "In Pfad umwandeln", follow=False), "")
         if ok:
             self.ed.notify("In Pfad umgewandelt – Knoten können jetzt bearbeitet werden.")
         self.refresh()
@@ -281,7 +305,10 @@ class NodeEditor:
         from .tools import _clamp_point
         p = _clamp_point(self.ed.tools.snap_point(pos))
         try:
-            self._live(nodes.move_node(self._drag_orig, self.node, (p.x(), p.y())))
+            res = self._follow(nodes.move_node(self._drag_orig, self.node, (p.x(), p.y())),
+                               self._drag_orig)
+            self._live(res.shape)
+            self._live_res = res
         except nodes.NodeError:
             return
         self._moved = True
@@ -290,15 +317,19 @@ class NodeEditor:
         orig, self._drag_orig = self._drag_orig, None
         if orig is None or not self._moved or not self.doc.has_shape(orig.id):
             return
-        new = self.doc.shape(orig.id).copy()
+        new = self.doc.shape(orig.id).copy()      # Stege schon beim Ziehen verteilt
+        res, self._live_res = self._live_res, None
         self._live(orig)
-        self._push(new, "Knoten verschieben")
+        self._push(new, "Knoten verschieben", follow=False)
+        if res is not None and res.contours:
+            self.ed.notify(f"Knoten verschieben · {res.readout()}")
         self._moved = False
 
     def cancel(self) -> None:
         if self._drag_orig is not None and self._moved and self.doc.has_shape(self._drag_orig.id):
             self._live(self._drag_orig)
         self._drag_orig = None
+        self._live_res = None
         self._moved = False
 
     def double_click(self, pos: QPointF) -> None:

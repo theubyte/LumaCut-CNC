@@ -400,7 +400,9 @@ class EvenTabsDialog(QDialog):
                              "ein Steg je … mm Umfang (große Teile mehr, kleine weniger) – "
                              "wie LightBurn „Auto-place tabs“. Trägt ein Objekt einen Startpunkt, "
                              "wird seine Kontur ab dem Startpunkt verteilt – wird der Startpunkt "
-                             "später gesetzt, verschoben oder entfernt, wandern die Stege mit")
+                             "später gesetzt, verschoben oder entfernt, wandern die Stege mit; "
+                             "ebenso werden sie nach Knoten bearbeiten, Vereinfachen, Abrunden "
+                             "oder Eckenradius auf dem neuen Umriss gleichmäßig neu verteilt")
         self.count = QSpinBox()
         self.count.setRange(*tabs.EVEN_COUNT_RANGE)
         self.count.setValue(v["count"])

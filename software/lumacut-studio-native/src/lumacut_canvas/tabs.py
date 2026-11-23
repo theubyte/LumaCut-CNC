@@ -26,6 +26,13 @@ bisherigen Konturstart gesetzt hätte, werden sie ab dem neuen Start gleich
 verteilt (gleiche Anzahl, gleiche Eckenregel). Von Hand gesetzte oder
 verschobene Stege bleiben, wo sie sind.
 
+Ebenso nach einer Änderung des Umrisses (:func:`follow_shape` – Knoten
+bearbeiten, Pfade vereinfachen, Ecken abrunden / abschrägen, Eckenradius): lagen
+die Stege einer Kontur vorher gleichmäßig, werden sie auf dem neuen Umriss mit
+derselben Anzahl und Eckenregel neu verteilt, statt nur auf den nächsten
+Umrisspunkt übertragen zu werden (dort stünden sie danach ungleich, an einer neuen
+Ecke oder am Start). Von Hand gesetzte Stege werden wie bisher nur übertragen.
+
 Hier nur die Rechnung (Qt nur über :func:`shape_paths.shape_polygons`); die
 Bedienung (Werkzeug „Stege“, Markierungen, Menü) liegt in :mod:`tabs_ui`.
 """
@@ -431,17 +438,32 @@ class FollowResult:
     contours: int = 0          # Konturen mit neu verteilten Stegen
     tabs: int = 0              # davon betroffene Stege
     kept: int = 0              # Konturen mit Stegen, die nicht gleichmäßig lagen (unverändert)
+    too_short: int = 0         # gleichmäßige Konturen, zu kurz für ihre Steg-Anzahl (nur übertragen)
+    #: Wo neu verteilt wurde (Text der Meldung): ab dem neuen Start / auf dem neuen Umriss.
+    where: str = "ab dem neuen Start"
+    #: Was mit von Hand gesetzten Stegen geschah (Text der Meldung).
+    kept_text: str = "unverändert"
 
     def readout(self) -> str:
         parts = []
         if self.contours:
             parts.append(f"{self.tabs} Steg{'e' if self.tabs != 1 else ''} an {self.contours} "
-                         f"Kontur{'en' if self.contours != 1 else ''} ab dem neuen Start "
+                         f"Kontur{'en' if self.contours != 1 else ''} {self.where} "
                          "gleichmäßig neu verteilt")
         if self.kept:
             parts.append(f"von Hand gesetzte Stege an {self.kept} Kontur"
-                         f"{'en' if self.kept != 1 else ''} unverändert")
+                         f"{'en' if self.kept != 1 else ''} {self.kept_text}")
+        if self.too_short:
+            parts.append(f"{self.too_short} Kontur{'en' if self.too_short != 1 else ''} zu kurz "
+                         "für ihre Stege – nur übertragen")
         return " · ".join(parts)
+
+    def add(self, other: "FollowResult") -> None:
+        """Zählung von ``other`` dazunehmen (mehrere Objekte in einer Meldung)."""
+        self.contours += other.contours
+        self.tabs += other.tabs
+        self.kept += other.kept
+        self.too_short += other.too_short
 
 
 def tab_width_for(doc, shape: Shape) -> float:
@@ -497,3 +519,117 @@ def follow_start(doc, old: Shape, new: Shape) -> FollowResult:
     if changed:
         res.shape = with_tab_points(new, out)
     return res
+
+
+# --- Stege folgen dem geänderten Umriss ------------------------------------------------
+
+def _same_points(a: list[Point], b: list[Point], tol: float = 1e-6) -> bool:
+    return len(a) == len(b) and all(any(math.dist(p, q) <= tol for q in b) for p in a)
+
+
+def _ring_map(old_rings: list[list[Point]], new_rings: list[list[Point]],
+              on_old: dict[int, list[Point]]) -> dict[int, int]:
+    """Welcher neue Ring gehört zu welchem alten (nur alte Ringe mit Stegen)? Gleiche
+    Ring-Anzahl: derselbe Index (Knoten bearbeiten, Vereinfachen und Abrunden behalten
+    die Reihenfolge); sonst der neue Ring, dem die meisten Stege des alten am nächsten
+    liegen. Bekommt ein neuer Ring Stege von zwei alten Ringen, fällt er heraus."""
+    out: dict[int, int] = {}
+    for k, mine in on_old.items():
+        if len(old_rings) == len(new_rings):
+            out[k] = k
+            continue
+        votes: dict[int, int] = {}
+        for p in mine:
+            _d, _q, j = nearest_on_rings(new_rings, p)
+            if j >= 0:
+                votes[j] = votes.get(j, 0) + 1
+        if votes:
+            out[k] = max(sorted(votes), key=lambda j: votes[j])
+    taken: dict[int, int] = {}
+    for j in out.values():
+        taken[j] = taken.get(j, 0) + 1
+    return {k: j for k, j in out.items() if taken[j] == 1}
+
+
+def follow_shape(doc, old: Shape, new: Shape) -> FollowResult:
+    """Stege von ``old`` nach einer Umrissänderung auf ``new`` verteilen.
+
+    ``new`` ist das Ergebnis von Knoten bearbeiten, Vereinfachen, Abrunden oder
+    Eckenradius – seine Stege sind schon auf den nächsten Umrisspunkt übertragen
+    (:func:`carry_tabs`), sein Startpunkt mit :func:`startpoint.carry_start`. Für jede
+    Kontur von ``old``, deren Stege genau so liegen, wie „Stege gleichmäßig setzen …“
+    sie ab ihrem Anfang setzt (:func:`even_pattern`, mit oder ohne „Ecken meiden“,
+    Stegbreite der Ebene), werden die Stege auf der zugehörigen Kontur von ``new`` mit
+    derselben Anzahl und Eckenregel ab deren Anfang (manueller Startpunkt, sonst
+    gezeichneter Start) neu gesetzt – so halten sie Abstand zu neuen Ecken und zum
+    Start und bleiben gleichmäßig. Ist die neue Kontur für die Anzahl zu kurz, bleiben
+    die übertragenen Stege. Von Hand gesetzte Stege bleiben übertragen wie bisher.
+    Ergibt die Verteilung dieselben Plätze wie die übertragenen Stege, bleibt ``new``
+    unverändert (Datei byte-gleich)."""
+    res = FollowResult(shape=new, where="auf dem neuen Umriss", kept_text="nur übertragen")
+    pts = old.tab_points()
+    old_rings = closed_rings(old)
+    new_rings = closed_rings(new)
+    if not pts or not old_rings or not new_rings:
+        return res
+    width = tab_width_for(doc, old)
+    on_old: dict[int, list[Point]] = {}
+    for p in pts:
+        d, _q, k = nearest_on_rings(old_rings, p)
+        if k >= 0 and d <= FOLLOW_TOL_MM:
+            on_old.setdefault(k, []).append(p)
+    if not on_old:
+        return res
+    ring_of = _ring_map(old_rings, new_rings, on_old)
+    carried: dict[int, list[Point]] = {}
+    loose: list[Point] = []
+    for q in new.tab_points():
+        d, _p, j = nearest_on_rings(new_rings, q)
+        if j >= 0 and d <= FOLLOW_TOL_MM:
+            carried.setdefault(j, []).append(q)
+        else:
+            loose.append(q)
+    target: dict[int, list[Point]] = {}
+    for k in sorted(on_old):
+        mine = on_old[k]
+        avoid = even_pattern(ring_origin(old, old_rings, k), mine, width)
+        if avoid is None:
+            res.kept += 1
+            continue
+        j = ring_of.get(k)
+        if j is None:
+            res.kept += 1
+            continue
+        n = len(mine)
+        L = ring_length(new_rings[j])
+        if L < 2 * width + 1.0 or n > int((L + 1e-6) // (2 * max(width, 1e-9))):
+            res.too_short += 1
+            continue
+        want = even_points_on_ring(ring_origin(new, new_rings, j), n, width, avoid)
+        if len(want) != n:
+            res.too_short += 1
+            continue
+        if _same_points(want, carried.get(j, [])):
+            continue            # liegen schon so (z. B. unveränderte Kontur)
+        target[j] = want
+        if not _same_points(want, mine):
+            res.contours += 1
+            res.tabs += n
+    if not target:
+        return res
+    out = list(loose)
+    for j in sorted(set(carried) | set(target)):
+        out.extend(target.get(j, carried.get(j, [])))
+    res.shape = with_tab_points(new, out)
+    return res
+
+
+def follow_shapes(doc, pairs: Iterable[tuple[Shape, Shape]]) -> tuple[list[Shape], FollowResult]:
+    """:func:`follow_shape` für mehrere ``(alt, neu)``-Paare: neue Formen und Gesamtzählung."""
+    total = FollowResult(shape=None, where="auf dem neuen Umriss", kept_text="nur übertragen")
+    out = []
+    for old, new in pairs:
+        r = follow_shape(doc, old, new)
+        out.append(r.shape)
+        total.add(r)
+    return out, total

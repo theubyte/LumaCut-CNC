@@ -126,6 +126,9 @@ class CornerFillet:
         self.last = dict(v)
         res = pathfillet.fillet_shapes(shapes, v["radius_mm"], v["mode"], v["corners"],
                                        v["min_angle_deg"])
+        from . import tabs
+        res.add, moved = tabs.follow_shapes(       # gleichmäßige Stege auf dem neuen Umriss
+            ed.document, [(ed.document.shape(i), s) for i, s in zip(res.remove, res.add)])
         title = "Ecken abrunden" if v["mode"] == "round" else "Ecken abschrägen"
         if res.changed:
             ed.undo_stack.beginMacro(title)
@@ -137,7 +140,8 @@ class CornerFillet:
             if ed.selection:     # Auswahl bleibt (ersetzte Formen durch ihre Nachfolger)
                 keep = [i for i in ed.selection if ed.document.has_shape(i)]
                 ed.set_selection(list(dict.fromkeys(keep + [s.id for s in res.add])))
-        ed.notify(f"{title}: " + res.readout())
+        extra = moved.readout() if moved.contours or moved.too_short else ""
+        ed.notify(f"{title}: " + res.readout() + (f" · {extra}" if extra else ""))
 
 
 def install(editor) -> CornerFillet:

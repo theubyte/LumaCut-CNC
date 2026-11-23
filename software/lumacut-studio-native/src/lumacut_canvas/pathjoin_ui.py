@@ -235,6 +235,9 @@ class PathCleanup:
         if not v:
             return
         res = pathsimplify.simplify_shapes(shapes, v["tolerance_mm"], v.get("fit_lines", False))
+        from . import tabs
+        res.add, moved = tabs.follow_shapes(       # gleichmäßige Stege auf dem neuen Umriss
+            ed.document, [(ed.document.shape(i), s) for i, s in zip(res.remove, res.add)])
         if res.changed:
             ed.undo_stack.beginMacro("Pfade vereinfachen")
             try:       # einzeln ersetzen: jede Form bleibt an ihrer Stelle im Stapel
@@ -245,7 +248,8 @@ class PathCleanup:
             if ed.selection:     # Auswahl bleibt (ersetzte Formen durch ihre Nachfolger)
                 keep = [i for i in ed.selection if ed.document.has_shape(i)]
                 ed.set_selection(keep + [s.id for s in res.add])
-        ed.notify("Pfade vereinfachen: " + res.readout())
+        extra = moved.readout() if moved.contours or moved.too_short else ""
+        ed.notify("Pfade vereinfachen: " + res.readout() + (f" · {extra}" if extra else ""))
 
     def _ask_trim(self, shapes):
         dlg = TrimDialog(shapes, self.editor)
