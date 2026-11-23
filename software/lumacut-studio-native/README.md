@@ -366,6 +366,15 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     gleichmäßigen Plätzen, verteilt LumaCut sie ab dem neuen Start mit gleicher Anzahl und
     Eckenregel neu (im selben Undo-Schritt, die Statuszeile meldet „… ab dem neuen Start
     gleichmäßig neu verteilt“); von Hand gesetzte oder verschobene Stege bleiben, wo sie sind.
+    Ebenso nach einer Änderung des Umrisses – Knoten ziehen (schon beim Ziehen), per Pfeiltaste
+    verschieben, einfügen oder löschen, „Pfade vereinfachen …“, „Ecken abrunden / abschrägen …“
+    und das Eckenradius-Feld: gleichmäßig liegende Stege werden auf dem neuen Umriss mit gleicher
+    Anzahl und Eckenregel neu verteilt (ab Startpunkt bzw. Konturstart, Abstand zu neuen Ecken),
+    statt nur auf den nächsten Umrisspunkt zu rutschen; die Statuszeile meldet „… auf dem neuen
+    Umriss gleichmäßig neu verteilt“, ist die Kontur für ihre Stege zu kurz, bleiben sie nur
+    übertragen. Von Hand gesetzte Stege und der Startpunkt wandern beim Knotenziehen auf ihrer
+    Kante beim selben Anteil mit (vorher entfielen sie weiter als 1,5 mm daneben bzw. wurden
+    beim Ziehen mit der Objektbox gestreckt).
     Code: `lumacut_canvas/tabs.py`, `tabs_ui.py`, `lumacut_job/cutpath.py`.
   - *Startpunkt* (Werkzeug „Startpunkt“, Alt+Umschalt+A, wie LightBurns *Set Start Point*):
     Tippen auf den Umriss einer geschlossenen Form legt dort fest, wo ihre Kontur beginnt
