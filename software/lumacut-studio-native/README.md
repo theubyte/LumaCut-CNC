@@ -1037,6 +1037,15 @@ Undo-Schritt; Gruppen zählen als eine Einheit und bleiben in sich unverändert.
   0,25–0,3 mm Raster); Teile, die nicht passen, bleiben stehen. Ein Undo-Schritt, Meldung mit
   belegter Fläche und Materialnutzung. Formen, Ebenen und Stege bleiben unverändert – die
   Teile werden nur verschoben / gedreht.
+  „Kerf und An-/Abfahrt einrechnen“ (Standard an, weiter als LightBurn / xTool, wo „Abstand“
+  beides mit abdecken muss): der Abstand gilt zwischen den echten Schnittlinien – Teile auf
+  einer Ebene mit Kerf-Versatz nach außen werden um den Versatz größer gerechnet, und rund um
+  jedes Teil mit An- oder Abfahrt bleibt die längere von beiden frei, sodass der Planer keine
+  Anfahrt neben einem Nachbarteil verlegen, kürzen oder weglassen muss (Anfahrtsräume dürfen
+  sich überlappen und über den Materialrand ragen; Löcher und Gravuren im Teil zählen nicht,
+  ausgesparte Objekte behalten ihren eigenen Anfahrtsraum). Der Dialog nennt die Zugabe der
+  Auswahl, die Statuszeile meldet „Schnittzugabe eingerechnet (…)“; ohne Kerf / Anfahrt auf
+  den Ebenen ändert sich nichts.
 
 ### Knoten bearbeiten (Werkzeug „Knoten“, Taste N)
 
