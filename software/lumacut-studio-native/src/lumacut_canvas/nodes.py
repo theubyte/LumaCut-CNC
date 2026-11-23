@@ -106,12 +106,15 @@ def from_rings(shape: Shape, rings: list[Ring], kind: str | None = None) -> Shap
     out = replace(shape, kind=kind, geom=Geometry(x0, y0, w, h, rot), points=norm,
                   rings=clean_rings(len(norm), starts), curves=clean_curves(len(norm), curves),
                   text="", image=None)
-    if shape.tabs:   # manuelle Stege bleiben an ihrer Stelle auf dem (geänderten) Umriss
-        from .tabs import carry_tabs
-        out = carry_tabs(out, shape.tab_points())
-    if shape.start:  # der Startpunkt bleibt an seiner Stelle auf dem Umriss
+    # Manuelle Stege und Startpunkt bleiben auf dem (geänderten) Umriss: auf einer
+    # verschobenen Kante wandern sie beim selben Anteil mit, sonst auf den nächsten Punkt.
+    if shape.tabs:
+        from .tabs import carry_tabs, slide_points
+        out = carry_tabs(out, slide_points(shape, out, shape.tab_points()))
+    if shape.start:
         from .startpoint import carry_start
-        out = carry_start(out, shape.start_point())
+        from .tabs import slide_points
+        out = carry_start(out, slide_points(shape, out, [shape.start_point()])[0])
     return out
 
 

@@ -154,6 +154,36 @@ def carry_tabs(new: Shape, pts: Iterable[Point], tol_mm: float = 1.5) -> Shape:
     return with_tab_points(new, keep)
 
 
+def slide_points(old: Shape, new: Shape, pts: Iterable[Point]) -> list[Point]:
+    """Punkte auf dem Umriss von ``old`` an dieselbe Stelle des geänderten Umrisses
+    ``new`` mitnehmen: haben beide gleich viele geschlossene Ringe mit gleich vielen
+    Ecken (Knoten verschoben), bleibt jeder Punkt auf seiner Kante beim selben Anteil
+    (eine Kante wird länger → der Steg wandert mit). Sonst und für Punkte neben dem
+    Umriss bleiben die Punkte, wie sie sind (danach :func:`carry_tabs` / ``carry_start``)."""
+    pts = list(pts)
+    a, b = closed_rings(old), closed_rings(new)
+    if not pts or len(a) != len(b) or any(len(r) != len(q) for r, q in zip(a, b)):
+        return pts
+    out = []
+    for p in pts:
+        best = (math.inf, -1, -1, 0.0)
+        for k, ring in enumerate(a):
+            for i, (u, v) in enumerate(zip(ring, ring[1:])):
+                dx, dy = v[0] - u[0], v[1] - u[1]
+                ll = dx * dx + dy * dy
+                t = 0.0 if ll <= 1e-18 else max(0.0, min(1.0, ((p[0] - u[0]) * dx + (p[1] - u[1]) * dy) / ll))
+                d = math.dist(p, (u[0] + dx * t, u[1] + dy * t))
+                if d < best[0]:
+                    best = (d, k, i, t)
+        d, k, i, t = best
+        if k < 0 or d > 1e-3:
+            out.append(p)
+            continue
+        u, v = b[k][i], b[k][i + 1]
+        out.append((u[0] + (v[0] - u[0]) * t, u[1] + (v[1] - u[1]) * t))
+    return out
+
+
 def tab_count(shapes: Iterable[Shape]) -> int:
     return sum(len(s.tabs) for s in shapes)
 
@@ -532,7 +562,8 @@ def _ring_map(old_rings: list[list[Point]], new_rings: list[list[Point]],
     """Welcher neue Ring gehört zu welchem alten (nur alte Ringe mit Stegen)? Gleiche
     Ring-Anzahl: derselbe Index (Knoten bearbeiten, Vereinfachen und Abrunden behalten
     die Reihenfolge); sonst der neue Ring, dem die meisten Stege des alten am nächsten
-    liegen. Bekommt ein neuer Ring Stege von zwei alten Ringen, fällt er heraus."""
+    liegen. Wollen zwei alte Ringe auf denselben neuen (ein Ring verschwand), gewinnt
+    der, dessen Stege ihm im Mittel am nächsten liegen; bei Gleichstand keiner."""
     out: dict[int, int] = {}
     for k, mine in on_old.items():
         if len(old_rings) == len(new_rings):
@@ -545,10 +576,20 @@ def _ring_map(old_rings: list[list[Point]], new_rings: list[list[Point]],
                 votes[j] = votes.get(j, 0) + 1
         if votes:
             out[k] = max(sorted(votes), key=lambda j: votes[j])
-    taken: dict[int, int] = {}
-    for j in out.values():
-        taken[j] = taken.get(j, 0) + 1
-    return {k: j for k, j in out.items() if taken[j] == 1}
+    by_new: dict[int, list[int]] = {}
+    for k, j in out.items():
+        by_new.setdefault(j, []).append(k)
+    result: dict[int, int] = {}
+    for j, ks in by_new.items():
+        if len(ks) == 1:
+            result[ks[0]] = j
+            continue
+        def mean(k):
+            return sum(nearest_on_rings([new_rings[j]], p)[0] for p in on_old[k]) / len(on_old[k])
+        ranked = sorted(ks, key=mean)
+        if mean(ranked[1]) - mean(ranked[0]) > 1e-6:
+            result[ranked[0]] = j
+    return result
 
 
 def follow_shape(doc, old: Shape, new: Shape) -> FollowResult:
