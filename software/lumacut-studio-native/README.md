@@ -375,6 +375,13 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     übertragen. Von Hand gesetzte Stege und der Startpunkt wandern beim Knotenziehen auf ihrer
     Kante beim selben Anteil mit (vorher entfielen sie weiter als 1,5 mm daneben bzw. wurden
     beim Ziehen mit der Objektbox gestreckt).
+    Auch beim Skalieren – Griffe am Auswahlrahmen (schon beim Ziehen, Esc stellt zurück) und
+    die Felder B / H, ungleichmäßig, gedreht oder als Gruppe: gleichmäßig liegende Stege werden
+    auf dem skalierten Umriss neu verteilt (gleiche Anzahl und Eckenregel, Start- und
+    Eckenabstand wieder genau in mm), statt mit der Objektbox mitgestreckt zu werden (dann
+    stünden sie nach dem Strecken ungleich oder zu nah / zu weit an Ecken); die Statuszeile
+    meldet „Skalieren · … auf dem skalierten Umriss gleichmäßig neu verteilt“. Von Hand gesetzte
+    Stege werden wie bisher mitgestreckt; Verschieben, Drehen und Spiegeln ändern nichts.
     Code: `lumacut_canvas/tabs.py`, `tabs_ui.py`, `lumacut_job/cutpath.py`.
   - *Startpunkt* (Werkzeug „Startpunkt“, Alt+Umschalt+A, wie LightBurns *Set Start Point*):
     Tippen auf den Umriss einer geschlossenen Form legt dort fest, wo ihre Kontur beginnt
