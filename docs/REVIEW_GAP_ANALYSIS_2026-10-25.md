@@ -17957,3 +17957,87 @@ on a 3 mm plywood plate with Alt+Umschalt+G, then set a start point in a corner 
 Startpunkt tool and drag it along the edge – the blue bars move along evenly, the status line
 reports „4 Stege an 1 Kontur ab dem neuen Start gleichmäßig neu verteilt“; cut with a 2 mm
 lead-in – every tab gap sits on its blue bar, none next to the start.
+
+## 119. Status update 2026-11-23 (review round 112)
+
+Done this round (even tabs follow outline edits; Machine / Scan Probe / Materials untouched –
+`tabs.py`, `nodes.py`, the node editor in `node_ui.py`, „Pfade vereinfachen …“ in
+`pathjoin_ui.py`, „Ecken abrunden / abschrägen …“ in `pathfillet_ui.py`, the corner radius field
+in `corners_ui.py` and the mode tooltip in `tabs_ui.py`; model, project format, job, planner,
+G-code writer, Pi and camera code unchanged):
+
+- Closed since §118 by others: none – main had no commit since `3b4ff1e` (round 111); no
+  Machine / Scan Probe / Materials commit since the 2026-11-15 STAND note, no other branch
+  active since 2026-11-13.
+- Gap picked: the last limit of §118 „node editing, simplify or corner radius carry the tabs but
+  do not redistribute them“ – priority group kerf / tabs / lead-in. Until now the tabs only
+  snapped to the nearest point of the changed outline: after dragging a node, rounding the
+  corners or simplifying a traced path they bunched up on one side, could land right on a new
+  corner or next to the start, and the planner pushed them by the clearances – the G-code gaps no
+  longer matched the blue bars. While dragging a node, tabs and start point were even stretched
+  with the bounding box and could leave the outline; hand tabs further than 1.5 mm from the new
+  outline were dropped. LightBurn's node editing only snaps tabs to the nearest outline point
+  and its *Auto-place tabs* has to be run again; xTool Creative Space regenerates tabs only on
+  demand. No user decision, no hardware, no material library, finishable with tests and not
+  owned by another agent.
+- **Follow** (`lumacut_canvas/tabs.py`, new `follow_shape(doc, old, new)` /
+  `follow_shapes(doc, pairs)` with a `FollowResult` readout): for every closed contour whose
+  tabs still sit exactly on the spots „Stege gleichmäßig setzen …“ gives (`even_pattern` of
+  §118: same count, with or without „Ecken meiden“, layer tab width or the 1 mm fallback,
+  0.05 mm tolerance), the tabs are placed again on the matching contour of the new outline with
+  the same count and corner rule, from its manual start point or drawn start – so they keep the
+  start and corner clearance after a new corner appears. Rings are mapped old → new by index
+  while the ring structure stays, otherwise by the closest old ring (a ring removed by deleting
+  nodes loses its tabs). Contours too short for their count keep the carried tabs (readout „zu
+  kurz – nur übertragen“). If the result equals the carried tabs the shape is returned unchanged
+  (project file byte-identical).
+- **Hand tabs and start point** (`nodes.py`, `tabs.py`): when a node move keeps the ring
+  structure, hand-placed tabs and the start point stay at the same fraction of their edge (they
+  slide along the moved edge instead of being dropped or stretched); other edits snap them to
+  the nearest outline point as before.
+- **Where it applies**: node editor – dragging a node (live while dragging, one undo step, Esc
+  restores tabs and start), arrow keys, insert / delete node, curve ⇄ line, close / open path,
+  „In Pfad umwandeln“ keeps the tabs; „Pfade vereinfachen …“, „Ecken abrunden / abschrägen …“
+  and the corner radius field, each in the same undo step as the edit. The status line adds
+  „· 4 Stege an 1 Kontur auf dem neuen Umriss gleichmäßig neu verteilt“ (or the hand tabs /
+  too short note); the tooltip of „Verteilung“ in the even-tabs dialog mentions it.
+
+Tests: new `tests/test_tabs_follow_shape.py` (25 tests): node move gives exactly the spots of
+placing on the new outline (count, without corner rule, spacing mode – the count is kept);
+start and corner clearance after a new corner; hand-moved and single hand tabs only carried
+with readout; an untouched hole stays byte-identical; ring removed by node delete; too short
+outline; nothing to follow; zero tab width; saved project without new key; simplify, fillet and
+corner radius; several shapes summed up in one readout; hand tab and start sliding along a moved
+edge; G-code gaps on the redistributed tabs through the Pi guard; node drag live in one undo
+step with Esc, hand tabs and start kept on the outline while dragging, arrow key and node
+delete, convert keeps tabs, simplify / fillet actions and corner radius field in one undo step
+with readout, dialog tooltip.
+
+Full suite: `QT_QPA_PLATFORM=offscreen pytest` in one process with the Python 3.13 venv: **4144 passed, 3 skipped** (30.9 min; 4119 + 25 new follow-shape tests), no failure – the two warnings are the known deprecated `QDragEnterEvent` constructor in `test_import_qt.py`.
+
+Output change for old files: none – project data are untouched; only an outline edited from now
+on can move tabs, and only tabs that still sit on their even spots.
+
+Still open: unchanged from §118 except its last limit (node editing, simplify and corner radius
+now redistribute even tabs) – camera placement beyond marks, automatic mark detection (Scan
+Probe), rotary, min/max corner power, Dot Mode dwell (waiting for the firmware decision on
+`LASER_POWER_TRAP`), Materials items, CoreXY time model, the xTool text style import, the trim
+refinements of §92, the print-and-cut limits of §93 / §94, the single-line font limits of §95 /
+§96 / §100 / §106, the warp limits of §97, the case limits of §98, the vertical text limits of
+§99, the box generator limits of §101 / §117, the living hinge limits of §102 / §116, the bent
+box limits of §103, the justified line limits of §104, the inline editing limits of §105, the
+spot simulation limits of §109, the window limits of §110, the mask limits of §111, the soft edge
+limits of §112, the even-tabs preview limits of §113, the pass preview limits of §114 and the
+even-tab recognition limits of §118 (tabs count as „even“ only while they sit exactly on their
+spots, a changed tab width can hide tabs next to a corner, contours without a manual start are
+distributed from their drawn start, nesting ignores the start point). For this round: other
+outline-changing operations (offset, boolean operations / weld, non-uniform scaling, trim) are
+not part of the follow and behave as before; hand tabs slide along their edge only for node
+moves that keep the ring structure, otherwise they snap to the nearest outline point; a ring
+removed by node delete loses its tabs.
+Hardware check: on the Windows app (also with the touch screen) place 4 tabs on a 3 mm plywood
+rectangle converted to a path („In Pfad umwandeln“) with Alt+Umschalt+G, then drag one corner
+node outwards with the node tool and afterwards set the corner radius of a second rectangle with
+tabs to 10 mm – the blue bars stay evenly spread and away from the corners and the start, the
+status line reports „… auf dem neuen Umriss gleichmäßig neu verteilt“; cut it – every tab gap
+sits on its blue bar.
