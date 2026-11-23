@@ -106,6 +106,8 @@ def _owner_counts(spec, xs, ys, zs):
     t = s.thickness_mm
     count = np.zeros(len(xs), dtype=int)
     for p in boxgen.panels(s):
+        if p.name not in boxgen.PANEL_NAMES:        # dividers: see test_box_dividers.py
+            continue
         a, b = p.size
         poly = Polygon([(px, b - py) for px, py in p.outline])        # v up again
         if p.name in ("Vorne", "Hinten"):
