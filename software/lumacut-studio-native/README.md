@@ -361,6 +361,11 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
     verteilt (dort beginnen Schnitt und Anfahrt): jeder Steg hält den Startabstand schon beim
     Setzen, der Planer muss keinen vom Start wegschieben, und die Lücken im G-Code liegen genau
     auf den blauen Balken; der Zähler meldet „… Kontur(en) ab dem gesetzten Startpunkt verteilt“.
+    Wird der Startpunkt *danach* gesetzt, verschoben (schon beim Ziehen) oder entfernt, wandern
+    gleichmäßig gesetzte Stege mit: liegen die Stege einer Kontur noch genau auf ihren
+    gleichmäßigen Plätzen, verteilt LumaCut sie ab dem neuen Start mit gleicher Anzahl und
+    Eckenregel neu (im selben Undo-Schritt, die Statuszeile meldet „… ab dem neuen Start
+    gleichmäßig neu verteilt“); von Hand gesetzte oder verschobene Stege bleiben, wo sie sind.
     Code: `lumacut_canvas/tabs.py`, `tabs_ui.py`, `lumacut_job/cutpath.py`.
   - *Startpunkt* (Werkzeug „Startpunkt“, Alt+Umschalt+A, wie LightBurns *Set Start Point*):
     Tippen auf den Umriss einer geschlossenen Form legt dort fest, wo ihre Kontur beginnt
