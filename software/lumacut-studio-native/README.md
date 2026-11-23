@@ -624,6 +624,20 @@ Die Maschine homt **oben rechts**: X0 Y0 liegt dort, **+X fährt nach links**, *
   ein Rückgängig-Schritt. Mit „Schriftart“ = Einlinie wird jeder Buchstabe ein offener Pfad
   (Striche, nie gefüllt) – wie beim Bogentext. Code: `src/lumacut_job/pathtext.py`, `pathtext_qt.py`, Pfad-Kurve in
   `lumacut_canvas/alongpath.py`.
+- **Box-Generator** („Box-Generator…“, *Alt+Umschalt+B*, Menü „Auftrag“ und Design-Menü; wie der
+  Box-Generator von xTool Studio): Box mit Fingerzinken aus Platten – Maße außen oder innen,
+  Materialdicke, Zinkenbreite, Kerf (die Teile wachsen um die halbe Schnittbreite, Zinken passen
+  saugend), mit oder ohne Deckel; flache Vorschau der Teile und Anzeige von Außen- / Innenmaß,
+  Zinken und Platzbedarf. **Trennwände:** „Trennwände quer / längs“ (je 0–20, Standard „keine“)
+  teilt das Innere in gleich große Fächer – Querwände parallel zur Vorderseite, Längswände parallel
+  zu den Seiten, jeweils volle Innenlänge und -höhe; wo sie sich kreuzen, greifen Schlitze halber
+  Höhe ineinander (Eierkarton-Steckgitter wie boxes.py „TrayInsert“). Sie werden nur eingesteckt,
+  Wände und Boden bleiben unverändert; der Kerf gilt auch für sie (Schlitze sitzen stramm). Die
+  Anzeige nennt Anzahl und Größe der Fächer, zu viele Trennwände (Fach unter 5 mm bzw. unter der
+  Materialdicke) werden abgelehnt. Eingefügt als eine Gruppe auf der aktiven Schneid-Ebene oder
+  einer neuen Ebene „Box“, ein Rückgängig-Schritt, per Doppelklick wieder bearbeitbar; im
+  Touch-Modus 44 px. Boxen ohne Trennwände bleiben bitgleich. Code: `src/lumacut_job/boxgen.py`,
+  `boxgen_qt.py`.
 - **Flex-Scharnier** („Flex-Scharnier…“, *Alt+Umschalt+H*, Menü „Auftrag“ und Design-Menü; die
   Living-Hinge-Muster, die LightBurn- und xTool-Nutzer aus boxes.py oder Online-Generatoren
   importieren): versetzte Schlitze, die Sperrholz biegsam machen – gerade Schlitze, Wellen oder
